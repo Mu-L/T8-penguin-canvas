@@ -9,6 +9,7 @@ const { Worker } = require('node:worker_threads');
 const {
   applyCanvasOperation,
   normalizeCanvasDocument,
+  validateOperation,
 } = require('../backend/src/collaboration/protocol');
 const {
   CANVAS_PATCH_CONTRACT,
@@ -20,8 +21,11 @@ const {
   CanvasPatchValidationError,
   assertCanvasPatchCredentialAuthority,
   buildCanvasPatchPlan,
+  canvasDocumentTouchesHostCredentials,
+  canvasOperationsTouchHostCredentials,
   canvasPatchTouchesHostCredentials,
   canvasPatchRequestDigest,
+  canvasStringContainsHostCredentialField,
   isHostCredentialFieldKey,
   normalizeCanvasPatchAuthority,
   safeCanvasPatchErrorMessage,
@@ -470,6 +474,20 @@ test('credential field detection is obfuscation-resistant without blocking ordin
     'maxTokens', 'tokenCount', 'inputTokens', 'outputTokenCount',
     'cacheKey', 'resourceKey', 'objectKey', 'modelKey', 'keyboardShortcut',
   ]) assert.equal(isHostCredentialFieldKey(key), false, key);
+  for (const url of [
+    'https://example.test/?state=STATE_SECRET',
+    'https://example.test/?code=AUTH_CODE_SECRET',
+    'https://example.test/oauth#access_token=FRAGMENT_ACCESS_SECRET',
+    'https://example.test/#/callback?code=HASH_CODE_SECRET&state=HASH_STATE_SECRET',
+    'https://user:password@example.test/path',
+    `https://example.test/?next=${encodeURIComponent('https://auth.example/callback?code=NESTED_CODE_SECRET')}`,
+    `https://example.test/?payload=${Buffer.from(JSON.stringify({ apiKey: 'NESTED_JSON_SECRET' })).toString('base64url')}`,
+    'https://example.test/callback#next=apiKey%3DNESTED_ASSIGNMENT_SECRET',
+    'https://example.test/callback?next=access_token%3DNESTED_QUERY_ASSIGNMENT_SECRET',
+    'https://example.test/callback?foo=1;code=SEMICOLON_CODE_SECRET',
+    'https://example.test/callback?foo=1&amp;code=HTML_CODE_SECRET',
+  ]) assert.equal(canvasStringContainsHostCredentialField(url), true, url);
+  assert.equal(canvasStringContainsHostCredentialField('https://example.test/result.png?page=2&productCode=ABC'), false);
 
   const document = normalizeCanvasDocument('credential-service', {
     nodes: [{ id: 'a', type: 'text', position: { x: 0, y: 0 }, data: { prompt: 'before' } }],
@@ -493,6 +511,381 @@ test('credential field detection is obfuscation-resistant without blocking ordin
     authority: { source: 'agent', role: 'owner', capabilities: ['manageProviders'] },
   });
   assert.equal(normalPlan.resultingDocument.nodes[0].data.prompt, 'after; 示例文本 {"apiKey":"fictional-not-a-setting"}');
+  for (const value of [
+    { items: [['apiKey', 'PAIR_SECRET']] },
+    { tabs: [['access_token', 'TAB_PAIR_SECRET']] },
+    { rawPairs: JSON.stringify([['apiKey', 'JSON_PAIR_SECRET']]) },
+  ]) {
+    assert.equal(canvasOperationsTouchHostCredentials(document, [{
+      type: 'node.patch',
+      payload: { nodeId: 'a', dataPatch: value },
+    }]), true);
+  }
+  assert.equal(canvasOperationsTouchHostCredentials(document, [{
+    type: 'node.patch',
+    payload: { nodeId: 'a', dataPatch: { items: [['prompt', 'visible']] } },
+  }]), false);
+  for (const plaintext of [
+    ['sk-', 'abcdefghijklmnopqrstuvwxyz123456'].join(''),
+    'Bearer test-bearer-token-value',
+    ['ghp_', 'A'.repeat(36)].join(''),
+    ['AKIA', 'ABCDEFGHIJKLMNOP'].join(''),
+    ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiJ0ZXN0In0', 'c2lnbmF0dXJl'].join('.'),
+    'data:image/png;base64,QUJDREVGRw==',
+  ]) {
+    assert.equal(canvasOperationsTouchHostCredentials(document, [{
+      type: 'node.patch',
+      payload: { nodeId: 'a', dataPatch: { prompt: plaintext } },
+    }]), true, plaintext);
+  }
+  assert.equal(canvasDocumentTouchesHostCredentials(normalizeCanvasDocument('oauth-context', {
+    nodes: [{
+      id: 'oauth',
+      type: 'text',
+      position: { x: 0, y: 0 },
+      data: {
+        oauthResponse: { code: 'OBJECT_CODE_SECRET', state: 'OBJECT_STATE_SECRET' },
+        callbackParams: { code: 'CALLBACK_CODE_SECRET' },
+        oauthResponseRaw: JSON.stringify({ code: 'RAW_CODE_SECRET', state: 'RAW_STATE_SECRET' }),
+      },
+    }],
+    edges: [],
+  }, { projectId: 'project-patch', revision: 1 })), true);
+  assert.equal(canvasPatchTouchesHostCredentials(patch({
+    id: 'agent-normal-generic-keys',
+    operations: [{
+      type: 'node.patch',
+      payload: {
+        nodeId: 'a',
+        dataPatch: {
+          parameter: { key: 'prompt', value: 'ordinary value' },
+          tabs: [{ key: 'timeline', label: '时间线' }],
+        },
+      },
+    }],
+  })), false);
+  assert.equal(canvasPatchTouchesHostCredentials(patch({
+    id: 'agent-real-feishu-node-add',
+    operations: [{
+      type: 'node.add',
+      payload: {
+        node: {
+          id: 'feishu-new',
+          type: 'feishu-bitable-input',
+          position: { x: 100, y: 0 },
+          data: {
+            feishuAppToken: 'bascnPublicResourceId',
+            feishuRows: [{
+              appToken: 'bascnPublicResourceId',
+              media: [{ fileToken: 'boxcnPublicFileId' }],
+            }],
+          },
+        },
+      },
+    }],
+  })), false);
+  assert.equal(canvasPatchTouchesHostCredentials(patch({
+    id: 'agent-fake-feishu-container-node-add',
+    operations: [{
+      type: 'node.add',
+      payload: {
+        node: {
+          id: 'text-with-fake-feishu-container',
+          type: 'text',
+          position: { x: 100, y: 0 },
+          data: {
+            feishuRows: [{
+              appToken: 'must-remain-forbidden',
+              media: [{ fileToken: 'must-remain-forbidden' }],
+            }],
+          },
+        },
+      },
+    }],
+  })), true);
+  assert.equal(canvasPatchTouchesHostCredentials(patch({
+    id: 'agent-generic-key-credential-descriptor',
+    operations: [{
+      type: 'node.patch',
+      payload: {
+        nodeId: 'a',
+        dataPatch: { parameter: { key: 'apiKey', value: 'must remain forbidden' } },
+      },
+    }],
+  })), true);
+  assert.equal(canvasPatchTouchesHostCredentials(patch({
+    id: 'agent-id-credential-descriptor',
+    operations: [{
+      type: 'node.patch',
+      payload: {
+        nodeId: 'a',
+        dataPatch: {
+          providerParameter: { id: 'apiKey', value: 'must remain forbidden' },
+          authorizationParameter: { id: 'authorization', defaultValue: 'must remain forbidden' },
+        },
+      },
+    }],
+  })), true);
+  assert.equal(canvasPatchTouchesHostCredentials(patch({
+    id: 'agent-bare-generic-key',
+    operations: [{
+      type: 'node.patch',
+      payload: { nodeId: 'a', dataPatch: { key: 'opaque-value' } },
+    }],
+  })), true);
+  assert.equal(canvasPatchTouchesHostCredentials(patch({
+    id: 'agent-fake-feishu-scope',
+    operations: [{
+      type: 'node.patch',
+      payload: {
+        nodeId: 'a',
+        dataPatch: { feishuAppToken: 'marker', fileToken: 'opaque-value' },
+      },
+    }],
+  })), true);
+  for (const [field, value] of [
+    ['comfyMakerWorkflowRaw', '{"1":{"inputs":{"key":"opaque-value"}}}'],
+    ['workflowJson', Buffer.from('{"apiKey":"opaque-value"}').toString('base64')],
+    ['providerConfig', Buffer.from('{"apiKey":"opaque-value"}').toString('hex')],
+  ]) {
+    assert.equal(canvasPatchTouchesHostCredentials(patch({
+      id: `agent-structured-${field}`,
+      operations: [{
+        type: 'node.patch',
+        payload: { nodeId: 'a', dataPatch: { [field]: value } },
+      }],
+    })), true, field);
+  }
+  assert.equal(canvasPatchTouchesHostCredentials(patch({
+    id: 'agent-oversized-structured-workflow',
+    operations: [{
+      type: 'node.patch',
+      payload: {
+        nodeId: 'a',
+        dataPatch: {
+          comfyMakerWorkflowRaw: JSON.stringify({
+            padding: 'x'.repeat((512 * 1024) + 1024),
+            apiKey: 'opaque-value',
+          }),
+        },
+      },
+    }],
+  })), true);
+  const sensitiveDocument = normalizeCanvasDocument('credential-operation-scope', {
+    nodes: [{
+      id: 'sensitive',
+      type: 'text',
+      position: { x: 0, y: 0 },
+      data: { prompt: 'before', apiKey: 'host-owned-value' },
+    }],
+    edges: [],
+  }, { projectId: 'project-patch', revision: 1 });
+  assert.equal(canvasDocumentTouchesHostCredentials(sensitiveDocument), true);
+  assert.equal(canvasOperationsTouchHostCredentials(sensitiveDocument, [{
+    type: 'node.patch',
+    payload: { nodeId: 'sensitive', dataPatch: { prompt: 'ordinary edit' } },
+  }]), false);
+  assert.equal(canvasOperationsTouchHostCredentials(sensitiveDocument, [{
+    type: 'node.patch',
+    payload: { nodeId: 'sensitive', unsetKeys: ['data'] },
+  }]), true);
+  assert.equal(canvasOperationsTouchHostCredentials(sensitiveDocument, [{
+    type: 'node.patch',
+    payload: { nodeId: 'sensitive', patch: { data: {} } },
+  }]), true);
+  assert.equal(canvasOperationsTouchHostCredentials(sensitiveDocument, [{
+    type: 'node.delete',
+    payload: { nodeId: 'sensitive' },
+  }]), true);
+  const sensitiveEntityUid = sensitiveDocument.nodes[0].entityUid;
+  assert.equal(canvasOperationsTouchHostCredentials(sensitiveDocument, [{
+    type: 'node.patch',
+    payload: { nodeId: sensitiveEntityUid, unsetKeys: ['data'] },
+  }]), true);
+  assert.equal(canvasOperationsTouchHostCredentials(sensitiveDocument, [{
+    type: 'node.delete',
+    payload: { nodeId: sensitiveEntityUid },
+  }]), true);
+  const realFeishuDocument = normalizeCanvasDocument('credential-real-feishu-scope', {
+    nodes: [{
+      id: 'feishu',
+      type: 'feishu-bitable-input',
+      position: { x: 0, y: 0 },
+      data: {
+        feishuAppToken: 'bascnExistingResourceId',
+        feishuRows: [{
+          appToken: 'bascnExistingResourceId',
+          media: [{ fileToken: 'boxcnExistingFileId' }],
+        }],
+        feishuBitableRows: [{
+          appToken: 'bascnExistingBitableResourceId',
+          fields: { attachment: [{ file_token: 'boxcnExistingRawFieldFileId' }] },
+          rowData: { attachment: [{ fileToken: 'boxcnExistingRowDataFileId' }] },
+          media: [{ fileToken: 'boxcnExistingBitableFileId' }],
+          attachments: [{ fileToken: 'boxcnExistingAttachmentFileId' }],
+        }],
+        feishuRecords: [{
+          fields: { attachment: [{ file_token: 'boxcnExistingRecordFileId' }] },
+        }],
+        feishuWriteResult: [{
+          fields: { attachment: [{ file_token: 'boxcnExistingWriteResultFileId' }] },
+        }],
+        metadata: {
+          feishuBitable: {
+            appToken: 'bascnExistingMetadataContainerResourceId',
+            rows: [{
+              appToken: 'bascnExistingMetadataResourceId',
+              media: [{ fileToken: 'boxcnExistingMetadataFileId' }],
+            }],
+          },
+          feishuBitableWrite: { appToken: 'bascnExistingWriteResourceId' },
+        },
+      },
+    }],
+    edges: [],
+  }, { projectId: 'project-patch', revision: 1 });
+  assert.equal(canvasDocumentTouchesHostCredentials(realFeishuDocument), false);
+  assert.equal(canvasOperationsTouchHostCredentials(realFeishuDocument, [{
+    type: 'node.patch',
+    payload: {
+      nodeId: 'feishu',
+      dataPatch: {
+        feishuRows: [{
+          appToken: 'bascnNextResourceId',
+          media: [{ fileToken: 'boxcnNextFileId' }],
+        }],
+        feishuBitableRows: [{
+          appToken: 'bascnNextBitableResourceId',
+          fields: { attachment: [{ file_token: 'boxcnNextRawFieldFileId' }] },
+          rowData: { attachment: [{ fileToken: 'boxcnNextRowDataFileId' }] },
+          media: [{ fileToken: 'boxcnNextBitableFileId' }],
+          attachments: [{ fileToken: 'boxcnNextAttachmentFileId' }],
+        }],
+        feishuRecords: [{
+          fields: { attachment: [{ file_token: 'boxcnNextRecordFileId' }] },
+        }],
+        feishuWriteResult: [{
+          fields: { attachment: [{ file_token: 'boxcnNextWriteResultFileId' }] },
+        }],
+        metadata: {
+          feishuBitable: {
+            appToken: 'bascnNextMetadataContainerResourceId',
+            rows: [{
+              appToken: 'bascnNextMetadataResourceId',
+              media: [{ fileToken: 'boxcnNextMetadataFileId' }],
+            }],
+          },
+          feishuBitableWrite: { appToken: 'bascnNextWriteResourceId' },
+        },
+      },
+    },
+  }]), false);
+  assert.equal(canvasOperationsTouchHostCredentials(realFeishuDocument, [{
+    type: 'node.patch',
+    payload: { nodeId: 'feishu', dataUnsetKeys: ['feishuAppToken'] },
+  }]), false);
+  assert.equal(canvasOperationsTouchHostCredentials(realFeishuDocument, [{
+    type: 'node.patch',
+    payload: {
+      nodeId: 'feishu',
+      dataUnsetKeys: ['feishuAppToken', 'feishuOutputAppToken'],
+    },
+  }]), false);
+  assert.equal(canvasOperationsTouchHostCredentials(realFeishuDocument, [{
+    type: 'node.patch',
+    payload: {
+      nodeId: 'feishu',
+      dataPatch: {
+        ignored: {
+          feishuRows: [{
+            appToken: 'NESTED_FAKE_APP_SECRET',
+            media: [{ fileToken: 'NESTED_FAKE_FILE_SECRET' }],
+          }],
+        },
+      },
+    },
+  }]), true);
+  const smuggledMove = {
+    type: 'node.move',
+    payload: {
+      nodeId: 'feishu',
+      position: { x: 20, y: 30 },
+      junk: { appToken: 'MOVE_ENVELOPE_SECRET' },
+    },
+  };
+  assert.equal(canvasOperationsTouchHostCredentials(realFeishuDocument, [smuggledMove]), true);
+  assert.throws(() => validateOperation(smuggledMove), /node\.move\.payload 包含不支持字段: junk/);
+  const realFeishuPatch = patch({
+    id: 'agent-real-feishu-contextual-patch',
+    operations: [{
+      type: 'node.patch',
+      payload: {
+        nodeId: 'feishu',
+        dataPatch: {
+          feishuRows: [{
+            appToken: 'bascnPlanResourceId',
+            media: [{ fileToken: 'boxcnPlanFileId' }],
+          }],
+        },
+      },
+    }],
+  });
+  assert.equal(canvasPatchTouchesHostCredentials(realFeishuPatch), true);
+  const realFeishuPlan = buildCanvasPatchPlan(realFeishuDocument, realFeishuPatch, {
+    authority: { source: 'agent', role: 'owner', capabilities: ['editGraph'] },
+  });
+  assert.equal(
+    realFeishuPlan.resultingDocument.nodes[0].data.feishuRows[0].media[0].fileToken,
+    'boxcnPlanFileId',
+  );
+  const fakeFeishuDocument = normalizeCanvasDocument('credential-fake-feishu-scope', {
+    nodes: [{
+      id: 'text',
+      type: 'text',
+      position: { x: 0, y: 0 },
+      data: { prompt: 'ordinary' },
+    }],
+    edges: [],
+  }, { projectId: 'project-patch', revision: 1 });
+  assert.equal(canvasOperationsTouchHostCredentials(fakeFeishuDocument, [{
+    type: 'node.patch',
+    payload: {
+      nodeId: 'text',
+      dataUnsetKeys: ['apiKey', 'accessToken'],
+    },
+  }]), true);
+  assert.equal(canvasOperationsTouchHostCredentials(fakeFeishuDocument, [{
+    type: 'node.patch',
+    payload: {
+      nodeId: 'text',
+      dataPatch: {
+        feishuRows: [{
+          appToken: 'must-remain-forbidden',
+          media: [{ fileToken: 'must-remain-forbidden' }],
+        }],
+      },
+    },
+  }]), true);
+  const sensitiveEdgeDocument = normalizeCanvasDocument('credential-edge-scope', {
+    nodes: [
+      { id: 'left', type: 'text', position: { x: 0, y: 0 }, data: { prompt: 'left' } },
+      { id: 'right', type: 'text', position: { x: 100, y: 0 }, data: { prompt: 'right' } },
+    ],
+    edges: [{
+      id: 'sensitive-edge',
+      source: 'left',
+      target: 'right',
+      data: { accessToken: 'host-owned-edge-value' },
+    }],
+  }, { projectId: 'project-patch', revision: 1 });
+  assert.equal(canvasOperationsTouchHostCredentials(sensitiveEdgeDocument, [{
+    type: 'node.delete',
+    payload: { nodeId: sensitiveEdgeDocument.nodes[0].entityUid },
+  }]), true);
+  assert.equal(canvasOperationsTouchHostCredentials(sensitiveEdgeDocument, [{
+    type: 'edge.delete',
+    payload: { edgeId: sensitiveEdgeDocument.edges[0].entityUid },
+  }]), true);
 
   const authorities = [
     { source: 'agent', role: 'owner', capabilities: ['manageProviders'], canManageHostCredentials: true },
@@ -632,6 +1025,63 @@ test('database enforces credential authority before duplicate lookup and leaves 
   }
 });
 
+test('database preview and apply use authoritative Feishu node context for public resource tokens', () => {
+  const db = new ProjectDatabase(':memory:');
+  try {
+    db.ensureCanvas('feishu-contextual-patch', {
+      nodes: [{
+        id: 'feishu',
+        type: 'feishu-bitable-input',
+        position: { x: 0, y: 0 },
+        data: {
+          feishuAppToken: 'bascnExistingResourceId',
+          feishuRows: [{
+            appToken: 'bascnExistingResourceId',
+            media: [{ fileToken: 'boxcnExistingFileId' }],
+          }],
+        },
+      }],
+      edges: [],
+    }, 'project-patch');
+    const input = patch({
+      id: 'feishu-contextual-database-patch',
+      operations: [{
+        type: 'node.patch',
+        payload: {
+          nodeId: 'feishu',
+          dataPatch: {
+            feishuAppToken: 'bascnNextResourceId',
+            feishuRows: [{
+              appToken: 'bascnNextResourceId',
+              media: [{ fileToken: 'boxcnNextFileId' }],
+            }],
+          },
+        },
+      }],
+    });
+    const authority = { source: 'agent', role: 'owner', capabilities: ['editGraph'] };
+    const preview = db.previewCanvasPatch('feishu-contextual-patch', input, {
+      actorId: 'canvas-agent',
+      sessionId: 'canvas-agent-session',
+      authority,
+    });
+    const applied = db.applyCanvasPatch('feishu-contextual-patch', input, {
+      actorId: 'canvas-agent',
+      sessionId: 'canvas-agent-session',
+      authority,
+      previewDigest: preview.previewDigest,
+      confirmed: true,
+    });
+    assert.equal(applied.revision, 2);
+    assert.equal(
+      applied.document.nodes[0].data.feishuRows[0].media[0].fileToken,
+      'boxcnNextFileId',
+    );
+  } finally {
+    db.close();
+  }
+});
+
 test('public digest and plan helpers cannot bypass validation and the operation type export is immutable', () => {
   const document = normalizeCanvasDocument('direct-service', {
     nodes: [{ id: 'a', type: 'text', data: {} }],
@@ -730,7 +1180,9 @@ test('node.restore and edge.restore are previewed and reverted without snapshot 
     assert.equal(applied.document.nodes.some((node) => node.id === 'a'), true);
     assert.equal(applied.document.edges.some((edge) => edge.id === 'edge-ab'), true);
     const reverted = db.revertCanvasPatch('canvas-patch', input.id, {
-      actorId: 'member-a', expectedRevision: 4,
+      actorId: 'member-a',
+      expectedRevision: 4,
+      authority: LOCAL_OWNER_PATCH_AUTHORITY,
     });
     assert.equal(reverted.revision, 6);
     assert.equal(reverted.document.nodes.some((node) => node.id === 'a'), false);
@@ -1075,8 +1527,8 @@ test('public preview, patch history and audit redact summary secrets, paths and 
   const db = new ProjectDatabase(':memory:');
   try {
     seed(db);
-    const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature123456';
-    const githubToken = 'ghp_0123456789abcdefghijklmnopqrstuvwxyz';
+    const jwt = ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', 'signature123456'].join('.');
+    const githubToken = ['ghp_', '0123456789abcdefghijklmnopqrstuvwxyz'].join('');
     const encodedPath = 'C%3A%5CUsers%5Calice%5Cprivate%5Csecret.txt';
     const encodedRootPath = 'path=%2Froot%2Fprivate%2Fsecret.txt';
     const encodedCredential = 'api_key%3DplainCredentialValue123456';
@@ -1154,12 +1606,15 @@ test('revert appends inverse operations, preserves unrelated later fields and re
         { type: 'node.delete', payload: { nodeId: 'a' } },
       ],
     });
-    const preview = db.previewCanvasPatch('canvas-patch', input);
+    const preview = db.previewCanvasPatch('canvas-patch', input, {
+      authority: LOCAL_OWNER_PATCH_AUTHORITY,
+    });
     const applied = db.applyCanvasPatch('canvas-patch', input, {
       previewDigest: preview.previewDigest,
       confirmed: true,
       actorId: 'member-a',
       sessionId: 'session-a',
+      authority: LOCAL_OWNER_PATCH_AUTHORITY,
     });
     assert.equal(applied.revision, 3);
     assert.deepEqual(applied.document.nodes.map((node) => node.id), ['b']);
@@ -1178,7 +1633,10 @@ test('revert appends inverse operations, preserves unrelated later fields and re
       actorId: 'member-b', expectedRevision: 4,
     }), CanvasPatchPermissionError);
     const reverted = db.revertCanvasPatch('canvas-patch', PATCH_ID, {
-      actorId: 'member-a', sessionId: 'session-revert', expectedRevision: 4,
+      actorId: 'member-a',
+      sessionId: 'session-revert',
+      expectedRevision: 4,
+      authority: LOCAL_OWNER_PATCH_AUTHORITY,
     });
     assert.equal(reverted.status, 'reverted');
     assert.equal(reverted.duplicate, false);
@@ -1582,6 +2040,11 @@ test('snapshot save and restore serialize across two real sqlite connections wit
         opId: `snapshot-restore-race-${index}`,
         actorId: `restore-writer-${index}`,
         sessionId: `restore-session-${index}`,
+        authority: {
+          source: 'local-owner',
+          role: 'owner',
+          capabilities: ['manageProviders'],
+        },
       },
     ]));
     assert.equal(restoreResults.filter((result) => result.ok).length, 1);

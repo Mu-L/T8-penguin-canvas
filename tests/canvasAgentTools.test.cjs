@@ -136,9 +136,9 @@ test('all eight tools return a fixed read-only scoped envelope without database 
     assert.equal(result.canvasRevision, 4);
     assert.equal(result.readOnly, true);
     assert.deepEqual(result.authority, {
-      advisoryOnly: false,
+      advisoryOnly: true,
       canPreviewCanvasPatch: true,
-      canApplyCanvasPatch: true,
+      canApplyCanvasPatch: false,
       canManageHostCredentials: false,
       credentialVisibility: 'configured-state-only',
     });
@@ -162,6 +162,36 @@ test('E4 authority keeps reviewers advisory-only, lets editors use only the exis
     canManageHostCredentials: false,
     credentialVisibility: 'configured-state-only',
   });
+  const misconfiguredReviewer = executeCanvasAgentTool(database, request('inspectRun', {}, 'misconfigured-reviewer'), {
+    actorId: 'reviewer-misconfigured', role: 'reviewer', capabilities: ['comment', 'approve', 'editGraph'],
+  });
+  assert.deepEqual(misconfiguredReviewer.authority, {
+    advisoryOnly: true,
+    canPreviewCanvasPatch: true,
+    canApplyCanvasPatch: false,
+    canManageHostCredentials: false,
+    credentialVisibility: 'configured-state-only',
+  });
+  const owner = executeCanvasAgentTool(database, request('inspectRun', {}, 'owner-with-edit'), {
+    actorId: 'owner-a', role: 'owner', capabilities: ['editGraph', 'manageProviders'],
+  });
+  assert.deepEqual(owner.authority, {
+    advisoryOnly: false,
+    canPreviewCanvasPatch: true,
+    canApplyCanvasPatch: true,
+    canManageHostCredentials: false,
+    credentialVisibility: 'configured-state-only',
+  });
+  const editorWithoutEdit = executeCanvasAgentTool(database, request('inspectRun', {}, 'editor-without-edit'), {
+    actorId: 'editor-read-only', role: 'editor', capabilities: ['runWorkflow'],
+  });
+  assert.deepEqual(editorWithoutEdit.authority, {
+    advisoryOnly: true,
+    canPreviewCanvasPatch: true,
+    canApplyCanvasPatch: false,
+    canManageHostCredentials: false,
+    credentialVisibility: 'configured-state-only',
+  });
   const editor = executeCanvasAgentTool(database, request('inspectRun'), {
     actorId: 'editor-a', role: 'editor', capabilities: ['editGraph', 'runWorkflow'],
   });
@@ -172,7 +202,10 @@ test('E4 authority keeps reviewers advisory-only, lets editors use only the exis
     canManageHostCredentials: false,
     credentialVisibility: 'configured-state-only',
   });
-  assert.doesNotMatch(JSON.stringify([reviewer, editor]), /plainSecretValue123456|credentialValue123456|\*{4}[A-Za-z0-9]{4}/i);
+  assert.doesNotMatch(
+    JSON.stringify([reviewer, misconfiguredReviewer, owner, editorWithoutEdit, editor]),
+    /plainSecretValue123456|credentialValue123456|\*{4}[A-Za-z0-9]{4}/i,
+  );
 });
 
 test('canvas, run, assets, and subflow projections redact values and never expose raw source objects', () => {
@@ -408,6 +441,86 @@ test('authoritative exact ports reject unknown handles and enforce required subf
     },
   ], [{ id: 'prompt-subflow', source: 'prompt-a', target: 'subflow-a', targetHandle: 'prompt-in' }]);
   assert.equal(executeCanvasAgentTool(requiredDatabase, request('simulateExecutionPlan', { proposal: connected }, 'required-connected')).data.valid, true);
+});
+
+test('E5 authoritative validation detects recursive fixed-version subflow dependencies and keeps shared DAGs valid', () => {
+  const nestedNode = (id, definitionId, version = 1) => ({
+    id,
+    type: 'subflow',
+    position: { x: 0, y: 0 },
+    data: { definitionId, definitionVersion: version, definitionProjectId: 'project-a' },
+  });
+  const flow = (id, nodes = []) => definition({
+    id,
+    version: 1,
+    revision: 1,
+    nodes,
+    edges: [],
+    inputs: [],
+    outputs: [],
+  });
+  const definitions = new Map([
+    ['root\u00001', flow('root', [nestedNode('root-to-child', 'child')])],
+    ['child\u00001', flow('child', [nestedNode('child-to-leaf', 'leaf')])],
+    ['leaf\u00001', flow('leaf', [nestedNode('leaf-to-child', 'child')])],
+  ]);
+  const document = {
+    schema: 't8-canvas-document',
+    schemaVersion: 2,
+    projectId: 'project-a',
+    canvasId: 'canvas-a',
+    revision: 4,
+    nodes: [nestedNode('root-instance', 'root')],
+    edges: [],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  };
+  const batches = [];
+  const recursiveDatabase = createDatabase({
+    document,
+    getSubflowDefinitionsByRefs(refs, projectId) {
+      assert.equal(projectId, 'project-a');
+      batches.push(clone(refs));
+      return refs.map((ref) => definitions.get(`${ref.id}\u0000${ref.version}`)).filter(Boolean).map(clone);
+    },
+    getSubflowDefinition() {
+      throw new Error('recursive validation must use bounded batch dependency loading');
+    },
+  });
+  const validation = executeCanvasAgentTool(recursiveDatabase, request('validateCanvas', {}, 'recursive-subflow')).data;
+  const recursiveCycle = validation.diagnostics.find((item) => (
+    item.ruleId === 'topology.cycle' && item.facts?.variant === 'subflow-dependency'
+  ));
+  assert.ok(recursiveCycle);
+  assert.equal(validation.valid, false);
+  assert.deepEqual(recursiveCycle.facts.rootRefs, ['root@1']);
+  assert.deepEqual(recursiveCycle.facts.cycleRefs, ['child@1', 'leaf@1', 'child@1']);
+  assert.deepEqual(batches, [
+    [{ id: 'root', version: 1 }],
+    [{ id: 'child', version: 1 }],
+    [{ id: 'leaf', version: 1 }],
+  ]);
+  const simulation = executeCanvasAgentTool(recursiveDatabase, request('simulateExecutionPlan', {}, 'recursive-simulation')).data;
+  assert.equal(simulation.blocked, true);
+  assert.equal(simulation.reasonCode, 'canvas_validation_failed');
+
+  const sharedDefinitions = new Map([
+    ['root\u00001', flow('root', [
+      nestedNode('root-to-left', 'left'),
+      nestedNode('root-to-right', 'right'),
+    ])],
+    ['left\u00001', flow('left', [nestedNode('left-to-shared', 'shared')])],
+    ['right\u00001', flow('right', [nestedNode('right-to-shared', 'shared')])],
+    ['shared\u00001', flow('shared', [{ id: 'inside', type: 'text', position: { x: 0, y: 0 }, data: { text: 'ok' } }])],
+  ]);
+  const shared = executeCanvasAgentTool(createDatabase({
+    document,
+    getSubflowDefinitionsByRefs(refs) {
+      return refs.map((ref) => sharedDefinitions.get(`${ref.id}\u0000${ref.version}`)).filter(Boolean).map(clone);
+    },
+  }), request('validateCanvas', {}, 'shared-subflow-dag')).data;
+  assert.equal(shared.diagnostics.some((item) => (
+    item.ruleId === 'topology.cycle' && item.facts?.variant === 'subflow-dependency'
+  )), false);
 });
 
 test('all 69 production node instances resolve one authoritative connection contract', () => {

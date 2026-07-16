@@ -75,6 +75,7 @@ test('release scripts verify installer, blockmap, latest.yml, and GitHub assets'
   const distRelease = read('../scripts/dist-release.cjs');
   const release = read('../scripts/release-github.cjs');
   const verify = read('../scripts/verify-github-release.cjs');
+  const latestYml = read('../scripts/latest-yml.cjs');
 
   assert.match(distRelease, /T8_REQUIRE_UPDATE_ARTIFACTS/);
   assert.match(distRelease, /release-github\.cjs/);
@@ -84,7 +85,19 @@ test('release scripts verify installer, blockmap, latest.yml, and GitHub assets'
   assert.match(release, /const createArgs = \[/);
   assert.match(release, /'create'/);
   assert.match(release, /gh', \['release', 'upload'/);
-  assert.match(release, /latest\.yml version mismatch/);
-  assert.match(verify, /release', 'download'/);
+  assert.match(release, /assertLatestYamlArtifact/);
+  assert.match(latestYml, /\$\{label\} version mismatch/);
+  assert.match(verify, /'release',\s*[\r\n]\s*'download'/);
   assert.match(verify, /missing release asset/);
+  assert.match(verify, /T8_RELEASE_TARGET must be the exact 40-character source commit SHA/);
+  assert.match(verify, /automatic-update tag must be \$\{expectedTag\}/);
+  assert.match(verify, /prepublish verification requires a stable draft release/);
+  assert.match(verify, /draft \$\{tag\} targets/);
+  assert.match(verify, /must be a published non-prerelease automatic-update release/);
+  assert.match(verify, /remote tag \$\{tag\} targets/);
+  assert.match(verify, /release asset SHA-256 mismatch/);
+  assert.match(verify, /assertLatestYamlArtifact/);
+  assert.match(latestYml, /\$\{label\} installer sha512 mismatch/);
+  assert.match(verify, /tagName,isLatest,isDraft,isPrerelease/);
+  assert.match(verify, /is not marked as GitHub Latest/);
 });

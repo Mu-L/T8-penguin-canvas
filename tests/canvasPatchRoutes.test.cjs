@@ -84,7 +84,7 @@ test('local canvas patch routes pin identity, persist authoritative documents, a
         throw Object.assign(new Error('无权预览 Patch'), { code: 'canvas_patch_forbidden' });
       }
       if (patch.id === 'leaky') {
-        throw Object.assign(new Error(`node C:\\Users\\alice\\private\\input.png /home/alice/private.txt C%3A%5CUsers%5Cencoded-user%5Cprivate.png %252Fhome%252Fencoded-user%252Fprivate.txt path=%2Froot%2Fprivate%2Fsecret.txt api_key%3DencodedCredentialValue123456 sk-test-secret-123456 ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA eyJAAAAAA.BBBBBBBB.CCCCCCCC apiKey=super-secret-value data:image/png;base64,\nQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=`), { code: 'canvas_patch_invalid' });
+        throw Object.assign(new Error(`node C:\\Users\\alice\\private\\input.png /home/alice/private.txt C%3A%5CUsers%5Cencoded-user%5Cprivate.png %252Fhome%252Fencoded-user%252Fprivate.txt path=%2Froot%2Fprivate%2Fsecret.txt api_key%3DencodedCredentialValue123456 ${['sk-', 'test-secret-123456'].join('')} ${['ghp_', 'A'.repeat(36)].join('')} ${['eyJAAAAAA', 'BBBBBBBB', 'CCCCCCCC'].join('.')} apiKey=super-secret-value data:image/png;base64,\nQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=`), { code: 'canvas_patch_invalid' });
       }
       return {
         patchId: patch.id,
@@ -281,6 +281,7 @@ test('local canvas patch routes pin identity, persist authoritative documents, a
   assert.equal(revertResponse.status, 200, await revertResponse.text());
   assert.deepEqual(calls.find((entry) => entry.method === 'revert').options, {
     expectedRevision: 5, actorId: 'local-owner', sessionId: 'local-session', projectId: 'project-local',
+    authority: { source: 'local-owner', role: 'owner', capabilities: ['manageProviders'] },
   });
   assert.deepEqual(JSON.parse(fs.readFileSync(canvasFile, 'utf8')), revertedDocument);
   listItem = JSON.parse(fs.readFileSync(listFile, 'utf8'))[0];

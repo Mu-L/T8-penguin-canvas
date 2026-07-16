@@ -27,11 +27,14 @@ import type { AssetRef, CanvasPatch, CanvasPatchPreview, CanvasPatchRecord, Coll
 import { diffSubflowDefinitions, upgradeSubflowInstances, type SubflowDefinition, type SubflowUpgradeResult } from '../utils/subflows';
 import {
   analyzeWorkflow,
+  buildWorkflowDoctorCanvasHighlights,
   collectWorkflowAssetIds,
+  workflowIssuesFromCanvasAgentValidation,
   workflowDisplayId,
   WORKFLOW_DOCTOR_RULE_COUNT,
   type CanvasPatchDraft,
   type WorkflowAssetDiagnostic,
+  type WorkflowDoctorCanvasHighlight,
   type WorkflowIssue,
   type WorkflowProviderDiagnostic,
   type WorkflowRunDiagnostic,
@@ -111,6 +114,7 @@ interface ProjectWorkbenchProps {
   onUpgradeSubflowInstances: (fromDefinition: SubflowDefinition, toDefinition: SubflowDefinition) => void;
   onInsertAsset: (asset: AssetRef) => void;
   onFocusNode: (nodeId: string) => void;
+  onDoctorHighlightsChange: (highlights: WorkflowDoctorCanvasHighlight[]) => void;
   onPreviewPatch: (patch: CanvasPatchDraft) => Promise<{ patch: CanvasPatch; preview: CanvasPatchPreview }>;
   onApplyPatch: (patch: CanvasPatch, preview: CanvasPatchPreview) => Promise<void>;
   onRevertPatch: (patchId: string, baseRevision: number) => Promise<void>;
@@ -173,6 +177,8 @@ interface DoctorRemoteContext {
   runs: RunSummary[];
   pendingIntents: RunIntent[];
   executionPolicy: CollaborationExecutionPolicySnapshot | null;
+  validation: CanvasAgentToolResult<'validateCanvas'> | null;
+  validationError: string;
   runEvidence: CanvasAgentRunEvidenceInspection | null;
   runEvidenceError: string;
 }
@@ -187,6 +193,8 @@ const EMPTY_DOCTOR_REMOTE_CONTEXT: DoctorRemoteContext = {
   runs: [],
   pendingIntents: [],
   executionPolicy: null,
+  validation: null,
+  validationError: '',
   runEvidence: null,
   runEvidenceError: '',
 };
@@ -420,7 +428,7 @@ export default function ProjectWorkbench(props: ProjectWorkbenchProps) {
     const reservedEstimatedCost = reservedIntent?.estimatedCostKnown === true && reservedIntent.estimatedCost != null
       ? Math.max(0, Number(reservedIntent.estimatedCost) || 0)
       : undefined;
-    return analyzeWorkflow(props.nodes, props.edges, {
+    const localIssues = analyzeWorkflow(props.nodes, props.edges, {
       projectId: props.projectId,
       providers: doctorProviders,
       providersComplete: providerSettingsLoaded,
@@ -440,7 +448,19 @@ export default function ProjectWorkbench(props: ProjectWorkbenchProps) {
         allowedModels: policy?.allowedModels,
       },
     });
+    const authoritativeIssues = scopedDoctorRemoteContext.validation
+      ? workflowIssuesFromCanvasAgentValidation(
+        scopedDoctorRemoteContext.validation.data,
+        props.nodes,
+        props.projectId,
+      )
+      : [];
+    return [...authoritativeIssues, ...localIssues];
   }, [doctorProviders, doctorRuns, liveExecutionTokenNodeIds, liveRunningNodeIds, props.edges, props.nodes, props.open, props.projectId, providerSettingsLoaded, scopedDoctorRemoteContext, tab]);
+  const doctorHighlights = useMemo(
+    () => buildWorkflowDoctorCanvasHighlights(issues, props.edges),
+    [issues, props.edges],
+  );
   const favoriteStorageKey = `t8-subflow-favorites:${props.projectId || 'project-local'}`;
   const subflowCategories = useMemo(() => [...new Set(subflows.map((definition) => String(definition.category || '').trim()).filter(Boolean))].sort(), [subflows]);
   const visibleSubflows = useMemo(() => subflows.filter((definition) => (!subflowCategory || definition.category === subflowCategory) && (!favoriteOnly || favoriteSubflowIds.includes(definition.id))), [favoriteOnly, favoriteSubflowIds, subflowCategory, subflows]);
@@ -1107,6 +1127,15 @@ export default function ProjectWorkbench(props: ProjectWorkbenchProps) {
   }, [loadPatchHistory, props.canvasRevision, props.open, tab]);
 
   useEffect(() => {
+    if (!props.open || tab !== 'doctor') {
+      props.onDoctorHighlightsChange([]);
+      return;
+    }
+    props.onDoctorHighlightsChange(doctorHighlights);
+    return () => props.onDoctorHighlightsChange([]);
+  }, [doctorHighlights, props.onDoctorHighlightsChange, props.open, tab]);
+
+  useEffect(() => {
     if (!props.open || tab !== 'doctor') return;
     const generation = ++doctorLoadGenerationRef.current;
     const controller = new AbortController();
@@ -1138,10 +1167,18 @@ export default function ProjectWorkbench(props: ProjectWorkbenchProps) {
           excludeIntentId: reservedIntent?.id,
         });
       });
+      const validationPromise = api.executeCanvasAgentTool({
+        tool: 'validateCanvas',
+        requestId: `doctor-validation-${Date.now().toString(36)}`,
+        projectId: props.projectId,
+        canvasId: props.canvasId!,
+        input: {},
+      }, { signal: controller.signal });
       const remotePromise = Promise.allSettled([
         api.listProjectRuns({ projectId: props.projectId, canvasId: props.canvasId || undefined, limit: 30 }, { signal: controller.signal }),
         intentsPromise,
         policyPromise,
+        validationPromise,
         runEvidencePromise,
       ] as const);
       const assets: WorkflowAssetDiagnostic[] = [];
@@ -1163,12 +1200,13 @@ export default function ProjectWorkbench(props: ProjectWorkbenchProps) {
           assets.push({ id: result.value.id, availability: result.value.availability, kind: result.value.kind, projectId: result.value.projectId });
         });
       }
-      const [runsResult, intentsResult, policyResult, runEvidenceResult] = await remotePromise;
+      const [runsResult, intentsResult, policyResult, validationResult, runEvidenceResult] = await remotePromise;
       if (controller.signal.aborted || generation !== doctorLoadGenerationRef.current) return;
       const unavailable: string[] = [];
       if (runsResult.status === 'rejected') unavailable.push('Run');
       if (intentsResult.status === 'rejected') unavailable.push('运行请求');
       if (policyResult.status === 'rejected') unavailable.push('执行策略');
+      if (validationResult.status === 'rejected' || validationResult.value.truncated) unavailable.push('递归子工作流结构诊断');
       if (doctorEvidenceTarget && runEvidenceResult.status === 'rejected') unavailable.push('指定 Run/NodeRun/Attempt 证据');
       if (unavailableAssetCount > 0) unavailable.push(`${unavailableAssetCount} 项项目素材`);
       setDoctorRemoteContext({
@@ -1181,6 +1219,12 @@ export default function ProjectWorkbench(props: ProjectWorkbenchProps) {
         runs: runsResult.status === 'fulfilled' ? runsResult.value : [],
         pendingIntents: intentsResult.status === 'fulfilled' ? intentsResult.value : [],
         executionPolicy: policyResult.status === 'fulfilled' ? policyResult.value : null,
+        validation: validationResult.status === 'fulfilled' && !validationResult.value.truncated
+          ? validationResult.value
+          : null,
+        validationError: validationResult.status === 'rejected'
+          ? validationResult.reason instanceof Error ? validationResult.reason.message : String(validationResult.reason)
+          : validationResult.value.truncated ? '权威结构诊断响应被截断，已拒绝使用部分结论。' : '',
         runEvidence: runEvidenceResult.status === 'fulfilled' ? runEvidenceResult.value : null,
         runEvidenceError: runEvidenceResult.status === 'rejected'
           ? runEvidenceResult.reason instanceof Error ? runEvidenceResult.reason.message : String(runEvidenceResult.reason)
@@ -1524,9 +1568,11 @@ export default function ProjectWorkbench(props: ProjectWorkbenchProps) {
                     <span>项目素材 {scopedDoctorRemoteContext.resolvedAssetCount}/{scopedDoctorRemoteContext.requestedAssetCount}</span>
                     <span>最近 Run {scopedDoctorRemoteContext.runs.length}</span>
                     <span>执行策略 {scopedDoctorRemoteContext.executionPolicy ? '已读取' : '未提供'}</span>
+                    <span>递归依赖 {scopedDoctorRemoteContext.validation ? '已权威核验' : '未核验'}</span>
                     {scopedDoctorRemoteContext.loading && <span className="inline-flex items-center gap-1"><Loader2 size={11} className="animate-spin" />刷新上下文</span>}
                   </div>
                   {scopedDoctorRemoteContext.requestedAssetCount > 64 && <p className="text-amber-500">本轮只核验按 ID 排序后的前 64 个项目素材引用，其余不据此下结论。</p>}
+                  {scopedDoctorRemoteContext.validationError && <p className="text-amber-500">{scopedDoctorRemoteContext.validationError}</p>}
                   {scopedDoctorRemoteContext.error && <p className="text-amber-500">{scopedDoctorRemoteContext.error}</p>}
                 </div>
                 {doctorEvidenceTarget && <div className="mb-3 rounded border border-amber-500/60 bg-amber-500/10 p-3 text-[10px] leading-5" data-testid="run-evidence-diagnosis">

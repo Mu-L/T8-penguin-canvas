@@ -1889,7 +1889,8 @@ test('farm render layer is mounted with ReactFlow coordinates and event exclusio
   const layer = readFileSync(new URL('../src/components/FarmCanvasLayer.tsx', import.meta.url), 'utf8');
   const panel = readFileSync(new URL('../src/components/FarmStoryPanel.tsx', import.meta.url), 'utf8');
   const sound = readFileSync(new URL('../src/utils/farmSound.ts', import.meta.url), 'utf8');
-  const css = readFileSync(new URL('../src/styles/theme-farm-story.css', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../src/styles/theme-farm-story.css', import.meta.url), 'utf8')
+    .replace(/\r\n?/g, '\n');
   const globalCss = readFileSync(new URL('../src/styles/index.css', import.meta.url), 'utf8');
   const farmDarkConsoleLockStart = css.indexOf('/* Farm dark console contrast lock. */');
   const farmDarkConsoleLockEnd = css.indexOf('html[data-theme-visual="farm-story"] .react-flow__node', farmDarkConsoleLockStart);

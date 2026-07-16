@@ -361,12 +361,25 @@ function containsPrivateAgentText(value: string) {
     || LONG_BASE64_PATTERN.test(candidate.replace(/\r?\n/g, '')));
 }
 
+const AGENT_PROMPT_OVERRIDE_PATTERN = /(?:(?:ignore|disregard|forget|override|bypass)\b.{0,32}\b(?:previous|prior|system|developer|hidden)\b.{0,24}\b(?:instruction|instructions|prompt|message|messages)\b|(?:忽略|无视|绕过|覆盖).{0,24}(?:之前|此前|先前|系统|开发者|隐藏).{0,16}(?:指令|提示词|消息|规则))/i;
+const AGENT_PROMPT_DISCLOSURE_PATTERN = /(?:(?:show|reveal|print|dump|expose)\b.{0,32}\b(?:system prompt|developer message|hidden instruction|hidden prompt)s?\b|(?:显示|泄露|打印|导出|透露).{0,24}(?:系统提示词|开发者消息|隐藏指令|隐藏提示词))/i;
+const AGENT_PROMPT_PRIVILEGED_READ_PATTERN = /(?:(?:read|show|reveal|print|dump|list|extract|exfiltrate)\b.{0,36}\b(?:api keys?|credentials?|secrets?|environment variables?|local (?:config|configuration|files?)|filesystem)\b|(?:读取|查看|显示|导出|泄露|列出).{0,28}(?:API\s*Key|密钥|凭据|环境变量|本机配置|本地配置|本机文件|本地文件|文件系统))/i;
+const AGENT_PROMPT_PRIVILEGED_TOOL_PATTERN = /(?:(?:call|invoke|use|execute|run)\b.{0,28}\b(?:powershell|cmd(?:\.exe)?|shell|filesystem|exec)\b|(?:调用|执行|运行).{0,24}(?:PowerShell|cmd(?:\.exe)?|shell|filesystem|文件系统|终端命令|系统命令))/i;
+
+function containsCanvasAgentPromptInjection(value: string) {
+  return AGENT_PROMPT_OVERRIDE_PATTERN.test(value)
+    || AGENT_PROMPT_DISCLOSURE_PATTERN.test(value)
+    || AGENT_PROMPT_PRIVILEGED_READ_PATTERN.test(value)
+    || AGENT_PROMPT_PRIVILEGED_TOOL_PATTERN.test(value);
+}
+
 export function sanitizeCanvasAgentPrompt(value: unknown): string {
   if (typeof value !== 'string') throw new Error('Canvas Agent 请求必须是文本');
   const prompt = value.normalize('NFKC').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
   if (!prompt) throw new Error('请输入要解释、规划或生成的工作流');
   if (prompt.length > 2_000) throw new Error('Canvas Agent 请求不能超过 2000 字符');
   if (containsPrivateAgentText(prompt)) throw new Error('Canvas Agent 请求包含凭据、绝对路径或内嵌二进制，已拒绝处理');
+  if (containsCanvasAgentPromptInjection(prompt)) throw new Error('Canvas Agent 请求包含提示注入或越权操作，已拒绝处理');
   return prompt;
 }
 

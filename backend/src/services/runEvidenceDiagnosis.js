@@ -195,14 +195,14 @@ function sealServerAuthoritativeRunValidation(runScope, validation) {
   for (const item of data.diagnostics) {
     if (!item || typeof item !== 'object' || Array.isArray(item)
       || !['error', 'warning'].includes(item.severity)
-      || !['canvas', 'node', 'edge'].includes(item.targetType)
+      || !['canvas', 'node', 'edge', 'subflow'].includes(item.targetType)
       || !exactId(item.targetId)
       || typeof item.ruleId !== 'string'
       || item.ruleId.length < 1
       || item.ruleId.length > 160) return null;
     if (item.severity === 'error') errorCount += 1;
     else warningCount += 1;
-    if (item.severity === 'error' && item.targetType === 'node') {
+    if (item.severity === 'error' && ['node', 'subflow'].includes(item.targetType)) {
       nodeErrors.push(Object.freeze({
         ruleId: item.ruleId,
         targetId: item.targetId,

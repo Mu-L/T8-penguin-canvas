@@ -98,8 +98,34 @@ test('collaboration patch routes enforce role, scope identity, safe broadcasts, 
     edges: [],
   });
   const calls = [];
-  const appliedDocument = { ...database.getCanvas('canvas-a'), revision: 2, updatedAt: 20 };
-  const revertedDocument = { ...database.getCanvas('canvas-a'), revision: 3, updatedAt: 30 };
+  const mutationDocumentNodes = [
+    ...database.getCanvas('canvas-a').nodes,
+    {
+      id: 'feishu-node',
+      type: 'feishu-bitable-input',
+      position: { x: 160, y: 0 },
+      data: {
+        feishuAppToken: 'bascnPatchResponseResourceId',
+        feishuRows: [{
+          appToken: 'bascnPatchResponseResourceId',
+          media: [{ fileToken: 'boxcnPatchResponseFileId' }],
+        }],
+        access_token: 'PATCH_RESPONSE_SECRET_864',
+      },
+    },
+  ];
+  const appliedDocument = {
+    ...database.getCanvas('canvas-a'),
+    nodes: mutationDocumentNodes,
+    revision: 2,
+    updatedAt: 20,
+  };
+  const revertedDocument = {
+    ...database.getCanvas('canvas-a'),
+    nodes: mutationDocumentNodes,
+    revision: 3,
+    updatedAt: 30,
+  };
   database.previewCanvasPatch = (canvasId, patch, options) => {
     calls.push({ method: 'preview', canvasId, patch: clone(patch), options: clone(options) });
     const unknown = Object.keys(patch).filter((key) => ![
@@ -109,7 +135,7 @@ test('collaboration patch routes enforce role, scope identity, safe broadcasts, 
       throw Object.assign(new Error(`未知 CanvasPatch 字段: ${unknown.join(', ')}`), { code: 'canvas_patch_invalid' });
     }
     if (patch.id === 'leaky') {
-      throw Object.assign(new Error('node D:\\private\\input.png /var/private/input.png D%3A%5Cprivate%5Cencoded-user%5Cinput.png %252Fvar%252Fprivate%252Fencoded-user%252Finput.png sk-test-secret-123456 ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA eyJAAAAAA.BBBBBBBB.CCCCCCCC token=super-secret-value data:image/png;base64,AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'), { code: 'canvas_patch_invalid' });
+      throw Object.assign(new Error(`node D:\\private\\input.png /var/private/input.png D%3A%5Cprivate%5Cencoded-user%5Cinput.png %252Fvar%252Fprivate%252Fencoded-user%252Finput.png ${['sk-', 'test-secret-123456'].join('')} ${['ghp_', 'A'.repeat(36)].join('')} ${['eyJAAAAAA', 'BBBBBBBB', 'CCCCCCCC'].join('.')} token=super-secret-value data:image/png;base64,AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA`), { code: 'canvas_patch_invalid' });
     }
     return {
       patchId: patch.id,
@@ -219,7 +245,13 @@ test('collaboration patch routes enforce role, scope identity, safe broadcasts, 
       method: 'POST', headers: { cookie: editor.cookie, 'content-type': 'application/json' },
       body: JSON.stringify({ patch: maliciousPatch, previewDigest: 'preview-digest', confirmed: true, actorId: 'body-actor' }),
     });
-    assert.equal(editorApply.status, 200, await editorApply.text());
+    const editorApplyPayload = await editorApply.json();
+    assert.equal(editorApply.status, 200, JSON.stringify(editorApplyPayload));
+    const appliedFeishuNode = editorApplyPayload.data.document.nodes.find((node) => node.id === 'feishu-node');
+    assert.equal(appliedFeishuNode.data.feishuAppToken, 'bascnPatchResponseResourceId');
+    assert.equal(appliedFeishuNode.data.feishuRows[0].appToken, 'bascnPatchResponseResourceId');
+    assert.equal(appliedFeishuNode.data.feishuRows[0].media[0].fileToken, 'boxcnPatchResponseFileId');
+    assert.doesNotMatch(JSON.stringify(editorApplyPayload), /PATCH_RESPONSE_SECRET_864/);
     const applyCall = calls.find((entry) => entry.method === 'apply');
     assert.deepEqual(applyCall.options, {
       previewDigest: 'preview-digest', confirmed: true,
@@ -248,9 +280,18 @@ test('collaboration patch routes enforce role, scope identity, safe broadcasts, 
       method: 'POST', headers: { cookie: editor.cookie, 'content-type': 'application/json' },
       body: JSON.stringify({ baseRevision: 2, actorId: 'body-actor', sessionId: 'body-session', projectId: 'project-evil' }),
     });
-    assert.equal(editorRevert.status, 200, await editorRevert.text());
+    const editorRevertPayload = await editorRevert.json();
+    assert.equal(editorRevert.status, 200, JSON.stringify(editorRevertPayload));
+    const revertedFeishuNode = editorRevertPayload.data.document.nodes.find((node) => node.id === 'feishu-node');
+    assert.equal(revertedFeishuNode.data.feishuAppToken, 'bascnPatchResponseResourceId');
+    assert.equal(revertedFeishuNode.data.feishuRows[0].appToken, 'bascnPatchResponseResourceId');
+    assert.equal(revertedFeishuNode.data.feishuRows[0].media[0].fileToken, 'boxcnPatchResponseFileId');
+    assert.doesNotMatch(JSON.stringify(editorRevertPayload), /PATCH_RESPONSE_SECRET_864/);
     assert.deepEqual(calls.find((entry) => entry.method === 'revert').options, {
       expectedRevision: 2, actorId: editor.session.memberId, sessionId: editor.session.id, projectId: 'project-local',
+      authority: {
+        source: 'collaboration', role: 'editor', capabilities: editor.session.capabilities,
+      },
     });
     const revertedMessage = await revertBroadcast;
     assert.ok(Number.isSafeInteger(revertedMessage.timestamp));

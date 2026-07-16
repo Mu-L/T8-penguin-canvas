@@ -384,7 +384,7 @@ test('prepareRunAction is deterministic, does not mutate input, and makes no net
 });
 
 test('preview remains bounded and redacts credentials, absolute paths, and base64', () => {
-  const secret = 'sk-abcdefghijklmnopqrstuvwxyz123456';
+  const secret = ['sk-', 'abcdefghijklmnopqrstuvwxyz123456'].join('');
   const path = 'C:\\Users\\private\\secret.txt';
   const dataUrl = `data:image/png;base64,${'A'.repeat(4000)}`;
   const manyNodes: Node[] = Array.from({ length: 140 }, (_, index) => ({

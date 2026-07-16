@@ -5,6 +5,8 @@ import { readFileSync } from 'node:fs';
 const workbench = readFileSync(new URL('../src/components/ProjectWorkbench.tsx', import.meta.url), 'utf8');
 const api = readFileSync(new URL('../src/services/api.ts', import.meta.url), 'utf8');
 const doctor = readFileSync(new URL('../src/utils/workflowDoctor.ts', import.meta.url), 'utf8');
+const canvas = readFileSync(new URL('../src/components/Canvas.tsx', import.meta.url), 'utf8');
+const styles = readFileSync(new URL('../src/styles/index.css', import.meta.url), 'utf8');
 
 test('workflow doctor UI renders the stable rule, evidence, location, fixability, and version contract', () => {
   assert.match(workbench, /data-testid="workflow-doctor"/);
@@ -33,7 +35,7 @@ test('closed and non-doctor workbench states skip analysis while node drags keep
   const remoteEffect = workbench.slice(remoteEffectStart, workbench.indexOf('\n\n  if (!props.open) return null;', remoteEffectStart));
   const effectDependencies = remoteEffect.slice(remoteEffect.lastIndexOf('}, ['));
   assert.match(issuesMemo, /if \(!props\.open \|\| tab !== 'doctor'\) return \[\];/);
-  assert.ok(issuesMemo.indexOf("tab !== 'doctor'") < issuesMemo.indexOf('return analyzeWorkflow('));
+  assert.ok(issuesMemo.indexOf("tab !== 'doctor'") < issuesMemo.indexOf('analyzeWorkflow('));
   assert.match(workbench, /const doctorAssetIdKey = useMemo\(/);
   assert.match(effectDependencies, /doctorAssetIdKey/);
   assert.match(effectDependencies, /props\.canvasRevision/);
@@ -91,4 +93,18 @@ test('doctor passes authoritative cost limits and keeps raw IDs local to actions
   assert.match(workbench, /affectedEdgeIds\.map\(\(id\) => workflowDisplayId\(id\)\)/);
   assert.match(workbench, /workflowDisplayId\(change\.targetId\)/);
   assert.doesNotMatch(workbench, /patchPreview\.operations\.map/);
+});
+
+test('E5 Doctor merges digest-verified recursive validation and clears non-invasive canvas markers outside the Doctor tab', () => {
+  assert.match(workbench, /tool: 'validateCanvas'/);
+  assert.match(workbench, /workflowIssuesFromCanvasAgentValidation\(/);
+  assert.match(workbench, /onDoctorHighlightsChange:/);
+  assert.match(workbench, /buildWorkflowDoctorCanvasHighlights\(issues, props\.edges\)/);
+  assert.match(workbench, /props\.onDoctorHighlightsChange\(\[\]\)/);
+  assert.match(canvas, /WorkflowDoctorHighlightContext/);
+  assert.match(canvas, /t8-workflow-doctor-node-marker/);
+  assert.match(canvas, /t8-workflow-doctor-port-highlight/);
+  assert.match(styles, /\.t8-workflow-doctor-node-marker/);
+  assert.match(styles, /\.react-flow__handle\.t8-workflow-doctor-port-highlight/);
+  assert.doesNotMatch(canvas, /data:\s*\{\s*\.\.\.\(node\.data[\s\S]{0,120}doctor/i);
 });

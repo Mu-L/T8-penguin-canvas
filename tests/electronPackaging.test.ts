@@ -1,6 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 
 function read(rel: string) {
   return readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -162,22 +174,296 @@ test('Electron package verifies the intelligent asset center and picker media co
 test('Electron release publishing requires explicit per-version approval', () => {
   const distRelease = read('../scripts/dist-release.cjs');
   const githubRelease = read('../scripts/release-github.cjs');
+  const releaseProvenance = read('../scripts/release-provenance.cjs');
+  const latestYml = read('../scripts/latest-yml.cjs');
 
   assert.match(distRelease, /const releaseApproval = `release-\$\{pkg\.version\}`/);
   assert.match(distRelease, /function assertReleaseApproval\(\)/);
   assert.match(distRelease, /process\.env\.T8_RELEASE_APPROVAL === releaseApproval/);
   assert.match(distRelease, /refusing to run Electron release without explicit approval/);
   assert.match(distRelease, /only after the user explicitly asks to publish/);
+  assert.match(distRelease, /function assertReleaseTarget\(\)/);
+  assert.match(distRelease, /T8_RELEASE_TARGET must be the exact 40-character source commit SHA/);
+  assert.match(distRelease, /const target = explicitTarget \|\| head/);
+  assert.match(distRelease, /\['ls-remote', releaseRemote, 'refs\/heads\/main'\]/);
+  assert.match(distRelease, /env\.T8_RELEASE_TARGET = target/);
+  assert.match(distRelease, /fixed release target/);
+  assert.match(distRelease, /crypto\.randomBytes\(32\)\.toString\('hex'\)/);
+  assert.match(distRelease, /T8_RELEASE_BUILD_NONCE/);
+  assert.match(distRelease, /removed stale automatic-update artifacts/);
+  assert.match(distRelease, /writeReleaseProvenance/);
+  assert.match(distRelease, /assertReleaseTarget\(\)/);
   assert.match(distRelease, /github release upload \+ verify/);
+  assert.match(distRelease, /run\('rebuild native modules for Electron', command\('npm'\), \['run', 'rebuild:electron'\]\)/);
+  assert.match(distRelease, /\['--win', '--x64', '--config\.npmRebuild=false'\]/);
 
   assert.match(githubRelease, /const releaseApproval = `release-\$\{version\}`/);
   assert.match(githubRelease, /function assertReleaseApproval\(\)/);
   assert.match(githubRelease, /if \(dryRun\) return/);
   assert.match(githubRelease, /process\.env\.T8_RELEASE_APPROVAL === releaseApproval/);
   assert.match(githubRelease, /refusing to publish GitHub Release without explicit approval/);
+  assert.match(githubRelease, /formal automatic-update tag must be \$\{expectedTag\}/);
+  assert.match(githubRelease, /function assertReleaseGitState\(target\)/);
+  assert.match(githubRelease, /refs\/heads\/main/);
+  assert.match(githubRelease, /refs\/tags\/\$\{tag\}/);
+  assert.match(githubRelease, /source worktree is not release-clean/);
+  assert.match(githubRelease, /function existingReleaseMetadata\(\)/);
+  assert.match(githubRelease, /published release \$\{tag\} is immutable/);
+  assert.match(githubRelease, /creating draft release/);
+  assert.match(githubRelease, /'--draft',[\s\S]*'--latest=false'/);
+  assert.match(githubRelease, /verifyRelease\('prepublish'\)/);
+  assert.match(githubRelease, /'--draft=false',[\s\S]*'--latest'/);
+  assert.match(githubRelease, /const publishResult = run\('gh',[\s\S]*\{ allowFailure: true \}/);
+  assert.match(githubRelease, /verifyRelease\('final'\)/);
+  assert.match(githubRelease, /publish command exited with/);
+  assert.match(githubRelease, /returnReleaseToDraft/);
+  assert.match(githubRelease, /assertReleaseProvenance/);
+  assert.match(githubRelease, /T8_RELEASE_BUILD_NONCE/);
+  assert.match(githubRelease, /hashFile\(installer, 'sha512', 'base64'\)/);
+  assert.match(githubRelease, /assertLatestYamlArtifact/);
+  assert.match(latestYml, /yaml\.load/);
+  assert.match(latestYml, /files\.length !== 1/);
+  assert.match(releaseProvenance, /t8-electron-release-provenance-v1/);
+  assert.match(releaseProvenance, /provenance source target does not match T8_RELEASE_TARGET/);
+  assert.match(releaseProvenance, /provenance build nonce does not match this dist:release process/);
+  assert.match(releaseProvenance, /artifact provenance mismatch/);
+
+  const require = createRequire(import.meta.url);
+  const {
+    artifactPaths,
+    assertReleaseProvenance,
+    writeReleaseProvenance,
+  } = require('../scripts/release-provenance.cjs');
+  const { assertLatestYamlArtifact } = require('../scripts/latest-yml.cjs');
+  const { withReleaseTemp } = require('../scripts/verify-github-release.cjs');
+  const fixtureInstallerName = 'T8-ProvenanceFixture-Setup-9.9.9.exe';
+  const fixtureInstallerSha512 = 'fixture-installer-sha512';
+  const latestFixture = ({
+    version = '9.9.9',
+    entrySha512 = fixtureInstallerSha512,
+    topLevelSha512 = fixtureInstallerSha512,
+  } = {}) => [
+    `version: ${version}`,
+    'files:',
+    `  - url: ${fixtureInstallerName}`,
+    `    sha512: ${entrySha512}`,
+    '    size: 128',
+    `path: ${fixtureInstallerName}`,
+    `sha512: ${topLevelSha512}`,
+    'releaseDate: 2026-07-16T00:00:00.000Z',
+  ].join('\n');
+  assert.doesNotThrow(() => assertLatestYamlArtifact({
+    text: latestFixture(),
+    version: '9.9.9',
+    installerName: fixtureInstallerName,
+    installerSha512: fixtureInstallerSha512,
+    installerSize: 128,
+  }));
+  assert.throws(() => assertLatestYamlArtifact({
+    text: latestFixture({ version: '9.9.90' }),
+    version: '9.9.9',
+    installerName: fixtureInstallerName,
+    installerSha512: fixtureInstallerSha512,
+    installerSize: 128,
+  }), /version mismatch/);
+  assert.throws(() => assertLatestYamlArtifact({
+    text: latestFixture({ version: '[9.9.9]' }),
+    version: '9.9.9',
+    installerName: fixtureInstallerName,
+    installerSha512: fixtureInstallerSha512,
+    installerSize: 128,
+  }), /version mismatch/);
+  assert.throws(() => assertLatestYamlArtifact({
+    text: latestFixture().replace(
+      `  - url: ${fixtureInstallerName}`,
+      `  - url: [${fixtureInstallerName}]`,
+    ),
+    version: '9.9.9',
+    installerName: fixtureInstallerName,
+    installerSha512: fixtureInstallerSha512,
+    installerSize: 128,
+  }), /missing or duplicated/);
+  assert.throws(() => assertLatestYamlArtifact({
+    text: latestFixture().replace(
+      `path: ${fixtureInstallerName}`,
+      `path: [${fixtureInstallerName}]`,
+    ),
+    version: '9.9.9',
+    installerName: fixtureInstallerName,
+    installerSha512: fixtureInstallerSha512,
+    installerSize: 128,
+  }), /top-level path mismatch/);
+  assert.throws(() => assertLatestYamlArtifact({
+    text: latestFixture({
+      entrySha512: 'wrong-files-entry-sha512',
+      topLevelSha512: fixtureInstallerSha512,
+    }),
+    version: '9.9.9',
+    installerName: fixtureInstallerName,
+    installerSha512: fixtureInstallerSha512,
+    installerSize: 128,
+  }), /sha512 mismatch/);
+  assert.throws(() => assertLatestYamlArtifact({
+    text: [
+      'version: 9.9.9',
+      'unrelated:',
+      `  - url: ${fixtureInstallerName}`,
+      `    sha512: ${fixtureInstallerSha512}`,
+      '    size: 128',
+      'files:',
+      '  - url: wrong-installer.exe',
+      `    sha512: ${fixtureInstallerSha512}`,
+      '    size: 128',
+      `path: ${fixtureInstallerName}`,
+      `sha512: ${fixtureInstallerSha512}`,
+    ].join('\n'),
+    version: '9.9.9',
+    installerName: fixtureInstallerName,
+    installerSha512: fixtureInstallerSha512,
+    installerSize: 128,
+  }), /missing or duplicated/);
+  assert.throws(() => assertLatestYamlArtifact({
+    text: latestFixture().replace(
+      `    sha512: ${fixtureInstallerSha512}`,
+      [
+        '    sha512: wrong-files-entry-sha512',
+        '    metadata:',
+        `      sha512: ${fixtureInstallerSha512}`,
+      ].join('\n'),
+    ),
+    version: '9.9.9',
+    installerName: fixtureInstallerName,
+    installerSha512: fixtureInstallerSha512,
+    installerSize: 128,
+  }), /installer sha512 mismatch/);
+  assert.throws(() => assertLatestYamlArtifact({
+    text: latestFixture().replace(
+      [
+        `    sha512: ${fixtureInstallerSha512}`,
+        '    size: 128',
+      ].join('\n'),
+      [
+        '    metadata:',
+        `      sha512: ${fixtureInstallerSha512}`,
+        '      size: 128',
+      ].join('\n'),
+    ),
+    version: '9.9.9',
+    installerName: fixtureInstallerName,
+    installerSha512: fixtureInstallerSha512,
+    installerSize: 128,
+  }), /installer sha512 is missing/);
+  assert.throws(() => assertLatestYamlArtifact({
+    text: latestFixture().replace(
+      `  - url: ${fixtureInstallerName}`,
+      [
+        '  - url: unexpected-first-installer.exe',
+        `    sha512: ${fixtureInstallerSha512}`,
+        '    size: 128',
+        `  - url: ${fixtureInstallerName}`,
+      ].join('\n'),
+    ),
+    version: '9.9.9',
+    installerName: fixtureInstallerName,
+    installerSha512: fixtureInstallerSha512,
+    installerSize: 128,
+  }), /exactly one entry/);
+  assert.throws(() => assertLatestYamlArtifact({
+    text: `${latestFixture()}\nversion: 9.9.9`,
+    version: '9.9.9',
+    installerName: fixtureInstallerName,
+    installerSha512: fixtureInstallerSha512,
+    installerSize: 128,
+  }), /YAML parse failed/);
+  assert.throws(() => assertLatestYamlArtifact({
+    text: latestFixture().replace(
+      `    size: 128`,
+      `    size: 128\n    size: 128`,
+    ),
+    version: '9.9.9',
+    installerName: fixtureInstallerName,
+    installerSha512: fixtureInstallerSha512,
+    installerSize: 128,
+  }), /YAML parse failed/);
+  assert.throws(() => assertLatestYamlArtifact({
+    text: `${latestFixture()}\nfiles:\n  - url: duplicate.exe`,
+    version: '9.9.9',
+    installerName: fixtureInstallerName,
+    installerSha512: fixtureInstallerSha512,
+    installerSize: 128,
+  }), /YAML parse failed/);
+  assert.throws(() => assertLatestYamlArtifact({
+    text: latestFixture().replace(
+      `\nsha512: ${fixtureInstallerSha512}\n`,
+      '\nsha512: wrong-top-level-sha512\n',
+    ),
+    version: '9.9.9',
+    installerName: fixtureInstallerName,
+    installerSha512: fixtureInstallerSha512,
+    installerSize: 128,
+  }), /top-level sha512 mismatch/);
+  assert.throws(() => assertLatestYamlArtifact({
+    text: `${latestFixture()}\nbad: [`,
+    version: '9.9.9',
+    installerName: fixtureInstallerName,
+    installerSha512: fixtureInstallerSha512,
+    installerSize: 128,
+  }), /YAML parse failed/);
+  assert.throws(() => assertLatestYamlArtifact({
+    text: `${latestFixture()}\n---\nversion: 9.9.9`,
+    version: '9.9.9',
+    installerName: fixtureInstallerName,
+    installerSha512: fixtureInstallerSha512,
+    installerSize: 128,
+  }), /YAML parse failed/);
+  let failedVerifyTemp = '';
+  assert.throws(() => withReleaseTemp((tempDir: string) => {
+    failedVerifyTemp = tempDir;
+    writeFileSync(join(tempDir, 'partial-installer.exe'), Buffer.alloc(16));
+    throw new Error('fixture verification failure');
+  }), /fixture verification failure/);
+  assert.equal(existsSync(failedVerifyTemp), false);
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 't8-release-provenance-'));
+  const fixturePackage = { version: '9.9.9', build: { productName: 'T8-ProvenanceFixture' } };
+  const target = 'c'.repeat(40);
+  const nonce = 'ab'.repeat(32);
+  try {
+    const paths = artifactPaths(fixtureRoot, fixturePackage);
+    mkdirSync(paths.distDir, { recursive: true });
+    for (const [index, artifact] of paths.artifacts.entries()) {
+      writeFileSync(artifact.path, Buffer.alloc(128 + index, index + 1));
+    }
+    writeReleaseProvenance({
+      root: fixtureRoot,
+      pkg: fixturePackage,
+      target,
+      nonce,
+    });
+    assert.equal(assertReleaseProvenance({
+      root: fixtureRoot,
+      pkg: fixturePackage,
+      target,
+      nonce,
+    }).target, target);
+    assert.throws(() => assertReleaseProvenance({
+      root: fixtureRoot,
+      pkg: fixturePackage,
+      target,
+      nonce: 'de'.repeat(32),
+    }), /build nonce/);
+    writeFileSync(paths.artifacts[1].path, Buffer.from('changed blockmap'));
+    assert.throws(() => assertReleaseProvenance({
+      root: fixtureRoot,
+      pkg: fixturePackage,
+      target,
+      nonce,
+    }), /artifact provenance mismatch/);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
 });
 
-test('Electron release keeps one packaged ffmpeg runtime and excludes installer duplicate', () => {
+test('Electron release verifies packaged media and offline runtime sidecars', () => {
   const packageJson = JSON.parse(read('../package.json'));
   const files = packageJson.build.files;
   const resources = packageJson.build.extraResources.map((item: any) => `${item.from}->${item.to}`);
@@ -197,6 +483,7 @@ test('Electron release keeps one packaged ffmpeg runtime and excludes installer 
   assert.match(llmMedia, /optional dev fallback only/);
 
   const postBuild = read('../electron/_post_build.cjs');
+  const runtimeArchivePrep = read('../scripts/prepare-runtime-archives.cjs');
   assert.match(postBuild, /function loadPackagedVideoTransitions\(\)/);
   assert.match(postBuild, /videoTransitions\.json/);
   assert.match(postBuild, /for \(const transition of loadPackagedVideoTransitions\(\)\)/);
@@ -207,6 +494,79 @@ test('Electron release keeps one packaged ffmpeg runtime and excludes installer 
   assert.match(postBuild, /ffprobe/);
   assert.match(postBuild, /show_format/);
   assert.match(postBuild, /packaged ffprobe JSON probe verified/);
+  assert.match(runtimeArchivePrep, /function assertStrictRuntimeSource\(/);
+  assert.match(runtimeArchivePrep, /python\/Scripts\/remove-ai-watermarks\.exe/);
+  assert.match(runtimeArchivePrep, /parsehub\/__init__\.py/);
+  assert.match(runtimeArchivePrep, /minimumSourceFiles: 40_000/);
+  assert.match(runtimeArchivePrep, /archiveSha256: sha256File\(archivePath\)/);
+  assert.match(runtimeArchivePrep, /sourceSha256: sourceHash\.digest\('hex'\)/);
+  assert.match(runtimeArchivePrep, /String\(entry\.sourceSha256\)\.toLowerCase\(\) === sourceStats\.sourceSha256/);
+  assert.ok(runtimeArchivePrep.includes("if (!/^[a-f0-9]{64}$/i.test(String(entry.archiveSha256 || ''))) return true;"));
+  assert.match(postBuild, /function verifyPackagedRuntimeArchive\(/);
+  assert.match(postBuild, /minimumArchiveBytes: 500_000_000/);
+  assert.match(postBuild, /entry\.sourceSha256/);
+  assert.match(postBuild, /spawnSync\(path7za, \['t'/);
+  assert.match(postBuild, /packaged runtime archive is missing required entries/);
+  assert.match(postBuild, /archive SHA-256, CRC and required entries verified/);
+  assert.match(postBuild, /if \(archiveStrict\) \{[\s\S]*verifyPackagedRuntimeArchive\([\s\S]*verifyDirectAiWatermarkRuntime\(runtimeRoot\)/);
+  assert.match(postBuild, /if \(archiveStrict\) \{[\s\S]*verifyPackagedRuntimeArchive\([\s\S]*verifyDirectParseHubRuntime\(libsRoot\)/);
+  assert.match(postBuild, /function verifyDirectAiWatermarkRuntime\(/);
+  assert.match(postBuild, /function verifyDirectParseHubRuntime\(/);
+
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 't8-runtime-gate-'));
+  const postBuildPath = fileURLToPath(new URL('../electron/_post_build.cjs', import.meta.url));
+  const runHelper = (helper: string, env: Record<string, string>) => spawnSync(
+    process.execPath,
+    ['-e', `require(${JSON.stringify(postBuildPath)}).${helper}(${JSON.stringify(fixtureRoot)})`],
+    {
+      env: { ...process.env, ...env },
+      encoding: 'utf8',
+      windowsHide: true,
+    },
+  );
+  try {
+    const aiRoot = join(fixtureRoot, 'tools', 'remove-ai-watermarks');
+    mkdirSync(aiRoot, { recursive: true });
+    writeFileSync(join(aiRoot, 'remove-ai-watermarks.exe'), Buffer.alloc(32 * 1024, 1));
+    writeFileSync(join(aiRoot, 'runtime-manifest.json'), '{}');
+    const strictArchiveFirst = runHelper('checkAiWatermarkRuntime', {
+      T8_REQUIRE_AI_WATERMARK_RUNTIME: '1',
+      T8_REQUIRE_RUNTIME_ARCHIVES: '1',
+    });
+    assert.equal(strictArchiveFirst.status, 1, strictArchiveFirst.stderr || strictArchiveFirst.stdout);
+    assert.match(
+      `${strictArchiveFirst.stdout}\n${strictArchiveFirst.stderr}`,
+      /packaged runtime archive is missing/,
+    );
+
+    writeFileSync(join(aiRoot, 'remove-ai-watermarks.exe'), Buffer.from([1]));
+    const tinyDirectAi = runHelper('checkAiWatermarkRuntime', {
+      T8_REQUIRE_AI_WATERMARK_RUNTIME: '1',
+      T8_REQUIRE_RUNTIME_ARCHIVES: '0',
+    });
+    assert.equal(tinyDirectAi.status, 1, tinyDirectAi.stderr || tinyDirectAi.stdout);
+    assert.match(
+      `${tinyDirectAi.stdout}\n${tinyDirectAi.stderr}`,
+      /direct remove-ai-watermarks runtime is incomplete or implausibly small/,
+    );
+
+    const parseBridge = join(fixtureRoot, 'tools', 'parsehub-bridge');
+    const parseLibs = join(fixtureRoot, 'tools', 'parsehub-pythonlibs');
+    mkdirSync(parseBridge, { recursive: true });
+    mkdirSync(parseLibs, { recursive: true });
+    writeFileSync(join(parseBridge, 'parsehub_bridge.py'), '# fixture');
+    const emptyDirectParseHub = runHelper('checkParseHubRuntime', {
+      T8_REQUIRE_PARSEHUB_RUNTIME: '1',
+      T8_REQUIRE_RUNTIME_ARCHIVES: '0',
+    });
+    assert.equal(emptyDirectParseHub.status, 1, emptyDirectParseHub.stderr || emptyDirectParseHub.stdout);
+    assert.match(
+      `${emptyDirectParseHub.stdout}\n${emptyDirectParseHub.stderr}`,
+      /direct ParseHub runtime is incomplete or implausibly small/,
+    );
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
 });
 
 test('Electron packaging verifies encrypted local extension hook points', () => {
@@ -243,7 +603,14 @@ test('formal Electron releases fail closed when required private sidecars are mi
   const encrypt = read('../electron/encrypt.cjs');
   const postBuild = read('../electron/_post_build.cjs');
 
+  assert.match(distRelease, /T8_REQUIRE_AI_WATERMARK_RUNTIME:\s*['"]1['"]/);
+  assert.match(distRelease, /T8_REQUIRE_PARSEHUB_RUNTIME:\s*['"]1['"]/);
+  assert.match(distRelease, /T8_REQUIRE_RUNTIME_ARCHIVES:\s*['"]1['"]/);
+  assert.match(distRelease, /T8_REQUIRE_UPDATE_ARTIFACTS:\s*['"]1['"]/);
   assert.match(distRelease, /T8_REQUIRE_LOCAL_PRIVATE:\s*['"]1['"]/);
+  assert.match(distRelease, /T8_ENABLE_LOCAL_PRIVATE:\s*['"]1['"]/);
+  assert.match(distRelease, /T8_DISABLE_LOCAL_EXTENSIONS:\s*['"]0['"]/);
+  assert.doesNotMatch(distRelease, /T8_REQUIRE_[A-Z_]+:\s*process\.env\./);
 
   assert.match(viteConfig, /LOCAL_REQUIRED_FRONTEND_ENTRY/);
   assert.match(viteConfig, /process\.env\.T8_REQUIRE_LOCAL_PRIVATE !== ['"]1['"]/);

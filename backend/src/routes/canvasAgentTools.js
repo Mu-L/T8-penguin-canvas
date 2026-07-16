@@ -22,6 +22,7 @@ function createCanvasAgentToolsRouter(options = {}) {
       const data = executeCanvasAgentTool(database, req.body, {
         actorId: 'local-owner',
         role: 'owner',
+        capabilities: ['editGraph'],
         sessionId: 'local-canvas-agent',
       });
       return res.json({ success: true, data });

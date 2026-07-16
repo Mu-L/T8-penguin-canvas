@@ -124,6 +124,13 @@ test('local Agent HTTP route returns bounded 200/400/403/404/409/413 contracts',
   assert.equal(ok.body.data.canvasId, 'canvas-a');
   assert.equal(ok.body.data.canvasRevision, 4);
   assert.equal(ok.body.data.readOnly, true);
+  assert.deepEqual(ok.body.data.authority, {
+    advisoryOnly: false,
+    canPreviewCanvasPatch: true,
+    canApplyCanvasPatch: true,
+    canManageHostCredentials: false,
+    credentialVisibility: 'configured-state-only',
+  });
   assert.match(ok.body.data.digest, /^[a-f0-9]{64}$/);
   assert.doesNotMatch(JSON.stringify(ok.body), /private prompt/);
 

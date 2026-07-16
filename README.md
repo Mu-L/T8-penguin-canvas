@@ -10,13 +10,13 @@ https://www.runninghub.cn/?inviteCode=rh-v1121
 My favorite girl Go YounJung
 # 🐧 贞贞的无限画布（企鹅共创版） · T8-penguin-canvas
 
-> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.5.6
+> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.5.7
 >
 > GitHub：<https://github.com/T8mars/T8-penguin-canvas>
 
 一个面向 AI 创作的 **节点式画布**：拖拽节点、连线编排、生成图像 / 视频 / 音频、调用 LLM、串接 RunningHub 工作流，叠加批量执行、智能对齐、打组、主题模板与终端日志。Web 浏览器和桌面端均可使用。
 
-![status](https://img.shields.io/badge/version-v2.5.6-brightgreen) ![node](https://img.shields.io/badge/node-56-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
+![status](https://img.shields.io/badge/version-v2.5.7-brightgreen) ![node](https://img.shields.io/badge/node-56-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
 
 ---
 
@@ -37,6 +37,7 @@ My favorite girl Go YounJung
 
 - 🎨 **56 个节点**，覆盖文本 / 图像 / 视频 / 音频 / LLM / RunningHub / ComfyUI / 3D / 工具 / 辅助 / 工具箱 / 输出预览 / 上传素材 / 素材集 / 批量打标 / 随机路由
 - 🧺 **画布级批量导入 + 素材合集打散**：上传节点支持一次选择多张图 / 多个视频 / 多段音频；也可直接把剪贴板或文件拖到画布，同类型多素材自动形成合集，上传和输出合集都可一键打散为多个独立素材节点
+- 🛡️ **v2.5.7 工作流医生 E5 自动更新版**：新增固定版本子工作流依赖循环诊断、临时节点/精确端口问题标记、提示注入与越权红队防护，以及多人竞争、失败回滚和旧 Attempt 隔离。固定评测包含 120 个坏工作流与 20 个干净对照；该结果只代表本语料覆盖的 4 个修复家族和 5 个规则，不外推为全部规则零误报。协作响应按权威飞书节点与精确路径保留公开资源令牌，同时继续清除普通凭据；正式 Electron 发布会固定已推送源码 SHA，并校验离线运行时、自动更新三项资产及其哈希，不能被父环境变量降级为空壳包。
 - 🩺 **v2.5.6 运行证据与工作流医生 E4 自动更新版**：执行前只读体检会核对项目、画布、revision、节点范围与结构摘要；失败后诊断引用持久化的 Run / NodeRun / Attempt 证据，并区分平台、配置、网络和画布结构问题。reviewer 只获得解释与建议，editor 不能修改主机 API Key，任何结构修复仍需预览和明确确认；Windows Electron 安装包与 `latest.yml` 自动更新资产已发布。
 - 🎬 **v2.5.5 Wan / Dola Seedream 海外模型自动更新版**：视频节点新增 Wan TAB 和 `wan-2.7-spicy-i2v`，支持单张首帧、2-15 秒、720p/1080p、负面提示词、音频 URL、提示词扩写与 seed；图像节点 Seedream 新增 Dola Seedream 5.0 Pro 海外模型选择，按参考图自动切换 t2i/i2i，旧画布继续默认国内模型。
 - 🐎 **v2.5.4 Happy Horse / Seed Audio / 3D 白模自动更新版**：视频节点新增 Happy Horse 文生视频、单图生视频和多参考图生视频，音频节点新增 Doubao Seed Audio；3D 表情编辑器使用离线 ICT FaceKit 中性人类白模和 52 通道，支持照片比例校准及精确图片输出；教程同步新增第十六弹，贞贞国内/海外平台名称统一。

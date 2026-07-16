@@ -3,6 +3,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -16,11 +17,25 @@ const RUNTIMES = [
     sourceDir: path.join(ROOT, 'tools', 'remove-ai-watermarks-runtime'),
     archiveFile: 'remove-ai-watermarks-runtime.zip',
     manifestFile: 'runtime-manifest.json',
+    requiredSourceFiles: [
+      'python/python.exe',
+      'python/Scripts/remove-ai-watermarks.exe',
+      'runtime-manifest.json',
+    ],
+    minimumSourceFiles: 40_000,
+    minimumSourceBytes: 1_000_000_000,
+    minimumArchiveBytes: 500_000_000,
   },
   {
     id: 'parsehub-pythonlibs',
     sourceDir: path.join(ROOT, 'tools', 'parsehub-pythonlibs'),
     archiveFile: 'parsehub-pythonlibs.zip',
+    requiredSourceFiles: [
+      'parsehub/__init__.py',
+    ],
+    minimumSourceFiles: 6_000,
+    minimumSourceBytes: 200_000_000,
+    minimumArchiveBytes: 50_000_000,
   },
 ];
 
@@ -34,9 +49,7 @@ function require7za() {
 
 function walkStats(root) {
   const stack = [root];
-  let files = 0;
-  let bytes = 0;
-  let maxMtimeMs = 0;
+  const filePaths = [];
   while (stack.length > 0) {
     const dir = stack.pop();
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -46,13 +59,34 @@ function walkStats(root) {
         continue;
       }
       if (!entry.isFile()) continue;
-      const st = fs.statSync(full);
-      files += 1;
-      bytes += st.size;
-      maxMtimeMs = Math.max(maxMtimeMs, st.mtimeMs);
+      filePaths.push(full);
     }
   }
-  return { files, bytes, maxMtimeMs };
+  filePaths.sort((left, right) => (
+    path.relative(root, left).replace(/\\/g, '/')
+      .localeCompare(path.relative(root, right).replace(/\\/g, '/'), 'en')
+  ));
+  const sourceHash = crypto.createHash('sha256');
+  let bytes = 0;
+  let maxMtimeMs = 0;
+  for (const full of filePaths) {
+    const st = fs.statSync(full);
+    const relativePath = path.relative(root, full).replace(/\\/g, '/');
+    bytes += st.size;
+    maxMtimeMs = Math.max(maxMtimeMs, st.mtimeMs);
+    sourceHash.update(relativePath);
+    sourceHash.update('\0');
+    sourceHash.update(String(st.size));
+    sourceHash.update('\0');
+    sourceHash.update(sha256File(full));
+    sourceHash.update('\n');
+  }
+  return {
+    files: filePaths.length,
+    bytes,
+    maxMtimeMs,
+    sourceSha256: sourceHash.digest('hex'),
+  };
 }
 
 function readJson(filePath) {
@@ -63,21 +97,71 @@ function readJson(filePath) {
   }
 }
 
+function sha256File(filePath) {
+  const hash = crypto.createHash('sha256');
+  const buffer = Buffer.allocUnsafe(8 * 1024 * 1024);
+  const handle = fs.openSync(filePath, 'r');
+  try {
+    let bytesRead = 0;
+    do {
+      bytesRead = fs.readSync(handle, buffer, 0, buffer.length, null);
+      if (bytesRead > 0) hash.update(buffer.subarray(0, bytesRead));
+    } while (bytesRead > 0);
+  } finally {
+    fs.closeSync(handle);
+  }
+  return hash.digest('hex');
+}
+
 function loadExistingManifest() {
   return readJson(path.join(OUT_DIR, 'runtime-archives-manifest.json')) || { runtimes: {} };
+}
+
+function assertStrictRuntimeSource(runtime, sourceStats) {
+  if (!STRICT) return;
+  const missing = (runtime.requiredSourceFiles || []).filter((relativePath) => {
+    const absolutePath = path.join(runtime.sourceDir, ...relativePath.split('/'));
+    try {
+      return !fs.statSync(absolutePath).isFile();
+    } catch (_) {
+      return true;
+    }
+  });
+  const problems = [];
+  if (missing.length > 0) problems.push(`missing required files: ${missing.join(', ')}`);
+  if (sourceStats.files < runtime.minimumSourceFiles) {
+    problems.push(`sourceFiles=${sourceStats.files} < ${runtime.minimumSourceFiles}`);
+  }
+  if (sourceStats.bytes < runtime.minimumSourceBytes) {
+    problems.push(`sourceBytes=${sourceStats.bytes} < ${runtime.minimumSourceBytes}`);
+  }
+  if (problems.length > 0) {
+    console.error(`[runtime-archives] strict source validation failed for ${runtime.id}: ${problems.join('; ')}`);
+    process.exit(1);
+  }
 }
 
 function shouldRebuild(runtime, sourceStats, existingManifest) {
   if (FORCE) return true;
   const archivePath = path.join(OUT_DIR, runtime.archiveFile);
   const entry = existingManifest?.runtimes?.[runtime.id];
-  return !(
+  if (!(
     fs.existsSync(archivePath) &&
     entry &&
     Number(entry.sourceFiles || 0) === sourceStats.files &&
     Number(entry.sourceBytes || 0) === sourceStats.bytes &&
-    Number(entry.sourceMtimeMs || 0) === sourceStats.maxMtimeMs
-  );
+    Number(entry.sourceMtimeMs || 0) === sourceStats.maxMtimeMs &&
+    /^[a-f0-9]{64}$/i.test(String(entry.sourceSha256 || '')) &&
+    String(entry.sourceSha256).toLowerCase() === sourceStats.sourceSha256
+  )) {
+    return true;
+  }
+  const archiveStat = fs.statSync(archivePath);
+  if (archiveStat.size < runtime.minimumArchiveBytes) return true;
+  if (Number(entry.archiveBytes || 0) > 0 && Number(entry.archiveBytes) !== archiveStat.size) return true;
+  if (!/^[a-f0-9]{64}$/i.test(String(entry.archiveSha256 || ''))) return true;
+  if (sha256File(archivePath) !== String(entry.archiveSha256).toLowerCase()) return true;
+  return false;
 }
 
 function run7zip(runtime, archivePath, path7za) {
@@ -109,9 +193,11 @@ function buildEntry(runtime, sourceStats, archivePath) {
     id: runtime.id,
     archiveFile: runtime.archiveFile,
     archiveBytes: archiveStat.size,
+    archiveSha256: sha256File(archivePath),
     sourceFiles: sourceStats.files,
     sourceBytes: sourceStats.bytes,
     sourceMtimeMs: sourceStats.maxMtimeMs,
+    sourceSha256: sourceStats.sourceSha256,
     createdAt: new Date().toISOString(),
   };
 }
@@ -143,6 +229,7 @@ function main() {
       continue;
     }
     const sourceStats = walkStats(runtime.sourceDir);
+    assertStrictRuntimeSource(runtime, sourceStats);
     const archivePath = path.join(OUT_DIR, runtime.archiveFile);
     if (shouldRebuild(runtime, sourceStats, existing)) {
       console.log(`[runtime-archives] creating ${runtime.archiveFile} from ${path.relative(ROOT, runtime.sourceDir)} (${sourceStats.files} files)`);

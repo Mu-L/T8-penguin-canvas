@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const path = require('path');
 const yauzl = require('yauzl');
 const yazl = require('yazl');
+const { canvasDocumentTouchesHostCredentials } = require('./canvasPatch');
 
 const PACKAGE_SCHEMA = 't8-subflow-package';
 const PACKAGE_VERSION = 1;
@@ -50,6 +51,7 @@ function stableJson(value) {
 
 function containsPlaintextSecret(value, seen = new Set()) {
   if (!value || typeof value !== 'object') return false;
+  if (seen.size === 0 && canvasDocumentTouchesHostCredentials(value)) return true;
   if (seen.has(value)) return false;
   seen.add(value);
   for (const [key, child] of Object.entries(value)) {

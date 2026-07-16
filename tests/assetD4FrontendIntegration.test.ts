@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { canUseAssetQuerySelection } from '../src/components/assets/assetD4State.ts';
 
-const read = (relativePath: string) => readFileSync(new URL(`../${relativePath}`, import.meta.url), 'utf8');
+const read = (relativePath: string) => readFileSync(
+  new URL(`../${relativePath}`, import.meta.url),
+  'utf8',
+).replace(/\r\n?/g, '\n');
 
 function between(source: string, start: string, end: string): string {
   const startIndex = source.indexOf(start);

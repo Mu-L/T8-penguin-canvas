@@ -21,7 +21,8 @@ const {
   CanvasPatchPermissionError,
   CanvasPatchRevertConflictError,
   CanvasPatchValidationError,
-  assertCanvasPatchCredentialAuthority,
+  assertCanvasDocumentCredentialAuthority,
+  assertCanvasOperationCredentialAuthority,
   assertCanvasPatchPostconditions,
   buildCanvasPatchPlan,
   canvasPatchRequestDigest,
@@ -2554,6 +2555,9 @@ class ProjectDatabase {
         updatedAt: Date.now(),
       });
       assertCanvasDocumentInvariants(restored);
+      assertCanvasDocumentCredentialAuthority(restored, {
+        authority: options.authority,
+      });
       const operationId = String(options.opId || crypto.randomUUID());
       assertUnreservedCanvasOperationId(operationId);
       const updated = this.db.prepare(`
@@ -2812,7 +2816,7 @@ class ProjectDatabase {
       throw new CanvasPatchPermissionError('画布不属于当前项目');
     }
     const patch = validateCanvasPatch(rawPatch);
-    assertCanvasPatchCredentialAuthority(patch, { authority: options.authority });
+    assertCanvasOperationCredentialAuthority(document, patch.operations, { authority: options.authority });
     if (patch.baseRevision !== document.revision) throw new RevisionConflictError(document);
     return buildCanvasPatchPlan(document, patch, {
       actorId: options.actorId,
@@ -2823,7 +2827,12 @@ class ProjectDatabase {
 
   applyCanvasPatch(canvasId, rawPatch, options = {}) {
     const patch = validateCanvasPatch(rawPatch);
-    assertCanvasPatchCredentialAuthority(patch, { authority: options.authority });
+    const authorityDocument = this.getCanvas(canvasId);
+    if (authorityDocument) {
+      assertCanvasOperationCredentialAuthority(authorityDocument, patch.operations, {
+        authority: options.authority,
+      });
+    }
     const requestDigest = canvasPatchRequestDigest(patch);
     if (options.confirmed !== true) throw new CanvasPatchConfirmationError();
     const suppliedPreviewDigest = String(options.previewDigest || '').trim().toLowerCase();
@@ -2837,6 +2846,9 @@ class ProjectDatabase {
       if (options.projectId != null && String(options.projectId) !== document.projectId) {
         throw new CanvasPatchPermissionError('画布不属于当前项目');
       }
+      assertCanvasOperationCredentialAuthority(document, patch.operations, {
+        authority: options.authority,
+      });
       const existing = this.db.prepare(`
         SELECT * FROM canvas_patch_applications
         WHERE project_id = ? AND canvas_id = ? AND patch_id = ?
@@ -3160,6 +3172,9 @@ class ProjectDatabase {
       }
       this.assertCanvasPatchProvenanceGuards(document, provenanceGuards);
       assertCanvasPatchPostconditions(document, postconditions);
+      assertCanvasOperationCredentialAuthority(document, inverseOperations, {
+        authority: options.authority,
+      });
       const baseRevision = document.revision;
       const now = Date.now();
       inverseOperations.forEach((semanticOperation, index) => {

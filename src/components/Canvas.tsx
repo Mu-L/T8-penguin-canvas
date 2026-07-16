@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type RefObject, type SetStateAction } from 'react';
+import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type RefObject, type SetStateAction } from 'react';
 import {
   ReactFlow,
   Background,
@@ -192,7 +192,7 @@ import SendMaterialsModal from './SendMaterialsModal';
 import RunPreflightModal from './RunPreflightModal';
 import SmartImage from './SmartImage';
 import { useCanvasHistory } from '../hooks/useCanvasHistory';
-import { materializeCanvasPatchDraft, type CanvasPatchDraft } from '../utils/workflowDoctor';
+import { materializeCanvasPatchDraft, type CanvasPatchDraft, type WorkflowDoctorCanvasHighlight } from '../utils/workflowDoctor';
 import {
   activateCanvasPatchPending,
   advanceCanvasPatchMutation,
@@ -1441,6 +1441,7 @@ const SPECIFIC_NODES: Record<string, any> = {
   'feishu-bitable-output': FeishuBitableOutputNode,
 };
 
+const WorkflowDoctorHighlightContext = createContext<ReadonlyMap<string, WorkflowDoctorCanvasHighlight>>(new Map());
 const NODE_SERIAL_ANCHOR_LEFT = '--t8-node-serial-anchor-left';
 const NODE_SERIAL_ANCHOR_TOP = '--t8-node-serial-anchor-top';
 
@@ -1452,6 +1453,7 @@ function findNodeSerialAnchorTarget(badgeEl: HTMLElement): HTMLElement | null {
     if (child === badgeEl) continue;
     if (child.classList.contains('react-flow__handle')) continue;
     if (child.classList.contains('t8-node-serial-badge')) continue;
+    if (child.classList.contains('t8-workflow-doctor-node-marker')) continue;
     return child;
   }
   return null;
@@ -1540,11 +1542,80 @@ function NodeSerialBadge({ data }: { data: unknown }) {
   );
 }
 
+function useWorkflowDoctorPortHighlights(
+  markerRef: RefObject<HTMLSpanElement | null>,
+  highlight: WorkflowDoctorCanvasHighlight | undefined,
+) {
+  useLayoutEffect(() => {
+    const marker = markerRef.current;
+    const parent = marker?.parentElement;
+    if (!marker || !parent || !highlight || typeof window === 'undefined') return;
+    let frame = 0;
+    let marked: HTMLElement[] = [];
+    const clear = () => {
+      marked.forEach((handle) => {
+        handle.classList.remove('t8-workflow-doctor-port-highlight');
+        delete handle.dataset.doctorSeverity;
+      });
+      marked = [];
+    };
+    const apply = () => {
+      frame = 0;
+      clear();
+      const inputIds = new Set(highlight.inputPortIds);
+      const outputIds = new Set(highlight.outputPortIds);
+      parent.querySelectorAll<HTMLElement>('.react-flow__handle').forEach((handle) => {
+        const rawHandleId = handle.getAttribute('data-handleid');
+        const handleId = rawHandleId == null || rawHandleId === '' ? null : rawHandleId;
+        const isInput = handle.classList.contains('target') || handle.classList.contains('react-flow__handle-left');
+        const isOutput = handle.classList.contains('source') || handle.classList.contains('react-flow__handle-right');
+        if ((!isInput || !inputIds.has(handleId)) && (!isOutput || !outputIds.has(handleId))) return;
+        handle.classList.add('t8-workflow-doctor-port-highlight');
+        handle.dataset.doctorSeverity = highlight.severity;
+        marked.push(handle);
+      });
+    };
+    const schedule = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(apply);
+    };
+    const observer = typeof MutationObserver === 'undefined'
+      ? null
+      : new MutationObserver(() => schedule());
+    observer?.observe(parent, { childList: true, subtree: true });
+    apply();
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      clear();
+    };
+  }, [highlight, markerRef]);
+}
+
+function WorkflowDoctorNodeMarker({ nodeId }: { nodeId: string }) {
+  const highlights = useContext(WorkflowDoctorHighlightContext);
+  const highlight = highlights.get(nodeId);
+  const markerRef = useRef<HTMLSpanElement | null>(null);
+  useWorkflowDoctorPortHighlights(markerRef, highlight);
+  if (!highlight) return null;
+  return (
+    <span
+      ref={markerRef}
+      className="t8-workflow-doctor-node-marker"
+      data-doctor-severity={highlight.severity}
+      title={`工作流医生：${highlight.issueCount} 项 · ${highlight.ruleIds.join('、')}`}
+    >
+      <span className="t8-workflow-doctor-node-marker__label" aria-hidden="true">! {highlight.issueCount}</span>
+    </span>
+  );
+}
+
 function withNodeSerialBadge(Component: ComponentType<any>): ComponentType<any> {
   const WrappedNode = (props: any) => (
     <>
       <Component {...props} />
       <NodeSerialBadge data={props?.data} />
+      <WorkflowDoctorNodeMarker nodeId={String(props?.id || '')} />
     </>
   );
   WrappedNode.displayName = `NodeSerialBadge(${Component.displayName || Component.name || 'Node'})`;
@@ -3513,6 +3584,14 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   const [runReplayRuntime, setRunReplayRuntime] = useState<{ nodes: Node[]; edges: Edge[] } | null>(null);
   const [generationHistoryOpen, setGenerationHistoryOpen] = useState(false);
   const [projectWorkbenchOpen, setProjectWorkbenchOpen] = useState(false);
+  const [workflowDoctorHighlights, setWorkflowDoctorHighlights] = useState<WorkflowDoctorCanvasHighlight[]>([]);
+  const workflowDoctorHighlightMap = useMemo(
+    () => new Map(workflowDoctorHighlights.map((highlight) => [highlight.nodeId, highlight])),
+    [workflowDoctorHighlights],
+  );
+  const handleDoctorHighlightsChange = useCallback((highlights: WorkflowDoctorCanvasHighlight[]) => {
+    setWorkflowDoctorHighlights(highlights);
+  }, []);
   const [canvasPatchConflictMessage, setCanvasPatchConflictMessage] = useState('');
   const generationHistoryDataKey = useMemo(() => buildGenerationHistoryDataKey(nodes), [nodes]);
   const generationHistoryCount = useMemo(() => countGenerationHistoryItems(nodes), [generationHistoryDataKey]);
@@ -12568,6 +12647,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         onRetryRun={handleRetryProjectRun}
         onRetrySubflowNodeRun={handleRetrySubflowNodeRun}
         onRetryRunAttempt={handleRetryProjectRunAttempt}
+        onDoctorHighlightsChange={handleDoctorHighlightsChange}
       />
       <FarmStoryPanel
         visualStyle={visualStyle}
@@ -12709,44 +12789,45 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         className="hidden"
         onChange={handleImportFile}
       />
-      <ReactFlow
-        nodes={renderedNodes}
-        edges={renderedEdges}
-        nodeTypes={memoNodeTypes}
-        edgeTypes={memoEdgeTypes}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        onConnectStart={onConnectStart}
-        onConnectEnd={onConnectEnd}
-        isValidConnection={onIsValidConnection}
-        connectionLineComponent={memoConnectionLineComponent}
-        onNodeDragStart={onNodeDragStart}
-        onNodeDrag={onNodeDrag}
-        onNodeDragStop={onNodeDragStop}
-        onMoveStart={handleViewportMoveStart}
-        onMoveEnd={handleViewportMoveEnd}
-        onSelectionContextMenu={onSelectionContextMenu}
-        onNodeContextMenu={onNodeContextMenu}
-        onPaneContextMenu={onPaneContextMenu}
-        onDragOver={onCanvasFileDragOver}
-        onDrop={onCanvasFileDrop}
-        onSelectionChange={onSelectionChange}
-        onSelectionStart={onSelectionStart}
-        onSelectionEnd={onSelectionEnd}
-        selectionKeyCode={memoSelectionKeyCode}
-        multiSelectionKeyCode={memoMultiSelectionKeyCode}
-        selectionMode={SelectionMode.Partial}
-        panOnDrag={memoPanOnDrag}
-        snapToGrid={snapEnabled}
-        snapGrid={SNAP_GRID}
-        elevateNodesOnSelect={false}
-        minZoom={CANVAS_MIN_ZOOM}
-        fitView
-        fitViewOptions={CANVAS_OVERVIEW_FIT_OPTIONS}
-        proOptions={memoProOptions}
-        defaultEdgeOptions={memoDefaultEdgeOptions}
-      >
+      <WorkflowDoctorHighlightContext.Provider value={workflowDoctorHighlightMap}>
+        <ReactFlow
+          nodes={renderedNodes}
+          edges={renderedEdges}
+          nodeTypes={memoNodeTypes}
+          edgeTypes={memoEdgeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          onConnectStart={onConnectStart}
+          onConnectEnd={onConnectEnd}
+          isValidConnection={onIsValidConnection}
+          connectionLineComponent={memoConnectionLineComponent}
+          onNodeDragStart={onNodeDragStart}
+          onNodeDrag={onNodeDrag}
+          onNodeDragStop={onNodeDragStop}
+          onMoveStart={handleViewportMoveStart}
+          onMoveEnd={handleViewportMoveEnd}
+          onSelectionContextMenu={onSelectionContextMenu}
+          onNodeContextMenu={onNodeContextMenu}
+          onPaneContextMenu={onPaneContextMenu}
+          onDragOver={onCanvasFileDragOver}
+          onDrop={onCanvasFileDrop}
+          onSelectionChange={onSelectionChange}
+          onSelectionStart={onSelectionStart}
+          onSelectionEnd={onSelectionEnd}
+          selectionKeyCode={memoSelectionKeyCode}
+          multiSelectionKeyCode={memoMultiSelectionKeyCode}
+          selectionMode={SelectionMode.Partial}
+          panOnDrag={memoPanOnDrag}
+          snapToGrid={snapEnabled}
+          snapGrid={SNAP_GRID}
+          elevateNodesOnSelect={false}
+          minZoom={CANVAS_MIN_ZOOM}
+          fitView
+          fitViewOptions={CANVAS_OVERVIEW_FIT_OPTIONS}
+          proOptions={memoProOptions}
+          defaultEdgeOptions={memoDefaultEdgeOptions}
+        >
         <Background
           variant={BackgroundVariant.Dots}
           gap={20}
@@ -12981,7 +13062,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
           onRunNode={(nodeId) => handleRunGroup([nodeId])}
           onStopRun={handleCancelRun}
         />
-      </ReactFlow>
+        </ReactFlow>
       {creativeDeskEditing && (
         <CreativeDeskLayer
           creativeDesk={creativeDesk}
@@ -13002,6 +13083,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         />
       )}
       {floatingControlRail}
+      </WorkflowDoctorHighlightContext.Provider>
 
       {/* 跨节点素材拖拽浮层 (Ctrl + 鼠标左键 从素材缩略图拖出) */}
       <MaterialDragOverlay />

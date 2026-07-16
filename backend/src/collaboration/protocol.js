@@ -17,6 +17,17 @@ const OPERATION_TYPES = new Set([
   'edge.restore',
   'viewport.set',
 ]);
+const OPERATION_PAYLOAD_KEYS = Object.freeze({
+  'node.add': Object.freeze(['node']),
+  'node.patch': Object.freeze(['nodeId', 'patch', 'dataPatch', 'unsetKeys', 'dataUnsetKeys']),
+  'node.move': Object.freeze(['nodeId', 'position']),
+  'node.delete': Object.freeze(['nodeId']),
+  'node.restore': Object.freeze(['node']),
+  'edge.add': Object.freeze(['edge']),
+  'edge.delete': Object.freeze(['edgeId']),
+  'edge.restore': Object.freeze(['edge']),
+  'viewport.set': Object.freeze(['viewport']),
+});
 
 function cloneJson(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -110,11 +121,29 @@ function normalizeCanvasDocument(canvasId, input, options = {}) {
   };
 }
 
+function normalizeOperationPayload(type, rawPayload) {
+  if (rawPayload == null) return {};
+  if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload) || Buffer.isBuffer(rawPayload)) {
+    throw new Error(`${type}.payload 必须是对象`);
+  }
+  const allowedKeys = OPERATION_PAYLOAD_KEYS[type] || [];
+  const allowed = new Set(allowedKeys);
+  const unknownKeys = Object.keys(rawPayload).filter((key) => !allowed.has(key));
+  if (unknownKeys.length > 0) {
+    throw new Error(`${type}.payload 包含不支持字段: ${unknownKeys.slice(0, 5).join(', ')}`);
+  }
+  const payload = {};
+  for (const key of allowedKeys) {
+    if (Object.prototype.hasOwnProperty.call(rawPayload, key)) payload[key] = cloneJson(rawPayload[key]);
+  }
+  return payload;
+}
+
 function validateOperation(raw) {
   if (!raw || typeof raw !== 'object') throw new Error('operation 必须是对象');
   const type = String(raw.type || '');
   if (!OPERATION_TYPES.has(type)) throw new Error(`不支持的 operation: ${type || '(empty)'}`);
-  const payload = raw.payload && typeof raw.payload === 'object' ? cloneJson(raw.payload) : {};
+  const payload = normalizeOperationPayload(type, raw.payload);
   return {
     opId: String(raw.opId || crypto.randomUUID()),
     projectId: raw.projectId == null ? null : String(raw.projectId),
@@ -127,6 +156,33 @@ function validateOperation(raw) {
     payload,
     timestamp: Math.max(1, Math.trunc(finiteNumber(raw.timestamp, Date.now()))),
   };
+}
+
+function operationRevisionError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  error.status = 400;
+  return error;
+}
+
+function requireOperationBatchRevision(rawBaseRevision, rawOperations) {
+  if (!Number.isInteger(rawBaseRevision) || rawBaseRevision < 1) {
+    throw operationRevisionError(
+      'canvas_operation_revision_required',
+      '协作画布操作必须提供正整数 baseRevision',
+    );
+  }
+  for (const rawOperation of Array.isArray(rawOperations) ? rawOperations : []) {
+    if (!rawOperation || typeof rawOperation !== 'object'
+      || !Object.prototype.hasOwnProperty.call(rawOperation, 'baseRevision')) continue;
+    if (rawOperation.baseRevision !== rawBaseRevision) {
+      throw operationRevisionError(
+        'canvas_operation_revision_mismatch',
+        '单条 operation.baseRevision 必须与批次 baseRevision 一致',
+      );
+    }
+  }
+  return rawBaseRevision;
 }
 
 function makeTombstone(operation, revision, identity = {}) {
@@ -502,9 +558,11 @@ module.exports = {
   CANVAS_SCHEMA,
   CANVAS_SCHEMA_VERSION,
   DEFAULT_PROJECT_ID,
+  OPERATION_PAYLOAD_KEYS,
   OPERATION_TYPES,
   normalizeCanvasDocument,
   validateOperation,
+  requireOperationBatchRevision,
   applyCanvasOperation,
   applyCanvasOperationForSimulation,
   assertCanvasDocumentInvariants,

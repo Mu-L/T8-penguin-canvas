@@ -69,6 +69,8 @@ const INTERNAL_CONNECTION_PORTS = Object.freeze({
 const NODE_SCHEMA_DIGEST = digestAgentResult(nodeSchemaManifest);
 const ASSET_KINDS = new Set(['image', 'video', 'audio', 'model3d', 'text', 'other']);
 const AGENT_RUN_VALIDATION_SUBFLOW_LIMIT = 100;
+const AGENT_SUBFLOW_DEPENDENCY_MAX_DEPTH = 8;
+const AGENT_SUBFLOW_DEFINITION_NODE_LIMIT = 2_000;
 const AGENT_RUN_VALIDATION_SUBFLOW_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
 const PORT_KINDS = new Set(['text', 'image', 'video', 'audio', 'model3d', 'metadata', 'config', 'any']);
 const MATERIAL_PORT_KINDS = new Set(['text', 'image', 'video', 'audio']);
@@ -364,7 +366,7 @@ function assetSubject(context) {
 function agentAuthority(context) {
   const role = String(context.role || 'owner');
   const capabilities = new Set(Array.isArray(context.capabilities) ? context.capabilities.map(String) : []);
-  const canApplyCanvasPatch = role === 'owner' || capabilities.has('editGraph');
+  const canApplyCanvasPatch = (role === 'owner' || role === 'editor') && capabilities.has('editGraph');
   return {
     advisoryOnly: !canApplyCanvasPatch,
     canPreviewCanvasPatch: true,
@@ -459,13 +461,373 @@ function inspectNodeSchema(database, document, input) {
   };
 }
 
-function publicDiagnostic(ruleId, severity, targetType, targetId, detail) {
-  return {
+function safePublicDiagnosticFacts(rawFacts) {
+  if (rawFacts == null) return undefined;
+  if (!rawFacts || typeof rawFacts !== 'object' || Array.isArray(rawFacts)) {
+    throw new CanvasAgentToolError('agent_validation_invalid', '诊断 facts 无效', 500);
+  }
+  const facts = {};
+  const entries = Object.entries(rawFacts);
+  if (entries.length > 20) throw new CanvasAgentToolError('agent_validation_invalid', '诊断 facts 超过限制', 500);
+  for (const [key, value] of entries) {
+    if (!/^[A-Za-z][A-Za-z0-9._-]{0,79}$/.test(key)) {
+      throw new CanvasAgentToolError('agent_validation_invalid', '诊断 facts 字段无效', 500);
+    }
+    if (typeof value === 'string') facts[key] = safeAgentText(value, `diagnostic.facts.${key}`, 240);
+    else if (typeof value === 'number') {
+      if (!Number.isFinite(value)) throw new CanvasAgentToolError('agent_validation_invalid', '诊断 facts 数值无效', 500);
+      facts[key] = value;
+    } else if (typeof value === 'boolean' || value == null) facts[key] = value;
+    else if (Array.isArray(value) && value.length <= 20) {
+      facts[key] = value.map((item, index) => {
+        if (typeof item === 'string') return safeAgentText(item, `diagnostic.facts.${key}[${index}]`, 240);
+        if (typeof item === 'number' && Number.isFinite(item)) return item;
+        throw new CanvasAgentToolError('agent_validation_invalid', '诊断 facts 数组无效', 500);
+      });
+    } else {
+      throw new CanvasAgentToolError('agent_validation_invalid', '诊断 facts 值无效', 500);
+    }
+  }
+  return facts;
+}
+
+function publicDiagnostic(ruleId, severity, targetType, targetId, detail, rawFacts) {
+  const diagnostic = {
     ruleId,
     severity,
     targetType,
     targetId: safePublicId(targetId, 'diagnostic.targetId'),
     detail: safeAgentText(detail, 'diagnostic.detail', 500),
+  };
+  const facts = safePublicDiagnosticFacts(rawFacts);
+  if (facts) diagnostic.facts = facts;
+  return diagnostic;
+}
+
+function subflowDependencyRefKey(id, version) {
+  return `${id}\u0000${version}`;
+}
+
+function subflowDependencyRefLabel(id, version) {
+  return `${id}@${version}`;
+}
+
+function parseAuthoritativeSubflowDependencyRef(node, projectId) {
+  const data = node?.data;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return { valid: false, detail: '子工作流依赖缺少固定定义或版本' };
+  }
+  const id = data.definitionId;
+  const version = Number(data.definitionVersion);
+  const referenceProjectId = data.definitionProjectId == null || data.definitionProjectId === ''
+    ? projectId
+    : String(data.definitionProjectId);
+  if (typeof id !== 'string'
+    || !AGENT_RUN_VALIDATION_SUBFLOW_ID_PATTERN.test(id)
+    || !Number.isSafeInteger(version)
+    || version < 1) {
+    return { valid: false, detail: '子工作流依赖缺少有效的固定 definitionId/version' };
+  }
+  if (referenceProjectId !== projectId) {
+    return { valid: false, detail: '子工作流依赖跨项目固定引用被拒绝' };
+  }
+  return {
+    valid: true,
+    ref: {
+      id,
+      version,
+      key: subflowDependencyRefKey(id, version),
+      label: subflowDependencyRefLabel(id, version),
+    },
+  };
+}
+
+function loadSubflowDefinitionBatch(database, refs, projectId) {
+  if (typeof database.getSubflowDefinitionsByRefs === 'function') {
+    return database.getSubflowDefinitionsByRefs(refs.map(({ id, version }) => ({ id, version })), projectId);
+  }
+  if (typeof database.getSubflowDefinition === 'function') {
+    return refs
+      .map(({ id, version }) => database.getSubflowDefinition(id, version, projectId))
+      .filter(Boolean);
+  }
+  return null;
+}
+
+function findSubflowDependencyCycle(adjacency, preferredStarts) {
+  const state = new Map();
+  const path = [];
+  const pathIndex = new Map();
+  const starts = [...new Set([
+    ...preferredStarts,
+    ...[...adjacency.keys()].sort(),
+  ])];
+  for (const start of starts) {
+    if (state.get(start) === 2 || !adjacency.has(start)) continue;
+    const frames = [{ key: start, next: 0 }];
+    state.set(start, 1);
+    pathIndex.set(start, path.length);
+    path.push(start);
+    while (frames.length > 0) {
+      const frame = frames[frames.length - 1];
+      const targets = adjacency.get(frame.key) || [];
+      if (frame.next >= targets.length) {
+        frames.pop();
+        state.set(frame.key, 2);
+        pathIndex.delete(frame.key);
+        path.pop();
+        continue;
+      }
+      const target = targets[frame.next];
+      frame.next += 1;
+      if (state.get(target) === 1) {
+        const index = pathIndex.get(target);
+        return [...path.slice(index == null ? 0 : index), target];
+      }
+      if (state.get(target) === 2 || !adjacency.has(target)) continue;
+      state.set(target, 1);
+      pathIndex.set(target, path.length);
+      path.push(target);
+      frames.push({ key: target, next: 0 });
+    }
+  }
+  return null;
+}
+
+function dependencyRootRefsReachingCycle(rootRefs, adjacency, cycle) {
+  const cycleKeys = new Set(cycle);
+  const reaching = [];
+  for (const rootKey of [...rootRefs.keys()].sort()) {
+    const queue = [rootKey];
+    const visited = new Set();
+    let reaches = false;
+    while (queue.length > 0 && !reaches) {
+      const key = queue.shift();
+      if (visited.has(key)) continue;
+      visited.add(key);
+      if (cycleKeys.has(key)) {
+        reaches = true;
+        break;
+      }
+      for (const child of adjacency.get(key) || []) queue.push(child);
+    }
+    if (reaches) reaching.push(rootRefs.get(rootKey).label);
+  }
+  return reaching;
+}
+
+function loadAuthoritativeSubflowDependencyGraph(database, document, options = {}) {
+  const projectId = String(document?.projectId || '');
+  const maxDepth = Number.isSafeInteger(options.maxDepth)
+    ? Math.max(1, Math.min(AGENT_SUBFLOW_DEPENDENCY_MAX_DEPTH, Number(options.maxDepth)))
+    : AGENT_SUBFLOW_DEPENDENCY_MAX_DEPTH;
+  const maxDefinitions = Number.isSafeInteger(options.maxDefinitions)
+    ? Math.max(1, Math.min(AGENT_RUN_VALIDATION_SUBFLOW_LIMIT, Number(options.maxDefinitions)))
+    : AGENT_RUN_VALIDATION_SUBFLOW_LIMIT;
+  const diagnostics = [];
+  const rootRefs = new Map();
+  const rootNodeIds = [];
+  for (const node of Array.isArray(document?.nodes) ? document.nodes : []) {
+    if (String(node?.type || '') !== 'subflow') continue;
+    rootNodeIds.push(String(node?.id || document?.canvasId || 'canvas'));
+    const parsed = parseAuthoritativeSubflowDependencyRef(node, projectId);
+    if (!parsed.valid) continue;
+    rootRefs.set(parsed.ref.key, parsed.ref);
+  }
+  const definitionsByRef = new Map();
+  const missingRefs = new Set();
+  const adjacency = new Map();
+  if (rootRefs.size === 0) {
+    return {
+      complete: true,
+      diagnostics,
+      definitionsByRef,
+      resolveSubflow: () => null,
+    };
+  }
+
+  let complete = true;
+  const scheduledDepth = new Map([...rootRefs.keys()].map((key) => [key, 1]));
+  let frontier = [...rootRefs.values()].sort((left, right) => left.key.localeCompare(right.key));
+  while (frontier.length > 0) {
+    const batch = frontier.filter((ref) => !definitionsByRef.has(ref.key) && !missingRefs.has(ref.key));
+    frontier = [];
+    if (batch.length === 0) continue;
+    if (definitionsByRef.size + missingRefs.size + batch.length > maxDefinitions) {
+      complete = false;
+      diagnostics.push(publicDiagnostic(
+        'subflow.version-invalid',
+        'error',
+        'subflow',
+        rootNodeIds[0] || document.canvasId,
+        `子工作流依赖定义超过 ${maxDefinitions} 项，权威验证已失败关闭`,
+        {
+          variant: 'subflow-dependency-limit',
+          rootRefs: [...rootRefs.values()].map((ref) => ref.label).sort(),
+          maximum: maxDefinitions,
+        },
+      ));
+      break;
+    }
+    let loaded;
+    try {
+      loaded = loadSubflowDefinitionBatch(database, batch, projectId);
+    } catch {
+      loaded = null;
+    }
+    if (!Array.isArray(loaded) || loaded.length > batch.length) {
+      complete = false;
+      diagnostics.push(publicDiagnostic(
+        'subflow.version-invalid',
+        'error',
+        'subflow',
+        rootNodeIds[0] || document.canvasId,
+        '子工作流依赖仓储暂不可用，权威验证已失败关闭',
+        {
+          variant: 'subflow-dependency-unavailable',
+          rootRefs: [...rootRefs.values()].map((ref) => ref.label).sort(),
+        },
+      ));
+      break;
+    }
+    const requested = new Map(batch.map((ref) => [ref.key, ref]));
+    const returned = new Map();
+    let malformed = false;
+    for (const definition of loaded) {
+      const id = definition?.id;
+      const version = Number(definition?.version);
+      const key = subflowDependencyRefKey(id, version);
+      if (typeof id !== 'string'
+        || !AGENT_RUN_VALIDATION_SUBFLOW_ID_PATTERN.test(id)
+        || !Number.isSafeInteger(version)
+        || version < 1
+        || String(definition?.projectId || '') !== projectId
+        || !requested.has(key)
+        || returned.has(key)
+        || !Array.isArray(definition?.nodes)
+        || definition.nodes.length > AGENT_SUBFLOW_DEFINITION_NODE_LIMIT) {
+        malformed = true;
+        break;
+      }
+      returned.set(key, definition);
+    }
+    if (malformed) {
+      complete = false;
+      diagnostics.push(publicDiagnostic(
+        'subflow.version-invalid',
+        'error',
+        'subflow',
+        rootNodeIds[0] || document.canvasId,
+        '子工作流依赖定义不满足权威固定版本契约',
+        {
+          variant: 'subflow-dependency-pin-mismatch',
+          rootRefs: [...rootRefs.values()].map((ref) => ref.label).sort(),
+        },
+      ));
+      break;
+    }
+    for (const ref of batch) {
+      const definition = returned.get(ref.key);
+      if (!definition) {
+        missingRefs.add(ref.key);
+        const depth = scheduledDepth.get(ref.key) || 1;
+        if (depth > 1) {
+          diagnostics.push(publicDiagnostic(
+            'subflow.version-invalid',
+            'error',
+            'subflow',
+            rootNodeIds[0] || document.canvasId,
+            `嵌套子工作流固定版本 ${ref.label} 不存在或不属于当前项目`,
+            {
+              variant: 'subflow-dependency-unavailable',
+              dependencyRef: ref.label,
+              rootRefs: [...rootRefs.values()].map((root) => root.label).sort(),
+            },
+          ));
+        }
+        continue;
+      }
+      definitionsByRef.set(ref.key, definition);
+      const children = [];
+      const depth = scheduledDepth.get(ref.key) || 1;
+      for (const childNode of definition.nodes) {
+        if (String(childNode?.type || '') !== 'subflow') continue;
+        const parsed = parseAuthoritativeSubflowDependencyRef(childNode, projectId);
+        if (!parsed.valid) {
+          diagnostics.push(publicDiagnostic(
+            'subflow.version-invalid',
+            'error',
+            'subflow',
+            rootNodeIds[0] || document.canvasId,
+            `${ref.label} 内的嵌套子工作流没有有效的固定版本`,
+            {
+              variant: 'subflow-dependency-pin-mismatch',
+              definitionRef: ref.label,
+              rootRefs: [...rootRefs.values()].map((root) => root.label).sort(),
+            },
+          ));
+          continue;
+        }
+        children.push(parsed.ref.key);
+        if (depth >= maxDepth && !definitionsByRef.has(parsed.ref.key)) {
+          complete = false;
+          diagnostics.push(publicDiagnostic(
+            'subflow.version-invalid',
+            'error',
+            'subflow',
+            rootNodeIds[0] || document.canvasId,
+            `子工作流依赖展开超过 ${maxDepth} 层，权威验证已失败关闭`,
+            {
+              variant: 'subflow-dependency-depth-limit',
+              definitionRef: parsed.ref.label,
+              rootRefs: [...rootRefs.values()].map((root) => root.label).sort(),
+              maximum: maxDepth,
+            },
+          ));
+          continue;
+        }
+        const nextDepth = depth + 1;
+        const knownDepth = scheduledDepth.get(parsed.ref.key);
+        if (knownDepth == null || nextDepth < knownDepth) scheduledDepth.set(parsed.ref.key, nextDepth);
+        if (!definitionsByRef.has(parsed.ref.key) && !missingRefs.has(parsed.ref.key)) frontier.push(parsed.ref);
+      }
+      adjacency.set(ref.key, [...new Set(children)].sort());
+    }
+    frontier = [...new Map(frontier.map((ref) => [ref.key, ref])).values()]
+      .sort((left, right) => left.key.localeCompare(right.key));
+    if (!complete) break;
+  }
+
+  if (complete) {
+    const cycle = findSubflowDependencyCycle(adjacency, [...rootRefs.keys()]);
+    if (cycle) {
+      const labels = cycle.map((key) => {
+        const definition = definitionsByRef.get(key);
+        if (definition) return subflowDependencyRefLabel(definition.id, Number(definition.version));
+        const separator = key.lastIndexOf('\u0000');
+        return subflowDependencyRefLabel(key.slice(0, separator), Number(key.slice(separator + 1)));
+      });
+      diagnostics.push(publicDiagnostic(
+        'topology.cycle',
+        'error',
+        'subflow',
+        rootNodeIds[0] || document.canvasId,
+        `固定版本子工作流依赖形成循环：${labels.join(' → ')}`,
+        {
+          variant: 'subflow-dependency',
+          rootRefs: dependencyRootRefsReachingCycle(rootRefs, adjacency, cycle),
+          cycleRefs: labels,
+          definitionCount: definitionsByRef.size,
+          maxDepth,
+        },
+      ));
+    }
+  }
+  return {
+    complete,
+    diagnostics,
+    definitionsByRef,
+    resolveSubflow: (id, version) => definitionsByRef.get(subflowDependencyRefKey(String(id), Number(version))) || null,
   };
 }
 
@@ -609,7 +971,9 @@ function connectionCountKey(nodeId, direction, portId) {
 function structuralValidation(document, options = {}) {
   const nodes = Array.isArray(document.nodes) ? document.nodes : [];
   const edges = Array.isArray(document.edges) ? document.edges : [];
-  const diagnostics = [];
+  const diagnostics = Array.isArray(options.subflowDependencyDiagnostics)
+    ? [...options.subflowDependencyDiagnostics]
+    : [];
   const nodeCounts = new Map();
   for (const node of nodes) nodeCounts.set(String(node?.id || ''), (nodeCounts.get(String(node?.id || '')) || 0) + 1);
   for (const [nodeId, count] of nodeCounts) {
@@ -758,48 +1122,7 @@ function structuralValidation(document, options = {}) {
 }
 
 function authoritativeRunValidationResolver(database, document) {
-  const refs = new Map();
-  for (const node of Array.isArray(document?.nodes) ? document.nodes : []) {
-    if (String(node?.type || '') !== 'subflow') continue;
-    const rawId = node?.data?.definitionId;
-    const version = Number(node?.data?.definitionVersion);
-    if (rawId == null || rawId === '' || !Number.isSafeInteger(version) || version < 1) continue;
-    if (typeof rawId !== 'string' || !AGENT_RUN_VALIDATION_SUBFLOW_ID_PATTERN.test(rawId)) {
-      return { complete: false, resolveSubflow: () => null };
-    }
-    refs.set(`${rawId}\u0000${version}`, { id: rawId, version });
-    if (refs.size > AGENT_RUN_VALIDATION_SUBFLOW_LIMIT) {
-      return { complete: false, resolveSubflow: () => null };
-    }
-  }
-  if (refs.size === 0) return { complete: true, resolveSubflow: () => null };
-  if (typeof database.getSubflowDefinitionsByRefs !== 'function') {
-    return { complete: false, resolveSubflow: () => null };
-  }
-  const definitions = database.getSubflowDefinitionsByRefs([...refs.values()], document.projectId);
-  if (!Array.isArray(definitions) || definitions.length > refs.size) {
-    return { complete: false, resolveSubflow: () => null };
-  }
-  const byRef = new Map();
-  for (const definition of definitions) {
-    const id = definition?.id;
-    const version = Number(definition?.version);
-    const key = `${id}\u0000${version}`;
-    if (typeof id !== 'string'
-      || !AGENT_RUN_VALIDATION_SUBFLOW_ID_PATTERN.test(id)
-      || !Number.isSafeInteger(version)
-      || version < 1
-      || String(definition?.projectId || '') !== String(document.projectId)
-      || !refs.has(key)
-      || byRef.has(key)) {
-      return { complete: false, resolveSubflow: () => null };
-    }
-    byRef.set(key, definition);
-  }
-  return {
-    complete: true,
-    resolveSubflow: (id, version) => byRef.get(`${id}\u0000${Number(version)}`) || null,
-  };
+  return loadAuthoritativeSubflowDependencyGraph(database, document);
 }
 
 function serverAuthoritativeRunValidation(database, document, run) {
@@ -809,7 +1132,10 @@ function serverAuthoritativeRunValidation(database, document, run) {
     || Number(run.canvasRevision) !== Number(document.revision)) return null;
   const resolver = authoritativeRunValidationResolver(database, document);
   if (!resolver.complete) return null;
-  const validation = structuralValidation(document, { resolveSubflow: resolver.resolveSubflow });
+  const validation = structuralValidation(document, {
+    resolveSubflow: resolver.resolveSubflow,
+    subflowDependencyDiagnostics: resolver.diagnostics,
+  });
   const envelope = {
     schema: 't8-canvas-agent-tool-result-v1',
     tool: 'validateCanvas',
@@ -1070,17 +1396,19 @@ function executeCanvasAgentTool(database, rawRequest, context = {}) {
   else if (tool === 'inspectRun') data = inspectRun(database, document, input);
   else if (tool === 'searchAssets') data = searchAssets(database, document, input, context);
   else if (tool === 'searchSubflows') data = searchSubflows(database, document, input);
-  else if (tool === 'validateCanvas') data = structuralValidation(document, {
-    resolveSubflow: (definitionId, version) => typeof database.getSubflowDefinition === 'function'
-      ? database.getSubflowDefinition(definitionId, version, document.projectId)
-      : null,
-  });
+  else if (tool === 'validateCanvas') {
+    const dependencyGraph = loadAuthoritativeSubflowDependencyGraph(database, document);
+    data = structuralValidation(document, {
+      resolveSubflow: dependencyGraph.resolveSubflow,
+      subflowDependencyDiagnostics: dependencyGraph.diagnostics,
+    });
+  }
   else if (tool === 'simulateExecutionPlan') {
     const executionDocument = proposalDocument(database, document, input.proposal);
+    const dependencyGraph = loadAuthoritativeSubflowDependencyGraph(database, executionDocument);
     data = simulateExecution(executionDocument, {
-      resolveSubflow: (definitionId, version) => typeof database.getSubflowDefinition === 'function'
-        ? database.getSubflowDefinition(definitionId, version, executionDocument.projectId)
-        : null,
+      resolveSubflow: dependencyGraph.resolveSubflow,
+      subflowDependencyDiagnostics: dependencyGraph.diagnostics,
     });
   }
   else data = estimateExecution(database, proposalDocument(database, document, input.proposal));

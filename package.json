@@ -1,7 +1,7 @@
 {
   "name": "t8-penguin-canvas",
   "private": false,
-  "version": "2.5.6",
+  "version": "2.5.7",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "T8-penguin-canvas — AI 节点画布工作流工具（Web + Electron 桌面端）",
@@ -87,6 +87,7 @@
     "cross-env": "^7.0.3",
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8",
+    "js-yaml": "^4.1.0",
     "postcss": "^8.4.0",
     "tailwindcss": "^3.4.0",
     "typescript": "^5.7.0",

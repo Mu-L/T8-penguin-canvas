@@ -1200,6 +1200,7 @@ router.post('/:id/patches/:patchId/revert', (req, res) => {
       actorId: LOCAL_PATCH_ACTOR_ID,
       sessionId: LOCAL_PATCH_SESSION_ID,
       projectId: document.projectId,
+      authority: LOCAL_PATCH_AUTHORITY,
     });
     return sendAuthoritativePatchResult(res, req.params.id, result, database);
   } catch (error) {
@@ -1232,6 +1233,7 @@ router.post('/:id/history/:revision/restore', (req, res) => {
       expectedRevision: expectedRevisionFromRequest(req),
       actorId: req.body?.actorId,
       sessionId: req.body?.sessionId,
+      authority: LOCAL_PATCH_AUTHORITY,
     });
     atomicWriteJson(file, document);
     res.set('ETag', `"${document.revision}"`);

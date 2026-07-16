@@ -2,7 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const modal = readFileSync(new URL('../src/components/RunPreflightModal.tsx', import.meta.url), 'utf8');
+const modal = readFileSync(
+  new URL('../src/components/RunPreflightModal.tsx', import.meta.url),
+  'utf8',
+).replace(/\r\n?/g, '\n');
 
 function sourceBetween(source: string, start: string, end: string) {
   const startIndex = source.indexOf(start);

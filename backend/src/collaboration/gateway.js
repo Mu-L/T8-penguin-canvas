@@ -8,7 +8,17 @@ const { WebSocketServer, WebSocket } = require('ws');
 const { SubflowRevisionConflictError, getProjectDatabase } = require('../services/projectDatabase');
 const { getAssetPreviewPipeline } = require('../services/assetPreviewPipeline');
 const { publicAsset } = require('../services/assetPublicView');
-const { mapCanvasMutationError } = require('../services/canvasPatch');
+const {
+  assertCanvasOperationCredentialAuthority,
+  mapCanvasMutationError,
+} = require('../services/canvasPatch');
+const {
+  publicCanvasDocument,
+  publicCanvasMutationResult,
+  publicCanvasSync,
+  publicCollaborationCanvasValue,
+  publicSubflowDefinition,
+} = require('../services/collaborationCanvasPublicView');
 const { executeCanvasAgentTool } = require('../services/canvasAgentTools');
 const {
   AssetUploadManager,
@@ -25,6 +35,7 @@ const { CollaborationAuth, parseCookies } = require('./auth');
 const { CollaborativeTextStore } = require('./textCrdt');
 const { ExecutionPolicyError, HostExecutionPolicy } = require('./executionPolicy');
 const { inspectJsonComplexity, originAllowed } = require('./gatewaySecurity');
+const { requireOperationBatchRevision } = require('./protocol');
 const {
   RunIntentAuthorityError,
   deriveRunIntentAuthority,
@@ -116,6 +127,17 @@ function publicCanvasPatchEvent(result, fallbackPatchId, fallbackStatus, actor) 
   const revision = Number.isSafeInteger(Number(revisionValue)) ? Number(revisionValue) : 0;
   const status = String(record.status || result?.status || fallbackStatus || 'applied').slice(0, 40);
   return { type: 'canvas.patch', patchId, revision, status, actor: String(actor || '').slice(0, 160) };
+}
+
+function publicSubflowRevisionConflict(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return publicCollaborationCanvasValue(value);
+  }
+  const output = publicCollaborationCanvasValue({ ...value, definition: null });
+  if (value.definition && typeof value.definition === 'object' && !Array.isArray(value.definition)) {
+    output.definition = publicSubflowDefinition(value.definition);
+  }
+  return output;
 }
 
 function comparableFilesystemPath(value) {
@@ -580,21 +602,33 @@ class CollaborationGateway {
     });
 
     app.get('/api/collab/canvases', (req, res) => {
-      res.json({ success: true, data: this.database.listCanvases(req.collaborationSession.projectId) });
+      res.json({
+        success: true,
+        data: publicCollaborationCanvasValue(
+          this.database.listCanvases(req.collaborationSession.projectId),
+        ),
+      });
     });
 
     app.get('/api/collab/canvases/:canvasId', (req, res) => {
       const document = this.ensureCanvasAccess(req.collaborationSession, req.params.canvasId);
       if (!document) return res.status(404).json({ success: false, error: '画布不存在或无权访问' });
       res.set('ETag', `"${document.revision}"`);
-      res.json({ success: true, data: document });
+      res.json({ success: true, data: publicCanvasDocument(document) });
     });
 
     app.get('/api/collab/canvases/:canvasId/sync', (req, res) => {
-      if (!this.ensureCanvasAccess(req.collaborationSession, req.params.canvasId)) {
+      const document = this.ensureCanvasAccess(req.collaborationSession, req.params.canvasId);
+      if (!document) {
         return res.status(404).json({ success: false, error: '画布不存在或无权访问' });
       }
-      res.json({ success: true, data: this.database.syncCanvas(req.params.canvasId, req.query?.afterRevision) });
+      res.json({
+        success: true,
+        data: publicCanvasSync(
+          this.database.syncCanvas(req.params.canvasId, req.query?.afterRevision),
+          document,
+        ),
+      });
     });
 
     app.post('/api/collab/canvases/:canvasId/agent/tools', rateLimiter({ limit: 60, windowMs: 60_000 }), (req, res) => {
@@ -691,7 +725,7 @@ class CollaborationGateway {
             context.actorId,
           ));
         }
-        res.json({ success: true, data: result });
+        res.json({ success: true, data: publicCanvasMutationResult(result) });
       } catch (error) {
         return sendCanvasPatchError(res, error);
       }
@@ -706,6 +740,7 @@ class CollaborationGateway {
           actorId: req.collaborationSession.memberId,
           sessionId: req.collaborationSession.id,
           projectId: req.collaborationSession.projectId,
+          authority: canvasPatchAuthorityForSession(req.collaborationSession),
         });
         if (!result.duplicate) {
           this.broadcast(req.collaborationSession.projectId, document.canvasId, publicCanvasPatchEvent(
@@ -715,33 +750,38 @@ class CollaborationGateway {
             req.collaborationSession.memberId,
           ));
         }
-        res.json({ success: true, data: result });
+        res.json({ success: true, data: publicCanvasMutationResult(result) });
       } catch (error) {
         return sendCanvasPatchError(res, error);
       }
     });
 
     app.get('/api/collab/subflows', (req, res) => {
+      const definitions = this.database.listSubflowDefinitions({
+        projectId: req.collaborationSession.projectId,
+        query: req.query?.query,
+      });
       res.json({
         success: true,
-        data: this.database.listSubflowDefinitions({
-          projectId: req.collaborationSession.projectId,
-          query: req.query?.query,
-        }),
+        data: definitions.map((definition) => publicSubflowDefinition(definition)),
       });
     });
 
     app.get('/api/collab/subflows/:id/versions', (req, res) => {
+      const definitions = this.database.listSubflowVersions(
+        req.params.id,
+        req.collaborationSession.projectId,
+      );
       res.json({
         success: true,
-        data: this.database.listSubflowVersions(req.params.id, req.collaborationSession.projectId),
+        data: definitions.map((definition) => publicSubflowDefinition(definition)),
       });
     });
 
     app.get('/api/collab/subflows/:id/:version', (req, res) => {
       const definition = this.database.getSubflowDefinition(req.params.id, req.params.version, req.collaborationSession.projectId);
       if (!definition) return res.status(404).json({ success: false, error: '子工作流定义不存在或无权访问' });
-      res.json({ success: true, data: definition });
+      res.json({ success: true, data: publicSubflowDefinition(definition) });
     });
 
     app.post('/api/collab/subflows/:id/publish', this.requireCapability('publishSubflow'), (req, res) => {
@@ -763,12 +803,17 @@ class CollaborationGateway {
           sessionId: req.collaborationSession.id,
           changeSummary,
         });
-        const publication = publicSubflowPublication(saved);
+        const publication = publicCollaborationCanvasValue(publicSubflowPublication(saved));
         this.broadcastProject(saved.projectId, { type: 'subflow.published', publication });
-        res.status(201).json({ success: true, data: saved });
+        res.status(201).json({ success: true, data: publicSubflowDefinition(saved) });
       } catch (error) {
         if (error instanceof SubflowRevisionConflictError) {
-          return res.status(409).json({ success: false, code: error.code, error: error.message, data: error.current });
+          return res.status(409).json({
+            success: false,
+            code: error.code,
+            error: error.message,
+            data: publicSubflowRevisionConflict(error.current),
+          });
         }
         res.status(400).json({ success: false, error: error?.message || String(error) });
       }
@@ -778,7 +823,12 @@ class CollaborationGateway {
       if (!this.ensureCanvasAccess(req.collaborationSession, req.params.canvasId)) {
         return res.status(404).json({ success: false, error: '画布不存在或无权访问' });
       }
-      res.json({ success: true, data: this.database.listCanvasSnapshots(req.params.canvasId, req.query?.limit) });
+      res.json({
+        success: true,
+        data: publicCollaborationCanvasValue(
+          this.database.listCanvasSnapshots(req.params.canvasId, req.query?.limit),
+        ),
+      });
     });
 
     app.post('/api/collab/canvases/:canvasId/history/:revision/restore', this.requireCapability('editGraph'), (req, res) => {
@@ -790,6 +840,7 @@ class CollaborationGateway {
           expectedRevision: req.body?.baseRevision,
           actorId: req.collaborationSession.memberId,
           sessionId: req.collaborationSession.id,
+          authority: canvasPatchAuthorityForSession(req.collaborationSession),
         });
         this.broadcast(document.projectId, document.canvasId, {
           type: 'canvas.snapshot-restored',
@@ -798,7 +849,7 @@ class CollaborationGateway {
           sourceRevision: Number(req.params.revision),
           actorId: req.collaborationSession.memberId,
         });
-        res.json({ success: true, data: document });
+        res.json({ success: true, data: publicCanvasDocument(document) });
       } catch (error) {
         return sendCanvasPatchError(res, error, {
           fallbackCode: 'snapshot_restore_invalid',
@@ -863,21 +914,26 @@ class CollaborationGateway {
 
     app.post('/api/collab/canvases/:canvasId/operations', this.requireCapability('editGraph'), (req, res) => {
       try {
-        if (!this.ensureCanvasAccess(req.collaborationSession, req.params.canvasId)) {
+        const document = this.ensureCanvasAccess(req.collaborationSession, req.params.canvasId);
+        if (!document) {
           return res.status(404).json({ success: false, error: '画布不存在或无权访问' });
         }
         const rawOperations = Array.isArray(req.body?.operations) ? req.body.operations : [];
+        const baseRevision = requireOperationBatchRevision(req.body?.baseRevision, rawOperations);
         const operations = rawOperations.map((operation, index) => ({
           ...operation,
           projectId: req.collaborationSession.projectId,
           canvasId: req.params.canvasId,
-          baseRevision: operation?.baseRevision == null ? req.body?.baseRevision : operation.baseRevision,
+          baseRevision,
           actorId: req.collaborationSession.memberId,
           sessionId: req.collaborationSession.id,
           clientSeq: Number(operation?.clientSeq) || index,
         }));
+        assertCanvasOperationCredentialAuthority(document, operations, {
+          authority: canvasPatchAuthorityForSession(req.collaborationSession),
+        });
         const result = this.database.applyOperations(req.params.canvasId, operations, {
-          expectedRevision: req.body?.baseRevision,
+          expectedRevision: baseRevision,
         });
         this.broadcast(req.collaborationSession.projectId, req.params.canvasId, {
           type: 'canvas.operations',
@@ -886,7 +942,7 @@ class CollaborationGateway {
           operations: result.acknowledgements,
           actorId: req.collaborationSession.memberId,
         });
-        res.json({ success: true, data: result });
+        res.json({ success: true, data: publicCanvasMutationResult(result) });
       } catch (error) {
         return sendCanvasPatchError(res, error, {
           fallbackCode: 'canvas_operation_invalid',

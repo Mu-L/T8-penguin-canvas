@@ -6,8 +6,10 @@ import {
   WORKFLOW_DOCTOR_RULES,
   analyzeWorkflow,
   applyCanvasPatch,
+  buildWorkflowDoctorCanvasHighlights,
   collectWorkflowAssetIds,
   planCanvasAgentRequest,
+  workflowIssuesFromCanvasAgentValidation,
 } from '../src/utils/workflowDoctor.ts';
 
 test('E1 exposes exactly 30 independently countable rules with a complete evidence contract', () => {
@@ -148,6 +150,179 @@ test('doctor validates immutable subflow identity and version without guessing l
   assert.equal(issue!.evidence.facts.embeddedVersion, 2);
 });
 
+test('E5 maps authoritative recursive-subflow diagnostics to local fixed instances without trusting remote node ids', () => {
+  const nodes: Node[] = [
+    {
+      id: 'local-root-instance',
+      type: 'subflow',
+      position: { x: 0, y: 0 },
+      data: {
+        definitionId: 'root',
+        definitionVersion: 1,
+        definitionProjectId: 'project-a',
+        definition: { id: 'root', version: 1, projectId: 'project-a', inputs: [], outputs: [] },
+      },
+    } as Node,
+  ];
+  const issues = workflowIssuesFromCanvasAgentValidation({
+    valid: false,
+    diagnostics: [
+      {
+        ruleId: 'topology.cycle',
+        severity: 'error',
+        targetType: 'subflow',
+        targetId: 'forged-remote-node-id',
+        detail: '固定版本子工作流依赖形成循环',
+        facts: {
+          variant: 'subflow-dependency',
+          rootRefs: ['root@1'],
+          cycleRefs: ['child@2', 'leaf@4', 'child@2'],
+          definitionCount: 3,
+          maxDepth: 8,
+        },
+      },
+      {
+        ruleId: 'subflow.version-invalid',
+        severity: 'error',
+        targetType: 'subflow',
+        targetId: 'forged-missing-node-id',
+        detail: '不要信任远端详情',
+        facts: {
+          variant: 'subflow-dependency-unavailable',
+          rootRefs: ['root@1'],
+          dependencyRef: 'missing@7',
+        },
+      },
+      {
+        ruleId: 'subflow.version-invalid',
+        severity: 'error',
+        targetType: 'subflow',
+        targetId: 'forged-pin-node-id',
+        detail: '不要信任远端详情',
+        facts: {
+          variant: 'subflow-dependency-pin-mismatch',
+          rootRefs: ['root@1'],
+          definitionRef: 'child@2',
+        },
+      },
+      {
+        ruleId: 'subflow.version-invalid',
+        severity: 'error',
+        targetType: 'subflow',
+        targetId: 'forged-depth-node-id',
+        detail: '不要信任远端详情',
+        facts: {
+          variant: 'subflow-dependency-depth-limit',
+          rootRefs: ['root@1'],
+          definitionRef: 'deep@8',
+          maximum: 8,
+        },
+      },
+      {
+        ruleId: 'subflow.version-invalid',
+        severity: 'error',
+        targetType: 'subflow',
+        targetId: 'forged-limit-node-id',
+        detail: '不要信任远端详情',
+        facts: {
+          variant: 'subflow-dependency-limit',
+          rootRefs: ['root@1'],
+          maximum: 100,
+        },
+      },
+      {
+        ruleId: 'subflow.version-invalid',
+        severity: 'error',
+        targetType: 'subflow',
+        targetId: 'forged-invalid-node-id',
+        detail: '畸形远端诊断必须忽略',
+        facts: {
+          variant: 'subflow-dependency-depth-limit',
+          rootRefs: ['root@1'],
+          definitionRef: 'not a fixed ref',
+          maximum: 0,
+        },
+      },
+    ],
+  }, nodes, 'project-a');
+
+  assert.equal(issues.length, 5);
+  assert.deepEqual(issues.map((item) => item.ruleId), [
+    'topology.cycle',
+    'subflow.version-invalid',
+    'subflow.version-invalid',
+    'subflow.version-invalid',
+    'subflow.version-invalid',
+  ]);
+  for (const issue of issues) {
+    assert.deepEqual(issue.targetNodeIds, ['local-root-instance']);
+    assert.deepEqual(issue.nodeIds, ['local-root-instance']);
+  }
+  assert.equal(issues[0].evidence.facts.variant, 'subflow-dependency');
+  assert.deepEqual(issues.slice(1).map((item) => item.evidence.facts.variant), [
+    'subflow-dependency-unavailable',
+    'subflow-dependency-pin-mismatch',
+    'subflow-dependency-depth-limit',
+    'subflow-dependency-limit',
+  ]);
+  assert.match(issues[1].detail, /missing@7/);
+  assert.match(issues[2].detail, /child@2/);
+  assert.match(issues[3].detail, /8 层/);
+  assert.match(issues[4].detail, /100 项/);
+  assert.doesNotMatch(JSON.stringify(issues), /forged-|不要信任|畸形远端/);
+});
+
+test('E5 non-invasive Doctor highlights aggregate severity and exact input/output handles', () => {
+  const nodes: Node[] = [
+    {
+      id: 'source',
+      type: 'subflow',
+      position: { x: 0, y: 0 },
+      data: {
+        definitionId: 'source-flow',
+        definitionVersion: 1,
+        definition: {
+          id: 'source-flow',
+          version: 1,
+          inputs: [],
+          outputs: [{ id: 'image-out', kind: 'image', required: false }],
+        },
+      },
+    } as Node,
+    {
+      id: 'target',
+      type: 'subflow',
+      position: { x: 200, y: 0 },
+      data: {
+        definitionId: 'target-flow',
+        definitionVersion: 1,
+        definition: {
+          id: 'target-flow',
+          version: 1,
+          inputs: [{ id: 'video-in', kind: 'video', required: true }],
+          outputs: [],
+        },
+      },
+    } as Node,
+  ];
+  const edges: Edge[] = [{
+    id: 'bad-port-edge',
+    source: 'source',
+    target: 'target',
+    sourceHandle: 'image-out',
+    targetHandle: 'video-in',
+  }];
+  const highlights = buildWorkflowDoctorCanvasHighlights(analyzeWorkflow(nodes, edges), edges);
+  const source = highlights.find((item) => item.nodeId === 'source');
+  const target = highlights.find((item) => item.nodeId === 'target');
+
+  assert.equal(source?.severity, 'error');
+  assert.ok(source?.outputPortIds.includes('image-out'));
+  assert.ok(target?.inputPortIds.includes('video-in'));
+  assert.ok((source?.issueCount || 0) >= 1);
+  assert.ok((target?.issueCount || 0) >= 1);
+});
+
 test('doctor reports exact three-layer run failure evidence and rejected stale writeback without exposing tokens', () => {
   const issues = analyzeWorkflow([], [], {
     runs: [{
@@ -230,7 +405,7 @@ test('doctor checks only explicit cost and concurrency limits', () => {
 });
 
 test('large data URLs and errors produce bounded redacted evidence, never payload or secrets', () => {
-  const secret = 'sk-abcdefghijklmnopqrstuvwxyz123456';
+  const secret = ['sk-', 'abcdefghijklmnopqrstuvwxyz123456'].join('');
   const payload = 'A'.repeat(100_000);
   const node = {
     id: 'large', type: 'image', position: { x: 0, y: 0 },

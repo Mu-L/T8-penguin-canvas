@@ -3,9 +3,8 @@ import { EXECUTABLE_NODE_TYPES } from '../config/executableNodeTypes.ts';
 import { CANVAS_NODE_SCHEMA_MANIFEST, NODE_REGISTRY } from '../config/nodeRegistry.ts';
 import {
   arePortsCompatible,
-  getNodeConnectionPort,
-  getNodePortKinds,
   resolveNodeConnectionPorts,
+  type NodeConnectionPort,
 } from '../config/portTypes.ts';
 import type {
   CanvasOperation,
@@ -220,6 +219,15 @@ export interface WorkflowDoctorContext {
   limits?: WorkflowDoctorLimits;
   now?: number;
   largeBase64Bytes?: number;
+}
+
+export interface WorkflowDoctorCanvasHighlight {
+  nodeId: string;
+  severity: DoctorSeverity;
+  issueCount: number;
+  ruleIds: string[];
+  inputPortIds: Array<string | null>;
+  outputPortIds: Array<string | null>;
 }
 
 // 这些节点本身就是数据源，零上游不是异常；其余执行能力统一复用权威注册表。
@@ -484,21 +492,48 @@ export function collectWorkflowAssetIds(nodes: Node[]): string[] {
 
 function diagnosePorts(nodes: Node[], edges: Edge[], issues: WorkflowIssue[]) {
   const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const portResolutions = new Map(nodes.map((node) => [node.id, resolveNodeConnectionPorts(node)]));
+  const inputPortsByNodeId = new Map<string, Map<string | null, NodeConnectionPort>>();
+  const outputPortsByNodeId = new Map<string, Map<string | null, NodeConnectionPort>>();
+  for (const node of nodes) {
+    const resolution = portResolutions.get(node.id);
+    if (!resolution?.resolved) continue;
+    inputPortsByNodeId.set(node.id, new Map(resolution.inputs.map((port) => [port.id, port])));
+    outputPortsByNodeId.set(node.id, new Map(resolution.outputs.map((port) => [port.id, port])));
+  }
+  const portEdgeKey = (nodeId: string, direction: 'inputs' | 'outputs', portId: string | null) => (
+    JSON.stringify([nodeId, direction, portId])
+  );
+  const attachedEdgesByPort = new Map<string, Edge[]>();
+  const validInputEdgesByPort = new Map<string, Edge[]>();
+  const appendEdge = (map: Map<string, Edge[]>, key: string, edge: Edge) => {
+    const list = map.get(key);
+    if (list) list.push(edge);
+    else map.set(key, [edge]);
+  };
+  for (const edge of edges) {
+    appendEdge(attachedEdgesByPort, portEdgeKey(edge.source, 'outputs', edge.sourceHandle == null ? null : String(edge.sourceHandle)), edge);
+    appendEdge(attachedEdgesByPort, portEdgeKey(edge.target, 'inputs', edge.targetHandle == null ? null : String(edge.targetHandle)), edge);
+  }
   const unresolvedReportedNodeIds = new Set<string>();
   for (const edge of edges) {
     const source = nodesById.get(edge.source);
     const target = nodesById.get(edge.target);
     if (!source || !target) continue;
-    const sourceResolution = resolveNodeConnectionPorts(source);
-    const targetResolution = resolveNodeConnectionPorts(target);
-    const unknownSource = !sourceResolution.resolved || !getNodeConnectionPort(source, 'output', edge.sourceHandle);
-    const unknownTarget = !targetResolution.resolved || !getNodeConnectionPort(target, 'input', edge.targetHandle);
+    const sourceResolution = portResolutions.get(source.id);
+    const targetResolution = portResolutions.get(target.id);
+    const sourceHandle = edge.sourceHandle == null ? null : String(edge.sourceHandle);
+    const targetHandle = edge.targetHandle == null ? null : String(edge.targetHandle);
+    const sourcePort = sourceResolution?.resolved ? outputPortsByNodeId.get(source.id)?.get(sourceHandle) : null;
+    const targetPort = targetResolution?.resolved ? inputPortsByNodeId.get(target.id)?.get(targetHandle) : null;
+    const unknownSource = !sourceResolution?.resolved || !sourcePort;
+    const unknownTarget = !targetResolution?.resolved || !targetPort;
     const unknownSides = [
       unknownSource ? { side: 'source' as const, node: source, handle: edge.sourceHandle } : null,
       unknownTarget ? { side: 'target' as const, node: target, handle: edge.targetHandle } : null,
     ].filter((entry): entry is { side: 'source' | 'target'; node: Node; handle: string | null | undefined } => Boolean(entry));
     for (const { side, node, handle } of unknownSides) {
-      if (!resolveNodeConnectionPorts(node).resolved) unresolvedReportedNodeIds.add(node.id);
+      if (!portResolutions.get(node.id)?.resolved) unresolvedReportedNodeIds.add(node.id);
       issues.push(workflowIssue('ports.handle-unknown', {
         id: `unknown-${side}-handle-${edge.id}`,
         detail: `连线 ${edge.id} 指向的${side === 'source' ? '输出' : '输入'}端口不存在或节点端口契约无法解析。`,
@@ -509,8 +544,9 @@ function diagnosePorts(nodes: Node[], edges: Edge[], issues: WorkflowIssue[]) {
       }));
     }
     if (unknownSides.length > 0) continue;
-    const outputs = getNodePortKinds(source, 'output', edge.sourceHandle);
-    const inputs = getNodePortKinds(target, 'input', edge.targetHandle);
+    if (!sourcePort || !targetPort) continue;
+    const outputs = sourcePort.kinds;
+    const inputs = targetPort.kinds;
     if (!arePortsCompatible(outputs, inputs)) {
       issues.push(workflowIssue('ports.type-incompatible', {
         id: `port-type-${edge.id}`,
@@ -520,17 +556,23 @@ function diagnosePorts(nodes: Node[], edges: Edge[], issues: WorkflowIssue[]) {
         nodeIds: [source.id, target.id],
         edgeIds: [edge.id],
       }));
+    } else if (edge.source !== edge.target) {
+      appendEdge(validInputEdgesByPort, portEdgeKey(target.id, 'inputs', targetPort.id), edge);
     }
   }
 
   for (const node of nodes) {
-    const resolution = resolveNodeConnectionPorts(node);
-    if (!resolution.resolved) {
+    const resolution = portResolutions.get(node.id);
+    if (!resolution?.resolved) {
       if (!unresolvedReportedNodeIds.has(node.id)) {
         issues.push(workflowIssue('ports.handle-unknown', {
           id: `unresolved-port-contract-${node.id}`,
           detail: `节点 ${node.id} 的权威端口契约无法解析。`,
-          evidence: { nodeId: node.id, resolver: resolution.resolver, reason: resolution.reason },
+          evidence: {
+            nodeId: node.id,
+            resolver: resolution?.resolver || 'unknown',
+            reason: resolution?.reason || 'node port resolution is unavailable',
+          },
           location: { scope: node.type === 'subflow' ? 'subflow' : 'node', nodeId: node.id, field: 'ports' },
           nodeIds: [node.id],
         }));
@@ -540,9 +582,8 @@ function diagnosePorts(nodes: Node[], edges: Edge[], issues: WorkflowIssue[]) {
     for (const direction of ['inputs', 'outputs'] as const) {
       const isInput = direction === 'inputs';
       for (const port of resolution[direction]) {
-        const matching = edges.filter((edge) => isInput
-          ? edge.target === node.id && (edge.targetHandle ?? null) === port.id
-          : edge.source === node.id && (edge.sourceHandle ?? null) === port.id);
+        const key = portEdgeKey(node.id, direction, port.id);
+        const matching = attachedEdgesByPort.get(key) || [];
         if (port.maxConnections != null && matching.length > port.maxConnections) {
           issues.push(workflowIssue('ports.capacity-exceeded', {
             id: `port-capacity-${node.id}-${direction}-${String(port.id ?? 'default')}`,
@@ -555,13 +596,7 @@ function diagnosePorts(nodes: Node[], edges: Edge[], issues: WorkflowIssue[]) {
         }
         if (isInput) {
           const minimum = port.hasDefault ? 0 : Math.max(port.required ? 1 : 0, port.minConnections);
-          const targetKinds = port.kinds;
-          const validMatching = matching.filter((edge) => {
-            const source = nodesById.get(edge.source);
-            return Boolean(source)
-              && edge.source !== node.id
-              && arePortsCompatible(getNodePortKinds(source, 'output', edge.sourceHandle), targetKinds);
-          });
+          const validMatching = validInputEdgesByPort.get(key) || [];
           if (minimum > 0 && validMatching.length < minimum) {
             issues.push(workflowIssue('ports.required-input-missing', {
               id: `required-port-${node.id}-${String(port.id ?? 'default')}`,
@@ -840,6 +875,205 @@ function ensureUniqueIssueIds(issues: WorkflowIssue[]) {
     if (occurrence > 1) issue.id = safeIssueId(`${issue.id}-${occurrence}`);
   }
   return issues;
+}
+
+const PUBLIC_SUBFLOW_REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}@[1-9]\d*$/;
+
+function localSubflowFixedRef(node: Node, projectId?: string) {
+  if (node.type !== 'subflow') return '';
+  const data = (node.data || {}) as Record<string, unknown>;
+  const definitionId = String(data.definitionId || '').trim();
+  const definitionVersion = Number(data.definitionVersion);
+  const definitionProjectId = String(data.definitionProjectId || projectId || '').trim();
+  if (!definitionId
+    || !Number.isSafeInteger(definitionVersion)
+    || definitionVersion < 1
+    || (projectId && definitionProjectId && definitionProjectId !== projectId)) return '';
+  const ref = `${definitionId}@${definitionVersion}`;
+  return PUBLIC_SUBFLOW_REF_PATTERN.test(ref) ? ref : '';
+}
+
+/**
+ * 只接受通过 Canvas Agent 摘要验证后的 validateCanvas.data，并只映射权威递归依赖循环。
+ * 远端 targetId 永远不用于本地定位；定位由当前 revision 的固定 definitionId/version 重新建立。
+ */
+export function workflowIssuesFromCanvasAgentValidation(
+  rawValidation: unknown,
+  nodes: Node[],
+  projectId?: string,
+): WorkflowIssue[] {
+  if (!rawValidation || typeof rawValidation !== 'object' || Array.isArray(rawValidation)) return [];
+  const diagnostics = (rawValidation as { diagnostics?: unknown }).diagnostics;
+  if (!Array.isArray(diagnostics) || diagnostics.length > 200) return [];
+  const nodesByRootRef = new Map<string, string[]>();
+  for (const node of nodes) {
+    const ref = localSubflowFixedRef(node, projectId);
+    if (!ref) continue;
+    nodesByRootRef.set(ref, [...(nodesByRootRef.get(ref) || []), node.id]);
+  }
+  const issues: WorkflowIssue[] = [];
+  for (const rawDiagnostic of diagnostics) {
+    if (!rawDiagnostic || typeof rawDiagnostic !== 'object' || Array.isArray(rawDiagnostic)) continue;
+    const diagnostic = rawDiagnostic as Record<string, unknown>;
+    if (diagnostic.severity !== 'error'
+      || diagnostic.targetType !== 'subflow'
+      || !diagnostic.facts
+      || typeof diagnostic.facts !== 'object'
+      || Array.isArray(diagnostic.facts)) continue;
+    const facts = diagnostic.facts as Record<string, unknown>;
+    const rootRefs = Array.isArray(facts.rootRefs)
+      ? facts.rootRefs.filter((value): value is string => typeof value === 'string' && PUBLIC_SUBFLOW_REF_PATTERN.test(value)).slice(0, 20)
+      : [];
+    if (rootRefs.length === 0) continue;
+    const targetNodeIds = [...new Set(rootRefs.flatMap((ref) => nodesByRootRef.get(ref) || []))].sort();
+    if (targetNodeIds.length === 0) continue;
+    if (diagnostic.ruleId === 'topology.cycle' && facts.variant === 'subflow-dependency') {
+      const cycleRefs = Array.isArray(facts.cycleRefs)
+        ? facts.cycleRefs.filter((value): value is string => typeof value === 'string' && PUBLIC_SUBFLOW_REF_PATTERN.test(value)).slice(0, 20)
+        : [];
+      if (cycleRefs.length < 2 || cycleRefs[0] !== cycleRefs[cycleRefs.length - 1]) continue;
+      const definitionCount = Number(facts.definitionCount);
+      const maxDepth = Number(facts.maxDepth);
+      issues.push(workflowIssue('topology.cycle', {
+        id: `subflow-dependency-cycle-${stableTextHash(cycleRefs.join('\u0000'))}`,
+        detail: `固定版本子工作流依赖形成循环：${cycleRefs.join(' → ')}`,
+        evidence: {
+          variant: 'subflow-dependency',
+          rootRefs,
+          cycleRefs,
+          definitionCount: Number.isSafeInteger(definitionCount) && definitionCount >= 0 ? definitionCount : 0,
+          maxDepth: Number.isSafeInteger(maxDepth) && maxDepth > 0 ? maxDepth : 0,
+        },
+        location: { scope: 'subflow', nodeId: targetNodeIds[0], field: 'definitionDependencies' },
+        nodeIds: targetNodeIds,
+      }));
+      continue;
+    }
+    if (diagnostic.ruleId !== 'subflow.version-invalid') continue;
+    const variant = String(facts.variant || '');
+    if (![
+      'subflow-dependency-limit',
+      'subflow-dependency-unavailable',
+      'subflow-dependency-pin-mismatch',
+      'subflow-dependency-depth-limit',
+    ].includes(variant)) continue;
+    const dependencyRef = typeof facts.dependencyRef === 'string' && PUBLIC_SUBFLOW_REF_PATTERN.test(facts.dependencyRef)
+      ? facts.dependencyRef
+      : '';
+    const definitionRef = typeof facts.definitionRef === 'string' && PUBLIC_SUBFLOW_REF_PATTERN.test(facts.definitionRef)
+      ? facts.definitionRef
+      : '';
+    const maximum = Number(facts.maximum);
+    const safeMaximum = Number.isSafeInteger(maximum) && maximum > 0 ? maximum : 0;
+    if ((variant === 'subflow-dependency-limit' || variant === 'subflow-dependency-depth-limit') && safeMaximum === 0) continue;
+    const detail = variant === 'subflow-dependency-limit'
+      ? `固定版本子工作流依赖超过 ${safeMaximum} 项，权威验证已失败关闭。`
+      : variant === 'subflow-dependency-depth-limit'
+        ? `固定版本子工作流依赖展开超过 ${safeMaximum} 层${definitionRef ? `（${definitionRef}）` : ''}，权威验证已失败关闭。`
+        : variant === 'subflow-dependency-pin-mismatch'
+          ? `固定版本子工作流依赖不满足权威版本契约${definitionRef ? `（${definitionRef}）` : ''}。`
+          : dependencyRef
+            ? `嵌套子工作流固定版本 ${dependencyRef} 不存在或不属于当前项目。`
+            : '固定版本子工作流依赖仓储暂不可用，权威验证已失败关闭。';
+    issues.push(workflowIssue('subflow.version-invalid', {
+      id: `subflow-dependency-invalid-${stableTextHash(JSON.stringify([
+        variant,
+        rootRefs,
+        dependencyRef,
+        definitionRef,
+        safeMaximum,
+      ]))}`,
+      detail,
+      evidence: {
+        variant,
+        rootRefs,
+        dependencyRef,
+        definitionRef,
+        maximum: safeMaximum,
+      },
+      location: { scope: 'subflow', nodeId: targetNodeIds[0], field: 'definitionDependencies' },
+      nodeIds: targetNodeIds,
+    }));
+  }
+  return ensureUniqueIssueIds(issues);
+}
+
+function doctorSeverityRank(severity: DoctorSeverity) {
+  return severity === 'error' ? 3 : severity === 'warning' ? 2 : 1;
+}
+
+function sortedPortIds(values: Set<string | null>) {
+  return [...values].sort((left, right) => {
+    if (left == null) return right == null ? 0 : -1;
+    if (right == null) return 1;
+    return left.localeCompare(right);
+  });
+}
+
+/**
+ * 把诊断结果转换成纯临时画布标记；不返回节点 data，也不参与保存、历史或 Patch。
+ */
+export function buildWorkflowDoctorCanvasHighlights(
+  issues: readonly WorkflowIssue[],
+  edges: readonly Edge[],
+): WorkflowDoctorCanvasHighlight[] {
+  const edgeById = new Map(edges.map((edge) => [edge.id, edge]));
+  const highlights = new Map<string, {
+    severity: DoctorSeverity;
+    issueIds: Set<string>;
+    ruleIds: Set<string>;
+    inputPortIds: Set<string | null>;
+    outputPortIds: Set<string | null>;
+  }>();
+  const ensure = (nodeId: string, issue: WorkflowIssue) => {
+    const current = highlights.get(nodeId);
+    if (current) {
+      if (doctorSeverityRank(issue.severity) > doctorSeverityRank(current.severity)) current.severity = issue.severity;
+      current.issueIds.add(issue.id);
+      current.ruleIds.add(issue.ruleId);
+      return current;
+    }
+    const created = {
+      severity: issue.severity,
+      issueIds: new Set([issue.id]),
+      ruleIds: new Set([issue.ruleId]),
+      inputPortIds: new Set<string | null>(),
+      outputPortIds: new Set<string | null>(),
+    };
+    highlights.set(nodeId, created);
+    return created;
+  };
+
+  for (const issue of issues) {
+    const rawNodeIds = [...new Set(issue.targetNodeIds || issue.nodeIds || [])];
+    rawNodeIds.forEach((nodeId) => ensure(nodeId, issue));
+    const rawEdgeIds = [...new Set(issue.targetEdgeIds || issue.edgeIds || [])];
+    for (const edgeId of rawEdgeIds) {
+      const edge = edgeById.get(edgeId);
+      if (!edge) continue;
+      ensure(edge.source, issue).outputPortIds.add(edge.sourceHandle == null ? null : String(edge.sourceHandle));
+      ensure(edge.target, issue).inputPortIds.add(edge.targetHandle == null ? null : String(edge.targetHandle));
+    }
+    const portId = issue.evidence.facts.portId;
+    const direction = issue.evidence.facts.direction;
+    if (typeof portId === 'string' && rawNodeIds.length > 0) {
+      const normalizedPortId = portId === '(null)' ? null : portId;
+      const target = ensure(rawNodeIds[0], issue);
+      if (direction === 'inputs') target.inputPortIds.add(normalizedPortId);
+      if (direction === 'outputs') target.outputPortIds.add(normalizedPortId);
+    }
+  }
+
+  return [...highlights.entries()]
+    .map(([nodeId, highlight]) => ({
+      nodeId,
+      severity: highlight.severity,
+      issueCount: highlight.issueIds.size,
+      ruleIds: [...highlight.ruleIds].sort(),
+      inputPortIds: sortedPortIds(highlight.inputPortIds),
+      outputPortIds: sortedPortIds(highlight.outputPortIds),
+    }))
+    .sort((left, right) => left.nodeId.localeCompare(right.nodeId));
 }
 
 export function analyzeWorkflow(nodes: Node[], edges: Edge[], context: WorkflowDoctorContext = {}): WorkflowIssue[] {

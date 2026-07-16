@@ -9,7 +9,7 @@ import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 const require = createRequire(import.meta.url);
 
 function read(rel: string) {
-  return readFileSync(new URL(rel, import.meta.url), 'utf8');
+  return readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n?/g, '\n');
 }
 
 function readOptional(rel: string) {
