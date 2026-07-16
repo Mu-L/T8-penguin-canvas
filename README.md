@@ -37,7 +37,7 @@ My favorite girl Go YounJung
 
 - 🎨 **56 个节点**，覆盖文本 / 图像 / 视频 / 音频 / LLM / RunningHub / ComfyUI / 3D / 工具 / 辅助 / 工具箱 / 输出预览 / 上传素材 / 素材集 / 批量打标 / 随机路由
 - 🧺 **画布级批量导入 + 素材合集打散**：上传节点支持一次选择多张图 / 多个视频 / 多段音频；也可直接把剪贴板或文件拖到画布，同类型多素材自动形成合集，上传和输出合集都可一键打散为多个独立素材节点
-- 🩺 **v2.5.6 运行证据与工作流医生 E4**：执行前只读体检会核对项目、画布、revision、节点范围与结构摘要；失败后诊断引用持久化的 Run / NodeRun / Attempt 证据，并区分平台、配置、网络和画布结构问题。reviewer 只获得解释与建议，editor 不能修改主机 API Key，任何结构修复仍需预览和明确确认。
+- 🩺 **v2.5.6 运行证据与工作流医生 E4 自动更新版**：执行前只读体检会核对项目、画布、revision、节点范围与结构摘要；失败后诊断引用持久化的 Run / NodeRun / Attempt 证据，并区分平台、配置、网络和画布结构问题。reviewer 只获得解释与建议，editor 不能修改主机 API Key，任何结构修复仍需预览和明确确认；Windows Electron 安装包与 `latest.yml` 自动更新资产已发布。
 - 🎬 **v2.5.5 Wan / Dola Seedream 海外模型自动更新版**：视频节点新增 Wan TAB 和 `wan-2.7-spicy-i2v`，支持单张首帧、2-15 秒、720p/1080p、负面提示词、音频 URL、提示词扩写与 seed；图像节点 Seedream 新增 Dola Seedream 5.0 Pro 海外模型选择，按参考图自动切换 t2i/i2i，旧画布继续默认国内模型。
 - 🐎 **v2.5.4 Happy Horse / Seed Audio / 3D 白模自动更新版**：视频节点新增 Happy Horse 文生视频、单图生视频和多参考图生视频，音频节点新增 Doubao Seed Audio；3D 表情编辑器使用离线 ICT FaceKit 中性人类白模和 52 通道，支持照片比例校准及精确图片输出；教程同步新增第十六弹，贞贞国内/海外平台名称统一。
 - 🌐 **v2.5.3 双站 API 与网页素材采集自动更新版**：RunningHub 国内/海外双 Key 与站点路由、贞贞 SD2 的 Seedance/Seedream、ComfyUI 多类型聚合输出、Chrome 网页素材 Popup/Side Panel 批量采集和顶部 API 获取入口正式发布；Electron 发布新增必需私有 sidecar 强制校验，缺失即阻断。

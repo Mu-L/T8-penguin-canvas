@@ -1,12 +1,12 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.5.6",
-  "lastUpdated": "2026-07-16-v2.5.6-electron-release-ready",
+  "lastUpdated": "2026-07-16-v2.5.6-electron-release",
   "sixSystemsImplementationAudit": {
     "version": "2.5.6",
-    "status": "verified-source-browser-electron-release-ready",
+    "status": "verified-and-released-v2.5.6-electron",
     "date": "2026-07-16",
-    "lastUpdated": "2026-07-16-v2.5.6-electron-release-ready",
+    "lastUpdated": "2026-07-16-v2.5.6-electron-release",
     "completedRounds": 18,
     "plannedRounds": 32,
     "completedRoundIds": [
@@ -39,7 +39,7 @@
     },
     "currentIncrement": {
       "name": "canvas-agent-workflow-doctor-round-4-run-evidence-preflight-failure-diagnosis",
-      "status": "verified-run-evidence-preflight-post-failure-diagnosis-full-tests-browser-electron-release-ready",
+      "status": "verified-run-evidence-preflight-post-failure-diagnosis-full-tests-browser-electron-released-v2.5.6",
       "capabilities": [
         "运行入口使用持久 RunIntent 绑定 projectId、canvasId、revision、runMode、目标节点和 requestId；Run、NodeRun、Attempt、恢复描述及终态写回保持同一权威身份，精确等价重试才复用幂等结果，内容碰撞或错误目标不会串写。",
         "批量执行前新增只读体检：展示当前与预期 revision、项目/画布、节点范围、结构 digest、Provider 能力和可证实的成本信息；没有明确价格证据时只显示未知，取消体检不会调用 Provider。",
@@ -56,7 +56,7 @@
         "正式 Windows x64 NSIS 构建、后端加密、运行时归档和 post-build 全部通过；win-unpacked 包含 93 个 .t8c、0 个明文后端 JS，ProductVersion 为 2.5.6.0、FileVersion 为 2.5.6。",
         "同一隔离 userData 连续冷启动两次均在用户已有 2.5.5 / 18766 后端旁选择 18767，返回 version=2.5.6，监听进程精确归属发布 EXE；两次正常关闭后端口释放且日志无 fatal、cachedDataRejected 或进程崩溃。",
         "隔离 SQLite schema 为 22，迁移 1-22 连续，quick_check=ok、foreign_key_check=0；run_intents、runs、node_runs、run_attempts、run_events 与 run_retention_policies 表及关键证据列齐全。",
-        "本记录确认源码、自动化测试、公开/私有生产 build、真实浏览器 QA 与本地正式 Electron 发布闸门已完成；GitHub v2.5.6 Release、远端自动更新资产和 Latest 状态仍以随后的公开发布实物校验为准。"
+        "GitHub v2.5.6 Release 已发布为非草稿、非预发布并标记 Latest；v2.5.6 tag 与发布源提交同指 affdaa07c04262746a4b65af96af7835d8d6744e，main 随后仅快进追加本发布记录，远端三项资产的 size 与 SHA-256 digest 均和本地实物一致。"
       ]
     },
     "nextRequiredWork": [
@@ -66,7 +66,7 @@
       "1280×768 下展开完整语义设置面板时素材网格可用高度过小；Electron 默认 1480×920 及设置折叠状态可用，后续 UI 回归需收紧该响应式 P2。",
       "可复用子工作流四轮、运行中心五轮、智能素材中心五轮与画布 Agent / 工作流医生前四轮已闭环，继续按 roadmap.md 完成剩余 14 轮及跨模块 Electron、多客户端/双设备和公网验收，不把 E4 外推为 E5 或其他系统完成。"
     ],
-    "releaseBoundary": "可复用子工作流第 1-4 轮、运行中心第 1-5 轮、智能素材中心第 1-5 轮与画布 Agent / 工作流医生第 1-4 轮现已闭环，严格总进度为 18/32；E5 及其余系统轮次仍未完成。v2.5.6 源码、211 文件 1655 项测试、公开/私有生产 build、真实浏览器 QA、正式 NSIS、双冷启动和 SQLite schema 22 闸门均已完成；GitHub Release、远端三项自动更新资产与 Latest 状态必须在公开发布后按实物另行记录。"
+    "releaseBoundary": "可复用子工作流第 1-4 轮、运行中心第 1-5 轮、智能素材中心第 1-5 轮与画布 Agent / 工作流医生第 1-4 轮已闭环并随 v2.5.6 Electron 自动更新版发布，严格总进度仍为 18/32；E5 及其余 14 轮尚未完成，不得外推为六大系统全部完成或生产级多人协作完成。"
   },
   "wan27DolaSeedreamModels": {
     "version": "2.5.5",
@@ -94,6 +94,44 @@
       "实现参数同时核对 api.seedance.nz 官方 llms.txt 与本地 ComfyUI_Seedance 参考节点；测试 Key 未写入源码、设置、日志、文档或构建产物。"
     ],
     "releaseBoundary": "已纳入 v2.5.5 Electron 自动更新版；公开提交只包含 Wan/Dola 功能、测试、版本记录和 release notes，私有 sidecar 仅进入加密安装包。"
+  },
+  "electronReleaseV256": {
+    "version": "2.5.6",
+    "status": "released",
+    "date": "2026-07-16",
+    "description": "v2.5.6 Electron 自动更新版正式发布画布 Agent / 工作流医生 E4 的运行证据、执行前体检和失败后诊断，并继续包含 Wan 2.7 Spicy 与 Dola Seedream 5.0 Pro。",
+    "sourceCommit": "affdaa07c04262746a4b65af96af7835d8d6744e",
+    "tagCommit": "affdaa07c04262746a4b65af96af7835d8d6744e",
+    "verification": [
+      "全量 211 个测试文件、1655/1655 通过；type-check、public:check、rh-toolbox:check、git diff --check、公开 2088 modules 与正式 Electron / 私有 2090 modules 构建通过。",
+      "正式包使用 Electron 33.4.11 编译并加入版本失败保护；93 个 .t8c、0 个明文后端 JS，EXE ProductVersion 2.5.6.0、FileVersion 2.5.6。",
+      "同一隔离 userData 双冷启动均返回 v2.5.6 / 18767，正常关闭并释放端口；SQLite schema 22、quick_check=ok、foreign_key_check=0，运行证据表完整。",
+      "内置 release:verify 与独立 GitHub API 核验均确认 Release 非草稿、非预发布、为 Latest，tag/source commit 一致且 main 随后仅追加发布记录，三项远端资产 size 与 SHA-256 digest 和本地一致。"
+    ],
+    "release": {
+      "tag": "v2.5.6",
+      "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.5.6",
+      "publishedAt": "2026-07-16T09:48:23Z",
+      "isDraft": false,
+      "isPrerelease": false,
+      "isLatest": true,
+      "installer": {
+        "name": "T8-PenguinCanvas-Setup-2.5.6.exe",
+        "bytes": 1278179610,
+        "sha256": "EAE3A7C47FC2A593141B5D4C4AA82D237785DF93E43C3154EC57E686B13B296F",
+        "sha512": "0/BeGvgqm81vNlEwI0Ds8SddmGSRZnC/FE48tgk/hHrZuRAMHkg3kJ8Vb6dHBNnl/DIwRb8daHhYbO8RX+nsWg=="
+      },
+      "blockmap": {
+        "name": "T8-PenguinCanvas-Setup-2.5.6.exe.blockmap",
+        "bytes": 1331444,
+        "sha256": "6420AAE705965492D66FAD3E45A853F78E3BB2C908384E83A64EFBB89ECADDF4"
+      },
+      "metadata": {
+        "name": "latest.yml",
+        "bytes": 362,
+        "sha256": "A8E84F2B41C58069C74604B33507BA950F0E16C7FC985087607F948E2FF5DCA2"
+      }
+    }
   },
   "electronReleaseV255": {
     "version": "2.5.5",
