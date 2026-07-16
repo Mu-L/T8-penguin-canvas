@@ -7,12 +7,15 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 const { assertLatestYamlArtifact } = require('./latest-yml.cjs');
+const { assertSealedReleaseRecovery } = require('./release-provenance.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
 const pkg = require(path.join(ROOT, 'package.json'));
 const version = pkg.version;
 const cliArgs = process.argv.slice(2);
 const prepublish = cliArgs.includes('--prepublish');
+const metadataOnly = cliArgs.includes('--metadata-only');
+const recoveryManifest = cliArgs.includes('--recovery-manifest');
 const tag = cliArgs.find((argument) => !argument.startsWith('--'))
   || process.env.T8_RELEASE_TAG
   || `v${version}`;
@@ -132,6 +135,18 @@ function assertExactReleaseAssets(assets, expectedNames) {
   return new Map(assets.map((asset) => [asset.name, asset]));
 }
 
+function assertReleaseAssetMetadata(assetByName, expectedByName) {
+  for (const [name, expected] of expectedByName) {
+    const asset = assetByName.get(name);
+    const advertisedSize = Number(asset?.size || 0);
+    if (advertisedSize !== expected.size) fail(`release asset size mismatch: ${name}`);
+    const advertisedDigest = String(asset?.digest || '').toLowerCase();
+    if (advertisedDigest !== `sha256:${expected.sha256}`) {
+      fail(`release asset advertised SHA-256 mismatch: ${name}`);
+    }
+  }
+}
+
 function main() {
   if (!/^[a-f0-9]{40}$/.test(releaseTarget)) {
     fail('T8_RELEASE_TARGET must be the exact 40-character source commit SHA');
@@ -139,7 +154,13 @@ function main() {
   if (tag !== expectedTag) {
     fail(`automatic-update tag must be ${expectedTag}, received ${tag}`);
   }
-  console.log(`[verify-release] repo=${repo} tag=${tag} phase=${prepublish ? 'prepublish' : 'final'}`);
+  console.log(
+    `[verify-release] repo=${repo} tag=${tag} phase=${prepublish ? 'prepublish' : 'final'} mode=${
+      recoveryManifest
+        ? (metadataOnly ? 'sealed-recovery-metadata' : 'sealed-recovery-full-download')
+        : (metadataOnly ? 'local-metadata' : 'local-full-download')
+    }`,
+  );
   const result = runGh(['release', 'view', tag, '--repo', repo, '--json', 'tagName,url,assets,isDraft,isPrerelease,isImmutable,publishedAt,targetCommitish'], {
     capture: true,
   });
@@ -164,58 +185,96 @@ function main() {
   }
   const expectedAssetNames = [installerName, blockmapName, 'latest.yml'];
   const assetByName = assertExactReleaseAssets(data.assets, expectedAssetNames);
-
-  withReleaseTemp((tmp) => {
-    runGh([
-      'release',
-      'download',
-      tag,
-      '--repo',
-      repo,
-      '--pattern',
-      installerName,
-      '--pattern',
-      blockmapName,
-      '--pattern',
-      'latest.yml',
-      '--dir',
-      tmp,
-      '--clobber',
-    ]);
-    for (const name of [installerName, blockmapName, 'latest.yml']) {
+  let expectedByName;
+  let sealedRecovery;
+  if (recoveryManifest) {
+    sealedRecovery = assertSealedReleaseRecovery({
+      root: ROOT,
+      pkg,
+      target: releaseTarget,
+      nonce: process.env.T8_RELEASE_BUILD_NONCE,
+    });
+    expectedByName = new Map(
+      Object.values(sealedRecovery.recovery.artifacts).map((artifact) => [
+        artifact.name,
+        { size: artifact.size, sha256: artifact.sha256 },
+      ]),
+    );
+  } else {
+    expectedByName = new Map();
+    for (const name of expectedAssetNames) {
       const localPath = path.join(distDir, name);
-      const remotePath = path.join(tmp, name);
       if (!fs.existsSync(localPath)) fail(`local release artifact is missing: ${path.relative(ROOT, localPath)}`);
-      if (!fs.existsSync(remotePath)) fail(`downloaded release artifact is missing: ${name}`);
       const localStat = fs.statSync(localPath);
-      const remoteStat = fs.statSync(remotePath);
-      const advertisedSize = Number(assetByName.get(name)?.size || 0);
-      if (localStat.size !== remoteStat.size || advertisedSize !== remoteStat.size) {
-        fail(`release asset size mismatch: ${name}`);
-      }
-      if (hashFile(localPath, 'sha256') !== hashFile(remotePath, 'sha256')) {
-        fail(`release asset SHA-256 mismatch: ${name}`);
-      }
-    }
-
-    const latestPath = path.join(tmp, 'latest.yml');
-    const latest = fs.readFileSync(latestPath, 'utf-8');
-    const downloadedInstallerPath = path.join(tmp, installerName);
-    const installerSha512 = hashFile(downloadedInstallerPath, 'sha512', 'base64');
-    const installerSize = fs.statSync(downloadedInstallerPath).size;
-    try {
-      assertLatestYamlArtifact({
-        text: latest,
-        version,
-        installerName,
-        installerSha512,
-        installerSize,
-        label: 'downloaded latest.yml',
+      expectedByName.set(name, {
+        size: localStat.size,
+        sha256: hashFile(localPath, 'sha256'),
       });
-    } catch (error) {
-      fail(error?.message || String(error));
     }
-  });
+  }
+  assertReleaseAssetMetadata(assetByName, expectedByName);
+
+  if (!metadataOnly) {
+    withReleaseTemp((tmp) => {
+      runGh([
+        'release',
+        'download',
+        tag,
+        '--repo',
+        repo,
+        '--pattern',
+        installerName,
+        '--pattern',
+        blockmapName,
+        '--pattern',
+        'latest.yml',
+        '--dir',
+        tmp,
+        '--clobber',
+      ]);
+      for (const name of expectedAssetNames) {
+        const remotePath = path.join(tmp, name);
+        if (!fs.existsSync(remotePath)) fail(`downloaded release artifact is missing: ${name}`);
+        const remoteStat = fs.statSync(remotePath);
+        if (recoveryManifest) {
+          const expected = expectedByName.get(name);
+          if (remoteStat.size !== expected.size) fail(`release asset size mismatch: ${name}`);
+          if (hashFile(remotePath, 'sha256') !== expected.sha256) {
+            fail(`release asset SHA-256 mismatch: ${name}`);
+          }
+        } else {
+          const localPath = path.join(distDir, name);
+          const localStat = fs.statSync(localPath);
+          if (localStat.size !== remoteStat.size) fail(`release asset size mismatch: ${name}`);
+          if (hashFile(localPath, 'sha256') !== hashFile(remotePath, 'sha256')) {
+            fail(`release asset SHA-256 mismatch: ${name}`);
+          }
+        }
+      }
+
+      const latestPath = path.join(tmp, 'latest.yml');
+      const latest = fs.readFileSync(latestPath, 'utf-8');
+      const downloadedInstallerPath = path.join(tmp, installerName);
+      const installerSha512 = hashFile(downloadedInstallerPath, 'sha512', 'base64');
+      const installerSize = fs.statSync(downloadedInstallerPath).size;
+      if (recoveryManifest
+        && installerSha512 !== sealedRecovery.recovery.artifacts.installer.sha512) {
+        fail('downloaded installer SHA-512 does not match sealed release recovery');
+      }
+      try {
+        assertLatestYamlArtifact({
+          text: latest,
+          version,
+          installerName,
+          installerSha512,
+          installerSize,
+          label: 'downloaded latest.yml',
+        });
+      } catch (error) {
+        fail(error?.message || String(error));
+      }
+    });
+  }
 
   const isLatest = prepublish ? false : releaseIsMarkedLatest();
   if (!prepublish && !isLatest) fail(`${tag} is not marked as GitHub Latest`);
@@ -223,6 +282,17 @@ function main() {
   console.log(`[verify-release] assets ok: ${installerName}, ${blockmapName}, latest.yml`);
   console.log(`[verify-release] url: ${data.url}`);
   console.log(`[verify-release] latest: ${prepublish ? 'not-required-before-publish' : (isLatest ? 'yes' : 'no')}`);
+  console.log(
+    `[verify-release] artifact verification: ${
+      recoveryManifest
+        ? (
+          metadataOnly
+            ? 'sealed recovery manifest + GitHub digest/size metadata'
+            : 'downloaded bytes + sealed recovery manifest + GitHub digest metadata'
+        )
+        : (metadataOnly ? 'local bytes + GitHub digest/size metadata' : 'downloaded bytes + GitHub digest metadata')
+    }`,
+  );
   console.log(`[verify-release] GitHub immutable: ${data.isImmutable === true ? 'yes' : 'no (publisher-level no-overwrite only)'}`);
 }
 
@@ -237,6 +307,7 @@ if (require.main === module) {
 
 module.exports = {
   assertExactReleaseAssets,
+  assertReleaseAssetMetadata,
   main,
   withReleaseTemp,
 };

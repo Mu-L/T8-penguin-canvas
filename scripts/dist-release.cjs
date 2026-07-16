@@ -7,13 +7,21 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const {
   artifactPaths,
+  assertReleaseProvenanceMatchesSealedRecovery,
+  assertSealedReleaseRecovery,
+  readReleaseRecovery,
+  sealReleaseRecovery,
+  writeReleaseRecovery,
   writeReleaseProvenance,
 } = require('./release-provenance.cjs');
+const { assertReleaseWorktreeClean } = require('./release-worktree.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
 const pkg = require(path.join(ROOT, 'package.json'));
 const releaseApproval = `release-${pkg.version}`;
 const releaseRemote = process.env.T8_RELEASE_REMOTE || 'origin';
+const releaseRepo = process.env.T8_RELEASE_REPO || process.env.GITHUB_REPOSITORY || 'T8mars/T8-penguin-canvas';
+const releaseTag = process.env.T8_RELEASE_TAG || `v${pkg.version}`;
 const env = {
   ...process.env,
   T8_REQUIRE_AI_WATERMARK_RUNTIME: '1',
@@ -53,6 +61,40 @@ function captureGit(args) {
   return String(result.stdout || '').trim();
 }
 
+function releaseNotFound(result) {
+  const detail = `${result?.stdout || ''}${result?.stderr || ''}`;
+  return result?.status !== 0 && /(release not found|HTTP 404|\bNot Found\b)/i.test(detail);
+}
+
+function readRemoteRelease() {
+  const result = spawnSync('gh', [
+    'release',
+    'view',
+    releaseTag,
+    '--repo',
+    releaseRepo,
+    '--json',
+    'tagName,isDraft,isPrerelease,targetCommitish,body,assets,url',
+  ], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    stdio: 'pipe',
+    windowsHide: true,
+  });
+  if (releaseNotFound(result)) return null;
+  if (result.error || result.status !== 0) {
+    const detail = `${result.stdout || ''}${result.stderr || ''}`.trim();
+    console.error(`[dist-release] cannot inspect GitHub Release ${releaseTag}${detail ? `: ${detail}` : ''}`);
+    process.exit(1);
+  }
+  try {
+    return JSON.parse(result.stdout);
+  } catch (_) {
+    console.error(`[dist-release] cannot parse GitHub Release metadata for ${releaseTag}`);
+    process.exit(1);
+  }
+}
+
 function assertReleaseTarget() {
   const explicitTarget = String(process.env.T8_RELEASE_TARGET || '').toLowerCase();
   if (explicitTarget && !/^[a-f0-9]{40}$/.test(explicitTarget)) {
@@ -77,9 +119,141 @@ function assertReleaseTarget() {
   return target;
 }
 
+function assertReleaseSourceClean(phase) {
+  try {
+    assertReleaseWorktreeClean({
+      root: ROOT,
+      log: (message) => console.log(message.replace(/^\[release\]/, '[dist-release]')),
+    });
+  } catch (error) {
+    console.error(`[dist-release] ${phase}: ${error?.message || error}`);
+    process.exit(1);
+  }
+}
+
+function assertReleaseTargetUnchanged(expectedTarget, phase) {
+  const head = captureGit(['rev-parse', 'HEAD']).toLowerCase();
+  const remoteMain = captureGit(['ls-remote', releaseRemote, 'refs/heads/main'])
+    .split(/\s+/)[0]
+    .toLowerCase();
+  if (head !== expectedTarget || remoteMain !== expectedTarget) {
+    console.error(
+      `[dist-release] ${phase}: release target changed during the build `
+      + `(expected ${expectedTarget}, HEAD ${head || '(missing)'}, ${releaseRemote}/main ${remoteMain || '(missing)'}).`,
+    );
+    process.exit(1);
+  }
+}
+
 function prepareReleaseBuild(target) {
-  const nonce = crypto.randomBytes(32).toString('hex');
+  let recorded;
+  try {
+    recorded = readReleaseRecovery({
+      root: ROOT,
+      pkg,
+      target,
+    });
+  } catch (error) {
+    console.error(`[dist-release] release recovery failed: ${error?.message || error}`);
+    process.exit(1);
+  }
+  const remoteRelease = readRemoteRelease();
+  if (!recorded && remoteRelease) {
+    console.error(
+      remoteRelease.isDraft
+        ? `[dist-release] ${releaseTag} already has a draft but no matching local recovery record; refusing to mutate it.`
+        : `[dist-release] published release ${releaseTag} already exists; refusing to rebuild or replace it.`,
+    );
+    process.exit(1);
+  }
+  const nonce = recorded
+    ? recorded.recovery.nonce
+    : crypto.randomBytes(32).toString('hex');
   env.T8_RELEASE_BUILD_NONCE = nonce;
+  let sealedRecovery = null;
+  if (recorded) {
+    const hasSealedState = recorded.recovery.nonceSha256 !== undefined
+      || recorded.recovery.artifacts !== undefined
+      || recorded.recovery.sealedAt !== undefined;
+    if (hasSealedState) {
+      try {
+        sealedRecovery = assertSealedReleaseRecovery({
+          root: ROOT,
+          pkg,
+          target,
+          nonce,
+        });
+      } catch (error) {
+        console.error(`[dist-release] sealed release recovery is invalid: ${error?.message || error}`);
+        process.exit(1);
+      }
+    } else if (remoteRelease) {
+      console.error(
+        `[dist-release] ${releaseTag} exists remotely but the matching local recovery was never sealed; refusing to rebuild or mutate it.`,
+      );
+      process.exit(1);
+    }
+  }
+  if (sealedRecovery && remoteRelease && !remoteRelease.isDraft) {
+    console.log(`[dist-release] reconciling previously published ${releaseTag} without rebuilding or uploading`);
+    run(
+      'reconcile existing published release',
+      process.execPath,
+      [path.join(ROOT, 'scripts', 'release-github.cjs'), '--reconcile-only'],
+    );
+    return { nonce, completed: true };
+  }
+  if (sealedRecovery) {
+    try {
+      assertReleaseProvenanceMatchesSealedRecovery({
+        root: ROOT,
+        pkg,
+        target,
+        nonce,
+      });
+      console.log(`[dist-release] resuming sealed ${releaseTag} with the original local artifacts; no rebuild required`);
+      run(
+        'resume sealed release',
+        process.execPath,
+        [path.join(ROOT, 'scripts', 'release-github.cjs')],
+      );
+      return { nonce, completed: true };
+    } catch (error) {
+      if (!remoteRelease?.isDraft) {
+        console.error(
+          `[dist-release] sealed release artifacts are unavailable or changed, and ${releaseTag} has no complete remote draft to reconcile: `
+          + `${error?.message || error}`,
+        );
+        process.exit(1);
+      }
+      console.warn(
+        `[dist-release] original local artifacts are unavailable or changed; attempting remote-only recovery of the sealed draft: `
+        + `${error?.message || error}`,
+      );
+      run(
+        'resume sealed release from remote assets',
+        process.execPath,
+        [path.join(ROOT, 'scripts', 'release-github.cjs'), '--remote-artifacts-only'],
+      );
+      return { nonce, completed: true };
+    }
+  }
+  if (!recorded) {
+    try {
+      const written = writeReleaseRecovery({
+        root: ROOT,
+        pkg,
+        target,
+        nonce,
+      });
+      console.log(`[dist-release] release recovery created: ${path.relative(ROOT, written.path)}`);
+    } catch (error) {
+      console.error(`[dist-release] release recovery failed: ${error?.message || error}`);
+      process.exit(1);
+    }
+  } else {
+    console.log(`[dist-release] reusing release recovery for ${target}`);
+  }
   const paths = artifactPaths(ROOT, pkg);
   for (const filePath of [
     ...paths.artifacts.map((artifact) => artifact.path),
@@ -88,7 +262,7 @@ function prepareReleaseBuild(target) {
     fs.rmSync(filePath, { force: true });
   }
   console.log(`[dist-release] removed stale automatic-update artifacts for ${target}`);
-  return nonce;
+  return { nonce, completed: false };
 }
 
 function run(label, executable, args) {
@@ -114,7 +288,13 @@ function run(label, executable, args) {
 function main() {
   assertReleaseApproval();
   const releaseTarget = assertReleaseTarget();
-  const releaseBuildNonce = prepareReleaseBuild(releaseTarget);
+  assertReleaseSourceClean('release worktree check before build or recovery');
+  const prepared = prepareReleaseBuild(releaseTarget);
+  if (prepared.completed) {
+    console.log(`[dist-release] ${releaseTag} recovery completed without rebuilding`);
+    return;
+  }
+  const releaseBuildNonce = prepared.nonce;
 
   const electronBuilder = path.join(
     ROOT,
@@ -129,6 +309,8 @@ function main() {
   run('rebuild native modules for Electron', command('npm'), ['run', 'rebuild:electron']);
   run('electron-builder nsis', electronBuilder, ['--win', '--x64', '--config.npmRebuild=false']);
   run('post-build checks', process.execPath, [path.join(ROOT, 'electron', '_post_build.cjs')]);
+  assertReleaseTargetUnchanged(releaseTarget, 'release target check before provenance');
+  assertReleaseSourceClean('release worktree check before provenance sealing');
   try {
     const written = writeReleaseProvenance({
       root: ROOT,
@@ -137,6 +319,15 @@ function main() {
       nonce: releaseBuildNonce,
     });
     console.log(`[dist-release] release provenance: ${path.relative(ROOT, written.path)}`);
+    assertReleaseTargetUnchanged(releaseTarget, 'release target check before recovery sealing');
+    assertReleaseSourceClean('release worktree check before recovery sealing');
+    const sealed = sealReleaseRecovery({
+      root: ROOT,
+      pkg,
+      target: releaseTarget,
+      nonce: releaseBuildNonce,
+    });
+    console.log(`[dist-release] sealed release recovery: ${path.relative(ROOT, sealed.path)}`);
   } catch (error) {
     console.error(`[dist-release] release provenance failed: ${error?.message || error}`);
     process.exit(1);

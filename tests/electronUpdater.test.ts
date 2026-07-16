@@ -84,7 +84,9 @@ test('release scripts verify installer, blockmap, latest.yml, and GitHub assets'
   assert.match(postBuild, /\.blockmap/);
   assert.match(release, /const createArgs = \[/);
   assert.match(release, /'create'/);
-  assert.match(release, /gh', \['release', 'upload'/);
+  assert.match(release, /function uploadMissingAssets/);
+  assert.match(release, /uploads\.github\.com/);
+  assert.match(release, /'--input'/);
   assert.match(release, /assertLatestYamlArtifact/);
   assert.match(latestYml, /\$\{label\} version mismatch/);
   assert.match(verify, /'release',\s*[\r\n]\s*'download'/);
@@ -96,9 +98,17 @@ test('release scripts verify installer, blockmap, latest.yml, and GitHub assets'
   assert.match(verify, /must be a published non-prerelease automatic-update release/);
   assert.match(verify, /remote tag \$\{tag\} targets/);
   assert.match(verify, /release asset SHA-256 mismatch/);
+  assert.match(verify, /release asset advertised SHA-256 mismatch/);
   assert.match(verify, /unexpected release asset/);
   assert.match(verify, /isImmutable/);
   assert.match(verify, /publisher-level no-overwrite only/);
+  assert.match(verify, /metadata-only/);
+  assert.match(verify, /recovery-manifest/);
+  assert.match(verify, /assertSealedReleaseRecovery/);
+  assert.match(verify, /sealed recovery manifest \+ GitHub digest\/size metadata/);
+  assert.match(verify, /sealed-recovery-full-download/);
+  assert.doesNotMatch(verify, /requires --metadata-only/);
+  assert.match(verify, /if \(!metadataOnly\)/);
   assert.match(verify, /assertLatestYamlArtifact/);
   assert.match(latestYml, /\$\{label\} installer sha512 mismatch/);
   assert.match(verify, /tagName,isLatest,isDraft,isPrerelease/);

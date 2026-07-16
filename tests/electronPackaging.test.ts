@@ -175,6 +175,7 @@ test('Electron release publishing requires explicit per-version approval', () =>
   const distRelease = read('../scripts/dist-release.cjs');
   const githubRelease = read('../scripts/release-github.cjs');
   const releaseProvenance = read('../scripts/release-provenance.cjs');
+  const releaseWorktree = read('../scripts/release-worktree.cjs');
   const latestYml = read('../scripts/latest-yml.cjs');
 
   assert.match(distRelease, /const releaseApproval = `release-\$\{pkg\.version\}`/);
@@ -183,6 +184,16 @@ test('Electron release publishing requires explicit per-version approval', () =>
   assert.match(distRelease, /refusing to run Electron release without explicit approval/);
   assert.match(distRelease, /only after the user explicitly asks to publish/);
   assert.match(distRelease, /function assertReleaseTarget\(\)/);
+  assert.match(distRelease, /function assertReleaseSourceClean\(phase\)/);
+  assert.equal(distRelease.match(/assertReleaseSourceClean\(/g)?.length, 4);
+  assert.match(distRelease, /release worktree check before build or recovery/);
+  assert.match(distRelease, /release worktree check before provenance sealing/);
+  assert.match(distRelease, /release worktree check before recovery sealing/);
+  assert.match(distRelease, /function assertReleaseTargetUnchanged\(expectedTarget, phase\)/);
+  assert.equal(distRelease.match(/assertReleaseTargetUnchanged\(/g)?.length, 3);
+  assert.match(distRelease, /release target check before provenance/);
+  assert.match(distRelease, /release target check before recovery sealing/);
+  assert.match(distRelease, /release target changed during the build/);
   assert.match(distRelease, /T8_RELEASE_TARGET must be the exact 40-character source commit SHA/);
   assert.match(distRelease, /const target = explicitTarget \|\| head/);
   assert.match(distRelease, /\['ls-remote', releaseRemote, 'refs\/heads\/main'\]/);
@@ -190,8 +201,18 @@ test('Electron release publishing requires explicit per-version approval', () =>
   assert.match(distRelease, /fixed release target/);
   assert.match(distRelease, /crypto\.randomBytes\(32\)\.toString\('hex'\)/);
   assert.match(distRelease, /T8_RELEASE_BUILD_NONCE/);
+  assert.match(distRelease, /readReleaseRecovery/);
+  assert.match(distRelease, /writeReleaseRecovery/);
+  assert.match(distRelease, /reusing release recovery/);
+  assert.match(distRelease, /assertSealedReleaseRecovery/);
+  assert.match(distRelease, /assertReleaseProvenanceMatchesSealedRecovery/);
+  assert.match(distRelease, /resuming sealed/);
+  assert.match(distRelease, /--remote-artifacts-only/);
+  assert.match(distRelease, /reconcile existing published release/);
   assert.match(distRelease, /removed stale automatic-update artifacts/);
   assert.match(distRelease, /writeReleaseProvenance/);
+  assert.match(distRelease, /sealReleaseRecovery/);
+  assert.match(distRelease, /sealed release recovery/);
   assert.match(distRelease, /assertReleaseTarget\(\)/);
   assert.match(distRelease, /github release upload \+ verify/);
   assert.match(distRelease, /run\('rebuild native modules for Electron', command\('npm'\), \['run', 'rebuild:electron'\]\)/);
@@ -204,48 +225,108 @@ test('Electron release publishing requires explicit per-version approval', () =>
   assert.match(githubRelease, /refusing to publish GitHub Release without explicit approval/);
   assert.match(githubRelease, /formal automatic-update tag must be \$\{expectedTag\}/);
   assert.match(githubRelease, /function assertReleaseGitState\(target\)/);
+  assert.match(githubRelease, /assertReleaseWorktreeClean\(\{ root: ROOT \}\)/);
   assert.match(githubRelease, /refs\/heads\/main/);
   assert.match(githubRelease, /refs\/tags\/\$\{tag\}/);
-  assert.match(githubRelease, /source worktree is not release-clean/);
   assert.match(githubRelease, /function existingReleaseMetadata\(options\)/);
+  assert.match(githubRelease, /function releaseNotesBody\(releaseTarget\)/);
+  assert.match(githubRelease, /'show'/);
+  assert.match(githubRelease, /`\$\{releaseTarget\}:\$\{relativeNotesPath\}`/);
+  assert.match(githubRelease, /cannot read release notes from fixed source target/);
   assert.match(githubRelease, /this publisher refuses to replace automatic-update assets/);
   assert.match(githubRelease, /t8-electron-release-draft-v1/);
   assert.match(githubRelease, /is not owned by this release build/);
   assert.match(githubRelease, /contains unexpected assets/);
-  assert.match(githubRelease, /targetCommitish,body,assets/);
+  assert.match(githubRelease, /databaseId,tagName,name,isDraft/);
   assert.match(githubRelease, /creating draft release/);
   assert.match(githubRelease, /'--draft',[\s\S]*'--latest=false'/);
-  assert.match(githubRelease, /verifyRelease\('prepublish'\)/);
-  assert.match(githubRelease, /'--draft=false',[\s\S]*'--latest'/);
-  assert.match(githubRelease, /const publishResult = run\('gh',[\s\S]*\{ allowFailure: true \}/);
-  assert.match(githubRelease, /verifyRelease\('final'\)/);
-  assert.match(githubRelease, /publish command exited with/);
-  assert.match(githubRelease, /returnReleaseToDraft/);
-  assert.match(githubRelease, /assertReleaseProvenance/);
+  assert.match(githubRelease, /verifyReleaseWithRetries\('prepublish'/);
+  assert.match(githubRelease, /function publishOwnedDraft/);
+  assert.match(githubRelease, /assertReleaseGitState\(ownership\.expectedTarget\)/);
+  assert.match(githubRelease, /const current = readReleaseMetadata\(\)/);
+  assert.match(githubRelease, /databaseId changed immediately before publish/);
+  assert.match(githubRelease, /function uploadMissingAssets/);
+  assert.match(githubRelease, /function releaseAssetUploadBase/);
+  assert.match(githubRelease, /uploads\.github\.com/);
+  assert.match(githubRelease, /'--input'/);
+  assert.match(githubRelease, /repos\/\$\{repo\}\/releases\/\$\{releaseId\}/);
+  assert.match(githubRelease, /'draft=false'/);
+  assert.match(githubRelease, /'make_latest=true'/);
+  assert.match(githubRelease, /tag_name=\$\{ownership\.expectedTag\}/);
+  assert.match(githubRelease, /target_commitish=\$\{ownership\.expectedTarget\}/);
+  assert.match(githubRelease, /const publishStatuses = \[\]/);
+  assert.match(githubRelease, /verifyReleaseWithRetries\('final'/);
+  assert.match(githubRelease, /assertOwnedDraftReadyForPublish\(remote, ownership\)/);
+  assert.match(githubRelease, /no second publish request was sent/);
+  assert.match(githubRelease, /reconcilePublishedRelease/);
+  assert.match(githubRelease, /--reconcile-only/);
+  assert.match(githubRelease, /--remote-artifacts-only/);
+  assert.match(githubRelease, /recoveryManifest: true/);
+  assert.match(githubRelease, /no automatic draft deletion or rollback was attempted/);
+  assert.match(githubRelease, /no automatic rollback was attempted/);
+  assert.doesNotMatch(githubRelease, /cleanupOwnedDraft/);
+  assert.doesNotMatch(githubRelease, /['"]release['"],\s*[\r\n\s]*['"]delete['"]/);
+  assert.doesNotMatch(githubRelease, /['"]--clobber['"]/);
+  assert.doesNotMatch(githubRelease, /\['release', 'upload'/);
+  assert.doesNotMatch(githubRelease, /returnReleaseToDraft/);
+  assert.doesNotMatch(githubRelease, /clearRecoveryAfterUnownedPublishedRelease/);
+  assert.doesNotMatch(githubRelease, /releaseHasExpectedMarker/);
+  assert.match(githubRelease, /metadataOnly: true/);
+  assert.match(githubRelease, /formal automatic-update publishing cannot intentionally stop at a draft/);
+  assert.match(githubRelease, /assertReleaseProvenanceMatchesSealedRecovery/);
+  assert.match(githubRelease, /function assertLocalArtifactsMatchSealedRecovery/);
+  assert.match(githubRelease, /uploadMissingAssets\(existing, missingAssets, ownership, releaseTarget\)/);
+  assert.match(githubRelease, /creating draft release[\s\S]*assertLocalArtifactsMatchSealedRecovery\(releaseTarget\)/);
+  assert.match(githubRelease, /assertSealedReleaseRecovery/);
   assert.match(githubRelease, /T8_RELEASE_BUILD_NONCE/);
   assert.match(githubRelease, /hashFile\(installer, 'sha512', 'base64'\)/);
   assert.match(githubRelease, /assertLatestYamlArtifact/);
   assert.match(latestYml, /yaml\.load/);
   assert.match(latestYml, /files\.length !== 1/);
   assert.match(releaseProvenance, /t8-electron-release-provenance-v1/);
+  assert.match(releaseProvenance, /t8-electron-release-recovery-v1/);
+  assert.match(releaseProvenance, /path\.join\(root, ['"]\.git['"]\)/);
+  assert.match(releaseProvenance, /path\.join\(gitDirectory, ['"]t8-release['"]/);
   assert.match(releaseProvenance, /provenance source target does not match T8_RELEASE_TARGET/);
   assert.match(releaseProvenance, /provenance build nonce does not match this dist:release invocation/);
   assert.match(releaseProvenance, /artifact provenance mismatch/);
+  assert.match(releaseProvenance, /already sealed with different artifact bytes and cannot be overwritten/);
+  assert.match(releaseProvenance, /current provenance and local artifact bytes do not match sealed release recovery/);
+  assert.match(releaseWorktree, /DEFAULT_ALLOWED_PACKAGING_DIRTY_PATHS/);
+  assert.match(releaseWorktree, /source worktree is not release-clean/);
 
   const require = createRequire(import.meta.url);
   const {
     artifactPaths,
+    assertReleaseRecovery,
     assertReleaseProvenance,
+    assertReleaseProvenanceMatchesSealedRecovery,
+    assertSealedReleaseRecovery,
+    clearReleaseRecovery,
+    readReleaseRecovery,
+    releaseRecoveryPath,
+    sealReleaseRecovery,
+    writeReleaseRecovery,
     writeReleaseProvenance,
   } = require('../scripts/release-provenance.cjs');
   const {
     assertExistingDraftOwnership,
+    assertOwnedDraftReadyForPublish,
+    assertPublishedReleaseOwnership,
+    assertReleaseAssetsMatchManifest,
     buildReleaseDraftMarker,
+    markedReleaseBody,
+    releaseAssetUploadBase,
+    releaseNotFound,
     withMarkedReleaseNotes,
   } = require('../scripts/release-github.cjs');
+  const {
+    classifyReleaseWorktreeStatus,
+  } = require('../scripts/release-worktree.cjs');
   const { assertLatestYamlArtifact } = require('../scripts/latest-yml.cjs');
   const {
     assertExactReleaseAssets,
+    assertReleaseAssetMetadata,
     withReleaseTemp,
   } = require('../scripts/verify-github-release.cjs');
   const fixtureInstallerName = 'T8-ProvenanceFixture-Setup-9.9.9.exe';
@@ -254,58 +335,131 @@ test('Electron release publishing requires explicit per-version approval', () =>
   const fixtureAssetNames = [fixtureInstallerName, fixtureBlockmapName, 'latest.yml'];
   const fixtureTarget = 'c'.repeat(40);
   const fixtureNonceHash = 'd'.repeat(64);
+  const fixtureTitle = 'Fixture v9.9.9';
   const fixtureMarker = buildReleaseDraftMarker({
     target: fixtureTarget,
     nonceSha256: fixtureNonceHash,
   });
+  const fixtureBody = `fixture notes\n\n${fixtureMarker}\n`;
+  const fixtureExpectedArtifacts = {
+    installer: {
+      name: fixtureInstallerName,
+      size: 128,
+      sha256: 'a'.repeat(64),
+    },
+    blockmap: {
+      name: fixtureBlockmapName,
+      size: 129,
+      sha256: 'b'.repeat(64),
+    },
+    latest: {
+      name: 'latest.yml',
+      size: 130,
+      sha256: 'c'.repeat(64),
+    },
+  };
+  const fixtureAssets = Object.values(fixtureExpectedArtifacts).map((artifact) => ({
+    name: artifact.name,
+    size: artifact.size,
+    digest: `sha256:${artifact.sha256}`,
+  }));
+  const fixtureOwnership = {
+    expectedTag: 'v9.9.9',
+    expectedTarget: fixtureTarget,
+    expectedMarker: fixtureMarker,
+    expectedAssetNames: fixtureAssetNames,
+    expectedTitle: fixtureTitle,
+    expectedBody: fixtureBody,
+    expectedArtifacts: fixtureExpectedArtifacts,
+  };
+  assert.deepEqual(classifyReleaseWorktreeStatus([
+    ' M tools/ffmpeg-runtime/ffmpeg.exe',
+    ' M tools/remove-ai-watermarks-runtime/README.md',
+  ].join('\n')), {
+    unexpected: [],
+    permitted: [
+      ' M tools/ffmpeg-runtime/ffmpeg.exe',
+      ' M tools/remove-ai-watermarks-runtime/README.md',
+    ],
+  });
+  assert.deepEqual(classifyReleaseWorktreeStatus(
+    'M  tools/ffmpeg-runtime/ffmpeg.exe',
+  ).unexpected, ['M  tools/ffmpeg-runtime/ffmpeg.exe']);
+  assert.deepEqual(classifyReleaseWorktreeStatus(
+    ' M scripts/release-github.cjs',
+  ).unexpected, [' M scripts/release-github.cjs']);
   let markedNotesPath = '';
-  assert.equal(withMarkedReleaseNotes(fixtureMarker, (tempNotes: string) => {
+  assert.equal(withMarkedReleaseNotes(fixtureMarker, undefined, (tempNotes: string) => {
     markedNotesPath = tempNotes;
     const text = readFileSync(tempNotes, 'utf8');
     assert.equal(text.includes(fixtureMarker), true);
     assert.equal(text.match(/t8-electron-release-draft-v1/g)?.length, 1);
     return 'marked-notes-ok';
   }), 'marked-notes-ok');
+  assert.equal(markedReleaseBody(fixtureMarker).match(/t8-electron-release-draft-v1/g)?.length, 1);
   assert.equal(existsSync(markedNotesPath), false);
+  assert.equal(releaseNotFound({
+    status: 1,
+    stdout: '',
+    stderr: 'release not found',
+  }), true);
+  assert.equal(releaseNotFound({
+    status: 1,
+    stdout: '',
+    stderr: 'HTTP 429 rate limit exceeded',
+  }), false);
   const fixtureDraft = (overrides: Record<string, unknown> = {}) => ({
+    databaseId: 123456,
+    uploadUrl: 'https://uploads.github.com/repos/T8mars/T8-penguin-canvas/releases/123456/assets{?name,label}',
     tagName: 'v9.9.9',
+    name: fixtureTitle,
     isDraft: true,
     isPrerelease: false,
     targetCommitish: fixtureTarget,
-    body: `fixture notes\n\n${fixtureMarker}\n`,
-    assets: [{ name: fixtureInstallerName }],
+    body: fixtureBody,
+    assets: [fixtureAssets[0]],
     ...overrides,
   });
-  assert.doesNotThrow(() => assertExistingDraftOwnership(fixtureDraft(), {
-    expectedTag: 'v9.9.9',
-    expectedTarget: fixtureTarget,
-    expectedMarker: fixtureMarker,
-    expectedAssetNames: fixtureAssetNames,
-  }));
+  assert.doesNotThrow(() => assertExistingDraftOwnership(fixtureDraft(), fixtureOwnership));
+  assert.doesNotThrow(() => assertReleaseAssetsMatchManifest(
+    fixtureDraft().assets,
+    fixtureExpectedArtifacts,
+    { allowSubset: true },
+  ));
+  assert.doesNotThrow(() => assertOwnedDraftReadyForPublish(
+    fixtureDraft({ assets: fixtureAssets }),
+    fixtureOwnership,
+  ));
+  assert.equal(
+    releaseAssetUploadBase(fixtureDraft()).toString(),
+    'https://uploads.github.com/repos/T8mars/T8-penguin-canvas/releases/123456/assets',
+  );
+  assert.throws(() => releaseAssetUploadBase(fixtureDraft({
+    uploadUrl: 'https://uploads.github.com/repos/T8mars/other/releases/123456/assets{?name,label}',
+  })), /does not match/);
   assert.throws(() => assertExistingDraftOwnership(fixtureDraft({
     targetCommitish: 'e'.repeat(40),
-  }), {
-    expectedTag: 'v9.9.9',
-    expectedTarget: fixtureTarget,
-    expectedMarker: fixtureMarker,
-    expectedAssetNames: fixtureAssetNames,
-  }), /targets/);
+  }), fixtureOwnership), /targets/);
   assert.throws(() => assertExistingDraftOwnership(fixtureDraft({
     body: '<!-- t8-electron-release-draft-v1 target=cccccccccccccccccccccccccccccccccccccccc nonceSha256=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee -->',
-  }), {
-    expectedTag: 'v9.9.9',
-    expectedTarget: fixtureTarget,
-    expectedMarker: fixtureMarker,
-    expectedAssetNames: fixtureAssetNames,
-  }), /not owned/);
+  }), fixtureOwnership), /not owned/);
   assert.throws(() => assertExistingDraftOwnership(fixtureDraft({
     assets: [{ name: fixtureInstallerName }, { name: 'unexpected-debug.zip' }],
-  }), {
-    expectedTag: 'v9.9.9',
-    expectedTarget: fixtureTarget,
-    expectedMarker: fixtureMarker,
-    expectedAssetNames: fixtureAssetNames,
-  }), /unexpected assets/);
+  }), fixtureOwnership), /unexpected assets/);
+  assert.throws(() => assertOwnedDraftReadyForPublish(fixtureDraft({
+    assets: fixtureAssets.map((asset, index) => (
+      index === 1 ? { ...asset, digest: `sha256:${'e'.repeat(64)}` } : asset
+    )),
+  }), fixtureOwnership), /SHA-256 metadata mismatch/);
+  const fixturePublished = {
+    ...fixtureDraft({ assets: fixtureAssets }),
+    isDraft: false,
+  };
+  assert.doesNotThrow(() => assertPublishedReleaseOwnership(fixturePublished, fixtureOwnership));
+  assert.throws(() => assertPublishedReleaseOwnership({
+    ...fixturePublished,
+    body: `changed notes\n\n${fixtureMarker}\n`,
+  }, fixtureOwnership), /notes do not match/);
   assert.doesNotThrow(() => assertExactReleaseAssets(
     fixtureAssetNames.map((name) => ({ name, size: 1 })),
     fixtureAssetNames,
@@ -322,6 +476,13 @@ test('Electron release publishing requires explicit per-version approval', () =>
     [fixtureInstallerName, fixtureInstallerName, 'latest.yml'].map((name) => ({ name, size: 1 })),
     fixtureAssetNames,
   ), /duplicate asset names/);
+  assert.doesNotThrow(() => assertReleaseAssetMetadata(
+    new Map(fixtureAssets.map((asset) => [asset.name, asset])),
+    new Map(Object.values(fixtureExpectedArtifacts).map((artifact) => [
+      artifact.name,
+      { size: artifact.size, sha256: artifact.sha256 },
+    ])),
+  ));
   const latestFixture = ({
     version = '9.9.9',
     entrySha512 = fixtureInstallerSha512,
@@ -512,17 +673,101 @@ test('Electron release publishing requires explicit per-version approval', () =>
   const target = fixtureTarget;
   const nonce = 'ab'.repeat(32);
   try {
+    mkdirSync(join(fixtureRoot, '.git'), { recursive: true });
     const paths = artifactPaths(fixtureRoot, fixturePackage);
     mkdirSync(paths.distDir, { recursive: true });
     for (const [index, artifact] of paths.artifacts.entries()) {
       writeFileSync(artifact.path, Buffer.alloc(128 + index, index + 1));
     }
+    const recoveryPath = releaseRecoveryPath(fixtureRoot, fixturePackage);
+    assert.match(recoveryPath, /[\\\/]\.git[\\\/]t8-release[\\\/]release-recovery-9\.9\.9\.json$/);
+    assert.equal(readReleaseRecovery({
+      root: fixtureRoot,
+      pkg: fixturePackage,
+      target,
+    }), null);
+    writeReleaseRecovery({
+      root: fixtureRoot,
+      pkg: fixturePackage,
+      target,
+      nonce,
+    });
+    assert.equal(existsSync(recoveryPath), true);
+    assert.equal(assertReleaseRecovery({
+      root: fixtureRoot,
+      pkg: fixturePackage,
+      target,
+      nonce,
+    }).recovery.nonce, nonce);
+    assert.throws(() => assertReleaseRecovery({
+      root: fixtureRoot,
+      pkg: fixturePackage,
+      target,
+      nonce: 'de'.repeat(32),
+    }), /recovery nonce/);
+    assert.throws(() => readReleaseRecovery({
+      root: fixtureRoot,
+      pkg: fixturePackage,
+      target: 'e'.repeat(40),
+    }), /source target mismatch/);
     writeReleaseProvenance({
       root: fixtureRoot,
       pkg: fixturePackage,
       target,
       nonce,
     });
+    sealReleaseRecovery({
+      root: fixtureRoot,
+      pkg: fixturePackage,
+      target,
+      nonce,
+    });
+    const sealed = assertSealedReleaseRecovery({
+      root: fixtureRoot,
+      pkg: fixturePackage,
+      target,
+      nonce,
+    });
+    assert.equal(sealed.recovery.artifacts.installer.name, fixtureInstallerName);
+    assert.equal(sealed.recovery.artifacts.installer.size, 128);
+    assert.doesNotThrow(() => assertReleaseProvenanceMatchesSealedRecovery({
+      root: fixtureRoot,
+      pkg: fixturePackage,
+      target,
+      nonce,
+    }));
+    writeFileSync(paths.artifacts[0].path, Buffer.alloc(256, 9));
+    writeReleaseProvenance({
+      root: fixtureRoot,
+      pkg: fixturePackage,
+      target,
+      nonce,
+    });
+    assert.throws(() => sealReleaseRecovery({
+      root: fixtureRoot,
+      pkg: fixturePackage,
+      target,
+      nonce,
+    }), /already sealed with different artifact bytes/);
+    assert.throws(() => assertReleaseProvenanceMatchesSealedRecovery({
+      root: fixtureRoot,
+      pkg: fixturePackage,
+      target,
+      nonce,
+    }), /do not match sealed release recovery/);
+    writeFileSync(paths.artifacts[0].path, Buffer.alloc(128, 1));
+    writeReleaseProvenance({
+      root: fixtureRoot,
+      pkg: fixturePackage,
+      target,
+      nonce,
+    });
+    assert.doesNotThrow(() => sealReleaseRecovery({
+      root: fixtureRoot,
+      pkg: fixturePackage,
+      target,
+      nonce,
+    }));
     assert.equal(assertReleaseProvenance({
       root: fixtureRoot,
       pkg: fixturePackage,
@@ -542,6 +787,13 @@ test('Electron release publishing requires explicit per-version approval', () =>
       target,
       nonce,
     }), /artifact provenance mismatch/);
+    assert.equal(clearReleaseRecovery({
+      root: fixtureRoot,
+      pkg: fixturePackage,
+      target,
+      nonce,
+    }), recoveryPath);
+    assert.equal(existsSync(recoveryPath), false);
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true });
   }
