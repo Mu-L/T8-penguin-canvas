@@ -56,8 +56,12 @@ import type {
   CanvasPatchRevertResult,
   CanvasOperation,
   CanvasSyncData,
+  CollaborationMember,
   CollaborationInvite,
   CollaborationExecutionPolicySnapshot,
+  CollaborationSession,
+  CollaborationSessionRevocationResult,
+  CollaborationResourceScopeStatus,
   CollaborationStatus,
   NodeRunSummary,
   RunAttemptSummary,
@@ -1829,9 +1833,69 @@ export async function retryProjectAssetSemanticJob(
 }
 
 // ========== 本机协作网关管理 ==========
-export async function getCollaborationStatus(): Promise<CollaborationStatus> {
-  const res = await request<{ success: boolean; data: CollaborationStatus }>(`${BASE}/collaboration/status`);
-  return res.data;
+function normalizeCollaborationStatus(value: CollaborationStatus): CollaborationStatus {
+  const legacy = value as Partial<CollaborationStatus> & { connections?: number };
+  const rawResourceScope = legacy.room?.resourceScope;
+  const resourceScope: CollaborationResourceScopeStatus | null = rawResourceScope
+    && typeof rawResourceScope === 'object'
+    ? {
+        status: ['ready', 'confirmation-required', 'stale'].includes(String(rawResourceScope.status))
+          ? rawResourceScope.status
+          : 'stale',
+        ready: Boolean(rawResourceScope.ready),
+        canvasRevision: Math.max(0, Number(rawResourceScope.canvasRevision) || 0),
+        trustedRevision: rawResourceScope.trustedRevision == null
+          ? null
+          : Math.max(0, Number(rawResourceScope.trustedRevision) || 0),
+        initializedAt: rawResourceScope.initializedAt == null
+          ? null
+          : Math.max(0, Number(rawResourceScope.initializedAt) || 0),
+        assetCount: Math.max(0, Number(rawResourceScope.assetCount) || 0),
+        subflowCount: Math.max(0, Number(rawResourceScope.subflowCount) || 0),
+      }
+    : null;
+  const room = legacy.room && typeof legacy.room === 'object'
+    ? {
+        projectId: String(legacy.room.projectId || ''),
+        canvasId: String(legacy.room.canvasId || ''),
+        canvasCount: Math.max(0, Number(legacy.room.canvasCount) || 0),
+        memberCount: Math.max(0, Number(legacy.room.memberCount) || 0),
+        activeSessionCount: Math.max(0, Number(legacy.room.activeSessionCount) || 0),
+        connectionCount: Math.max(0, Number(legacy.room.connectionCount) || 0),
+        resourceScope,
+      }
+    : null;
+  return {
+    running: Boolean(legacy.running),
+    host: legacy.host == null ? null : String(legacy.host),
+    port: Number.isInteger(Number(legacy.port)) ? Number(legacy.port) : null,
+    startedAt: legacy.startedAt == null ? null : Number(legacy.startedAt),
+    connectionCount: Math.max(0, Number(legacy.connectionCount ?? legacy.connections) || 0),
+    privateBackendExposed: Boolean(legacy.privateBackendExposed),
+    networkInterfaces: Array.isArray(legacy.networkInterfaces) ? legacy.networkInterfaces : [],
+    shareUrls: Array.isArray(legacy.shareUrls)
+      ? legacy.shareUrls.filter((url): url is string => typeof url === 'string' && Boolean(url))
+      : [],
+    defaultHost: String(legacy.defaultHost || '127.0.0.1'),
+    defaultPort: Number.isInteger(Number(legacy.defaultPort)) ? Number(legacy.defaultPort) : 18767,
+    room,
+  };
+}
+
+export async function getCollaborationStatus(
+  projectId?: string,
+  canvasId?: string | null,
+  options: { signal?: AbortSignal } = {},
+): Promise<CollaborationStatus> {
+  const params = new URLSearchParams();
+  if (projectId) params.set('projectId', projectId);
+  if (canvasId) params.set('canvasId', canvasId);
+  const suffix = params.size ? `?${params.toString()}` : '';
+  const res = await request<{ success: boolean; data: CollaborationStatus }>(
+    `${BASE}/collaboration/status${suffix}`,
+    { signal: options.signal },
+  );
+  return normalizeCollaborationStatus(res.data);
 }
 
 export async function startCollaborationGateway(input: { host?: string; port?: number } = {}): Promise<CollaborationStatus> {
@@ -1839,11 +1903,25 @@ export async function startCollaborationGateway(input: { host?: string; port?: n
     method: 'POST',
     body: JSON.stringify(input),
   });
-  return res.data;
+  return normalizeCollaborationStatus(res.data);
 }
 
 export async function stopCollaborationGateway(): Promise<CollaborationStatus> {
   const res = await request<{ success: boolean; data: CollaborationStatus }>(`${BASE}/collaboration/stop`, { method: 'POST' });
+  return normalizeCollaborationStatus(res.data);
+}
+
+export async function initializeCollaborationResourceScope(
+  projectId: string,
+  canvasId: string,
+): Promise<CollaborationResourceScopeStatus> {
+  const res = await request<{ success: boolean; data: CollaborationResourceScopeStatus }>(
+    `${BASE}/collaboration/resource-scope/initialize`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ projectId, canvasId, confirmed: true }),
+    },
+  );
   return res.data;
 }
 
@@ -1863,7 +1941,8 @@ export async function getCollaborationExecutionPolicy(
 }
 
 export async function createCollaborationInvite(input: {
-  projectId?: string;
+  projectId: string;
+  canvasId: string;
   role: WorkspaceRole;
   expiresInMs?: number;
   maxUses?: number;
@@ -1875,14 +1954,109 @@ export async function createCollaborationInvite(input: {
   return res.data;
 }
 
+export async function listCollaborationInvites(
+  projectId: string,
+  canvasId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<CollaborationInvite[]> {
+  const params = new URLSearchParams({ projectId, canvasId });
+  const res = await request<{ success: boolean; data: CollaborationInvite[] }>(
+    `${BASE}/collaboration/invites?${params.toString()}`,
+    { signal: options.signal },
+  );
+  return Array.isArray(res.data) ? res.data : [];
+}
+
+export async function revokeCollaborationInvite(inviteId: string, projectId: string, canvasId: string): Promise<CollaborationInvite> {
+  const params = new URLSearchParams({ projectId, canvasId });
+  const res = await request<{ success: boolean; data: CollaborationInvite }>(
+    `${BASE}/collaboration/invites/${encodeURIComponent(inviteId)}?${params.toString()}`,
+    { method: 'DELETE' },
+  );
+  return res.data;
+}
+
+export async function listCollaborationMembers(
+  projectId: string,
+  canvasId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<CollaborationMember[]> {
+  const params = new URLSearchParams({ projectId, canvasId });
+  const res = await request<{ success: boolean; data: CollaborationMember[] }>(
+    `${BASE}/collaboration/members?${params.toString()}`,
+    { signal: options.signal },
+  );
+  return Array.isArray(res.data) ? res.data : [];
+}
+
+export async function updateCollaborationMember(
+  memberId: string,
+  projectId: string,
+  canvasId: string,
+  patch: { role: Exclude<WorkspaceRole, 'owner'>; displayName?: string },
+): Promise<CollaborationMember> {
+  const res = await request<{ success: boolean; data: CollaborationMember }>(
+    `${BASE}/collaboration/members/${encodeURIComponent(memberId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ ...patch, projectId, canvasId }),
+    },
+  );
+  return res.data;
+}
+
+export async function removeCollaborationMember(memberId: string, projectId: string, canvasId: string): Promise<CollaborationMember> {
+  const params = new URLSearchParams({ projectId, canvasId });
+  const res = await request<{ success: boolean; data: CollaborationMember }>(
+    `${BASE}/collaboration/members/${encodeURIComponent(memberId)}?${params.toString()}`,
+    { method: 'DELETE' },
+  );
+  return res.data;
+}
+
+export async function listCollaborationSessions(
+  projectId: string,
+  canvasId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<CollaborationSession[]> {
+  const params = new URLSearchParams({ projectId, canvasId });
+  const res = await request<{ success: boolean; data: CollaborationSession[] }>(
+    `${BASE}/collaboration/sessions?${params.toString()}`,
+    { signal: options.signal },
+  );
+  return Array.isArray(res.data) ? res.data : [];
+}
+
+export async function revokeCollaborationSession(sessionId: string, projectId: string, canvasId: string): Promise<CollaborationSession> {
+  const params = new URLSearchParams({ projectId, canvasId });
+  const res = await request<{ success: boolean; data: CollaborationSession }>(
+    `${BASE}/collaboration/sessions/${encodeURIComponent(sessionId)}?${params.toString()}`,
+    { method: 'DELETE' },
+  );
+  return res.data;
+}
+
+export async function revokeAllCollaborationSessions(projectId: string, canvasId: string): Promise<CollaborationSessionRevocationResult> {
+  const res = await request<{ success: boolean; data: CollaborationSessionRevocationResult }>(
+    `${BASE}/collaboration/sessions/revoke-all`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ projectId, canvasId }),
+    },
+  );
+  return res.data;
+}
+
 export async function listCollaborationRunIntents(
   status?: string,
   projectId?: string,
+  canvasId?: string | null,
   options: { signal?: AbortSignal } = {},
 ): Promise<RunIntent[]> {
   const params = new URLSearchParams();
   if (status) params.set('status', status);
   if (projectId) params.set('projectId', projectId);
+  if (canvasId) params.set('canvasId', canvasId);
   const suffix = params.size ? `?${params.toString()}` : '';
   const res = await request<{ success: boolean; data: RunIntent[] }>(
     `${BASE}/collaboration/run-intents${suffix}`,
@@ -1891,9 +2065,14 @@ export async function listCollaborationRunIntents(
   return res.data || [];
 }
 
-export async function updateCollaborationRunIntent(intentId: string, patch: { status: 'rejected' | 'stale' | 'failed' }): Promise<RunIntent> {
+export async function updateCollaborationRunIntent(
+  intentId: string,
+  projectId: string,
+  canvasId: string,
+  patch: { status: 'rejected' | 'stale' | 'failed' },
+): Promise<RunIntent> {
   const res = await request<{ success: boolean; data: RunIntent }>(`${BASE}/collaboration/run-intents/${encodeURIComponent(intentId)}`, {
-    method: 'PATCH', body: JSON.stringify(patch),
+    method: 'PATCH', body: JSON.stringify({ ...patch, projectId, canvasId }),
   });
   return res.data;
 }

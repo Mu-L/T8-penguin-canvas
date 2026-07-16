@@ -94,7 +94,7 @@ test('latest schema migrates real schema 15 fingerprint data idempotently withou
     seedSchema15(filename);
     const first = new ProjectDatabase(filename, { autoBackup: false });
     try {
-      assert.equal(PROJECT_DATABASE_SCHEMA_VERSION, 22);
+      assert.equal(PROJECT_DATABASE_SCHEMA_VERSION, 23);
       assert.equal(first.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, PROJECT_DATABASE_SCHEMA_VERSION);
       assert.equal(first.db.pragma('quick_check', { simple: true }), 'ok');
       assert.deepEqual(first.db.pragma('foreign_key_check'), []);

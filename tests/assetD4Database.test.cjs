@@ -251,7 +251,7 @@ test('latest schema migrates schema 16 data in one idempotent transaction with F
     seedSchema16(filename);
     const database = new ProjectDatabase(filename, { autoBackup: false });
     try {
-      assert.equal(PROJECT_DATABASE_SCHEMA_VERSION, 22);
+      assert.equal(PROJECT_DATABASE_SCHEMA_VERSION, 23);
       assert.equal(database.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, PROJECT_DATABASE_SCHEMA_VERSION);
       assert.equal(database.db.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get().count, PROJECT_DATABASE_SCHEMA_VERSION);
       assert.equal(database.getAsset('schema16-preserved-asset').metadata.legacyMarker, true);

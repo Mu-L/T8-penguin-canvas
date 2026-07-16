@@ -9165,13 +9165,13 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     const currentRevision = activeId ? canvasRevisionsRef.current.get(activeId) || 0 : 0;
     if (!activeId || intent.canvasId !== activeId || intent.canvasRevision !== currentRevision) {
       logBus.warn('远程运行请求对应的画布或版本已经变化，已标记为过期', '协作运行');
-      await api.updateCollaborationRunIntent(intent.id, { status: 'stale' });
+      await api.updateCollaborationRunIntent(intent.id, intent.projectId, intent.canvasId, { status: 'stale' });
       return false;
     }
     const requestedIds = intent.nodeIds.filter((id) => nodesRef.current.some((node) => node.id === id));
     if (intent.nodeIds.length > 0 && requestedIds.length !== intent.nodeIds.length) {
       logBus.warn('远程运行请求包含已删除节点，已标记为过期', '协作运行');
-      await api.updateCollaborationRunIntent(intent.id, { status: 'stale' });
+      await api.updateCollaborationRunIntent(intent.id, intent.projectId, intent.canvasId, { status: 'stale' });
       return false;
     }
     const currentNodes = nodesRef.current;
@@ -9181,7 +9181,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     const runNodes = planned.nodes.filter((node) => requestedSet.has(node.id));
     const runEdges = planned.edges.filter((edge) => requestedSet.has(edge.source) && requestedSet.has(edge.target));
     if (!runNodes.some((node) => node.type && EXECUTABLE_NODE_TYPES.has(node.type))) {
-      await api.updateCollaborationRunIntent(intent.id, { status: 'stale' });
+      await api.updateCollaborationRunIntent(intent.id, intent.projectId, intent.canvasId, { status: 'stale' });
       return false;
     }
     const count = await runNodesByOrder(runNodes, runEdges, {
@@ -9199,7 +9199,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     });
     if (count < 0) return false;
     if (count === 0) {
-      await api.updateCollaborationRunIntent(intent.id, { status: 'stale' });
+      await api.updateCollaborationRunIntent(intent.id, intent.projectId, intent.canvasId, { status: 'stale' });
       return false;
     }
     return true;

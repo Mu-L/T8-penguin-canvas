@@ -35,12 +35,22 @@ const {
   deriveRunIntentAuthority,
   summarizeRunIntentAuthority,
 } = require('../collaboration/runIntentAuthority');
+const {
+  MAX_ASSET_REFERENCES,
+  MAX_SUBFLOW_REFERENCES,
+  collectCanvasResourceReferences,
+  subflowDefinitionContentDigest,
+  subflowReferenceKey,
+} = require('./canvasResourceScope');
 
-const PROJECT_DATABASE_SCHEMA_VERSION = 22;
+const PROJECT_DATABASE_SCHEMA_VERSION = 23;
 const OPERATION_SNAPSHOT_INTERVAL = 100;
 const CANVAS_PROVENANCE_GUARD_VERSION = 1;
 const CANVAS_PROVENANCE_GUARD_LIMIT = 2000;
 const RESERVED_CANVAS_PATCH_OPERATION_ID_PREFIX = 'canvas-patch:';
+const CANVAS_RESOURCE_DOCUMENT_SOURCE = 'canvas-document';
+const CANVAS_RESOURCE_LINEAGE_SOURCE = 'lineage';
+const CANVAS_RESOURCE_PUBLISH_SOURCE = 'collaboration-publish';
 
 const ASSET_STORAGE_MODES = new Set(['managed', 'linked', 'remote', 'embedded']);
 const ASSET_AVAILABILITY_STATES = new Set(['available', 'missing', 'corrupt', 'unverified']);
@@ -968,9 +978,33 @@ class ProjectDatabase {
       CREATE INDEX IF NOT EXISTS idx_subflow_definition_heads_updated
         ON subflow_definition_heads(project_id, updated_at DESC);
 
+      CREATE TABLE IF NOT EXISTS canvas_resource_grants (
+        project_id TEXT NOT NULL,
+        canvas_id TEXT NOT NULL,
+        resource_type TEXT NOT NULL,
+        resource_id TEXT NOT NULL,
+        resource_version INTEGER NOT NULL DEFAULT 0,
+        source TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY(project_id, canvas_id, resource_type, resource_id, resource_version, source)
+      );
+      CREATE INDEX IF NOT EXISTS idx_canvas_resource_grants_scope
+        ON canvas_resource_grants(project_id, canvas_id, resource_type, resource_id, resource_version);
+
+      CREATE TABLE IF NOT EXISTS canvas_resource_grant_state (
+        project_id TEXT NOT NULL,
+        canvas_id TEXT NOT NULL,
+        trusted_revision INTEGER NOT NULL,
+        initialized_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY(project_id, canvas_id)
+      );
+
       CREATE TABLE IF NOT EXISTS collaboration_members (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,
+        canvas_id TEXT,
         display_name TEXT NOT NULL,
         role TEXT NOT NULL,
         capabilities_json TEXT NOT NULL,
@@ -981,6 +1015,7 @@ class ProjectDatabase {
       CREATE TABLE IF NOT EXISTS collaboration_invites (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,
+        canvas_id TEXT,
         code_hash TEXT NOT NULL UNIQUE,
         role TEXT NOT NULL,
         capabilities_json TEXT NOT NULL,
@@ -994,6 +1029,7 @@ class ProjectDatabase {
       CREATE TABLE IF NOT EXISTS collaboration_sessions (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,
+        canvas_id TEXT,
         member_id TEXT NOT NULL,
         token_hash TEXT NOT NULL UNIQUE,
         expires_at INTEGER NOT NULL,
@@ -1075,6 +1111,17 @@ class ProjectDatabase {
       ensureColumn('run_intents', 'execution_authority_json', `execution_authority_json TEXT NOT NULL DEFAULT '{}'`);
       ensureColumn('run_intents', 'actual_cost', 'actual_cost REAL');
       ensureColumn('run_retention_policies', 'max_asset_refs', 'max_asset_refs INTEGER NOT NULL DEFAULT 100000');
+      ensureColumn('collaboration_invites', 'canvas_id', 'canvas_id TEXT');
+      ensureColumn('collaboration_members', 'canvas_id', 'canvas_id TEXT');
+      ensureColumn('collaboration_sessions', 'canvas_id', 'canvas_id TEXT');
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_collaboration_invites_scope
+          ON collaboration_invites(project_id, canvas_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_collaboration_members_scope
+          ON collaboration_members(project_id, canvas_id, created_at ASC);
+        CREATE INDEX IF NOT EXISTS idx_collaboration_sessions_scope
+          ON collaboration_sessions(project_id, canvas_id, created_at DESC);
+      `);
       const subflowPrimaryKey = this.db.pragma('table_info(subflow_definitions)')
         .filter((entry) => Number(entry.pk) > 0)
         .sort((left, right) => Number(left.pk) - Number(right.pk))
@@ -2287,12 +2334,613 @@ class ProjectDatabase {
           );
         }
       }
+      const schema23AlreadyApplied = Boolean(
+        this.db.prepare('SELECT 1 AS applied FROM schema_migrations WHERE version = 23').get(),
+      );
+      if (!schema23AlreadyApplied) {
+        this.db.exec(`
+          UPDATE collaboration_invites
+          SET canvas_id = (
+            SELECT MIN(d.canvas_id)
+            FROM canvas_documents d
+            WHERE d.project_id = collaboration_invites.project_id
+            HAVING COUNT(*) = 1
+          )
+          WHERE canvas_id IS NULL OR TRIM(canvas_id) = '';
+
+          UPDATE collaboration_members
+          SET canvas_id = (
+            SELECT MIN(d.canvas_id)
+            FROM canvas_documents d
+            WHERE d.project_id = collaboration_members.project_id
+            HAVING COUNT(*) = 1
+          )
+          WHERE canvas_id IS NULL OR TRIM(canvas_id) = '';
+
+          UPDATE collaboration_sessions
+          SET canvas_id = (
+            SELECT m.canvas_id
+            FROM collaboration_members m
+            WHERE m.id = collaboration_sessions.member_id
+              AND m.project_id = collaboration_sessions.project_id
+          )
+          WHERE canvas_id IS NULL OR TRIM(canvas_id) = '';
+
+          UPDATE collaboration_invites
+          SET revoked_at = COALESCE(revoked_at, ${now})
+          WHERE canvas_id IS NULL
+             OR TRIM(canvas_id) = ''
+             OR NOT EXISTS (
+               SELECT 1 FROM canvas_documents d
+               WHERE d.canvas_id = collaboration_invites.canvas_id
+                 AND d.project_id = collaboration_invites.project_id
+             );
+
+          UPDATE collaboration_sessions
+          SET revoked_at = COALESCE(revoked_at, ${now})
+          WHERE canvas_id IS NULL
+             OR TRIM(canvas_id) = ''
+             OR NOT EXISTS (
+               SELECT 1 FROM canvas_documents d
+               WHERE d.canvas_id = collaboration_sessions.canvas_id
+                 AND d.project_id = collaboration_sessions.project_id
+             )
+             OR NOT EXISTS (
+               SELECT 1 FROM collaboration_members m
+               WHERE m.id = collaboration_sessions.member_id
+                 AND m.project_id = collaboration_sessions.project_id
+                 AND m.canvas_id = collaboration_sessions.canvas_id
+             );
+        `);
+        const invalidScopedIntents = this.db.prepare(`
+          SELECT ri.id, ri.project_id, ri.canvas_id, ri.requested_by, ri.status
+          FROM run_intents ri
+          LEFT JOIN collaboration_members m ON m.id = ri.requested_by
+          WHERE ri.run_id IS NULL
+            AND ri.status IN ('pending', 'accepted')
+            AND (
+              m.id IS NULL
+              OR m.project_id <> ri.project_id
+              OR m.canvas_id IS NULL
+              OR TRIM(m.canvas_id) = ''
+              OR m.canvas_id <> ri.canvas_id
+            )
+          ORDER BY ri.created_at ASC, ri.id ASC
+        `).all();
+        const staleInvalidScopedIntent = this.db.prepare(`
+          UPDATE run_intents
+          SET status = 'stale', updated_at = ?
+          WHERE id = ? AND run_id IS NULL AND status IN ('pending', 'accepted')
+        `);
+        const auditInvalidScopedIntent = this.db.prepare(`
+          INSERT INTO audit_events(
+            project_id, canvas_id, actor_id, session_id, action,
+            target_type, target_id, metadata_json, created_at
+          ) VALUES (?, ?, 'local-owner', 'schema23-migration',
+            'collaboration.run-intent.schema23-scope-stale',
+            'run-intent', ?, ?, ?)
+        `);
+        for (const intent of invalidScopedIntents) {
+          staleInvalidScopedIntent.run(now, intent.id);
+          auditInvalidScopedIntent.run(
+            intent.project_id,
+            intent.canvas_id,
+            intent.id,
+            JSON.stringify({
+              previousStatus: intent.status,
+              nextStatus: 'stale',
+              requestedBy: intent.requested_by,
+              reasonCode: 'intent_requester_canvas_scope_invalid',
+            }),
+            now,
+          );
+        }
+      }
+      this.db.prepare(`
+        INSERT OR IGNORE INTO canvas_resource_grant_state(
+          project_id, canvas_id, trusted_revision, initialized_at, updated_at
+        )
+        SELECT project_id, canvas_id, revision, 0, ?
+        FROM canvas_documents
+      `).run(now);
+      if (!schema23AlreadyApplied) {
+        this.db.prepare(`
+          UPDATE collaboration_invites
+          SET revoked_at = COALESCE(revoked_at, ?)
+          WHERE revoked_at IS NULL
+            AND EXISTS (
+              SELECT 1
+              FROM canvas_resource_grant_state state
+              WHERE state.project_id = collaboration_invites.project_id
+                AND state.canvas_id = collaboration_invites.canvas_id
+                AND state.initialized_at <= 0
+            )
+        `).run(now);
+        this.db.prepare(`
+          UPDATE collaboration_sessions
+          SET revoked_at = COALESCE(revoked_at, ?)
+          WHERE revoked_at IS NULL
+            AND EXISTS (
+              SELECT 1
+              FROM canvas_resource_grant_state state
+              WHERE state.project_id = collaboration_sessions.project_id
+                AND state.canvas_id = collaboration_sessions.canvas_id
+                AND state.initialized_at <= 0
+            )
+        `).run(now);
+      }
       for (let version = 1; version <= PROJECT_DATABASE_SCHEMA_VERSION; version += 1) {
         this.db.prepare('INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)').run(version, now);
       }
       this.options.beforeMigrationCommit?.(this.db, PROJECT_DATABASE_SCHEMA_VERSION);
     });
     migrateTransaction();
+  }
+
+  _upsertCanvasResourceGrant(projectId, canvasId, resourceType, resourceId, resourceVersion, source, now = Date.now()) {
+    this.db.prepare(`
+      INSERT INTO canvas_resource_grants(
+        project_id, canvas_id, resource_type, resource_id, resource_version, source, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(project_id, canvas_id, resource_type, resource_id, resource_version, source)
+      DO UPDATE SET updated_at = excluded.updated_at
+    `).run(
+      String(projectId),
+      String(canvasId),
+      String(resourceType),
+      String(resourceId),
+      Math.max(0, Math.trunc(Number(resourceVersion) || 0)),
+      String(source),
+      now,
+      now,
+    );
+  }
+
+  resolveCanvasDocumentResources(inputDocument, options = {}) {
+    const document = inputDocument?.canvasId
+      ? inputDocument
+      : this.getCanvas(inputDocument);
+    if (!document) throw new Error('画布不存在');
+    const projectId = String(document.projectId || DEFAULT_PROJECT_ID);
+    const canonicalSubflowDigests = new Map();
+    const embeddedValidationResults = new Map();
+    const validateEmbeddedSubflow = ({
+      definitionId,
+      version,
+      projectId: embeddedProjectId,
+      contentDigest,
+    }) => {
+      if (embeddedProjectId && String(embeddedProjectId) !== projectId) return false;
+      const referenceKey = subflowReferenceKey(definitionId, version);
+      const validationKey = `${referenceKey}\u0000${String(contentDigest || '')}`;
+      if (embeddedValidationResults.has(validationKey)) {
+        return embeddedValidationResults.get(validationKey);
+      }
+      if (!canonicalSubflowDigests.has(referenceKey)) {
+        const canonical = this.getSubflowDefinition(definitionId, version, projectId);
+        canonicalSubflowDigests.set(
+          referenceKey,
+          canonical ? subflowDefinitionContentDigest(canonical) : null,
+        );
+      }
+      const valid = Boolean(contentDigest)
+        && canonicalSubflowDigests.get(referenceKey) === contentDigest;
+      embeddedValidationResults.set(validationKey, valid);
+      return valid;
+    };
+    const collected = collectCanvasResourceReferences(document, {
+      validateEmbeddedSubflow,
+      validateRootSubflowDefinition: options.validateRootSubflowDefinition,
+    });
+    const assetIds = new Set(collected.assetIds);
+    const assetUrls = new Set(collected.assetUrls);
+    const subflowReferences = new Map();
+    const requestedSubflowReferences = new Map();
+    const subflowDefinitions = new Map();
+    const missingSubflows = [];
+    const subflowPinMismatches = [...collected.subflowPinMismatches];
+    const subflowContentMismatches = [...collected.subflowContentMismatches];
+    const queue = [];
+    const scheduledSubflowKeys = new Set();
+    let truncated = Boolean(collected.truncated);
+
+    const scheduleSubflow = (id, version, depth) => {
+      const normalizedId = String(id || '').trim();
+      const normalizedVersion = Number(version);
+      if (!normalizedId || !Number.isInteger(normalizedVersion) || normalizedVersion < 1) return;
+      const key = subflowReferenceKey(normalizedId, normalizedVersion);
+      if (scheduledSubflowKeys.has(key)) return;
+      if (scheduledSubflowKeys.size >= MAX_SUBFLOW_REFERENCES || depth > 16) {
+        truncated = true;
+        return;
+      }
+      scheduledSubflowKeys.add(key);
+      if (!requestedSubflowReferences.has(normalizedId)) {
+        requestedSubflowReferences.set(normalizedId, new Set());
+      }
+      requestedSubflowReferences.get(normalizedId).add(normalizedVersion);
+      queue.push({ id: normalizedId, version: normalizedVersion, depth, key });
+    };
+
+    for (const [id, versions] of collected.subflowReferences) {
+      for (const version of versions) scheduleSubflow(id, version, 1);
+    }
+
+    while (queue.length > 0) {
+      const reference = queue.shift();
+      const definition = this.getSubflowDefinition(reference.id, reference.version, projectId);
+      if (!definition) {
+        missingSubflows.push({ id: reference.id, version: reference.version });
+        continue;
+      }
+      subflowDefinitions.set(reference.key, definition);
+      if (!subflowReferences.has(reference.id)) subflowReferences.set(reference.id, new Set());
+      subflowReferences.get(reference.id).add(reference.version);
+      const nested = collectCanvasResourceReferences(definition, {
+        validateEmbeddedSubflow,
+      });
+      if (nested.truncated) truncated = true;
+      for (const mismatch of nested.subflowPinMismatches) {
+        if (subflowPinMismatches.length >= MAX_SUBFLOW_REFERENCES) {
+          truncated = true;
+          break;
+        }
+        subflowPinMismatches.push(mismatch);
+      }
+      for (const mismatch of nested.subflowContentMismatches) {
+        if (subflowContentMismatches.length >= MAX_SUBFLOW_REFERENCES) {
+          truncated = true;
+          break;
+        }
+        subflowContentMismatches.push(mismatch);
+      }
+      for (const assetId of nested.assetIds) {
+        if (assetIds.size >= MAX_ASSET_REFERENCES) truncated = true;
+        else assetIds.add(assetId);
+      }
+      for (const assetUrl of nested.assetUrls) {
+        if (assetUrls.size >= MAX_ASSET_REFERENCES) truncated = true;
+        else assetUrls.add(assetUrl);
+      }
+      for (const [id, versions] of nested.subflowReferences) {
+        for (const version of versions) scheduleSubflow(id, version, reference.depth + 1);
+      }
+    }
+
+    const existingAssetIds = new Set();
+    const foreignAssetIds = [];
+    const candidateAssetIds = [...assetIds].slice(0, MAX_ASSET_REFERENCES);
+    for (let index = 0; index < candidateAssetIds.length; index += 400) {
+      const batch = candidateAssetIds.slice(index, index + 400);
+      if (!batch.length) continue;
+      const rows = this.db.prepare(`
+        SELECT id, project_id FROM assets
+        WHERE id IN (${batch.map(() => '?').join(',')})
+      `).all(...batch);
+      for (const row of rows) {
+        if (String(row.project_id) === projectId) existingAssetIds.add(String(row.id));
+        else foreignAssetIds.push(String(row.id));
+      }
+    }
+    for (const asset of this.findAssetsBySourceUrls(projectId, [...assetUrls])) {
+      if (asset?.id) existingAssetIds.add(String(asset.id));
+    }
+    const grantAssetIds = new Set([...assetIds, ...existingAssetIds]);
+
+    return {
+      document,
+      projectId,
+      requestedAssetIds: assetIds,
+      assetIds: existingAssetIds,
+      grantAssetIds,
+      requestedSubflowReferences,
+      subflowReferences,
+      subflowDefinitions,
+      missingSubflows,
+      subflowPinMismatches: subflowPinMismatches.slice(0, MAX_SUBFLOW_REFERENCES),
+      subflowContentMismatches: subflowContentMismatches.slice(0, MAX_SUBFLOW_REFERENCES),
+      foreignAssetIds: [...new Set(foreignAssetIds)],
+      truncated,
+    };
+  }
+
+  _syncCanvasDocumentResourceGrants(document, options = {}) {
+    const existingState = this.getCanvasResourceGrantState(document.projectId, document.canvasId);
+    if (existingState && existingState.initializedAt <= 0 && options.initializeResourceScope !== true) {
+      this._advanceCanvasResourceGrantState(document);
+      return {
+        projectId: String(document.projectId),
+        canvasId: String(document.canvasId),
+        trustedRevision: Number(document.revision),
+        assetCount: 0,
+        subflowCount: 0,
+        missingSubflows: [],
+        confirmationRequired: true,
+      };
+    }
+    const resolved = this.resolveCanvasDocumentResources(document);
+    if (resolved.truncated) {
+      const error = new Error('画布资源引用超过协作授权安全上限');
+      error.code = 'canvas_resource_scope_too_large';
+      error.status = 422;
+      throw error;
+    }
+    if (resolved.subflowPinMismatches.length > 0) {
+      const error = new Error('画布包含身份或固定版本不一致的内嵌子工作流');
+      error.code = 'canvas_resource_subflow_pin_mismatch';
+      error.status = 422;
+      throw error;
+    }
+    const missingSubflowKeys = new Set(
+      resolved.missingSubflows.map((reference) => subflowReferenceKey(reference.id, reference.version)),
+    );
+    const divergentEmbeddedSubflows = resolved.subflowContentMismatches.filter((mismatch) => (
+      !missingSubflowKeys.has(subflowReferenceKey(mismatch.definitionId, mismatch.version))
+    ));
+    if (divergentEmbeddedSubflows.length > 0) {
+      const error = new Error('画布包含与权威固定版本内容不一致的内嵌子工作流');
+      error.code = 'canvas_resource_subflow_content_mismatch';
+      error.status = 422;
+      throw error;
+    }
+    const missingSubflowsRequireConfirmation = resolved.missingSubflows.length > 0;
+    if (missingSubflowsRequireConfirmation && options.initializeResourceScope === true) {
+      const error = new Error('画布引用的固定版本子工作流不存在');
+      error.code = 'canvas_resource_subflow_missing';
+      error.status = 422;
+      throw error;
+    }
+    const source = String(options.source || CANVAS_RESOURCE_DOCUMENT_SOURCE);
+    const now = Date.now();
+    this.db.prepare(`
+      DELETE FROM canvas_resource_grants
+      WHERE project_id = ? AND canvas_id = ? AND source = ?
+    `).run(resolved.projectId, resolved.document.canvasId, source);
+    for (const assetId of resolved.grantAssetIds) {
+      this._upsertCanvasResourceGrant(
+        resolved.projectId,
+        resolved.document.canvasId,
+        'asset',
+        assetId,
+        0,
+        source,
+        now,
+      );
+    }
+    for (const [id, versions] of resolved.requestedSubflowReferences) {
+      for (const version of versions) {
+        this._upsertCanvasResourceGrant(
+          resolved.projectId,
+          resolved.document.canvasId,
+          'subflow',
+          id,
+          version,
+          source,
+          now,
+        );
+      }
+    }
+    this.db.prepare(`
+      INSERT INTO canvas_resource_grant_state(project_id, canvas_id, trusted_revision, initialized_at, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(project_id, canvas_id)
+      DO UPDATE SET
+        trusted_revision = excluded.trusted_revision,
+        initialized_at = CASE
+          WHEN ? = 1 THEN excluded.initialized_at
+          WHEN ? = 1 THEN 0
+          ELSE canvas_resource_grant_state.initialized_at
+        END,
+        updated_at = excluded.updated_at
+    `).run(
+      resolved.projectId,
+      resolved.document.canvasId,
+      Number(resolved.document.revision),
+      missingSubflowsRequireConfirmation ? 0 : now,
+      now,
+      options.initializeResourceScope === true ? 1 : 0,
+      missingSubflowsRequireConfirmation ? 1 : 0,
+    );
+    return {
+      projectId: resolved.projectId,
+      canvasId: resolved.document.canvasId,
+      trustedRevision: Number(resolved.document.revision),
+      assetCount: resolved.grantAssetIds.size,
+      subflowCount: [...resolved.requestedSubflowReferences.values()]
+        .reduce((total, versions) => total + versions.size, 0),
+      missingSubflows: resolved.missingSubflows,
+      confirmationRequired: missingSubflowsRequireConfirmation,
+    };
+  }
+
+  _advanceCanvasResourceGrantState(document) {
+    const result = this.db.prepare(`
+      UPDATE canvas_resource_grant_state
+      SET trusted_revision = ?, updated_at = ?
+      WHERE project_id = ? AND canvas_id = ?
+    `).run(
+      Number(document.revision),
+      Date.now(),
+      String(document.projectId),
+      String(document.canvasId),
+    );
+    if (result.changes !== 1) {
+      const error = new Error('协作资源授权状态尚未由主机初始化');
+      error.code = 'canvas_resource_scope_uninitialized';
+      error.status = 409;
+      throw error;
+    }
+  }
+
+  _commitCanvasResourceState(document, options = {}) {
+    if (options.syncResourceGrants === false) {
+      if (typeof options.assertResultingDocument !== 'function') {
+        const error = new Error('协作画布写入缺少资源授权校验');
+        error.code = 'canvas_resource_authority_required';
+        error.status = 403;
+        throw error;
+      }
+      options.assertResultingDocument(document);
+      this._advanceCanvasResourceGrantState(document);
+      return;
+    }
+    options.assertResultingDocument?.(document);
+    this._syncCanvasDocumentResourceGrants(document);
+  }
+
+  syncCanvasDocumentResourceGrants(canvasIdOrDocument, options = {}) {
+    const document = typeof canvasIdOrDocument === 'string'
+      ? this.getCanvas(canvasIdOrDocument)
+      : canvasIdOrDocument;
+    if (!document) throw new Error('画布不存在');
+    const transaction = this.db.transaction(() => this._syncCanvasDocumentResourceGrants(document, options));
+    return transaction.immediate();
+  }
+
+  initializeCanvasResourceGrantsForSharing(projectId, canvasId, options = {}) {
+    const transaction = this.db.transaction(() => {
+      const document = this.getCanvas(canvasId);
+      if (!document || String(document.projectId) !== String(projectId)) {
+        throw new Error('协作房间画布不存在');
+      }
+      const summary = this._syncCanvasDocumentResourceGrants(document, {
+        initializeResourceScope: true,
+      });
+      this.db.prepare(`
+        UPDATE canvas_operations
+        SET requires_snapshot = 1
+        WHERE canvas_id = ?
+      `).run(String(canvasId));
+      this.appendAuditEvent({
+        projectId,
+        canvasId,
+        actorId: options.actorId || 'local-owner',
+        sessionId: options.sessionId || 'local-management',
+        action: 'collaboration.resource-scope.initialize',
+        targetType: 'canvas',
+        targetId: canvasId,
+        metadata: {
+          trustedRevision: summary.trustedRevision,
+          assetCount: summary.assetCount,
+          subflowCount: summary.subflowCount,
+        },
+      });
+      return summary;
+    });
+    return transaction.immediate();
+  }
+
+  getCanvasResourceGrantState(projectId, canvasId) {
+    const state = this.db.prepare(`
+      SELECT project_id, canvas_id, trusted_revision, initialized_at, updated_at
+      FROM canvas_resource_grant_state WHERE project_id = ? AND canvas_id = ?
+    `).get(String(projectId), String(canvasId));
+    return state ? {
+      projectId: state.project_id,
+      canvasId: state.canvas_id,
+      trustedRevision: Number(state.trusted_revision),
+      initializedAt: Number(state.initialized_at),
+      updatedAt: Number(state.updated_at),
+    } : null;
+  }
+
+  ensureCanvasResourceGrantState(projectId, canvasId) {
+    const document = this.getCanvas(canvasId);
+    if (!document || String(document.projectId) !== String(projectId)) throw new Error('协作房间画布不存在');
+    const state = this.getCanvasResourceGrantState(projectId, canvasId);
+    if (state) return state;
+    const now = Date.now();
+    this.db.prepare(`
+      INSERT OR IGNORE INTO canvas_resource_grant_state(
+        project_id, canvas_id, trusted_revision, initialized_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?)
+    `).run(
+      String(projectId),
+      String(canvasId),
+      Number(document.revision),
+      0,
+      now,
+    );
+    return this.getCanvasResourceGrantState(projectId, canvasId);
+  }
+
+  listCanvasResourceGrants(projectId, canvasId) {
+    const rows = this.db.prepare(`
+      SELECT resource_type, resource_id, resource_version
+      FROM canvas_resource_grants
+      WHERE project_id = ? AND canvas_id = ?
+      GROUP BY resource_type, resource_id, resource_version
+      ORDER BY resource_type, resource_id, resource_version
+      LIMIT 10000
+    `).all(String(projectId), String(canvasId));
+    const assetIds = new Set();
+    const subflowReferences = new Map();
+    for (const row of rows) {
+      if (row.resource_type === 'asset') {
+        assetIds.add(String(row.resource_id));
+        continue;
+      }
+      if (row.resource_type !== 'subflow') continue;
+      const id = String(row.resource_id);
+      const version = Number(row.resource_version);
+      if (!subflowReferences.has(id)) subflowReferences.set(id, new Set());
+      subflowReferences.get(id).add(version);
+    }
+    return { assetIds, subflowReferences };
+  }
+
+  grantCanvasAssetResource(projectId, canvasId, assetId, source = CANVAS_RESOURCE_LINEAGE_SOURCE) {
+    const canvas = this.getCanvas(canvasId);
+    const asset = this.getAsset(assetId);
+    if (!canvas || String(canvas.projectId) !== String(projectId)
+      || !asset || String(asset.projectId) !== String(projectId)) {
+      throw new Error('素材协作授权必须绑定同一项目中的有效画布和素材');
+    }
+    this._upsertCanvasResourceGrant(projectId, canvasId, 'asset', assetId, 0, source);
+    return String(assetId);
+  }
+
+  _grantCanvasSubflowResource(projectId, canvasId, definitionId, version, source, now = Date.now()) {
+    const canvas = this.getCanvas(canvasId);
+    if (!canvas || String(canvas.projectId) !== String(projectId)) {
+      throw new Error('子工作流协作授权必须绑定同一项目中的有效画布');
+    }
+    const synthetic = {
+      projectId: String(projectId),
+      canvasId: String(canvasId),
+      revision: Number(canvas.revision),
+      nodes: [{
+        id: 'canvas-resource-grant',
+        type: 'subflow',
+        position: { x: 0, y: 0 },
+        data: { definitionId: String(definitionId), definitionVersion: Number(version) },
+      }],
+      edges: [],
+    };
+    const resolved = this.resolveCanvasDocumentResources(synthetic);
+    if (resolved.truncated || resolved.missingSubflows.length > 0) {
+      throw new Error('子工作流协作授权无法解析固定版本依赖');
+    }
+    for (const assetId of resolved.assetIds) {
+      this._upsertCanvasResourceGrant(projectId, canvasId, 'asset', assetId, 0, source, now);
+    }
+    for (const [id, versions] of resolved.subflowReferences) {
+      for (const grantedVersion of versions) {
+        this._upsertCanvasResourceGrant(projectId, canvasId, 'subflow', id, grantedVersion, source, now);
+      }
+    }
+    return { projectId: String(projectId), canvasId: String(canvasId), definitionId: String(definitionId), version: Number(version) };
+  }
+
+  grantCanvasSubflowResource(projectId, canvasId, definitionId, version, source = CANVAS_RESOURCE_PUBLISH_SOURCE) {
+    const transaction = this.db.transaction(() => this._grantCanvasSubflowResource(
+      projectId,
+      canvasId,
+      definitionId,
+      version,
+      source,
+    ));
+    return transaction.immediate();
   }
 
   close() {
@@ -2308,18 +2956,35 @@ class ProjectDatabase {
     }) : null;
   }
 
-  ensureCanvas(canvasId, snapshot, projectId = DEFAULT_PROJECT_ID) {
+  ensureCanvas(canvasId, snapshot, projectId = DEFAULT_PROJECT_ID, options = {}) {
     const existing = this.getCanvas(canvasId);
     if (existing) return existing;
     const now = Date.now();
     const document = normalizeCanvasDocument(canvasId, snapshot, { projectId, revision: 1, updatedAt: now });
     assertCanvasDocumentInvariants(document);
-    this.db.prepare(`
-      INSERT INTO canvas_documents(canvas_id, project_id, schema_version, revision, snapshot_json, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(document.canvasId, document.projectId, document.schemaVersion, 1, JSON.stringify(document), now, now);
-    this.recordCanvasSnapshot(document, 'legacy-migration');
-    return document;
+    const transaction = this.db.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO canvas_documents(canvas_id, project_id, schema_version, revision, snapshot_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(document.canvasId, document.projectId, document.schemaVersion, 1, JSON.stringify(document), now, now);
+      this.recordCanvasSnapshot(document, 'legacy-migration');
+      if (options.initializeResourceScope === false) {
+        this.db.prepare(`
+          INSERT INTO canvas_resource_grant_state(
+            project_id, canvas_id, trusted_revision, initialized_at, updated_at
+          ) VALUES (?, ?, ?, 0, ?)
+        `).run(
+          document.projectId,
+          document.canvasId,
+          Number(document.revision),
+          now,
+        );
+      } else {
+        this._syncCanvasDocumentResourceGrants(document);
+      }
+      return document;
+    });
+    return transaction.immediate();
   }
 
   recordCanvasSnapshot(document, reason = 'periodic') {
@@ -2558,6 +3223,7 @@ class ProjectDatabase {
       assertCanvasDocumentCredentialAuthority(restored, {
         authority: options.authority,
       });
+      this._commitCanvasResourceState(restored, options);
       const operationId = String(options.opId || crypto.randomUUID());
       assertUnreservedCanvasOperationId(operationId);
       const updated = this.db.prepare(`
@@ -2601,7 +3267,13 @@ class ProjectDatabase {
   }
 
   deleteCanvas(canvasId) {
-    this.db.prepare('DELETE FROM canvas_documents WHERE canvas_id = ?').run(String(canvasId));
+    const normalizedCanvasId = String(canvasId);
+    const transaction = this.db.transaction(() => {
+      this.db.prepare('DELETE FROM canvas_resource_grants WHERE canvas_id = ?').run(normalizedCanvasId);
+      this.db.prepare('DELETE FROM canvas_resource_grant_state WHERE canvas_id = ?').run(normalizedCanvasId);
+      this.db.prepare('DELETE FROM canvas_documents WHERE canvas_id = ?').run(normalizedCanvasId);
+    });
+    transaction.immediate();
   }
 
   saveCanvasSnapshot(canvasId, snapshot, options = {}) {
@@ -2619,6 +3291,7 @@ class ProjectDatabase {
         updatedAt: now,
       });
       assertCanvasDocumentInvariants(document);
+      this._commitCanvasResourceState(document, options);
       const operationId = String(options.opId || crypto.randomUUID());
       assertUnreservedCanvasOperationId(operationId);
       if (this.getCanvasOperationIdentity(operationId)) throw new OperationIdConflictError(current);
@@ -2774,6 +3447,7 @@ class ProjectDatabase {
         appliedCount += 1;
       }
       if (!appliedCount) return { document, acknowledgements };
+      this._commitCanvasResourceState(document, options);
       const updated = this.db.prepare(`
         UPDATE canvas_documents
         SET revision = ?, schema_version = ?, snapshot_json = ?, updated_at = ?
@@ -2818,11 +3492,13 @@ class ProjectDatabase {
     const patch = validateCanvasPatch(rawPatch);
     assertCanvasOperationCredentialAuthority(document, patch.operations, { authority: options.authority });
     if (patch.baseRevision !== document.revision) throw new RevisionConflictError(document);
-    return buildCanvasPatchPlan(document, patch, {
+    const plan = buildCanvasPatchPlan(document, patch, {
       actorId: options.actorId,
       sessionId: options.sessionId,
       authority: options.authority,
-    }).preview;
+    });
+    options.assertResultingDocument?.(plan.resultingDocument);
+    return plan.preview;
   }
 
   applyCanvasPatch(canvasId, rawPatch, options = {}) {
@@ -2957,6 +3633,7 @@ class ProjectDatabase {
         appliedRevision: document.revision,
       }, provenanceGuards);
 
+      this._commitCanvasResourceState(document, options);
       const updated = this.db.prepare(`
         UPDATE canvas_documents
         SET revision = ?, schema_version = ?, snapshot_json = ?, updated_at = ?
@@ -3213,6 +3890,7 @@ class ProjectDatabase {
         this.recordCanvasOperationMutation(beforeOperation, document, operation);
         this.insertCanvasOperationRecord(operation, document.revision, false);
       });
+      this._commitCanvasResourceState(document, options);
       const updated = this.db.prepare(`
         UPDATE canvas_documents
         SET revision = ?, schema_version = ?, snapshot_json = ?, updated_at = ?
@@ -3288,16 +3966,21 @@ class ProjectDatabase {
     const document = this.getCanvas(canvasId);
     if (!document) return null;
     const revision = Math.max(0, Number(afterRevision) || 0);
-    if (revision <= 0 || document.revision - revision > limit) return { mode: 'snapshot', document };
+    const revisionGap = Number(document.revision) - revision;
+    if (revision <= 0 || revisionGap < 0 || revisionGap > limit) {
+      return { mode: 'snapshot', document };
+    }
     const rows = this.db.prepare(`
       SELECT * FROM canvas_operations
       WHERE canvas_id = ? AND revision > ?
       ORDER BY revision ASC LIMIT ?
     `).all(canvasId, revision, limit + 1);
+    const completeRevisionCoverage = rows.length === revisionGap
+      && rows.every((row, index) => Number(row.revision) === revision + index + 1);
     if (
       rows.length > limit
       || rows.some((row) => row.requires_snapshot)
-      || (document.revision > revision && (rows.length === 0 || Number(rows[0].revision) > revision + 1))
+      || !completeRevisionCoverage
     ) return { mode: 'snapshot', document };
     return {
       mode: 'operations',
@@ -3337,14 +4020,48 @@ class ProjectDatabase {
     });
   }
 
+  listCanvasAssetIds(projectId, canvasId, limit = 2000) {
+    const normalizedProjectId = String(projectId || DEFAULT_PROJECT_ID);
+    const normalizedCanvasId = String(canvasId || '');
+    const safeLimit = Math.min(10_000, Math.max(1, Math.trunc(Number(limit) || 2000)));
+    const ids = new Set(this.db.prepare(`
+      SELECT DISTINCT asset_id
+      FROM asset_lineage_events
+      WHERE project_id = ? AND canvas_id = ?
+      ORDER BY created_at DESC
+      LIMIT ?
+    `).all(normalizedProjectId, normalizedCanvasId, safeLimit).map((row) => String(row.asset_id)));
+    const outputRows = this.db.prepare(`
+      SELECT nr.output_refs_json
+      FROM node_runs nr
+      JOIN runs r ON r.id = nr.run_id
+      WHERE r.project_id = ? AND r.canvas_id = ?
+      ORDER BY nr.updated_at DESC
+      LIMIT ?
+    `).all(normalizedProjectId, normalizedCanvasId, safeLimit);
+    for (const row of outputRows) {
+      for (const assetId of parseJson(row.output_refs_json, [])) {
+        if (ids.size >= safeLimit) break;
+        if (assetId != null && String(assetId).trim()) ids.add(String(assetId).trim());
+      }
+      if (ids.size >= safeLimit) break;
+    }
+    return [...ids];
+  }
+
   createInvite(record) {
+    const canvas = this.getCanvas(record?.canvasId);
+    if (!canvas || String(canvas.projectId) !== String(record?.projectId || '')) {
+      throw new Error('邀请必须绑定当前项目中的有效画布');
+    }
     this.db.prepare(`
       INSERT INTO collaboration_invites(
-        id, project_id, code_hash, role, capabilities_json, expires_at, max_uses, use_count, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+        id, project_id, canvas_id, code_hash, role, capabilities_json, expires_at, max_uses, use_count, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
     `).run(
       record.id,
       record.projectId,
+      record.canvasId,
       record.codeHash,
       record.role,
       JSON.stringify(record.capabilities || []),
@@ -3354,23 +4071,38 @@ class ProjectDatabase {
     );
     this.appendAuditEvent({
       projectId: record.projectId,
+      canvasId: record.canvasId,
       actorId: record.createdBy,
       sessionId: record.sessionId,
       action: 'collaboration.invite.create',
       targetType: 'invite',
       targetId: record.id,
-      metadata: { role: record.role, capabilities: record.capabilities || [], expiresAt: record.expiresAt, maxUses: record.maxUses },
+      metadata: {
+        canvasId: record.canvasId,
+        role: record.role,
+        capabilities: record.capabilities || [],
+        expiresAt: record.expiresAt,
+        maxUses: record.maxUses,
+      },
       createdAt: record.createdAt,
     });
   }
 
-  listInvites(projectId = DEFAULT_PROJECT_ID) {
-    return this.db.prepare(`
-      SELECT id, project_id, role, capabilities_json, expires_at, max_uses, use_count, revoked_at, created_at
+  listInvites(projectId = DEFAULT_PROJECT_ID, options = {}) {
+    const canvasId = options.canvasId == null ? null : String(options.canvasId);
+    const rows = canvasId == null
+      ? this.db.prepare(`
+      SELECT id, project_id, canvas_id, role, capabilities_json, expires_at, max_uses, use_count, revoked_at, created_at
       FROM collaboration_invites WHERE project_id = ? ORDER BY created_at DESC
-    `).all(String(projectId)).map((row) => ({
+    `).all(String(projectId))
+      : this.db.prepare(`
+      SELECT id, project_id, canvas_id, role, capabilities_json, expires_at, max_uses, use_count, revoked_at, created_at
+      FROM collaboration_invites WHERE project_id = ? AND canvas_id = ? ORDER BY created_at DESC
+    `).all(String(projectId), canvasId);
+    return rows.map((row) => ({
       id: row.id,
       projectId: row.project_id,
+      canvasId: row.canvas_id,
       role: row.role,
       capabilities: parseJson(row.capabilities_json, []),
       expiresAt: row.expires_at,
@@ -3382,12 +4114,19 @@ class ProjectDatabase {
   }
 
   revokeInvite(inviteId, options = {}) {
-    const invite = this.db.prepare('SELECT id, project_id, revoked_at FROM collaboration_invites WHERE id = ?').get(String(inviteId));
+    const invite = this.db.prepare(`
+      SELECT id, project_id, canvas_id, role, capabilities_json, expires_at, max_uses, use_count, revoked_at, created_at
+      FROM collaboration_invites
+      WHERE id = ?
+    `).get(String(inviteId));
     if (!invite) return null;
+    if (options.expectedProjectId != null && String(options.expectedProjectId) !== String(invite.project_id)) return null;
+    if (options.expectedCanvasId != null && String(options.expectedCanvasId) !== String(invite.canvas_id)) return null;
     const revokedAt = invite.revoked_at || Date.now();
     this.db.prepare('UPDATE collaboration_invites SET revoked_at = ? WHERE id = ?').run(revokedAt, invite.id);
     this.appendAuditEvent({
       projectId: invite.project_id,
+      canvasId: invite.canvas_id,
       actorId: options.actorId,
       sessionId: options.sessionId,
       action: 'collaboration.invite.revoke',
@@ -3395,7 +4134,18 @@ class ProjectDatabase {
       targetId: invite.id,
       metadata: { revokedAt },
     });
-    return { id: invite.id, projectId: invite.project_id, revokedAt };
+    return {
+      id: invite.id,
+      projectId: invite.project_id,
+      canvasId: invite.canvas_id,
+      role: invite.role,
+      capabilities: parseJson(invite.capabilities_json, []),
+      expiresAt: invite.expires_at,
+      maxUses: invite.max_uses,
+      useCount: invite.use_count,
+      revokedAt,
+      createdAt: invite.created_at,
+    };
   }
 
   redeemInvite(codeHash, record) {
@@ -3403,13 +4153,43 @@ class ProjectDatabase {
       const invite = this.db.prepare('SELECT * FROM collaboration_invites WHERE code_hash = ?').get(codeHash);
       const now = Date.now();
       if (!invite || invite.revoked_at || invite.expires_at <= now || invite.use_count >= invite.max_uses) return null;
+      if (record.expectedCanvasId != null
+        && String(record.expectedCanvasId) !== String(invite.canvas_id || '')) return null;
+      const canvas = this.db.prepare(`
+        SELECT d.revision, state.trusted_revision, state.initialized_at
+        FROM canvas_documents d
+        LEFT JOIN canvas_resource_grant_state state
+          ON state.project_id = d.project_id AND state.canvas_id = d.canvas_id
+        WHERE d.canvas_id = ? AND d.project_id = ?
+      `).get(invite.canvas_id, invite.project_id);
+      if (!canvas
+        || Number(canvas.initialized_at) <= 0
+        || Number(canvas.trusted_revision) !== Number(canvas.revision)) {
+        this.db.prepare('UPDATE collaboration_invites SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ?')
+          .run(now, invite.id);
+        return null;
+      }
+      const document = this.getCanvas(invite.canvas_id);
+      const resolvedResources = document
+        ? this.resolveCanvasDocumentResources(document)
+        : null;
+      if (!resolvedResources
+        || resolvedResources.truncated
+        || resolvedResources.subflowPinMismatches.length > 0
+        || resolvedResources.subflowContentMismatches.length > 0
+        || resolvedResources.missingSubflows.length > 0) {
+        this.db.prepare('UPDATE collaboration_invites SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ?')
+          .run(now, invite.id);
+        return null;
+      }
       this.db.prepare('UPDATE collaboration_invites SET use_count = use_count + 1 WHERE id = ?').run(invite.id);
       this.db.prepare(`
-        INSERT INTO collaboration_members(id, project_id, display_name, role, capabilities_json, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO collaboration_members(id, project_id, canvas_id, display_name, role, capabilities_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         record.memberId,
         invite.project_id,
+        invite.canvas_id,
         record.displayName,
         invite.role,
         invite.capabilities_json,
@@ -3417,12 +4197,13 @@ class ProjectDatabase {
         now,
       );
       this.db.prepare(`
-        INSERT INTO collaboration_sessions(id, project_id, member_id, token_hash, expires_at, created_at, last_seen_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(record.sessionId, invite.project_id, record.memberId, record.tokenHash, record.sessionExpiresAt, now, now);
+        INSERT INTO collaboration_sessions(id, project_id, canvas_id, member_id, token_hash, expires_at, created_at, last_seen_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(record.sessionId, invite.project_id, invite.canvas_id, record.memberId, record.tokenHash, record.sessionExpiresAt, now, now);
       return {
         inviteId: invite.id,
         projectId: invite.project_id,
+        canvasId: invite.canvas_id,
         memberId: record.memberId,
         sessionId: record.sessionId,
         displayName: record.displayName,
@@ -3437,17 +4218,21 @@ class ProjectDatabase {
   getSession(tokenHash) {
     const now = Date.now();
     const row = this.db.prepare(`
-      SELECT s.id AS session_id, s.project_id, s.member_id, s.expires_at,
+      SELECT s.id AS session_id, s.project_id, s.canvas_id, s.member_id, s.expires_at,
              m.display_name, m.role, m.capabilities_json
       FROM collaboration_sessions s
       JOIN collaboration_members m ON m.id = s.member_id
+      JOIN canvas_documents d ON d.canvas_id = s.canvas_id AND d.project_id = s.project_id
       WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > ?
+        AND s.canvas_id IS NOT NULL AND TRIM(s.canvas_id) <> ''
+        AND m.project_id = s.project_id AND m.canvas_id = s.canvas_id
     `).get(tokenHash, now);
     if (!row) return null;
     this.db.prepare('UPDATE collaboration_sessions SET last_seen_at = ? WHERE id = ?').run(now, row.session_id);
     return {
       id: row.session_id,
       projectId: row.project_id,
+      canvasId: row.canvas_id,
       memberId: row.member_id,
       displayName: row.display_name,
       role: row.role,
@@ -3456,8 +4241,88 @@ class ProjectDatabase {
     };
   }
 
-  revokeSession(sessionId) {
-    this.db.prepare('UPDATE collaboration_sessions SET revoked_at = ? WHERE id = ?').run(Date.now(), sessionId);
+  listCollaborationSessions(projectId = DEFAULT_PROJECT_ID, options = {}) {
+    const now = Date.now();
+    const canvasId = options.canvasId == null ? null : String(options.canvasId);
+    const statement = canvasId == null ? this.db.prepare(`
+      SELECT s.id, s.project_id, s.canvas_id, s.member_id, s.expires_at, s.revoked_at, s.created_at, s.last_seen_at,
+             m.display_name, m.role,
+             CASE WHEN d.canvas_id IS NOT NULL
+                    AND m.project_id = s.project_id
+                    AND m.canvas_id = s.canvas_id
+                  THEN 1 ELSE 0 END AS scope_valid
+      FROM collaboration_sessions s
+      JOIN collaboration_members m ON m.id = s.member_id
+      LEFT JOIN canvas_documents d ON d.canvas_id = s.canvas_id AND d.project_id = s.project_id
+      WHERE s.project_id = ?
+      ORDER BY s.created_at DESC, s.id ASC
+    `) : this.db.prepare(`
+      SELECT s.id, s.project_id, s.canvas_id, s.member_id, s.expires_at, s.revoked_at, s.created_at, s.last_seen_at,
+             m.display_name, m.role,
+             CASE WHEN d.canvas_id IS NOT NULL
+                    AND m.project_id = s.project_id
+                    AND m.canvas_id = s.canvas_id
+                  THEN 1 ELSE 0 END AS scope_valid
+      FROM collaboration_sessions s
+      JOIN collaboration_members m ON m.id = s.member_id
+      LEFT JOIN canvas_documents d ON d.canvas_id = s.canvas_id AND d.project_id = s.project_id
+      WHERE s.project_id = ? AND s.canvas_id = ?
+      ORDER BY s.created_at DESC, s.id ASC
+    `);
+    const rows = canvasId == null
+      ? statement.all(String(projectId))
+      : statement.all(String(projectId), canvasId);
+    return rows.map((row) => ({
+      id: row.id,
+      projectId: row.project_id,
+      canvasId: row.canvas_id,
+      memberId: row.member_id,
+      displayName: row.display_name,
+      role: row.role,
+      expiresAt: row.expires_at,
+      revokedAt: row.revoked_at,
+      createdAt: row.created_at,
+      lastSeenAt: row.last_seen_at,
+      active: row.revoked_at == null && row.expires_at > now && Number(row.scope_valid) === 1,
+    }));
+  }
+
+  revokeSession(sessionId, options = {}) {
+    const session = this.db.prepare(`
+      SELECT s.id, s.project_id, s.canvas_id, s.member_id, s.expires_at, s.revoked_at, s.created_at, s.last_seen_at,
+             m.display_name, m.role
+      FROM collaboration_sessions s
+      JOIN collaboration_members m ON m.id = s.member_id
+      WHERE s.id = ?
+    `).get(String(sessionId));
+    if (!session) return null;
+    if (options.expectedProjectId != null && String(options.expectedProjectId) !== String(session.project_id)) return null;
+    if (options.expectedCanvasId != null && String(options.expectedCanvasId) !== String(session.canvas_id)) return null;
+    const revokedAt = session.revoked_at || Date.now();
+    this.db.prepare('UPDATE collaboration_sessions SET revoked_at = ? WHERE id = ?').run(revokedAt, session.id);
+    this.appendAuditEvent({
+      projectId: session.project_id,
+      canvasId: session.canvas_id,
+      actorId: options.actorId,
+      sessionId: options.sessionId,
+      action: 'collaboration.session.revoke',
+      targetType: 'session',
+      targetId: session.id,
+      metadata: { memberId: session.member_id, revokedAt },
+    });
+    return {
+      id: session.id,
+      projectId: session.project_id,
+      canvasId: session.canvas_id,
+      memberId: session.member_id,
+      displayName: session.display_name,
+      role: session.role,
+      expiresAt: session.expires_at,
+      revokedAt,
+      createdAt: session.created_at,
+      lastSeenAt: session.last_seen_at,
+      active: false,
+    };
   }
 
   rotateSession(sessionId, record, options = {}) {
@@ -3466,17 +4331,21 @@ class ProjectDatabase {
         SELECT s.*, m.display_name, m.role, m.capabilities_json
         FROM collaboration_sessions s
         JOIN collaboration_members m ON m.id = s.member_id
+        JOIN canvas_documents d ON d.canvas_id = s.canvas_id AND d.project_id = s.project_id
         WHERE s.id = ? AND s.revoked_at IS NULL AND s.expires_at > ?
+          AND s.canvas_id IS NOT NULL AND TRIM(s.canvas_id) <> ''
+          AND m.project_id = s.project_id AND m.canvas_id = s.canvas_id
       `).get(String(sessionId), Date.now());
       if (!current) return null;
       const now = Date.now();
       this.db.prepare('UPDATE collaboration_sessions SET revoked_at = ? WHERE id = ?').run(now, current.id);
       this.db.prepare(`
-        INSERT INTO collaboration_sessions(id, project_id, member_id, token_hash, expires_at, created_at, last_seen_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(record.sessionId, current.project_id, current.member_id, record.tokenHash, record.expiresAt, now, now);
+        INSERT INTO collaboration_sessions(id, project_id, canvas_id, member_id, token_hash, expires_at, created_at, last_seen_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(record.sessionId, current.project_id, current.canvas_id, current.member_id, record.tokenHash, record.expiresAt, now, now);
       this.appendAuditEvent({
         projectId: current.project_id,
+        canvasId: current.canvas_id,
         actorId: current.member_id,
         sessionId: record.sessionId,
         action: 'collaboration.session.rotate',
@@ -3487,6 +4356,7 @@ class ProjectDatabase {
       return {
         id: record.sessionId,
         projectId: current.project_id,
+        canvasId: current.canvas_id,
         memberId: current.member_id,
         displayName: current.display_name,
         role: current.role,
@@ -3498,12 +4368,15 @@ class ProjectDatabase {
   }
 
   revokeMemberSessions(memberId, options = {}) {
-    const member = this.db.prepare('SELECT id, project_id FROM collaboration_members WHERE id = ?').get(String(memberId));
+    const member = this.db.prepare('SELECT id, project_id, canvas_id FROM collaboration_members WHERE id = ?').get(String(memberId));
     if (!member) return 0;
+    if (options.expectedProjectId != null && String(options.expectedProjectId) !== String(member.project_id)) return 0;
+    if (options.expectedCanvasId != null && String(options.expectedCanvasId) !== String(member.canvas_id)) return 0;
     const result = this.db.prepare('UPDATE collaboration_sessions SET revoked_at = ? WHERE member_id = ? AND revoked_at IS NULL')
       .run(Date.now(), member.id);
     this.appendAuditEvent({
       projectId: member.project_id,
+      canvasId: member.canvas_id,
       actorId: options.actorId,
       sessionId: options.sessionId,
       action: 'collaboration.sessions.revoke-member',
@@ -3529,12 +4402,38 @@ class ProjectDatabase {
     return result.changes;
   }
 
-  listMembers(projectId = DEFAULT_PROJECT_ID) {
-    return this.db.prepare(`
-      SELECT id, display_name, role, capabilities_json, created_at, updated_at
+  revokeCanvasSessions(projectId, canvasId, options = {}) {
+    const result = this.db.prepare(`
+      UPDATE collaboration_sessions
+      SET revoked_at = ?
+      WHERE project_id = ? AND canvas_id = ? AND revoked_at IS NULL
+    `).run(Date.now(), String(projectId), String(canvasId));
+    this.appendAuditEvent({
+      projectId,
+      canvasId,
+      actorId: options.actorId,
+      sessionId: options.sessionId,
+      action: 'collaboration.sessions.revoke-canvas',
+      targetType: 'canvas',
+      targetId: canvasId,
+      metadata: { revokedSessions: result.changes },
+    });
+    return result.changes;
+  }
+
+  listMembers(projectId = DEFAULT_PROJECT_ID, options = {}) {
+    const canvasId = options.canvasId == null ? null : String(options.canvasId);
+    const rows = canvasId == null ? this.db.prepare(`
+      SELECT id, project_id, canvas_id, display_name, role, capabilities_json, created_at, updated_at
       FROM collaboration_members WHERE project_id = ? ORDER BY created_at ASC
-    `).all(projectId).map((row) => ({
+    `).all(projectId) : this.db.prepare(`
+      SELECT id, project_id, canvas_id, display_name, role, capabilities_json, created_at, updated_at
+      FROM collaboration_members WHERE project_id = ? AND canvas_id = ? ORDER BY created_at ASC
+    `).all(projectId, canvasId);
+    return rows.map((row) => ({
       id: row.id,
+      projectId: row.project_id,
+      canvasId: row.canvas_id,
       displayName: row.display_name,
       role: row.role,
       capabilities: parseJson(row.capabilities_json, []),
@@ -3545,12 +4444,13 @@ class ProjectDatabase {
 
   getCollaborationMember(memberId) {
     const row = this.db.prepare(`
-      SELECT id, project_id, display_name, role, capabilities_json, created_at, updated_at
+      SELECT id, project_id, canvas_id, display_name, role, capabilities_json, created_at, updated_at
       FROM collaboration_members WHERE id = ?
     `).get(String(memberId));
     return row ? {
       id: row.id,
       projectId: row.project_id,
+      canvasId: row.canvas_id,
       displayName: row.display_name,
       role: row.role,
       capabilities: parseJson(row.capabilities_json, []),
@@ -3562,15 +4462,17 @@ class ProjectDatabase {
   updateMember(memberId, patch = {}, options = {}) {
     const member = this.db.prepare('SELECT * FROM collaboration_members WHERE id = ?').get(String(memberId));
     if (!member) return null;
+    if (options.expectedProjectId != null && String(options.expectedProjectId) !== String(member.project_id)) return null;
+    if (options.expectedCanvasId != null && String(options.expectedCanvasId) !== String(member.canvas_id)) return null;
     const role = String(patch.role || member.role);
     const capabilities = Array.isArray(patch.capabilities) ? patch.capabilities.map(String) : parseJson(member.capabilities_json, []);
     const displayName = patch.displayName == null ? member.display_name : String(patch.displayName).trim().slice(0, 48);
     const updatedAt = Date.now();
     this.db.prepare('UPDATE collaboration_members SET display_name = ?, role = ?, capabilities_json = ?, updated_at = ? WHERE id = ?')
       .run(displayName || member.display_name, role, JSON.stringify(capabilities), updatedAt, member.id);
-    this.revokeMemberSessions(member.id, options);
     this.appendAuditEvent({
       projectId: member.project_id,
+      canvasId: member.canvas_id,
       actorId: options.actorId,
       sessionId: options.sessionId,
       action: 'collaboration.member.update',
@@ -3578,17 +4480,25 @@ class ProjectDatabase {
       targetId: member.id,
       metadata: { previousRole: member.role, role, capabilities },
     });
-    return this.listMembers(member.project_id).find((entry) => entry.id === member.id) || null;
+    return this.listMembers(member.project_id, { canvasId: member.canvas_id })
+      .find((entry) => entry.id === member.id) || null;
   }
 
   removeMember(memberId, options = {}) {
-    const member = this.db.prepare('SELECT id, project_id, display_name, role FROM collaboration_members WHERE id = ?').get(String(memberId));
+    const member = this.db.prepare(`
+      SELECT id, project_id, canvas_id, display_name, role, capabilities_json, created_at, updated_at
+      FROM collaboration_members
+      WHERE id = ?
+    `).get(String(memberId));
     if (!member) return null;
+    if (options.expectedProjectId != null && String(options.expectedProjectId) !== String(member.project_id)) return null;
+    if (options.expectedCanvasId != null && String(options.expectedCanvasId) !== String(member.canvas_id)) return null;
     const transaction = this.db.transaction(() => {
       this.revokeMemberSessions(member.id, options);
       this.db.prepare('DELETE FROM collaboration_members WHERE id = ?').run(member.id);
       this.appendAuditEvent({
         projectId: member.project_id,
+        canvasId: member.canvas_id,
         actorId: options.actorId,
         sessionId: options.sessionId,
         action: 'collaboration.member.remove',
@@ -3598,7 +4508,16 @@ class ProjectDatabase {
       });
     });
     transaction();
-    return { id: member.id, projectId: member.project_id };
+    return {
+      id: member.id,
+      projectId: member.project_id,
+      canvasId: member.canvas_id,
+      displayName: member.display_name,
+      role: member.role,
+      capabilities: parseJson(member.capabilities_json, []),
+      createdAt: member.created_at,
+      updatedAt: member.updated_at,
+    };
   }
 
   createReviewThread(input) {
@@ -3775,19 +4694,44 @@ class ProjectDatabase {
   listRunIntents(filters = {}) {
     const projectId = String(filters.projectId || DEFAULT_PROJECT_ID);
     const status = filters.status ? String(filters.status) : null;
-    const rows = status
-      ? this.db.prepare('SELECT * FROM run_intents WHERE project_id = ? AND status = ? ORDER BY created_at ASC LIMIT 500').all(projectId, status)
-      : this.db.prepare('SELECT * FROM run_intents WHERE project_id = ? ORDER BY created_at DESC LIMIT 500').all(projectId);
+    const canvasId = filters.canvasId ? String(filters.canvasId) : null;
+    const rows = status && canvasId
+      ? this.db.prepare('SELECT * FROM run_intents WHERE project_id = ? AND canvas_id = ? AND status = ? ORDER BY created_at ASC, id ASC LIMIT 500').all(projectId, canvasId, status)
+      : status
+        ? this.db.prepare('SELECT * FROM run_intents WHERE project_id = ? AND status = ? ORDER BY created_at ASC, id ASC LIMIT 500').all(projectId, status)
+        : canvasId
+          ? this.db.prepare('SELECT * FROM run_intents WHERE project_id = ? AND canvas_id = ? ORDER BY created_at DESC, id DESC LIMIT 500').all(projectId, canvasId)
+          : this.db.prepare('SELECT * FROM run_intents WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT 500').all(projectId);
     return rows.map((row) => this.mapRunIntent(row));
   }
 
-  updateRunIntent(intentId, patch = {}) {
-    const row = this.db.prepare('SELECT * FROM run_intents WHERE id = ?').get(String(intentId));
+  updateRunIntent(intentId, patch = {}, options = {}) {
+    const expectedProjectId = options.expectedProjectId == null ? null : String(options.expectedProjectId);
+    const expectedCanvasId = options.expectedCanvasId == null ? null : String(options.expectedCanvasId);
+    const row = expectedProjectId == null && expectedCanvasId == null
+      ? this.db.prepare('SELECT * FROM run_intents WHERE id = ?').get(String(intentId))
+      : expectedCanvasId == null
+        ? this.db.prepare('SELECT * FROM run_intents WHERE id = ? AND project_id = ?').get(String(intentId), expectedProjectId)
+        : this.db.prepare('SELECT * FROM run_intents WHERE id = ? AND project_id = ? AND canvas_id = ?')
+          .get(String(intentId), expectedProjectId, expectedCanvasId);
     if (!row) return null;
     const actualCost = patch.actualCost == null ? row.actual_cost : Math.max(0, Number(patch.actualCost) || 0);
-    this.db.prepare('UPDATE run_intents SET status = ?, run_id = ?, actual_cost = ?, updated_at = ? WHERE id = ?')
-      .run(String(patch.status || row.status), patch.runId ?? row.run_id, actualCost, Date.now(), intentId);
-    return this.mapRunIntent(this.db.prepare('SELECT * FROM run_intents WHERE id = ?').get(String(intentId)));
+    const result = expectedProjectId == null && expectedCanvasId == null
+      ? this.db.prepare('UPDATE run_intents SET status = ?, run_id = ?, actual_cost = ?, updated_at = ? WHERE id = ?')
+        .run(String(patch.status || row.status), patch.runId ?? row.run_id, actualCost, Date.now(), intentId)
+      : expectedCanvasId == null
+        ? this.db.prepare('UPDATE run_intents SET status = ?, run_id = ?, actual_cost = ?, updated_at = ? WHERE id = ? AND project_id = ?')
+          .run(String(patch.status || row.status), patch.runId ?? row.run_id, actualCost, Date.now(), intentId, expectedProjectId)
+        : this.db.prepare('UPDATE run_intents SET status = ?, run_id = ?, actual_cost = ?, updated_at = ? WHERE id = ? AND project_id = ? AND canvas_id = ?')
+          .run(String(patch.status || row.status), patch.runId ?? row.run_id, actualCost, Date.now(), intentId, expectedProjectId, expectedCanvasId);
+    if (result.changes !== 1) return null;
+    const updated = expectedProjectId == null && expectedCanvasId == null
+      ? this.db.prepare('SELECT * FROM run_intents WHERE id = ?').get(String(intentId))
+      : expectedCanvasId == null
+        ? this.db.prepare('SELECT * FROM run_intents WHERE id = ? AND project_id = ?').get(String(intentId), expectedProjectId)
+        : this.db.prepare('SELECT * FROM run_intents WHERE id = ? AND project_id = ? AND canvas_id = ?')
+          .get(String(intentId), expectedProjectId, expectedCanvasId);
+    return updated ? this.mapRunIntent(updated) : null;
   }
 
   claimRunIntent(intentId, run) {
@@ -4018,6 +4962,16 @@ class ProjectDatabase {
         targetId: id,
         metadata: { version, revision, previousRevision: currentRevision, changeSummary },
       });
+      if (options.grantCanvasId != null) {
+        this._grantCanvasSubflowResource(
+          projectId,
+          String(options.grantCanvasId),
+          id,
+          version,
+          CANVAS_RESOURCE_PUBLISH_SOURCE,
+          now,
+        );
+      }
       return definition;
     });
     return write.immediate(input);
@@ -5237,6 +6191,16 @@ class ProjectDatabase {
     const query = String(filters.query || '').trim().toLowerCase();
     const clauses = ['a.project_id = ?'];
     const values = [projectId];
+    if (Array.isArray(filters.assetIds)) {
+      const assetIds = [...new Set(filters.assetIds
+        .map((value) => String(value || '').trim())
+        .filter(Boolean))].slice(0, MAX_ASSET_REFERENCES);
+      if (assetIds.length === 0) clauses.push('0 = 1');
+      else {
+        clauses.push('a.id IN (SELECT value FROM json_each(?))');
+        values.push(JSON.stringify(assetIds));
+      }
+    }
     if (filters.kind) { clauses.push('a.kind = ?'); values.push(String(filters.kind)); }
     if (filters.storageMode) { clauses.push('a.storage_mode = ?'); values.push(String(filters.storageMode)); }
     if (filters.availability) { clauses.push('a.availability = ?'); values.push(String(filters.availability)); }
@@ -7851,17 +8815,24 @@ class ProjectDatabase {
   }
 
   findAssetsBySourceUrls(projectId, sourceUrls = []) {
-    const normalized = [...new Set((Array.isArray(sourceUrls) ? sourceUrls : []).map((value) => String(value || '').trim()).filter(Boolean))].slice(0, 200);
+    const normalized = [...new Set((Array.isArray(sourceUrls) ? sourceUrls : [])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean))].slice(0, MAX_ASSET_REFERENCES);
     if (!normalized.length) return [];
-    const rows = this.db.prepare(`
-      SELECT id FROM assets WHERE project_id = ? AND source_url IN (${normalized.map(() => '?').join(',')})
-        AND COALESCE(json_extract(metadata_json, '$.sourceState'), 'current') <> 'replaced'
-      ORDER BY updated_at DESC, id DESC
-    `).all(String(projectId || DEFAULT_PROJECT_ID), ...normalized);
-    if (!rows.length) return [];
-    const fullRows = this.db.prepare(`SELECT * FROM assets WHERE id IN (${rows.map(() => '?').join(',')})`).all(...rows.map((row) => row.id));
-    const hydrated = new Map(this.hydrateAssetRows(fullRows).map((asset) => [asset.id, asset]));
-    return rows.map((row) => hydrated.get(row.id)).filter(Boolean);
+    const rows = [];
+    const normalizedProjectId = String(projectId || DEFAULT_PROJECT_ID);
+    for (let index = 0; index < normalized.length; index += 400) {
+      const batch = normalized.slice(index, index + 400);
+      rows.push(...this.db.prepare(`
+        SELECT * FROM assets WHERE project_id = ? AND source_url IN (${batch.map(() => '?').join(',')})
+          AND COALESCE(json_extract(metadata_json, '$.sourceState'), 'current') <> 'replaced'
+      `).all(normalizedProjectId, ...batch));
+    }
+    rows.sort((left, right) => (
+      Number(right.updated_at) - Number(left.updated_at)
+      || String(right.id).localeCompare(String(left.id))
+    ));
+    return this.hydrateAssetRows(rows);
   }
 
   replaceAssetAtSource(oldAssetId, nextInput = {}, lineageInput = {}) {
@@ -8328,6 +9299,17 @@ class ProjectDatabase {
         JSON.stringify(input.metadata && typeof input.metadata === 'object' ? input.metadata : {}),
         createdAt,
       );
+      if (canvasId) {
+        this._upsertCanvasResourceGrant(
+          asset.projectId,
+          canvasId,
+          'asset',
+          asset.id,
+          0,
+          CANVAS_RESOURCE_LINEAGE_SOURCE,
+          createdAt,
+        );
+      }
       // Keep the historical array-shaped return value for internal callers,
       // but never let a write hydrate another project's tombstoned history or
       // grow an unbounded response when a source accumulates many events.

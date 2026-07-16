@@ -35,6 +35,12 @@ const { CollaborationAuth, parseCookies } = require('./auth');
 const { CollaborativeTextStore } = require('./textCrdt');
 const { ExecutionPolicyError, HostExecutionPolicy } = require('./executionPolicy');
 const { inspectJsonComplexity, originAllowed } = require('./gatewaySecurity');
+const {
+  listNetworkInterfaces,
+  normalizeBindHost,
+  shareUrlsForHost,
+  validateBindHost,
+} = require('./hostManagement');
 const { requireOperationBatchRevision } = require('./protocol');
 const {
   RunIntentAuthorityError,
@@ -48,6 +54,9 @@ const SESSION_COOKIE = 't8_collab_session';
 const MAX_WS_MESSAGE_BYTES = 64 * 1024;
 const MAX_CANVAS_AGENT_REQUEST_BYTES = 64 * 1024;
 const MAX_COLLAB_UPLOAD_BYTES = 512 * 1024 * 1024;
+const WS_CLOSE_GRACE_MS = 500;
+const SERVER_CLOSE_GRACE_MS = 2000;
+const SERVER_CLOSE_SETTLE_MS = 250;
 
 function sendCanvasPatchError(res, error, options = {}) {
   const mapped = mapCanvasMutationError(error, options);
@@ -316,7 +325,7 @@ function sameOriginUpgrade(request, configuredOrigins) {
 }
 
 class CollaborationGateway {
-  constructor(config, database = null) {
+  constructor(config, database = null, options = {}) {
     this.config = config;
     this.database = database || getProjectDatabase(config);
     this.previewPipeline = database ? null : getAssetPreviewPipeline(config, this.database);
@@ -330,6 +339,16 @@ class CollaborationGateway {
     this.startedAt = null;
     this.host = null;
     this.port = null;
+    this.lifecycleTail = Promise.resolve();
+    this.lastLifecycleRequest = null;
+    this.webSocketTerminationTimers = new WeakMap();
+    this.networkInterfacesProvider = typeof options.listNetworkInterfaces === 'function'
+      ? options.listNetworkInterfaces
+      : listNetworkInterfaces;
+  }
+
+  networkInterfaces() {
+    return this.networkInterfacesProvider();
   }
 
   status() {
@@ -341,6 +360,159 @@ class CollaborationGateway {
       connectionCount: this.connections.size,
       privateBackendExposed: false,
     };
+  }
+
+  managementStatus() {
+    const status = this.status();
+    const networkInterfaces = this.networkInterfaces();
+    return {
+      ...status,
+      networkInterfaces,
+      shareUrls: status.running ? shareUrlsForHost(this.host, this.port, networkInterfaces) : [],
+      defaultHost: normalizeBindHost(this.config.COLLAB_HOST || '127.0.0.1'),
+      defaultPort: Number(this.config.COLLAB_PORT) || 18767,
+    };
+  }
+
+  managementResourceScope(projectId, canvasId) {
+    const canvas = this.database.getCanvas(canvasId);
+    if (!canvas || String(canvas.projectId) !== String(projectId)) return null;
+    const state = this.database.getCanvasResourceGrantState(projectId, canvasId);
+    const grants = state
+      ? this.database.listCanvasResourceGrants(projectId, canvasId)
+      : { assetIds: new Set(), subflowReferences: new Map() };
+    const subflowCount = [...grants.subflowReferences.values()]
+      .reduce((total, versions) => total + versions.size, 0);
+    const initialized = Boolean(state) && Number(state.initializedAt) > 0;
+    const revisionCurrent = Boolean(state)
+      && Number(state.trustedRevision) === Number(canvas.revision);
+    return {
+      status: !initialized
+        ? 'confirmation-required'
+        : revisionCurrent ? 'ready' : 'stale',
+      ready: initialized && revisionCurrent,
+      canvasRevision: Number(canvas.revision),
+      trustedRevision: state ? Number(state.trustedRevision) : null,
+      initializedAt: initialized ? Number(state.initializedAt) : null,
+      assetCount: grants.assetIds.size,
+      subflowCount,
+    };
+  }
+
+  connectionCountForProject(projectId) {
+    const expectedProjectId = String(projectId || '');
+    let count = 0;
+    for (const state of this.connections.values()) {
+      if (String(state?.session?.projectId || '') === expectedProjectId) count += 1;
+    }
+    return count;
+  }
+
+  connectionCountForCanvas(projectId, canvasId) {
+    const expectedProjectId = String(projectId || '');
+    const expectedCanvasId = String(canvasId || '');
+    let count = 0;
+    for (const state of this.connections.values()) {
+      if (String(state?.session?.projectId || '') === expectedProjectId
+        && String(state?.session?.canvasId || '') === expectedCanvasId) count += 1;
+    }
+    return count;
+  }
+
+  connectionCountForSession(sessionId) {
+    const expectedSessionId = String(sessionId || '');
+    let count = 0;
+    for (const state of this.connections.values()) {
+      if (String(state?.session?.id || '') === expectedSessionId) count += 1;
+    }
+    return count;
+  }
+
+  scheduleWebSocketTermination(webSocket, delayMs = WS_CLOSE_GRACE_MS) {
+    if (!webSocket || webSocket.readyState === WebSocket.CLOSED) return;
+    if (this.webSocketTerminationTimers.has(webSocket)) return;
+    const timer = setTimeout(() => {
+      this.webSocketTerminationTimers.delete(webSocket);
+      if (webSocket.readyState === WebSocket.CLOSED) return;
+      try { webSocket.terminate(); } catch (_) { /* already closed */ }
+    }, delayMs);
+    timer.unref?.();
+    this.webSocketTerminationTimers.set(webSocket, timer);
+    webSocket.once('close', () => {
+      const pendingTimer = this.webSocketTerminationTimers.get(webSocket);
+      if (!pendingTimer) return;
+      clearTimeout(pendingTimer);
+      this.webSocketTerminationTimers.delete(webSocket);
+    });
+  }
+
+  closeConnections(predicate, reason = 'session revoked', options = {}) {
+    const closeCode = Number.isInteger(Number(options.code)) ? Number(options.code) : 4001;
+    const messageType = String(options.messageType || 'session.revoked');
+    let closed = 0;
+    for (const [webSocket, state] of this.connections.entries()) {
+      if (!predicate(state)) continue;
+      closed += 1;
+      if (webSocket.readyState === WebSocket.OPEN) {
+        try {
+          webSocket.send(JSON.stringify({ type: messageType, reason, timestamp: Date.now() }));
+        } catch (_) {
+          // The close below remains authoritative even if the final notice cannot be delivered.
+        }
+        webSocket.close(closeCode, String(reason).slice(0, 120));
+      } else if (webSocket.readyState === WebSocket.CONNECTING) {
+        webSocket.terminate();
+      }
+      this.scheduleWebSocketTermination(webSocket);
+    }
+    return closed;
+  }
+
+  closeSessionConnections(sessionId, reason = 'session revoked') {
+    const expectedSessionId = String(sessionId || '');
+    return this.closeConnections((state) => String(state?.session?.id || '') === expectedSessionId, reason);
+  }
+
+  closeMemberConnections(memberId, reason = 'member access changed', options = {}) {
+    const expectedMemberId = String(memberId || '');
+    return this.closeConnections(
+      (state) => String(state?.session?.memberId || '') === expectedMemberId,
+      reason,
+      options,
+    );
+  }
+
+  closeProjectConnections(projectId, reason = 'project sessions revoked') {
+    const expectedProjectId = String(projectId || '');
+    return this.closeConnections((state) => String(state?.session?.projectId || '') === expectedProjectId, reason);
+  }
+
+  closeCanvasConnections(projectId, canvasId, reason = 'canvas sessions revoked') {
+    const expectedProjectId = String(projectId || '');
+    const expectedCanvasId = String(canvasId || '');
+    return this.closeConnections(
+      (state) => String(state?.session?.projectId || '') === expectedProjectId
+        && String(state?.session?.canvasId || '') === expectedCanvasId,
+      reason,
+    );
+  }
+
+  enqueueLifecycle(type, key, operation) {
+    const previous = this.lastLifecycleRequest;
+    if (previous?.type === type && previous.key === key) return previous.promise;
+    const promise = this.lifecycleTail.then(operation, operation);
+    this.lifecycleTail = promise.then(() => undefined, () => undefined);
+    const request = { type, key, promise };
+    this.lastLifecycleRequest = request;
+    promise.then(
+      () => {
+        if (this.lastLifecycleRequest === request) this.lastLifecycleRequest = null;
+      },
+      () => {
+        if (this.lastLifecycleRequest === request) this.lastLifecycleRequest = null;
+      },
+    );
+    return promise;
   }
 
   requireSession(req, res, next) {
@@ -362,8 +534,242 @@ class CollaborationGateway {
 
   ensureCanvasAccess(session, canvasId) {
     const document = this.database.getCanvas(canvasId);
-    if (!document || document.projectId !== session.projectId) return null;
+    if (!document
+      || document.projectId !== session?.projectId
+      || String(document.canvasId) !== String(session?.canvasId || '')) return null;
     return document;
+  }
+
+  canvasResourceScope(session) {
+    const document = this.ensureCanvasAccess(session, session?.canvasId);
+    if (!document) {
+      return {
+        document: null,
+        state: null,
+        ready: false,
+        assetIds: new Set(),
+        subflowReferences: new Map(),
+      };
+    }
+    const state = this.database.getCanvasResourceGrantState(document.projectId, document.canvasId);
+    const ready = Boolean(state)
+      && Number(state.initializedAt) > 0
+      && Number(state.trustedRevision) === Number(document.revision);
+    const grants = ready
+      ? this.database.listCanvasResourceGrants(document.projectId, document.canvasId)
+      : { assetIds: new Set(), subflowReferences: new Map() };
+    return {
+      document,
+      state,
+      ready,
+      assetIds: grants.assetIds,
+      subflowReferences: grants.subflowReferences,
+    };
+  }
+
+  canvasResourceError(code, message, status = 403) {
+    const error = new Error(message);
+    error.code = code;
+    error.status = status;
+    return error;
+  }
+
+  canvasResourceScopeFailure(scope) {
+    if (!scope?.document) {
+      return this.canvasResourceError(
+        'canvas_not_found',
+        '画布不存在或无权访问',
+        404,
+      );
+    }
+    if (!scope.state || Number(scope.state.initializedAt) <= 0) {
+      return this.canvasResourceError(
+        'canvas_resource_scope_confirmation_required',
+        '该画布尚未由主机确认协作资源范围',
+        409,
+      );
+    }
+    return this.canvasResourceError(
+      'canvas_resource_scope_stale',
+      '协作资源授权状态需要主机重新同步',
+      409,
+    );
+  }
+
+  requireReadyResourceScope(req, res, next) {
+    const scope = this.canvasResourceScope(req.collaborationSession);
+    if (!scope.ready) {
+      const error = this.canvasResourceScopeFailure(scope);
+      return res.status(error.status).json({
+        success: false,
+        code: error.code,
+        error: error.message,
+      });
+    }
+    req.collaborationResourceScope = scope;
+    next();
+  }
+
+  assertDocumentResourcesGranted(session, candidateDocument, options = {}) {
+    const scope = this.canvasResourceScope(session);
+    if (!scope.document || !scope.ready) {
+      throw this.canvasResourceScopeFailure(scope);
+    }
+    const candidate = {
+      ...(candidateDocument && typeof candidateDocument === 'object' ? candidateDocument : {}),
+      projectId: scope.document.projectId,
+      canvasId: scope.document.canvasId,
+    };
+    const resolved = this.database.resolveCanvasDocumentResources(candidate, {
+      validateRootSubflowDefinition: options.validateRootSubflowDefinition,
+    });
+    if (resolved.truncated) {
+      throw this.canvasResourceError(
+        'canvas_resource_scope_too_large',
+        '画布资源引用超过协作授权安全上限',
+        422,
+      );
+    }
+    if (resolved.subflowPinMismatches.length > 0) {
+      throw this.canvasResourceError(
+        'canvas_resource_subflow_pin_mismatch',
+        '画布包含身份或固定版本不一致的内嵌子工作流',
+        422,
+      );
+    }
+    if (resolved.subflowContentMismatches.length > 0) {
+      throw this.canvasResourceError(
+        'canvas_resource_subflow_content_mismatch',
+        '画布包含与权威固定版本内容不一致的内嵌子工作流',
+        422,
+      );
+    }
+    if (resolved.missingSubflows.length > 0) {
+      throw this.canvasResourceError(
+        'canvas_resource_subflow_missing',
+        '画布引用的固定版本子工作流不存在',
+        422,
+      );
+    }
+    for (const assetId of resolved.grantAssetIds) {
+      if (!scope.assetIds.has(String(assetId))) {
+        throw this.canvasResourceError(
+          'canvas_resource_access_denied',
+          '画布引用了未获当前协作房间授权的素材或子工作流',
+        );
+      }
+    }
+    for (const [definitionId, versions] of resolved.requestedSubflowReferences) {
+      const allowedVersions = scope.subflowReferences.get(String(definitionId));
+      for (const version of versions) {
+        if (!allowedVersions?.has(Number(version))) {
+          throw this.canvasResourceError(
+            'canvas_resource_access_denied',
+            '画布引用了未获当前协作房间授权的素材或子工作流',
+          );
+        }
+      }
+    }
+    return resolved;
+  }
+
+  canvasScopedSubflowDefinitions(session, query = '', scope = null) {
+    const resourceScope = scope || this.canvasResourceScope(session);
+    if (!resourceScope.ready) return [];
+    const references = [];
+    for (const [id, versions] of resourceScope.subflowReferences) {
+      for (const version of versions) references.push({ id, version });
+    }
+    const definitions = [];
+    for (let index = 0; index < references.length; index += 100) {
+      definitions.push(...this.database.getSubflowDefinitionsByRefs(
+        references.slice(index, index + 100),
+        session.projectId,
+      ));
+    }
+    const normalizedQuery = String(query || '').trim().toLowerCase();
+    return definitions
+      .filter((definition) => {
+        if (!normalizedQuery) return true;
+        return `${definition?.name || ''} ${definition?.description || ''} ${definition?.category || ''} ${(definition?.tags || []).join(' ')}`
+          .toLowerCase()
+          .includes(normalizedQuery);
+      })
+      .sort((left, right) => (
+        Number(right?.publishedAt || right?.updatedAt || right?.createdAt || 0)
+        - Number(left?.publishedAt || left?.updatedAt || left?.createdAt || 0)
+        || String(left?.id || '').localeCompare(String(right?.id || ''))
+        || Number(right?.version || 0) - Number(left?.version || 0)
+      ));
+  }
+
+  collaborationAgentDatabase(session, scope = null) {
+    const resourceScope = scope || this.canvasResourceScope(session);
+    const database = this.database;
+    const facade = Object.create(database);
+    const assetIds = [...resourceScope.assetIds];
+    const projectId = String(session.projectId);
+    const canvasId = String(session.canvasId);
+    facade.getCanvas = (requestedCanvasId) => (
+      String(requestedCanvasId) === canvasId
+        ? database.getCanvas(canvasId)
+        : null
+    );
+    facade.listAccessibleAssets = (filters = {}, subject = {}) => database.listAccessibleAssets({
+      ...filters,
+      projectId,
+      assetIds,
+    }, subject);
+    facade.countAccessibleAssets = (filters = {}, subject = {}) => database.countAccessibleAssets({
+      ...filters,
+      projectId,
+      assetIds,
+    }, subject);
+    facade.getSubflowDefinition = (definitionId, version, requestedProjectId = projectId) => {
+      if (String(requestedProjectId) !== projectId) return null;
+      const versions = resourceScope.subflowReferences.get(String(definitionId || ''));
+      if (!versions?.size) return null;
+      const selectedVersion = version == null
+        ? Math.max(...versions)
+        : Number(version);
+      if (!versions.has(selectedVersion)) return null;
+      return database.getSubflowDefinition(definitionId, selectedVersion, projectId);
+    };
+    facade.getSubflowDefinitionsByRefs = (refs, requestedProjectId = projectId) => {
+      if (String(requestedProjectId) !== projectId || !Array.isArray(refs)) return [];
+      const allowed = refs.filter((reference) => (
+        resourceScope.subflowReferences
+          .get(String(reference?.id || ''))
+          ?.has(Number(reference?.version))
+      ));
+      const definitions = [];
+      for (let index = 0; index < allowed.length; index += 100) {
+        definitions.push(...database.getSubflowDefinitionsByRefs(
+          allowed.slice(index, index + 100),
+          projectId,
+        ));
+      }
+      return definitions;
+    };
+    facade.listSubflowDefinitions = (filters = {}) => this.canvasScopedSubflowDefinitions(
+      session,
+      filters.query,
+      resourceScope,
+    );
+    facade.listSubflowVersions = (definitionId, requestedProjectId = projectId) => {
+      if (String(requestedProjectId) !== projectId) return [];
+      const versions = resourceScope.subflowReferences.get(String(definitionId || ''));
+      if (!versions?.size) return [];
+      return database.listSubflowVersions(definitionId, projectId)
+        .filter((definition) => versions.has(Number(definition.version)));
+    };
+    return facade;
+  }
+
+  sessionCanAccessSubflow(session, definitionId, version = null) {
+    const versions = this.canvasResourceScope(session).subflowReferences.get(String(definitionId || ''));
+    if (!versions) return false;
+    return version == null || versions.has(Number(version));
   }
 
   assetAccessSubject(session, permission) {
@@ -374,8 +780,12 @@ class CollaborationGateway {
     };
   }
 
-  canSessionAccessAsset(session, asset, permission = 'view') {
+  canSessionAccessAsset(session, asset, permission = 'view', scopedAssetIds = null) {
     if (!session || !asset || String(asset.projectId) !== String(session.projectId)) return false;
+    const allowedAssetIds = scopedAssetIds instanceof Set
+      ? scopedAssetIds
+      : this.canvasResourceScope(session).assetIds;
+    if (!allowedAssetIds.has(String(asset.id))) return false;
     if (typeof this.database.canAccessAsset !== 'function') return false;
     try {
       return Boolean(this.database.canAccessAsset(
@@ -388,9 +798,14 @@ class CollaborationGateway {
     }
   }
 
-  filterSessionAssets(session, assets, permission = 'view') {
+  filterSessionAssets(session, assets, permission = 'view', scopedAssetIds = null) {
+    const allowedAssetIds = scopedAssetIds instanceof Set
+      ? scopedAssetIds
+      : this.canvasResourceScope(session).assetIds;
     const candidates = (Array.isArray(assets) ? assets : [])
-      .filter((asset) => asset && String(asset.projectId) === String(session?.projectId))
+      .filter((asset) => asset
+        && String(asset.projectId) === String(session?.projectId)
+        && allowedAssetIds.has(String(asset.id)))
       .slice(0, 1000);
     if (!session || typeof this.database.filterAccessibleAssets !== 'function') return [];
     try {
@@ -405,11 +820,14 @@ class CollaborationGateway {
     }
   }
 
-  publicAssetForSession(session, asset) {
+  publicAssetForSession(session, asset, scopedAssetIds = null) {
     const safe = publicAsset(asset);
     if (!safe) return null;
-    const canPreview = this.canSessionAccessAsset(session, asset, 'preview');
-    const canOriginal = this.canSessionAccessAsset(session, asset, 'original')
+    const allowedAssetIds = scopedAssetIds instanceof Set
+      ? scopedAssetIds
+      : this.canvasResourceScope(session).assetIds;
+    const canPreview = this.canSessionAccessAsset(session, asset, 'preview', allowedAssetIds);
+    const canOriginal = this.canSessionAccessAsset(session, asset, 'original', allowedAssetIds)
       && this.auth.hasCapability(session, 'downloadOriginal');
     const base = `/api/collab/assets/${encodeURIComponent(String(asset.id))}/media`;
     const metadata = safe.metadata && typeof safe.metadata === 'object' ? { ...safe.metadata } : {};
@@ -427,10 +845,10 @@ class CollaborationGateway {
       metadata,
       sourceUrl: canPreview ? base : null,
       effectivePermissions: {
-        view: this.canSessionAccessAsset(session, asset, 'view'),
+        view: this.canSessionAccessAsset(session, asset, 'view', allowedAssetIds),
         preview: canPreview,
         original: canOriginal,
-        organize: this.canSessionAccessAsset(session, asset, 'organize'),
+        organize: this.canSessionAccessAsset(session, asset, 'organize', allowedAssetIds),
       },
       representations: {
         ...(canPreview ? { preview: base } : {}),
@@ -506,6 +924,15 @@ class CollaborationGateway {
       if (webSocket?.readyState === WebSocket.OPEN) webSocket.close(1008, 'session revoked');
       return null;
     }
+    if (state.canvasId && String(state.canvasId) !== String(session.canvasId || '')) {
+      if (webSocket?.readyState === WebSocket.OPEN) webSocket.close(1008, 'canvas scope changed');
+      return null;
+    }
+    const resourceScope = this.canvasResourceScope(session);
+    if (!resourceScope.ready) {
+      if (webSocket?.readyState === WebSocket.OPEN) webSocket.close(4003, 'resource scope unavailable');
+      return null;
+    }
     state.session = session;
     return session;
   }
@@ -561,17 +988,27 @@ class CollaborationGateway {
     });
 
     app.get('/api/collab/status', (_req, res) => {
-      res.json({ success: true, data: { service: 't8-collaboration-gateway', ...this.status() } });
+      res.json({
+        success: true,
+        data: {
+          service: 't8-collaboration-gateway',
+          running: Boolean(this.server?.listening),
+          privateBackendExposed: false,
+        },
+      });
     });
 
     app.post('/api/collab/invites/redeem', rateLimiter({ limit: 12, windowMs: 60_000 }), (req, res) => {
-      const redeemed = this.auth.redeemInvite(req.body?.code, req.body?.displayName);
+      const redeemed = this.auth.redeemInvite(req.body?.code, req.body?.displayName, {
+        canvasId: req.body?.canvasId,
+      });
       if (!redeemed) return res.status(400).json({ success: false, error: '邀请无效、已过期或使用次数已满' });
       res.setHeader('Set-Cookie', sessionCookie(redeemed.token, req));
       res.json({
         success: true,
         data: {
           projectId: redeemed.projectId,
+          canvasId: redeemed.canvasId,
           memberId: redeemed.memberId,
           displayName: redeemed.displayName,
           role: redeemed.role,
@@ -588,10 +1025,17 @@ class CollaborationGateway {
     });
 
     app.post('/api/collab/logout', (req, res) => {
-      this.auth.revoke(req.collaborationSession.id);
+      this.auth.revoke(req.collaborationSession.id, {
+        actorId: req.collaborationSession.memberId,
+        sessionId: req.collaborationSession.id,
+        expectedProjectId: req.collaborationSession.projectId,
+      });
+      this.closeSessionConnections(req.collaborationSession.id, 'signed out');
       res.setHeader('Set-Cookie', clearSessionCookie(req));
       res.json({ success: true });
     });
+
+    app.use('/api/collab', this.requireReadyResourceScope.bind(this));
 
     app.post('/api/collab/session/rotate', (req, res) => {
       const rotated = this.auth.rotate(req.collaborationSession);
@@ -602,19 +1046,30 @@ class CollaborationGateway {
     });
 
     app.get('/api/collab/canvases', (req, res) => {
+      const document = this.ensureCanvasAccess(
+        req.collaborationSession,
+        req.collaborationSession.canvasId,
+      );
+      const canvases = document
+        ? this.database.listCanvases(req.collaborationSession.projectId)
+          .filter((canvas) => String(canvas.id) === String(document.canvasId))
+        : [];
       res.json({
         success: true,
-        data: publicCollaborationCanvasValue(
-          this.database.listCanvases(req.collaborationSession.projectId),
-        ),
+        data: publicCollaborationCanvasValue(canvases),
       });
     });
 
     app.get('/api/collab/canvases/:canvasId', (req, res) => {
       const document = this.ensureCanvasAccess(req.collaborationSession, req.params.canvasId);
       if (!document) return res.status(404).json({ success: false, error: '画布不存在或无权访问' });
-      res.set('ETag', `"${document.revision}"`);
-      res.json({ success: true, data: publicCanvasDocument(document) });
+      try {
+        this.assertDocumentResourcesGranted(req.collaborationSession, document);
+        res.set('ETag', `"${document.revision}"`);
+        res.json({ success: true, data: publicCanvasDocument(document) });
+      } catch (error) {
+        return sendCanvasPatchError(res, error);
+      }
     });
 
     app.get('/api/collab/canvases/:canvasId/sync', (req, res) => {
@@ -622,13 +1077,30 @@ class CollaborationGateway {
       if (!document) {
         return res.status(404).json({ success: false, error: '画布不存在或无权访问' });
       }
-      res.json({
-        success: true,
-        data: publicCanvasSync(
-          this.database.syncCanvas(req.params.canvasId, req.query?.afterRevision),
-          document,
-        ),
-      });
+      try {
+        this.assertDocumentResourcesGranted(req.collaborationSession, document);
+        let sync = this.database.syncCanvas(req.params.canvasId, req.query?.afterRevision);
+        if (sync?.mode === 'operations' && Array.isArray(sync.operations)) {
+          try {
+            this.assertDocumentResourcesGranted(req.collaborationSession, {
+              projectId: document.projectId,
+              canvasId: document.canvasId,
+              revision: document.revision,
+              nodes: [],
+              edges: [],
+              collaborationOperations: sync.operations,
+            });
+          } catch (_) {
+            sync = { mode: 'snapshot', document };
+          }
+        }
+        res.json({
+          success: true,
+          data: publicCanvasSync(sync, document),
+        });
+      } catch (error) {
+        return sendCanvasPatchError(res, error);
+      }
     });
 
     app.post('/api/collab/canvases/:canvasId/agent/tools', rateLimiter({ limit: 60, windowMs: 60_000 }), (req, res) => {
@@ -639,18 +1111,30 @@ class CollaborationGateway {
         if (Buffer.byteLength(JSON.stringify(raw), 'utf8') > MAX_CANVAS_AGENT_REQUEST_BYTES) {
           return res.status(413).json({ success: false, code: 'agent_request_too_large', error: 'Agent 工具请求超过 64 KiB' });
         }
-        const data = executeCanvasAgentTool(this.database, {
+        const resourceScope = this.canvasResourceScope(req.collaborationSession);
+        if (!resourceScope.ready) {
+          throw this.canvasResourceError(
+            'canvas_resource_scope_stale',
+            '协作资源授权状态尚未初始化或需要主机重新同步',
+            409,
+          );
+        }
+        const data = executeCanvasAgentTool(
+          this.collaborationAgentDatabase(req.collaborationSession, resourceScope),
+          {
           ...raw,
           projectId: req.collaborationSession.projectId,
           canvasId: document.canvasId,
-        }, {
-          projectId: req.collaborationSession.projectId,
-          canvasId: document.canvasId,
-          actorId: req.collaborationSession.memberId,
-          sessionId: req.collaborationSession.id,
-          role: req.collaborationSession.role,
-          capabilities: req.collaborationSession.capabilities,
-        });
+          },
+          {
+            projectId: req.collaborationSession.projectId,
+            canvasId: document.canvasId,
+            actorId: req.collaborationSession.memberId,
+            sessionId: req.collaborationSession.id,
+            role: req.collaborationSession.role,
+            capabilities: req.collaborationSession.capabilities,
+          },
+        );
         return res.json({ success: true, data });
       } catch (error) {
         return sendCanvasPatchError(res, error, {
@@ -676,6 +1160,10 @@ class CollaborationGateway {
           sessionId: context.sessionId,
           projectId: context.projectId,
           authority: canvasPatchAuthorityForSession(req.collaborationSession),
+          assertResultingDocument: (resultingDocument) => this.assertDocumentResourcesGranted(
+            req.collaborationSession,
+            resultingDocument,
+          ),
         });
         res.json({ success: true, data: preview });
       } catch (error) {
@@ -716,7 +1204,13 @@ class CollaborationGateway {
           sessionId: context.sessionId,
           projectId: context.projectId,
           authority: canvasPatchAuthorityForSession(req.collaborationSession),
+          syncResourceGrants: false,
+          assertResultingDocument: (resultingDocument) => this.assertDocumentResourcesGranted(
+            req.collaborationSession,
+            resultingDocument,
+          ),
         });
+        this.assertDocumentResourcesGranted(req.collaborationSession, result.document);
         if (!result.duplicate) {
           this.broadcast(context.projectId, document.canvasId, publicCanvasPatchEvent(
             result,
@@ -741,6 +1235,11 @@ class CollaborationGateway {
           sessionId: req.collaborationSession.id,
           projectId: req.collaborationSession.projectId,
           authority: canvasPatchAuthorityForSession(req.collaborationSession),
+          syncResourceGrants: false,
+          assertResultingDocument: (resultingDocument) => this.assertDocumentResourcesGranted(
+            req.collaborationSession,
+            resultingDocument,
+          ),
         });
         if (!result.duplicate) {
           this.broadcast(req.collaborationSession.projectId, document.canvasId, publicCanvasPatchEvent(
@@ -757,20 +1256,11 @@ class CollaborationGateway {
     });
 
     app.get('/api/collab/subflows', (req, res) => {
-      const definitions = this.database.listSubflowDefinitions({
-        projectId: req.collaborationSession.projectId,
-        query: req.query?.query,
-      });
-      res.json({
-        success: true,
-        data: definitions.map((definition) => publicSubflowDefinition(definition)),
-      });
-    });
-
-    app.get('/api/collab/subflows/:id/versions', (req, res) => {
-      const definitions = this.database.listSubflowVersions(
-        req.params.id,
-        req.collaborationSession.projectId,
+      const scope = this.canvasResourceScope(req.collaborationSession);
+      const definitions = this.canvasScopedSubflowDefinitions(
+        req.collaborationSession,
+        req.query?.query,
+        scope,
       );
       res.json({
         success: true,
@@ -778,7 +1268,26 @@ class CollaborationGateway {
       });
     });
 
+    app.get('/api/collab/subflows/:id/versions', (req, res) => {
+      if (!this.sessionCanAccessSubflow(req.collaborationSession, req.params.id)) {
+        return res.status(404).json({ success: false, error: '子工作流定义不存在或无权访问' });
+      }
+      const allowedVersions = this.canvasResourceScope(req.collaborationSession)
+        .subflowReferences.get(String(req.params.id)) || new Set();
+      const definitions = this.database.listSubflowVersions(
+        req.params.id,
+        req.collaborationSession.projectId,
+      ).filter((definition) => allowedVersions.has(Number(definition.version)));
+      res.json({
+        success: true,
+        data: definitions.map((definition) => publicSubflowDefinition(definition)),
+      });
+    });
+
     app.get('/api/collab/subflows/:id/:version', (req, res) => {
+      if (!this.sessionCanAccessSubflow(req.collaborationSession, req.params.id, req.params.version)) {
+        return res.status(404).json({ success: false, error: '子工作流定义不存在或无权访问' });
+      }
       const definition = this.database.getSubflowDefinition(req.params.id, req.params.version, req.collaborationSession.projectId);
       if (!definition) return res.status(404).json({ success: false, error: '子工作流定义不存在或无权访问' });
       res.json({ success: true, data: publicSubflowDefinition(definition) });
@@ -786,6 +1295,9 @@ class CollaborationGateway {
 
     app.post('/api/collab/subflows/:id/publish', this.requireCapability('publishSubflow'), (req, res) => {
       try {
+        if (!this.sessionCanAccessSubflow(req.collaborationSession, req.params.id)) {
+          return res.status(404).json({ success: false, error: '子工作流定义不存在或无权访问' });
+        }
         const baseRevision = Number(req.body?.baseRevision);
         if (!Number.isInteger(baseRevision) || baseRevision < 0) throw new Error('发布子工作流必须提供有效 baseRevision');
         const changeSummary = normalizeSubflowChangeSummary(req.body?.changeSummary, { required: true });
@@ -797,14 +1309,29 @@ class CollaborationGateway {
           projectId: req.collaborationSession.projectId,
         };
         validateSubflowDefinition(definition);
+        this.assertDocumentResourcesGranted(req.collaborationSession, {
+          ...definition,
+          canvasId: req.collaborationSession.canvasId,
+          revision: this.ensureCanvasAccess(
+            req.collaborationSession,
+            req.collaborationSession.canvasId,
+          )?.revision,
+        }, {
+          validateRootSubflowDefinition: false,
+        });
         const saved = this.database.saveSubflowDefinition(definition, {
           expectedRevision: baseRevision,
           actorId: req.collaborationSession.memberId,
           sessionId: req.collaborationSession.id,
           changeSummary,
+          grantCanvasId: req.collaborationSession.canvasId,
         });
         const publication = publicCollaborationCanvasValue(publicSubflowPublication(saved));
-        this.broadcastProject(saved.projectId, { type: 'subflow.published', publication });
+        this.broadcast(saved.projectId, req.collaborationSession.canvasId, {
+          type: 'subflow.published',
+          canvasId: req.collaborationSession.canvasId,
+          publication,
+        });
         res.status(201).json({ success: true, data: publicSubflowDefinition(saved) });
       } catch (error) {
         if (error instanceof SubflowRevisionConflictError) {
@@ -841,6 +1368,11 @@ class CollaborationGateway {
           actorId: req.collaborationSession.memberId,
           sessionId: req.collaborationSession.id,
           authority: canvasPatchAuthorityForSession(req.collaborationSession),
+          syncResourceGrants: false,
+          assertResultingDocument: (resultingDocument) => this.assertDocumentResourcesGranted(
+            req.collaborationSession,
+            resultingDocument,
+          ),
         });
         this.broadcast(document.projectId, document.canvasId, {
           type: 'canvas.snapshot-restored',
@@ -934,6 +1466,11 @@ class CollaborationGateway {
         });
         const result = this.database.applyOperations(req.params.canvasId, operations, {
           expectedRevision: baseRevision,
+          syncResourceGrants: false,
+          assertResultingDocument: (resultingDocument) => this.assertDocumentResourcesGranted(
+            req.collaborationSession,
+            resultingDocument,
+          ),
         });
         this.broadcast(req.collaborationSession.projectId, req.params.canvasId, {
           type: 'canvas.operations',
@@ -952,11 +1489,15 @@ class CollaborationGateway {
     });
 
     app.get('/api/collab/reviews', (req, res) => {
+      const requestedCanvasId = String(req.query?.canvasId || req.collaborationSession.canvasId || '');
+      if (!this.ensureCanvasAccess(req.collaborationSession, requestedCanvasId)) {
+        return res.status(404).json({ success: false, error: '画布不存在或无权访问' });
+      }
       res.json({
         success: true,
         data: this.database.listReviewThreads({
           projectId: req.collaborationSession.projectId,
-          canvasId: req.query?.canvasId,
+          canvasId: requestedCanvasId,
           status: req.query?.status,
         }),
       });
@@ -986,7 +1527,9 @@ class CollaborationGateway {
 
     app.post('/api/collab/reviews/:threadId/comments', this.requireCapability('comment'), (req, res) => {
       const thread = this.database.getReviewThread(req.params.threadId);
-      if (!thread || thread.projectId !== req.collaborationSession.projectId) return res.status(404).json({ success: false, error: '评论线程不存在' });
+      if (!thread || !this.ensureCanvasAccess(req.collaborationSession, thread.canvasId)) {
+        return res.status(404).json({ success: false, error: '评论线程不存在' });
+      }
       const body = String(req.body?.body || '').trim();
       if (!body || body.length > 5000) return res.status(400).json({ success: false, error: '评论正文应为 1-5000 字' });
       const comment = this.database.createReviewComment({
@@ -1001,7 +1544,9 @@ class CollaborationGateway {
 
     app.patch('/api/collab/reviews/:threadId', (req, res) => {
       const thread = this.database.getReviewThread(req.params.threadId);
-      if (!thread || thread.projectId !== req.collaborationSession.projectId) return res.status(404).json({ success: false, error: '评论线程不存在' });
+      if (!thread || !this.ensureCanvasAccess(req.collaborationSession, thread.canvasId)) {
+        return res.status(404).json({ success: false, error: '评论线程不存在' });
+      }
       const nextStatus = String(req.body?.status || thread.status);
       const approval = ['approved', 'changes_requested'].includes(nextStatus);
       const capability = approval ? 'approve' : 'comment';
@@ -1012,47 +1557,56 @@ class CollaborationGateway {
     });
 
     app.get('/api/collab/assets', (req, res) => {
+      const scopedAssetIds = this.canvasResourceScope(req.collaborationSession).assetIds;
       const filters = {
         projectId: req.collaborationSession.projectId,
         kind: req.query?.kind,
         query: req.query?.query,
         limit: req.query?.limit,
         offset: req.query?.offset,
+        assetIds: [...scopedAssetIds],
       };
       const subject = this.assetAccessSubject(req.collaborationSession, 'view');
       const assets = typeof this.database.listAccessibleAssets === 'function'
         ? this.database.listAccessibleAssets(filters, subject)
         : [];
-      const countFilters = { projectId: filters.projectId, kind: filters.kind, query: filters.query };
+      const scopedAssets = this.filterSessionAssets(req.collaborationSession, assets, 'view', scopedAssetIds);
       const total = typeof this.database.countAccessibleAssets === 'function'
-        ? this.database.countAccessibleAssets(countFilters, subject)
-        : 0;
+        ? this.database.countAccessibleAssets(
+          { ...filters, limit: undefined, offset: undefined },
+          subject,
+        )
+        : scopedAssets.length;
       res.json({
         success: true,
-        data: (Array.isArray(assets) ? assets : []).map((asset) => this.publicAssetForSession(req.collaborationSession, asset)).filter(Boolean),
-        meta: { total: Math.max(0, Number(total) || 0) },
+        data: scopedAssets
+          .map((asset) => this.publicAssetForSession(req.collaborationSession, asset, scopedAssetIds))
+          .filter(Boolean),
+        meta: { total },
       });
     });
 
     app.get('/api/collab/assets/:assetId', (req, res) => {
       const asset = this.database.getAsset(req.params.assetId);
-      if (!asset || !this.canSessionAccessAsset(req.collaborationSession, asset, 'view')) return res.status(404).json({ success: false, error: '素材不存在或无权访问' });
-      res.json({ success: true, data: this.publicAssetForSession(req.collaborationSession, asset) });
+      const scopedAssetIds = this.canvasResourceScope(req.collaborationSession).assetIds;
+      if (!asset || !this.canSessionAccessAsset(req.collaborationSession, asset, 'view', scopedAssetIds)) return res.status(404).json({ success: false, error: '素材不存在或无权访问' });
+      res.json({ success: true, data: this.publicAssetForSession(req.collaborationSession, asset, scopedAssetIds) });
     });
 
     app.get('/api/collab/assets/:assetId/media', (req, res) => {
       const asset = this.database.getAsset(req.params.assetId);
+      const scopedAssetIds = this.canvasResourceScope(req.collaborationSession).assetIds;
       const downloadOriginal = String(req.query?.download || '') === '1';
       const representation = String(req.query?.representation || 'preview') === 'thumbnail' ? 'thumbnail' : 'preview';
       if (!asset) return res.status(404).end();
       if (downloadOriginal) {
-        if (!this.canSessionAccessAsset(req.collaborationSession, asset, 'original')) return res.status(404).end();
+        if (!this.canSessionAccessAsset(req.collaborationSession, asset, 'original', scopedAssetIds)) return res.status(404).end();
         if (!this.auth.hasCapability(req.collaborationSession, 'downloadOriginal')) return res.status(403).end();
-      } else if (!this.canSessionAccessAsset(req.collaborationSession, asset, 'preview')) {
+      } else if (!this.canSessionAccessAsset(req.collaborationSession, asset, 'preview', scopedAssetIds)) {
         return res.status(404).end();
       }
       const canFallbackToOriginal = !downloadOriginal
-        && this.canSessionAccessAsset(req.collaborationSession, asset, 'original')
+        && this.canSessionAccessAsset(req.collaborationSession, asset, 'original', scopedAssetIds)
         && this.auth.hasCapability(req.collaborationSession, 'downloadOriginal');
       const resolved = downloadOriginal
         ? this._resolveAssetRepresentation(asset, 'original', true)
@@ -1096,6 +1650,7 @@ class CollaborationGateway {
 
     const uploadContext = (req) => ({
       projectId: req.collaborationSession.projectId,
+      canvasId: req.collaborationSession.canvasId,
       memberId: req.collaborationSession.memberId,
       sourceKind: 'collaboration',
     });
@@ -1319,11 +1874,28 @@ class CollaborationGateway {
   }
 
   async start(options = {}) {
-    if (this.server?.listening) return this.status();
-    const requestedHost = String(options.host || this.config.COLLAB_HOST || '127.0.0.1');
-    if (!['0.0.0.0', '127.0.0.1', '::1'].includes(requestedHost)) throw new Error('不支持的协作监听地址');
+    const requestedHost = validateBindHost(
+      options.host || this.config.COLLAB_HOST || '127.0.0.1',
+      this.networkInterfaces(),
+    );
     const requestedPort = Number(options.port ?? this.config.COLLAB_PORT);
     if (!Number.isInteger(requestedPort) || requestedPort < 0 || requestedPort > 65535) throw new Error('协作端口无效');
+    const requestKey = `${requestedHost}:${requestedPort}`;
+    return this.enqueueLifecycle(
+      'start',
+      requestKey,
+      () => this.startInternal({ host: requestedHost, port: requestedPort }),
+    );
+  }
+
+  async startInternal(options = {}) {
+    const networkInterfaces = this.networkInterfaces();
+    const requestedHost = validateBindHost(options.host || this.config.COLLAB_HOST || '127.0.0.1', networkInterfaces);
+    const requestedPort = Number(options.port ?? this.config.COLLAB_PORT);
+    if (!Number.isInteger(requestedPort) || requestedPort < 0 || requestedPort > 65535) throw new Error('协作端口无效');
+    if (this.server?.listening) {
+      if (this.host === requestedHost && this.port === requestedPort) return this.managementStatus();
+    }
 
     const app = this.createApp();
     const server = http.createServer(app);
@@ -1343,6 +1915,12 @@ class CollaborationGateway {
           socket.destroy();
           return;
         }
+        const resourceScope = this.canvasResourceScope(session);
+        if (!resourceScope.ready) {
+          socket.write('HTTP/1.1 409 Conflict\r\n\r\n');
+          socket.destroy();
+          return;
+        }
         webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
           webSocketServer.emit('connection', webSocket, request, session, token);
         });
@@ -1350,23 +1928,46 @@ class CollaborationGateway {
         socket.destroy();
       }
     });
-    webSocketServer.on('connection', (webSocket, _request, session, token) => this.attachWebSocket(webSocket, session, token));
+    webSocketServer.on('connection', (webSocket, _request, session, token) => this.attachWebSocket(webSocket, session, token, server));
 
-    await new Promise((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(requestedPort, requestedHost, () => resolve());
-    });
+    try {
+      await new Promise((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(requestedPort, requestedHost, () => resolve());
+      });
+    } catch (error) {
+      webSocketServer.close();
+      try {
+        server.close();
+      } catch (_) {
+        // A bind failure can occur before Node marks the temporary server as running.
+      }
+      throw error;
+    }
     const address = server.address();
+    const previousServer = this.server;
+    const previousWebSocketServer = this.webSocketServer;
     this.server = server;
     this.webSocketServer = webSocketServer;
     this.host = requestedHost;
     this.port = typeof address === 'object' && address ? address.port : requestedPort;
     this.startedAt = Date.now();
-    return this.status();
+    if (previousServer && previousServer !== server) {
+      await this.closeServerResources(previousServer, previousWebSocketServer, 'gateway restarted');
+    }
+    return this.managementStatus();
   }
 
-  attachWebSocket(webSocket, session, token) {
-    this.connections.set(webSocket, { session, sessionToken: token, canvasId: null, lastSeenAt: Date.now(), messageWindowAt: Date.now(), messageCount: 0 });
+  attachWebSocket(webSocket, session, token, server = this.server) {
+    this.connections.set(webSocket, {
+      session,
+      sessionToken: token,
+      server,
+      canvasId: null,
+      lastSeenAt: Date.now(),
+      messageWindowAt: Date.now(),
+      messageCount: 0,
+    });
     webSocket.send(JSON.stringify({ type: 'session.ready', session, timestamp: Date.now() }));
     webSocket.on('message', (raw) => {
       if (raw.length > MAX_WS_MESSAGE_BYTES) return webSocket.close(1009, 'message too large');
@@ -1392,6 +1993,14 @@ class CollaborationGateway {
       if (message.type === 'canvas.join') {
         const document = this.ensureCanvasAccess(currentSession, message.canvasId);
         if (!document) return webSocket.send(JSON.stringify({ type: 'error', code: 'canvas_forbidden' }));
+        const resourceScope = this.canvasResourceScope(currentSession);
+        if (!resourceScope.ready) {
+          webSocket.send(JSON.stringify({
+            type: 'error',
+            code: this.canvasResourceScopeFailure(resourceScope).code,
+          }));
+          return webSocket.close(4003, 'resource scope unavailable');
+        }
         state.canvasId = document.canvasId;
         return webSocket.send(JSON.stringify({ type: 'canvas.joined', canvasId: document.canvasId, revision: document.revision }));
       }
@@ -1446,6 +2055,30 @@ class CollaborationGateway {
       if (!session || session.projectId !== projectId) continue;
       webSocket.send(JSON.stringify({ ...message, timestamp: Date.now() }));
     }
+  }
+
+  broadcastSubflowPublication(projectId, definitionId, version, message, except = null) {
+    const normalizedProjectId = String(projectId || '');
+    const normalizedDefinitionId = String(definitionId || '').trim();
+    const normalizedVersion = Number(version);
+    if (!normalizedProjectId
+      || !normalizedDefinitionId
+      || !Number.isInteger(normalizedVersion)
+      || normalizedVersion < 1) return 0;
+    let sent = 0;
+    for (const [webSocket, state] of this.connections.entries()) {
+      if (webSocket === except || webSocket.readyState !== WebSocket.OPEN) continue;
+      const session = this.refreshConnectionSession(webSocket, state);
+      if (!session || String(session.projectId) !== normalizedProjectId) continue;
+      if (!this.sessionCanAccessSubflow(
+        session,
+        normalizedDefinitionId,
+        normalizedVersion,
+      )) continue;
+      webSocket.send(JSON.stringify({ ...message, timestamp: Date.now() }));
+      sent += 1;
+    }
+    return sent;
   }
 
   broadcastHostRunIntent(intent) {
@@ -1516,18 +2149,63 @@ class CollaborationGateway {
     });
   }
 
-  async stop() {
-    if (!this.server) return this.status();
-    for (const webSocket of this.connections.keys()) webSocket.close(1001, 'gateway stopped');
-    this.connections.clear();
-    await new Promise((resolve) => this.server.close(() => resolve()));
-    this.webSocketServer?.close();
-    this.server = null;
-    this.webSocketServer = null;
-    this.startedAt = null;
-    this.host = null;
-    this.port = null;
-    return this.status();
+  async closeServerResources(server, webSocketServer, reason) {
+    const serverWebSockets = new Set(webSocketServer?.clients || []);
+    for (const [webSocket, state] of this.connections.entries()) {
+      if (state?.server !== server) continue;
+      serverWebSockets.add(webSocket);
+      this.connections.delete(webSocket);
+      try { webSocket.close(1001, reason); } catch (_) { /* already closed */ }
+      this.scheduleWebSocketTermination(webSocket, SERVER_CLOSE_GRACE_MS);
+    }
+    await new Promise((resolve) => {
+      let settled = false;
+      let forceTimer = null;
+      let settleTimer = null;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(forceTimer);
+        clearTimeout(settleTimer);
+        resolve();
+      };
+      forceTimer = setTimeout(() => {
+        for (const webSocket of serverWebSockets) {
+          if (webSocket.readyState === WebSocket.CLOSED) continue;
+          try { webSocket.terminate(); } catch (_) { /* already closed */ }
+        }
+        try { server.closeIdleConnections?.(); } catch (_) { /* best effort */ }
+        try { server.closeAllConnections?.(); } catch (_) { /* best effort */ }
+        settleTimer = setTimeout(finish, SERVER_CLOSE_SETTLE_MS);
+        settleTimer.unref?.();
+      }, SERVER_CLOSE_GRACE_MS);
+      forceTimer.unref?.();
+      try {
+        server.close(finish);
+      } catch (_) {
+        finish();
+      }
+    });
+    try { webSocketServer?.close(); } catch (_) { /* already closed */ }
+  }
+
+  async stopInternal() {
+    const server = this.server;
+    const webSocketServer = this.webSocketServer;
+    if (!server) return this.managementStatus();
+    await this.closeServerResources(server, webSocketServer, 'gateway stopped');
+    if (this.server === server) {
+      this.server = null;
+      this.webSocketServer = null;
+      this.startedAt = null;
+      this.host = null;
+      this.port = null;
+    }
+    return this.managementStatus();
+  }
+
+  stop() {
+    return this.enqueueLifecycle('stop', 'gateway', () => this.stopInternal());
   }
 }
 

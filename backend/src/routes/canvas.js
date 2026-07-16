@@ -31,6 +31,12 @@ const LOCAL_AGENT_PATCH_AUTHORITY = Object.freeze({
   role: 'owner',
   capabilities: Object.freeze([]),
 });
+const NEW_CANVAS_RESOURCE_OPTIONS = Object.freeze({
+  initializeResourceScope: true,
+});
+const LEGACY_CANVAS_HYDRATION_OPTIONS = Object.freeze({
+  initializeResourceScope: false,
+});
 
 function localCanvasPatchAuthority(patch) {
   // Canvas Agent plan ids are created by the versioned host planner, not copied
@@ -64,7 +70,14 @@ function scopeCanvasPatch(rawPatch, scope) {
 function ensurePatchCanvas(database, canvasId) {
   let document = database.getCanvas(canvasId);
   const file = getCanvasFile(canvasId);
-  if (!document && fs.existsSync(file)) document = database.ensureCanvas(canvasId, readJsonFile(file));
+  if (!document && fs.existsSync(file)) {
+    document = database.ensureCanvas(
+      canvasId,
+      readJsonFile(file),
+      undefined,
+      LEGACY_CANVAS_HYDRATION_OPTIONS,
+    );
+  }
   return document;
 }
 
@@ -978,7 +991,12 @@ router.post('/', (req, res) => {
     nextNodeSerialId: 1,
     farmCanvas: createDefaultFarmCanvasState(),
   };
-  const document = projectDatabase().ensureCanvas(id, initialData);
+  const document = projectDatabase().ensureCanvas(
+    id,
+    initialData,
+    undefined,
+    NEW_CANVAS_RESOURCE_OPTIONS,
+  );
   atomicWriteJson(getCanvasFile(id), document);
   res.json({ success: true, data: { ...canvas, revision: document.revision } });
 });
@@ -991,7 +1009,12 @@ router.get('/:id', (req, res) => {
     let document = database.getCanvas(req.params.id);
     if (!document) {
       if (!fs.existsSync(file)) return res.status(404).json({ success: false, error: '画布不存在' });
-      document = database.ensureCanvas(req.params.id, readJsonFile(file));
+      document = database.ensureCanvas(
+        req.params.id,
+        readJsonFile(file),
+        undefined,
+        LEGACY_CANVAS_HYDRATION_OPTIONS,
+      );
     } else {
       let mirrorRevision = null;
       try {
@@ -1046,7 +1069,14 @@ router.put('/:id', (req, res) => {
     persisted.farmCanvas = sanitizeFarmCanvasState(incoming.farmCanvas);
   }
   try {
-    if (fs.existsSync(file)) projectDatabase().ensureCanvas(req.params.id, readJsonFile(file));
+    if (fs.existsSync(file)) {
+      projectDatabase().ensureCanvas(
+        req.params.id,
+        readJsonFile(file),
+        undefined,
+        LEGACY_CANVAS_HYDRATION_OPTIONS,
+      );
+    }
     const document = projectDatabase().saveCanvasSnapshot(req.params.id, persisted, {
       expectedRevision: expectedRevisionFromRequest(req),
       actorId: req.body?.actorId,
@@ -1084,7 +1114,12 @@ router.get('/:id/sync', (req, res) => {
   try {
     const file = getCanvasFile(req.params.id);
     if (!projectDatabase().getCanvas(req.params.id) && fs.existsSync(file)) {
-      projectDatabase().ensureCanvas(req.params.id, readJsonFile(file));
+      projectDatabase().ensureCanvas(
+        req.params.id,
+        readJsonFile(file),
+        undefined,
+        LEGACY_CANVAS_HYDRATION_OPTIONS,
+      );
     }
     const data = projectDatabase().syncCanvas(req.params.id, req.query?.afterRevision);
     if (!data) return res.status(404).json({ success: false, error: '画布不存在' });
@@ -1099,7 +1134,12 @@ router.post('/:id/operations', (req, res) => {
   try {
     const file = getCanvasFile(req.params.id);
     if (!projectDatabase().getCanvas(req.params.id) && fs.existsSync(file)) {
-      projectDatabase().ensureCanvas(req.params.id, readJsonFile(file));
+      projectDatabase().ensureCanvas(
+        req.params.id,
+        readJsonFile(file),
+        undefined,
+        LEGACY_CANVAS_HYDRATION_OPTIONS,
+      );
     }
     const result = projectDatabase().applyOperations(req.params.id, req.body?.operations, {
       expectedRevision: expectedRevisionFromRequest(req),
@@ -1213,7 +1253,12 @@ router.get('/:id/history', (req, res) => {
   try {
     const file = getCanvasFile(req.params.id);
     if (!projectDatabase().getCanvas(req.params.id) && fs.existsSync(file)) {
-      projectDatabase().ensureCanvas(req.params.id, readJsonFile(file));
+      projectDatabase().ensureCanvas(
+        req.params.id,
+        readJsonFile(file),
+        undefined,
+        LEGACY_CANVAS_HYDRATION_OPTIONS,
+      );
     }
     if (!projectDatabase().getCanvas(req.params.id)) return res.status(404).json({ success: false, error: '画布不存在' });
     res.json({ success: true, data: projectDatabase().listCanvasSnapshots(req.params.id, req.query?.limit) });
@@ -1227,7 +1272,12 @@ router.post('/:id/history/:revision/restore', (req, res) => {
   try {
     const file = getCanvasFile(req.params.id);
     if (!projectDatabase().getCanvas(req.params.id) && fs.existsSync(file)) {
-      projectDatabase().ensureCanvas(req.params.id, readJsonFile(file));
+      projectDatabase().ensureCanvas(
+        req.params.id,
+        readJsonFile(file),
+        undefined,
+        LEGACY_CANVAS_HYDRATION_OPTIONS,
+      );
     }
     const document = projectDatabase().restoreCanvasSnapshot(req.params.id, req.params.revision, {
       expectedRevision: expectedRevisionFromRequest(req),

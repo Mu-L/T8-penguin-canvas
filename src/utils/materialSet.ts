@@ -1,4 +1,4 @@
-import { fileNameFromUrl, type MediaKind } from './mediaCollection';
+import { fileNameFromUrl, type MediaKind } from './mediaCollection.ts';
 
 export type MaterialSetKind = 'text' | 'image' | 'video' | 'audio';
 

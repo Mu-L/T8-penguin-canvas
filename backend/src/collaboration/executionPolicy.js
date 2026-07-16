@@ -118,11 +118,20 @@ class HostExecutionPolicy {
     const member = this.database.getCollaborationMember(intent.requestedBy);
     const roleCanRun = member && ['owner', 'editor'].includes(String(member.role));
     const capabilityCanRun = member && Array.isArray(member.capabilities) && member.capabilities.includes('runWorkflow');
-    if (!member || member.projectId !== intent.projectId || !roleCanRun || !capabilityCanRun) {
+    if (!member
+      || member.projectId !== intent.projectId
+      || String(member.canvasId || '') !== String(intent.canvasId)
+      || !roleCanRun
+      || !capabilityCanRun) {
       throw new ExecutionPolicyError(
         'intent_requester_not_authorized',
-        '运行意图发起人已不是当前项目中可运行工作流的成员',
-        { requestedBy: intent.requestedBy, role: member?.role || null },
+        '运行意图发起人已不是当前画布中可运行工作流的成员',
+        {
+          requestedBy: intent.requestedBy,
+          role: member?.role || null,
+          memberCanvasId: member?.canvasId || null,
+          intentCanvasId: intent.canvasId,
+        },
         403,
       );
     }

@@ -11,14 +11,16 @@ const { explicitAttemptCost, explicitRunCost } = require('../backend/src/service
 function insertMember(database, {
   id = 'member-editor',
   projectId = 'project-local',
+  canvasId = 'canvas-authority',
   role = 'editor',
   capabilities = ['runWorkflow'],
 } = {}) {
   const now = Date.now();
   database.db.prepare(`
-    INSERT INTO collaboration_members(id, project_id, display_name, role, capabilities_json, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, projectId, id, role, JSON.stringify(capabilities), now, now);
+    INSERT INTO collaboration_members(
+      id, project_id, canvas_id, display_name, role, capabilities_json, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, projectId, canvasId, id, role, JSON.stringify(capabilities), now, now);
   return database.getCollaborationMember(id);
 }
 

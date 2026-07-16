@@ -28,6 +28,7 @@ async function requestJson(url, options = {}) {
 async function redeem(baseUrl, gateway, role, displayName) {
   const invite = gateway.auth.createInvite({
     projectId: 'project-e5-collaboration',
+    canvasId: 'canvas-e5',
     role,
     maxUses: 1,
   });

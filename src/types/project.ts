@@ -940,12 +940,49 @@ export interface CollaborationAssetUploadCompleteResult {
   deduplicated?: boolean;
 }
 
+export interface CollaborationNetworkInterface {
+  id: string;
+  name: string;
+  address: string;
+  family: 'IPv4';
+  internal: boolean;
+  cidr?: string | null;
+  scope: 'loopback' | 'private' | 'link-local' | 'public' | 'wildcard';
+  label: string;
+}
+
+export interface CollaborationRoomStatus {
+  projectId: string;
+  canvasId: string;
+  canvasCount: number;
+  memberCount: number;
+  activeSessionCount: number;
+  connectionCount: number;
+  resourceScope?: CollaborationResourceScopeStatus | null;
+}
+
+export interface CollaborationResourceScopeStatus {
+  status: 'ready' | 'confirmation-required' | 'stale';
+  ready: boolean;
+  canvasRevision: number;
+  trustedRevision?: number | null;
+  initializedAt?: number | null;
+  assetCount: number;
+  subflowCount: number;
+}
+
 export interface CollaborationStatus {
   running: boolean;
-  host?: string;
-  port?: number;
-  url?: string;
-  connections?: number;
+  host?: string | null;
+  port?: number | null;
+  startedAt?: number | null;
+  connectionCount: number;
+  privateBackendExposed: boolean;
+  networkInterfaces: CollaborationNetworkInterface[];
+  shareUrls: string[];
+  defaultHost: string;
+  defaultPort: number;
+  room?: CollaborationRoomStatus | null;
 }
 
 export interface CollaborationExecutionPolicy {
@@ -972,13 +1009,58 @@ export interface CollaborationExecutionPolicySnapshot {
 
 export interface CollaborationInvite {
   id: string;
-  code: string;
+  code?: string;
   projectId: string;
+  canvasId?: string | null;
   role: WorkspaceRole;
   capabilities: WorkspaceCapability[];
   expiresAt: number;
   maxUses: number;
+  useCount?: number;
+  revokedAt?: number | null;
+  createdAt?: number;
   localUrl?: string | null;
+  shareUrls?: string[];
+}
+
+export interface CollaborationMember {
+  id: string;
+  projectId: string;
+  canvasId?: string | null;
+  displayName: string;
+  role: WorkspaceRole;
+  capabilities: WorkspaceCapability[];
+  createdAt: number;
+  updatedAt: number;
+  sessionCount?: number;
+  connectionCount?: number;
+  online?: boolean;
+  lastSeenAt?: number | null;
+  disconnectedConnections?: number;
+}
+
+export interface CollaborationSession {
+  id: string;
+  projectId: string;
+  canvasId?: string | null;
+  memberId: string;
+  displayName: string;
+  role: WorkspaceRole;
+  expiresAt: number;
+  revokedAt?: number | null;
+  createdAt: number;
+  lastSeenAt: number;
+  active: boolean;
+  connectionCount?: number;
+  connected?: boolean;
+  disconnectedConnections?: number;
+}
+
+export interface CollaborationSessionRevocationResult {
+  projectId: string;
+  canvasId: string;
+  revokedSessions: number;
+  disconnectedConnections: number;
 }
 
 export interface RunIntent {

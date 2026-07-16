@@ -1762,10 +1762,10 @@ test('durable field provenance rejects ABA but allows same-node unrelated fields
   }
 });
 
-test('schema 22 retains project-scoped durable provenance, operation identity and stale preview rejection', () => {
+test('latest schema 23 retains schema 22 project-scoped provenance, operation identity and stale preview rejection', () => {
   const db = new ProjectDatabase(':memory:');
   try {
-    assert.equal(PROJECT_DATABASE_SCHEMA_VERSION, 22);
+    assert.equal(PROJECT_DATABASE_SCHEMA_VERSION, 23);
     assert.equal(db.db.prepare('SELECT 1 AS ok FROM schema_migrations WHERE version = 21').get().ok, 1);
     const columns = db.db.pragma('table_info(canvas_patch_applications)').map((row) => row.name);
     for (const column of [
@@ -2230,7 +2230,7 @@ test('patch apply, personal history, audit and revert survive two real sqlite re
   }
 });
 
-test('schema 19 through 22 migration is atomic, idempotent and preserves the existing canvas', () => {
+test('schema 19 through 23 migration is atomic, idempotent and preserves the existing canvas', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-canvas-patch-schema21-'));
   const filename = path.join(directory, 'projects.sqlite3');
   try {
@@ -2241,10 +2241,10 @@ test('schema 19 through 22 migration is atomic, idempotent and preserves the exi
         unexpectedOpen = new ProjectDatabase(filename, {
           autoBackup: false,
           beforeMigrationCommit: (_db, version) => {
-            if (version === 22) throw new Error('schema22-injected-failure');
+            if (version === 23) throw new Error('schema23-injected-failure');
           },
         });
-      }, /schema22-injected-failure/);
+      }, /schema23-injected-failure/);
     } finally {
       unexpectedOpen?.close();
     }
@@ -2262,7 +2262,7 @@ test('schema 19 through 22 migration is atomic, idempotent and preserves the exi
 
     const migrated = new ProjectDatabase(filename, { autoBackup: false });
     try {
-      assert.equal(migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 22);
+      assert.equal(migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 23);
       assert.equal(migrated.getCanvas('legacy-patch-canvas').revision, 7);
       assert.equal(migrated.getCanvas('legacy-patch-canvas').nodes[0].data.prompt, 'preserve-me');
       const patchColumns = migrated.db.pragma('table_info(canvas_patch_applications)').map((row) => row.name);
@@ -2280,7 +2280,7 @@ test('schema 19 through 22 migration is atomic, idempotent and preserves the exi
       assert.equal(migrated.db.pragma('quick_check', { simple: true }), 'ok');
       assert.deepEqual(migrated.db.pragma('foreign_key_check'), []);
       assert.doesNotThrow(() => migrated.migrate());
-      assert.equal(migrated.db.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get().count, 22);
+      assert.equal(migrated.db.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get().count, 23);
     } finally {
       migrated.close();
     }
@@ -2289,7 +2289,7 @@ test('schema 19 through 22 migration is atomic, idempotent and preserves the exi
   }
 });
 
-test('schema 20 to 22 migration preserves schema 21 operation identity, rolls back atomically and is idempotent across reopen', () => {
+test('schema 20 to 23 migration preserves schema 21 operation identity, rolls back atomically and is idempotent across reopen', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-canvas-operation-schema21-'));
   const filename = path.join(directory, 'projects.sqlite3');
   const operation = {
@@ -2316,7 +2316,7 @@ test('schema 20 to 22 migration preserves schema 21 operation identity, rolls ba
     const downgrade = new BetterSqlite3(filename);
     try {
       downgrade.exec(`
-        DELETE FROM schema_migrations WHERE version IN (21, 22);
+        DELETE FROM schema_migrations WHERE version IN (21, 22, 23);
         DROP TABLE IF EXISTS canvas_operation_idempotency;
       `);
       assert.equal(downgrade.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 20);
@@ -2331,10 +2331,10 @@ test('schema 20 to 22 migration preserves schema 21 operation identity, rolls ba
         failedOpen = new ProjectDatabase(filename, {
           autoBackup: false,
           beforeMigrationCommit: (_db, version) => {
-            if (version === 22) throw new Error('schema22-ledger-injected-failure');
+            if (version === 23) throw new Error('schema23-ledger-injected-failure');
           },
         });
-      }, /schema22-ledger-injected-failure/);
+      }, /schema23-ledger-injected-failure/);
     } finally {
       failedOpen?.close();
     }

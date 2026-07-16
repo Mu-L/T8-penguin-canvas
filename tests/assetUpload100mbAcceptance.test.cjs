@@ -178,7 +178,11 @@ function createFixture() {
     FRONTEND_DIST: '',
   };
   const database = new ProjectDatabase(dbFile, { autoBackup: false });
-  database.ensureCanvas('canvas-100mb', { projectId: PROJECT_ID, name: '100MB upload acceptance', nodes: [], edges: [] });
+  database.ensureCanvas(
+    'canvas-100mb',
+    { name: '100MB upload acceptance', nodes: [], edges: [] },
+    PROJECT_ID,
+  );
   return { root, input, output, blobDir, tempDir, dataDir, dbFile, sourceFile, config, database, gateway: null, baseUrl: '' };
 }
 
@@ -221,7 +225,12 @@ function assertPathless(value, fixture) {
 }
 
 async function redeemEditor(fixture) {
-  const invite = fixture.gateway.auth.createInvite({ projectId: PROJECT_ID, role: 'editor', maxUses: 1 });
+  const invite = fixture.gateway.auth.createInvite({
+    projectId: PROJECT_ID,
+    canvasId: 'canvas-100mb',
+    role: 'editor',
+    maxUses: 1,
+  });
   const result = await jsonResponse(await fetch(`${fixture.baseUrl}/api/collab/invites/redeem`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

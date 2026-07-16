@@ -163,7 +163,12 @@ async function disposeFixture(fixture) {
 }
 
 async function redeem(fixture, role = 'editor', displayName = role) {
-  const invite = fixture.gateway.auth.createInvite({ projectId: PROJECT_ID, role, maxUses: 1 });
+  const invite = fixture.gateway.auth.createInvite({
+    projectId: PROJECT_ID,
+    canvasId: 'canvas-d5',
+    role,
+    maxUses: 1,
+  });
   const result = await responseBody(await fetch(`${fixture.baseUrl}/api/collab/invites/redeem`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -248,7 +253,7 @@ async function uploadWholeAsset(fixture, actor, bytes, options = {}) {
 }
 
 test('schema 18 records the durable D5 upload migration', () => {
-  assert.equal(PROJECT_DATABASE_SCHEMA_VERSION, 22);
+  assert.equal(PROJECT_DATABASE_SCHEMA_VERSION, 23);
   const database = new ProjectDatabase(':memory:');
   try {
     assert.equal(database.db.prepare('SELECT 1 AS ok FROM schema_migrations WHERE version = 18').get()?.ok, 1);
@@ -580,6 +585,12 @@ test('collaboration media serves the proxy by default and requires both original
         proxyUrl: '/files/thumbnails/asset-previews/acl-proxy.mp4',
       },
       createdBy: 'local-owner',
+    });
+    fixture.database.recordAssetLineageEvent({
+      assetId: asset.id,
+      canvasId: 'canvas-d5',
+      sourceType: 'test-fixture',
+      creatorId: 'local-owner',
     });
     fixture.database.db.prepare(`
       UPDATE asset_blobs SET storage_key = ?, storage_state = 'ready', verified_at = ? WHERE content_hash = ?

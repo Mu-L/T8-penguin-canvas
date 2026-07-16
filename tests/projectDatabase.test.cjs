@@ -690,11 +690,17 @@ test('three-level multi-port subflow graph survives database close and reopen un
   }
 });
 
-test('invite and member lifecycle revokes stale sessions and records audits', () => {
+test('invite and member lifecycle refreshes roles, revokes removed-member sessions and records audits', () => {
   const db = new ProjectDatabase(':memory:');
   const auth = new CollaborationAuth(db);
   try {
-    const invite = auth.createInvite({ role: 'editor', maxUses: 2 });
+    db.ensureCanvas('canvas-auth-lifecycle', { nodes: [], edges: [] }, 'project-local');
+    const invite = auth.createInvite({
+      projectId: 'project-local',
+      canvasId: 'canvas-auth-lifecycle',
+      role: 'editor',
+      maxUses: 2,
+    });
     const listedInvite = db.listInvites()[0];
     assert.equal(listedInvite.id, invite.id);
     assert.equal(Object.hasOwn(listedInvite, 'codeHash'), false);
@@ -704,13 +710,20 @@ test('invite and member lifecycle revokes stale sessions and records audits', ()
     const updated = auth.updateMember(redeemed.memberId, { role: 'reviewer' }, { actorId: 'owner-a' });
     assert.equal(updated.role, 'reviewer');
     assert.deepEqual(updated.capabilities.sort(), ['approve', 'comment', 'downloadOriginal'].sort());
-    assert.equal(auth.authenticate(redeemed.token), null);
+    const refreshedSession = auth.authenticate(redeemed.token);
+    assert.equal(refreshedSession.role, 'reviewer');
+    assert.equal(refreshedSession.canvasId, 'canvas-auth-lifecycle');
+    assert.deepEqual(refreshedSession.capabilities.sort(), ['approve', 'comment', 'downloadOriginal'].sort());
 
     const revoked = auth.revokeInvite(invite.id, { actorId: 'owner-a' });
     assert.equal(revoked.id, invite.id);
     assert.equal(auth.redeemInvite(invite.code, 'Bob'), null);
 
-    const secondInvite = auth.createInvite({ role: 'viewer' });
+    const secondInvite = auth.createInvite({
+      projectId: 'project-local',
+      canvasId: 'canvas-auth-lifecycle',
+      role: 'viewer',
+    });
     const second = auth.redeemInvite(secondInvite.code, 'Carol');
     assert.equal(auth.removeMember(second.memberId, { actorId: 'owner-a' }).id, second.memberId);
     assert.equal(auth.authenticate(second.token), null);
@@ -724,7 +737,12 @@ test('session rotation invalidates the old token and preserves member capabiliti
   const db = new ProjectDatabase(':memory:');
   const auth = new CollaborationAuth(db);
   try {
-    const invite = auth.createInvite({ role: 'editor' });
+    db.ensureCanvas('canvas-auth-rotation', { nodes: [], edges: [] }, 'project-local');
+    const invite = auth.createInvite({
+      projectId: 'project-local',
+      canvasId: 'canvas-auth-rotation',
+      role: 'editor',
+    });
     const redeemed = auth.redeemInvite(invite.code, 'Rotate User');
     const current = auth.authenticate(redeemed.token);
     const rotated = auth.rotate(current);

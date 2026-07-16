@@ -72,7 +72,7 @@ test('provider context passes capability facts and booleans, never raw settings 
 
 test('doctor loads explicit run, intent, and host policy context through scoped APIs', () => {
   assert.match(workbench, /api\.listProjectRuns\(\{ projectId: props\.projectId, canvasId: props\.canvasId \|\| undefined, limit: 30 \}, \{ signal: controller\.signal \}\)/);
-  assert.match(workbench, /api\.listCollaborationRunIntents\('actionable', props\.projectId, \{ signal: controller\.signal \}\)/);
+  assert.match(workbench, /api\.listCollaborationRunIntents\('actionable', props\.projectId, props\.canvasId, \{ signal: controller\.signal \}\)/);
   assert.match(workbench, /const policyPromise = intentsPromise\.then\(\(intents\) => \{[\s\S]*selectDoctorReservedRunIntent\(intents\)[\s\S]*excludeIntentId: reservedIntent\?\.id/);
   assert.match(api, /export async function getCollaborationExecutionPolicy\([\s\S]{0,160}options: \{ signal\?: AbortSignal; excludeIntentId\?: string \}/);
   assert.match(api, /params\.set\('excludeIntentId', options\.excludeIntentId\)/);

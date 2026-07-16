@@ -43,14 +43,16 @@ function imageCanvas(database, {
 function insertMember(database, {
   id = 'remote-editor',
   projectId = 'project-local',
+  canvasId = 'canvas-a',
   role = 'editor',
   capabilities = ['runWorkflow'],
 } = {}) {
   const now = Date.now();
   database.db.prepare(`
-    INSERT INTO collaboration_members(id, project_id, display_name, role, capabilities_json, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, projectId, id, role, JSON.stringify(capabilities), now, now);
+    INSERT INTO collaboration_members(
+      id, project_id, canvas_id, display_name, role, capabilities_json, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, projectId, canvasId, id, role, JSON.stringify(capabilities), now, now);
   return database.getCollaborationMember(id);
 }
 
@@ -188,8 +190,13 @@ function createGatewayFixture(canvasData) {
   return { directory, database, gateway };
 }
 
-async function redeemEditor(baseUrl, gateway) {
-  const invite = gateway.auth.createInvite({ projectId: 'project-local', role: 'editor', maxUses: 1 });
+async function redeemEditor(baseUrl, gateway, canvasId = 'canvas-a') {
+  const invite = gateway.auth.createInvite({
+    projectId: 'project-local',
+    canvasId,
+    role: 'editor',
+    maxUses: 1,
+  });
   const response = await fetch(`${baseUrl}/api/collab/invites/redeem`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -226,7 +233,9 @@ test('management API cannot pre-accept a pending intent and still lists legacy a
   const { server, url } = await createCollaborationManagementServer(gateway);
   t.after(() => closeServer(server));
 
-  const actionableResponse = await fetch(`${url}/run-intents?projectId=project-local&status=actionable`);
+  const actionableResponse = await fetch(
+    `${url}/run-intents?projectId=project-local&canvasId=canvas-a&status=actionable`,
+  );
   const actionable = await actionableResponse.json();
   assert.equal(actionableResponse.status, 200);
   assert.deepEqual(
@@ -237,7 +246,7 @@ test('management API cannot pre-accept a pending intent and still lists legacy a
   const response = await fetch(`${url}/run-intents/${pending.id}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ status: 'accepted' }),
+    body: JSON.stringify({ projectId: 'project-local', canvasId: 'canvas-a', status: 'accepted' }),
   });
   const payload = await response.json();
   assert.equal(response.status, 409);
@@ -523,7 +532,8 @@ test('remote run intent idempotency only replays the same server-normalized requ
       assert.equal(requesterCollision.payload.code, 'intent_idempotency_conflict');
       assert.ok(requesterCollision.payload.data.conflictingFields.includes('requestedBy'));
 
-      const canvasCollision = await submit(cookie, {
+      const canvasBCookie = await redeemEditor(baseUrl, gateway, canvasB.canvasId);
+      const canvasCollision = await submit(canvasBCookie, {
         canvasId: canvasB.canvasId,
         canvasRevision: canvasB.revision,
       });

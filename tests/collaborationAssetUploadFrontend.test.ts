@@ -24,8 +24,10 @@ test('collaboration upload UI is mounted only behind the uploadAsset capability'
   assert.ok(capabilityCheck >= 0 && capabilityCheck < uploadMount, 'capability must be derived before the guarded mount');
 });
 
-test('initial canvas synchronization never sends through a connecting WebSocket', () => {
-  assert.match(workspace, /webSocketRef\.current\?\.readyState === WebSocket\.OPEN/);
+test('initial canvas synchronization leaves joining to websocket open with the session scope', () => {
+  const loadCanvas = section(workspace, 'const loadCanvas = useCallback', 'const loadSubflows = useCallback');
+  assert.doesNotMatch(loadCanvas, /canvas\.join|webSocketRef\.current/);
+  assert.match(workspace, /socket\.onopen = \(\) => socket\.send\(JSON\.stringify\(\{ type: 'canvas\.join', canvasId: session\.canvasId \}\)\)/);
   assert.doesNotMatch(workspace, /webSocketRef\.current\?\.send\(JSON\.stringify\(\{ type: 'canvas\.join'/);
 });
 

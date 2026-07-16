@@ -13,8 +13,13 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-async function redeem(baseUrl, gateway, role, displayName) {
-  const invite = gateway.auth.createInvite({ projectId: 'project-local', role, maxUses: 1 });
+async function redeem(baseUrl, gateway, canvasId, role, displayName) {
+  const invite = gateway.auth.createInvite({
+    projectId: 'project-local',
+    canvasId,
+    role,
+    maxUses: 1,
+  });
   const response = await fetch(`${baseUrl}/api/collab/invites/redeem`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ code: invite.code, displayName }),
@@ -26,12 +31,13 @@ async function redeem(baseUrl, gateway, role, displayName) {
   return { cookie, payload: payload.data, session: gateway.auth.authenticate(token) };
 }
 
-async function redeemOwner(baseUrl, gateway, database, displayName) {
+async function redeemOwner(baseUrl, gateway, database, canvasId, displayName) {
   const code = `owner-${crypto.randomBytes(18).toString('base64url')}`;
   const now = Date.now();
   database.createInvite({
     id: crypto.randomUUID(),
     projectId: 'project-local',
+    canvasId,
     codeHash: hashSecret(code),
     role: 'owner',
     capabilities: capabilitiesForRole('owner'),
@@ -179,8 +185,8 @@ test('collaboration patch routes enforce role, scope identity, safe broadcasts, 
   try {
     const status = await gateway.start({ host: '127.0.0.1', port: 0 });
     const baseUrl = `http://127.0.0.1:${status.port}`;
-    const viewer = await redeem(baseUrl, gateway, 'reviewer', 'Patch Reviewer');
-    const editor = await redeem(baseUrl, gateway, 'editor', 'Patch Editor');
+    const viewer = await redeem(baseUrl, gateway, 'canvas-a', 'reviewer', 'Patch Reviewer');
+    const editor = await redeem(baseUrl, gateway, 'canvas-a', 'editor', 'Patch Editor');
     socket = await openJoinedSocket(status, editor.cookie);
 
     const maliciousPatch = {
@@ -259,6 +265,7 @@ test('collaboration patch routes enforce role, scope identity, safe broadcasts, 
       authority: {
         source: 'collaboration', role: 'editor', capabilities: editor.session.capabilities,
       },
+      syncResourceGrants: false,
     });
     assert.equal(applyCall.patch.operations[0].actorId, editor.session.memberId);
     assert.equal(applyCall.patch.operations[0].sessionId, editor.session.id);
@@ -292,6 +299,7 @@ test('collaboration patch routes enforce role, scope identity, safe broadcasts, 
       authority: {
         source: 'collaboration', role: 'editor', capabilities: editor.session.capabilities,
       },
+      syncResourceGrants: false,
     });
     const revertedMessage = await revertBroadcast;
     assert.ok(Number.isSafeInteger(revertedMessage.timestamp));
@@ -345,8 +353,8 @@ test('collaboration patch routes complete a real SQLite lifecycle with reviewer 
   try {
     const status = await gateway.start({ host: '127.0.0.1', port: 0 });
     const baseUrl = `http://127.0.0.1:${status.port}`;
-    const reviewer = await redeem(baseUrl, gateway, 'reviewer', 'Real Patch Reviewer');
-    const editor = await redeem(baseUrl, gateway, 'editor', 'Real Patch Editor');
+    const reviewer = await redeem(baseUrl, gateway, 'canvas-real', 'reviewer', 'Real Patch Reviewer');
+    const editor = await redeem(baseUrl, gateway, 'canvas-real', 'editor', 'Real Patch Editor');
 
     const reviewerPatch = {
       schema: 't8-canvas-patch-v1',
@@ -560,9 +568,15 @@ test('gateway credential boundary keeps reviewer advisory, editor graph-only, an
   try {
     const status = await gateway.start({ host: '127.0.0.1', port: 0 });
     const baseUrl = `http://127.0.0.1:${status.port}`;
-    const reviewer = await redeem(baseUrl, gateway, 'reviewer', 'Credential Reviewer');
-    const editor = await redeem(baseUrl, gateway, 'editor', 'Credential Editor');
-    const owner = await redeemOwner(baseUrl, gateway, database, 'Credential Owner');
+    const reviewer = await redeem(baseUrl, gateway, 'canvas-credential-authority', 'reviewer', 'Credential Reviewer');
+    const editor = await redeem(baseUrl, gateway, 'canvas-credential-authority', 'editor', 'Credential Editor');
+    const owner = await redeemOwner(
+      baseUrl,
+      gateway,
+      database,
+      'canvas-credential-authority',
+      'Credential Owner',
+    );
     assert.equal(reviewer.session.role, 'reviewer');
     assert.equal(editor.session.role, 'editor');
     assert.equal(owner.session.role, 'owner');

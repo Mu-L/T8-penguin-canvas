@@ -294,6 +294,10 @@ function createGatewayFixture() {
           progressMessage: '等待授权',
         },
       },
+      {
+        id: 'shared-subflow-node', type: 'subflow', position: { x: 1280, y: 0 },
+        data: { definitionId: 'shared-subflow', definitionVersion: 1 },
+      },
     ],
     edges: [{
       id: 'secret-edge',
@@ -322,6 +326,10 @@ function createGatewayFixture() {
     sessionId: 'fixture',
     changeSummary: '创建共享子工作流',
   });
+  database.initializeCanvasResourceGrantsForSharing('project-local', 'canvas-a', {
+    actorId: 'local-owner',
+    sessionId: 'fixture',
+  });
   const gateway = new CollaborationGateway({
     COLLAB_HOST: '127.0.0.1',
     COLLAB_PORT: 0,
@@ -333,7 +341,12 @@ function createGatewayFixture() {
 }
 
 async function redeem(baseUrl, gateway, role, displayName = role) {
-  const invite = gateway.auth.createInvite({ projectId: 'project-local', role, maxUses: 1 });
+  const invite = gateway.auth.createInvite({
+    projectId: 'project-local',
+    canvasId: 'canvas-a',
+    role,
+    maxUses: 1,
+  });
   const response = await fetch(`${baseUrl}/api/collab/invites/redeem`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -352,6 +365,15 @@ function setAssetPolicy(database, assetId, scope, grants, expectedRevision) {
     grants,
     ...(expectedRevision == null ? {} : { expectedRevision }),
   }, { actorId: 'local-owner' });
+}
+
+function scopeAssetToCanvas(database, assetId, canvasId = 'canvas-a') {
+  return database.recordAssetLineageEvent({
+    assetId,
+    canvasId,
+    sourceType: 'test-fixture',
+    creatorId: 'local-owner',
+  });
 }
 
 async function openJoinedSocket(status, cookie) {
@@ -439,6 +461,8 @@ test('collaboration Agent tools require a session, force scope, honor asset ACL,
 
     database.upsertAsset({ id: 'agent-project-asset', projectId: 'project-local', kind: 'image', filename: 'project.png', createdBy: 'local-owner' });
     database.upsertAsset({ id: 'agent-reviewer-asset', projectId: 'project-local', kind: 'image', filename: 'reviewer.png', createdBy: 'local-owner' });
+    scopeAssetToCanvas(database, 'agent-project-asset');
+    scopeAssetToCanvas(database, 'agent-reviewer-asset');
     const viewer = await redeem(baseUrl, gateway, 'viewer', 'Agent 查看者');
     const reviewer = await redeem(baseUrl, gateway, 'reviewer', 'Agent 审片者');
     setAssetPolicy(database, 'agent-reviewer-asset', 'restricted', [{
@@ -550,6 +574,7 @@ test('review roles, run intent idempotency and asset range stay capability scope
       sourceUrl: '/files/output/sample.bin',
       createdBy: 'local-owner',
     });
+    scopeAssetToCanvas(database, 'asset-range');
     const editor = await redeem(baseUrl, gateway, 'editor', '编辑者');
     const reviewer = await redeem(baseUrl, gateway, 'reviewer', '审片者');
 
@@ -609,20 +634,24 @@ test('asset ACL filters list, detail, media and host broadcasts by current membe
   await withGateway(async ({ baseUrl, gateway, database, output, status }) => {
     const sharedPath = path.join(output, 'shared-blob.bin');
     fs.writeFileSync(sharedPath, Buffer.from('0123456789'));
-    const createAsset = (id, metadata = {}) => database.upsertAsset({
-      id,
-      projectId: 'project-local',
-      contentHash: 'a'.repeat(64),
-      kind: 'video',
-      mimeType: 'video/mp4',
-      filename: `${id}.mp4`,
-      managedPath: sharedPath,
-      sourceUrl: `/files/output/${id}.mp4`,
-      storageMode: 'managed',
-      availability: 'available',
-      metadata: { size: 10, ...metadata },
-      createdBy: 'local-owner',
-    });
+    const createAsset = (id, metadata = {}) => {
+      const asset = database.upsertAsset({
+        id,
+        projectId: 'project-local',
+        contentHash: 'a'.repeat(64),
+        kind: 'video',
+        mimeType: 'video/mp4',
+        filename: `${id}.mp4`,
+        managedPath: sharedPath,
+        sourceUrl: `/files/output/${id}.mp4`,
+        storageMode: 'managed',
+        availability: 'available',
+        metadata: { size: 10, ...metadata },
+        createdBy: 'local-owner',
+      });
+      scopeAssetToCanvas(database, id);
+      return asset;
+    };
     createAsset('asset-project');
     createAsset('asset-member', {
       apiKey: 'must-not-leak-api-key',
@@ -721,17 +750,11 @@ test('asset ACL filters list, detail, media and host broadcasts by current membe
       gateway.broadcastHostRunOutput(roleRun, roleNodeRun, [database.getAsset('asset-role')]);
       assert.deepEqual((await beforeRoleChange).assets, [], 'original permission must not be promoted to preview permission in broadcasts');
       gateway.auth.updateMember(reviewer.payload.memberId, { role: 'viewer' }, { actorId: 'local-owner', sessionId: 'fixture' });
-      const roleRevokedDetail = await fetch(`${baseUrl}/api/collab/assets/asset-role`, { headers: { cookie: reviewer.cookie } });
-      assert.equal(roleRevokedDetail.status, 401);
-      const revokedSocket = new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('revoked websocket remained authorized')), 3000);
-        reviewerSocket.once('close', (code) => {
-          clearTimeout(timer);
-          resolve(code);
-        });
-      });
+      const roleDowngradedDetail = await fetch(`${baseUrl}/api/collab/assets/asset-role`, { headers: { cookie: reviewer.cookie } });
+      assert.equal(roleDowngradedDetail.status, 404);
+      const afterRoleChange = waitForSocketMessage(reviewerSocket, 'run.output');
       gateway.broadcastHostRunOutput(roleRun, roleNodeRun, [database.getAsset('asset-role')]);
-      assert.equal(await revokedSocket, 1008);
+      assert.deepEqual((await afterRoleChange).assets, []);
     } finally {
       reviewerSocket.close();
     }
@@ -790,7 +813,7 @@ test('canvas document and sync responses keep graph data usable without exposing
     const listResponse = await fetch(`${baseUrl}/api/collab/canvases`, { headers });
     const listPayload = await listResponse.json();
     assert.equal(listResponse.status, 200, JSON.stringify(listPayload));
-    assert.ok(listPayload.data.some((canvas) => canvas.id === 'canvas-list-secret'));
+    assert.deepEqual(listPayload.data.map((canvas) => canvas.id), ['canvas-a']);
     assert.doesNotMatch(
       JSON.stringify(listPayload),
       /host-owner|private-canvas|CANVAS_LIST_STATE_SECRET/,
@@ -1399,7 +1422,7 @@ test('canvas history is readable but only editors can restore a new revision', a
   });
 });
 
-test('subflow publication is editor scoped, revision checked and broadcast to the whole project', async () => {
+test('subflow publication is editor scoped, revision checked and broadcast to the current canvas', async () => {
   await withGateway(async ({ baseUrl, gateway, database, status }) => {
     const viewer = await redeem(baseUrl, gateway, 'viewer', '定义查看者');
     const reviewer = await redeem(baseUrl, gateway, 'reviewer', '定义审片者');
@@ -1505,17 +1528,21 @@ test('subflow publication is editor scoped, revision checked and broadcast to th
       headers: { cookie: editorB.cookie },
     });
     await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('project websocket did not become ready')), 3000);
+      const timer = setTimeout(() => reject(new Error('canvas websocket did not join')), 3000);
       socket.once('error', reject);
       socket.on('message', (raw) => {
         const message = JSON.parse(String(raw));
-        if (message.type !== 'session.ready') return;
+        if (message.type === 'session.ready') {
+          socket.send(JSON.stringify({ type: 'canvas.join', canvasId: 'canvas-a' }));
+          return;
+        }
+        if (message.type !== 'canvas.joined') return;
         clearTimeout(timer);
         resolve();
       });
     });
     const broadcast = new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('subflow project broadcast timed out')), 3000);
+      const timer = setTimeout(() => reject(new Error('subflow canvas broadcast timed out')), 3000);
       const onMessage = (raw) => {
         const message = JSON.parse(String(raw));
         if (message.type !== 'subflow.published') return;
@@ -1639,6 +1666,7 @@ test('remote clients cannot forge run state or output while host broadcasts safe
       id: 'asset-host-1', projectId: 'project-local', kind: 'image', filename: 'host.png', mimeType: 'image/png',
       sourceUrl: 'https://evil.example/forged.png', managedPath: 'C:\\secret\\host.png', createdBy: 'local-owner',
     });
+    scopeAssetToCanvas(database, 'asset-host-1');
     const forgedHttp = await fetch(`${baseUrl}/api/collab/project-runs`, {
       method: 'POST',
       headers: { cookie: editor.cookie, 'content-type': 'application/json' },

@@ -474,14 +474,21 @@ class AssetUploadManager {
                 provenance: {
                   source: session.sourceKind === 'collaboration' ? 'collaboration-upload' : 'project-upload',
                   memberId: session.memberId,
+                  canvasId: context.canvasId || null,
                   uploadSessionId: session.id,
                 },
                 createdBy: session.memberId,
               },
               lineage: {
                 sourceType: session.sourceKind === 'collaboration' ? 'collaboration-upload' : 'project-upload',
+                canvasId: context.canvasId || null,
                 creatorId: session.memberId,
-                metadata: { memberId: session.memberId, storageMode: 'managed', blobStorage: 'cas' },
+                metadata: {
+                  memberId: session.memberId,
+                  canvasId: context.canvasId || null,
+                  storageMode: 'managed',
+                  blobStorage: 'cas',
+                },
               },
               deduplicated: lockedInstalled.reused,
             });

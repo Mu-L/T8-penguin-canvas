@@ -19,6 +19,7 @@ import CollaborationAssetUpload from './CollaborationAssetUpload';
 interface Session {
   id?: string;
   projectId: string;
+  canvasId: string;
   memberId: string;
   displayName: string;
   role: WorkspaceRole;
@@ -79,10 +80,20 @@ function displayNode(node: Node): Node {
   };
 }
 
+function requestedCanvasIdFromLocation() {
+  return new URLSearchParams(location.search).get('canvas') || '';
+}
+
+function removeInviteFromAddressBar() {
+  const url = new URL(location.href);
+  if (!url.searchParams.has('invite')) return;
+  url.searchParams.delete('invite');
+  history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
 function Workspace() {
   const [session, setSession] = useState<Session | null>(null);
   const [canvases, setCanvases] = useState<CanvasSummary[]>([]);
-  const [canvasId, setCanvasId] = useState('');
   const [document, setDocument] = useState<VersionedCanvasData | null>(null);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState('');
@@ -98,6 +109,7 @@ function Workspace() {
   const webSocketRef = useRef<WebSocket | null>(null);
   const seqRef = useRef(1);
   const pointerSentAtRef = useRef(0);
+  const canvasId = session?.canvasId || '';
   const canEdit = session?.capabilities.includes('editGraph') || false;
   const canPublishSubflow = session?.capabilities.includes('publishSubflow') || false;
   const canComment = session?.capabilities.includes('comment') || false;
@@ -105,21 +117,20 @@ function Workspace() {
   const canApprove = session?.capabilities.includes('approve') || false;
   const canUploadAsset = session?.capabilities.includes('uploadAsset') || false;
 
-  const loadCanvas = useCallback(async (id: string) => {
-    if (!id) return;
+  const loadCanvas = useCallback(async (scopedCanvasId: string) => {
+    if (!scopedCanvasId) return;
     setBusy(true);
     try {
-      const next = await collabRequest<VersionedCanvasData>(`/api/collab/canvases/${encodeURIComponent(id)}`);
+      const next = await collabRequest<VersionedCanvasData>(`/api/collab/canvases/${encodeURIComponent(scopedCanvasId)}`);
+      if (next.canvasId !== scopedCanvasId) {
+        throw new Error('协作网关返回的画布与当前会话授权不一致。');
+      }
       setDocument(next);
       setNodes((next.nodes || []).map(displayNode));
-      setCanvasId(id);
       setSharedRuns({});
       setSelectedNodeId('');
-      setReviews(await collabRequest<ReviewThread[]>(`/api/collab/reviews?canvasId=${encodeURIComponent(id)}`));
+      setReviews(await collabRequest<ReviewThread[]>(`/api/collab/reviews?canvasId=${encodeURIComponent(scopedCanvasId)}`));
       setStatus(`已同步 revision ${next.revision}`);
-      if (webSocketRef.current?.readyState === WebSocket.OPEN) {
-        webSocketRef.current.send(JSON.stringify({ type: 'canvas.join', canvasId: id }));
-      }
     } catch (error) { setStatus(error instanceof Error ? error.message : String(error)); }
     finally { setBusy(false); }
   }, []);
@@ -131,27 +142,41 @@ function Workspace() {
   const bootstrap = useCallback(async () => {
     setBusy(true);
     try {
+      const params = new URLSearchParams(location.search);
+      const invite = params.get('invite') || '';
+      const requestedCanvasId = requestedCanvasIdFromLocation();
       let nextSession: Session;
-      try {
-        nextSession = await collabRequest<Session>('/api/collab/session');
-      } catch {
-        const invite = new URLSearchParams(location.search).get('invite');
-        if (!invite) throw new Error('邀请链接缺少 invite 参数');
+      if (invite) {
         localStorage.setItem('t8-collab-display-name', displayName.trim() || '访客');
         nextSession = await collabRequest<Session>('/api/collab/invites/redeem', {
           method: 'POST',
-          body: JSON.stringify({ code: invite, displayName: displayName.trim() || '访客' }),
+          body: JSON.stringify({
+            code: invite,
+            displayName: displayName.trim() || '访客',
+            ...(requestedCanvasId ? { canvasId: requestedCanvasId } : {}),
+          }),
         });
+        removeInviteFromAddressBar();
+      } else {
+        nextSession = await collabRequest<Session>('/api/collab/session');
       }
-      setSession(nextSession);
+      if (!String(nextSession.canvasId || '').trim()) {
+        throw new Error('协作会话缺少画布授权，请联系主机重新生成邀请。');
+      }
+      if (requestedCanvasId && requestedCanvasId !== nextSession.canvasId) {
+        throw new Error('邀请链接指定的画布与当前协作会话不一致，请重新打开正确的邀请链接。');
+      }
       const [nextCanvases, nextSubflows] = await Promise.all([
         collabRequest<CanvasSummary[]>('/api/collab/canvases'),
         collabRequest<SubflowDefinition[]>('/api/collab/subflows'),
       ]);
-      setCanvases(nextCanvases);
+      if (nextCanvases.length !== 1 || nextCanvases[0]?.id !== nextSession.canvasId) {
+        throw new Error('协作网关返回了超出当前会话授权范围的画布，请联系主机重新生成邀请。');
+      }
+      setSession(nextSession);
+      setCanvases([nextCanvases[0]]);
       setSubflows(nextSubflows);
-      if (nextCanvases[0]) await loadCanvas(nextCanvases[0].id);
-      else setStatus('项目中还没有可访问画布');
+      await loadCanvas(nextSession.canvasId);
     } catch (error) { setStatus(error instanceof Error ? error.message : String(error)); }
     finally { setBusy(false); }
   }, [displayName, loadCanvas, loadSubflows]);
@@ -163,24 +188,36 @@ function Workspace() {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const socket = new WebSocket(`${protocol}//${location.host}/ws/collab`);
     webSocketRef.current = socket;
-    socket.onopen = () => { if (canvasId) socket.send(JSON.stringify({ type: 'canvas.join', canvasId })); };
+    const refreshSessionAfterRoleChange = async () => {
+      try {
+        const nextSession = await collabRequest<Session>('/api/collab/session');
+        if (!nextSession.canvasId || nextSession.canvasId !== session.canvasId) {
+          throw new Error('成员权限更新后的画布授权不一致，请联系主机重新邀请。');
+        }
+        setSession(nextSession);
+        setStatus(`权限已更新为 ${nextSession.role}，协作连接正在刷新。`);
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : String(error));
+      }
+    };
+    socket.onopen = () => socket.send(JSON.stringify({ type: 'canvas.join', canvasId: session.canvasId }));
     socket.onmessage = (event) => {
       let message: any;
       try { message = JSON.parse(event.data); } catch { return; }
-      if (message.type === 'canvas.operations' && message.canvasId === canvasId) void loadCanvas(canvasId);
+      if (message.type === 'canvas.operations' && message.canvasId === session.canvasId) void loadCanvas(session.canvasId);
       if (message.type === 'subflow.published') {
         void loadSubflows();
         const publication = message.publication || {};
         setStatus(`${publication.publishedBy || '协作者'} 已发布 ${publication.name || publication.id} v${publication.version} / revision ${publication.revision}`);
       }
       if (message.type === 'review.created' || message.type === 'review.updated' || message.type === 'review.comment') {
-        if (canvasId) void collabRequest<ReviewThread[]>(`/api/collab/reviews?canvasId=${encodeURIComponent(canvasId)}`).then(setReviews);
+        void collabRequest<ReviewThread[]>(`/api/collab/reviews?canvasId=${encodeURIComponent(session.canvasId)}`).then(setReviews);
       }
-      if (message.type === 'run.intent-state' && message.intent?.canvasId === canvasId) {
+      if (message.type === 'run.intent-state' && message.intent?.canvasId === session.canvasId) {
         const intent = message.intent;
         setStatus(`运行请求 ${String(intent.id).slice(0, 8)}：${intent.status}${intent.runId ? ` · Run ${String(intent.runId).slice(0, 8)}` : ''}`);
       }
-      if (message.type === 'run.state' && message.run?.canvasId === canvasId) {
+      if (message.type === 'run.state' && message.run?.canvasId === session.canvasId) {
         const run = message.run;
         setSharedRuns((current) => ({
           ...current,
@@ -213,9 +250,22 @@ function Workspace() {
       }
       if (message.type === 'presence.update' && message.memberId !== session.memberId) setPresence((current) => ({ ...current, [message.memberId]: { memberId: message.memberId, displayName: message.displayName, ...message.presence } }));
       if (message.type === 'presence.left') setPresence((current) => { const next = { ...current }; delete next[message.memberId]; return next; });
+      if (message.type === 'session.revoked') setStatus('主机已断开当前协作会话，请重新获取邀请链接。');
+      if (message.type === 'session.changed') void refreshSessionAfterRoleChange();
+    };
+    socket.onerror = () => setStatus('协作连接发生错误，正在等待重新加入。');
+    socket.onclose = (event) => {
+      setPresence({});
+      if (event.code === 4002) {
+        void refreshSessionAfterRoleChange();
+      } else {
+        setStatus(event.code === 4001
+          ? '主机已断开当前协作会话，请重新获取邀请链接。'
+          : '协作网关连接已关闭。');
+      }
     };
     return () => { socket.close(); webSocketRef.current = null; };
-  }, [canvasId, loadCanvas, loadSubflows, session]);
+  }, [loadCanvas, loadSubflows, session]);
 
   const sendOperations = useCallback(async (operations: Array<{ type: string; payload: Record<string, unknown> }>) => {
     if (!document || !canvasId || !session) return;
@@ -238,7 +288,13 @@ function Workspace() {
     }
   }, [canvasId, document, loadCanvas, session]);
 
-  const onNodesChange = useCallback((changes: NodeChange[]) => setNodes((current) => applyNodeChanges(changes, current)), []);
+  const onNodesChange = useCallback((changes: NodeChange[]) => {
+    const permittedChanges = canEdit
+      ? changes
+      : changes.filter((change) => change.type === 'select' || change.type === 'dimensions');
+    if (!permittedChanges.length) return;
+    setNodes((current) => applyNodeChanges(permittedChanges, current));
+  }, [canEdit]);
   const onNodeDragStop: NodeMouseHandler = useCallback((_event, node) => {
     if (!canEdit) return;
     void sendOperations([{ type: 'node.move', payload: { nodeId: node.id, position: node.position } }]);
@@ -323,21 +379,36 @@ function Workspace() {
 
   return (
     <div className="flex h-screen flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]" onPointerMove={(event) => {
-      if (!webSocketRef.current || Date.now() - pointerSentAtRef.current < 90) return;
+      if (webSocketRef.current?.readyState !== WebSocket.OPEN || Date.now() - pointerSentAtRef.current < 90) return;
       pointerSentAtRef.current = Date.now();
       webSocketRef.current.send(JSON.stringify({ type: 'presence.update', presence: { cursor: { x: event.clientX, y: event.clientY }, selectedNodeIds: nodes.filter((node) => node.selected).map((node) => node.id) } }));
     }}>
       <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b border-[var(--border-primary)] bg-[var(--bg-secondary)] px-3 py-2 md:h-14 md:flex-nowrap md:gap-3 md:px-4 md:py-0">
         <Shield size={19} className="text-[var(--accent-primary)]" /><div className="min-w-0 flex-1"><h1 className="text-sm font-bold">T8 协作画布</h1><p className="truncate text-[10px] text-[var(--text-secondary)]">{status}</p></div>
-        <select value={canvasId} className="order-3 h-9 min-w-0 flex-1 rounded border border-[var(--border-primary)] bg-[var(--bg-primary)] px-2 text-xs md:order-none md:max-w-56 md:flex-none" onChange={(event) => void loadCanvas(event.target.value)}>{canvases.map((canvas) => <option key={canvas.id} value={canvas.id}>{canvas.name}</option>)}</select>
-        <button type="button" className="grid h-9 w-9 place-items-center rounded border border-[var(--border-primary)]" title="重新同步" onClick={() => void loadCanvas(canvasId)}><RefreshCw size={15} /></button>
+        <div data-testid="collaboration-scoped-canvas" className="order-3 h-9 min-w-0 flex-1 truncate rounded border border-[var(--border-primary)] bg-[var(--bg-primary)] px-3 py-2 text-xs md:order-none md:max-w-56 md:flex-none" title={canvases[0]?.name || session?.canvasId || ''}>{canvases[0]?.name || session?.canvasId || '等待画布授权'}</div>
+        <button type="button" className="grid h-9 w-9 place-items-center rounded border border-[var(--border-primary)] disabled:opacity-40" title="重新同步" disabled={!session?.canvasId} onClick={() => { if (session?.canvasId) void loadCanvas(session.canvasId); }}><RefreshCw size={15} /></button>
         {canRun && <button type="button" className="flex h-9 items-center gap-2 rounded bg-[var(--accent-primary)] px-3 text-xs font-bold text-white" onClick={requestRun}><Play size={14} />请求运行</button>}
         <div className="flex min-w-0 max-w-44 items-center gap-2 text-xs"><CircleUserRound size={16} className="shrink-0" /><span className="truncate">{session?.displayName || displayName}</span><span className="shrink-0 opacity-55">{session?.role}</span></div>
       </header>
+      {session && (
+        <div
+          className={`shrink-0 border-b px-4 py-2 text-xs ${canEdit ? 'border-green-500/30 bg-green-500/10' : 'border-amber-500/30 bg-amber-500/10'}`}
+          data-testid="collaboration-access-mode"
+        >
+          <strong>{canEdit ? '编辑连接' : session.role === 'reviewer' ? '审阅连接 · 画布只读' : '查看连接 · 完全只读'}</strong>
+          <span className="ml-2 text-[var(--text-secondary)]">
+            {canEdit
+              ? '可按主机授予的能力编辑、上传或请求运行。'
+              : session.role === 'reviewer'
+                ? '可以评论和审批，不能拖动、删除、连线、运行、上传或发布。'
+                : '只能查看画布与获授权素材，不能修改或发起运行。'}
+          </span>
+        </div>
+      )}
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <main className="relative min-w-0 flex-1">
           {busy && <div className="absolute inset-0 z-20 grid place-items-center bg-black/15"><Loader2 size={26} className="animate-spin" /></div>}
-          <ReactFlow nodes={nodes} edges={document?.edges || []} nodesDraggable={canEdit} nodesConnectable={false} elementsSelectable onNodesChange={onNodesChange} onNodeDragStop={onNodeDragStop} onNodeClick={(_event, node) => setSelectedNodeId(node.id)} fitView minZoom={0.05} maxZoom={2}><Background /><Controls /><MiniMap pannable zoomable /></ReactFlow>
+          <ReactFlow nodes={nodes} edges={document?.edges || []} nodesDraggable={canEdit} nodesConnectable={false} deleteKeyCode={null} elementsSelectable onNodesChange={onNodesChange} onNodeDragStop={onNodeDragStop} onNodeClick={(_event, node) => setSelectedNodeId(node.id)} fitView minZoom={0.05} maxZoom={2}><Background /><Controls /><MiniMap pannable zoomable /></ReactFlow>
           {Object.values(presence).map((member) => member.cursor && <div key={member.memberId} className="pointer-events-none fixed z-30 rounded bg-[var(--accent-primary)] px-2 py-1 text-[10px] font-bold text-white" style={{ left: member.cursor.x + 8, top: member.cursor.y + 8 }}>{member.displayName}</div>)}
         </main>
         <aside className="h-[40vh] w-full shrink-0 overflow-auto border-t border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4 md:h-auto md:w-80 md:border-l md:border-t-0">

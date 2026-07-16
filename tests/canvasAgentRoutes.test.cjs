@@ -246,7 +246,12 @@ test('collaboration Agent route is pre-parsed, authenticated, scope-forced, and 
   assert.match(route, /sessionId: req\.collaborationSession\.id/);
   assert.match(route, /role: req\.collaborationSession\.role/);
   assert.match(route, /capabilities: req\.collaborationSession\.capabilities/);
-  assert.match(route, /executeCanvasAgentTool\(this\.database/);
+  assert.match(route, /const resourceScope = this\.canvasResourceScope\(req\.collaborationSession\)/);
+  assert.match(
+    route,
+    /executeCanvasAgentTool\(\s*this\.collaborationAgentDatabase\(req\.collaborationSession, resourceScope\)/,
+  );
+  assert.doesNotMatch(route, /executeCanvasAgentTool\(this\.database/);
   assert.match(route, /sendCanvasPatchError\(res, error/);
   assert.match(route, /fallbackCode: 'agent_tool_failed'/);
   assert.doesNotMatch(route, /(?:apply|save|update|delete|restore|revert)Canvas|broadcast\(/);

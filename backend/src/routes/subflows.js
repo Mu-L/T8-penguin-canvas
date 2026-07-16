@@ -175,10 +175,15 @@ router.post('/', (req, res) => {
       sessionId: 'local-subflow-api',
       changeSummary,
     });
-    collaborationGateway.broadcastProject(saved.projectId, {
-      type: 'subflow.published',
-      publication: publicSubflowPublication(saved),
-    });
+    collaborationGateway.broadcastSubflowPublication(
+      saved.projectId,
+      saved.id,
+      saved.version,
+      {
+        type: 'subflow.published',
+        publication: publicSubflowPublication(saved),
+      },
+    );
     res.status(201).json({ success: true, data: saved });
   } catch (error) {
     if (error instanceof SubflowRevisionConflictError) {
@@ -223,10 +228,15 @@ router.post('/package/import', packageUpload.single('file'), async (req, res) =>
       sessionId: 'local-subflow-import',
       changeSummary: '导入 .t8flow 归档',
     });
-    collaborationGateway.broadcastProject(saved.projectId, {
-      type: 'subflow.published',
-      publication: publicSubflowPublication(saved),
-    });
+    collaborationGateway.broadcastSubflowPublication(
+      saved.projectId,
+      saved.id,
+      saved.version,
+      {
+        type: 'subflow.published',
+        publication: publicSubflowPublication(saved),
+      },
+    );
     res.status(201).json({ success: true, data: { definition: saved, archiveSha256: imported.archiveSha256, importedAssetIds: importedAssets.created.map((item) => item.id) } });
   } catch (error) {
     rollbackImportedAssets(importedAssets?.created || [], database);

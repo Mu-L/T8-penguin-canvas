@@ -1,7 +1,7 @@
 {
   "name": "t8-penguin-canvas",
   "private": false,
-  "version": "2.5.7",
+  "version": "2.5.8",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "T8-penguin-canvas — AI 节点画布工作流工具（Web + Electron 桌面端）",
@@ -66,6 +66,7 @@
     "lucide-react": "^0.468.0",
     "multer": "^2.0.2",
     "phaser": "^3.90.0",
+    "qrcode": "1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "sharp": "^0.34.5",
@@ -78,6 +79,7 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@types/qrcode": "1.5.6",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/three": "^0.184.1",
