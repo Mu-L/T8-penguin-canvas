@@ -43,6 +43,25 @@ test('dir packaging verification ignores stale release metadata unless update ar
   assert.match(postBuild, /skipping installer\/latest\.yml checks for dir build/);
 });
 
+test('Electron bytecode compilation is pinned to the project-local locked runtime', () => {
+  const packageJson = JSON.parse(read('../package.json'));
+  const packageLock = JSON.parse(read('../package-lock.json'));
+  const encrypt = read('../electron/encrypt.cjs');
+
+  assert.equal(
+    packageJson.scripts.encrypt,
+    'cross-env ELECTRON_RUN_AS_NODE=1 node node_modules/electron/cli.js electron/encrypt.cjs',
+  );
+  assert.equal(
+    packageLock.packages['node_modules/electron'].version,
+    packageJson.devDependencies.electron.replace(/^\^/, ''),
+  );
+  assert.match(encrypt, /function assertElectronCompilerRuntime\(\)/);
+  assert.match(encrypt, /package-lock=\$\{expected\}, compiler=\$\{actual\}/);
+  assert.match(encrypt, /project-local Electron \$\{expected\} is incomplete/);
+  assert.match(encrypt, /assertElectronCompilerRuntime\(\);/);
+});
+
 test('Electron does not open the renderer before the packaged backend is ready', () => {
   const main = read('../electron/main.cjs');
   assert.match(main, /const backendReady = await waitForBackend\(backendPort, 30\)/);

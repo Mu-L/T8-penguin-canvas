@@ -26,6 +26,10 @@ const bytenode = require('bytenode');
 const { encryptBuffer } = require('./loader.cjs');
 
 const BACKEND_SRC = path.resolve(__dirname, '..', 'backend', 'src');
+const PROJECT_ROOT = path.resolve(__dirname, '..');
+const PACKAGE_LOCK = path.join(PROJECT_ROOT, 'package-lock.json');
+const LOCAL_ELECTRON_PACKAGE = path.join(PROJECT_ROOT, 'node_modules', 'electron', 'package.json');
+const LOCAL_ELECTRON_PATH = path.join(PROJECT_ROOT, 'node_modules', 'electron', 'path.txt');
 const LOCAL_PRIVATE_SRC = path.resolve(__dirname, '..', 'local-private');
 const OUT_DIR = path.resolve(__dirname, '..', 'build', 'backend-enc');
 const LOCAL_PRIVATE_BACKEND_DIRS = [
@@ -71,6 +75,42 @@ function walk(dir, results = []) {
 
 function ensureDir(p) {
   if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+}
+
+function readExpectedElectronVersion() {
+  const lock = JSON.parse(fs.readFileSync(PACKAGE_LOCK, 'utf8'));
+  const version = lock?.packages?.['node_modules/electron']?.version;
+  if (!version) {
+    throw new Error('[encrypt] package-lock.json is missing the pinned Electron version');
+  }
+  return String(version);
+}
+
+function assertElectronCompilerRuntime() {
+  const expected = readExpectedElectronVersion();
+  const actual = process.versions.electron;
+  if (!actual) {
+    throw new Error(
+      `[encrypt] bytecode compiler must run with project Electron ${expected}; run npm ci, then npm run encrypt`,
+    );
+  }
+  if (actual !== expected) {
+    throw new Error(
+      `[encrypt] Electron runtime mismatch: package-lock=${expected}, compiler=${actual}; run npm ci and use the project-local Electron CLI`,
+    );
+  }
+  if (!fs.existsSync(LOCAL_ELECTRON_PACKAGE) || !fs.existsSync(LOCAL_ELECTRON_PATH)) {
+    throw new Error(
+      `[encrypt] project-local Electron ${expected} is incomplete; run npm ci before packaging`,
+    );
+  }
+  const localVersion = JSON.parse(fs.readFileSync(LOCAL_ELECTRON_PACKAGE, 'utf8')).version;
+  if (String(localVersion) !== expected) {
+    throw new Error(
+      `[encrypt] local Electron package mismatch: package-lock=${expected}, node_modules=${localVersion || 'missing'}`,
+    );
+  }
+  console.log(`[encrypt] compiler Electron ${actual}, Node ${process.versions.node}, V8 ${process.versions.v8}`);
 }
 
 // 把 require('./foo') / require('./foo.js') 重写为 require('./foo.t8c')
@@ -232,14 +272,10 @@ function main() {
 }
 
 if (require.main === module) {
-  // 必须用 electron 运行本脚本 (npx electron electron/encrypt.js)
+  // 必须用项目锁定的 Electron 运行本脚本,避免 npm 向父目录解析到其他 Electron。
   // 使 bytenode 编译出的字节码与运行时 Electron V8 版本一致
-  // 检测: process.versions.electron 存在则表明是 Electron 进程
-  if (!process.versions.electron) {
-    console.warn('[encrypt] WARNING: 该脚本未在 Electron 下执行! V8 版本不匹配会导致打包后崩溃。');
-    console.warn('[encrypt]   请改用: npx electron electron/encrypt.js');
-  }
   try {
+    assertElectronCompilerRuntime();
     main();
     // Electron 环境下需主动退出,否则事件循环不退
     if (process.versions.electron) {
@@ -264,4 +300,6 @@ module.exports = {
   encryptFile,
   rewriteRequires,
   writeCanvasAgentIntegrityManifest,
+  readExpectedElectronVersion,
+  assertElectronCompilerRuntime,
 };

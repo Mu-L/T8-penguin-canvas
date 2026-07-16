@@ -35,7 +35,7 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "type-check": "tsc --noEmit",
     "electron:dev": "cross-env T8PC_PACKAGED=0 electron electron/main.cjs",
-    "encrypt": "cross-env ELECTRON_RUN_AS_NODE=1 electron electron/encrypt.cjs",
+    "encrypt": "cross-env ELECTRON_RUN_AS_NODE=1 node node_modules/electron/cli.js electron/encrypt.cjs",
     "prepack:enc": "npm run rh-toolbox:check && npm run build && npm run encrypt",
     "prepack:runtimes": "node scripts/prepare-runtime-archives.cjs",
     "rebuild:electron": "electron-rebuild -f -w better-sqlite3 --arch x64",
