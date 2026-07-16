@@ -56,7 +56,7 @@
         "20,000 节点、19,999 连线的确定性链式画布诊断约 284 ms，低于 5 秒闸门；该数字只代表本机该图形和 Doctor 分析器，不代表所有图形或 UI 渲染性能。",
         "Electron 33.4.11 目录包严格 post-build 通过：94 个 t8c、0 明文后端代码、私有扩展和充值后端均加密、Canvas Agent 完整性 5/5。包内 Electron ABI 130 实际打开 SQLite 3.53.2；同一全新 userData 连续冷启动两次均选择 18767、加载加密入口、状态接口与前端可用、正常关闭后进程树和端口为 0。schema 22、迁移 1-22 连续、quick_check=ok、foreign_key_check=0，运行证据表齐全；根 Node ABI 127 与用户现有服务保持不变。",
         "正式发布脚本把去水印、ParseHub、runtime archives、自动更新资产和本地私有 sidecar 的严格变量固定为 1，父环境显式传 0 也不能降级。预归档验证完整源目录的必需入口与最低规模，post-build 验证包内 ZIP 的 archive/source 统计、SHA-256、7-Zip CRC 和必需文件，拒绝 README-only 空壳运行时。",
-        "dist:release 在任何构建前固定当前 HEAD、核对 origin/main、清理旧自动更新资产，并以本次进程随机 nonce 写入绑定 source target/version/三资产哈希的 provenance；release:github 缺少同一 nonce 或 provenance 不匹配即拒绝。公开同版本 Release 默认不可变，新版本先建立非 Latest 草稿，下载回读通过后才发布并标记 Latest，再执行最终复核。"
+        "dist:release 在任何构建前固定当前 HEAD、核对 origin/main、清理旧自动更新资产，并由本次调用生成随机 nonce，仅通过该调用启动的子进程环境传递，再写入绑定 source target/version/三资产哈希的 provenance；release:github 缺少同一 nonce 或 provenance 不匹配即拒绝。本发布器拒绝覆盖已公开的同版本 Release，并以 source target + nonce 哈希标记约束已有草稿接管；这不等同于启用 GitHub 仓库级 immutable releases。新版本先建立非 Latest 草稿，下载回读通过后才发布并标记 Latest，再执行最终复核。"
       ]
     },
     "nextRequiredWork": [
@@ -5070,7 +5070,7 @@
       "dist:dir": "npm run prepack:enc && npm run prepack:runtimes && npm run rebuild:electron && electron-builder --win --x64 --dir --config.npmRebuild=false && cross-env T8_DIRECTORY_BUILD=1 node electron/_post_build.cjs (只出 win-unpacked 目录, 不要求 NSIS 自动更新资产)",
       "dist": "npm run prepack:enc && npm run prepack:runtimes && npm run rebuild:electron && electron-builder --win --x64 --config.npmRebuild=false && node electron/_post_build.cjs (出最终 T8-PenguinCanvas-Setup-${version}.exe)",
       "dist:release": "node scripts/dist-release.cjs (强制注入 T8_REQUIRE_AI_WATERMARK_RUNTIME=1、T8_REQUIRE_PARSEHUB_RUNTIME=1、T8_REQUIRE_RUNTIME_ARCHIVES=1、T8_REQUIRE_UPDATE_ARTIFACTS=1、T8_REQUIRE_LOCAL_PRIVATE=1、T8_ENABLE_LOCAL_PRIVATE=1 与 T8_DISABLE_LOCAL_EXTENSIONS=0；执行 Electron native rebuild、NSIS 构建并上传 GitHub Release 自动更新资产，父环境不能降级这些闸门)",
-      "release:github": "node scripts/release-github.cjs（仅供同一次 dist:release 进程携带固定 T8_RELEASE_TARGET、随机 T8_RELEASE_BUILD_NONCE 与匹配 release-provenance.json 时调用；公开同 tag Release 不可覆盖）",
+      "release:github": "node scripts/release-github.cjs（仅供本次 dist:release 调用启动的子进程继承固定 T8_RELEASE_TARGET、随机 T8_RELEASE_BUILD_NONCE 并匹配 release-provenance.json 时调用；本发布器拒绝覆盖已公开同 tag，并仅接管 source target、nonce 标记与资产子集均匹配的草稿；不假定 GitHub 仓库级 immutable releases 已启用）",
       "release:verify": "node scripts/verify-github-release.cjs（需显式提供发布源 T8_RELEASE_TARGET；校验 tag/source、draft/prerelease/Latest、installer/blockmap/latest.yml 远端回读摘要以及 latest.yml 的真实 YAML 结构、版本、path、files 条目、sha512 与 size）"
     },
     "runtimeEnvVars": {

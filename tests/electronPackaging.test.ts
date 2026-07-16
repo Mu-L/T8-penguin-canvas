@@ -207,8 +207,12 @@ test('Electron release publishing requires explicit per-version approval', () =>
   assert.match(githubRelease, /refs\/heads\/main/);
   assert.match(githubRelease, /refs\/tags\/\$\{tag\}/);
   assert.match(githubRelease, /source worktree is not release-clean/);
-  assert.match(githubRelease, /function existingReleaseMetadata\(\)/);
-  assert.match(githubRelease, /published release \$\{tag\} is immutable/);
+  assert.match(githubRelease, /function existingReleaseMetadata\(options\)/);
+  assert.match(githubRelease, /this publisher refuses to replace automatic-update assets/);
+  assert.match(githubRelease, /t8-electron-release-draft-v1/);
+  assert.match(githubRelease, /is not owned by this release build/);
+  assert.match(githubRelease, /contains unexpected assets/);
+  assert.match(githubRelease, /targetCommitish,body,assets/);
   assert.match(githubRelease, /creating draft release/);
   assert.match(githubRelease, /'--draft',[\s\S]*'--latest=false'/);
   assert.match(githubRelease, /verifyRelease\('prepublish'\)/);
@@ -225,7 +229,7 @@ test('Electron release publishing requires explicit per-version approval', () =>
   assert.match(latestYml, /files\.length !== 1/);
   assert.match(releaseProvenance, /t8-electron-release-provenance-v1/);
   assert.match(releaseProvenance, /provenance source target does not match T8_RELEASE_TARGET/);
-  assert.match(releaseProvenance, /provenance build nonce does not match this dist:release process/);
+  assert.match(releaseProvenance, /provenance build nonce does not match this dist:release invocation/);
   assert.match(releaseProvenance, /artifact provenance mismatch/);
 
   const require = createRequire(import.meta.url);
@@ -234,10 +238,90 @@ test('Electron release publishing requires explicit per-version approval', () =>
     assertReleaseProvenance,
     writeReleaseProvenance,
   } = require('../scripts/release-provenance.cjs');
+  const {
+    assertExistingDraftOwnership,
+    buildReleaseDraftMarker,
+    withMarkedReleaseNotes,
+  } = require('../scripts/release-github.cjs');
   const { assertLatestYamlArtifact } = require('../scripts/latest-yml.cjs');
-  const { withReleaseTemp } = require('../scripts/verify-github-release.cjs');
+  const {
+    assertExactReleaseAssets,
+    withReleaseTemp,
+  } = require('../scripts/verify-github-release.cjs');
   const fixtureInstallerName = 'T8-ProvenanceFixture-Setup-9.9.9.exe';
   const fixtureInstallerSha512 = 'fixture-installer-sha512';
+  const fixtureBlockmapName = `${fixtureInstallerName}.blockmap`;
+  const fixtureAssetNames = [fixtureInstallerName, fixtureBlockmapName, 'latest.yml'];
+  const fixtureTarget = 'c'.repeat(40);
+  const fixtureNonceHash = 'd'.repeat(64);
+  const fixtureMarker = buildReleaseDraftMarker({
+    target: fixtureTarget,
+    nonceSha256: fixtureNonceHash,
+  });
+  let markedNotesPath = '';
+  assert.equal(withMarkedReleaseNotes(fixtureMarker, (tempNotes: string) => {
+    markedNotesPath = tempNotes;
+    const text = readFileSync(tempNotes, 'utf8');
+    assert.equal(text.includes(fixtureMarker), true);
+    assert.equal(text.match(/t8-electron-release-draft-v1/g)?.length, 1);
+    return 'marked-notes-ok';
+  }), 'marked-notes-ok');
+  assert.equal(existsSync(markedNotesPath), false);
+  const fixtureDraft = (overrides: Record<string, unknown> = {}) => ({
+    tagName: 'v9.9.9',
+    isDraft: true,
+    isPrerelease: false,
+    targetCommitish: fixtureTarget,
+    body: `fixture notes\n\n${fixtureMarker}\n`,
+    assets: [{ name: fixtureInstallerName }],
+    ...overrides,
+  });
+  assert.doesNotThrow(() => assertExistingDraftOwnership(fixtureDraft(), {
+    expectedTag: 'v9.9.9',
+    expectedTarget: fixtureTarget,
+    expectedMarker: fixtureMarker,
+    expectedAssetNames: fixtureAssetNames,
+  }));
+  assert.throws(() => assertExistingDraftOwnership(fixtureDraft({
+    targetCommitish: 'e'.repeat(40),
+  }), {
+    expectedTag: 'v9.9.9',
+    expectedTarget: fixtureTarget,
+    expectedMarker: fixtureMarker,
+    expectedAssetNames: fixtureAssetNames,
+  }), /targets/);
+  assert.throws(() => assertExistingDraftOwnership(fixtureDraft({
+    body: '<!-- t8-electron-release-draft-v1 target=cccccccccccccccccccccccccccccccccccccccc nonceSha256=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee -->',
+  }), {
+    expectedTag: 'v9.9.9',
+    expectedTarget: fixtureTarget,
+    expectedMarker: fixtureMarker,
+    expectedAssetNames: fixtureAssetNames,
+  }), /not owned/);
+  assert.throws(() => assertExistingDraftOwnership(fixtureDraft({
+    assets: [{ name: fixtureInstallerName }, { name: 'unexpected-debug.zip' }],
+  }), {
+    expectedTag: 'v9.9.9',
+    expectedTarget: fixtureTarget,
+    expectedMarker: fixtureMarker,
+    expectedAssetNames: fixtureAssetNames,
+  }), /unexpected assets/);
+  assert.doesNotThrow(() => assertExactReleaseAssets(
+    fixtureAssetNames.map((name) => ({ name, size: 1 })),
+    fixtureAssetNames,
+  ));
+  assert.throws(() => assertExactReleaseAssets(
+    [...fixtureAssetNames, 'unexpected-debug.zip'].map((name) => ({ name, size: 1 })),
+    fixtureAssetNames,
+  ), /unexpected release asset/);
+  assert.throws(() => assertExactReleaseAssets(
+    fixtureAssetNames.slice(0, 2).map((name) => ({ name, size: 1 })),
+    fixtureAssetNames,
+  ), /missing release asset/);
+  assert.throws(() => assertExactReleaseAssets(
+    [fixtureInstallerName, fixtureInstallerName, 'latest.yml'].map((name) => ({ name, size: 1 })),
+    fixtureAssetNames,
+  ), /duplicate asset names/);
   const latestFixture = ({
     version = '9.9.9',
     entrySha512 = fixtureInstallerSha512,
@@ -425,7 +509,7 @@ test('Electron release publishing requires explicit per-version approval', () =>
   assert.equal(existsSync(failedVerifyTemp), false);
   const fixtureRoot = mkdtempSync(join(tmpdir(), 't8-release-provenance-'));
   const fixturePackage = { version: '9.9.9', build: { productName: 'T8-ProvenanceFixture' } };
-  const target = 'c'.repeat(40);
+  const target = fixtureTarget;
   const nonce = 'ab'.repeat(32);
   try {
     const paths = artifactPaths(fixtureRoot, fixturePackage);

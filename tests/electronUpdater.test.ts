@@ -96,6 +96,9 @@ test('release scripts verify installer, blockmap, latest.yml, and GitHub assets'
   assert.match(verify, /must be a published non-prerelease automatic-update release/);
   assert.match(verify, /remote tag \$\{tag\} targets/);
   assert.match(verify, /release asset SHA-256 mismatch/);
+  assert.match(verify, /unexpected release asset/);
+  assert.match(verify, /isImmutable/);
+  assert.match(verify, /publisher-level no-overwrite only/);
   assert.match(verify, /assertLatestYamlArtifact/);
   assert.match(latestYml, /\$\{label\} installer sha512 mismatch/);
   assert.match(verify, /tagName,isLatest,isDraft,isPrerelease/);

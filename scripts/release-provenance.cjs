@@ -111,7 +111,7 @@ function assertReleaseProvenance(options) {
   const recordedNonceHash = String(recorded.nonceSha256 || '').toLowerCase();
   if (!/^[a-f0-9]{64}$/.test(recordedNonceHash)
     || !crypto.timingSafeEqual(Buffer.from(recordedNonceHash, 'hex'), Buffer.from(expectedNonceHash, 'hex'))) {
-    fail('provenance build nonce does not match this dist:release process');
+    fail('provenance build nonce does not match this dist:release invocation');
   }
   for (const artifact of paths.artifacts) {
     const actual = {

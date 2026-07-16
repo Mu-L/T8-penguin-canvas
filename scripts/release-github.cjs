@@ -33,10 +33,71 @@ const allowedPackagingDirtyPaths = new Set([
   'tools/ffmpeg-runtime/ffprobe.exe',
   'tools/remove-ai-watermarks-runtime/README.md',
 ]);
+const RELEASE_DRAFT_MARKER_SCHEMA = 't8-electron-release-draft-v1';
 
 function fail(message) {
   console.error(`[release] ${message}`);
   process.exit(1);
+}
+
+function buildReleaseDraftMarker({ target, nonceSha256 }) {
+  const normalizedTarget = String(target || '').toLowerCase();
+  const normalizedNonceHash = String(nonceSha256 || '').toLowerCase();
+  if (!/^[a-f0-9]{40}$/.test(normalizedTarget)) {
+    throw new Error('release draft marker target must be an exact 40-character commit SHA');
+  }
+  if (!/^[a-f0-9]{64}$/.test(normalizedNonceHash)) {
+    throw new Error('release draft marker nonceSha256 must be an exact 64-character hexadecimal digest');
+  }
+  return `<!-- ${RELEASE_DRAFT_MARKER_SCHEMA} target=${normalizedTarget} nonceSha256=${normalizedNonceHash} -->`;
+}
+
+function releaseAssetNames(assets) {
+  if (!Array.isArray(assets)) throw new Error('existing release assets metadata is invalid');
+  const names = assets.map((asset) => String(asset?.name || ''));
+  if (names.some((name) => !name)) throw new Error('existing release contains an unnamed asset');
+  if (new Set(names).size !== names.length) throw new Error('existing release contains duplicate asset names');
+  return names;
+}
+
+function assertExistingDraftOwnership(data, {
+  expectedTag,
+  expectedTarget,
+  expectedMarker,
+  expectedAssetNames,
+}) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error(`existing release metadata for ${expectedTag} is invalid`);
+  }
+  if (data.tagName !== expectedTag) {
+    throw new Error(`existing release tag mismatch: expected ${expectedTag}, received ${data.tagName}`);
+  }
+  if (!data.isDraft) {
+    throw new Error(`published release ${expectedTag} already exists; this publisher refuses to replace automatic-update assets`);
+  }
+  if (data.isPrerelease) {
+    throw new Error(`existing draft ${expectedTag} is a prerelease, but this publisher only creates stable automatic updates`);
+  }
+  if (String(data.targetCommitish || '').toLowerCase() !== String(expectedTarget || '').toLowerCase()) {
+    throw new Error(`existing draft ${expectedTag} targets ${data.targetCommitish || '(missing)'}, expected ${expectedTarget}`);
+  }
+  const markerPattern = new RegExp(
+    `<!-- ${RELEASE_DRAFT_MARKER_SCHEMA} target=[a-f0-9]{40} nonceSha256=[a-f0-9]{64} -->`,
+    'g',
+  );
+  const markers = String(data.body || '').match(markerPattern) || [];
+  if (markers.length !== 1 || markers[0] !== expectedMarker) {
+    throw new Error(`existing draft ${expectedTag} is not owned by this release build; refusing to mutate it`);
+  }
+  const expectedNames = new Set(expectedAssetNames);
+  if (expectedNames.size !== expectedAssetNames.length || expectedNames.has('')) {
+    throw new Error('expected release asset names are invalid');
+  }
+  const unexpected = releaseAssetNames(data.assets).filter((name) => !expectedNames.has(name));
+  if (unexpected.length > 0) {
+    throw new Error(`existing draft ${expectedTag} contains unexpected assets: ${unexpected.join(', ')}`);
+  }
+  return data;
 }
 
 function assertReleaseApproval() {
@@ -124,7 +185,7 @@ function capture(command, commandArgs, options = {}) {
   return result.status === 0 ? String(result.stdout || '') : '';
 }
 
-function existingReleaseMetadata() {
+function existingReleaseMetadata(options) {
   if (dryRun) return null;
   const result = run('gh', [
     'release',
@@ -133,7 +194,7 @@ function existingReleaseMetadata() {
     '--repo',
     repo,
     '--json',
-    'tagName,isDraft,isPrerelease',
+    'tagName,isDraft,isPrerelease,targetCommitish,body,assets',
   ], {
     capture: true,
     allowFailure: true,
@@ -145,12 +206,16 @@ function existingReleaseMetadata() {
   } catch (_) {
     fail(`cannot parse existing release metadata for ${tag}`);
   }
-  if (data.tagName !== tag) fail(`existing release tag mismatch: expected ${tag}, received ${data.tagName}`);
-  if (!data.isDraft) {
-    fail(`published release ${tag} is immutable; refusing to replace automatic-update assets`);
+  try {
+    return assertExistingDraftOwnership(data, {
+      expectedTag: tag,
+      expectedTarget: options.releaseTarget,
+      expectedMarker: options.releaseMarker,
+      expectedAssetNames: options.expectedAssetNames,
+    });
+  } catch (error) {
+    fail(error?.message || String(error));
   }
-  if (data.isPrerelease) fail(`existing draft ${tag} is a prerelease, but this publisher only creates stable automatic updates`);
-  return data;
 }
 
 function getGitTarget() {
@@ -205,22 +270,31 @@ function assertReleaseGitState(target) {
   }
 }
 
-function writeFallbackNotes() {
-  if (fs.existsSync(notesFile)) return notesFile;
-  const tmp = path.join(os.tmpdir(), `t8pc-${tag}-release-notes.md`);
-  fs.writeFileSync(
-    tmp,
-    [
-      `# 贞贞的无限画布 ${tag}`,
-      '',
-      '- Electron 桌面端接入 GitHub Release 自动更新。',
-      '- 顶栏新增检查、下载、重启安装状态入口。',
-      '- Release 资产包含 NSIS 安装包、blockmap 与 latest.yml。',
-      '',
-    ].join('\n'),
-    'utf-8',
-  );
-  return tmp;
+function releaseNotesBody() {
+  if (fs.existsSync(notesFile)) return fs.readFileSync(notesFile, 'utf8');
+  return [
+    `# 贞贞的无限画布 ${tag}`,
+    '',
+    '- Electron 桌面端接入 GitHub Release 自动更新。',
+    '- 顶栏新增检查、下载、重启安装状态入口。',
+    '- Release 资产包含 NSIS 安装包、blockmap 与 latest.yml。',
+    '',
+  ].join('\n');
+}
+
+function withMarkedReleaseNotes(marker, action) {
+  const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 't8pc-release-notes-'));
+  const tempNotes = path.join(tempDirectory, `${tag}.md`);
+  const cleanup = () => fs.rmSync(tempDirectory, { recursive: true, force: true });
+  process.once('exit', cleanup);
+  try {
+    const body = releaseNotesBody().replace(/\s+$/, '');
+    fs.writeFileSync(tempNotes, `${body}\n\n${marker}\n`, 'utf8');
+    return action(tempNotes);
+  } finally {
+    process.removeListener('exit', cleanup);
+    cleanup();
+  }
 }
 
 function verifyRelease(phase) {
@@ -254,14 +328,14 @@ function main() {
   console.log(`[release] repo=${repo} tag=${tag}`);
   const releaseTarget = getGitTarget();
   assertReleaseGitState(releaseTarget);
-  const existing = existingReleaseMetadata();
 
   assertFile(installer);
   assertFile(blockmap);
   assertLatestYaml();
+  let provenance;
   if (!dryRun) {
     try {
-      assertReleaseProvenance({
+      provenance = assertReleaseProvenance({
         root: ROOT,
         pkg,
         target: releaseTarget,
@@ -272,80 +346,106 @@ function main() {
     }
   }
 
-  const releaseNotes = writeFallbackNotes();
   const assets = [installer, blockmap, latest];
+  const expectedAssetNames = assets.map((asset) => path.basename(asset));
   const title = `贞贞的无限画布${tag}`;
+  let releaseMarker;
+  try {
+    releaseMarker = buildReleaseDraftMarker({
+      target: releaseTarget,
+      nonceSha256: dryRun ? '0'.repeat(64) : provenance?.nonceSha256,
+    });
+  } catch (error) {
+    fail(error?.message || String(error));
+  }
 
-  if (existing) {
-    console.log(`[release] updating existing draft ${tag}`);
-    run('gh', ['release', 'upload', tag, ...assets, '--repo', repo, '--clobber']);
-    run('gh', [
+  withMarkedReleaseNotes(releaseMarker, (releaseNotes) => {
+    const existing = existingReleaseMetadata({
+      releaseTarget,
+      releaseMarker,
+      expectedAssetNames,
+    });
+    if (existing) {
+      console.log(`[release] updating owned draft ${tag}`);
+      run('gh', ['release', 'upload', tag, ...assets, '--repo', repo, '--clobber']);
+      run('gh', [
+        'release',
+        'edit',
+        tag,
+        '--repo',
+        repo,
+        '--title',
+        title,
+        '--notes-file',
+        releaseNotes,
+        '--draft',
+        '--latest=false',
+      ]);
+    } else {
+      console.log(`[release] creating draft release ${tag}`);
+      const createArgs = [
+        'release',
+        'create',
+        tag,
+        ...assets,
+        '--repo',
+        repo,
+        '--target',
+        releaseTarget,
+        '--title',
+        title,
+        '--notes-file',
+        releaseNotes,
+        '--draft',
+        '--latest=false',
+      ];
+      run('gh', createArgs);
+    }
+
+    if (verifyRelease('prepublish') !== 0) {
+      fail(`draft ${tag} failed prepublish verification and remains unpublished`);
+    }
+    if (draft) {
+      console.log(`[release] draft ${tag} verified and left unpublished by request`);
+      return;
+    }
+
+    const publishResult = run('gh', [
       'release',
       'edit',
       tag,
       '--repo',
       repo,
-      '--title',
-      title,
-      '--notes-file',
-      releaseNotes,
-      '--draft',
-      '--latest=false',
-    ]);
-  } else {
-    console.log(`[release] creating draft release ${tag}`);
-    const createArgs = [
-      'release',
-      'create',
-      tag,
-      ...assets,
-      '--repo',
-      repo,
-      '--target',
-      releaseTarget,
-      '--title',
-      title,
-      '--notes-file',
-      releaseNotes,
-      '--draft',
-      '--latest=false',
-    ];
-    run('gh', createArgs);
-  }
-
-  if (verifyRelease('prepublish') !== 0) {
-    fail(`draft ${tag} failed prepublish verification and remains unpublished`);
-  }
-  if (draft) {
-    console.log(`[release] draft ${tag} verified and left unpublished by request`);
-    return;
-  }
-
-  const publishResult = run('gh', [
-    'release',
-    'edit',
-    tag,
-    '--repo',
-    repo,
-    '--draft=false',
-    '--prerelease=false',
-    '--latest',
-  ], { allowFailure: true });
-  if (verifyRelease('final') !== 0) {
-    const returnedToDraft = returnReleaseToDraft();
-    const publishStatus = publishResult.status !== 0
-      ? `; publish command exited with ${publishResult.status}`
-      : '';
-    fail(
-      returnedToDraft
-        ? `${tag} failed final verification and was returned to draft${publishStatus}`
-        : `${tag} failed final verification; automatic rollback to draft also failed${publishStatus}`,
-    );
-  }
-  if (publishResult.status !== 0) {
-    console.warn(`[release] publish command exited with ${publishResult.status}, but final remote verification succeeded`);
-  }
-  console.log('[release] done');
+      '--draft=false',
+      '--prerelease=false',
+      '--latest',
+    ], { allowFailure: true });
+    if (verifyRelease('final') !== 0) {
+      const returnedToDraft = returnReleaseToDraft();
+      const publishStatus = publishResult.status !== 0
+        ? `; publish command exited with ${publishResult.status}`
+        : '';
+      fail(
+        returnedToDraft
+          ? `${tag} failed final verification and was returned to draft${publishStatus}`
+          : `${tag} failed final verification; automatic rollback to draft also failed${publishStatus}`,
+      );
+    }
+    if (publishResult.status !== 0) {
+      console.warn(`[release] publish command exited with ${publishResult.status}, but final remote verification succeeded`);
+    }
+    console.log('[release] done');
+  });
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  RELEASE_DRAFT_MARKER_SCHEMA,
+  assertExistingDraftOwnership,
+  buildReleaseDraftMarker,
+  main,
+  withMarkedReleaseNotes,
+};

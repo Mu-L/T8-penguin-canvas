@@ -116,6 +116,22 @@ function withReleaseTemp(action) {
   }
 }
 
+function assertExactReleaseAssets(assets, expectedNames) {
+  if (!Array.isArray(assets)) fail('release assets metadata is invalid');
+  const names = assets.map((asset) => String(asset?.name || ''));
+  if (names.some((name) => !name)) fail('release contains an unnamed asset');
+  if (new Set(names).size !== names.length) fail('release contains duplicate asset names');
+  const expected = new Set(expectedNames);
+  if (expected.size !== expectedNames.length || expected.has('')) fail('expected release asset names are invalid');
+  for (const required of expectedNames) {
+    if (!names.includes(required)) fail(`missing release asset: ${required}`);
+  }
+  const unexpected = names.filter((name) => !expected.has(name));
+  if (unexpected.length > 0) fail(`unexpected release asset: ${unexpected.join(', ')}`);
+  if (names.length !== expectedNames.length) fail('release asset set is not exact');
+  return new Map(assets.map((asset) => [asset.name, asset]));
+}
+
 function main() {
   if (!/^[a-f0-9]{40}$/.test(releaseTarget)) {
     fail('T8_RELEASE_TARGET must be the exact 40-character source commit SHA');
@@ -124,7 +140,7 @@ function main() {
     fail(`automatic-update tag must be ${expectedTag}, received ${tag}`);
   }
   console.log(`[verify-release] repo=${repo} tag=${tag} phase=${prepublish ? 'prepublish' : 'final'}`);
-  const result = runGh(['release', 'view', tag, '--repo', repo, '--json', 'tagName,url,assets,isDraft,isPrerelease,publishedAt,targetCommitish'], {
+  const result = runGh(['release', 'view', tag, '--repo', repo, '--json', 'tagName,url,assets,isDraft,isPrerelease,isImmutable,publishedAt,targetCommitish'], {
     capture: true,
   });
   const data = JSON.parse(result.stdout);
@@ -146,12 +162,8 @@ function main() {
       fail(`draft ${tag} targets ${data.targetCommitish || '(missing)'}, expected ${releaseTarget}`);
     }
   }
-  const assetByName = new Map((data.assets || []).map((asset) => [asset.name, asset]));
-  for (const required of [installerName, blockmapName, 'latest.yml']) {
-    if (!assetByName.has(required)) {
-      fail(`missing release asset: ${required}`);
-    }
-  }
+  const expectedAssetNames = [installerName, blockmapName, 'latest.yml'];
+  const assetByName = assertExactReleaseAssets(data.assets, expectedAssetNames);
 
   withReleaseTemp((tmp) => {
     runGh([
@@ -211,6 +223,7 @@ function main() {
   console.log(`[verify-release] assets ok: ${installerName}, ${blockmapName}, latest.yml`);
   console.log(`[verify-release] url: ${data.url}`);
   console.log(`[verify-release] latest: ${prepublish ? 'not-required-before-publish' : (isLatest ? 'yes' : 'no')}`);
+  console.log(`[verify-release] GitHub immutable: ${data.isImmutable === true ? 'yes' : 'no (publisher-level no-overwrite only)'}`);
 }
 
 if (require.main === module) {
@@ -223,6 +236,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  assertExactReleaseAssets,
   main,
   withReleaseTemp,
 };
