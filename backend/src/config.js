@@ -10,6 +10,16 @@ const os = require('os');
 //             前端静态产物位于 T8PC_FRONTEND_DIST(默认 resources/frontend)。
 const IS_PACKAGED = process.env.T8PC_PACKAGED === '1';
 const PROJECT_DIR = path.resolve(__dirname, '..', '..');
+function resolveAppVersion() {
+  const injected = String(process.env.T8PC_APP_VERSION || '').trim();
+  if (injected) return injected;
+  try {
+    return String(JSON.parse(fs.readFileSync(path.join(PROJECT_DIR, 'package.json'), 'utf8')).version || '').trim() || '0.0.0-dev';
+  } catch (_) {
+    return '0.0.0-dev';
+  }
+}
+const APP_VERSION = resolveAppVersion();
 const USER_DATA = process.env.T8PC_USER_DATA && process.env.T8PC_USER_DATA.trim().length > 0
   ? process.env.T8PC_USER_DATA
   : PROJECT_DIR;
@@ -26,7 +36,7 @@ const config = {
   // 服务器
   HOST: process.env.HOST || '127.0.0.1',
   PORT: process.env.PORT || 18766, // 注意:与主项目 18765 错开
-  APP_VERSION: '2.5.3',
+  APP_VERSION,
   NODE_ENV: process.env.NODE_ENV || (IS_PACKAGED ? 'production' : 'development'),
   IS_PACKAGED,
 
@@ -38,10 +48,32 @@ const config = {
   INPUT_DIR: path.join(DATA_ROOT, 'input'),
   OUTPUT_DIR: path.join(DATA_ROOT, 'output'),
   THUMBNAILS_DIR: path.join(DATA_ROOT, 'thumbnails'),
+  ASSET_PREVIEWS_DIR: path.join(DATA_ROOT, 'thumbnails', 'asset-previews'),
+  ASSET_BLOB_DIR: path.join(DATA_ROOT, 'data', 'asset-blobs'),
+  COLLAB_UPLOAD_TEMP_DIR: path.join(DATA_ROOT, 'data', 'collaboration-uploads'),
+  ASSET_SEMANTIC_MODELS_DIR: path.join(DATA_ROOT, 'semantic-models'),
+  ASSET_SEMANTIC_WORK_DIR: path.join(DATA_ROOT, 'data', 'asset-semantic'),
+  ASSET_SEMANTIC_SNAPSHOTS_DIR: path.join(DATA_ROOT, 'data', 'asset-semantic', 'snapshots'),
+  ASSET_SEMANTIC_CONCURRENCY: Math.max(1, Math.min(1, Number(process.env.T8_ASSET_SEMANTIC_CONCURRENCY) || 1)),
+  ASSET_SEMANTIC_MAX_ATTEMPTS: Math.max(1, Math.min(3, Number(process.env.T8_ASSET_SEMANTIC_MAX_ATTEMPTS) || 3)),
+  ASSET_SEMANTIC_RETRY_BASE_MS: Math.max(100, Math.min(60_000, Number(process.env.T8_ASSET_SEMANTIC_RETRY_BASE_MS) || 1_500)),
+  ASSET_SEMANTIC_JOB_TIMEOUT_MS: Math.max(30_000, Math.min(30 * 60_000, Number(process.env.T8_ASSET_SEMANTIC_JOB_TIMEOUT_MS) || 10 * 60_000)),
+  ASSET_SEMANTIC_PIPELINE_VERSION: 'asset-semantic-v1',
+  PROJECT_DB_FILE: path.join(DATA_ROOT, 'data', 't8-projects.sqlite3'),
+  PROJECT_DB_BACKUP_FILE: path.join(DATA_ROOT, 'data', 't8-projects.sqlite3.backup'),
+  COLLAB_HOST: process.env.T8_COLLAB_HOST || '127.0.0.1',
+  COLLAB_PORT: Number(process.env.T8_COLLAB_PORT || 18767),
+  COLLAB_ALLOWED_ORIGINS: String(process.env.T8_COLLAB_ALLOWED_ORIGINS || '').split(',').map((value) => value.trim()).filter(Boolean),
+  COLLAB_PROJECT_QUOTA_BYTES: Math.max(1, Number(process.env.T8_COLLAB_PROJECT_QUOTA_BYTES) || 20 * 1024 * 1024 * 1024),
+  COLLAB_MEMBER_QUOTA_BYTES: Math.max(1, Number(process.env.T8_COLLAB_MEMBER_QUOTA_BYTES) || 5 * 1024 * 1024 * 1024),
+  COLLAB_UPLOAD_CHUNK_BYTES: Math.max(1024 * 1024, Math.min(16 * 1024 * 1024, Number(process.env.T8_COLLAB_UPLOAD_CHUNK_BYTES) || 8 * 1024 * 1024)),
+  COLLAB_MAX_UPLOAD_BYTES: Math.max(1024 * 1024, Math.min(4 * 1024 * 1024 * 1024, Number(process.env.T8_COLLAB_MAX_UPLOAD_BYTES) || 512 * 1024 * 1024)),
+  COLLAB_UPLOAD_SESSION_TTL_MS: Math.max(5 * 60 * 1000, Math.min(7 * 24 * 60 * 60 * 1000, Number(process.env.T8_COLLAB_UPLOAD_SESSION_TTL_MS) || 24 * 60 * 60 * 1000)),
 
   // 数据文件
   CANVAS_FILE: path.join(DATA_ROOT, 'data', 'canvas_list.json'),
   SETTINGS_FILE: path.join(DATA_ROOT, 'data', 'settings.json'),
+  FEISHU_BITABLE_PRIVATE_FILE: path.join(DATA_ROOT, 'data', 'feishu_bitable.private.json'),
   ACHIEVEMENTS_FILE: path.join(DATA_ROOT, 'data', 'achievements.json'),
   RH_APPS_FILE: path.join(DATA_ROOT, 'data', 'rh_apps.json'),
   // v1.2.10+ RH 工具节点专用数据（与 rh_apps.json 完全分开）
@@ -53,6 +85,13 @@ const config = {
   // 缩略图配置
   THUMBNAIL_SIZE: 160,
   THUMBNAIL_QUALITY: 80,
+  ASSET_PREVIEW_CONCURRENCY: Math.max(1, Math.min(4, Number.parseInt(process.env.T8PC_ASSET_PREVIEW_CONCURRENCY || '2', 10) || 2)),
+  ASSET_PREVIEW_MAX_ATTEMPTS: Math.max(1, Math.min(3, Number.parseInt(process.env.T8PC_ASSET_PREVIEW_MAX_ATTEMPTS || '3', 10) || 3)),
+  ASSET_PREVIEW_RETRY_BASE_MS: Math.max(100, Math.min(60_000, Number.parseInt(process.env.T8PC_ASSET_PREVIEW_RETRY_BASE_MS || '750', 10) || 750)),
+  ASSET_PREVIEW_EPHEMERAL_QUEUE_LIMIT: Math.max(1, Math.min(256, Number.parseInt(process.env.T8PC_ASSET_PREVIEW_EPHEMERAL_QUEUE_LIMIT || '64', 10) || 64)),
+  ASSET_PREVIEW_TEMP_MAX_AGE_MS: Math.max(60_000, Math.min(7 * 24 * 60 * 60 * 1000, Number.parseInt(process.env.T8PC_ASSET_PREVIEW_TEMP_MAX_AGE_MS || String(6 * 60 * 60 * 1000), 10) || 6 * 60 * 60 * 1000)),
+  ASSET_PREVIEW_PIPELINE_VERSION: 'asset-preview-v2-phash',
+  ASSET_INDEX_STABILITY_ATTEMPTS: Math.max(1, Math.min(3, Number.parseInt(process.env.T8PC_ASSET_INDEX_STABILITY_ATTEMPTS || '2', 10) || 2)),
 
   // 业务配置
   // 上传素材节点不设置应用层大小上限；0 表示交给磁盘和系统自身约束。
@@ -86,7 +125,7 @@ const config = {
 
 // 提前创建打包后的数据目录(避免首次启动报错)
 if (IS_PACKAGED) {
-  for (const dir of [config.DATA_DIR, config.INPUT_DIR, config.OUTPUT_DIR, config.THUMBNAILS_DIR]) {
+  for (const dir of [config.DATA_DIR, config.INPUT_DIR, config.OUTPUT_DIR, config.THUMBNAILS_DIR, config.ASSET_PREVIEWS_DIR, config.ASSET_BLOB_DIR, config.COLLAB_UPLOAD_TEMP_DIR]) {
     try { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
   }
 }

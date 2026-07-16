@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { PORT_COLOR } from '../../config/portTypes';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import * as api from '../../services/api';
 import {
   createCodexProjectSkill,
@@ -3886,7 +3887,7 @@ const CodexCliAgentNode = ({ id, data, selected }: NodeProps) => {
                   mentions={quickPromptMentions}
                   materials={mentionMaterials}
                   onChange={(value, mentions) => update({ codexQuickPrompt: value, codexQuickPromptMentions: mentions })}
-                  onSubmit={() => void handleQuickRun()}
+                  onSubmit={() => requestCanvasNodeRun(id)}
                   placeholder="输入创作任务；可用 @ 引用素材，也可输入 /imagegen 或 /ads-explorer 调用 Skill..."
                   title="Codex 流式对话"
                   promptTemplateKind="image"
@@ -3925,7 +3926,7 @@ const CodexCliAgentNode = ({ id, data, selected }: NodeProps) => {
                     className="nodrag inline-flex items-center gap-1 px-4 py-2 text-sm font-black"
                     style={{ ...buttonStyle, background: accent, color: studioAccentText, borderColor: accent }}
                     disabled={isBusy}
-                    onClick={() => void handleQuickRun()}
+                    onClick={() => requestCanvasNodeRun(id)}
                   >
                     {isBusy ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
                     发送
@@ -4217,7 +4218,7 @@ const CodexCliAgentNode = ({ id, data, selected }: NodeProps) => {
               mentions={quickPromptMentions}
               materials={mentionMaterials}
               onChange={(value, mentions) => update({ codexQuickPrompt: value, codexQuickPromptMentions: mentions })}
-              onSubmit={() => void handleQuickRun()}
+              onSubmit={() => requestCanvasNodeRun(id)}
               placeholder="例如：/imagegen 生成一张未来感海报；也可 @ 引用素材继续改..."
               title="Codex 简约生成"
               promptTemplateKind="image"
@@ -4276,7 +4277,7 @@ const CodexCliAgentNode = ({ id, data, selected }: NodeProps) => {
                 type="button"
                 className="nodrag inline-flex flex-1 items-center justify-center gap-2 px-4 py-2.5 text-sm font-black"
                 style={{ ...buttonStyle, background: accent, color: studioAccentText, borderColor: accent }}
-                onClick={() => void handleQuickRun()}
+                onClick={() => requestCanvasNodeRun(id)}
               >
                 <Play size={17} />
                 开始生成

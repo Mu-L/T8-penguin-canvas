@@ -6,8 +6,11 @@ import {
   resolveRhImageCapabilityPreset,
   type RhImageCapabilityPresetId,
 } from '../utils/rhToolboxCapabilities';
+import type { QueueSecondaryProviderAction } from '../utils/secondaryProviderAction';
 
 interface RhImageCapabilityRailProps {
+  secondaryActionNodeId: string;
+  queueSecondaryAction: QueueSecondaryProviderAction;
   sourceUrl?: string;
   sourceUrls?: string[];
   accent: string;
@@ -21,6 +24,8 @@ interface RhImageCapabilityRailProps {
 }
 
 export default function RhImageCapabilityRail({
+  secondaryActionNodeId,
+  queueSecondaryAction,
   sourceUrl,
   sourceUrls,
   accent,
@@ -79,6 +84,8 @@ export default function RhImageCapabilityRail({
         return (
           <RhImageCapabilityButton
             key={preset.id}
+            secondaryActionNodeId={secondaryActionNodeId}
+            queueSecondaryAction={queueSecondaryAction}
             sourceUrl={sourceUrl}
             sourceUrls={sourceUrls}
             accent={accent}

@@ -47,6 +47,7 @@ export type NodeType =
   | 'frame-pair'
   | 'loop'
   | 'random-route'
+  | 'subflow'
   | 'pick-from-set'
   | 'text-split'
   | 'resize'
@@ -79,6 +80,8 @@ export type NodeType =
   | 'upload'
   | 'material-set'
   | 'generation-target'
+  | 'feishu-bitable-input'
+  | 'feishu-bitable-output'
   | 'output';
 
 // 节点分类
@@ -260,6 +263,7 @@ export interface CanvasListItem {
   nodeCount: number;
   createdAt: number;
   updatedAt: number;
+  revision?: number;
 }
 
 export type CreativeDeskFrameId =
@@ -630,6 +634,12 @@ export interface FarmCanvasState {
 
 // 画布完整数据
 export interface CanvasData {
+  schema?: 't8-canvas-document';
+  schemaVersion?: 2;
+  projectId?: string;
+  canvasId?: string;
+  revision?: number;
+  updatedAt?: number;
   nodes: any[];
   edges: any[];
   viewport: { x: number; y: number; zoom: number };

@@ -58,16 +58,21 @@ import {
   upsertPanoramaOcclusionMask,
   validatePanoramaGeneration,
 } from '../src/utils/panorama3d.ts';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 test('panorama 3d node is registered under the 3D category', () => {
   const registry = readFileSync(new URL('../src/config/nodeRegistry.ts', import.meta.url), 'utf8');
-  const ports = readFileSync(new URL('../src/config/portTypes.ts', import.meta.url), 'utf8');
   const types = readFileSync(new URL('../src/types/canvas.ts', import.meta.url), 'utf8');
   const placement = readFileSync(new URL('../src/utils/nodePlacement.ts', import.meta.url), 'utf8');
 
-  assert.match(registry, /type:\s*'panorama-3d'[\s\S]*label:\s*'3D全景'[\s\S]*category:\s*'3d'/);
+  assertProductionNodeSchema('panorama-3d', {
+    label: '3D全景',
+    category: '3d',
+    inputs: ['image'],
+    outputs: ['image'],
+    executable: true,
+  });
   assert.match(registry, /'3d':\s*\{\s*label:\s*'3D'/);
-  assert.match(ports, /'panorama-3d':\s*\{\s*inputs:\s*\['image'\],\s*outputs:\s*\['image'\]\s*\}/);
   assert.match(types, /\|\s*'panorama-3d'/);
   assert.match(types, /\|\s*'3d'/);
   assert.match(placement, /'panorama-3d':\s*\{\s*w:\s*1180,\s*h:\s*760\s*\}/);

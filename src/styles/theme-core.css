@@ -10,6 +10,16 @@ html[data-theme-template] ::selection {
   color: var(--t8-accent-text);
 }
 
+/* Canvas v2 surfaces share the established theme tokens across every visual theme. */
+html {
+  --bg-primary: var(--t8-bg-panel, #ffffff);
+  --bg-secondary: var(--t8-bg-panel-elevated, #f8fafc);
+  --text-primary: var(--t8-text-main, #111827);
+  --text-secondary: var(--t8-text-muted, #64748b);
+  --border-primary: var(--t8-border, #cbd5e1);
+  --accent-primary: var(--t8-accent, #0ea5e9);
+}
+
 .t8-panel {
   background: var(--t8-bg-panel);
   border: 1px solid var(--t8-border);

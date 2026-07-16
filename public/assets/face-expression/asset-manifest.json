@@ -3,7 +3,7 @@
   "name": "T8 ICT Neutral Human Head",
   "version": 1,
   "file": "t8-ict-neutral-head-v1.glb",
-  "sha256": "B4469D8CDEE43DCE3CA669184DB1FFBE68107E6C93A4F7E6BB1F49D00C4CC961",
+  "sha256": "E546548DFFAE1396A7D7817F9FE2D542839A537219F5783FAACFCB5FA50980BB",
   "sizeBytes": 19616944,
   "renderVertices": 28911,
   "materials": 12,
@@ -17,6 +17,7 @@
     "Mapped ICT left/right expression names to the T8 ARKit-compatible 52-channel schema",
     "Combined split browInnerUp and cheekPuff shapes into symmetric T8 channels",
     "Added a conservative tongueOut deformation for the T8 channel missing from ICT Face Model Light",
-    "Recomputed smooth normals and assigned neutral clay studio materials"
+    "Recomputed smooth normals and assigned neutral clay studio materials",
+    "Reduced iris depth compensation so eyeBlink morphs close without iris-eyelid intersections"
   ]
 }

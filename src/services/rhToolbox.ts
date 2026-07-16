@@ -1,4 +1,12 @@
-import { cancelRh, fetchRhAppInfo, queryRh, submitRh, uploadRhAsset, type RhSite } from './generation';
+import {
+  cancelRh,
+  fetchRhAppInfo,
+  queryRh,
+  submitRh,
+  uploadRhAsset,
+  type ProviderTransportTrace,
+  type RhSite,
+} from './generation';
 import { RH_TOOLBOX_MANIFEST } from '../data/rhToolboxManifest';
 import {
   buildRhToolboxNodeInfoList,
@@ -25,7 +33,7 @@ export type RhToolboxProgressStage =
   | 'success'
   | 'error';
 
-export interface RunRhToolboxProgress {
+export interface RunRhToolboxProgress extends ProviderTransportTrace {
   stage: RhToolboxProgressStage;
   message: string;
   taskId?: string;
@@ -44,7 +52,7 @@ export interface RunRhToolboxToolOptions {
   onProgress?: (progress: RunRhToolboxProgress) => void;
 }
 
-export interface RunRhToolboxToolResult extends RhToolboxOutputClassification {
+export interface RunRhToolboxToolResult extends RhToolboxOutputClassification, ProviderTransportTrace {
   tool: RhToolboxTool;
   taskId: string;
   nodeInfoList: RhToolboxNodeInfoItem[];
@@ -211,7 +219,15 @@ export async function runRhToolboxTool(options: RunRhToolboxToolOptions): Promis
     taskId = submitResult.taskId;
     siteState.current = submitResult.site || siteState.current;
     if (!taskId) throw new Error('RH 未返回 taskId');
-    progress?.({ stage: 'submit', message: '已提交 RH 任务', taskId });
+    progress?.({
+      stage: 'submit',
+      message: '已提交 RH 任务',
+      taskId,
+      requestId: submitResult.requestId,
+      transportHttpStatus: submitResult.transportHttpStatus,
+      upstreamHttpStatus: submitResult.upstreamHttpStatus,
+      usage: submitResult.usage,
+    });
     if (options.signal?.aborted) {
       await cancelTaskIfNeeded();
       throw new Error('已取消');
@@ -230,10 +246,29 @@ export async function runRhToolboxTool(options: RunRhToolboxToolOptions): Promis
         const query = await queryRh(taskId, siteState.current);
         if (query.site) siteState.current = query.site;
         lastRaw = query;
+        progress?.({
+          stage: 'poll',
+          message: `轮询响应 ${pollCount}/${maxPolls}`,
+          taskId,
+          pollCount,
+          requestId: query.requestId,
+          transportHttpStatus: query.transportHttpStatus,
+          upstreamHttpStatus: query.upstreamHttpStatus,
+          usage: query.usage,
+        });
         if (query.status === 'SUCCESS') {
           remoteTaskCompleted = true;
           const classified = classifyRhToolboxOutputs(query.urls || []);
-          progress?.({ stage: 'success', message: `完成 · ${classified.urls.length} 个输出`, taskId, pollCount });
+          progress?.({
+            stage: 'success',
+            message: `完成 · ${classified.urls.length} 个输出`,
+            taskId,
+            pollCount,
+            requestId: query.requestId,
+            transportHttpStatus: query.transportHttpStatus,
+            upstreamHttpStatus: query.upstreamHttpStatus,
+            usage: query.usage,
+          });
           return {
             ...classified,
             tool,
@@ -242,6 +277,10 @@ export async function runRhToolboxTool(options: RunRhToolboxToolOptions): Promis
             appInfo,
             raw: query,
             site: siteState.current,
+            requestId: query.requestId || submitResult.requestId,
+            transportHttpStatus: query.transportHttpStatus,
+            upstreamHttpStatus: query.upstreamHttpStatus,
+            usage: query.usage,
           };
         }
         if (query.status === 'FAILED') {

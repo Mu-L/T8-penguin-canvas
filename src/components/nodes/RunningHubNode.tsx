@@ -5,6 +5,8 @@ import { submitRh, queryRh, cancelRh, fetchRhAppInfo, uploadRhAsset, type RhSite
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useHasAutoOutput } from './useHasAutoOutput';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
+import type { RunNodeLifecycleReporter } from '../../types/project';
 import { useUpstreamMaterials, type Material } from './useUpstreamMaterials';
 import { useOrderedMaterials } from './useOrderedMaterials';
 import MaterialPreviewSection from './MaterialPreviewSection';
@@ -499,7 +501,7 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
   //   LoopNode awaitNode 立即继续 → extractFromNode 读不到产物 → result=null → failCount++。
   //   修复: 轮询完成才 resolve，handleRun await 它，markDone 时机=任务真正结束。
   //   同样适用于 RH 钱包应用节点 (runninghubWallet)，同一个组件复用。
-  const startPolling = (tid: string): Promise<void> => {
+  const startPolling = (tid: string, reporter?: RunNodeLifecycleReporter): Promise<void> => {
     stopPoll(new Error('已取消'));
     return new Promise<void>((resolve, reject) => {
       let elapsed = 0;
@@ -530,6 +532,22 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
         try {
           const r = await queryRh(tid, activeRhSiteRef.current);
           applyResolvedRhSite(r.site);
+          await reporter?.polling({
+            provider: 'runninghub',
+            model: webappId,
+            site: r.site || activeRhSiteRef.current,
+            taskId: tid,
+            requestId: r.requestId,
+            transportHttpStatus: r.transportHttpStatus,
+            upstreamHttpStatus: r.upstreamHttpStatus,
+            usage: r.usage,
+            httpStatusSource: 'local-backend',
+            pollCount: elapsed,
+            pollLimit: MAX,
+            status: r.status,
+            code: r.code,
+            outputCount: Array.isArray(r.urls) ? r.urls.length : 0,
+          });
           console.log('[RH/poll] taskId=', tid, 'status=', r.status, 'code=', r.code, 'urls=', r.urls?.length || 0);
           // 轮询进度写入面板：每 30s 一条 debug，避免刷屏
           if (elapsed % 6 === 0) {
@@ -545,7 +563,18 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
             const firstImg = list.find(isImg);
             const firstVid = list.find(isVid);
             const firstAud = list.find(isAud);
-            const patch: any = { status: 'success', urls: list };
+            const patch: any = {
+              status: 'success',
+              urls: list,
+              provider: 'runninghub',
+              model: webappId,
+              taskId: tid,
+              requestId: r.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+            };
             if (firstImg) patch.imageUrl = firstImg;
             if (firstVid) patch.videoUrl = firstVid;
             if (firstAud) patch.audioUrl = firstAud;
@@ -554,6 +583,18 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
             console.log('[RH/done] taskId=', tid, 'urls=', list);
             logBus.success(`任务完成 · ${list.length} 个输出 → ${list[0] || ''}`, src);
             update(patch);
+            await reporter?.providerResponse({
+              provider: 'runninghub',
+              model: webappId,
+              upstreamTaskId: tid,
+              requestId: r.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+              status: 'succeeded',
+              httpStatusSource: 'local-backend',
+            });
             finish(true);
           } else if (r.status === 'FAILED') {
             // failReason 可能是 ComfyUI 报错对象(含 traceback/exception_type 等)，
@@ -571,6 +612,19 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
                 reason = `RH 失败 code=${r.code}`;
               }
             }
+            await reporter?.providerResponse({
+              provider: 'runninghub',
+              model: webappId,
+              upstreamTaskId: tid,
+              requestId: r.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+              status: 'failed',
+              error: { message: reason },
+              httpStatusSource: 'local-backend',
+            });
             update({ status: 'error', error: reason });
             setError(reason);
             logBus.error(`生成失败: ${reason}`, src);
@@ -650,13 +704,14 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [webappId, upstreamNodes, appInfo]);
 
-  const handleRun = async () => {
+  const handleRun = async (reporter?: RunNodeLifecycleReporter) => {
     stopRequestedRef.current = false;
     setError(null);
     if (!webappId) {
       setError('请先填写 webappId');
       return;
     }
+    await reporter?.providerRequest({ provider: 'runninghub', model: webappId });
     // 兑底：如果还没拉过 appInfo 且上游接了媒体节点，先同步拉一次，
     // 避免提交空 nodeInfoList 后 RH 黙默用了应用默认参数。
     let freshList: any[] | null = null;
@@ -693,6 +748,16 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
         site: activeRhSiteRef.current,
       });
       applyResolvedRhSite(r.site);
+      await reporter?.providerSubmitted({
+        provider: 'runninghub',
+        model: webappId,
+        upstreamTaskId: r.taskId,
+        requestId: r.requestId,
+        transportHttpStatus: r.transportHttpStatus,
+        upstreamHttpStatus: r.upstreamHttpStatus,
+        usage: r.usage,
+        httpStatusSource: 'local-backend',
+      });
       activeTaskIdRef.current = r.taskId;
       console.log('[RH/submit] taskId=', r.taskId);
       if (stopRequestedRef.current) {
@@ -717,13 +782,31 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
       logBus.success(`异步任务已提交 taskId=${r.taskId} 进入轮询…`, src);
       update({ status: 'polling', taskId: r.taskId });
       // v1.2.9.12: await 让 useRunTrigger 等到任务真正完成才 markDone，循环器才能拿到 urls
-      await startPolling(r.taskId);
+      await startPolling(r.taskId, reporter);
     } catch (e: any) {
       if (stopRequestedRef.current || e?.message === '已取消') {
+        await reporter?.providerResponse({
+          provider: 'runninghub',
+          model: webappId,
+          upstreamTaskId: activeTaskIdRef.current || undefined,
+          status: 'stopped',
+          error: { message: e?.message || '已取消' },
+        });
         logBus.warn('任务已停止', src);
         update({ status: 'idle', taskId: '' });
         return;
       }
+      await reporter?.providerResponse({
+        provider: 'runninghub',
+        model: webappId,
+        upstreamTaskId: activeTaskIdRef.current || undefined,
+        requestId: e?.requestId,
+        transportHttpStatus: e?.transportHttpStatus,
+        upstreamHttpStatus: e?.upstreamHttpStatus,
+        status: 'failed',
+        error: { message: e?.message || '提交失败', code: e?.code },
+        httpStatusSource: 'local-backend',
+      });
       console.error('[RH/submit] error:', e);
       logBus.error(`提交失败: ${e?.message || e}`, src);
       setError(e?.message || '提交失败');
@@ -732,10 +815,10 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
   };
 
   // 接入运行总线,供批量运行调起(不重复调起轮询中的任务)
-  useRunTrigger(id, async () => {
+  useRunTrigger(id, async (reporter) => {
     if (status === 'submitting' || status === 'polling') return;
-    await handleRun();
-  });
+    await handleRun(reporter);
+  }, undefined, { lifecycleAware: true });
 
   const handleStop = async () => {
     stopRequestedRef.current = true;
@@ -1092,7 +1175,7 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
 
         {!isBusy ? (
           <button
-            onClick={handleRun}
+            onClick={() => requestCanvasNodeRun(id)}
             className={`w-full flex items-center justify-center gap-1.5 py-1.5 rounded ${accent.primary} text-xs font-medium transition-colors`}
           >
             <Sparkles size={12} /> {useWallet ? '运行钱包工作流' : '运行工作流'}

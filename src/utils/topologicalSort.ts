@@ -8,7 +8,7 @@ import type { Node, Edge } from '@xyflow/react';
 export function topologicalSort(
   nodes: Node[],
   edges: Edge[],
-  executableTypes: Set<string>
+  executableTypes: ReadonlySet<string>
 ): string[] {
   const exeNodes = nodes.filter((n) => n.type && executableTypes.has(n.type));
   const exeIds = new Set(exeNodes.map((n) => n.id));
@@ -63,7 +63,7 @@ export function topologicalSort(
 export function topologicalLayers(
   nodes: Node[],
   edges: Edge[],
-  executableTypes: Set<string>
+  executableTypes: ReadonlySet<string>
 ): string[][] {
   const exeNodes = nodes.filter((n) => n.type && executableTypes.has(n.type));
   const exeIds = new Set(exeNodes.map((n) => n.id));

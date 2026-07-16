@@ -1,0 +1,3706 @@
+{
+  "schema": "t8-canvas-node-schema-v1",
+  "version": 1,
+  "connectionPorts": {
+    "upload": {
+      "resolver": "upload",
+      "inputs": [],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image",
+            "video",
+            "audio",
+            "model3d"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "model-3d-upload": {
+      "resolver": "static",
+      "inputs": [],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "model3d"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "model-3d-preview": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "model3d"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "material-set": {
+      "resolver": "material-set",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "generation-target": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "output": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio",
+            "model3d",
+            "any"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "any"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "feishu-bitable-input": {
+      "resolver": "static",
+      "inputs": [],
+      "outputs": [
+        {
+          "id": "text",
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "image",
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "video",
+          "kinds": [
+            "video"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "audio",
+          "kinds": [
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "metadata",
+          "kinds": [
+            "metadata"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "feishu-bitable-output": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio",
+            "metadata",
+            "any"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": "text",
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "metadata",
+          "kinds": [
+            "metadata"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "text": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "image": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "video": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "video"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "video-edit": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "video"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "seedance": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "video"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "director-storyboard": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "video",
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "audio": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": "audio-0",
+          "kinds": [
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null,
+          "preferred": true
+        },
+        {
+          "id": "audio-1",
+          "kinds": [
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null,
+          "preferred": false
+        }
+      ]
+    },
+    "llm": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "runninghub": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio",
+            "config"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image",
+            "video"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "runninghub-wallet": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio",
+            "config"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image",
+            "video"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "rh-config": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "config"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "rh-tools": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "rh-toolbox": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "vibex": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "fal-toolbox": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio",
+            "model3d"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "grok-oauth-agent": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": "text",
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "image",
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "video",
+          "kinds": [
+            "video"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "audio",
+          "kinds": [
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "codex-cli-agent": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": "text",
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "image",
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "video",
+          "kinds": [
+            "video"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "audio",
+          "kinds": [
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": "text",
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "image",
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "video",
+          "kinds": [
+            "video"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "audio",
+          "kinds": [
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "model3d",
+          "kinds": [
+            "model3d"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "codex-image-conjure": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": "text",
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "image",
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": "image",
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "text",
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "artist-style-master": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": "text",
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": "text",
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "image",
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "anime-tag-master": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": "text",
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "image",
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": "text",
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "image",
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "comfyui-store": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "comfyui-app-maker": {
+      "resolver": "static",
+      "inputs": [],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "multi-angle-3d": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "panorama-720": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "penguin-portrait": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "metadata"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "portrait-metadata": {
+      "resolver": "static",
+      "inputs": [],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "metadata"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "storyboard-grid": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "drawing-board": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "browser": {
+      "resolver": "static",
+      "inputs": [],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "image-compare": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": "a",
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "b",
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "frame-extractor": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "video"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "frame-pair": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "video"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": "first",
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "last",
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "loop": {
+      "resolver": "loop",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "random-route": {
+      "resolver": "random-route",
+      "inputs": [
+        {
+          "id": "input_data",
+          "kinds": [
+            "any"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": []
+    },
+    "subflow": {
+      "resolver": "subflow",
+      "inputs": [],
+      "outputs": []
+    },
+    "pick-from-set": {
+      "resolver": "pick-from-set",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "text-split": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "resize": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "combine": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "remove-bg": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "upscale": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "grid-crop": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "grid-editor": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "edit": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "idea": {
+      "resolver": "static",
+      "inputs": [],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "bp": {
+      "resolver": "static",
+      "inputs": [],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "relay": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "any"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "any"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "remove-ai-watermark": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image",
+            "video",
+            "audio",
+            "text",
+            "metadata"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "video-output": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "video"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": []
+    },
+    "cinematic": {
+      "resolver": "toolbox-param",
+      "inputs": [],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "video-motion": {
+      "resolver": "toolbox-param",
+      "inputs": [],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "multi-angle-visual": {
+      "resolver": "toolbox-param",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "portrait-master": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "metadata"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "metadata"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "pose-master": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "metadata"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image",
+            "text",
+            "metadata"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "aggregate-parser": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "batch-processor": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image",
+            "video",
+            "audio",
+            "model3d"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": []
+    },
+    "batch-tagger": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image",
+            "video",
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": "text",
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "metadata",
+          "kinds": [
+            "metadata"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "topaz-image-upscale": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "topaz-video-upscale": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "video"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "video"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "face-expression-3d": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": "model3d",
+          "kinds": [
+            "model3d"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "image",
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "metadata",
+          "kinds": [
+            "metadata"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": "image",
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "metadata",
+          "kinds": [
+            "metadata"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
+    "panorama-3d": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    }
+  },
+  "types": [
+    {
+      "type": "upload",
+      "label": "上传素材",
+      "category": "input",
+      "description": "图像 / 视频 / 音频 三合一上传(自适应输出端口)",
+      "icon": "Upload",
+      "color": "emerald",
+      "ports": {
+        "inputs": [],
+        "outputs": []
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "model-3d-upload",
+      "label": "3D素材上传",
+      "category": "input",
+      "description": "上传 glb/gltf/obj/stl/fbx/usdz/zip 3D 模型素材，并可一键生成 3D 模型预览节点",
+      "icon": "Box",
+      "color": "blue",
+      "ports": {
+        "inputs": [],
+        "outputs": [
+          "model3d"
+        ]
+      },
+      "executable": false,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "model-3d-preview",
+      "label": "3D模型预览",
+      "category": "input",
+      "description": "预览 glb/gltf/obj/stl/fbx/usdz 3D 模型，显示原始下载地址，并把当前角度快照输出为图像",
+      "icon": "Box",
+      "color": "blue",
+      "ports": {
+        "inputs": [
+          "model3d"
+        ],
+        "outputs": [
+          "image"
+        ]
+      },
+      "executable": false,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "material-set",
+      "label": "素材集",
+      "category": "input",
+      "description": "把多个同类型文本 / 图像 / 视频 / 音频打包成可排序素材集，可直接传给生成与 RH 节点",
+      "icon": "Images",
+      "color": "teal",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ],
+        "outputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ]
+      },
+      "executable": false,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "generation-target",
+      "label": "生成目标框",
+      "category": "input",
+      "description": "先在画布上摆好 AI 结果位置，再把图像生成、网页反推或标注改图结果替换到框内",
+      "icon": "ScanLine",
+      "color": "teal",
+      "ports": {
+        "inputs": [
+          "text",
+          "image"
+        ],
+        "outputs": [
+          "image"
+        ]
+      },
+      "executable": false,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "output",
+      "label": "输出素材",
+      "category": "input",
+      "description": "起于上游任意节点的 文本/图像/视频/音频/3D模型 结果预览(原始宽高比 + 文本双击编辑)",
+      "icon": "MonitorPlay",
+      "color": "teal",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video",
+          "audio",
+          "model3d",
+          "any"
+        ],
+        "outputs": [
+          "any"
+        ]
+      },
+      "executable": false,
+      "generatable": true,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {},
+        "connectionPorts": {
+          "dynamic": false,
+          "inputs": [
+            { "id": null, "kinds": ["text", "image", "video", "audio", "model3d", "any"], "required": false, "minConnections": 0, "maxConnections": null }
+          ],
+          "outputs": [
+            { "id": null, "kinds": ["any"], "required": false, "minConnections": 0, "maxConnections": null }
+          ]
+        }
+      }
+    },
+    {
+      "type": "feishu-bitable-input",
+      "label": "飞书多维表格输入",
+      "category": "input",
+      "description": "读取飞书/Lark 多维表格记录，输出文本、图像、视频、音频与原始行元数据",
+      "icon": "Table2",
+      "color": "emerald",
+      "ports": {
+        "inputs": [],
+        "outputs": [
+          "text",
+          "image",
+          "video",
+          "audio",
+          "metadata"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "feishu-bitable-output",
+      "label": "飞书多维表格输出",
+      "category": "input",
+      "description": "把上游生成结果写回飞书/Lark 多维表格，支持新增、更新、文本字段和附件字段",
+      "icon": "TableProperties",
+      "color": "sky",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video",
+          "audio",
+          "metadata",
+          "any"
+        ],
+        "outputs": [
+          "text",
+          "metadata"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "text",
+      "label": "文本",
+      "category": "core",
+      "description": "提示词文本节点",
+      "icon": "Type",
+      "color": "sky",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ],
+        "outputs": [
+          "text"
+        ]
+      },
+      "executable": false,
+      "generatable": true,
+      "generation": {
+        "allowedDataFields": {
+          "text": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "defaults": {
+          "text": ""
+        },
+        "connectionPorts": {
+          "dynamic": false,
+          "inputs": [
+            { "id": null, "kinds": ["text", "image", "video", "audio"], "required": false, "minConnections": 0, "maxConnections": null }
+          ],
+          "outputs": [
+            { "id": null, "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": null }
+          ]
+        }
+      }
+    },
+    {
+      "type": "image",
+      "label": "图像",
+      "category": "core",
+      "description": "GPT Image 2 / Nano Banana Pro / Nano Banana 2 (多 TAB 模型切换)",
+      "icon": "Image",
+      "color": "amber",
+      "ports": {
+        "inputs": [
+          "text",
+          "image"
+        ],
+        "outputs": [
+          "image"
+        ]
+      },
+      "executable": true,
+      "generatable": true,
+      "generation": {
+        "allowedDataFields": {
+          "model": {
+            "type": "string",
+            "enum": [
+              "gpt-image-2"
+            ]
+          },
+          "aspectRatio": {
+            "type": "string",
+            "enum": [
+              "1:1"
+            ]
+          },
+          "sizeLevel": {
+            "type": "string",
+            "enum": [
+              "1K"
+            ]
+          },
+          "referenceImages": {
+            "type": "array",
+            "maxItems": 0
+          }
+        },
+        "defaults": {
+          "model": "gpt-image-2",
+          "aspectRatio": "1:1",
+          "sizeLevel": "1K",
+          "referenceImages": []
+        },
+        "connectionPorts": {
+          "dynamic": false,
+          "inputs": [
+            { "id": null, "kinds": ["text", "image"], "required": false, "minConnections": 0, "maxConnections": null }
+          ],
+          "outputs": [
+            { "id": null, "kinds": ["image"], "required": false, "minConnections": 0, "maxConnections": null }
+          ]
+        }
+      }
+    },
+    {
+      "type": "video",
+      "label": "视频",
+      "category": "core",
+      "description": "Veo / Grok Video",
+      "icon": "Video",
+      "color": "rose",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ],
+        "outputs": [
+          "video"
+        ]
+      },
+      "executable": true,
+      "generatable": true,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {},
+        "connectionPorts": {
+          "dynamic": false,
+          "inputs": [
+            { "id": null, "kinds": ["text", "image", "video", "audio"], "required": false, "minConnections": 0, "maxConnections": null }
+          ],
+          "outputs": [
+            { "id": null, "kinds": ["video"], "required": false, "minConnections": 0, "maxConnections": null }
+          ]
+        }
+      }
+    },
+    {
+      "type": "video-edit",
+      "label": "视频剪辑",
+      "category": "core",
+      "description": "轻量视频拼接台：收集多个视频、裁短排序、转场滤镜并合成为标准视频素材",
+      "icon": "Scissors",
+      "color": "rose",
+      "ports": {
+        "inputs": [
+          "video"
+        ],
+        "outputs": [
+          "video",
+          "audio"
+        ]
+      },
+      "executable": false,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "seedance",
+      "label": "SD2.0",
+      "category": "core",
+      "description": "Seedance 2.0 视频分镜",
+      "icon": "Film",
+      "color": "fuchsia",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ],
+        "outputs": [
+          "video"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "director-storyboard",
+      "label": "导演分镜台",
+      "category": "core",
+      "description": "秒级长片分镜台：多镜头提示词、参考素材和 Seedance2.0 无限并发生成",
+      "icon": "Clapperboard",
+      "color": "fuchsia",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ],
+        "outputs": [
+          "video",
+          "text"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "audio",
+      "label": "音频",
+      "category": "core",
+      "description": "Suno V5.5 全模式(生成/翻唱/续写)",
+      "icon": "Music",
+      "color": "violet",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "audio"
+        ],
+        "outputs": [
+          "audio"
+        ]
+      },
+      "executable": true,
+      "generatable": true,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {},
+        "connectionPorts": {
+          "dynamic": false,
+          "inputs": [
+            { "id": null, "kinds": ["text", "image", "audio"], "required": false, "minConnections": 0, "maxConnections": null }
+          ],
+          "outputs": [
+            { "id": "audio-0", "kinds": ["audio"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": true },
+            { "id": "audio-1", "kinds": ["audio"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": false }
+          ]
+        }
+      }
+    },
+    {
+      "type": "llm",
+      "label": "LLM",
+      "category": "core",
+      "description": "GPT-5 / Claude 4.5 / Gemini 2.5(独立 Key)",
+      "icon": "Brain",
+      "color": "emerald",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video"
+        ],
+        "outputs": [
+          "text"
+        ]
+      },
+      "executable": true,
+      "generatable": true,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {},
+        "connectionPorts": {
+          "dynamic": false,
+          "inputs": [
+            { "id": null, "kinds": ["text", "image", "video"], "required": false, "minConnections": 0, "maxConnections": null }
+          ],
+          "outputs": [
+            { "id": null, "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": null }
+          ]
+        }
+      }
+    },
+    {
+      "type": "runninghub",
+      "label": "RunningHub",
+      "category": "rh",
+      "description": "RH 工作流主节点",
+      "icon": "Workflow",
+      "color": "cyan",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video",
+          "audio",
+          "config"
+        ],
+        "outputs": [
+          "image",
+          "video"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "runninghub-wallet",
+      "label": "RH钱包应用",
+      "category": "rh",
+      "description": "RH 钱包应用工作流（与 RunningHub 节点共用 RunningHub APIKEY）",
+      "icon": "Wallet",
+      "color": "violet",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video",
+          "audio",
+          "config"
+        ],
+        "outputs": [
+          "image",
+          "video"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "rh-config",
+      "label": "RH 配置",
+      "category": "rh",
+      "description": "RH 工作流参数注入",
+      "icon": "Settings2",
+      "color": "cyan",
+      "hidden": true,
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ],
+        "outputs": [
+          "config"
+        ]
+      },
+      "executable": false,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "rh-tools",
+      "label": "RH超市",
+      "category": "rh",
+      "description": "启动器式包装多个 RunningHub AI 应用，在节点内分类浏览 / 拼音搜索 / 一键运行",
+      "icon": "Sparkles",
+      "color": "cyan",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ],
+        "outputs": [
+          "image",
+          "video",
+          "audio"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "rh-toolbox",
+      "label": "RH工具箱",
+      "category": "rh",
+      "description": "维护者精选 RunningHub 工具箱，只读分类运行，可作为图像/视频/文本/音频辅助能力被其他节点复用",
+      "icon": "Wrench",
+      "color": "cyan",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ],
+        "outputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "vibex",
+      "label": "VibeX工作台",
+      "category": "rh",
+      "description": "嵌入 VibeX 视频工作台，支持线上 / 本地页面并把视频、图片、音频和提示词发送回当前画布",
+      "icon": "Clapperboard",
+      "color": "cyan",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ],
+        "outputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ]
+      },
+      "executable": false,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "fal-toolbox",
+      "label": "Fal超市",
+      "category": "fal",
+      "description": "按分类复刻 Fal.ai 模型能力，接上游文本/图像/视频/音频后一键运行，不影响原有图像/视频 FAL 节点",
+      "icon": "Store",
+      "color": "violet",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ],
+        "outputs": [
+          "text",
+          "image",
+          "video",
+          "audio",
+          "model3d"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "grok-oauth-agent",
+      "label": "Grok OAuth Agent",
+      "category": "grok",
+      "description": "独立 Grok / xAI OAuth Agent 工作台：流式聊天、图像、视频、TTS、STT，多模态输入并输出四类素材",
+      "icon": "Bot",
+      "color": "emerald",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ],
+        "outputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "codex-cli-agent",
+      "label": "Codex CLI Agent",
+      "category": "codex",
+      "description": "面向创作者的 Codex CLI 工作台：流式对话、图像生成提示词、Skill 调用、产物库和版本树",
+      "icon": "TerminalSquare",
+      "color": "sky",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ],
+        "outputs": [
+          "text",
+          "image",
+          "video",
+          "audio",
+          "model3d"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "codex-image-conjure",
+      "label": "Codex 生图工作台",
+      "category": "codex",
+      "description": "基于 Codex CLI imagegen 的专用生图工作台：提示词模板、片段、参考图和公共图库",
+      "icon": "ImagePlus",
+      "color": "sky",
+      "ports": {
+        "inputs": [
+          "text",
+          "image"
+        ],
+        "outputs": [
+          "image",
+          "text"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "artist-style-master",
+      "label": "艺术风格大师",
+      "category": "inspiration",
+      "description": "移植 qiaomu 艺术家风格库：按画家、中文名、流派和标签检索，输出风格提示词或参考图",
+      "icon": "Palette",
+      "color": "amber",
+      "ports": {
+        "inputs": [
+          "text"
+        ],
+        "outputs": [
+          "text",
+          "image"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "anime-tag-master",
+      "label": "动漫标签大师",
+      "category": "inspiration",
+      "description": "移植 comfyui-anima-t8 Danbooru / Gelbooru 懒加载图库：搜索动漫标签、参考图、保存自定义标签并输出标签或图像",
+      "icon": "Tags",
+      "color": "lime",
+      "ports": {
+        "inputs": [
+          "text",
+          "image"
+        ],
+        "outputs": [
+          "text",
+          "image"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "comfyui-store",
+      "label": "ComfyUI超市",
+      "category": "comfyui",
+      "description": "ComfyUI 应用库：导入制作好的工作流应用，接上游素材后一键运行",
+      "icon": "Boxes",
+      "color": "cyan",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ],
+        "outputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "comfyui-app-maker",
+      "label": "ComfyUI应用制作工具",
+      "category": "comfyui",
+      "description": "上传 ComfyUI API Workflow JSON，自动识别参数并保存为可复用应用",
+      "icon": "FileJson",
+      "color": "emerald",
+      "ports": {
+        "inputs": [],
+        "outputs": [
+          "text"
+        ]
+      },
+      "executable": false,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "multi-angle-3d",
+      "label": "多角度 3D",
+      "category": "special",
+      "description": "3D 多视角生成",
+      "icon": "Box",
+      "color": "indigo",
+      "hidden": true,
+      "ports": {
+        "inputs": [
+          "text",
+          "image"
+        ],
+        "outputs": [
+          "image"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "panorama-720",
+      "label": "720 全景",
+      "category": "special",
+      "description": "720° 全景图",
+      "icon": "Globe",
+      "color": "indigo",
+      "hidden": true,
+      "ports": {
+        "inputs": [
+          "text"
+        ],
+        "outputs": [
+          "image"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "penguin-portrait",
+      "label": "企鹅肖像",
+      "category": "special",
+      "description": "肖像专用流程",
+      "icon": "UserSquare2",
+      "color": "indigo",
+      "hidden": true,
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "metadata"
+        ],
+        "outputs": [
+          "image"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "portrait-metadata",
+      "label": "肖像元数据",
+      "category": "special",
+      "description": "肖像参数管理",
+      "icon": "FileText",
+      "color": "indigo",
+      "hidden": true,
+      "ports": {
+        "inputs": [],
+        "outputs": [
+          "metadata"
+        ]
+      },
+      "executable": false,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "storyboard-grid",
+      "label": "分镜网格",
+      "category": "special",
+      "description": "分镜九宫格布局",
+      "icon": "LayoutGrid",
+      "color": "indigo",
+      "hidden": true,
+      "ports": {
+        "inputs": [
+          "image"
+        ],
+        "outputs": [
+          "image"
+        ]
+      },
+      "executable": false,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "drawing-board",
+      "label": "画板",
+      "category": "utility",
+      "description": "图层画板：接上游图片后手绘、标注、组合并输出图像",
+      "icon": "Pencil",
+      "color": "orange",
+      "ports": {
+        "inputs": [
+          "image"
+        ],
+        "outputs": [
+          "image"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "browser",
+      "label": "浏览器",
+      "category": "utility",
+      "description": "网页内嵌",
+      "icon": "Globe2",
+      "color": "orange",
+      "hidden": true,
+      "ports": {
+        "inputs": [],
+        "outputs": [
+          "text",
+          "image"
+        ]
+      },
+      "executable": false,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "image-compare",
+      "label": "图像对比",
+      "category": "utility",
+      "description": "双图滑杆 / 并排 / 叠加 / 热力 / 聚焦对比",
+      "icon": "GitCompare",
+      "color": "orange",
+      "ports": {
+        "inputs": [
+          "image"
+        ],
+        "outputs": [
+          "image"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "frame-extractor",
+      "label": "抽帧",
+      "category": "utility",
+      "description": "视频抽帧",
+      "icon": "Scissors",
+      "color": "orange",
+      "hidden": true,
+      "ports": {
+        "inputs": [
+          "video"
+        ],
+        "outputs": [
+          "image"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "frame-pair",
+      "label": "首尾帧获取",
+      "category": "utility",
+      "description": "从视频抽取首帧与尾帧，双输出可分别接下游",
+      "icon": "Film",
+      "color": "orange",
+      "ports": {
+        "inputs": [
+          "video"
+        ],
+        "outputs": [
+          "image"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "loop",
+      "label": "循环器",
+      "category": "utility",
+      "description": "接多个同类型素材，串联逐个驱动或并联克隆子图同时跱发下游生成节点",
+      "icon": "Repeat",
+      "color": "orange",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ],
+        "outputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "random-route",
+      "label": "随机路由",
+      "category": "utility",
+      "description": "接收任意上游素材，按运行时随机命中的输出口继续执行指定数量下游分支",
+      "icon": "Shuffle",
+      "color": "orange",
+      "ports": {
+        "inputs": [
+          "any"
+        ],
+        "outputs": [
+          "any"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "subflow",
+      "label": "子工作流",
+      "category": "utility",
+      "description": "固定版本的可复用节点流程，支持显式输入输出端口、参数覆盖和内部运行追踪",
+      "icon": "Workflow",
+      "color": "orange",
+      "ports": {
+        "inputs": [],
+        "outputs": []
+      },
+      "executable": true,
+      "generatable": true,
+      "generation": {
+        "allowedDataFields": {
+          "definitionId": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "definitionVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "definition": {
+            "type": "subflow-definition"
+          },
+          "parameterOverrides": {
+            "type": "object",
+            "maxProperties": 50
+          }
+        },
+        "defaults": {
+          "parameterOverrides": {}
+        },
+        "connectionPorts": {
+          "dynamic": true,
+          "inputs": [],
+          "outputs": []
+        }
+      }
+    },
+    {
+      "type": "pick-from-set",
+      "label": "从合集获取",
+      "category": "utility",
+      "description": "从上游多素材中按序号取出单一素材，kind 可在节点内切换",
+      "icon": "Filter",
+      "color": "orange",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ],
+        "outputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "text-split",
+      "label": "文本分割",
+      "category": "utility",
+      "description": "将长提示词/分镜按段落、行、智能分镜、正则、自定义分隔符或字数切成多段文本，支持收藏与循环器链路",
+      "icon": "SplitSquareVertical",
+      "color": "orange",
+      "ports": {
+        "inputs": [
+          "text"
+        ],
+        "outputs": [
+          "text"
+        ]
+      },
+      "executable": false,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "resize",
+      "label": "尺寸调整",
+      "category": "utility",
+      "description": "图像尺寸调整",
+      "icon": "Maximize2",
+      "color": "orange",
+      "ports": {
+        "inputs": [
+          "image"
+        ],
+        "outputs": [
+          "image"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "combine",
+      "label": "合并",
+      "category": "utility",
+      "description": "图像合并",
+      "icon": "Combine",
+      "color": "orange",
+      "ports": {
+        "inputs": [
+          "image"
+        ],
+        "outputs": [
+          "image"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "remove-bg",
+      "label": "抠图",
+      "category": "utility",
+      "description": "去除背景",
+      "icon": "Eraser",
+      "color": "orange",
+      "hidden": true,
+      "ports": {
+        "inputs": [
+          "image"
+        ],
+        "outputs": [
+          "image"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "upscale",
+      "label": "放大",
+      "category": "utility",
+      "description": "图像放大",
+      "icon": "ZoomIn",
+      "color": "orange",
+      "hidden": true,
+      "ports": {
+        "inputs": [
+          "image"
+        ],
+        "outputs": [
+          "image"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "grid-crop",
+      "label": "宫格剪裁",
+      "category": "utility",
+      "description": "网格切图",
+      "icon": "Grid3x3",
+      "color": "orange",
+      "ports": {
+        "inputs": [
+          "image"
+        ],
+        "outputs": [
+          "image"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "grid-editor",
+      "label": "宫格编辑",
+      "category": "utility",
+      "description": "多图分镜宫格拼接与顺序拆分",
+      "icon": "LayoutGrid",
+      "color": "orange",
+      "ports": {
+        "inputs": [
+          "image"
+        ],
+        "outputs": [
+          "image"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "edit",
+      "label": "编辑",
+      "category": "auxiliary",
+      "description": "图像编辑/局部",
+      "icon": "Edit3",
+      "color": "slate",
+      "hidden": true,
+      "ports": {
+        "inputs": [
+          "text",
+          "image"
+        ],
+        "outputs": [
+          "image"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "idea",
+      "label": "灵感",
+      "category": "auxiliary",
+      "description": "灵感记录",
+      "icon": "Lightbulb",
+      "color": "slate",
+      "ports": {
+        "inputs": [],
+        "outputs": [
+          "text"
+        ]
+      },
+      "executable": false,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "bp",
+      "label": "BP 蓝图",
+      "category": "auxiliary",
+      "description": "Blueprint 蓝图",
+      "icon": "Map",
+      "color": "slate",
+      "ports": {
+        "inputs": [],
+        "outputs": [
+          "text"
+        ]
+      },
+      "executable": false,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "relay",
+      "label": "中继",
+      "category": "auxiliary",
+      "description": "数据中转",
+      "icon": "ArrowRightLeft",
+      "color": "slate",
+      "ports": {
+        "inputs": [
+          "any"
+        ],
+        "outputs": [
+          "any"
+        ]
+      },
+      "executable": false,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "remove-ai-watermark",
+      "label": "去AI水印",
+      "category": "auxiliary",
+      "description": "基于 remove-ai-watermarks 的可见/隐形水印、局部擦除、元数据清理与鉴别",
+      "icon": "ShieldOff",
+      "color": "slate",
+      "ports": {
+        "inputs": [
+          "image",
+          "video",
+          "audio"
+        ],
+        "outputs": [
+          "image",
+          "video",
+          "audio",
+          "text",
+          "metadata"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "video-output",
+      "label": "视频输出",
+      "category": "auxiliary",
+      "description": "视频结果展示",
+      "icon": "MonitorPlay",
+      "color": "slate",
+      "hidden": true,
+      "ports": {
+        "inputs": [
+          "video"
+        ],
+        "outputs": []
+      },
+      "executable": false,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "cinematic",
+      "label": "电影感",
+      "category": "toolbox",
+      "description": "电影感组合器：风格 / 镜头 / 光影 / 调色 / 质感各 50 项，支持收藏与 JSON 导入/导出",
+      "icon": "Clapperboard",
+      "color": "pink",
+      "ports": {
+        "inputs": [],
+        "outputs": [
+          "text"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "video-motion",
+      "label": "视频运镜",
+      "category": "toolbox",
+      "description": "视频运镜组合器：场景 / 动作 / 路径 / 节奏 / 稳定 / 主体约束各 50 项，支持收藏与 JSON 导入/导出",
+      "icon": "Camera",
+      "color": "pink",
+      "ports": {
+        "inputs": [],
+        "outputs": [
+          "text"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "multi-angle-visual",
+      "label": "可视化多角度",
+      "category": "toolbox",
+      "description": "可视化调节方位 / 俯仰 / 远近，支持批量角度、Prompt 模式、前后缀、镜头收藏、JSON 导入/导出与紧凑双栏 UI",
+      "icon": "Compass",
+      "color": "pink",
+      "ports": {
+        "inputs": [
+          "image"
+        ],
+        "outputs": [
+          "text"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "portrait-master",
+      "label": "肖像大师",
+      "category": "toolbox",
+      "description": "捏人 Prompt 设计器：五官、发型、服饰、配饰、气质神情等 9 大类词库，支持随机、锁定、权重和运行输出文本",
+      "icon": "UserRoundCog",
+      "color": "pink",
+      "ports": {
+        "inputs": [
+          "text",
+          "metadata"
+        ],
+        "outputs": [
+          "text",
+          "metadata"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "pose-master",
+      "label": "姿势大师",
+      "category": "toolbox",
+      "description": "人体线稿姿态编辑器：支持多人姿势、抓取移动、OpenPose/COCO 预览输出、keypoints JSON 与中英文 prompt",
+      "icon": "PersonStanding",
+      "color": "pink",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "metadata"
+        ],
+        "outputs": [
+          "image",
+          "text",
+          "metadata"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "aggregate-parser",
+      "label": "聚合解析",
+      "category": "toolbox",
+      "description": "基于 ParseHub 的轻量自媒体聚合解析：输入短链/分享码/分享文案，合规确认后默认保存到输出目录；远端地址解析作为高级模式保留",
+      "icon": "Link2",
+      "color": "pink",
+      "ports": {
+        "inputs": [
+          "text"
+        ],
+        "outputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "batch-processor",
+      "label": "批量素材处理",
+      "category": "toolbox",
+      "description": "批量导入文件或文件夹，在节点内完成命名、去黑边、抠图、扩图、高清放大和进度反馈，不自动铺满画布输出节点",
+      "icon": "Files",
+      "color": "pink",
+      "ports": {
+        "inputs": [
+          "image",
+          "video",
+          "audio",
+          "model3d"
+        ],
+        "outputs": []
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "batch-tagger",
+      "label": "批量打标",
+      "category": "toolbox",
+      "description": "批量导入图像/视频素材，调用 LLM/Vision API 生成 TAG、短句、自然语言或 JSON sidecar 文件",
+      "icon": "Tags",
+      "color": "pink",
+      "ports": {
+        "inputs": [
+          "image",
+          "video",
+          "text"
+        ],
+        "outputs": [
+          "text",
+          "metadata"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "topaz-image-upscale",
+      "label": "Topaz图像高清化",
+      "category": "toolbox",
+      "description": "调用本机 Topaz Gigapixel AI / Gigapixel 8，对上游图像做本地高清放大；需要用户已安装并登录软件",
+      "icon": "Image",
+      "color": "pink",
+      "ports": {
+        "inputs": [
+          "image"
+        ],
+        "outputs": [
+          "image"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "topaz-video-upscale",
+      "label": "Topaz视频高清化",
+      "category": "toolbox",
+      "description": "调用本机 Topaz Video AI 自带 ffmpeg，对上游视频做放大与补帧；需要用户已安装并登录软件",
+      "icon": "Video",
+      "color": "pink",
+      "ports": {
+        "inputs": [
+          "video"
+        ],
+        "outputs": [
+          "video"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "face-expression-3d",
+      "label": "3D表情编辑",
+      "category": "3d",
+      "description": "52 通道 3D 人脸表情、照片比例校准、相机灯光与 1K-4K 批量图片导出",
+      "icon": "ScanFace",
+      "color": "cyan",
+      "ports": {
+        "inputs": [
+          "model3d",
+          "image",
+          "metadata"
+        ],
+        "outputs": [
+          "image",
+          "metadata"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "panorama-3d",
+      "label": "3D全景",
+      "category": "3d",
+      "description": "Three.js 360 全景预览与取景导出，内置 GPT Image 2 文生/图生 21:9 全景贴图生成",
+      "icon": "Globe2",
+      "color": "sky",
+      "ports": {
+        "inputs": [
+          "image"
+        ],
+        "outputs": [
+          "image"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    }
+  ]
+}

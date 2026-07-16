@@ -31,6 +31,8 @@ import { submitRh, queryRh, cancelRh, fetchRhAppInfo, uploadRhAsset, type RhSite
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useHasAutoOutput } from './useHasAutoOutput';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
+import type { RunNodeLifecycleReporter } from '../../types/project';
 import { useUpstreamMaterials, type Material } from './useUpstreamMaterials';
 import { useOrderedMaterials } from './useOrderedMaterials';
 import MaterialPreviewSection from './MaterialPreviewSection';
@@ -543,7 +545,7 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
   };
 
   // Promise 化轮询（让 useRunTrigger 等到任务真正完成才 markDone）
-  const startPolling = (tid: string): Promise<void> => {
+  const startPolling = (tid: string, reporter?: RunNodeLifecycleReporter): Promise<void> => {
     const key = rhToolsPollKey(id, tid);
     const existing = activeRHToolsPolls.get(key);
     if (existing) {
@@ -589,6 +591,22 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
         try {
           const r = await queryRh(tid, activeRhSiteRef.current);
           if (r.site) activeRhSiteRef.current = r.site;
+          await reporter?.polling({
+            provider: 'runninghub',
+            model: webappId,
+            site: r.site || activeRhSiteRef.current,
+            taskId: tid,
+            requestId: r.requestId,
+            transportHttpStatus: r.transportHttpStatus,
+            upstreamHttpStatus: r.upstreamHttpStatus,
+            usage: r.usage,
+            httpStatusSource: 'local-backend',
+            pollCount: elapsed,
+            pollLimit: MAX,
+            status: r.status,
+            code: r.code,
+            outputCount: Array.isArray(r.urls) ? r.urls.length : 0,
+          });
           if (elapsed % 6 === 0) {
             logBus.debug(`[${elapsed * 5}s] status=${r.status} code=${r.code} urls=${r.urls?.length || 0}`, src);
           }
@@ -600,13 +618,36 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
             const firstImg = list.find(isImg);
             const firstVid = list.find(isVid);
             const firstAud = list.find(isAud);
-            const patch: any = { status: 'success', urls: list };
+            const patch: any = {
+              status: 'success',
+              urls: list,
+              provider: 'runninghub',
+              model: webappId,
+              taskId: tid,
+              requestId: r.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+            };
             if (firstImg) patch.imageUrl = firstImg;
             if (firstVid) patch.videoUrl = firstVid;
             if (firstAud) patch.audioUrl = firstAud;
             if (!firstImg && !firstVid && !firstAud && list[0]) patch.imageUrl = list[0];
             logBus.success(`任务完成 · ${list.length} 个输出 → ${list[0] || ''}`, src);
             update(patch);
+            await reporter?.providerResponse({
+              provider: 'runninghub',
+              model: webappId,
+              upstreamTaskId: tid,
+              requestId: r.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+              status: 'succeeded',
+              httpStatusSource: 'local-backend',
+            });
             finish(true);
           } else if (r.status === 'FAILED') {
             let reason: string;
@@ -622,6 +663,19 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
                 reason = `RH 失败 code=${r.code}`;
               }
             }
+            await reporter?.providerResponse({
+              provider: 'runninghub',
+              model: webappId,
+              upstreamTaskId: tid,
+              requestId: r.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+              status: 'failed',
+              error: { message: reason },
+              httpStatusSource: 'local-backend',
+            });
             update({ status: 'error', error: reason });
             setVisibleError(reason);
             logBus.error(`生成失败: ${reason}`, src);
@@ -704,13 +758,14 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, taskId, activeAppId, webappId]);
 
-  const handleRun = async () => {
+  const handleRun = async (reporter?: RunNodeLifecycleReporter) => {
     stopRequestedRef.current = false;
     setVisibleError(null);
     if (!webappId) {
       setVisibleError('请先选择应用');
       return;
     }
+    await reporter?.providerRequest({ provider: 'runninghub', model: webappId });
     let freshList: any[] | null = null;
     let freshValues: Record<string, RhParamValue> | null = null;
     if (!appInfo?.nodeInfoList?.length) {
@@ -739,6 +794,16 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
         site: activeRhSiteRef.current,
       });
       activeRhSiteRef.current = r.site || activeRhSiteRef.current;
+      await reporter?.providerSubmitted({
+        provider: 'runninghub',
+        model: webappId,
+        upstreamTaskId: r.taskId,
+        requestId: r.requestId,
+        transportHttpStatus: r.transportHttpStatus,
+        upstreamHttpStatus: r.upstreamHttpStatus,
+        usage: r.usage,
+        httpStatusSource: 'local-backend',
+      });
       activeTaskIdRef.current = r.taskId;
       if (stopRequestedRef.current) {
         logBus.warn(`停止请求已收到，提交返回后立即取消 RH 后台任务 taskId=${r.taskId}`, src);
@@ -761,13 +826,31 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
       }
       logBus.success(`异步任务已提交 taskId=${r.taskId} 进入轮询…`, src);
       update({ status: 'polling', taskId: r.taskId });
-      await startPolling(r.taskId);
+      await startPolling(r.taskId, reporter);
     } catch (e: any) {
       if (stopRequestedRef.current || e?.message === '已取消') {
+        await reporter?.providerResponse({
+          provider: 'runninghub',
+          model: webappId,
+          upstreamTaskId: activeTaskIdRef.current || undefined,
+          status: 'stopped',
+          error: { message: e?.message || '已取消' },
+        });
         logBus.warn('任务已停止', src);
         update({ status: 'idle', taskId: '' });
         return;
       }
+      await reporter?.providerResponse({
+        provider: 'runninghub',
+        model: webappId,
+        upstreamTaskId: activeTaskIdRef.current || undefined,
+        requestId: e?.requestId,
+        transportHttpStatus: e?.transportHttpStatus,
+        upstreamHttpStatus: e?.upstreamHttpStatus,
+        status: 'failed',
+        error: { message: e?.message || '提交失败', code: e?.code },
+        httpStatusSource: 'local-backend',
+      });
       logBus.error(`提交失败: ${e?.message || e}`, src);
       setVisibleError(e?.message || '提交失败');
       update({ status: 'error', error: e?.message });
@@ -775,11 +858,11 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
   };
 
   // 接入运行总线（循环器/批量执行）
-  useRunTrigger(id, async () => {
+  useRunTrigger(id, async (reporter) => {
     if (!activeAppId || !webappId) return; // 启动器视图不可被调起
     if (status === 'submitting' || status === 'polling') return;
-    await handleRun();
-  });
+    await handleRun(reporter);
+  }, undefined, { lifecycleAware: true });
 
   const handleStop = async () => {
     stopRequestedRef.current = true;
@@ -1224,7 +1307,7 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
 
           {!isBusy ? (
             <button
-              onClick={handleRun}
+              onClick={() => requestCanvasNodeRun(id)}
               onMouseDown={(e) => e.stopPropagation()}
               className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded text-xs font-medium nodrag"
               style={{ background: accentSoft, color: accent, border: `1px solid ${ringColor}` }}

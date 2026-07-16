@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import { PORT_COLOR } from '../../config/portTypes';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
+import type { RunNodeLifecycleReporter } from '../../types/project';
 import { runFalToolboxTool, getFalToolboxManifest, type RunFalToolboxProgress } from '../../services/falToolbox';
 import { useThemeStore } from '../../stores/theme';
 import { logBus } from '../../stores/logs';
@@ -386,7 +388,7 @@ const FalToolboxNode = ({ id, data, selected }: NodeProps) => {
     return resolved;
   };
 
-  const handleRun = async () => {
+  const handleRun = async (reporter?: RunNodeLifecycleReporter) => {
     if (!activeTool) {
       update({ status: 'error', error: '请先选择 Fal 超市工具' });
       throw new Error('请先选择 Fal 超市工具');
@@ -414,6 +416,7 @@ const FalToolboxNode = ({ id, data, selected }: NodeProps) => {
       outputText: '',
     });
     const source = `fal-toolbox:${id}`;
+    await reporter?.providerRequest({ provider: 'fal', model: activeTool.id });
     try {
       const resolvedTextInputs = collectResolvedTextInputs();
       const resolvedUserParams = collectResolvedUserParams();
@@ -421,6 +424,21 @@ const FalToolboxNode = ({ id, data, selected }: NodeProps) => {
       const onProgress = (progress: RunFalToolboxProgress) => {
         setProgressMessage(progress.message);
         if (progress.requestId) update({ status: progress.stage === 'poll' ? 'polling' : 'submitting', requestId: progress.requestId });
+        const payload = {
+          provider: 'fal',
+          toolId: activeTool.id,
+          requestId: progress.requestId || null,
+          transportHttpStatus: progress.transportHttpStatus,
+          upstreamHttpStatus: progress.upstreamHttpStatus,
+          usage: progress.usage,
+          httpStatusSource: 'local-backend',
+          pollCount: progress.pollCount || null,
+          stage: progress.stage,
+          message: progress.message,
+        };
+        if (progress.stage === 'poll') void reporter?.polling(payload);
+        else if (progress.stage === 'submit' && progress.requestId) void reporter?.providerSubmitted(payload);
+        else void reporter?.progress(payload);
       };
       const result = await runFalToolboxTool({
         toolId: activeTool.id,
@@ -438,6 +456,16 @@ const FalToolboxNode = ({ id, data, selected }: NodeProps) => {
       });
       const textOutputs = result.textOutputs.filter(Boolean);
       const textValue = textOutputs.join('\n\n');
+      await reporter?.providerResponse({
+        provider: 'fal',
+        model: activeTool.id,
+        requestId: result.requestId,
+        transportHttpStatus: result.transportHttpStatus,
+        upstreamHttpStatus: result.upstreamHttpStatus,
+        usage: result.usage,
+        status: 'succeeded',
+        httpStatusSource: 'local-backend',
+      });
       update({
         status: 'success',
         requestId: result.requestId || '',
@@ -461,6 +489,11 @@ const FalToolboxNode = ({ id, data, selected }: NodeProps) => {
         texts: textOutputs,
         textSegments: textOutputs,
         raw: result.raw,
+        provider: 'fal',
+        model: activeTool.id,
+        transportHttpStatus: result.transportHttpStatus,
+        upstreamHttpStatus: result.upstreamHttpStatus,
+        usage: result.usage,
         error: '',
       });
       const total = result.urls.length + textOutputs.length;
@@ -468,6 +501,16 @@ const FalToolboxNode = ({ id, data, selected }: NodeProps) => {
       logBus.success(`${activeTool.title} 完成 · ${total} 个输出`, source);
     } catch (error: any) {
       const message = error?.message || 'Fal超市运行失败';
+      await reporter?.providerResponse({
+        provider: 'fal',
+        model: activeTool.id,
+        requestId: error?.requestId,
+        transportHttpStatus: error?.transportHttpStatus,
+        upstreamHttpStatus: error?.upstreamHttpStatus,
+        status: aborter.signal.aborted ? 'stopped' : 'failed',
+        error: { message, code: error?.code },
+        httpStatusSource: 'local-backend',
+      });
       update({ status: 'error', error: message });
       setProgressMessage('');
       logBus.error(message, source);
@@ -482,10 +525,10 @@ const FalToolboxNode = ({ id, data, selected }: NodeProps) => {
     setProgressMessage('已停止');
   };
 
-  useRunTrigger(id, async () => {
+  useRunTrigger(id, async (reporter) => {
     if (isBusy) return;
-    await handleRun();
-  });
+    await handleRun(reporter);
+  }, undefined, { lifecycleAware: true });
 
   const onResize = (_event: any, params: { width: number; height: number }) => {
     const next = { w: Math.round(params.width), h: Math.round(params.height) };
@@ -870,7 +913,7 @@ const FalToolboxNode = ({ id, data, selected }: NodeProps) => {
               <Square size={12} /> 停止
             </button>
           ) : (
-            <button type="button" onClick={() => { void handleRun().catch(() => undefined); }} className="nodrag w-full flex items-center justify-center gap-1.5 rounded py-2 text-xs font-bold" style={{ background: accent, color: isPixel ? 'var(--px-surface)' : '#120818', border: `1px solid ${accent}` }}>
+            <button type="button" onClick={() => requestCanvasNodeRun(id)} className="nodrag w-full flex items-center justify-center gap-1.5 rounded py-2 text-xs font-bold" style={{ background: accent, color: isPixel ? 'var(--px-surface)' : '#120818', border: `1px solid ${accent}` }}>
               <Play size={12} fill="currentColor" /> 运行 FAL
             </button>
           )}

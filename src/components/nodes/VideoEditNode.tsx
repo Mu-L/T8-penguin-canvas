@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent, type PointerEvent, type SyntheticEvent } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent, type PointerEvent, type SyntheticEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Handle, Position, useReactFlow, type NodeProps } from '@xyflow/react';
 import {
@@ -34,6 +34,7 @@ import { uploadFileBlob } from '../../services/imageOps';
 import { cancelVideoEditJob, composeVideoEditAsync, getVideoEditJob, loadVideoTimelinePreviewAsync, probeVideo, separateVideoAudioAsync, snapshotVideoFrameAsync, type VideoComposeResult, type VideoSnapshotResult } from '../../services/videoOps';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useUpstreamMaterials } from './useUpstreamMaterials';
+import { useRunTrigger } from '../../hooks/useRunTrigger';
 import ImageEditModal, { type ImageEditProduceMeta } from './ImageEditModal';
 import {
   appendVideoEditClips,
@@ -98,6 +99,16 @@ import {
 import { fileNameFromUrl, formatMediaSize, getMediaItemsFromData, type MediaItem } from '../../utils/mediaCollection';
 import { CREATIVE_TARGET_NODE_TYPE, buildCreativeTargetResult } from '../../utils/canvasCreativeWorkflow';
 import { placeSingleNode } from '../../utils/nodePlacement';
+import {
+  createSecondaryProviderActionForNode,
+  executeRegisteredSecondaryProviderAction,
+  requestCanvasSecondaryProviderAction,
+  resolveSecondaryProviderActionForRun,
+  secondaryProviderActionFromNodeData,
+  secondaryProviderActionNodePatch,
+  type QueueSecondaryProviderAction,
+} from '../../utils/secondaryProviderAction';
+import type { RunNodeLifecycleReporter } from '../../types/project';
 import { useThemeStore } from '../../stores/theme';
 
 const ASPECT_OPTIONS: Array<{ value: VideoEditSettings['aspect']; label: string }> = [
@@ -848,6 +859,40 @@ function VideoEditNode({ id, data, selected }: NodeProps) {
   const videoEditTheme = useThemeStore((state) => state.theme);
   const videoEditThemeStyle = useThemeStore((state) => state.style);
   const d = (data as any) || {};
+  const queueSecondaryAction = useCallback<QueueSecondaryProviderAction>((draft) => {
+    const action = createSecondaryProviderActionForNode(id, 'video-edit', draft);
+    update(secondaryProviderActionNodePatch(action));
+    queueMicrotask(() => {
+      if (!requestCanvasSecondaryProviderAction(action)) {
+        const current = secondaryProviderActionFromNodeData(rf.getNode(id)?.data);
+        if (current?.requestId === action.requestId) update(secondaryProviderActionNodePatch(null));
+        setLocalError('无法请求视频编辑器 RH 抠图运行体检');
+      }
+    });
+    return action;
+  }, [id, rf, update]);
+
+  const runSecondaryAction = useCallback(async (reporter: RunNodeLifecycleReporter) => {
+    const action = resolveSecondaryProviderActionForRun({
+      nodeId: id,
+      nodeType: 'video-edit',
+      nodeData: rf.getNode(id)?.data,
+      runContext: reporter.runContext,
+    });
+    if (!action) {
+      throw new Error('视频编辑节点缺少已确认的次级 Provider action，已停止调用 Provider');
+    }
+    try {
+      await executeRegisteredSecondaryProviderAction(action, reporter);
+    } finally {
+      const current = secondaryProviderActionFromNodeData(rf.getNode(id)?.data);
+      if (current?.requestId === action.requestId) update(secondaryProviderActionNodePatch(null));
+    }
+  }, [id, rf, update]);
+
+  // VideoEdit 仍不参与普通运行；该唯一监听器只承接显式 Secondary Provider action。
+  useRunTrigger(id, runSecondaryAction, undefined, { lifecycleAware: true });
+
   const videoEditSolidPalette = useMemo(
     () => resolveVideoEditSolidPalette(videoEditTemplateId, videoEditTheme, videoEditThemeStyle),
     [videoEditTemplateId, videoEditTheme, videoEditThemeStyle],
@@ -10627,6 +10672,9 @@ function VideoEditNode({ id, data, selected }: NodeProps) {
     {imageEditSnapshotUrl && (
       <ImageEditModal
         srcUrl={imageEditSnapshotUrl}
+        secondaryActionNodeId={id}
+        secondaryActionNodeType="video-edit"
+        queueSecondaryAction={queueSecondaryAction}
         onClose={() => setImageEditSnapshotUrl('')}
         onProduce={handleImageEditSnapshotProduce}
       />

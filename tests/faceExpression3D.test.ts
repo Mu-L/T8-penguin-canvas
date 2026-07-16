@@ -16,6 +16,12 @@ import {
   randomizeFaceExpression,
   setFaceChannel,
 } from '../src/utils/faceExpression3D.ts';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
+import {
+  FACE_EXPRESSION_LIBRARY_PRESETS,
+  FACE_PRESET_LIBRARY_REFERENCES,
+  FACE_PRESET_LIBRARY_LEVELS,
+} from '../src/utils/faceExpressionPresetLibrary.ts';
 
 function read(relativePath: string) {
   return readFileSync(new URL(`../${relativePath}`, import.meta.url), 'utf8');
@@ -117,6 +123,40 @@ test('built-in presets have unique ids and a neutral fallback', () => {
   assert.equal(FACE_EXPRESSION_PRESETS[0]?.id, 'neutral');
 });
 
+test('validated preset library contains 100 bounded, distinct and conflict-free expressions', () => {
+  assert.equal(FACE_EXPRESSION_LIBRARY_PRESETS.length, 100);
+  assert.equal(FACE_PRESET_LIBRARY_REFERENCES.compoundExpressions, 'https://doi.org/10.1073/pnas.1322355111');
+  assert.equal(FACE_PRESET_LIBRARY_LEVELS.length, 4);
+  assert.equal(new Set(FACE_EXPRESSION_LIBRARY_PRESETS.map((item) => item.id)).size, 100);
+  assert.equal(new Set(FACE_EXPRESSION_LIBRARY_PRESETS.map((item) => item.name)).size, 100);
+  assert.deepEqual(
+    Object.fromEntries(['basic', 'compound', 'social'].map((category) => [category, FACE_EXPRESSION_LIBRARY_PRESETS.filter((item) => item.category === category).length])),
+    { basic: 24, compound: 60, social: 16 },
+  );
+
+  const channelSet = new Set<string>(FACE_CHANNELS);
+  for (const preset of FACE_EXPRESSION_LIBRARY_PRESETS) {
+    const entries = Object.entries(preset.channels);
+    assert.ok(entries.length > 0, `${preset.id} has no active channels`);
+    assert.ok(preset.actionUnits.length > 0, `${preset.id} has no evidence basis`);
+    for (const [channel, value] of entries) {
+      assert.ok(channelSet.has(channel), `${preset.id} uses unknown channel ${channel}`);
+      assert.ok(Number(value) >= 0 && Number(value) <= 1, `${preset.id}.${channel} is outside 0..1`);
+    }
+    const c = preset.channels;
+    assert.ok(!((c.eyeBlinkLeft || 0) > 0.35 && (c.eyeWideLeft || 0) > 0.35), `${preset.id} conflicts on left eyelid`);
+    assert.ok(!((c.eyeBlinkRight || 0) > 0.35 && (c.eyeWideRight || 0) > 0.35), `${preset.id} conflicts on right eyelid`);
+    assert.ok(!((c.mouthSmileLeft || 0) > 0.35 && (c.mouthFrownLeft || 0) > 0.35), `${preset.id} conflicts on left mouth corner`);
+    assert.ok(!((c.mouthSmileRight || 0) > 0.35 && (c.mouthFrownRight || 0) > 0.35), `${preset.id} conflicts on right mouth corner`);
+  }
+
+  const base = defaultFaceExpressionState();
+  const applied = applyFacePreset(base, 'library-happily-surprised-standard', 'replace');
+  assert.equal(applied.expression.presetId, 'library-happily-surprised-standard');
+  assert.ok(applied.expression.channels.mouthSmileLeft > 0);
+  assert.ok(applied.expression.channels.browInnerUp > 0);
+});
+
 test('default model is the licensed ICT neutral human head and legacy defaults migrate', () => {
   const base = defaultFaceExpressionState();
   assert.equal(base.model.adapterId, 't8-ict-neutral-head-v1');
@@ -149,19 +189,22 @@ test('default model is the licensed ICT neutral human head and legacy defaults m
 
 test('node is registered as executable 3D image/metadata producer and persists local outputs', () => {
   const types = read('src/types/canvas.ts');
-  const registry = read('src/config/nodeRegistry.ts');
-  const ports = read('src/config/portTypes.ts');
   const canvas = read('src/components/Canvas.tsx');
-  const actionBar = read('src/components/NodeActionBar.tsx');
   const node = read('src/components/nodes/FaceExpression3DNode.tsx');
   assert.match(types, /'face-expression-3d'/);
-  assert.match(registry, /type: 'face-expression-3d'.*3D表情编辑/);
-  assert.match(ports, /'face-expression-3d': \{ inputs: \['model3d', 'image', 'metadata'\], outputs: \['image', 'metadata'\] \}/);
+  assertProductionNodeSchema('face-expression-3d', {
+    label: '3D表情编辑',
+    category: '3d',
+    inputs: ['model3d', 'image', 'metadata'],
+    outputs: ['image', 'metadata'],
+    executable: true,
+  });
   assert.match(canvas, /FaceExpression3DNode/);
   assert.match(canvas, /'face-expression-3d'/);
-  assert.match(actionBar, /'face-expression-3d'/);
   assert.match(node, /uploadDataUrl\(dataUrl/);
   assert.match(node, /imageUrls: urls/);
+  assert.match(node, /outputText:\s*''/);
+  assert.doesNotMatch(node, /outputText:\s*`3D 表情图片/);
   assert.match(node, /useRunTrigger\(id/);
   assert.doesNotMatch(node, /imageUrl:\s*dataUrl/);
 });
@@ -170,8 +213,16 @@ test('editor exposes every required professional workflow tab and photo analysis
   const editor = read('src/components/face-expression-3d/FaceExpression3DEditor.tsx');
   const analysis = read('src/utils/facePhotoAnalysis.ts');
   const scene = read('src/three/faceExpression/FaceExpressionScene.ts');
-  for (const label of ['表情', '头眼', '相机', '灯光', '输出', '批量']) assert.match(editor, new RegExp(label));
+  for (const label of ['表情', '表情预设', '头眼', '相机', '灯光', '输出', '批量']) assert.match(editor, new RegExp(label));
+  assert.match(editor, /\{ id: 'expression', label: '表情'.*\{ id: 'presets', label: '表情预设'.*\{ id: 'pose', label: '头眼'/s);
+  assert.match(editor, /data-testid="face-expression-preset-library"/);
+  assert.match(editor, /filteredLibraryPresets\.length\}\/100/);
   assert.match(editor, /专业 52/);
+  assert.match(editor, /mouthSmileLeft:\s*'微笑'/);
+  assert.match(editor, /mouthFrownLeft:\s*'嘴角下压'/);
+  assert.match(editor, /eyeBlinkLeft:\s*'眨眼'/);
+  assert.match(editor, /label=\{SIMPLE_CHANNEL_LABELS\[channel\]\}/);
+  assert.match(editor, /label=\{FACE_CHANNEL_LABELS\[channel\]\}/);
   assert.match(editor, /照片功能只校准/);
   assert.match(analysis, /FaceLandmarker/);
   assert.match(analysis, /outputFaceBlendshapes: true/);
@@ -193,6 +244,7 @@ test('bundled ICT GLB is licensed, compact and exposes the exact T8 52-channel s
   const jsonLength = model.readUInt32LE(12);
   const gltf = JSON.parse(model.subarray(20, 20 + jsonLength).toString('utf8').trim());
   const manifest = JSON.parse(read('public/assets/face-expression/asset-manifest.json'));
+  const builder = read('scripts/build-ict-face-glb.cjs');
   const license = read('public/assets/face-expression/LICENSE-ICT-FaceKit.txt');
   assert.ok(model.length < 25 * 1024 * 1024, `model is ${(model.length / 1024 / 1024).toFixed(2)} MB`);
   assert.deepEqual(gltf.meshes[0].extras.targetNames, [...FACE_CHANNELS]);
@@ -202,6 +254,9 @@ test('bundled ICT GLB is licensed, compact and exposes the exact T8 52-channel s
   assert.equal(manifest.expressionChannels, 52);
   assert.equal(manifest.sizeBytes, model.length);
   assert.equal(manifest.sha256, createHash('sha256').update(model).digest('hex').toUpperCase());
+  assert.match(builder, /const IRIS_FORWARD_OFFSET = 0\.006/);
+  assert.doesNotMatch(builder, /vertices\[index \* 3 \+ 2\] \+= 0\.025/);
+  assert.ok(manifest.modifications.some((item: string) => item.includes('eyeBlink morphs close')));
   assert.match(license, /Copyright \(c\) 2020 USC Institute for Creative Technologies/);
   const packageJson = read('package.json');
   const postBuild = read('electron/_post_build.cjs');

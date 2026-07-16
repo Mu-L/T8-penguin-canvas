@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, useReactFlow, type NodeProps } from '@xyflow/react';
 import {
   Archive,
   Copy,
@@ -25,7 +25,9 @@ import { getCodexCliStatus, startCodexCliLogin, type CodexCliStatus } from '../.
 import { publishCodexImageConjureResult, streamCodexImageConjure, type CodexImageConjureResult } from '../../services/codexImageConjure';
 import { PORT_COLOR } from '../../config/portTypes';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { createCanvasNodeRunRequestId, requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { useThemeStore } from '../../stores/theme';
+import type { RunNodeLifecycleReporter } from '../../types/project';
 import {
   DEFAULT_CODEX_IMAGE_TEMPLATES,
   buildCodexImageConjurePrompt,
@@ -177,6 +179,7 @@ function friendlyCodexErrorMessage(message: any) {
 const CodexImageConjureNode = ({ id, data, selected }: NodeProps) => {
   const d = data as any;
   const update = useUpdateNodeData(id);
+  const rf = useReactFlow();
   const { theme, style } = useThemeStore();
   const isDark = theme === 'dark';
   const isPixel = style === 'pixel';
@@ -595,13 +598,19 @@ const CodexImageConjureNode = ({ id, data, selected }: NodeProps) => {
     }
   }, [d.codexConjureGalleryQuery, id, latestUrls, update]);
 
-  const runTask = useCallback(async (task: CodexImageConjureTask) => {
+  const runTask = useCallback(async (task: CodexImageConjureTask, reporter?: RunNodeLifecycleReporter) => {
     const controller = new AbortController();
     controllersRef.current.set(task.id, controller);
     let reply = '';
     patchTask(task.id, { status: 'running', progressText: 'Codex 正在生成...', startedAt: new Date().toISOString(), error: '' });
     setStreamText('');
     try {
+      await reporter?.providerRequest({
+        provider: 'codex-cli',
+        ...(task.model ? { model: task.model } : {}),
+        requestId: task.id,
+        queueIndex: task.queueIndex,
+      });
       const result = await streamCodexImageConjure(
         {
           nodeId: id,
@@ -645,6 +654,13 @@ const CodexImageConjureNode = ({ id, data, selected }: NodeProps) => {
         ...(persistPrompt ? {} : { codexConjurePrompt: '', codexConjurePromptMentions: [] }),
         ...(persistRefs ? {} : { codexConjureGalleryRefs: [] }),
       });
+      await reporter?.providerResponse({
+        provider: 'codex-cli',
+        ...(task.model ? { model: task.model } : {}),
+        requestId: task.id,
+        status: 'succeeded',
+        outputCount: published.imageUrls.length,
+      });
       return published;
     } catch (error: any) {
       const aborted = error?.name === 'AbortError';
@@ -657,25 +673,33 @@ const CodexImageConjureNode = ({ id, data, selected }: NodeProps) => {
       if (!aborted) {
         update({ status: 'error', error: error?.message || '生成失败' });
       }
+      await reporter?.providerResponse({
+        provider: 'codex-cli',
+        ...(task.model ? { model: task.model } : {}),
+        requestId: task.id,
+        status: aborted ? 'stopped' : 'failed',
+        error: error?.message || (aborted ? '用户停止' : '生成失败'),
+      });
       return null;
     } finally {
       controllersRef.current.delete(task.id);
     }
   }, [autoPublish, d.codexExecutablePath, id, patchTask, persistPrompt, persistRefs, update]);
 
-  const handleGenerate = useCallback(async () => {
-    if (busy) return;
+  const handleGenerate = useCallback(async (reporter?: RunNodeLifecycleReporter) => {
+    if (busy) throw new Error('Codex 图像节点已有任务正在运行，请先停止后再试。');
     const input = buildCurrentTaskInput();
     if (!input.prompt) {
-      update({ error: '请填写提示词，或连接上游文本节点。' });
-      return;
+      const message = '请填写提示词，或连接上游文本节点。';
+      update({ status: 'error', error: message });
+      throw new Error(message);
     }
     const task = createCodexImageConjureTask(input);
     setTasks([...tasksRef.current, task]);
     setBusy(true);
     update({ status: 'running', error: '', codexConjureLastRunSummary: 'Codex 正在生成图像...' });
     try {
-      await runTask(task);
+      await runTask(task, reporter);
     } finally {
       setBusy(false);
     }
@@ -693,14 +717,15 @@ const CodexImageConjureNode = ({ id, data, selected }: NodeProps) => {
     update({ codexConjureLastRunSummary: `已加入 ${batchCount} 个任务到队列。` });
   }, [batchCount, buildCurrentTaskInput, setTasks, update]);
 
-  const runQueue = useCallback(async () => {
-    if (busy) return;
+  const runQueue = useCallback(async (reporter?: RunNodeLifecycleReporter) => {
+    if (busy) throw new Error('Codex 图像节点已有任务正在运行，请先停止后再试。');
     let pending = tasksRef.current.filter((task) => task.status === 'queued');
     if (!pending.length) {
       const input = buildCurrentTaskInput();
       if (!input.prompt) {
-        update({ error: '请填写提示词，或连接上游文本节点。' });
-        return;
+        const message = '请填写提示词，或连接上游文本节点。';
+        update({ status: 'error', error: message });
+        throw new Error(message);
       }
       const next = enqueueCodexImageConjureTasks(tasksRef.current, input, batchCount);
       setTasks(next);
@@ -708,12 +733,19 @@ const CodexImageConjureNode = ({ id, data, selected }: NodeProps) => {
     }
     setBusy(true);
     update({ status: 'running', error: '', codexConjureLastRunSummary: `队列启动：${pending.length} 个任务，并发 ${concurrency}` });
+    let failedCount = 0;
     try {
       while (pending.length) {
         const batch = pending.slice(0, concurrency);
-        await Promise.all(batch.map((task) => runTask(task)));
+        const results = await Promise.all(batch.map((task) => runTask(task, reporter)));
+        failedCount += results.filter((result) => !result).length;
         pending = tasksRef.current.filter((task) => task.status === 'queued');
         if (!pending.length) break;
+      }
+      if (failedCount > 0) {
+        const message = `任务队列有 ${failedCount} 个任务失败或停止`;
+        update({ status: 'error', error: message, codexConjureLastRunSummary: message });
+        throw new Error(message);
       }
       update({ status: 'success', codexConjureLastRunSummary: '任务队列已完成。' });
     } finally {
@@ -745,9 +777,58 @@ const CodexImageConjureNode = ({ id, data, selected }: NodeProps) => {
     });
   }, [galleryRefs, latestUrls, prompt, update]);
 
-  useRunTrigger(id, async () => {
-    if (!busy) await handleGenerate();
-  }, 'codex-image-conjure');
+  const requestQueueRun = useCallback(() => {
+    const requestId = createCanvasNodeRunRequestId(id, 'codex-queue');
+    update({
+      codexConjureRunMode: 'queue',
+      codexConjureRunRequestId: requestId,
+    });
+    // Persist the exact secondary intent before Canvas snapshots the node for
+    // its execution digest and confirmation preview.
+    window.requestAnimationFrame(() => {
+      if (requestCanvasNodeRun(id, { requestId })) return;
+      const liveData = rf.getNode(id)?.data as Record<string, unknown> | undefined;
+      if (liveData?.codexConjureRunRequestId !== requestId) return;
+      update({
+        codexConjureRunMode: 'single',
+        codexConjureRunRequestId: '',
+        status: 'error',
+        error: '无法请求任务队列运行体检',
+      });
+    });
+  }, [id, rf, update]);
+
+  useRunTrigger(id, async (reporter) => {
+    const liveData = rf.getNode(id)?.data as Record<string, unknown> | undefined;
+    const contextRequestId = String(reporter.runContext?.requestId || '').trim();
+    const persistedRequestId = String(liveData?.codexConjureRunRequestId || '').trim();
+    const requestedMode = String(liveData?.codexConjureRunMode || '').trim();
+    try {
+      // Ordinary canvas/group runs have no persisted node-surface intent and
+      // retain the normal single-generation behavior.
+      if (!persistedRequestId) {
+        await handleGenerate(reporter);
+        return;
+      }
+      if (!contextRequestId || contextRequestId !== persistedRequestId) {
+        throw new Error('Codex 队列运行请求已变化或失效，已拒绝执行。');
+      }
+      if (requestedMode !== 'queue') {
+        throw new Error('Codex 队列运行模式无效，已拒绝执行。');
+      }
+      await runQueue(reporter);
+    } finally {
+      if (contextRequestId) {
+        const latestData = rf.getNode(id)?.data as Record<string, unknown> | undefined;
+        if (latestData?.codexConjureRunRequestId === contextRequestId) {
+          update({
+            codexConjureRunMode: 'single',
+            codexConjureRunRequestId: '',
+          });
+        }
+      }
+    }
+  }, 'codex-image-conjure', { lifecycleAware: true });
 
   const statusText = status?.available ? (status.version ? `Codex ${status.version}` : 'Codex 已就绪') : (status?.message || '正在检查 Codex CLI');
   const routeMissing = isRouteMissingMessage(statusText);
@@ -898,7 +979,7 @@ const CodexImageConjureNode = ({ id, data, selected }: NodeProps) => {
         </div>
         <div className="grid grid-cols-3 gap-2">
           <button type="button" className="nodrag px-2 py-2 text-xs font-bold" style={buttonStyle} onClick={addToQueue}>加入队列</button>
-          <button type="button" className="nodrag px-2 py-2 text-xs font-bold" style={buttonStyle} onClick={() => void runQueue()} disabled={busy}>开始队列</button>
+          <button type="button" className="nodrag px-2 py-2 text-xs font-bold" style={buttonStyle} onClick={requestQueueRun} disabled={busy}>开始队列</button>
           <button type="button" className="nodrag px-2 py-2 text-xs font-bold" style={buttonStyle} onClick={clearFinishedTasks}>清空完成</button>
         </div>
         <div className="max-h-32 space-y-1 overflow-auto pr-1">
@@ -1075,7 +1156,7 @@ const CodexImageConjureNode = ({ id, data, selected }: NodeProps) => {
             mentions={mentions}
             materials={mentionMaterials}
             onChange={(value, nextMentions) => update({ codexConjurePrompt: value, codexConjurePromptMentions: nextMentions })}
-            onSubmit={() => void handleGenerate()}
+            onSubmit={() => requestCanvasNodeRun(id)}
             placeholder="描述要生成的图像；可用 @ 引用上游素材，也可写 ~cinematic 片段..."
             title="输入提示词 / 对话"
             promptTemplateKind="image"
@@ -1127,7 +1208,7 @@ const CodexImageConjureNode = ({ id, data, selected }: NodeProps) => {
 
       <footer className="mt-3 flex items-center gap-2">
         {!busy ? (
-          <button type="button" className="nodrag flex flex-1 items-center justify-center gap-2 px-4 py-3 text-base font-black" style={{ ...buttonStyle, background: `linear-gradient(180deg, ${surfaceStrong}, ${accent})`, color: isDark ? '#ecfeff' : '#ffffff' }} onClick={() => void handleGenerate()}>
+          <button type="button" className="nodrag flex flex-1 items-center justify-center gap-2 px-4 py-3 text-base font-black" style={{ ...buttonStyle, background: `linear-gradient(180deg, ${surfaceStrong}, ${accent})`, color: isDark ? '#ecfeff' : '#ffffff' }} onClick={() => requestCanvasNodeRun(id)}>
             <Play size={18} /> 开始生成
           </button>
         ) : (
@@ -1135,7 +1216,7 @@ const CodexImageConjureNode = ({ id, data, selected }: NodeProps) => {
             <Square size={17} /> 停止
           </button>
         )}
-        <button type="button" className="nodrag inline-flex items-center justify-center gap-1 px-3 py-3 text-xs font-bold" style={buttonStyle} onClick={() => void runQueue()} disabled={busy}>
+        <button type="button" className="nodrag inline-flex items-center justify-center gap-1 px-3 py-3 text-xs font-bold" style={buttonStyle} onClick={requestQueueRun} disabled={busy}>
           <ListChecks size={15} /> 队列
         </button>
         <button type="button" className="nodrag inline-flex items-center justify-center gap-1 px-3 py-3 text-xs font-bold" style={buttonStyle} onClick={() => navigator.clipboard?.writeText(prompt)}>

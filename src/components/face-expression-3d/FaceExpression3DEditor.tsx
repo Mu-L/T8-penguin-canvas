@@ -2,8 +2,8 @@ import { useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Camera, Check, ChevronDown, Download, Eye, FileImage, Focus, Grid3X3,
-  ImagePlus, Info, Layers3, Lightbulb, Loader2, Maximize2, RefreshCw, Save,
-  ScanFace, ShieldCheck, Shuffle, Sparkles, Trash2, Upload, X,
+  ImagePlus, Info, Layers3, Library, Lightbulb, Loader2, Maximize2, RefreshCw, Save,
+  ScanFace, Search, ShieldCheck, Shuffle, Sparkles, Trash2, Upload, X,
 } from 'lucide-react';
 import FaceExpressionViewport, { type FaceExpressionViewportHandle } from './FaceExpressionViewport';
 import {
@@ -12,7 +12,6 @@ import {
   FACE_CHANNEL_LABELS,
   FACE_EXPRESSION_PRESETS,
   FACE_LIGHTING_PRESETS,
-  allFacePresets,
   applyFaceCameraPreset,
   applyFaceLightingPreset,
   applyFacePreset,
@@ -27,6 +26,11 @@ import {
   type FaceExpressionPreset,
   type FaceExpressionTab,
 } from '../../utils/faceExpression3D';
+import {
+  FACE_EXPRESSION_LIBRARY_PRESETS,
+  FACE_PRESET_LIBRARY_CATEGORIES,
+  type FacePresetLibraryCategory,
+} from '../../utils/faceExpressionPresetLibrary';
 import type { FaceModelCompatibilityReport } from '../../three/faceExpression/FaceExpressionScene';
 
 interface FaceExpression3DEditorProps {
@@ -45,6 +49,7 @@ interface FaceExpression3DEditorProps {
 
 const TABS: Array<{ id: FaceExpressionTab; label: string; icon: typeof Sparkles }> = [
   { id: 'expression', label: '表情', icon: Sparkles },
+  { id: 'presets', label: '表情预设', icon: Library },
   { id: 'pose', label: '头眼', icon: Eye },
   { id: 'camera', label: '相机', icon: Camera },
   { id: 'lighting', label: '灯光', icon: Lightbulb },
@@ -52,10 +57,23 @@ const TABS: Array<{ id: FaceExpressionTab; label: string; icon: typeof Sparkles 
   { id: 'batch', label: '批量', icon: Layers3 },
 ];
 
-const SIMPLE_CHANNELS: FaceChannel[] = [
+const SIMPLE_CHANNELS = [
   'mouthSmileLeft', 'mouthFrownLeft', 'mouthPucker', 'jawOpen', 'eyeBlinkLeft',
   'eyeWideLeft', 'eyeSquintLeft', 'browInnerUp', 'browDownLeft', 'cheekPuff',
-];
+] as const satisfies readonly FaceChannel[];
+
+const SIMPLE_CHANNEL_LABELS: Record<(typeof SIMPLE_CHANNELS)[number], string> = {
+  mouthSmileLeft: '微笑',
+  mouthFrownLeft: '嘴角下压',
+  mouthPucker: '嘟嘴',
+  jawOpen: '张口',
+  eyeBlinkLeft: '眨眼',
+  eyeWideLeft: '眼睛睁大',
+  eyeSquintLeft: '眯眼',
+  browInnerUp: '眉心上扬',
+  browDownLeft: '眉毛下压',
+  cheekPuff: '鼓腮',
+};
 
 const fieldClass = 'nodrag h-9 w-full rounded-md border border-white/15 bg-[#151d28] px-2.5 text-[12px] text-slate-100 outline-none focus:border-cyan-400';
 const buttonClass = 'nodrag inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-white/15 bg-[#192433] px-3 text-[12px] font-semibold text-slate-100 transition hover:border-cyan-400/70 hover:bg-[#203044] disabled:cursor-not-allowed disabled:opacity-45';
@@ -108,12 +126,23 @@ export default function FaceExpression3DEditor({
   const presetImportRef = useRef<HTMLInputElement | null>(null);
   const [tab, setTab] = useState<FaceExpressionTab>('expression');
   const [advanced, setAdvanced] = useState(false);
+  const [presetLibraryCategory, setPresetLibraryCategory] = useState<'all' | FacePresetLibraryCategory>('all');
+  const [presetLibraryQuery, setPresetLibraryQuery] = useState('');
   const [presetName, setPresetName] = useState('');
   const [compatibility, setCompatibility] = useState<FaceModelCompatibilityReport | null>(null);
   const [message, setMessage] = useState('');
   const [neutralPreview, setNeutralPreview] = useState(false);
   const [modelInfoOpen, setModelInfoOpen] = useState(false);
-  const presets = useMemo(() => allFacePresets(state), [state]);
+  const presets = useMemo(() => [...FACE_EXPRESSION_PRESETS, ...state.customPresets], [state.customPresets]);
+  const filteredLibraryPresets = useMemo(() => {
+    const query = presetLibraryQuery.trim().toLowerCase();
+    return FACE_EXPRESSION_LIBRARY_PRESETS.filter((preset) => {
+      if (presetLibraryCategory !== 'all' && preset.category !== presetLibraryCategory) return false;
+      if (!query) return true;
+      return [preset.name, preset.description, preset.categoryLabel, preset.intensityLabel, ...preset.actionUnits]
+        .some((value) => value.toLowerCase().includes(query));
+    });
+  }, [presetLibraryCategory, presetLibraryQuery]);
   const batchPlan = useMemo(() => buildFaceBatchPlan(state), [state]);
   const viewportState = useMemo(() => neutralPreview ? normalizeFaceExpressionState({
     ...state,
@@ -209,7 +238,7 @@ export default function FaceExpression3DEditor({
             <summary className="nodrag flex cursor-pointer items-center justify-between px-3 py-2 text-[12px] font-bold text-slate-100">{group.label}<ChevronDown size={13} /></summary>
             <div className="border-t border-white/10 px-3 py-2">{group.channels.map((channel) => <SliderRow key={channel} label={FACE_CHANNEL_LABELS[channel]} value={state.expression.channels[channel]} onChange={(value) => setExpressionValue(channel, value)} />)}</div>
           </details>
-        )) : SIMPLE_CHANNELS.map((channel) => <SliderRow key={channel} label={FACE_CHANNEL_LABELS[channel]} value={state.expression.channels[channel]} onChange={(value) => setExpressionValue(channel, value)} />)}
+        )) : SIMPLE_CHANNELS.map((channel) => <SliderRow key={channel} label={SIMPLE_CHANNEL_LABELS[channel]} value={state.expression.channels[channel]} onChange={(value) => setExpressionValue(channel, value)} />)}
       </section>
 
       <section className="border-t border-white/10 pt-3">
@@ -220,6 +249,46 @@ export default function FaceExpression3DEditor({
           <button className={buttonClass} onClick={exportPresets} disabled={!state.customPresets.length}><Download size={13} />导出</button>
           <button className={buttonClass} onClick={deleteCurrentPreset} disabled={!state.expression.presetId.startsWith('custom-')}><Trash2 size={13} />删除</button>
         </div>
+      </section>
+    </div>
+  );
+
+  const renderPresetLibrary = () => (
+    <div className="space-y-3" data-testid="face-expression-preset-library">
+      <section className="sticky top-0 z-[2] space-y-2 border-b border-white/10 bg-[#0f1721] pb-3">
+        <div className="flex items-center justify-between">
+          <div><h3 className="text-[12px] font-black text-white">表情预设</h3><span className="text-[10px] text-slate-400">FACS / ARKit 52 通道</span></div>
+          <span className="rounded border border-cyan-300/25 bg-cyan-300/10 px-2 py-1 text-[10px] font-bold text-cyan-100">{filteredLibraryPresets.length}/100</span>
+        </div>
+        <label className="relative block">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
+          <input className={`${fieldClass} pl-8`} value={presetLibraryQuery} onChange={(event) => setPresetLibraryQuery(event.target.value)} placeholder="搜索表情或动作单元" />
+        </label>
+        <div className="grid grid-cols-2 gap-1.5">
+          {FACE_PRESET_LIBRARY_CATEGORIES.map((category) => (
+            <Pill key={category.id} active={presetLibraryCategory === category.id} onClick={() => setPresetLibraryCategory(category.id)}>{category.label}</Pill>
+          ))}
+        </div>
+        <select className={fieldClass} value={state.expression.mode} onChange={(event) => apply({ ...state, expression: { ...state.expression, mode: event.target.value === 'add' ? 'add' : 'replace' } })}>
+          <option value="replace">替换当前表情</option><option value="add">叠加到当前表情</option>
+        </select>
+      </section>
+      <section className="grid grid-cols-2 gap-2">
+        {filteredLibraryPresets.map((preset) => {
+          const active = state.expression.presetId === preset.id;
+          return <button
+            key={preset.id}
+            type="button"
+            className={`nodrag min-h-[66px] rounded-md border p-2 text-left transition ${active ? 'border-cyan-300 bg-cyan-300/15 shadow-[inset_0_0_0_1px_rgba(103,232,249,.2)]' : 'border-white/10 bg-[#151d28] hover:border-cyan-300/55 hover:bg-[#1b2938]'}`}
+            onClick={() => apply(applyFacePreset(state, preset.id))}
+            title={`${preset.description} · ${preset.actionUnits.join(' + ')}`}
+            data-preset-id={preset.id}
+          >
+            <span className={`block truncate text-[11px] font-black ${active ? 'text-cyan-100' : 'text-slate-100'}`}>{preset.name}</span>
+            <span className="mt-1 block truncate text-[9px] text-slate-400">{preset.categoryLabel} · {preset.actionUnits.join('+')}</span>
+            <span className="mt-1 block truncate text-[9px] text-slate-500">{preset.description}</span>
+          </button>;
+        })}
       </section>
     </div>
   );
@@ -284,7 +353,7 @@ export default function FaceExpression3DEditor({
     </div>
   );
 
-  const panel = tab === 'expression' ? renderExpression() : tab === 'pose' ? renderPose() : tab === 'camera' ? renderCamera() : tab === 'lighting' ? renderLighting() : tab === 'output' ? renderOutput() : renderBatch();
+  const panel = tab === 'expression' ? renderExpression() : tab === 'presets' ? renderPresetLibrary() : tab === 'pose' ? renderPose() : tab === 'camera' ? renderCamera() : tab === 'lighting' ? renderLighting() : tab === 'output' ? renderOutput() : renderBatch();
 
   return createPortal(
     <div className="fixed inset-0 z-[10040] flex bg-black/75 p-3 backdrop-blur-sm" onMouseDown={(event) => event.stopPropagation()} data-testid="face-expression-editor">

@@ -6,6 +6,7 @@ import {
   SEEDANCE_NZ_RATIO_OPTIONS,
   SEEDANCE_NZ_NATIVE_RESOLUTION_OPTIONS,
 } from '../src/config/seedance.ts';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 const read = (relative: string) => readFileSync(new URL(relative, import.meta.url), 'utf8');
 
@@ -106,7 +107,6 @@ test('Seedream NZ selector distinguishes domestic and Dola overseas model famili
 test('audio node exposes Seed Audio without replacing Suno and supports image/audio references', () => {
   const node = read('../src/components/nodes/AudioNode.tsx');
   const generation = read('../src/services/generation.ts');
-  const ports = read('../src/config/portTypes.ts');
   const apiSettings = read('../src/components/ApiSettings.tsx');
   assert.match(node, /audioProviderMode.*seed-audio/);
   assert.match(node, /doubao-seed-audio-1\.0/);
@@ -118,7 +118,13 @@ test('audio node exposes Seed Audio without replacing Suno and supports image/au
   assert.match(node, /submitAudio\(/);
   assert.match(generation, /\/api\/proxy\/audio\/seed-audio\/submit/);
   assert.match(generation, /\/api\/proxy\/audio\/seed-audio\/status/);
-  assert.match(ports, /audio: \{ inputs: \['text', 'image', 'audio'\], outputs: \['audio'\] \}/);
+  assertProductionNodeSchema('audio', {
+    label: '音频',
+    category: 'core',
+    inputs: ['text', 'image', 'audio'],
+    outputs: ['audio'],
+    executable: true,
+  });
   assert.match(apiSettings, /Happy Horse、Seedream 与 Seed Audio/);
 });
 

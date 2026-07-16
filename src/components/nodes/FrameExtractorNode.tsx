@@ -3,6 +3,7 @@ import { Handle, Position, useReactFlow, type NodeProps } from '@xyflow/react';
 import { Scissors, Loader2, AlertCircle, Sparkles } from 'lucide-react';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import SmartImage from '../SmartImage';
 
 /**
@@ -176,7 +177,7 @@ const FrameExtractorNode = (p: NodeProps) => {
         </div>
 
         <button
-          onClick={handleExtract}
+          onClick={() => requestCanvasNodeRun(p.id)}
           disabled={status === 'running' || !upstreamVideo}
           className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded text-xs font-medium disabled:opacity-50 transition-colors bg-orange-500/20 hover:bg-orange-500/30 text-orange-200"
         >

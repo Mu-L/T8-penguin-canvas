@@ -4,6 +4,61 @@
  */
 import type { AdvancedProviderConfig } from '../types/canvas';
 
+export interface ProviderTransportTrace {
+  /** 上游或本地代理显式返回的请求 ID；绝不从通用 id 字段猜测。 */
+  requestId?: string;
+  /** 浏览器到本地后端这一跳的真实 HTTP 状态。 */
+  transportHttpStatus?: number;
+  /** 仅当后端适配器显式返回时存在，不能用本地代理状态冒充。 */
+  upstreamHttpStatus?: number;
+  usage?: Record<string, unknown>;
+}
+
+function providerTransportTrace(payload: unknown, response: Response): ProviderTransportTrace {
+  const record = payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload as Record<string, any>
+    : {};
+  const requestId = String(
+    record.requestId
+    || record.request_id
+    || response.headers?.get?.('x-request-id')
+    || '',
+  ).trim();
+  const upstreamHttpStatus = Number(record.upstreamHttpStatus ?? record.upstream_http_status);
+  const usage = record.usage && typeof record.usage === 'object' && !Array.isArray(record.usage)
+    ? record.usage as Record<string, unknown>
+    : record.raw?.usage && typeof record.raw.usage === 'object' && !Array.isArray(record.raw.usage)
+      ? record.raw.usage as Record<string, unknown>
+      : undefined;
+  return {
+    ...(requestId ? { requestId } : {}),
+    transportHttpStatus: response.status,
+    ...(Number.isInteger(upstreamHttpStatus) && upstreamHttpStatus >= 100 && upstreamHttpStatus <= 599
+      ? { upstreamHttpStatus }
+      : {}),
+    ...(usage ? { usage } : {}),
+  };
+}
+
+function withProviderTransportTrace<T extends Record<string, any>>(
+  payload: T | null | undefined,
+  response: Response,
+): T & ProviderTransportTrace {
+  const record = (payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {}) as T;
+  return { ...record, ...providerTransportTrace(record, response) };
+}
+
+function providerResponseError(response: Response, data: any, fallback?: string): Error & Record<string, any> {
+  const error = new Error(data?.error || data?.message || fallback || `HTTP ${response.status}`) as Error & Record<string, any>;
+  const trace = providerTransportTrace(data?.data ?? data, response);
+  error.transportHttpStatus = trace.transportHttpStatus;
+  error.status = response.status;
+  if (trace.requestId) error.requestId = trace.requestId;
+  if (trace.upstreamHttpStatus) error.upstreamHttpStatus = trace.upstreamHttpStatus;
+  if (trace.usage) error.usage = trace.usage;
+  return error;
+}
+
 async function safeJsonResponse(response: Response, label: string): Promise<any> {
   const text = await response.text();
   const trimmed = text.trim();
@@ -43,7 +98,7 @@ export interface GenerateImageRequest {
   providerParams?: Record<string, any>;
 }
 
-export interface GenerateImageResult {
+export interface GenerateImageResult extends ProviderTransportTrace {
   urls: string[]; // 本地相对 URL,如 /files/output/xxx.png
   raw: any;
 }
@@ -56,7 +111,7 @@ export async function generateImage(req: GenerateImageRequest): Promise<Generate
   });
   const data = await r.json();
   if (!r.ok || !data.success) {
-    throw new Error(data?.error || `HTTP ${r.status}`);
+    throw providerResponseError(r, data);
   }
   return data.data;
 }
@@ -80,7 +135,7 @@ export interface GenerateExternalImageRequest {
   providerParams?: Record<string, any>;
 }
 
-export interface GenerateExternalImageResult {
+export interface GenerateExternalImageResult extends ProviderTransportTrace {
   imageUrls: string[];
   remoteImageUrls?: string[];
   videoUrls?: string[];
@@ -104,7 +159,7 @@ export async function generateExternalImage(req: GenerateExternalImageRequest): 
   });
   const data = await r.json();
   if (!r.ok || !data.success) {
-    throw new Error(data?.error || `HTTP ${r.status}`);
+    throw providerResponseError(r, data);
   }
   const payload = data.data || {};
   return {
@@ -121,6 +176,7 @@ export async function generateExternalImage(req: GenerateExternalImageRequest): 
     taskId: payload.taskId,
     raw: payload.raw,
     provider: payload.provider,
+    ...providerTransportTrace(payload, r),
   };
 }
 
@@ -140,7 +196,7 @@ export interface GenerateExternalVideoRequest {
   providerParams?: Record<string, any>;
 }
 
-export interface GenerateExternalVideoResult {
+export interface GenerateExternalVideoResult extends ProviderTransportTrace {
   videoUrls: string[];
   remoteVideoUrls?: string[];
   taskId?: string;
@@ -156,7 +212,7 @@ export async function generateExternalVideo(req: GenerateExternalVideoRequest): 
   });
   const data = await r.json();
   if (!r.ok || !data.success) {
-    throw new Error(data?.error || `HTTP ${r.status}`);
+    throw providerResponseError(r, data);
   }
   const payload = data.data || {};
   return {
@@ -165,6 +221,7 @@ export async function generateExternalVideo(req: GenerateExternalVideoRequest): 
     taskId: payload.taskId,
     raw: payload.raw,
     provider: payload.provider,
+    ...providerTransportTrace(payload, r),
   };
 }
 
@@ -174,7 +231,7 @@ export async function generateExternalVideo(req: GenerateExternalVideoRequest): 
 //   - sync=true: 同步完成,urls 已存在
 //   - sync=false: 需轮询 queryImageStatus(taskId)
 // ========================================================================
-export interface ImageSubmitResult {
+export interface ImageSubmitResult extends ProviderTransportTrace {
   sync: boolean;
   taskId?: string;
   urls?: string[];
@@ -190,11 +247,11 @@ export async function submitImageAsync(req: GenerateImageRequest): Promise<Image
     body: JSON.stringify(req),
   });
   const data = await r.json();
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
-  return data.data;
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
 }
 
-export interface ImageQueryResult {
+export interface ImageQueryResult extends ProviderTransportTrace {
   status: string;       // pending / running / completed / failed
   progress: string;
   urls?: string[];
@@ -207,9 +264,12 @@ export async function queryImageStatus(taskId: string, apiModel?: string): Promi
   const qs = apiModel ? `?model=${encodeURIComponent(apiModel)}` : '';
   const r = await fetch(`/api/proxy/image/status/${encodeURIComponent(taskId)}${qs}`);
   const data = await r.json();
-  if (!r.ok) throw new Error(data?.error || `HTTP ${r.status}`);
+  if (!r.ok) throw providerResponseError(r, data);
   // 失败状态下 success=false 但返回 body 中仍包含 status:'failed'
-  return data.data || { status: data.success ? 'pending' : 'failed', progress: '0%', error: data?.error };
+  return withProviderTransportTrace(
+    data.data || { status: data.success ? 'pending' : 'failed', progress: '0%', error: data?.error },
+    r,
+  );
 }
 
 export interface SeedreamNzSubmitRequest {
@@ -228,15 +288,18 @@ export async function submitSeedreamNz(req: SeedreamNzSubmitRequest): Promise<Im
     body: JSON.stringify(req),
   });
   const data = await safeJsonResponse(r, '贞贞的平价AI工坊（国内） Seedream 提交');
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
-  return data.data;
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
 }
 
 export async function querySeedreamNz(taskId: string): Promise<ImageQueryResult> {
   const r = await fetch(`/api/proxy/image/seedance-nz/status/${encodeURIComponent(taskId)}`);
   const data = await safeJsonResponse(r, '贞贞的平价AI工坊（国内） Seedream 查询');
-  if (!r.ok) throw new Error(data?.error || `HTTP ${r.status}`);
-  return data.data || { status: data.success ? 'pending' : 'failed', progress: '0%', error: data?.error };
+  if (!r.ok) throw providerResponseError(r, data);
+  return withProviderTransportTrace(
+    data.data || { status: data.success ? 'pending' : 'failed', progress: '0%', error: data?.error },
+    r,
+  );
 }
 
 // ========================================================================
@@ -284,7 +347,7 @@ export interface FalSubmitRequest {
   providerParams?: Record<string, any>;
 }
 
-export interface FalSubmitResult {
+export interface FalSubmitResult extends ProviderTransportTrace {
   sync: boolean;
   urls?: string[];
   requestId?: string;
@@ -299,11 +362,11 @@ export async function submitImageFal(req: FalSubmitRequest): Promise<FalSubmitRe
     body: JSON.stringify(req),
   });
   const data = await r.json();
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
   return data.data;
 }
 
-export interface FalQueryResult {
+export interface FalQueryResult extends ProviderTransportTrace {
   status: 'pending' | 'completed' | 'failed' | string;
   urls?: string[];
   error?: string;
@@ -318,8 +381,8 @@ export async function queryImageFal(params: { responseUrl?: string; endpoint?: s
   });
   const data = await r.json();
   // 后端在 FAILED 时会 success=false 但 data.status='failed',这里返回结果供上层判断
-  if (!r.ok && !data.data) throw new Error(data?.error || `HTTP ${r.status}`);
-  return data.data || { status: 'failed', error: data?.error || 'unknown' };
+  if (!r.ok && !data.data) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data || { status: 'failed', error: data?.error || 'unknown' }, r);
 }
 
 // ========== Midjourney (严格对齐 gpt-image-2-web/index.html runMJ L4437~L4694 + uploadMJImage L4407) ==========
@@ -375,7 +438,7 @@ export interface MjImagineRequest {
   remix?: boolean;
 }
 
-export interface MjImagineResult {
+export interface MjImagineResult extends ProviderTransportTrace {
   taskId: string;
   raw: any;
 }
@@ -387,7 +450,7 @@ export async function submitMjImagine(req: MjImagineRequest): Promise<MjImagineR
     body: JSON.stringify(req),
   });
   const data = await r.json();
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
   const upstream = data.data || {};
   // upstream.code === 1 表示提交成功(主项目 L4658)
   if (upstream.code !== undefined && upstream.code !== 1) {
@@ -395,10 +458,10 @@ export async function submitMjImagine(req: MjImagineRequest): Promise<MjImagineR
   }
   const taskId = String(upstream.result || upstream.task_id || '');
   if (!taskId) throw new Error('未拿到 MJ taskId: ' + JSON.stringify(upstream).slice(0, 200));
-  return { taskId, raw: upstream };
+  return { taskId, raw: upstream, ...providerTransportTrace(upstream, r) };
 }
 
-export interface MjTaskResult {
+export interface MjTaskResult extends ProviderTransportTrace {
   status: 'SUBMITTED' | 'IN_PROGRESS' | 'SUCCESS' | 'FAILURE' | string;
   progress?: string;
   imageUrl?: string;
@@ -410,7 +473,7 @@ export interface MjTaskResult {
 export async function queryMjTask(taskId: string, speed: MjSpeed = 'fast'): Promise<MjTaskResult> {
   const r = await fetch(`/api/proxy/mj/task/${encodeURIComponent(taskId)}?speed=${encodeURIComponent(speed)}`);
   const data = await r.json();
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
   const d = data.data || {};
   // 主项目 L4675~L4694: image_urls 可能是 JSON 字符串 / 对象数组 / 字符串数组
   // 元素可能为字符串 '...' 或对象 { url: '...' }，对齐主项目用 x.url || x 兼容
@@ -435,6 +498,7 @@ export async function queryMjTask(taskId: string, speed: MjSpeed = 'fast'): Prom
     imageUrls,
     failReason: d.fail_reason || d.failReason,
     raw: d,
+    ...providerTransportTrace(d, r),
   };
 }
 
@@ -447,7 +511,7 @@ export async function uploadMjImage(file: File, speed: MjSpeed = 'fast'): Promis
     body: JSON.stringify({ base64Data: dataUrl, speed }),
   });
   const data = await r.json();
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
   const url = data.data?.url || '';
   if (!url) throw new Error('MJ upload 未返回 URL');
   return url;
@@ -491,6 +555,9 @@ export interface GenerateLlmResult {
   truncated?: boolean;
   raw: any;
   model: string;
+  requestId?: string;
+  transportHttpStatus?: number;
+  usage?: Record<string, unknown>;
 }
 
 export async function generateLlm(req: GenerateLlmRequest): Promise<GenerateLlmResult> {
@@ -501,9 +568,13 @@ export async function generateLlm(req: GenerateLlmRequest): Promise<GenerateLlmR
   });
   const data = await r.json();
   if (!r.ok || !data.success) {
-    throw new Error(data?.error || `HTTP ${r.status}`);
+    throw providerResponseError(r, data);
   }
-  return data.data;
+  const payload = data.data || {};
+  return {
+    ...payload,
+    ...providerTransportTrace(payload, r),
+  };
 }
 
 export interface GenerateExternalLlmRequest extends Omit<GenerateLlmRequest, 'stream'> {
@@ -520,7 +591,7 @@ export async function generateExternalLlm(req: GenerateExternalLlmRequest): Prom
   });
   const data = await r.json();
   if (!r.ok || !data.success) {
-    throw new Error(data?.error || `HTTP ${r.status}`);
+    throw providerResponseError(r, data);
   }
   const payload = data.data || {};
   return {
@@ -530,6 +601,7 @@ export async function generateExternalLlm(req: GenerateExternalLlmRequest): Prom
     truncated: payload.truncated === true || payload.raw?.choices?.[0]?.finish_reason === 'length',
     raw: payload.raw,
     model: req.model,
+    ...providerTransportTrace(payload, r),
   };
 }
 
@@ -544,7 +616,7 @@ export async function generateExternalLlm(req: GenerateExternalLlmRequest): Prom
 export async function generateLlmStream(
   req: GenerateLlmRequest,
   opts: { onDelta?: (chunk: string) => void; signal?: AbortSignal } = {}
-): Promise<{ content: string; finishReason?: string; truncated?: boolean }> {
+): Promise<{ content: string; finishReason?: string; truncated?: boolean; requestId?: string; transportHttpStatus?: number; usage?: Record<string, unknown> }> {
   const r = await fetch('/api/proxy/llm', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -568,10 +640,15 @@ export async function generateLlmStream(
   let assembled = '';
   let buffer = '';
   let finishReason = '';
+  let usage: Record<string, unknown> | undefined;
+  const requestId = r.headers?.get?.('x-request-id') || undefined;
   const finish = () => ({
     content: assembled,
     finishReason: finishReason || undefined,
     truncated: ['length', 'max_tokens', 'content_length'].includes(String(finishReason || '').toLowerCase()),
+    requestId,
+    transportHttpStatus: r.status,
+    usage,
   });
   const processSseLine = (raw: string): boolean => {
     const line = raw.trim();
@@ -581,6 +658,7 @@ export async function generateLlmStream(
     try {
       const j = JSON.parse(data);
       const choice = j?.choices?.[0];
+      if (j?.usage && typeof j.usage === 'object') usage = j.usage;
       const delta = choice?.delta?.content;
       if (choice?.finish_reason || choice?.finishReason) {
         finishReason = String(choice.finish_reason || choice.finishReason || '');
@@ -627,7 +705,7 @@ export async function uploadFile(file: File): Promise<{ url: string; filename: s
   const r = await fetch('/api/files/upload', { method: 'POST', body: fd });
   const data = await r.json();
   if (!r.ok || !data.success) {
-    throw new Error(data?.error || `HTTP ${r.status}`);
+    throw providerResponseError(r, data);
   }
   return data.data;
 }
@@ -680,7 +758,7 @@ export interface VideoFalSubmitRequest {
   providerParams?: Record<string, any>;
 }
 
-export interface VideoFalSubmitResult {
+export interface VideoFalSubmitResult extends ProviderTransportTrace {
   sync: boolean;
   videoUrl?: string;
   requestId?: string;
@@ -695,11 +773,11 @@ export async function submitVideoFal(req: VideoFalSubmitRequest): Promise<VideoF
     body: JSON.stringify(req),
   });
   const data = await r.json();
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
-  return data.data;
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
 }
 
-export interface VideoFalQueryResult {
+export interface VideoFalQueryResult extends ProviderTransportTrace {
   status: 'pending' | 'completed' | 'failed' | string;
   videoUrl?: string;
   error?: string;
@@ -713,8 +791,8 @@ export async function queryVideoFal(params: { responseUrl?: string; endpoint?: s
     body: JSON.stringify(params),
   });
   const data = await r.json();
-  if (!r.ok && !data.data) throw new Error(data?.error || `HTTP ${r.status}`);
-  return data.data || { status: 'failed', error: data?.error || 'unknown' };
+  if (!r.ok && !data.data) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data || { status: 'failed', error: data?.error || 'unknown' }, r);
 }
 
 // ========================================================================
@@ -756,18 +834,22 @@ export interface VideoSubmitRequest {
   providerParams?: Record<string, any>;
 }
 
-export async function submitVideo(req: VideoSubmitRequest): Promise<{ taskId: string }> {
+export interface VideoSubmitResult extends ProviderTransportTrace {
+  taskId: string;
+}
+
+export async function submitVideo(req: VideoSubmitRequest): Promise<VideoSubmitResult> {
   const r = await fetch('/api/proxy/video/submit', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
   });
   const data = await r.json();
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
-  return data.data;
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
 }
 
-export interface VideoQueryResult {
+export interface VideoQueryResult extends ProviderTransportTrace {
   status: 'PENDING' | 'SUCCESS' | 'FAILURE' | 'RUNNING' | string;
   progress?: string;
   videoUrl?: string | null;
@@ -779,8 +861,12 @@ export async function queryVideo(taskId: string, model?: string): Promise<VideoQ
   const extra = model ? `&model=${encodeURIComponent(model)}` : '';
   const r = await fetch(`/api/proxy/video/query?taskId=${encodeURIComponent(taskId)}${extra}`);
   const data = await r.json();
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
-  return data.data;
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  const payload = data.data || {};
+  return {
+    ...payload,
+    ...providerTransportTrace(payload, r),
+  };
 }
 
 export interface HappyHorseSubmitRequest {
@@ -792,18 +878,23 @@ export interface HappyHorseSubmitRequest {
   images?: string[];
 }
 
-export async function submitHappyHorse(req: HappyHorseSubmitRequest): Promise<{ taskId: string; model: string; taskType: string }> {
+export async function submitHappyHorse(req: HappyHorseSubmitRequest): Promise<{
+  taskId: string;
+  model: string;
+  taskType: string;
+} & ProviderTransportTrace> {
   const r = await fetch('/api/proxy/video/happyhorse/submit', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
   });
   const data = await r.json();
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
-  return data.data;
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  const payload = data.data || {};
+  return withProviderTransportTrace(payload, r);
 }
 
-export interface HappyHorseQueryResult {
+export interface HappyHorseQueryResult extends ProviderTransportTrace {
   status: 'pending' | 'running' | 'succeeded' | 'failed' | string;
   progress?: string | number;
   videoUrl?: string | null;
@@ -813,8 +904,8 @@ export interface HappyHorseQueryResult {
 export async function queryHappyHorse(taskId: string): Promise<HappyHorseQueryResult> {
   const r = await fetch(`/api/proxy/video/happyhorse/status/${encodeURIComponent(taskId)}`);
   const data = await r.json();
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
-  return data.data;
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
 }
 
 export interface WanSubmitRequest {
@@ -829,22 +920,26 @@ export interface WanSubmitRequest {
   seed?: number;
 }
 
-export async function submitWan(req: WanSubmitRequest): Promise<{ taskId: string; model: string; taskType: string }> {
+export async function submitWan(req: WanSubmitRequest): Promise<{
+  taskId: string;
+  model: string;
+  taskType: string;
+} & ProviderTransportTrace> {
   const r = await fetch('/api/proxy/video/wan/submit', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
   });
   const data = await safeJsonResponse(r, 'Wan 2.7 Spicy 提交');
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
-  return data.data;
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
 }
 
 export async function queryWan(taskId: string): Promise<HappyHorseQueryResult> {
   const r = await fetch(`/api/proxy/video/wan/status/${encodeURIComponent(taskId)}`);
   const data = await safeJsonResponse(r, 'Wan 2.7 Spicy 查询');
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
-  return data.data;
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
 }
 
 // ========================================================================
@@ -889,7 +984,7 @@ export interface SeedanceSubmitRequest {
   providerParams?: Record<string, any>;
 }
 
-export interface SeedanceSubmitResult {
+export interface SeedanceSubmitResult extends ProviderTransportTrace {
   taskId: string;
   taskProvider?: Exclude<SeedanceTaskProvider, 'auto'>;
   model?: string;
@@ -903,11 +998,11 @@ export async function submitSeedance(req: SeedanceSubmitRequest): Promise<Seedan
     body: JSON.stringify(req),
   });
   const data = await r.json();
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
-  return data.data;
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
 }
 
-export interface SeedanceQueryResult {
+export interface SeedanceQueryResult extends ProviderTransportTrace {
   /** 'pending' | 'running' | 'succeeded' | 'failed' (已后端归一) */
   status: string;
   progress?: string;
@@ -925,7 +1020,7 @@ export async function querySeedance(
   const providerQuery = taskProvider ? `&taskProvider=${encodeURIComponent(taskProvider)}` : '';
   const r = await fetch(`/api/proxy/seedance/query?taskId=${encodeURIComponent(taskId)}${providerQuery}`);
   const data = await r.json();
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
   return data.data;
 }
 
@@ -954,15 +1049,15 @@ export interface AudioSubmitRequest {
 
 export async function submitAudio(
   req: AudioSubmitRequest,
-): Promise<{ taskId: string; clipIds: string[] }> {
+): Promise<{ taskId: string; clipIds: string[] } & ProviderTransportTrace> {
   const r = await fetch('/api/proxy/audio/submit', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
   });
   const data = await r.json();
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
-  return data.data;
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
 }
 
 export interface AudioTrack {
@@ -976,7 +1071,7 @@ export interface AudioTrack {
   tags?: string;
   duration?: number;
 }
-export interface AudioQueryResult {
+export interface AudioQueryResult extends ProviderTransportTrace {
   status: 'PENDING' | 'SUCCESS' | string;
   tracks: AudioTrack[];
   total: number;
@@ -993,8 +1088,8 @@ export async function queryAudio(clipIds: string[], saveLocal: boolean = true): 
   const params = new URLSearchParams({ clipIds: ids, saveLocal: String(saveLocal) });
   const r = await fetch(`/api/proxy/audio/query?${params.toString()}`);
   const data = await r.json();
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
-  return data.data;
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
 }
 
 export interface SeedAudioSubmitRequest {
@@ -1010,18 +1105,21 @@ export interface SeedAudioSubmitRequest {
   audioUrls?: string[];
 }
 
-export async function submitSeedAudio(req: SeedAudioSubmitRequest): Promise<{ taskId: string; model: string }> {
+export async function submitSeedAudio(req: SeedAudioSubmitRequest): Promise<{
+  taskId: string;
+  model: string;
+} & ProviderTransportTrace> {
   const r = await fetch('/api/proxy/audio/seed-audio/submit', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
   });
   const data = await r.json();
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
-  return data.data;
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
 }
 
-export interface SeedAudioQueryResult {
+export interface SeedAudioQueryResult extends ProviderTransportTrace {
   status: 'pending' | 'running' | 'succeeded' | 'failed' | string;
   progress?: string | number;
   audioUrl?: string | null;
@@ -1032,8 +1130,8 @@ export interface SeedAudioQueryResult {
 export async function querySeedAudio(taskId: string): Promise<SeedAudioQueryResult> {
   const r = await fetch(`/api/proxy/audio/seed-audio/status/${encodeURIComponent(taskId)}`);
   const data = await r.json();
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
-  return data.data;
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
 }
 
 /**
@@ -1051,7 +1149,7 @@ export async function uploadAudioForSuno(
   }
   const r = await fetch('/api/proxy/audio/upload', { method: 'POST', body: fd });
   const data = await r.json();
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
   return data.data;
 }
 
@@ -1068,18 +1166,22 @@ export interface RhSubmitRequest {
   site?: RhSite;
 }
 
-export async function submitRh(req: RhSubmitRequest): Promise<{ taskId: string; site: RhSite; fallbackUsed?: boolean }> {
+export async function submitRh(req: RhSubmitRequest): Promise<{
+  taskId: string;
+  site: RhSite;
+  fallbackUsed?: boolean;
+} & ProviderTransportTrace> {
   const r = await fetch('/api/proxy/runninghub/submit', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
   });
   const data = await r.json();
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
-  return data.data;
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
 }
 
-export interface RhQueryResult {
+export interface RhQueryResult extends ProviderTransportTrace {
   status: 'PENDING' | 'SUCCESS' | 'RUNNING' | 'QUEUED' | 'FAILED' | string;
   urls: string[];
   failReason?: string | null;
@@ -1092,8 +1194,8 @@ export async function queryRh(taskId: string, site: RhSite = 'cn'): Promise<RhQu
   const url = `/api/proxy/runninghub/query?taskId=${encodeURIComponent(taskId)}&site=${encodeURIComponent(site)}`;
   const r = await fetch(url);
   const data = await r.json();
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
-  return data.data;
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
 }
 
 export async function cancelRh(taskId: string, site: RhSite = 'cn'): Promise<{ taskId: string; site?: RhSite; raw?: any }> {
@@ -1103,7 +1205,7 @@ export async function cancelRh(taskId: string, site: RhSite = 'cn'): Promise<{ t
     body: JSON.stringify({ taskId, site }),
   });
   const data = await safeJsonResponse(r, 'RunningHub 取消任务');
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
   return data.data;
 }
 
@@ -1111,7 +1213,7 @@ export async function fetchRhAppInfo(webappId: string, site: RhSite = 'cn'): Pro
   const url = `/api/proxy/runninghub/app-info?webappId=${encodeURIComponent(webappId)}&site=${encodeURIComponent(site)}`;
   const r = await fetch(url);
   const data = await r.json();
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
   return data.data;
 }
 
@@ -1126,7 +1228,7 @@ export async function uploadRhAsset(url: string, site: RhSite = 'cn'): Promise<{
     body: JSON.stringify({ url, site }),
   });
   const data = await r.json();
-  if (!r.ok || !data.success) throw new Error(data?.error || `HTTP ${r.status}`);
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
   return data.data;
 }
 

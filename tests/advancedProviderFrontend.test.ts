@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 import fs from 'node:fs';
 
 import {
@@ -286,7 +287,14 @@ test('ImageNode lets Jimeng CLI request up to 10 images without lifting other pr
 
 test('VideoNode keeps Jimeng Seedance media limits separate from Grok FAL controls', () => {
   const source = fs.readFileSync(new URL('../src/components/nodes/VideoNode.tsx', import.meta.url), 'utf8');
-  const ports = fs.readFileSync(new URL('../src/config/portTypes.ts', import.meta.url), 'utf8');
+
+  assertProductionNodeSchema('video', {
+    label: '视频',
+    category: 'core',
+    inputs: ['text', 'image', 'video', 'audio'],
+    outputs: ['video'],
+    executable: true,
+  });
 
   assert.match(source, /JIMENG_SEEDANCE_LIMITS = \{ images: 9, videos: 3, audios: 3 \}/);
   assert.match(source, /showBuiltinFalControls = !isExternalSelected && isFal/);
@@ -295,7 +303,6 @@ test('VideoNode keeps Jimeng Seedance media limits separate from Grok FAL contro
   assert.match(source, /videos: videoRefs/);
   assert.match(source, /audios: audioRefs/);
   assert.match(source, /图\$\{refs\.length\}\/视\$\{videoRefs\.length\}\/音\$\{audioRefs\.length\}/);
-  assert.match(ports, /video:\s*\{\s*inputs:\s*\['text', 'image', 'video', 'audio'\],\s*outputs:\s*\['video'\]\s*\}/);
 });
 
 test('SeedanceNode exposes explicit Jimeng intelligent multiframe mode only for Jimeng CLI', () => {
@@ -314,6 +321,7 @@ test('SeedanceNode exposes Zhenzhen mini model and native4K resolution', () => {
   const generation = fs.readFileSync(new URL('../src/services/generation.ts', import.meta.url), 'utf8');
 
   assert.match(source, /LEGACY_SEEDANCE_MODEL_OPTIONS as MODEL_OPTIONS/);
+  assert.match(source, /LEGACY_SEEDANCE_RESOLUTION_OPTIONS as RESOLUTION_OPTIONS/);
   assert.match(seedanceConfig, /value: 'doubao-seedance-2\.0-mini'/);
   assert.match(seedanceConfig, /label: 'seedance-2\.0-mini'/);
   assert.match(seedanceConfig, /LEGACY_SEEDANCE_RESOLUTION_OPTIONS = \[[^\]]*'native4K'[^\]]*\]/);

@@ -25,6 +25,7 @@ import {
   X,
 } from 'lucide-react';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { opGridCompose, uploadFileBlob } from '../../services/imageOps';
 import {
   GRID_EDITOR_CUSTOM_RATIO_VALUE,
@@ -1026,7 +1027,7 @@ const GridEditorNode = ({ id, data, selected }: NodeProps) => {
           </button>
           <button
             type="button"
-            onClick={handleRun}
+            onClick={() => requestCanvasNodeRun(id)}
             disabled={status === 'running'}
             className="t8-btn t8-btn-primary h-9 text-xs"
           >

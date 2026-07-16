@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo } from 'react';
 import { Handle, Position, useReactFlow, type Edge, type Node, type NodeProps } from '@xyflow/react';
 import { GitBranch, Shuffle } from 'lucide-react';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
-import { useRunBusStore } from '../../stores/runBus';
+import { matchesRunCompletion, useRunBusStore } from '../../stores/runBus';
 import { useThemeStore } from '../../stores/theme';
 import { PORT_COLOR } from '../../config/portTypes';
 import {
@@ -55,6 +55,7 @@ function waitForNodeRun(nodeId: string): Promise<WaitResult> {
   return new Promise((resolve) => {
     let done = false;
     const startCancelSeq = useRunBusStore.getState().cancelSeq;
+    let executionToken: string | null = null;
     const finish = (result: WaitResult) => {
       if (done) return;
       done = true;
@@ -64,11 +65,16 @@ function waitForNodeRun(nodeId: string): Promise<WaitResult> {
     };
     const unsubscribe = useRunBusStore.subscribe((state) => {
       if (state.cancelSeq !== startCancelSeq) finish('cancelled');
-      if (state.lastDone && state.lastDone.id === nodeId) finish(state.lastDone.ok ? 'ok' : 'fail');
+      else if (matchesRunCompletion(state.lastDone, nodeId, executionToken)) finish(state.lastDone.ok ? 'ok' : 'fail');
+      else if (executionToken && state.executionTokens[nodeId] !== executionToken) finish('cancelled');
     });
     const timer = window.setTimeout(() => finish('fail'), WAIT_TIMEOUT_MS);
     const state = useRunBusStore.getState();
-    state.triggerRun(nodeId, state.mode === 'batch' ? 'batch' : 'single');
+    executionToken = state.triggerRun(nodeId, state.mode === 'batch' ? 'batch' : 'single');
+    const current = useRunBusStore.getState();
+    if (current.cancelSeq !== startCancelSeq) finish('cancelled');
+    else if (matchesRunCompletion(current.lastDone, nodeId, executionToken)) finish(current.lastDone.ok ? 'ok' : 'fail');
+    else if (current.executionTokens[nodeId] !== executionToken) finish('cancelled');
   });
 }
 

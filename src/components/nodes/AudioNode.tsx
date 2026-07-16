@@ -15,6 +15,8 @@ import { SUNO_VERSIONS, DEFAULT_SUNO_VERSION } from '../../providers/models';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useHasAutoOutput } from './useHasAutoOutput';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
+import type { RunNodeLifecycleReporter } from '../../types/project';
 import { logBus } from '../../stores/logs';
 import { PORT_COLOR } from '../../config/portTypes';
 import { useThemeStore } from '../../stores/theme';
@@ -229,7 +231,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
   //   useRunTrigger 认为 runFn 完成 markDone(true)。 但实际任务 audioUrl 还未赋值 → LoopNode awaitNode
   //   立即继续 → extractFromNode 读不到 audioUrl → result=null → failCount++。
   //   修复后: 轮询完成才 resolve，handleGenerate await 它，什么时候 markDone 什么时候任务真正结束。
-  const startPolling = (clipIds: string[]): Promise<void> => {
+  const startPolling = (clipIds: string[], reporter?: RunNodeLifecycleReporter): Promise<void> => {
     stopPoll();
     return new Promise<void>((resolve, reject) => {
       let elapsed = 0;
@@ -247,6 +249,21 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
         }
         try {
           const r = await queryAudio(clipIds, true);
+          await reporter?.polling({
+            provider: 'suno',
+            model: version,
+            taskIds: clipIds,
+            requestId: r.requestId,
+            transportHttpStatus: r.transportHttpStatus,
+            upstreamHttpStatus: r.upstreamHttpStatus,
+            usage: r.usage,
+            httpStatusSource: 'local-backend',
+            pollCount: elapsed,
+            pollLimit: MAX,
+            status: r.status,
+            completed: r.completed,
+            total: r.total,
+          });
           if (r.status === 'SUCCESS' && r.tracks.length > 0) {
             stopPoll();
             // 双输出口: audioUrl=轨1, audioUrl_1=轨2
@@ -256,6 +273,24 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
               audioUrl: r.tracks[0]?.audioUrl || '',
               audioUrl_1: r.tracks[1]?.audioUrl || '',
               progress: `${r.completed}/${r.total}`,
+              provider: 'suno',
+              model: version,
+              requestId: r.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+            });
+            await reporter?.providerResponse({
+              provider: 'suno',
+              model: version,
+              requestId: r.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+              status: 'succeeded',
+              httpStatusSource: 'local-backend',
             });
             logBus.success(`完成 ${r.tracks.length} 轨: ${r.tracks.map((t) => t.audioUrl).join(' | ')}`, src);
             taskCompletionSound.notifyComplete(id, 'audio');
@@ -271,7 +306,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     });
   };
 
-  const startSeedAudioPolling = (tid: string): Promise<void> => {
+  const startSeedAudioPolling = (tid: string, reporter?: RunNodeLifecycleReporter): Promise<void> => {
     stopPoll();
     return new Promise<void>((resolve, reject) => {
       let elapsed = 0;
@@ -289,6 +324,20 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           const result = await querySeedAudio(tid);
           const normalizedStatus = String(result.status || '').trim().toLowerCase();
           const currentProgress = String(result.progress ?? '');
+          await reporter?.polling({
+            provider: 'seedance-nz',
+            model: 'doubao-seed-audio-1.0',
+            taskId: tid,
+            requestId: result.requestId,
+            transportHttpStatus: result.transportHttpStatus,
+            upstreamHttpStatus: result.upstreamHttpStatus,
+            usage: result.usage,
+            httpStatusSource: 'local-backend',
+            pollCount: elapsed,
+            pollLimit: SUNO_MAX_POLL,
+            status: normalizedStatus,
+            progress: currentProgress,
+          });
           if (normalizedStatus === 'succeeded' && result.audioUrl) {
             stopPoll();
             const seedTrack = {
@@ -304,6 +353,26 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
               audioUrl: result.audioUrl,
               audioUrl_1: '',
               progress: '100%',
+              provider: 'seedance-nz',
+              model: 'doubao-seed-audio-1.0',
+              taskId: tid,
+              requestId: result.requestId,
+              transportHttpStatus: result.transportHttpStatus,
+              upstreamHttpStatus: result.upstreamHttpStatus,
+              usage: result.usage,
+              pollCount: elapsed,
+            });
+            await reporter?.providerResponse({
+              provider: 'seedance-nz',
+              model: 'doubao-seed-audio-1.0',
+              upstreamTaskId: tid,
+              requestId: result.requestId,
+              transportHttpStatus: result.transportHttpStatus,
+              upstreamHttpStatus: result.upstreamHttpStatus,
+              usage: result.usage,
+              pollCount: elapsed,
+              status: 'succeeded',
+              httpStatusSource: 'local-backend',
             });
             logBus.success(`Seed Audio 完成 → ${result.audioUrl}`, src);
             taskCompletionSound.notifyComplete(id, 'audio');
@@ -311,6 +380,19 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           } else if (normalizedStatus === 'failed') {
             stopPoll();
             const message = result.failReason || 'Seed Audio 生成失败';
+            await reporter?.providerResponse({
+              provider: 'seedance-nz',
+              model: 'doubao-seed-audio-1.0',
+              upstreamTaskId: tid,
+              requestId: result.requestId,
+              transportHttpStatus: result.transportHttpStatus,
+              upstreamHttpStatus: result.upstreamHttpStatus,
+              usage: result.usage,
+              pollCount: elapsed,
+              status: 'failed',
+              error: { message },
+              httpStatusSource: 'local-backend',
+            });
             setError(message);
             update({ status: 'error', error: message });
             reject(new Error(message));
@@ -324,7 +406,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     });
   };
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (reporter?: RunNodeLifecycleReporter) => {
     setError(null);
     const upstream = collectUpstream();
     const resolvedLocalPrompt = resolveMediaMentions(localPrompt, promptMentions, mentionMaterials);
@@ -337,6 +419,9 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
       setError('Seed Audio 提示词长度必须为 5-2048 字符');
       return;
     }
+    const traceProvider = isSeedAudio ? 'seedance-nz' : 'suno';
+    const traceModel = isSeedAudio ? 'doubao-seed-audio-1.0' : version;
+    await reporter?.providerRequest({ provider: traceProvider, model: traceModel });
     taskCompletionSound.primeAudio();
     update({ status: 'submitting', error: null, tracks: [], audioUrl: undefined });
     try {
@@ -363,9 +448,19 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           images: upstream.imageUrls.length ? upstream.imageUrls : undefined,
           audioUrls: upstream.audioUrls.length ? upstream.audioUrls : undefined,
         });
+        await reporter?.providerSubmitted({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: result.taskId,
+          requestId: result.requestId,
+          transportHttpStatus: result.transportHttpStatus,
+          upstreamHttpStatus: result.upstreamHttpStatus,
+          usage: result.usage,
+          httpStatusSource: 'local-backend',
+        });
         update({ status: 'polling', taskId: result.taskId, lastPrompt: finalPrompt, progress: '0%' });
         logBus.info(`Seed Audio 任务 ${result.taskId} 已提交，开始轮询`, src);
-        await startSeedAudioPolling(result.taskId);
+        await startSeedAudioPolling(result.taskId, reporter);
         return;
       }
       // cover/extend: 如预传 clipId 为空但上游有 audioUrl, 则自动上传
@@ -391,13 +486,33 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
         continue_at: mode === 'extend' ? continueAt : undefined,
         providerParams,
       });
+      await reporter?.providerSubmitted({
+        provider: traceProvider,
+        model: traceModel,
+        upstreamTaskId: r.taskId,
+        requestId: r.requestId,
+        transportHttpStatus: r.transportHttpStatus,
+        upstreamHttpStatus: r.upstreamHttpStatus,
+        usage: r.usage,
+        httpStatusSource: 'local-backend',
+      });
       logBus.success(`taskId=${r.taskId} clips=${(r.clipIds || []).join(',') || '?'}`, src);
       update({ status: 'polling', taskId: r.taskId, clipIds: r.clipIds, lastPrompt: finalPrompt, progress: '0/?' });
       const idsToPoll = r.clipIds && r.clipIds.length > 0 ? r.clipIds : [r.taskId];
       // v1.2.9.11: await 轮询 —— 让 useRunTrigger 等到任务真正完成才 markDone，LoopNode awaitNode 才能拿到 audioUrl
-      await startPolling(idsToPoll);
+      await startPolling(idsToPoll, reporter);
     } catch (e: any) {
       const msg = e?.message || '提交失败';
+      await reporter?.providerResponse({
+        provider: traceProvider,
+        model: traceModel,
+        requestId: e?.requestId,
+        transportHttpStatus: e?.transportHttpStatus,
+        upstreamHttpStatus: e?.upstreamHttpStatus,
+        status: 'failed',
+        error: { message: msg, code: e?.code },
+        httpStatusSource: 'local-backend',
+      });
       setError(msg);
       logBus.error(msg, src);
       update({ status: 'error', error: msg });
@@ -410,10 +525,10 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
   };
 
   // 接入运行总线
-  useRunTrigger(id, async () => {
+  useRunTrigger(id, async (reporter) => {
     if (status === 'submitting' || status === 'polling') return;
-    await handleGenerate();
-  }, 'audio');
+    await handleGenerate(reporter);
+  }, 'audio', { lifecycleAware: true });
 
   // === 跨节点拖拽: source (输出 tracks 可拖出) ===
   const startDrag = useDragMaterialStore((s) => s.start);
@@ -744,7 +859,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
 
         {!isBusy ? (
           <button
-            onClick={handleGenerate}
+            onClick={() => requestCanvasNodeRun(id)}
             className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded bg-violet-500/20 hover:bg-violet-500/30 text-violet-200 text-xs font-medium transition-colors"
           >
             <Sparkles size={12} /> 生成音频

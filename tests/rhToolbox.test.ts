@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 const loadRhToolboxUtils = async () => import('../src/utils/rhToolbox.ts');
 const loadRhToolboxCapabilities = async () => import('../src/utils/rhToolboxCapabilities.ts');
@@ -8,22 +9,26 @@ const loadRhToolboxDeveloper = async () => import('../src/utils/rhToolboxDevelop
 const loadRhToolboxManifest = async () => import('../src/data/rhToolboxManifest.ts');
 
 test('RH toolbox node is registered as a visible executable RH node', () => {
-  const registry = readFileSync(new URL('../src/config/nodeRegistry.ts', import.meta.url), 'utf8');
-  const ports = readFileSync(new URL('../src/config/portTypes.ts', import.meta.url), 'utf8');
   const types = readFileSync(new URL('../src/types/canvas.ts', import.meta.url), 'utf8');
   const canvas = readFileSync(new URL('../src/components/Canvas.tsx', import.meta.url), 'utf8');
   const actionBar = readFileSync(new URL('../src/components/NodeActionBar.tsx', import.meta.url), 'utf8');
   const loop = readFileSync(new URL('../src/components/nodes/LoopNode.tsx', import.meta.url), 'utf8');
 
-  assert.match(registry, /type:\s*'rh-toolbox'[\s\S]*label:\s*'RH工具箱'[\s\S]*category:\s*'rh'/);
-  assert.match(ports, /'rh-toolbox':\s*\{\s*inputs:\s*\['text', 'image', 'video', 'audio'\],\s*outputs:\s*\['text', 'image', 'video', 'audio'\]\s*\}/);
+  assertProductionNodeSchema('rh-toolbox', {
+    label: 'RH工具箱',
+    category: 'rh',
+    inputs: ['text', 'image', 'video', 'audio'],
+    outputs: ['text', 'image', 'video', 'audio'],
+    executable: true,
+  });
   assert.match(types, /\|\s*'rh-toolbox'/);
   assert.match(canvas, /const RHToolboxNode = lazyCanvasNode\(\(\) => import\('\.\/nodes\/RHToolboxNode'\), 'RHToolboxNode'\)/);
   assert.match(canvas, /'rh-toolbox': RHToolboxNode/);
   assert.match(canvas, /'rh-toolbox':\s*\{/);
-  assert.match(canvas, /'rh-tools', 'rh-toolbox'/);
-  assert.match(actionBar, /'rh-tools', 'rh-toolbox'/);
-  assert.match(loop, /'rh-tools', 'rh-toolbox'/);
+  assert.match(canvas, /import \{ EXECUTABLE_NODE_TYPES \} from '\.\.\/config\/executableNodeTypes'/);
+  assert.match(actionBar, /EXECUTABLE_NODE_TYPES\.has\(n\.type\)/);
+  assert.match(loop, /import \{ EXECUTABLE_NODE_TYPES \} from '\.\.\/\.\.\/config\/executableNodeTypes'/);
+  assert.match(loop, /topologicalSort\([^;]+EXECUTABLE_NODE_TYPES\)/s);
 });
 
 test('RH image capability service exposes cutout, upscale, and expand wrappers for batch processing', () => {
@@ -58,6 +63,8 @@ test('RH video material shortcuts ship frame extraction and RH video upscalers',
   const category = manifest.categories.find((item) => item.id === 'video-category-9d33p');
   assert.equal(category?.name, '视频超分');
   assert.equal(category?.parentId, 'video');
+  assert.match(rail, /status: result\.cancelled \? 'stopped' : result\.failedItems\.length > 0 \? 'partial' : 'succeeded'/);
+  assert.match(rail, /if \(result\.failedItems\.length > 0\)[\s\S]*throw new Error\(warning\)/);
 
   const nvidia = findRhToolboxToolById(manifest, 'video-nividia-upscale');
   assert.equal(nvidia?.title, '英伟达极速超分');
@@ -540,6 +547,8 @@ test('RH toolbox image cutout is exposed as a reusable node capability', async (
   assert.match(button, /onRunningChange\?\.\(false\)/);
   assert.match(button, /点击取消/);
   assert.match(button, /failedItems/);
+  assert.match(button, /status: result\.cancelled \? 'stopped' : result\.failedItems\.length > 0 \? 'partial' : 'succeeded'/);
+  assert.match(button, /else if \(result\.failedItems\.length > 0\)[\s\S]*throw new Error\(warning\)/);
   assert.match(rail, /data-rh-image-capability-rail/);
   assert.match(rail, /RH_IMAGE_NODE_CAPABILITY_PRESETS/);
   assert.match(rail, /variant="rail"/);

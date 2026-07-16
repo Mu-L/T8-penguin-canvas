@@ -20,6 +20,7 @@ import {
   upsertCodexImageTemplate,
 } from '../src/utils/codexImageConjure.ts';
 import { publishCodexImageConjureResult } from '../src/services/codexImageConjure.ts';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 function read(rel: string) {
   return readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -28,18 +29,20 @@ function read(rel: string) {
 test('Codex image conjure node is registered as a focused Codex image generator', () => {
   const types = read('../src/types/canvas.ts');
   const registry = read('../src/config/nodeRegistry.ts');
-  const ports = read('../src/config/portTypes.ts');
   const canvas = read('../src/components/Canvas.tsx');
   const sidebar = read('../src/components/Sidebar.tsx');
   const placement = read('../src/utils/nodePlacement.ts');
   const features = read('../features.json');
 
   assert.match(types, /'codex-image-conjure'/);
-  assert.match(registry, /type:\s*'codex-image-conjure'[\s\S]*label:\s*'Codex 生图工作台'[\s\S]*category:\s*'codex'/);
+  assertProductionNodeSchema('codex-image-conjure', {
+    label: 'Codex 生图工作台',
+    category: 'codex',
+    inputs: ['text', 'image'],
+    outputs: ['image', 'text'],
+    executable: true,
+  });
   assert.match(registry, /codex:\s*\{\s*label:\s*'CODEX CLI'/);
-  assert.match(ports, /'codex-image-conjure':\s*\{\s*inputs:\s*\['text', 'image'\],\s*outputs:\s*\['image', 'text'\]/);
-  assert.doesNotMatch(ports, /'codex-image-conjure':\s*\{\s*inputs:\s*\[[^\]]*video/);
-  assert.doesNotMatch(ports, /'codex-image-conjure':\s*\{[\s\S]*outputs:\s*\[[^\]]*video/);
   assert.match(canvas, /CodexImageConjureNode/);
   assert.match(canvas, /import\('\.\/nodes\/CodexImageConjureNode'\)/);
   assert.match(canvas, /'codex-image-conjure': CodexImageConjureNode/);
@@ -137,6 +140,17 @@ test('Codex image conjure frontend only uses Codex CLI image generation and reso
   assert.match(node, /变体/);
   assert.match(node, /codexConjureTasks/);
   assert.match(node, /runQueue/);
+  assert.match(node, /createCanvasNodeRunRequestId\(id, 'codex-queue'\)/);
+  assert.match(node, /codexConjureRunMode: 'queue'[\s\S]*codexConjureRunRequestId: requestId/);
+  assert.match(node, /requestCanvasNodeRun\(id, \{ requestId \}\)/);
+  assert.match(node, /const persistedRequestId = String\(liveData\?\.codexConjureRunRequestId[\s\S]*contextRequestId !== persistedRequestId[\s\S]*requestedMode !== 'queue'[\s\S]*runQueue\(reporter\)/);
+  assert.match(node, /latestData\?\.codexConjureRunRequestId === contextRequestId[\s\S]*codexConjureRunRequestId: ''/);
+  assert.match(node, /update\(\{ status: 'error', error: message \}\);[\s\S]*throw new Error\(message\)/);
+  assert.match(node, /useRunTrigger\(id,[\s\S]*\{ lifecycleAware: true \}\)/);
+  assert.match(node, /reporter\?\.providerRequest\([\s\S]*provider: 'codex-cli'/);
+  assert.match(node, /reporter\?\.providerResponse\([\s\S]*provider: 'codex-cli'/);
+  assert.doesNotMatch(node, /onClick=\{\(\) => void runQueue\(\)\}/,
+    'queue buttons must not invoke Codex generation outside the Canvas Run pipeline');
   assert.match(node, /导入/);
   assert.match(node, /导出/);
   assert.match(node, /MentionPromptInput/);

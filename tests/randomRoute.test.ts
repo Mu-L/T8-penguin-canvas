@@ -9,6 +9,7 @@ import {
   selectRandomRouteHandles,
 } from '../src/utils/randomRoute.ts';
 import { topologicalLayers } from '../src/utils/topologicalSort.ts';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 function read(rel: string) {
   return readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
@@ -172,21 +173,22 @@ test('random route removes stale auto-output nodes created by older builds', () 
 });
 
 test('random route node is registered as a dynamic utility node with run support', () => {
-  const registry = read('src/config/nodeRegistry.ts');
-  const ports = read('src/config/portTypes.ts');
   const types = read('src/types/canvas.ts');
   const canvas = read('src/components/Canvas.tsx');
-  const actionBar = read('src/components/NodeActionBar.tsx');
   const nodeSource = read('src/components/nodes/RandomRouteNode.tsx');
   const features = read('features.json');
 
-  assert.match(registry, /type:\s*'random-route'[\s\S]*label:\s*'随机路由'[\s\S]*category:\s*'utility'/);
-  assert.match(ports, /'random-route':\s*\{\s*inputs:\s*\['any'\],\s*outputs:\s*\['any'\]\s*\}/);
+  assertProductionNodeSchema('random-route', {
+    label: '随机路由',
+    category: 'utility',
+    inputs: ['any'],
+    outputs: ['any'],
+    executable: true,
+  });
   assert.match(types, /\|\s*'random-route'/);
   assert.match(canvas, /const RandomRouteNode = lazyCanvasNode\(\(\) => import\('\.\/nodes\/RandomRouteNode'\)/);
   assert.match(canvas, /'random-route':\s*RandomRouteNode/);
   assert.match(canvas, /'random-route'/);
-  assert.match(actionBar, /'random-route'/);
   assert.match(features, /"nodeType":\s*"random-route"/);
   assert.match(features, /"type":\s*"random-route"/);
   assert.match(nodeSource, /data-random-route-node/);

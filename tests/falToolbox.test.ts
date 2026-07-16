@@ -1,27 +1,44 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
+import { getNodeOutputs } from '../src/config/portTypes.ts';
 
 const loadFalToolboxUtils = async () => import('../src/utils/falToolbox.ts');
 const loadFalToolboxManifest = async () => import('../src/data/falToolboxManifest.ts');
 
 test('Fal toolbox node is registered as a visible executable FAL node', () => {
   const registry = readFileSync(new URL('../src/config/nodeRegistry.ts', import.meta.url), 'utf8');
-  const ports = readFileSync(new URL('../src/config/portTypes.ts', import.meta.url), 'utf8');
   const types = readFileSync(new URL('../src/types/canvas.ts', import.meta.url), 'utf8');
   const canvas = readFileSync(new URL('../src/components/Canvas.tsx', import.meta.url), 'utf8');
   const actionBar = readFileSync(new URL('../src/components/NodeActionBar.tsx', import.meta.url), 'utf8');
   const loop = readFileSync(new URL('../src/components/nodes/LoopNode.tsx', import.meta.url), 'utf8');
   const node = readFileSync(new URL('../src/components/nodes/FalToolboxNode.tsx', import.meta.url), 'utf8');
 
-  assert.match(registry, /type:\s*'fal-toolbox'[\s\S]*label:\s*'Fal超市'[\s\S]*category:\s*'fal'/);
-  assert.match(registry, /type:\s*'model-3d-upload'[\s\S]*label:\s*'3D素材上传'[\s\S]*category:\s*'input'/);
-  assert.match(registry, /type:\s*'model-3d-preview'[\s\S]*label:\s*'3D模型预览'[\s\S]*category:\s*'input'/);
+  assertProductionNodeSchema('fal-toolbox', {
+    label: 'Fal超市',
+    category: 'fal',
+    inputs: ['text', 'image', 'video', 'audio'],
+    outputs: ['text', 'image', 'video', 'audio', 'model3d'],
+    executable: true,
+  });
+  assertProductionNodeSchema('model-3d-upload', {
+    label: '3D素材上传',
+    category: 'input',
+    inputs: [],
+    outputs: ['model3d'],
+    executable: false,
+  });
+  assertProductionNodeSchema('model-3d-preview', {
+    label: '3D模型预览',
+    category: 'input',
+    inputs: ['model3d'],
+    outputs: ['image'],
+    executable: false,
+  });
   assert.match(registry, /fal:\s*\{\s*label:\s*'FAL工具箱'/);
-  assert.match(ports, /'fal-toolbox':\s*\{\s*inputs:\s*\['text', 'image', 'video', 'audio'\],\s*outputs:\s*\['text', 'image', 'video', 'audio', 'model3d'\]\s*\}/);
-  assert.match(ports, /'model-3d-preview':\s*\{\s*inputs:\s*\['model3d'\],\s*outputs:\s*\['image'\]\s*\}/);
-  assert.match(ports, /'model-3d-upload':\s*\{\s*inputs:\s*\[\],\s*outputs:\s*\['model3d'\]\s*\}/);
-  assert.match(ports, /if \(uploadType === 'model3d'\) return \['model3d'\]/);
+  assert.deepEqual(getNodeOutputs({ type: 'upload', data: { uploadType: 'model3d' } } as never), ['model3d']);
+  assert.deepEqual(getNodeOutputs({ type: 'model-3d-upload', data: {} } as never), ['model3d']);
   assert.match(types, /\|\s*'fal-toolbox'/);
   assert.match(types, /\|\s*'model-3d-preview'/);
   assert.match(types, /\|\s*'model-3d-upload'/);
@@ -34,9 +51,9 @@ test('Fal toolbox node is registered as a visible executable FAL node', () => {
   assert.match(canvas, /'fal-toolbox':\s*\{/);
   assert.match(canvas, /'model-3d-preview':\s*\{/);
   assert.match(canvas, /'model-3d-upload':\s*\{\s*uploadType:\s*'model3d'/);
-  assert.match(canvas, /'rh-tools', 'rh-toolbox', 'fal-toolbox', 'comfyui-store'/);
-  assert.match(actionBar, /'rh-tools', 'rh-toolbox', 'fal-toolbox', 'comfyui-store'/);
-  assert.match(loop, /'rh-tools', 'rh-toolbox', 'fal-toolbox', 'comfyui-store'/);
+  assert.match(canvas, /import \{ EXECUTABLE_NODE_TYPES \} from '\.\.\/config\/executableNodeTypes'/);
+  assert.match(actionBar, /EXECUTABLE_NODE_TYPES\.has\(n\.type\)/);
+  assert.match(loop, /import \{ EXECUTABLE_NODE_TYPES \} from '\.\.\/\.\.\/config\/executableNodeTypes'/);
   assert.match(node, /const handleHorizontalWheel = \(event: WheelEvent<HTMLDivElement>\)/);
   assert.match(node, /el\.scrollLeft \+= delta/);
   assert.equal((node.match(/onWheel=\{handleHorizontalWheel\}/g) || []).length >= 2, true);
@@ -385,7 +402,6 @@ test('Zhenzhen FAL tools mirror ComfyUI payload contracts', async () => {
 
 test('3D model preview supports common FAL model formats', () => {
   const preview = readFileSync(new URL('../src/components/nodes/Model3DPreviewNode.tsx', import.meta.url), 'utf8');
-  const registry = readFileSync(new URL('../src/config/nodeRegistry.ts', import.meta.url), 'utf8');
   const output = readFileSync(new URL('../src/components/nodes/OutputNode.tsx', import.meta.url), 'utf8');
   const upload = readFileSync(new URL('../src/components/nodes/UploadNode.tsx', import.meta.url), 'utf8');
   const canvas = readFileSync(new URL('../src/components/Canvas.tsx', import.meta.url), 'utf8');
@@ -402,7 +418,14 @@ test('3D model preview supports common FAL model formats', () => {
   assert.match(preview, /ref=\{mountRef\} className="absolute inset-0"/);
   assert.doesNotMatch(preview, /while \(mount\.firstChild\) mount\.removeChild\(mount\.firstChild\)/);
   assert.doesNotMatch(preview, /当前内置预览先支持 glb\/gltf/);
-  assert.match(registry, /glb\/gltf\/obj\/stl\/fbx\/usdz 3D 模型/);
+  assertProductionNodeSchema('model-3d-preview', {
+    label: '3D模型预览',
+    category: 'input',
+    inputs: ['model3d'],
+    outputs: ['image'],
+    executable: false,
+    description: /glb\/gltf\/obj\/stl\/fbx\/usdz 3D 模型/,
+  });
   assert.match(output, /const isModel3DUrl/);
   assert.match(output, /3D模型 \(\{collected\.models\.length\}\)/);
   assert.match(output, /splitOutputCollection\('model3d', collected\.models\)/);

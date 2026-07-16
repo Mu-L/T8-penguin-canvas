@@ -3,6 +3,7 @@ import { Handle, Position, useReactFlow } from '@xyflow/react';
 import { AlertCircle, Loader2, Sparkles } from 'lucide-react';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { useHasAutoOutput } from './useHasAutoOutput';
 import SmartImage from '../SmartImage';
 
@@ -141,7 +142,7 @@ export function ImageOpFrame(props: ImageOpNodeProps) {
         {renderSettings()}
 
         <button
-          onClick={handleRun}
+          onClick={() => requestCanvasNodeRun(id)}
           disabled={status === 'running'}
           className={`w-full flex items-center justify-center gap-1.5 py-1.5 rounded text-xs font-medium disabled:opacity-50 transition-colors ${buttonClasses}`}
         >

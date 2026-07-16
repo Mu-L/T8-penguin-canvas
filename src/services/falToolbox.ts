@@ -24,6 +24,9 @@ export interface RunFalToolboxProgress {
   message: string;
   requestId?: string;
   pollCount?: number;
+  transportHttpStatus?: number;
+  upstreamHttpStatus?: number;
+  usage?: Record<string, unknown>;
 }
 
 export interface RunFalToolboxToolOptions {
@@ -41,6 +44,27 @@ export interface RunFalToolboxToolResult extends FalToolboxOutputClassification 
   requestId?: string;
   responseUrl?: string;
   raw?: any;
+  transportHttpStatus?: number;
+  upstreamHttpStatus?: number;
+  usage?: Record<string, unknown>;
+}
+
+function withTransportTrace(payload: any, response: Response): any {
+  const record = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
+  const requestId = String(record.requestId || record.request_id || response.headers?.get?.('x-request-id') || '').trim();
+  const upstreamHttpStatus = Number(record.upstreamHttpStatus ?? record.upstream_http_status);
+  const usage = record.usage && typeof record.usage === 'object' && !Array.isArray(record.usage)
+    ? record.usage
+    : record.raw?.usage && typeof record.raw.usage === 'object' && !Array.isArray(record.raw.usage)
+      ? record.raw.usage
+      : undefined;
+  return {
+    ...record,
+    ...(requestId ? { requestId } : {}),
+    transportHttpStatus: response.status,
+    ...(Number.isInteger(upstreamHttpStatus) && upstreamHttpStatus >= 100 && upstreamHttpStatus <= 599 ? { upstreamHttpStatus } : {}),
+    ...(usage ? { usage } : {}),
+  };
 }
 
 export function getFalToolboxManifest(): FalToolboxManifest {
@@ -99,7 +123,7 @@ export async function submitFalToolbox(payload: FalToolboxRunPayload): Promise<a
   if (!r.ok || !data.success) {
     throw new Error(errorFromResponse(data, `FAL HTTP ${r.status}`));
   }
-  return data.data || {};
+  return withTransportTrace(data.data || {}, r);
 }
 
 export async function queryFalToolbox(payload: {
@@ -117,10 +141,10 @@ export async function queryFalToolbox(payload: {
   });
   const data = await readJsonResponse(r);
   if (!r.ok || !data.success) {
-    if (data?.data?.status === 'failed') return data.data;
+    if (data?.data?.status === 'failed') return withTransportTrace(data.data, r);
     throw new Error(errorFromResponse(data, `FAL Poll HTTP ${r.status}`));
   }
-  return data.data || {};
+  return withTransportTrace(data.data || {}, r);
 }
 
 export async function runFalToolboxTool(options: RunFalToolboxToolOptions): Promise<RunFalToolboxToolResult> {
@@ -150,15 +174,33 @@ export async function runFalToolboxTool(options: RunFalToolboxToolOptions): Prom
 
   progress?.({ stage: 'submit', message: '提交 FAL 任务' });
   const submitted = await submitFalToolbox(runPayload);
+  progress?.({
+    stage: 'submit',
+    message: '已提交 FAL 任务',
+    requestId: submitted.requestId || submitted.request_id,
+    transportHttpStatus: submitted.transportHttpStatus,
+    upstreamHttpStatus: submitted.upstreamHttpStatus,
+    usage: submitted.usage,
+  });
   const initial = classifyFalToolboxOutputs(submitted);
   if (submitted.status === 'completed' || submitted.sync === true || initial.urls.length || initial.textOutputs.length) {
-    progress?.({ stage: 'success', message: `完成 · ${initial.urls.length + initial.textOutputs.length} 个输出`, requestId: submitted.requestId });
+    progress?.({
+      stage: 'success',
+      message: `完成 · ${initial.urls.length + initial.textOutputs.length} 个输出`,
+      requestId: submitted.requestId,
+      transportHttpStatus: submitted.transportHttpStatus,
+      upstreamHttpStatus: submitted.upstreamHttpStatus,
+      usage: submitted.usage,
+    });
     return {
       ...initial,
       tool,
       requestId: submitted.requestId,
       responseUrl: submitted.responseUrl,
       raw: submitted.raw || submitted,
+      transportHttpStatus: submitted.transportHttpStatus,
+      upstreamHttpStatus: submitted.upstreamHttpStatus,
+      usage: submitted.usage,
     };
   }
   if (submitted.status === 'failed') {
@@ -195,6 +237,15 @@ export async function runFalToolboxTool(options: RunFalToolboxToolOptions): Prom
         outputSchema: tool.outputSchema,
         statusPath: tool.runtime?.statusPath,
       });
+      progress?.({
+        stage: 'poll',
+        message: `轮询响应 ${pollCount}/${maxPolls}`,
+        requestId,
+        pollCount,
+        transportHttpStatus: query.transportHttpStatus,
+        upstreamHttpStatus: query.upstreamHttpStatus,
+        usage: query.usage,
+      });
       transientPollErrors = 0;
     } catch (error) {
       transientPollErrors += 1;
@@ -207,13 +258,24 @@ export async function runFalToolboxTool(options: RunFalToolboxToolOptions): Prom
     }
     const classified = classifyFalToolboxOutputs(query);
     if (query.status === 'completed' || classified.urls.length || classified.textOutputs.length) {
-      progress?.({ stage: 'success', message: `完成 · ${classified.urls.length + classified.textOutputs.length} 个输出`, requestId, pollCount });
+      progress?.({
+        stage: 'success',
+        message: `完成 · ${classified.urls.length + classified.textOutputs.length} 个输出`,
+        requestId,
+        pollCount,
+        transportHttpStatus: query.transportHttpStatus,
+        upstreamHttpStatus: query.upstreamHttpStatus,
+        usage: query.usage,
+      });
       return {
         ...classified,
         tool,
         requestId,
         responseUrl,
         raw: lastRaw,
+        transportHttpStatus: query.transportHttpStatus,
+        upstreamHttpStatus: query.upstreamHttpStatus,
+        usage: query.usage,
       };
     }
   }

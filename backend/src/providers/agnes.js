@@ -1,5 +1,6 @@
 const { resolveMediaRef } = require('./mediaResolver');
 const openaiCompatible = require('./openaiCompatible');
+const { mergeProviderTrace, providerTrace } = require('./providerTrace');
 
 const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
 const DEFAULT_CHAT_TIMEOUT_MS = 30 * 60 * 1000;
@@ -348,21 +349,24 @@ async function generateImage(provider, input = {}, options = {}) {
       fetchImpl: options.fetchImpl,
     });
     const raw = await responseJson(res);
+    const trace = providerTrace(res, raw, { pollCount: 0 });
     if (!res.ok) {
       return {
         ok: false,
         code: 'http_error',
         providerId: provider.id,
         protocol: provider.protocol,
+        model,
         error: `Agnes 图像调用失败：HTTP ${res.status}${raw?.message ? ` ${trimBodyForError(raw.message)}` : ''}`,
         raw,
+        ...trace,
       };
     }
     const imageUrls = [...new Set(collectImageUrls(raw))];
     if (!imageUrls.length) {
-      return { ok: false, code: 'empty_image', providerId: provider.id, protocol: provider.protocol, error: 'Agnes 图像接口没有返回图片。', raw };
+      return { ok: false, code: 'empty_image', providerId: provider.id, protocol: provider.protocol, model, error: 'Agnes 图像接口没有返回图片。', raw, ...trace };
     }
-    return { ok: true, kind: 'image', code: 'completed', providerId: provider.id, protocol: provider.protocol, model, imageUrls, raw };
+    return { ok: true, kind: 'image', code: 'completed', providerId: provider.id, protocol: provider.protocol, model, imageUrls, raw, ...trace };
   } catch (e) {
     return {
       ok: false,
@@ -378,6 +382,7 @@ async function waitForAgnesVideoTask(provider, videoId, model, options = {}) {
   const maxPolls = clampNumber(options.maxPolls, 120, 1, 240);
   const sleepImpl = options.sleepImpl || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   let lastRaw = {};
+  let trace = {};
   for (let i = 0; i < maxPolls; i += 1) {
     if (i > 0 || !options.skipInitialSleep) await sleepImpl(Math.min(5000 + i * 1200, 12000));
     const query = new URL(`${agnesRootUrl(provider)}/agnesapi`);
@@ -391,21 +396,28 @@ async function waitForAgnesVideoTask(provider, videoId, model, options = {}) {
     });
     const raw = await responseJson(res);
     lastRaw = raw;
+    trace = mergeProviderTrace(trace, providerTrace(res, raw, { pollCount: i + 1 }));
     if (!res.ok) {
       if (VIDEO_TRANSIENT_HTTP_STATUSES.has(Number(res.status))) continue;
-      throw new Error(`Agnes 视频任务查询失败：HTTP ${res.status}${raw?.message ? ` ${trimBodyForError(raw.message)}` : ''}`);
+      const error = new Error(`Agnes 视频任务查询失败：HTTP ${res.status}${raw?.message ? ` ${trimBodyForError(raw.message)}` : ''}`);
+      Object.assign(error, trace);
+      throw error;
     }
     const urls = [...new Set(collectVideoUrls(raw))];
-    if (urls.length) return { raw, videoUrls: urls };
+    if (urls.length) return { raw, videoUrls: urls, ...trace };
     const status = videoStatus(raw);
     if (VIDEO_FAILURE_STATUSES.has(status)) {
-      throw new Error(`Agnes 视频任务失败：${trimBodyForError(raw?.message || raw?.error || status)}`);
+      const error = new Error(`Agnes 视频任务失败：${trimBodyForError(raw?.message || raw?.error || status)}`);
+      Object.assign(error, trace);
+      throw error;
     }
     if (VIDEO_SUCCESS_STATUSES.has(status) && !urls.length) {
-      return { raw, videoUrls: [] };
+      return { raw, videoUrls: [], ...trace };
     }
   }
-  throw new Error(`Agnes 视频任务超时：${trimBodyForError(JSON.stringify(lastRaw)) || videoId}`);
+  const error = new Error(`Agnes 视频任务超时：${trimBodyForError(JSON.stringify(lastRaw)) || videoId}`);
+  Object.assign(error, trace, { pollCount: maxPolls });
+  throw error;
 }
 
 async function generateVideo(provider, input = {}, options = {}) {
@@ -417,6 +429,7 @@ async function generateVideo(provider, input = {}, options = {}) {
   }
 
   let model;
+  let trace = {};
   try {
     model = selectedModel(input.model || input.providerModel, provider.videoModels, provider.defaults?.videoModel || DEFAULT_VIDEO_MODEL);
   } catch (e) {
@@ -458,14 +471,17 @@ async function generateVideo(provider, input = {}, options = {}) {
       fetchImpl: options.fetchImpl,
     });
     const raw = await responseJson(res);
+    trace = providerTrace(res, raw, { pollCount: 0 });
     if (!res.ok) {
       return {
         ok: false,
         code: 'http_error',
         providerId: provider.id,
         protocol: provider.protocol,
+        model,
         error: `Agnes 视频调用失败：HTTP ${res.status}${raw?.message ? ` ${trimBodyForError(raw.message)}` : ''}`,
         raw,
+        ...trace,
       };
     }
     let videoUrls = [...new Set(collectVideoUrls(raw))];
@@ -473,20 +489,23 @@ async function generateVideo(provider, input = {}, options = {}) {
     let finalRaw = raw;
     if (!videoUrls.length && taskId) {
       const polled = await waitForAgnesVideoTask(provider, taskId, model, options);
+      trace = mergeProviderTrace(trace, polled);
       finalRaw = polled.raw;
       videoUrls = polled.videoUrls;
     }
     if (!videoUrls.length) {
-      return { ok: false, code: 'empty_video', providerId: provider.id, protocol: provider.protocol, error: 'Agnes 视频接口任务完成但没有返回视频。', taskId, raw: finalRaw };
+      return { ok: false, code: 'empty_video', providerId: provider.id, protocol: provider.protocol, model, error: 'Agnes 视频接口任务完成但没有返回视频。', taskId, raw: finalRaw, ...trace };
     }
-    return { ok: true, kind: 'video', code: 'completed', providerId: provider.id, protocol: provider.protocol, model, taskId, videoUrls, raw: finalRaw };
+    return { ok: true, kind: 'video', code: 'completed', providerId: provider.id, protocol: provider.protocol, model, taskId, videoUrls, raw: finalRaw, ...trace };
   } catch (e) {
     return {
       ok: false,
       code: e?.name === 'AbortError' ? 'timeout' : 'network_error',
       providerId: provider.id,
       protocol: provider.protocol,
+      model,
       error: e?.name === 'AbortError' ? 'Agnes 视频调用超时。' : (e?.message || 'Agnes 视频调用失败。'),
+      ...mergeProviderTrace(trace, e),
     };
   }
 }

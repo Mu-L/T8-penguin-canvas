@@ -90,7 +90,7 @@ interface T8ParseAuthResult {
 interface T8PickedMediaFile {
   path: string;
   name: string;
-  kind: 'image' | 'video';
+  kind: 'image' | 'video' | 'audio' | 'model3d';
   size: number;
   mime: string;
   relativePath?: string;
@@ -115,7 +115,7 @@ interface Window {
     }>;
     openExternal: (url: string) => Promise<{ success: boolean; message?: string }>;
     openPath: (targetPath: string) => Promise<{ success: boolean; message?: string; path?: string }>;
-    pickMediaFiles?: (options?: { directory?: boolean; multiple?: boolean; kinds?: Array<'image' | 'video'> }) => Promise<T8PickMediaFilesResult>;
+    pickMediaFiles?: (options?: { directory?: boolean; multiple?: boolean; kinds?: Array<'image' | 'video' | 'audio' | 'model3d'> }) => Promise<T8PickMediaFilesResult>;
     getPathForFile?: (file: File) => string;
     dragFileOut?: (payload: { url?: string; path?: string; filename?: string; kind?: string; requestId?: string }) => void;
     onDragFileOutStatus?: (callback: (status: T8DragFileOutStatus) => void) => () => void;

@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
+import { memo, useCallback, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
 import { Handle, Position, useReactFlow, type Node, type Edge, type NodeProps } from '@xyflow/react';
 import {
   AlertCircle,
@@ -20,6 +20,7 @@ import { useHiddenFeatureStore, isRhDuckUploadEnabled } from '../../stores/hidde
 import { PORT_COLOR } from '../../config/portTypes';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
 import { useDragMaterialStore, type MaterialPayload } from '../../stores/dragMaterial';
+import { useCanvasStore } from '../../stores/canvas';
 import { logBus } from '../../stores/logs';
 import ImageEditModal, { type ImageEditProduceMeta } from './ImageEditModal';
 import ResizableCorners from './ResizableCorners';
@@ -59,6 +60,18 @@ import {
 } from '../../utils/canvasCreativeWorkflow';
 // v1.2.10.5: 节点落点防重叠
 import { placeSingleNode, placeBatchNodes, defaultSizeOf, type Rect as PlacementRect } from '../../utils/nodePlacement';
+import { extractRunProviderTrace } from '../../utils/runProviderTrace';
+import {
+  createSecondaryProviderActionForNode,
+  executeRegisteredSecondaryProviderAction,
+  requestCanvasSecondaryProviderAction,
+  resolveSecondaryProviderActionForRun,
+  secondaryProviderActionFromNodeData,
+  secondaryProviderActionNodePatch,
+  type QueueSecondaryProviderAction,
+  type SecondaryProviderActionEnvelope,
+} from '../../utils/secondaryProviderAction';
+import type { RunNodeLifecycleReporter } from '../../types/project';
 
 type UploadProduceMeta =
   | ImageEditProduceMeta
@@ -172,6 +185,18 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
   const clearRhDuckUpload = useHiddenFeatureStore((s) => s.clearRhDuckUpload);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const rf = useReactFlow();
+  const queueSecondaryAction = useCallback<QueueSecondaryProviderAction>((draft) => {
+    const action = createSecondaryProviderActionForNode(id, 'upload', draft);
+    update(secondaryProviderActionNodePatch(action));
+    queueMicrotask(() => {
+      if (!requestCanvasSecondaryProviderAction(action)) {
+        const current = secondaryProviderActionFromNodeData(rf.getNode(id)?.data);
+        if (current?.requestId === action.requestId) update(secondaryProviderActionNodePatch(null));
+        setError('无法请求次级 Provider action 运行体检');
+      }
+    });
+    return action;
+  }, [id, rf, update]);
 
   const [error, setError] = useState<string | null>(null);
   const [rhCapabilityBusy, setRhCapabilityBusy] = useState(false);
@@ -335,9 +360,6 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
     }
   };
 
-  // 接入运行总线, 供 NodeActionBar / 批量运行 调起
-  useRunTrigger(id, handleRun);
-
   // === 跨节点拖拽: source (从已上传缩略图 Ctrl+拖出) ===
   const startDrag = useDragMaterialStore((s) => s.start);
   const beginMaterialDrag = (e: React.MouseEvent, payload: MaterialPayload) => {
@@ -378,6 +400,11 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
 
     const fd = new FormData();
     fd.append('file', file);
+    const canvasId = useCanvasStore.getState().activeId;
+    if (canvasId) fd.append('canvasId', canvasId);
+    fd.append('sourceNodeId', id);
+    fd.append('sourceNodeType', String(type || 'upload'));
+    fd.append('creatorId', 'local-owner');
     const res = await fetch('/api/files/upload', { method: 'POST', body: fd });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
@@ -474,11 +501,13 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
     [mediaItems],
   );
   const canRunVideoTools = videoSourceItems.length > 0 && uploadType === 'video';
+  const showRhCapabilityRail = (selected || rhCapabilityBusy) && canEditImage;
+  const showRhVideoCapabilityRail = (selected || rhVideoCapabilityBusy) && canRunVideoTools;
   const openEdit = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     if (canEditImage) setEditingUrl(imageSourceUrls[0]);
   };
-  const runAnnotationEditProduce = async (
+  const queueAnnotationEditProduce = (
     cleanUrls: string[],
     meta: Extract<ImageEditProduceMeta, { type: 'annotation-edit' }>,
   ) => {
@@ -488,10 +517,11 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
       logBus.warn(error.message, logSource);
       throw error;
     }
-    try {
-      logBus.info('正在按标注说明生成改图结果', logSource);
-      const request = buildAnnotationEditRequest({
-        sourceNodeId: id,
+    const targetNode = rf.getNodes().find((node) => node.id !== id && node.selected && node.type === CREATIVE_TARGET_NODE_TYPE) || null;
+    queueSecondaryAction({
+      actionId: 'image-edit.annotation',
+      target: 'annotation-edit',
+      params: {
         sourceImageUrl: cleanUrls[0],
         annotatedImageUrl: cleanUrls[1],
         instruction: meta.instruction,
@@ -499,23 +529,67 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
         annotationShapeCount: meta.annotationShapeCount,
         providerId: 'default-image',
         providerModel: 'gpt-image-2',
+        ...(targetNode ? { targetNodeId: targetNode.id } : {}),
+      },
+    });
+    logBus.info('标注改图已绑定参数，等待运行体检确认', logSource);
+  };
+
+  const executeAnnotationEditAction = async (
+    action: Extract<SecondaryProviderActionEnvelope, { actionId: 'image-edit.annotation' }>,
+    reporter: RunNodeLifecycleReporter,
+  ) => {
+    const params = action.params;
+    const logSource = `annotation-edit-upload:${id}`;
+    let providerRequested = false;
+    let providerResponded = false;
+    try {
+      logBus.info('正在按标注说明生成改图结果', logSource);
+      const request = buildAnnotationEditRequest({
+        sourceNodeId: id,
+        sourceImageUrl: params.sourceImageUrl,
+        annotatedImageUrl: params.annotatedImageUrl,
+        instruction: params.instruction,
+        annotationTextCount: params.annotationTextCount,
+        annotationShapeCount: params.annotationShapeCount,
+        providerId: params.providerId,
+        providerModel: params.providerModel,
       });
+      const targetNode = params.targetNodeId
+        ? rf.getNode(params.targetNodeId) || null
+        : null;
+      if (params.targetNodeId && (!targetNode || targetNode.type !== CREATIVE_TARGET_NODE_TYPE)) {
+        throw new Error('已绑定的生成目标框已删除或变化，已停止调用 Provider');
+      }
+      await reporter.providerRequest({
+        provider: params.providerId,
+        model: params.providerModel,
+        actionId: action.actionId,
+        actionTarget: action.target,
+      });
+      providerRequested = true;
       const result = await generateImage({
-        model: 'gpt-image-2',
-        apiModel: 'gpt-image-2',
+        model: params.providerModel,
+        apiModel: params.providerModel,
         prompt: request.prompt,
         images: request.images,
         n: 1,
       });
       const resultUrls = (Array.isArray(result.urls) ? result.urls : []).map((url) => String(url || '').trim()).filter(Boolean);
       if (resultUrls.length === 0) throw new Error('标注改图完成但没有返回图片');
+      await reporter.providerResponse({
+        provider: params.providerId,
+        model: params.providerModel,
+        ...extractRunProviderTrace(result),
+        status: 'succeeded',
+      });
+      providerResponded = true;
       const sourceNode = rf.getNode(id) || ({
         id,
         type: 'upload',
         position: { x: 0, y: 0 },
         data: d,
       } as Node);
-      const targetNode = rf.getNodes().find((node) => node.id !== id && node.selected && node.type === CREATIVE_TARGET_NODE_TYPE) || null;
       const placement = buildAnnotationEditResultPlacement({
         sourceNode,
         targetNode,
@@ -532,9 +606,20 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
         });
         return placement.outputNode ? [...patched, placement.outputNode] : patched;
       });
+      await reporter.output({
+        status: 'succeeded',
+        assets: resultUrls.map((url) => ({ kind: 'image', sourceUrl: url })),
+      });
       logBus.success(targetNode ? '标注改图结果已填入生成目标框' : '标注改图结果已创建到右侧', logSource);
     } catch (error: any) {
       logBus.error(error?.message || '标注改图失败', logSource);
+      if (providerRequested && !providerResponded) {
+        await reporter.providerResponse({
+          provider: params.providerId,
+          model: params.providerModel,
+          status: 'failed',
+        });
+      }
       throw error;
     }
   };
@@ -544,7 +629,7 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
     const isRhCapabilityOutput = _meta?.type === 'rh-capability' || _meta?.type === 'video-frame-extract';
     const logSource = `rh-image-output:${id}`;
     if (_meta?.type === 'annotation-edit') {
-      return runAnnotationEditProduce(cleanUrls, _meta);
+      return queueAnnotationEditProduce(cleanUrls, _meta);
     }
     if (cleanUrls.length === 0) {
       if (isRhCapabilityOutput) logBus.warn(`${_meta.label || 'RH 图像能力'}完成但没有可创建的图像 URL`, logSource);
@@ -732,6 +817,35 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
     });
   };
 
+  const runNode = async (reporter: RunNodeLifecycleReporter) => {
+    const action = resolveSecondaryProviderActionForRun({
+      nodeId: id,
+      nodeType: 'upload',
+      nodeData: rf.getNode(id)?.data,
+      runContext: reporter.runContext,
+    });
+    if (!action) {
+      if (reporter.runContext?.secondaryProviderActionId) {
+        throw new Error('上传节点的次级 Provider action 已过期或被修改，已停止调用 Provider');
+      }
+      await handleRun();
+      return;
+    }
+    try {
+      if (action.actionId === 'image-edit.annotation') {
+        await executeAnnotationEditAction(action, reporter);
+      } else {
+        await executeRegisteredSecondaryProviderAction(action, reporter);
+      }
+    } finally {
+      const current = secondaryProviderActionFromNodeData(rf.getNode(id)?.data);
+      if (current?.requestId === action.requestId) update(secondaryProviderActionNodePatch(null));
+    }
+  };
+
+  // Upload 的普通“输出素材”和所有次级 Provider action 共用唯一监听器。
+  useRunTrigger(id, runNode, undefined, { lifecycleAware: true });
+
   return (
     <div
       data-upload-node-id={id}
@@ -802,29 +916,31 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
           </button>
         </div>
       )}
-      {(selected || rhCapabilityBusy) && canEditImage && (
-        <RhImageCapabilityRail
-          sourceUrls={imageSourceUrls}
-          accent={effectiveHandleColor}
-          isDark={isDark}
-          isPixel={isPixel}
-          onComplete={(result) => handleProduce(result.imageUrls, { type: 'rh-capability', label: result.tool.title })}
-          onError={setError}
-          onRunningChange={setRhCapabilityBusy}
-        />
-      )}
-      {(selected || rhVideoCapabilityBusy) && canRunVideoTools && (
-        <RhVideoCapabilityRail
-          sourceItems={videoSourceItems}
-          accent={effectiveHandleColor}
-          isDark={isDark}
-          isPixel={isPixel}
-          onFramesComplete={(imageUrls) => handleProduce(imageUrls, { type: 'video-frame-extract', label: '首尾帧获取' })}
-          onVideosComplete={(result) => handleVideoProduce(result.videoUrls, { type: 'rh-video-capability', label: result.tool.title })}
-          onError={setError}
-          onRunningChange={setRhVideoCapabilityBusy}
-        />
-      )}
+      <RhImageCapabilityRail
+        secondaryActionNodeId={id}
+        queueSecondaryAction={queueSecondaryAction}
+        sourceUrls={imageSourceUrls}
+        accent={effectiveHandleColor}
+        isDark={isDark}
+        isPixel={isPixel}
+        style={{ display: showRhCapabilityRail ? 'flex' : 'none' }}
+        onComplete={(result) => handleProduce(result.imageUrls, { type: 'rh-capability', label: result.tool.title })}
+        onError={setError}
+        onRunningChange={setRhCapabilityBusy}
+      />
+      <RhVideoCapabilityRail
+        secondaryActionNodeId={id}
+        queueSecondaryAction={queueSecondaryAction}
+        sourceItems={videoSourceItems}
+        accent={effectiveHandleColor}
+        isDark={isDark}
+        isPixel={isPixel}
+        style={{ display: showRhVideoCapabilityRail ? 'flex' : 'none' }}
+        onFramesComplete={(imageUrls) => handleProduce(imageUrls, { type: 'video-frame-extract', label: '首尾帧获取' })}
+        onVideosComplete={(result) => handleVideoProduce(result.videoUrls, { type: 'rh-video-capability', label: result.tool.title })}
+        onError={setError}
+        onRunningChange={setRhVideoCapabilityBusy}
+      />
       {/* 仅有 source handle(上传节点不接收输入) */}
       <Handle
         type="source"
@@ -1213,6 +1329,9 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
       {editingUrl && (
         <ImageEditModal
           srcUrl={editingUrl}
+          secondaryActionNodeId={id}
+          secondaryActionNodeType="upload"
+          queueSecondaryAction={queueSecondaryAction}
           onClose={() => setEditingUrl(null)}
           onProduce={handleProduce}
         />

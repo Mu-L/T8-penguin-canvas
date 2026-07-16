@@ -6,6 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { generateLlmStream } from '../src/services/generation.ts';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 const require = createRequire(import.meta.url);
 const { normalizeLlmMessageMedia, resolveBundledFfmpeg } = require('../backend/src/providers/llmMedia.js');
@@ -17,11 +18,16 @@ function read(rel: string) {
 }
 
 test('LLM node accepts video ports and builds video_url payloads', () => {
-  const ports = read('src/config/portTypes.ts');
   const node = read('src/components/nodes/LLMNode.tsx');
   const generation = read('src/services/generation.ts');
 
-  assert.match(ports, /llm:\s*\{\s*inputs:\s*\['text', 'image', 'video'\]/);
+  assertProductionNodeSchema('llm', {
+    label: 'LLM',
+    category: 'core',
+    inputs: ['text', 'image', 'video'],
+    outputs: ['text'],
+    executable: true,
+  });
   assert.match(generation, /type:\s*'video_url'/);
   assert.match(node, /video_url:\s*\{\s*url:\s*u\s*\}/);
   assert.match(node, /groups=\{\['text', 'image', 'video'\]\}/);

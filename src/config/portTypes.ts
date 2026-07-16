@@ -5,7 +5,7 @@
  *   每个节点声明它的"输入需要什么"与"输出提供什么"。
  *   连接时只允许 source.outputs 与 target.inputs 有交集才能连。
  *   特殊类型 'any' 表示透传,与任何类型互通(用于 relay 中继)。
- *   upload 节点是动态的:输出根据 data.uploadType 决定,未上传时视为通用占位。
+ *   upload 节点是动态的:输出根据 data.uploadType 决定,未上传时保留空类型 Handle 且不可连出。
  *
  * 端口类型(PortType):
  *   - text:     文本/提示词 (data.prompt)
@@ -18,6 +18,8 @@
  *   - any:      透传(中继)
  */
 import type { Node } from '@xyflow/react';
+import schemaManifest from '../../backend/src/shared/canvasNodeSchema.json' with { type: 'json' };
+import { normalizeRandomRouteSettings, randomRouteOutputHandle } from '../utils/randomRoute.ts';
 
 export type PortType =
   | 'text'
@@ -36,6 +38,319 @@ export interface NodePorts {
   outputs: PortType[];
 }
 
+export type ConnectionPortResolver =
+  | 'static'
+  | 'upload'
+  | 'material-set'
+  | 'loop'
+  | 'pick-from-set'
+  | 'random-route'
+  | 'subflow'
+  | 'toolbox-param';
+
+export interface NodeConnectionPort {
+  id: string | null;
+  kinds: PortType[];
+  required: boolean;
+  minConnections: number;
+  maxConnections: number | null;
+  preferred?: boolean;
+  hasDefault?: boolean;
+}
+
+export interface ResolvedNodeConnectionPorts {
+  resolved: true;
+  resolver: ConnectionPortResolver;
+  inputs: NodeConnectionPort[];
+  outputs: NodeConnectionPort[];
+}
+
+export interface UnresolvedNodeConnectionPorts {
+  resolved: false;
+  resolver: ConnectionPortResolver | 'unknown';
+  reason: string;
+  inputs: [];
+  outputs: [];
+}
+
+export type NodeConnectionPortResolution = ResolvedNodeConnectionPorts | UnresolvedNodeConnectionPorts;
+
+interface ManifestConnectionPortAuthority {
+  resolver: ConnectionPortResolver;
+  inputs: unknown[];
+  outputs: unknown[];
+}
+
+interface CanvasNodePortManifest {
+  connectionPorts: Record<string, ManifestConnectionPortAuthority>;
+}
+
+const PORT_TYPES = new Set<PortType>(['text', 'image', 'video', 'audio', 'model3d', 'metadata', 'config', 'any']);
+const MATERIAL_KINDS = new Set<PortType>(['text', 'image', 'video', 'audio']);
+const UPLOAD_KINDS = new Set<PortType>(['image', 'video', 'audio', 'model3d']);
+const CONNECTION_PORT_RESOLVERS = new Set<ConnectionPortResolver>([
+  'static', 'upload', 'material-set', 'loop', 'pick-from-set', 'random-route', 'subflow', 'toolbox-param',
+]);
+const MANIFEST_CONNECTION_PORTS = (schemaManifest as unknown as CanvasNodePortManifest).connectionPorts;
+
+// 画布内部结构节点不属于 69 类生产业务节点，但其 JSX Handle 仍必须精确校验。
+const INTERNAL_CONNECTION_PORTS: Record<string, ManifestConnectionPortAuthority> = {
+  groupBox: {
+    resolver: 'static', inputs: [], outputs: [{ id: 'group-out', kinds: ['any'], required: false, minConnections: 0, maxConnections: null }],
+  },
+};
+
+const DEV_CONNECTION_PORTS: Record<string, ManifestConnectionPortAuthority> = import.meta.env?.DEV ? {
+  'rh-toolbox-maker': {
+    resolver: 'static', inputs: [], outputs: [{ id: null, kinds: ['text'], required: false, minConnections: 0, maxConnections: null }],
+  },
+  'fal-toolbox-maker': {
+    resolver: 'static', inputs: [], outputs: [{ id: null, kinds: ['text'], required: false, minConnections: 0, maxConnections: null }],
+  },
+} : {};
+
+const TOOLBOX_PARAM_KIND_BY_TYPE: Record<string, 'cinematic' | 'video-motion' | 'multi-angle-visual'> = {
+  cinematic: 'cinematic',
+  'video-motion': 'video-motion',
+  'multi-angle-visual': 'multi-angle-visual',
+};
+
+function unresolvedConnectionPorts(
+  reason: string,
+  resolver: ConnectionPortResolver | 'unknown' = 'unknown',
+): UnresolvedNodeConnectionPorts {
+  return { resolved: false, resolver, reason, inputs: [], outputs: [] };
+}
+
+function normalizePortId(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  if (typeof value !== 'string' || value.length === 0 || value.length > 160 || value.trim() !== value) return undefined;
+  return value;
+}
+
+function normalizeManifestConnectionPort(value: unknown): NodeConnectionPort | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const id = normalizePortId(raw.id);
+  if (id === undefined) return null;
+  if (!Array.isArray(raw.kinds) || raw.kinds.length === 0 || raw.kinds.length > PORT_TYPES.size) return null;
+  const kinds = raw.kinds.filter((kind): kind is PortType => typeof kind === 'string' && PORT_TYPES.has(kind as PortType));
+  if (kinds.length !== raw.kinds.length || new Set(kinds).size !== kinds.length) return null;
+  const minConnections = Number(raw.minConnections);
+  const maxConnections = raw.maxConnections == null ? null : Number(raw.maxConnections);
+  if (!Number.isSafeInteger(minConnections) || minConnections < 0 || minConnections > 1_000) return null;
+  if (maxConnections != null && (!Number.isSafeInteger(maxConnections) || maxConnections < minConnections || maxConnections > 1_000)) return null;
+  if (typeof raw.required !== 'boolean') return null;
+  if (raw.preferred !== undefined && typeof raw.preferred !== 'boolean') return null;
+  return {
+    id,
+    kinds: [...kinds],
+    required: raw.required,
+    minConnections,
+    maxConnections,
+    ...(raw.preferred === undefined ? {} : { preferred: raw.preferred }),
+  };
+}
+
+function normalizeAuthorityPorts(value: unknown): NodeConnectionPort[] | null {
+  if (!Array.isArray(value) || value.length > 200) return null;
+  const ports = value.map(normalizeManifestConnectionPort);
+  if (ports.some((port) => !port)) return null;
+  const resolved = ports as NodeConnectionPort[];
+  const ids = resolved.map((port) => port.id);
+  if (new Set(ids).size !== ids.length) return null;
+  return resolved;
+}
+
+function staticAuthority(type: string): ResolvedNodeConnectionPorts | UnresolvedNodeConnectionPorts {
+  const raw = MANIFEST_CONNECTION_PORTS?.[type] || INTERNAL_CONNECTION_PORTS[type] || DEV_CONNECTION_PORTS[type];
+  if (!raw || !CONNECTION_PORT_RESOLVERS.has(raw.resolver)) return unresolvedConnectionPorts('node connection authority is missing');
+  const inputs = normalizeAuthorityPorts(raw.inputs);
+  const outputs = normalizeAuthorityPorts(raw.outputs);
+  if (!inputs || !outputs) return unresolvedConnectionPorts('node connection authority is invalid', raw.resolver);
+  return { resolved: true, resolver: raw.resolver, inputs, outputs };
+}
+
+function portWithKinds(port: NodeConnectionPort, kinds: PortType[]): NodeConnectionPort {
+  return { ...port, kinds: [...kinds] };
+}
+
+function normalizedDataKind(value: unknown, kinds: Set<PortType>): PortType | null | undefined {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string' || !kinds.has(value as PortType)) return undefined;
+  return value as PortType;
+}
+
+function hasUsableMaterialSetItem(value: unknown, kind: PortType): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  let itemKind: PortType;
+  if (item.kind === undefined || item.kind === null || item.kind === '') {
+    itemKind = kind;
+  } else if (typeof item.kind === 'string' && MATERIAL_KINDS.has(item.kind as PortType)) {
+    itemKind = item.kind as PortType;
+  } else {
+    return false;
+  }
+  if (itemKind !== kind) return false;
+  const rawValue = kind === 'text' ? (item.text ?? item.url) : item.url;
+  return typeof rawValue === 'string' && rawValue.trim().length > 0;
+}
+
+function resolveSubflowConnectionPorts(node: Node): NodeConnectionPortResolution {
+  const data = ((node.data || {}) as Record<string, unknown>);
+  const definition = data.definition;
+  if (!definition || typeof definition !== 'object' || Array.isArray(definition)) {
+    return unresolvedConnectionPorts('subflow definition is missing', 'subflow');
+  }
+  const embedded = definition as Record<string, unknown>;
+  const fixedId = normalizePortId(data.definitionId);
+  const fixedVersion = data.definitionVersion;
+  const embeddedVersion = embedded.version;
+  if (typeof fixedId !== 'string'
+    || embedded.id !== fixedId
+    || typeof fixedVersion !== 'number'
+    || !Number.isSafeInteger(fixedVersion)
+    || fixedVersion < 1
+    || typeof embeddedVersion !== 'number'
+    || !Number.isSafeInteger(embeddedVersion)
+    || embeddedVersion !== fixedVersion) {
+    return unresolvedConnectionPorts('subflow fixed definition identity does not match embedded definition', 'subflow');
+  }
+  if (data.definitionRevision != null && embedded.revision != null) {
+    const fixedRevision = data.definitionRevision;
+    const embeddedRevision = embedded.revision;
+    if (typeof fixedRevision !== 'number'
+      || !Number.isSafeInteger(fixedRevision)
+      || fixedRevision < 1
+      || typeof embeddedRevision !== 'number'
+      || !Number.isSafeInteger(embeddedRevision)
+      || embeddedRevision !== fixedRevision) {
+      return unresolvedConnectionPorts('subflow fixed revision does not match embedded definition', 'subflow');
+    }
+  }
+  const rawInputs = embedded.inputs;
+  const rawOutputs = embedded.outputs;
+  if (!Array.isArray(rawInputs) || !Array.isArray(rawOutputs) || rawInputs.length + rawOutputs.length > 200) {
+    return unresolvedConnectionPorts('subflow ports are invalid', 'subflow');
+  }
+  const seen = new Set<string>();
+  const normalize = (rawPort: unknown): NodeConnectionPort | null => {
+    if (!rawPort || typeof rawPort !== 'object' || Array.isArray(rawPort)) return null;
+    const port = rawPort as Record<string, unknown>;
+    const id = normalizePortId(port.id);
+    if (typeof id !== 'string' || seen.has(id) || !PORT_TYPES.has(port.kind as PortType)) return null;
+    if (port.required != null && typeof port.required !== 'boolean') return null;
+    const required = port.required === true;
+    const minConnections = port.minConnections == null ? (required ? 1 : 0) : port.minConnections;
+    const maxConnections = port.maxConnections == null ? null : port.maxConnections;
+    if (typeof minConnections !== 'number'
+      || !Number.isSafeInteger(minConnections)
+      || minConnections < 0
+      || minConnections > 1_000) return null;
+    if (maxConnections != null && (typeof maxConnections !== 'number'
+      || !Number.isSafeInteger(maxConnections)
+      || maxConnections < minConnections
+      || maxConnections > 1_000)) return null;
+    seen.add(id);
+    return {
+      id,
+      kinds: [port.kind as PortType],
+      required,
+      minConnections,
+      maxConnections,
+      hasDefault: Object.prototype.hasOwnProperty.call(port, 'defaultValue') && port.defaultValue !== undefined,
+    };
+  };
+  const inputs = rawInputs.map(normalize);
+  const outputs = rawOutputs.map(normalize);
+  if (inputs.some((port) => !port) || outputs.some((port) => !port)) {
+    return unresolvedConnectionPorts('subflow port contract is invalid', 'subflow');
+  }
+  return {
+    resolved: true,
+    resolver: 'subflow',
+    inputs: inputs as NodeConnectionPort[],
+    outputs: outputs as NodeConnectionPort[],
+  };
+}
+
+/**
+ * 将节点类型、实际 Handle ID 与实例 data 解析为唯一端口契约。
+ * 任何未知 authority / discriminator / 子工作流契约都 fail closed，调用方不得回退 aggregate ports。
+ */
+export function resolveNodeConnectionPorts(node: Node | null | undefined): NodeConnectionPortResolution {
+  if (!node || typeof node.type !== 'string' || !node.type) return unresolvedConnectionPorts('node type is missing');
+  const authority = staticAuthority(node.type);
+  if (!authority.resolved) return authority;
+  const data = ((node.data || {}) as Record<string, unknown>);
+  if (authority.resolver === 'static') return authority;
+  if (authority.resolver === 'subflow') return resolveSubflowConnectionPorts(node);
+
+  if (authority.resolver === 'upload') {
+    const kind = normalizedDataKind(data.uploadType, UPLOAD_KINDS);
+    const output = authority.outputs[0];
+    if (!output || output.id !== null) return unresolvedConnectionPorts('upload authority is invalid', 'upload');
+    return { ...authority, outputs: [portWithKinds(output, kind ? [kind] : [])] };
+  }
+
+  if (authority.resolver === 'material-set') {
+    const kind = normalizedDataKind(data.materialSetKind, MATERIAL_KINDS);
+    const input = authority.inputs[0];
+    const output = authority.outputs[0];
+    if (!input || !output || input.id !== null || output.id !== null) {
+      return unresolvedConnectionPorts('material-set authority is invalid', 'material-set');
+    }
+    const selectedKind = kind || null;
+    const hasItems = Boolean(selectedKind)
+      && Array.isArray(data.materialSetItems)
+      && data.materialSetItems.some((item) => hasUsableMaterialSetItem(item, selectedKind!));
+    return {
+      ...authority,
+      inputs: [portWithKinds(input, selectedKind ? [selectedKind] : [...input.kinds])],
+      outputs: [portWithKinds(output, selectedKind && hasItems ? [selectedKind] : [])],
+    };
+  }
+
+  if (authority.resolver === 'loop' || authority.resolver === 'pick-from-set') {
+    const field = authority.resolver === 'loop' ? 'kind' : 'pickKind';
+    const rawKind = normalizedDataKind(data[field], MATERIAL_KINDS);
+    const kind = rawKind || 'image';
+    const input = authority.inputs[0];
+    const output = authority.outputs[0];
+    if (!input || !output || input.id !== null || output.id !== null) {
+      return unresolvedConnectionPorts(`${authority.resolver} authority is invalid`, authority.resolver);
+    }
+    return { ...authority, inputs: [portWithKinds(input, [kind])], outputs: [portWithKinds(output, [kind])] };
+  }
+
+  if (authority.resolver === 'random-route') {
+    const input = authority.inputs[0];
+    if (!input || input.id !== 'input_data' || input.kinds.length !== 1 || input.kinds[0] !== 'any') {
+      return unresolvedConnectionPorts('random-route authority is invalid', 'random-route');
+    }
+    const { totalOutputs } = normalizeRandomRouteSettings(data);
+    const outputs = Array.from({ length: totalOutputs }, (_, index): NodeConnectionPort => ({
+      id: randomRouteOutputHandle(index + 1),
+      kinds: ['any'],
+      required: false,
+      minConnections: 0,
+      maxConnections: null,
+    }));
+    return { ...authority, outputs };
+  }
+
+  if (authority.resolver === 'toolbox-param') {
+    const expected = TOOLBOX_PARAM_KIND_BY_TYPE[node.type];
+    const missingKind = data.kind === undefined || data.kind === null || data.kind === '';
+    const actual = missingKind ? 'cinematic' : data.kind;
+    if (!expected || actual !== expected) return unresolvedConnectionPorts('toolbox type and data.kind do not match', 'toolbox-param');
+    return authority;
+  }
+
+  return unresolvedConnectionPorts('connection resolver is unsupported', authority.resolver);
+}
+
 const DEV_NODE_PORTS: Record<string, NodePorts> = import.meta.env?.DEV ? {
   // RH 工具箱制作器: 维护者开发态节点，只输出生成好的 manifest JSON 文本。
   'rh-toolbox-maker': { inputs: [], outputs: ['text'] },
@@ -47,201 +362,42 @@ const DEV_NODE_PORTS: Record<string, NodePorts> = import.meta.env?.DEV ? {
  * 节点端口注册表
  * 与 features.json 节点清单严格对齐
  */
+const MANIFEST_NODE_PORTS = Object.fromEntries(
+  schemaManifest.types.map((item) => [
+    item.type,
+    {
+      inputs: [...item.ports.inputs] as PortType[],
+      outputs: [...item.ports.outputs] as PortType[],
+    },
+  ]),
+) as Record<string, NodePorts>;
+
+/**
+ * 生产节点端口取自共享 t8-canvas-node-schema-v1；DEV 节点只在开发态追加。
+ */
 export const NODE_PORTS: Record<string, NodePorts> = {
-  // ========== Core ==========
-  text: { inputs: ['text', 'image', 'video', 'audio'], outputs: ['text'] },
-  image: { inputs: ['text', 'image'], outputs: ['image'] },
-  // 视频节点默认模型仍只使用 text/image；选择即梦 CLI Seedance 时会消费 video/audio 参考。
-  // 端口表是静态的，需提前允许四类输入，避免用户切到即梦 CLI 后无法连线。
-  video: { inputs: ['text', 'image', 'video', 'audio'], outputs: ['video'] },
-  'video-edit': { inputs: ['video'], outputs: ['video', 'audio'] },
-  // SD2.0 (Seedance 2.0) 同时支持:
-  //   text  → prompt
-  //   image → reference_image / first_frame / last_frame
-  //   video → reference_video (上游视频节点 / SD2.0 节点 都可作为输入)
-  //   audio → reference_audio
-  seedance: { inputs: ['text', 'image', 'video', 'audio'], outputs: ['video'] },
-  // 导演分镜台: 内部把多个分镜并发调度到 Seedance2.0, 每个完成的视频即时输出, 同时输出分镜文本摘要。
-  'director-storyboard': { inputs: ['text', 'image', 'video', 'audio'], outputs: ['video', 'text'] },
-  audio: { inputs: ['text', 'image', 'audio'], outputs: ['audio'] },
-  llm: { inputs: ['text', 'image', 'video'], outputs: ['text'] },
-
-  // ========== RH ==========
-  runninghub: { inputs: ['text', 'image', 'video', 'audio', 'config'], outputs: ['image', 'video'] },
-  // RH 钱包应用：端口语义与 runninghub 一致，仅是提交时使用独立 APIKEY
-  'runninghub-wallet': { inputs: ['text', 'image', 'video', 'audio', 'config'], outputs: ['image', 'video'] },
-  // RhConfigNode 阶段 B 通用化：可接受任意上游节点产出的
-  // text / image / video / audio（提交时由 RunningHubNode 负责调 /upload-asset 转 fileName）
-  'rh-config': { inputs: ['text', 'image', 'video', 'audio'], outputs: ['config'] },
-  // RH 工具节点 (启动器): 节点内部独立运行 RH 应用。
-  // v1.2.10.1: 与 RunningHubNode 一致，左侧可接 text/image/video/audio 上游，
-  // 右侧输出 image/video/audio（按扩展名分流到 imageUrl/videoUrl/audioUrl）。
-  'rh-tools': { inputs: ['text', 'image', 'video', 'audio'], outputs: ['image', 'video', 'audio'] },
-  // RH 工具箱: 维护者精选工具，可处理/输出四类素材，后续供其他节点按 capability 快捷调用。
-  'rh-toolbox': { inputs: ['text', 'image', 'video', 'audio'], outputs: ['text', 'image', 'video', 'audio'] },
-  // VibeX 工作台: 独立视频工作台，可接收四类素材语境，并通过 postMessage 回传四类素材与提示词。
-  vibex: { inputs: ['text', 'image', 'video', 'audio'], outputs: ['text', 'image', 'video', 'audio'] },
+  ...MANIFEST_NODE_PORTS,
   ...DEV_NODE_PORTS,
-
-  // ========== FAL ==========
-  // Fal 超市: 复制 Fal.ai 模型能力到独立超市入口；不替换现有图像/视频 FAL 节点。
-  'fal-toolbox': { inputs: ['text', 'image', 'video', 'audio'], outputs: ['text', 'image', 'video', 'audio', 'model3d'] },
-  // 3D 模型预览: 接收 Fal 超市等 3D 模型 URL，输出当前视角快照图。
-  'model-3d-preview': { inputs: ['model3d'], outputs: ['image'] },
-  'face-expression-3d': { inputs: ['model3d', 'image', 'metadata'], outputs: ['image', 'metadata'] },
-  // 3D 素材上传: 专门上传本地 glb/gltf/obj/stl/fbx/usdz/zip 模型。
-  'model-3d-upload': { inputs: [], outputs: ['model3d'] },
-
-  // ========== GROK OAuth ==========
-  // 独立 Grok OAuth Agent：不走高级来源/分类 Key；由私有 OAuth 模块统一处理聊天、图像、视频、TTS、STT。
-  'grok-oauth-agent': { inputs: ['text', 'image', 'video', 'audio'], outputs: ['text', 'image', 'video', 'audio'] },
-
-  // ========== Codex CLI ==========
-  // 创作者 Codex Agent：通过本机 Codex CLI + Skill 调用生成文本、提示词、图像等产物。
-  'codex-cli-agent': { inputs: ['text', 'image', 'video', 'audio'], outputs: ['text', 'image', 'video', 'audio', 'model3d'] },
-
-  // ========== Inspiration ==========
-  // 艺术风格大师：可接收上游文本作为检索/创作语境，运行时输出风格提示词或风格参考图。
-  'artist-style-master': { inputs: ['text'], outputs: ['text', 'image'] },
-  // 动漫标签大师：可接收文本/图像语境，运行时输出标签提示词或标签参考图。
-  'anime-tag-master': { inputs: ['text', 'image'], outputs: ['text', 'image'] },
-
-  // ========== ComfyUI ==========
-  // ComfyUI超市：本地 workflow 应用运行器，可按 manifest 消费/输出四类素材。
-  'comfyui-store': { inputs: ['text', 'image', 'video', 'audio'], outputs: ['text', 'image', 'video', 'audio'] },
-  // ComfyUI应用制作工具：把 API Workflow JSON 转成应用 manifest，输出 JSON 文本。
-  'comfyui-app-maker': { inputs: [], outputs: ['text'] },
-
-  // ========== Special ==========
-  'multi-angle-3d': { inputs: ['text', 'image'], outputs: ['image'] },
-  'panorama-720': { inputs: ['text'], outputs: ['image'] },
-  'penguin-portrait': { inputs: ['text', 'image', 'metadata'], outputs: ['image'] },
-  'portrait-metadata': { inputs: ['image'], outputs: ['metadata'] },
-  'storyboard-grid': { inputs: ['image'], outputs: ['image'] },
-
-  // ========== Utility ==========
-  'drawing-board': { inputs: ['image'], outputs: ['image'] },
-  browser: { inputs: [], outputs: ['text', 'image'] },
-  'image-compare': { inputs: ['image'], outputs: ['image'] },
-  'frame-extractor': { inputs: ['video'], outputs: ['image'] },
-  // 首尾帧获取: 视频抽首/尾两帧 → 双 source handle (id=first/last) 输出 image
-  'frame-pair': { inputs: ['video'], outputs: ['image'] },
-  // 循环器 (v1.2.8): 接受 4 类素材集合 → 按 kind 输出下游驱动 (串联/并联)
-  // 输出默认按 kind 递多类型 (any 允许接任意下游执行节点)
-  loop: { inputs: ['text', 'image', 'video', 'audio'], outputs: ['text', 'image', 'video', 'audio'] },
-  // 随机路由: 任意上游素材透传到 N 个动态输出口，运行时只触发命中的分支。
-  'random-route': { inputs: ['any'], outputs: ['any'] },
-  // 从合集获取 (v1.2.8): 从上游集合中选中单一素材 → 输出按 kind 变化
-  'pick-from-set': { inputs: ['text', 'image', 'video', 'audio'], outputs: ['text', 'image', 'video', 'audio'] },
-  // 文本分割: 长文本/上游文本 → 多段 textSegments, 下游按多文本集合消费
-  'text-split': { inputs: ['text'], outputs: ['text'] },
-  resize: { inputs: ['image'], outputs: ['image'] },
-  combine: { inputs: ['image'], outputs: ['image'] },
-  'remove-bg': { inputs: ['image'], outputs: ['image'] },
-  upscale: { inputs: ['image'], outputs: ['image'] },
-  'grid-crop': { inputs: ['image'], outputs: ['image'] },
-  'grid-editor': { inputs: ['image'], outputs: ['image'] },
-
-  // ========== Auxiliary ==========
-  edit: { inputs: ['text', 'image'], outputs: ['image'] },
-  idea: { inputs: [], outputs: ['text'] },
-  bp: { inputs: ['text'], outputs: ['text'] },
-  // relay 中继:任意进任意出(透传)
-  relay: { inputs: ['any'], outputs: ['any'] },
-  // 去AI水印: 图像支持完整清理/擦除/鉴别；视频/音频支持元数据检查与清理，文本输出用于报告。
-  'remove-ai-watermark': { inputs: ['image', 'video', 'audio'], outputs: ['image', 'video', 'audio', 'text', 'metadata'] },
-  'video-output': { inputs: ['video'], outputs: [] },
-
-  // ========== Toolbox ==========
-  cinematic: { inputs: [], outputs: ['text'] },
-  'video-motion': { inputs: [], outputs: ['text'] },
-  'multi-angle-visual': { inputs: ['image'], outputs: ['text'] },
-  'portrait-master': { inputs: ['text', 'metadata'], outputs: ['text', 'metadata'] },
-  // 姿势大师二阶段: 兼容上游肖像/运镜文本与参考图。未连接时保持旧版独立输出行为。
-  'pose-master': { inputs: ['text', 'image', 'metadata'], outputs: ['image', 'text', 'metadata'] },
-  // 聚合解析: 可直接接上游分享文案文本，输出解析摘要与媒体地址。
-  'aggregate-parser': { inputs: ['text'], outputs: ['text', 'image', 'video', 'audio'] },
-  // 批量素材处理: 只在节点内处理/归档/反馈，不对外输出素材，避免批量完成后自动铺满画布。
-  'batch-processor': { inputs: ['image', 'video', 'audio', 'model3d'], outputs: [] },
-  // 批量打标: 收集图像/视频素材，输出文本/元数据结果供下游或 sidecar 保存。
-  'batch-tagger': { inputs: ['image', 'video', 'text'], outputs: ['text', 'metadata'] },
-  // Topaz 本地高清化: 仅调用用户本机已安装的 Topaz 软件，不内置第三方商业程序。
-  'topaz-image-upscale': { inputs: ['image'], outputs: ['image'] },
-  'topaz-video-upscale': { inputs: ['video'], outputs: ['video'] },
-
-  // ========== 3D ==========
-  'panorama-3d': { inputs: ['image'], outputs: ['image'] },
-
-  // ========== 上传素材节点 (NEW) ==========
-  // 动态:由 data.uploadType 决定具体输出。未上传时 outputs=[],不允许连出。
-  upload: { inputs: [], outputs: [] },
-  // 素材集: 同类型素材集合，输入可收集四类素材，输出按 materialSetKind 动态决定。
-  'material-set': { inputs: ['text', 'image', 'video', 'audio'], outputs: ['text', 'image', 'video', 'audio'] },
-  // 生成目标框: 接提示词和参考图，输出框内最终图像。
-  'generation-target': { inputs: ['text', 'image'], outputs: ['image'] },
-
-  // ========== 输出素材节点 (NEW) ==========
-  // 任意上游节点的 文本/图像/视频/音频 都可连入；同时作为中继节点可继续向下游透传 (any)。
-  output: { inputs: ['text', 'image', 'video', 'audio', 'model3d', 'any'], outputs: ['any'] },
-
-  // ========== 组容器 (NEW) ==========
-  // groupBox 自身不接收外部输入 (无 target handle),
-  // 但右侧 source handle 可以把「组内所有节点的聚合输出 (any)」一次性传给组外节点。
-  groupBox: { inputs: [], outputs: ['any'] },
-  // Codex 专用生图工作台：只接文本/图像参考，只输出图像和最终文本。
-  'codex-image-conjure': { inputs: ['text', 'image'], outputs: ['image', 'text'] },
 };
+
+function uniqueKinds(ports: NodeConnectionPort[]): PortType[] {
+  return [...new Set(ports.flatMap((port) => port.kinds))];
+}
 
 /**
  * 取节点的输入端口类型(返回该节点能接收的 PortType 列表)。
  */
 export function getNodeInputs(node: Node | null | undefined): PortType[] {
-  if (!node || !node.type) return [];
-  const ports = NODE_PORTS[node.type];
-  return ports?.inputs ?? [];
+  const resolution = resolveNodeConnectionPorts(node);
+  return resolution.resolved ? uniqueKinds(resolution.inputs) : [];
 }
 
 /**
  * 取节点的输出端口类型(对 upload 做动态解析)。
  */
 export function getNodeOutputs(node: Node | null | undefined): PortType[] {
-  if (!node || !node.type) return [];
-
-  // upload 节点根据 data.uploadType 动态决定输出类型
-  if (node.type === 'upload') {
-    const uploadType = (node.data as any)?.uploadType as
-      | 'image'
-      | 'video'
-      | 'audio'
-      | 'model3d'
-      | undefined;
-    if (uploadType === 'image') return ['image'];
-    if (uploadType === 'video') return ['video'];
-    if (uploadType === 'audio') return ['audio'];
-    if (uploadType === 'model3d') return ['model3d'];
-    // 未上传时不暴露任何输出类型
-    return [];
-  }
-
-  if (node.type === 'material-set') {
-    const kind = (node.data as any)?.materialSetKind as
-      | 'text'
-      | 'image'
-      | 'video'
-      | 'audio'
-      | undefined;
-    const items = (node.data as any)?.materialSetItems;
-    const hasItems = Array.isArray(items) && items.length > 0;
-    if (!hasItems) return [];
-    if (kind === 'text') return ['text'];
-    if (kind === 'image') return ['image'];
-    if (kind === 'video') return ['video'];
-    if (kind === 'audio') return ['audio'];
-    return [];
-  }
-
-  const ports = NODE_PORTS[node.type];
-  return ports?.outputs ?? [];
+  const resolution = resolveNodeConnectionPorts(node);
+  return resolution.resolved ? uniqueKinds(resolution.outputs) : [];
 }
 
 /**
@@ -267,7 +423,9 @@ export function arePortsCompatible(
  */
 export function isConnectionValid(
   source: Node | null | undefined,
-  target: Node | null | undefined
+  target: Node | null | undefined,
+  connection?: { sourceHandle?: string | null; targetHandle?: string | null },
+  existingEdges: Array<{ source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }> = [],
 ): boolean {
   if (!source || !target) return false;
   if (source.id === target.id) return false; // 不允许自连
@@ -275,9 +433,54 @@ export function isConnectionValid(
   //          这种连接会变成无内容的空白 OutputNode, 影响体验; 真正的展示应走
   //          「循环器 → EXEC 节点 → OutputNode」累积链路。
   if ((source as any).type === 'loop' && (target as any).type === 'output') return false;
-  const sOut = getNodeOutputs(source);
-  const tIn = getNodeInputs(target);
+  const sOut = getNodePortKinds(source, 'output', connection?.sourceHandle);
+  const tIn = getNodePortKinds(target, 'input', connection?.targetHandle);
+  if (!connectionCapacityAvailable(source, 'output', connection?.sourceHandle, existingEdges)) return false;
+  if (!connectionCapacityAvailable(target, 'input', connection?.targetHandle, existingEdges)) return false;
   return arePortsCompatible(sOut, tIn);
+}
+
+export function getNodePortKinds(node: Node | null | undefined, direction: 'input' | 'output', handle?: string | null): PortType[] {
+  return getNodeConnectionPort(node, direction, handle)?.kinds || [];
+}
+
+export function getNodeConnectionPort(
+  node: Node | null | undefined,
+  direction: 'input' | 'output',
+  handle?: string | null,
+): NodeConnectionPort | null {
+  const resolution = resolveNodeConnectionPorts(node);
+  if (!resolution.resolved) return null;
+  const id = handle == null ? null : String(handle);
+  const ports = direction === 'input' ? resolution.inputs : resolution.outputs;
+  return ports.find((port) => port.id === id) || null;
+}
+
+function connectionCapacityAvailable(
+  node: Node,
+  direction: 'input' | 'output',
+  handle: string | null | undefined,
+  edges: Array<{ source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }>,
+) {
+  const resolution = resolveNodeConnectionPorts(node);
+  if (!resolution.resolved) return false;
+  const port = getNodeConnectionPort(node, direction, handle);
+  if (!port) return false;
+  if (port.maxConnections == null) return true;
+  const count = edges.filter((edge) => direction === 'input'
+    ? edge.target === node.id && (edge.targetHandle ?? null) === port.id
+    : edge.source === node.id && (edge.sourceHandle ?? null) === port.id).length;
+  return count < port.maxConnections;
+}
+
+export function getConnectionPortType(
+  source: Node | null | undefined,
+  target: Node | null | undefined,
+  connection?: { sourceHandle?: string | null; targetHandle?: string | null },
+): PortType | null {
+  const outputs = getNodePortKinds(source, 'output', connection?.sourceHandle);
+  const inputs = getNodePortKinds(target, 'input', connection?.targetHandle);
+  return outputs.find((kind) => inputs.includes(kind) || kind === 'any' || inputs.includes('any')) || null;
 }
 
 /**

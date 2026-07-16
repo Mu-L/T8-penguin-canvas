@@ -7,10 +7,15 @@ import {
   generateExternalLlm,
 } from '../src/services/generation.ts';
 
-function jsonResponse(body: any, status = 200) {
+function jsonResponse(body: any, status = 200, headers: Record<string, string> = {}) {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: {
+      get(name: string) {
+        return headers[String(name).toLowerCase()] || null;
+      },
+    },
     async json() {
       return body;
     },
@@ -115,6 +120,48 @@ test('generateExternalVideo posts to external video route and returns normalized
     assert.deepEqual(result.videoUrls, ['/files/output/external_1.mp4']);
     assert.deepEqual(result.remoteVideoUrls, ['https://cdn.example.com/raw.mp4']);
     assert.equal(result.taskId, 'vid-1');
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test('provider generation exposes explicit transport/request/usage metadata without guessing generic ids', async () => {
+  const oldFetch = globalThis.fetch;
+  (globalThis as any).fetch = async () => jsonResponse({
+    success: true,
+    data: {
+      id: 'generic-id-must-not-become-request-id',
+      videoUrls: ['/files/output/traced.mp4'],
+      upstreamHttpStatus: 201,
+      usage: { credits: 2, totalTokens: 42 },
+    },
+  }, 202, { 'x-request-id': 'request-from-header' });
+  try {
+    const result = await generateExternalVideo({ providerId: 'trace-provider', prompt: 'trace', model: 'trace-model' });
+    assert.equal(result.requestId, 'request-from-header');
+    assert.equal(result.transportHttpStatus, 202);
+    assert.equal(result.upstreamHttpStatus, 201);
+    assert.deepEqual(result.usage, { credits: 2, totalTokens: 42 });
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test('provider HTTP failures retain transport status and request id for NormalizedRunError', async () => {
+  const oldFetch = globalThis.fetch;
+  (globalThis as any).fetch = async () => jsonResponse({ success: false, error: 'rate limited' }, 429, {
+    'x-request-id': 'request-rate-limit',
+  });
+  try {
+    await assert.rejects(
+      () => generateExternalImage({ providerId: 'trace-provider', prompt: 'trace' }),
+      (error: any) => {
+        assert.equal(error.transportHttpStatus, 429);
+        assert.equal(error.status, 429);
+        assert.equal(error.requestId, 'request-rate-limit');
+        return true;
+      },
+    );
   } finally {
     globalThis.fetch = oldFetch;
   }

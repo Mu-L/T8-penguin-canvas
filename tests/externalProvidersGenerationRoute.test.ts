@@ -27,7 +27,8 @@ test('external provider generation routes run enabled OpenAI compatible LLM and 
   const upstreamCalls: any[] = [];
   upstreamApp.post('/v1/chat/completions', (req, res) => {
     upstreamCalls.push({ path: req.path, body: req.body, auth: req.header('authorization') });
-    res.json({ choices: [{ message: { content: 'external hello' } }] });
+    res.set('x-request-id', 'req-route-chat');
+    res.json({ choices: [{ message: { content: 'external hello' } }], usage: { prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 } });
   });
   upstreamApp.post('/v1/images/generations', (req, res) => {
     upstreamCalls.push({ path: req.path, body: req.body, auth: req.header('authorization') });
@@ -106,6 +107,10 @@ test('external provider generation routes run enabled OpenAI compatible LLM and 
 
   assert.equal(llm.success, true);
   assert.equal(llm.data.text, 'external hello');
+  assert.equal(llm.data.requestId, 'req-route-chat');
+  assert.equal(llm.data.upstreamHttpStatus, 200);
+  assert.equal(llm.data.pollCount, 0);
+  assert.deepEqual(llm.data.usage, { prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 });
   assert.equal(JSON.stringify(llm).includes('sk-route-secret'), false);
 
   const image = await fetch(`${base}/api/proxy/external/image`, {

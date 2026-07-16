@@ -93,7 +93,7 @@ test('garden defense battle is mounted under the top-right toolbar with Phaser a
 
   assert.match(canvas, /GardenDefenseExperience/);
   assert.match(canvas, /withGardenDefenseNodeVisualState/);
-  assert.match(canvas, /isGardenDefense \? nodes\.map\(withGardenDefenseNodeVisualState\)/);
+  assert.match(canvas, /isGardenDefense\s*\?\s*nodes\.map\(withGardenDefenseNodeVisualState\)/);
   assert.match(experience, /GARDEN_PANEL_COLLAPSED_STORAGE_KEY/);
   assert.match(experience, /t8-garden-defense-panel__toggle/);
   assert.match(experience, /data-garden-panel-state/);

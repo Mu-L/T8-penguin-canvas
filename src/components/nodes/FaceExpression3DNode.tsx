@@ -9,6 +9,7 @@ import { PORT_COLOR } from '../../config/portTypes';
 import { useThemeStore } from '../../stores/theme';
 import { uploadDataUrl, uploadFileBlob } from '../../services/imageOps';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import {
   applyFaceCameraPreset,
   applyFacePreset,
@@ -90,7 +91,7 @@ const FaceExpression3DNode = ({ id, data, selected }: NodeProps) => {
       imageUrls: urls, directImageUrls: urls, urls,
       metadata: faceExpressionMetadata(outputState, last),
       faceExpressionMetadata: faceExpressionMetadata(outputState, last),
-      outputText: `3D 表情图片 ${urls.length} 张 · ${outputState.output.width}×${outputState.output.height}`,
+      outputText: '',
       ...extra,
     });
   };
@@ -245,7 +246,7 @@ const FaceExpression3DNode = ({ id, data, selected }: NodeProps) => {
           <button className="nodrag inline-flex h-9 items-center justify-center gap-1 rounded-md border font-bold disabled:opacity-40" style={{ borderColor: border, background: surface }} onClick={applyUpstreamMetadata} disabled={!upstreamMetadata}><Sparkles size={13} />应用参数</button>
         </div>
         <div className="flex items-center gap-2">
-          <button className="nodrag inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md border-2 border-cyan-400 bg-cyan-400/15 text-[12px] font-black" onClick={() => void runSingle()} disabled={busy}>{busy ? <Loader2 size={15} className="animate-spin" /> : <Camera size={15} />}生成图片</button>
+          <button className="nodrag inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md border-2 border-cyan-400 bg-cyan-400/15 text-[12px] font-black" onClick={() => requestCanvasNodeRun(id)} disabled={busy}>{busy ? <Loader2 size={15} className="animate-spin" /> : <Camera size={15} />}生成图片</button>
           <button className="nodrag inline-flex h-10 w-24 items-center justify-center gap-1 rounded-md border text-[11px] font-bold" style={{ borderColor: border, background: surface }} onClick={() => void runBatch()} disabled={busy}><Layers3 size={14} />批量</button>
           {busy && <button className="nodrag inline-flex h-10 w-10 items-center justify-center rounded-md border border-rose-400/60 text-rose-400" onClick={stop} title="停止"><X size={15} /></button>}
         </div>

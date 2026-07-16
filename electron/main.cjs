@@ -15,7 +15,7 @@ const net = require('net');
 const { spawn } = require('child_process');
 const { fileURLToPath } = require('url');
 
-const APP_VERSION = '2.5.5';
+const APP_VERSION = require('../package.json').version;
 const UPDATE_DISABLED_MESSAGE = '开发模式不会检查 GitHub Release 更新';
 
 // 允许在 Linux/某些机型上规避 GPU 沙盒导致的启动延迟
@@ -1104,6 +1104,18 @@ const PICK_MEDIA_META = new Map([
   ['.mkv', { kind: 'video', mime: 'video/x-matroska' }],
   ['.avi', { kind: 'video', mime: 'video/x-msvideo' }],
   ['.m4v', { kind: 'video', mime: 'video/x-m4v' }],
+  ['.mp3', { kind: 'audio', mime: 'audio/mpeg' }],
+  ['.wav', { kind: 'audio', mime: 'audio/wav' }],
+  ['.ogg', { kind: 'audio', mime: 'audio/ogg' }],
+  ['.m4a', { kind: 'audio', mime: 'audio/mp4' }],
+  ['.flac', { kind: 'audio', mime: 'audio/flac' }],
+  ['.aac', { kind: 'audio', mime: 'audio/aac' }],
+  ['.glb', { kind: 'model3d', mime: 'model/gltf-binary' }],
+  ['.gltf', { kind: 'model3d', mime: 'model/gltf+json' }],
+  ['.obj', { kind: 'model3d', mime: 'model/obj' }],
+  ['.fbx', { kind: 'model3d', mime: 'application/octet-stream' }],
+  ['.stl', { kind: 'model3d', mime: 'model/stl' }],
+  ['.usdz', { kind: 'model3d', mime: 'model/vnd.usdz+zip' }],
 ]);
 
 function dragOutRoots() {
@@ -1158,7 +1170,7 @@ async function pickMediaFiles(options = {}) {
   const requestedKinds = Array.isArray(options.kinds) && options.kinds.length
     ? options.kinds
     : ['image', 'video'];
-  const allowedKinds = new Set(requestedKinds.filter((kind) => kind === 'image' || kind === 'video'));
+  const allowedKinds = new Set(requestedKinds.filter((kind) => ['image', 'video', 'audio', 'model3d'].includes(kind)));
   if (allowedKinds.size === 0) {
     return { success: false, message: '没有可选择的素材类型' };
   }
@@ -1168,7 +1180,7 @@ async function pickMediaFiles(options = {}) {
     : ['openFile', ...(options.multiple === false ? [] : ['multiSelections'])];
   const filters = [
     {
-      name: allowedKinds.has('image') && allowedKinds.has('video') ? '图像 / 视频' : allowedKinds.has('image') ? '图像' : '视频',
+      name: allowedKinds.size > 1 ? '图像 / 视频 / 音频 / 3D' : allowedKinds.has('image') ? '图像' : allowedKinds.has('video') ? '视频' : allowedKinds.has('audio') ? '音频' : '3D 模型',
       extensions: Array.from(PICK_MEDIA_META.entries())
         .filter(([, meta]) => allowedKinds.has(meta.kind))
         .map(([ext]) => ext.replace(/^\./, '')),
@@ -1554,6 +1566,7 @@ async function startBackend() {
   process.env.HOST = '127.0.0.1';
   process.env.T8PC_USER_DATA = getUserDataDir();
   process.env.T8PC_PACKAGED = isPackaged() ? '1' : '0';
+  process.env.T8PC_APP_VERSION = APP_VERSION;
   process.env.T8PC_RES = isPackaged() ? process.resourcesPath : path.resolve(__dirname, '..');
   // 生产模式让 Express 同时托管前端 dist/
   process.env.T8PC_FRONTEND_DIST = isPackaged()
@@ -1743,7 +1756,8 @@ app.whenReady().then(async () => {
   try {
     await startBackend();
     // 等后端真正可访问
-    await waitForBackend(backendPort, 30);
+    const backendReady = await waitForBackend(backendPort, 30);
+    if (!backendReady) throw new Error(`后端未能在端口 ${backendPort} 就绪`);
     createMainWindow();
     setTimeout(() => {
       if (logWindow && !logWindow.isDestroyed()) logWindow.close();

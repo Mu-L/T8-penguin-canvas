@@ -35,6 +35,8 @@ import {
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useHasAutoOutput } from './useHasAutoOutput';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
+import type { RunNodeLifecycleReporter } from '../../types/project';
 import { logBus } from '../../stores/logs';
 import { useThemeStore } from '../../stores/theme';
 import { useUpstreamMaterials, type Material } from './useUpstreamMaterials';
@@ -415,7 +417,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   //   useRunTrigger 认为 runFn 完成 markDone(true)。 但实际任务 videoUrl 还未赋值 → LoopNode awaitNode
   //   立即继续 → extractFromNode 读不到 videoUrl → result=null → failCount++。
   //   修复: 轮询完成才 resolve，handleGenerate await 它，markDone 时机=任务真正结束。
-  const startPolling = (tid: string, runId: number): Promise<void> => {
+  const startPolling = (tid: string, runId: number, reporter?: RunNodeLifecycleReporter): Promise<void> => {
     stopPoll();
     return new Promise<void>((resolve, reject) => {
       pollRejectRef.current = reject;
@@ -446,6 +448,24 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
               : await queryVideo(tid, apiModel);
           const normalizedStatus = String(r.status || '').trim().toUpperCase();
           const currentProgress = String(r.progress ?? '');
+          await reporter?.polling({
+            provider: isWan || isHappyHorse ? 'seedance-nz' : 'zhenzhen',
+            model: apiModel,
+            taskId: tid,
+            recovery: {
+              kind: isWan ? 'wan' : isHappyHorse ? 'happyhorse' : 'video',
+              taskId: tid, model: apiModel, pollIntervalMs: POLL_INT, maxPolls: MAX,
+            },
+            requestId: r.requestId,
+            transportHttpStatus: r.transportHttpStatus,
+            upstreamHttpStatus: r.upstreamHttpStatus,
+            usage: r.usage,
+            httpStatusSource: 'local-backend',
+            pollCount: elapsed,
+            pollLimit: MAX,
+            status: normalizedStatus,
+            progress: currentProgress,
+          });
           if (!isCurrentGenerationRun(runId)) {
             rejectStoppedGeneration(reject);
             return;
@@ -457,7 +477,31 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           if (['SUCCESS', 'SUCCEEDED', 'COMPLETED'].includes(normalizedStatus) && r.videoUrl) {
             pollRejectRef.current = null;
             stopPoll();
-            update({ status: 'success', videoUrl: r.videoUrl, progress: '100%' });
+            update({
+              status: 'success',
+              videoUrl: r.videoUrl,
+              progress: '100%',
+              provider: isWan || isHappyHorse ? 'seedance-nz' : 'zhenzhen',
+              apiModel,
+              taskId: tid,
+              requestId: r.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+            });
+            await reporter?.providerResponse({
+              provider: isWan || isHappyHorse ? 'seedance-nz' : 'zhenzhen',
+              model: apiModel,
+              upstreamTaskId: tid,
+              requestId: r.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+              status: 'succeeded',
+              httpStatusSource: 'local-backend',
+            });
             logBus.success(`任务完成 → ${r.videoUrl}`, src);
             taskCompletionSound.notifyComplete(id, 'video');
             resolve();
@@ -465,6 +509,19 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             pollRejectRef.current = null;
             stopPoll();
             const msg = r.failReason || '生成失败';
+            await reporter?.providerResponse({
+              provider: isWan || isHappyHorse ? 'seedance-nz' : 'zhenzhen',
+              model: apiModel,
+              upstreamTaskId: tid,
+              requestId: r.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+              status: 'failed',
+              error: { message: msg },
+              httpStatusSource: 'local-backend',
+            });
             update({ status: 'error', error: msg });
             setError(msg);
             logBus.error(`生成失败: ${msg}`, src);
@@ -488,7 +545,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   const falPollRef = useRef<{ responseUrl?: string; endpoint?: string; requestId?: string } | null>(null);
 
   // v1.2.9.11: 同样改造为 Promise（理由同 startPolling）
-  const startFalPolling = (runId: number): Promise<void> => {
+  const startFalPolling = (runId: number, reporter?: RunNodeLifecycleReporter): Promise<void> => {
     stopPoll();
     return new Promise<void>((resolve, reject) => {
       pollRejectRef.current = reject;
@@ -512,6 +569,27 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         }
         try {
           const r = await queryVideoFal(falPollRef.current!);
+          await reporter?.polling({
+            provider: 'fal',
+            model: apiModel,
+            requestId: falPollRef.current?.requestId || null,
+            recovery: {
+              kind: 'video-fal',
+              requestId: falPollRef.current?.requestId || null,
+              responseUrl: falPollRef.current?.responseUrl,
+              endpoint: falPollRef.current?.endpoint,
+              model: apiModel,
+              pollIntervalMs: POLL_INT,
+              maxPolls: MAX,
+            },
+            transportHttpStatus: r.transportHttpStatus,
+            upstreamHttpStatus: r.upstreamHttpStatus,
+            usage: r.usage,
+            httpStatusSource: 'local-backend',
+            pollCount: elapsed,
+            pollLimit: MAX,
+            status: r.status,
+          });
           if (!isCurrentGenerationRun(runId)) {
             rejectStoppedGeneration(reject);
             return;
@@ -520,7 +598,29 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           if (r.status === 'completed' && r.videoUrl) {
             pollRejectRef.current = null;
             stopPoll();
-            update({ status: 'success', videoUrl: r.videoUrl, progress: '100%' });
+            update({
+              status: 'success',
+              videoUrl: r.videoUrl,
+              progress: '100%',
+              provider: 'fal',
+              apiModel,
+              requestId: r.requestId || falPollRef.current?.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+            });
+            await reporter?.providerResponse({
+              provider: 'fal',
+              model: apiModel,
+              requestId: r.requestId || falPollRef.current?.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+              status: 'succeeded',
+              httpStatusSource: 'local-backend',
+            });
             logBus.success(`FAL 视频完成 → ${r.videoUrl}`, src);
             taskCompletionSound.notifyComplete(id, 'video');
             resolve();
@@ -528,6 +628,18 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             pollRejectRef.current = null;
             stopPoll();
             const msg = r.error || 'FAL 生成失败';
+            await reporter?.providerResponse({
+              provider: 'fal',
+              model: apiModel,
+              requestId: r.requestId || falPollRef.current?.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+              status: 'failed',
+              error: { message: msg },
+              httpStatusSource: 'local-backend',
+            });
             update({ status: 'error', error: msg });
             setError(msg);
             logBus.error(`FAL 生成失败: ${msg}`, src);
@@ -546,7 +658,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     });
   };
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (reporter?: RunNodeLifecycleReporter) => {
     setError(null);
     const { prompt: upstreamPrompt, imageUrls, videoUrls, audioUrls } = collectUpstream();
     const resolvedLocalPrompt = resolveMediaMentions(localPrompt, promptMentions, mentionMaterials);
@@ -579,6 +691,15 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     const runId = nextGenerationRun();
     cancelActivePoll();
     falPollRef.current = null;
+    const traceProvider = isExternalSelected && providerSelection.provider
+      ? providerSelection.provider.id
+      : isFal
+        ? 'fal'
+        : isWan || isHappyHorse
+          ? 'seedance-nz'
+          : 'zhenzhen';
+    const traceModel = isExternalSelected && providerSelection.provider ? externalProviderModel : apiModel;
+    await reporter?.providerRequest({ provider: traceProvider, model: traceModel });
     taskCompletionSound.primeAudio();
     update({ status: 'submitting', error: null, videoUrl: null, taskId: null });
     try {
@@ -613,12 +734,41 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         if (!isCurrentGenerationRun(runId)) return;
         const nextVideoUrl = r.videoUrls[0];
         if (!nextVideoUrl) throw new Error('扩展平台没有返回视频。');
+        if (r.taskId || r.requestId) {
+          await reporter?.providerSubmitted({
+            provider: traceProvider,
+            model: traceModel,
+            upstreamTaskId: r.taskId,
+            requestId: r.requestId,
+            transportHttpStatus: r.transportHttpStatus,
+            upstreamHttpStatus: r.upstreamHttpStatus,
+            usage: r.usage,
+            httpStatusSource: 'local-backend',
+          });
+        }
+        await reporter?.providerResponse({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: r.taskId,
+          requestId: r.requestId,
+          transportHttpStatus: r.transportHttpStatus,
+          upstreamHttpStatus: r.upstreamHttpStatus,
+          usage: r.usage,
+          status: 'succeeded',
+          httpStatusSource: 'local-backend',
+        });
         update({
           status: 'success',
           videoUrl: nextVideoUrl,
           videoUrls: r.videoUrls,
           remoteVideoUrls: r.remoteVideoUrls,
           taskId: r.taskId || null,
+          provider: traceProvider,
+          apiModel: traceModel,
+          requestId: r.requestId,
+          transportHttpStatus: r.transportHttpStatus,
+          upstreamHttpStatus: r.upstreamHttpStatus,
+          usage: r.usage,
           lastPrompt: finalPrompt,
           progress: '100%',
         });
@@ -645,9 +795,19 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           seed: wanSeed,
         });
         if (!isCurrentGenerationRun(runId)) return;
+        await reporter?.providerSubmitted({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: result.taskId,
+          requestId: result.requestId,
+          transportHttpStatus: result.transportHttpStatus,
+          upstreamHttpStatus: result.upstreamHttpStatus,
+          usage: result.usage,
+          httpStatusSource: 'local-backend',
+        });
         update({ status: 'polling', taskId: result.taskId, lastPrompt: finalPrompt, progress: '0%' });
         logBus.info(`Wan 2.7 Spicy 任务 ${result.taskId} 已提交，开始轮询`, src);
-        await startPolling(result.taskId, runId);
+        await startPolling(result.taskId, runId, reporter);
         return;
       }
 
@@ -668,9 +828,19 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           images: happyImages.length ? happyImages : undefined,
         });
         if (!isCurrentGenerationRun(runId)) return;
+        await reporter?.providerSubmitted({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: result.taskId,
+          requestId: result.requestId,
+          transportHttpStatus: result.transportHttpStatus,
+          upstreamHttpStatus: result.upstreamHttpStatus,
+          usage: result.usage,
+          httpStatusSource: 'local-backend',
+        });
         update({ status: 'polling', taskId: result.taskId, lastPrompt: finalPrompt, progress: '0%' });
         logBus.info(`Happy Horse 任务 ${result.taskId} 已提交，开始轮询`, src);
-        await startPolling(result.taskId, runId);
+        await startPolling(result.taskId, runId, reporter);
         return;
       }
 
@@ -745,15 +915,45 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         const r = await submitVideoFal(falReq);
         if (!isCurrentGenerationRun(runId)) return;
         if (r.sync && r.videoUrl) {
-          update({ status: 'success', videoUrl: r.videoUrl, lastPrompt: finalPrompt, progress: '100%' });
+          await reporter?.providerResponse({
+            provider: traceProvider,
+            model: traceModel,
+            requestId: r.requestId,
+            transportHttpStatus: r.transportHttpStatus,
+            upstreamHttpStatus: r.upstreamHttpStatus,
+            usage: r.usage,
+            status: 'succeeded',
+            httpStatusSource: 'local-backend',
+          });
+          update({
+            status: 'success',
+            videoUrl: r.videoUrl,
+            lastPrompt: finalPrompt,
+            progress: '100%',
+            provider: traceProvider,
+            apiModel: traceModel,
+            requestId: r.requestId,
+            transportHttpStatus: r.transportHttpStatus,
+            upstreamHttpStatus: r.upstreamHttpStatus,
+            usage: r.usage,
+          });
           logBus.success(`FAL 同步完成 → ${r.videoUrl}`, src);
           taskCompletionSound.notifyComplete(id, 'video');
         } else {
           falPollRef.current = { responseUrl: r.responseUrl, endpoint: r.endpoint, requestId: r.requestId };
+          await reporter?.providerSubmitted({
+            provider: traceProvider,
+            model: traceModel,
+            requestId: r.requestId,
+            transportHttpStatus: r.transportHttpStatus,
+            upstreamHttpStatus: r.upstreamHttpStatus,
+            usage: r.usage,
+            httpStatusSource: 'local-backend',
+          });
           update({ status: 'polling', lastPrompt: finalPrompt, progress: '15%' });
           logBus.info(`FAL 异步任务 requestId=${r.requestId} 进入轮询…`, src);
           // v1.2.9.11: await 让 useRunTrigger 等到任务真正完成才 markDone
-          await startFalPolling(runId);
+          await startFalPolling(runId, reporter);
         }
         return;
       }
@@ -825,13 +1025,33 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
 
       const r = await submitVideo(payload);
       if (!isCurrentGenerationRun(runId)) return;
+      await reporter?.providerSubmitted({
+        provider: traceProvider,
+        model: traceModel,
+        upstreamTaskId: r.taskId,
+        requestId: r.requestId,
+        transportHttpStatus: r.transportHttpStatus,
+        upstreamHttpStatus: r.upstreamHttpStatus,
+        usage: r.usage,
+        httpStatusSource: 'local-backend',
+      });
       update({ status: 'polling', taskId: r.taskId, lastPrompt: finalPrompt, progress: '0%' });
       logBus.info(`异步任务已提交 taskId=${r.taskId} 进入轮询…`, src);
       // v1.2.9.11: await 让 useRunTrigger 等到任务真正完成才 markDone
-      await startPolling(r.taskId, runId);
+      await startPolling(r.taskId, runId, reporter);
     } catch (e: any) {
       if (!isCurrentGenerationRun(runId)) return;
       const msg = e?.message || '提交失败';
+      await reporter?.providerResponse({
+        provider: traceProvider,
+        model: traceModel,
+        transportHttpStatus: e?.transportHttpStatus,
+        upstreamHttpStatus: e?.upstreamHttpStatus,
+        requestId: e?.requestId,
+        status: 'failed',
+        error: { message: msg, code: e?.code },
+        httpStatusSource: 'local-backend',
+      });
       setError(msg);
       update({ status: 'error', error: msg });
       logBus.error(`提交失败: ${msg}`, src);
@@ -848,10 +1068,10 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   };
 
   // 批量运行接入
-  useRunTrigger(id, async () => {
+  useRunTrigger(id, async (reporter) => {
     if (status === 'submitting' || status === 'polling') return;
-    await handleGenerate();
-  }, 'video');
+    await handleGenerate(reporter);
+  }, 'video', { lifecycleAware: true });
 
   // === 跨节点拖拽: source (输出视频可拖出) ===
   const startDrag = useDragMaterialStore((s) => s.start);
@@ -1641,7 +1861,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
 
         {!isBusy ? (
           <button
-            onClick={handleGenerate}
+            onClick={() => requestCanvasNodeRun(id)}
             className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 text-xs font-medium transition-colors"
           >
             <Sparkles size={12} /> 生成视频

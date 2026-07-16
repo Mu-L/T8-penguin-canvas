@@ -1,5 +1,5 @@
 import { memo, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, useReactFlow, type NodeProps } from '@xyflow/react';
 import {
   AlertCircle,
   Braces,
@@ -22,6 +22,7 @@ import { LLM_MODELS } from '../../providers/models';
 import { PORT_COLOR } from '../../config/portTypes';
 import { useApiKeysStore } from '../../stores/apiKeys';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { createCanvasNodeRunRequestId, requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { openLocalPath, openOutputFolder } from '../../services/imageOps';
 import {
   advancedProviderModelOptions,
@@ -49,6 +50,7 @@ import { useUpstreamMaterials } from './useUpstreamMaterials';
 import { useUpdateNodeData } from './useUpdateNodeData';
 
 type BatchTagStatus = 'pending' | 'running' | 'success' | 'error' | 'skipped';
+type BatchTagRunMode = 'all' | 'retry-failed';
 
 interface BatchTagItem {
   id: string;
@@ -313,6 +315,7 @@ function FieldLabel({ children }: { children: ReactNode }) {
 }
 
 function BatchTaggerNode({ id, data, selected }: NodeProps) {
+  const rf = useReactFlow();
   const update = useUpdateNodeData(id);
   const d = (data || {}) as any;
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -738,9 +741,29 @@ function BatchTaggerNode({ id, data, selected }: NodeProps) {
     update({ status: 'idle', batchTagNotice: '正在停止本地队列...' });
   };
 
-  useRunTrigger(id, async () => {
-    if (!running) await runBatch(false);
-  }, 'batch-tagger');
+  const requestBatchTagRun = (runMode: BatchTagRunMode) => {
+    if (running) return;
+    const requestId = runMode === 'retry-failed'
+      ? createCanvasNodeRunRequestId(id, 'batch-tag-retry')
+      : '';
+    update({ batchTagRunMode: runMode, batchTagRunRequestId: requestId });
+    // Canvas must snapshot the persisted intent, not the click handler's stale
+    // render, so publish it before dispatching the preflight request.
+    window.requestAnimationFrame(() => requestCanvasNodeRun(id, requestId ? { requestId } : {}));
+  };
+
+  useRunTrigger(id, async (reporter) => {
+    if (running) return;
+    const liveData = rf.getNode(id)?.data as Record<string, unknown> | undefined;
+    const retryOnly = Boolean(reporter.runContext?.requestId)
+      && reporter.runContext?.requestId === liveData?.batchTagRunRequestId
+      && liveData?.batchTagRunMode === 'retry-failed';
+    try {
+      await runBatch(retryOnly);
+    } finally {
+      update({ batchTagRunMode: 'all', batchTagRunRequestId: '' });
+    }
+  }, 'batch-tagger', { lifecycleAware: true });
 
   const resultItems = allItems.filter((item) => item.status === 'success' || item.status === 'error');
   const previewItem = [...allItems].reverse().find((item) => item.status === 'success') || resultItems[0] || allItems[0];
@@ -970,12 +993,12 @@ function BatchTaggerNode({ id, data, selected }: NodeProps) {
                 停止
               </button>
             ) : (
-              <button type="button" className="t8-btn t8-btn-primary px-3 py-2 text-sm" onClick={() => void runBatch(false)} disabled={!allItems.length || busy}>
+              <button type="button" className="t8-btn t8-btn-primary px-3 py-2 text-sm" onClick={() => requestBatchTagRun('all')} disabled={!allItems.length || busy}>
                 <Play size={14} />
                 开始打标
               </button>
             )}
-            <button type="button" className="t8-btn px-3 py-2 text-sm" onClick={() => void runBatch(true)} disabled={running || progress.fail === 0}>
+            <button type="button" className="t8-btn px-3 py-2 text-sm" onClick={() => requestBatchTagRun('retry-failed')} disabled={running || progress.fail === 0}>
               <RotateCcw size={14} />
               重试失败
             </button>

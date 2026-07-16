@@ -14,6 +14,7 @@ import {
   upsertArtistStyleInLibrary,
 } from '../src/utils/artistStyleMaster.ts';
 import { ARTIST_STYLE_MASTER_ITEMS } from '../src/data/artistStyleMasterManifest.ts';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 function read(rel: string) {
   return readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -22,20 +23,32 @@ function read(rel: string) {
 test('artist style master is registered in the Inspiration category', () => {
   const types = read('../src/types/canvas.ts');
   const registry = read('../src/config/nodeRegistry.ts');
-  const ports = read('../src/config/portTypes.ts');
   const canvas = read('../src/components/Canvas.tsx');
+  const node = read('../src/components/nodes/ArtistStyleMasterNode.tsx');
   const sidebar = read('../src/components/Sidebar.tsx');
   const placement = read('../src/utils/nodePlacement.ts');
   const features = read('../features.json');
 
   assert.match(types, /'artist-style-master'/);
   assert.match(types, /'inspiration'/);
-  assert.match(registry, /type:\s*'artist-style-master'[\s\S]*label:\s*'艺术风格大师'[\s\S]*category:\s*'inspiration'/);
+  assertProductionNodeSchema('artist-style-master', {
+    label: '艺术风格大师',
+    category: 'inspiration',
+    inputs: ['text'],
+    outputs: ['text', 'image'],
+    executable: true,
+  });
   assert.match(registry, /inspiration:\s*\{\s*label:\s*'灵感之源'/);
-  assert.match(ports, /'artist-style-master':\s*\{\s*inputs:\s*\['text'\],\s*outputs:\s*\['text', 'image'\]/);
   assert.match(canvas, /ArtistStyleMasterNode/);
   assert.match(canvas, /import\('\.\/nodes\/ArtistStyleMasterNode'\)/);
   assert.match(canvas, /'artist-style-master': ArtistStyleMasterNode/);
+  assert.match(node, /import \{ requestCanvasNodeRun \} from '\.\.\/\.\.\/utils\/canvasRunRequest';/);
+  assert.equal(node.match(/requestCanvasNodeRun\(id\)/g)?.length, 1);
+  assert.match(node, /onClick=\{\(\) => requestArtistStyleRun\('prompt'\)\}/);
+  assert.match(node, /onClick=\{\(\) => requestArtistStyleRun\('image'\)\}/);
+  assert.match(node, /artistStyleOutputMode: mode,[\s\S]*?requestCanvasNodeRun\(id\);/);
+  assert.match(node, /liveData\?\.artistStyleOutputMode === 'image'[\s\S]*?runArtistStyleOutput\(mode\)/);
+  assert.doesNotMatch(node, /void runArtistStyleOutput\(/);
   assert.match(sidebar, /'artist-style-master': 'Palette'/);
   assert.match(placement, /'artist-style-master':\s*\{\s*w:\s*480,\s*h:\s*620\s*\}/);
   assert.match(features, /artistStyleMasterNode/);
@@ -201,8 +214,8 @@ test('artist style master frontend keeps gallery and theme readability hooks', (
   assert.match(node, /打开艺术风格库/);
   assert.match(node, /输出风格提示词/);
   assert.match(node, /输出风格图片/);
-  assert.match(node, /runArtistStyleOutput\('prompt'\)/);
-  assert.match(node, /runArtistStyleOutput\('image'\)/);
+  assert.match(node, /requestArtistStyleRun\('prompt'\)/);
+  assert.match(node, /requestArtistStyleRun\('image'\)/);
   assert.match(node, /保存到艺术风格大师/);
   assert.match(node, /新增分类/);
   assert.match(node, /重命名分类/);

@@ -14,6 +14,7 @@ import {
   type BatchTagMode,
   type BatchTagMediaKind,
 } from '../src/utils/batchTagger.ts';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 const require = createRequire(import.meta.url);
 
@@ -193,11 +194,8 @@ test('batch tagger recommends ModelScope Qwen3-VL 235B for visual tagging', () =
 });
 
 test('batch tagger node is registered as an image/video toolbox node with UI and feature metadata', () => {
-  const registry = read('src/config/nodeRegistry.ts');
-  const ports = read('src/config/portTypes.ts');
   const types = read('src/types/canvas.ts');
   const canvas = read('src/components/Canvas.tsx');
-  const actionBar = read('src/components/NodeActionBar.tsx');
   const loop = read('src/components/nodes/LoopNode.tsx');
   const placement = read('src/utils/nodePlacement.ts');
   const server = read('backend/src/server.js');
@@ -211,14 +209,18 @@ test('batch tagger node is registered as an image/video toolbox node with UI and
   const viteEnv = read('src/vite-env.d.ts');
   const styles = read('src/styles/index.css');
 
-  assert.match(registry, /type:\s*'batch-tagger'[\s\S]*label:\s*'批量打标'[\s\S]*category:\s*'toolbox'/);
-  assert.match(ports, /'batch-tagger':\s*\{\s*inputs:\s*\['image',\s*'video',\s*'text'\],\s*outputs:\s*\['text',\s*'metadata'\]\s*\}/);
+  assertProductionNodeSchema('batch-tagger', {
+    label: '批量打标',
+    category: 'toolbox',
+    inputs: ['image', 'video', 'text'],
+    outputs: ['text', 'metadata'],
+    executable: true,
+  });
   assert.match(types, /\|\s*'batch-tagger'/);
   assert.match(canvas, /const BatchTaggerNode = lazyCanvasNode\(\(\) => import\('\.\/nodes\/BatchTaggerNode'\)/);
   assert.match(canvas, /'batch-tagger':\s*BatchTaggerNode/);
   assert.match(canvas, /'batch-tagger':\s*\{[\s\S]*batchTagMode:\s*'tags'[\s\S]*batchTagFormats:\s*\['txt'\]/);
-  assert.match(actionBar, /'batch-tagger'/);
-  assert.match(loop, /'aggregate-parser',\s*'batch-processor',\s*'batch-tagger'/);
+  assert.match(loop, /EXECUTABLE_NODE_TYPES\.has\(n\.type as string\)/);
   assert.match(placement, /'batch-tagger':\s*\{\s*w:\s*720,\s*h:\s*620\s*\}/);
   assert.match(server, /batchTagsRouter/);
   assert.match(postBuild, /routes',\s*'batchTags\.t8c'/);
@@ -612,19 +614,31 @@ test('batch tagger saves sidecars beside source files placed at a drive root wit
 test('batch tagger local import preserves native source path and opens the actual saved directory', async () => {
   const express = require('express');
   const batchTagsRoute = require('../backend/src/routes/batchTags.js');
-  const filesRouter = require('../backend/src/routes/files.js');
   const config = require('../backend/src/config.js');
   const oldConfig = {
+    DATA_DIR: config.DATA_DIR,
     INPUT_DIR: config.INPUT_DIR,
     OUTPUT_DIR: config.OUTPUT_DIR,
+    THUMBNAILS_DIR: config.THUMBNAILS_DIR,
+    PROJECT_DB_FILE: config.PROJECT_DB_FILE,
+    PROJECT_DB_BACKUP_FILE: config.PROJECT_DB_BACKUP_FILE,
   };
   const root = mkdtempSync(join(tmpdir(), 't8-batch-tags-import-'));
+  let projectDatabase: any = null;
   try {
+    config.DATA_DIR = join(root, 'data');
     config.INPUT_DIR = join(root, 'input');
     config.OUTPUT_DIR = join(root, 'output');
+    config.THUMBNAILS_DIR = join(root, 'thumbnails');
+    config.PROJECT_DB_FILE = join(config.DATA_DIR, 't8-projects.sqlite3');
+    config.PROJECT_DB_BACKUP_FILE = join(config.DATA_DIR, 't8-projects.sqlite3.backup');
+    const filesRouter = require('../backend/src/routes/files.js');
+    projectDatabase = require('../backend/src/services/projectDatabase.js').getProjectDatabase(config);
     const sourceDir = join(root, '工作流(2)');
+    mkdirSync(config.DATA_DIR, { recursive: true });
     mkdirSync(config.INPUT_DIR, { recursive: true });
     mkdirSync(config.OUTPUT_DIR, { recursive: true });
+    mkdirSync(config.THUMBNAILS_DIR, { recursive: true });
     mkdirSync(sourceDir, { recursive: true });
     const sourcePath = join(sourceDir, 'ComfyUI_00006_fhrxf_1782377039.png');
     writeFileSync(sourcePath, 'fake image bytes');
@@ -690,8 +704,16 @@ test('batch tagger local import preserves native source path and opens the actua
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   } finally {
+    if (projectDatabase) {
+      try { await projectDatabase.createBackup(); } catch {}
+      try { projectDatabase.close(); } catch {}
+    }
+    config.DATA_DIR = oldConfig.DATA_DIR;
     config.INPUT_DIR = oldConfig.INPUT_DIR;
     config.OUTPUT_DIR = oldConfig.OUTPUT_DIR;
+    config.THUMBNAILS_DIR = oldConfig.THUMBNAILS_DIR;
+    config.PROJECT_DB_FILE = oldConfig.PROJECT_DB_FILE;
+    config.PROJECT_DB_BACKUP_FILE = oldConfig.PROJECT_DB_BACKUP_FILE;
     rmSync(root, { recursive: true, force: true });
   }
 });

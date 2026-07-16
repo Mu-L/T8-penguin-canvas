@@ -1170,6 +1170,19 @@ function seedreamNzProgress(value, fallback = '0%') {
   return /^\d+(?:\.\d+)?$/.test(text) ? `${text}%` : text;
 }
 
+function seedanceNzTrace(value = {}) {
+  const requestId = String(value?.requestId || '').trim();
+  const upstreamHttpStatus = Number(value?.upstreamHttpStatus);
+  const pollCount = value?.pollCount === undefined ? undefined : Math.max(0, Math.trunc(Number(value.pollCount) || 0));
+  const usage = value?.usage && typeof value.usage === 'object' && !Array.isArray(value.usage) ? value.usage : undefined;
+  return {
+    ...(requestId ? { requestId } : {}),
+    ...(Number.isInteger(upstreamHttpStatus) && upstreamHttpStatus >= 100 && upstreamHttpStatus <= 599 ? { upstreamHttpStatus } : {}),
+    ...(pollCount !== undefined ? { pollCount } : {}),
+    ...(usage ? { usage } : {}),
+  };
+}
+
 // seedance.nz Seedream uses a dedicated async protocol. Keep this route
 // isolated from the existing zhenzhen /v1/images/generations implementation.
 router.post('/image/seedance-nz/submit', async (req, res) => {
@@ -1195,6 +1208,7 @@ router.post('/image/seedance-nz/submit', async (req, res) => {
         model: result.model,
         taskProvider: 'seedance-nz-image',
         raw: result.raw,
+        ...seedanceNzTrace(result),
       },
     });
   } catch (error) {
@@ -1203,6 +1217,7 @@ router.post('/image/seedance-nz/submit', async (req, res) => {
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
       error: error?.message || 'seedance.nz Seedream 请求失败',
+      ...seedanceNzTrace(error),
     });
   }
 });
@@ -1218,7 +1233,7 @@ router.get('/image/seedance-nz/status/:tid', async (req, res) => {
     const result = await seedanceNz.queryImageTask(req.params.tid, apiKey);
     if (result.status === 'succeeded') {
       if (!result.imageUrl) {
-        return res.status(502).json({ success: false, error: 'Seedream 任务成功但未返回图片 URL', raw: result.raw });
+        return res.status(502).json({ success: false, error: 'Seedream 任务成功但未返回图片 URL', raw: result.raw, ...seedanceNzTrace(result) });
       }
       const localUrl = await saveRemoteImage(result.imageUrl, seedanceNz.fetchRemote);
       return res.json({
@@ -1229,6 +1244,7 @@ router.get('/image/seedance-nz/status/:tid', async (req, res) => {
           urls: [localUrl],
           remoteUrls: [result.imageUrl],
           raw: result.raw,
+          ...seedanceNzTrace(result),
         },
       });
     }
@@ -1240,6 +1256,7 @@ router.get('/image/seedance-nz/status/:tid', async (req, res) => {
           progress: seedreamNzProgress(result.progress, '100%'),
           error: result.failReason || 'Seedream 任务失败',
           raw: result.raw,
+          ...seedanceNzTrace(result),
         },
       });
     }
@@ -1249,6 +1266,7 @@ router.get('/image/seedance-nz/status/:tid', async (req, res) => {
         status: result.status,
         progress: seedreamNzProgress(result.progress),
         raw: result.raw,
+        ...seedanceNzTrace(result),
       },
     });
   } catch (error) {
@@ -1257,6 +1275,7 @@ router.get('/image/seedance-nz/status/:tid', async (req, res) => {
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
       error: error?.message || 'seedance.nz Seedream 查询失败',
+      ...seedanceNzTrace(error),
     });
   }
 });
@@ -1281,6 +1300,7 @@ router.post('/video/happyhorse/submit', async (req, res) => {
         model: result.model,
         taskType: result.taskType,
         raw: result.raw,
+        ...seedanceNzTrace(result),
       },
     });
   } catch (error) {
@@ -1289,6 +1309,7 @@ router.post('/video/happyhorse/submit', async (req, res) => {
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
       error: error?.message || 'Happy Horse 请求失败',
+      ...seedanceNzTrace(error),
     });
   }
 });
@@ -1314,6 +1335,7 @@ router.get('/video/happyhorse/status/:tid', async (req, res) => {
         model: remembered?.model || '',
         taskType: remembered?.taskType || '',
         raw: result.raw,
+        ...seedanceNzTrace(result),
       },
     });
   } catch (error) {
@@ -1322,6 +1344,7 @@ router.get('/video/happyhorse/status/:tid', async (req, res) => {
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
       error: error?.message || 'Happy Horse 查询失败',
+      ...seedanceNzTrace(error),
     });
   }
 });
@@ -1346,6 +1369,7 @@ router.post('/video/wan/submit', async (req, res) => {
         model: result.model,
         taskType: result.taskType,
         raw: result.raw,
+        ...seedanceNzTrace(result),
       },
     });
   } catch (error) {
@@ -1354,6 +1378,7 @@ router.post('/video/wan/submit', async (req, res) => {
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
       error: error?.message || 'Wan 2.7 Spicy 请求失败',
+      ...seedanceNzTrace(error),
     });
   }
 });
@@ -1379,6 +1404,7 @@ router.get('/video/wan/status/:tid', async (req, res) => {
         model: remembered?.model || '',
         taskType: remembered?.taskType || '',
         raw: result.raw,
+        ...seedanceNzTrace(result),
       },
     });
   } catch (error) {
@@ -1387,6 +1413,7 @@ router.get('/video/wan/status/:tid', async (req, res) => {
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
       error: error?.message || 'Wan 2.7 Spicy 查询失败',
+      ...seedanceNzTrace(error),
     });
   }
 });
@@ -1403,13 +1430,14 @@ router.post('/audio/seed-audio/submit', async (req, res) => {
       provider: 'seed-audio-nz',
       model: result.model,
     });
-    return res.json({ success: true, data: { taskId: result.taskId, model: result.model, raw: result.raw } });
+    return res.json({ success: true, data: { taskId: result.taskId, model: result.model, raw: result.raw, ...seedanceNzTrace(result) } });
   } catch (error) {
     const status = Number(error?.status || 500);
     console.error('proxy/audio/seed-audio/submit 错误:', error?.message || error);
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
       error: error?.message || 'Seed Audio 请求失败',
+      ...seedanceNzTrace(error),
     });
   }
 });
@@ -1433,6 +1461,7 @@ router.get('/audio/seed-audio/status/:tid', async (req, res) => {
         failReason: result.failReason,
         model: remembered?.model || '',
         raw: result.raw,
+        ...seedanceNzTrace(result),
       },
     });
   } catch (error) {
@@ -1441,6 +1470,7 @@ router.get('/audio/seed-audio/status/:tid', async (req, res) => {
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
       error: error?.message || 'Seed Audio 查询失败',
+      ...seedanceNzTrace(error),
     });
   }
 });
@@ -3368,12 +3398,13 @@ router.post('/seedance/submit', async (req, res) => {
           model: result.model,
           taskType: result.taskType,
           raw: result.raw,
+          ...seedanceNzTrace(result),
         },
       });
     } catch (e) {
       console.error('proxy/seedance/submit seedance.nz 错误:', e?.message || e);
       const status = Number(e?.status);
-      return res.status(status >= 400 && status < 600 ? status : 500).json({ success: false, error: e?.message || 'seedance.nz 请求失败' });
+      return res.status(status >= 400 && status < 600 ? status : 500).json({ success: false, error: e?.message || 'seedance.nz 请求失败', ...seedanceNzTrace(e) });
     }
   }
 
@@ -3519,7 +3550,7 @@ router.get('/seedance/query', async (req, res) => {
     } catch (e) {
       console.error('proxy/seedance/query seedance.nz 错误:', e?.message || e);
       const status = Number(e?.status);
-      return res.status(status >= 400 && status < 600 ? status : 500).json({ success: false, error: e?.message || 'seedance.nz 查询失败' });
+      return res.status(status >= 400 && status < 600 ? status : 500).json({ success: false, error: e?.message || 'seedance.nz 查询失败', ...seedanceNzTrace(e) });
     }
   }
 

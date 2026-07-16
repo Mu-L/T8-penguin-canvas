@@ -22,18 +22,23 @@ import {
   sanitizeDirectorStoryboardShots,
   type DirectorStoryboardJob,
 } from '../src/utils/directorStoryboard.ts';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 
 test('director storyboard node is registered as a visible Seedance orchestration node', () => {
-  const registry = read('../src/config/nodeRegistry.ts');
-  const ports = read('../src/config/portTypes.ts');
   const types = read('../src/types/canvas.ts');
   const canvas = read('../src/components/Canvas.tsx');
+  const node = read('../src/components/nodes/DirectorStoryboardNode.tsx');
   const features = read('../features.json');
 
-  assert.match(registry, /type:\s*'director-storyboard'[\s\S]*label:\s*'导演分镜台'[\s\S]*category:\s*'core'/);
-  assert.match(ports, /'director-storyboard':\s*\{\s*inputs:\s*\['text', 'image', 'video', 'audio'\],\s*outputs:\s*\['video', 'text'\]\s*\}/);
+  assertProductionNodeSchema('director-storyboard', {
+    label: '导演分镜台',
+    category: 'core',
+    inputs: ['text', 'image', 'video', 'audio'],
+    outputs: ['video', 'text'],
+    executable: true,
+  });
   assert.match(types, /\|\s*'director-storyboard'/);
   assert.match(canvas, /const DirectorStoryboardNode = lazyCanvasNode\(\(\) => import\('\.\/nodes\/DirectorStoryboardNode'\), 'DirectorStoryboardNode'\)/);
   assert.match(canvas, /'director-storyboard': DirectorStoryboardNode/);
@@ -41,6 +46,16 @@ test('director storyboard node is registered as a visible Seedance orchestration
   assert.match(canvas, /directorBridgePanelEnabled:\s*false/);
   assert.match(canvas, /bridgeEnabled:\s*false/);
   assert.match(canvas, /directorBridgePromptPresets:\s*\[\]/);
+  assert.match(node, /import \{[^}]*\brequestCanvasNodeRun\b[^}]*\} from '\.\.\/\.\.\/utils\/canvasRunRequest';/);
+  assert.match(node, /const requestStoryboardRun = \(mode: DirectorStoryboardRunMode, targetId = ''\) =>/);
+  assert.match(node, /directorStoryboardRunMode: mode,[\s\S]*directorStoryboardRunTargetId: normalizedTargetId,[\s\S]*directorStoryboardRunRequestId: requestId/);
+  assert.match(node, /requestCanvasNodeRun\(id, \{ requestId \}\)/);
+  assert.match(node, /useRunTrigger\(id, async \(reporter\) => \{[\s\S]*const contextRequestId = String\(reporter\.runContext\?\.requestId/);
+  assert.match(node, /contextRequestId !== persistedRequestId[\s\S]*throw new Error\('导演分镜运行请求已变化或失效，已拒绝执行。'\)/);
+  assert.doesNotMatch(node, /onClick=\{\(\) => runStoryboard\(\)\}/);
+  assert.doesNotMatch(node, /onClick=\{\(\) => runStoryboard\(activeShot\.id\)\}/);
+  assert.match(node, /onClick=\{\(\) => requestStoryboardRun\('shot', activeShot\.id\)\}/);
+  assert.match(node, /onClick=\{\(\) => requestStoryboardRun\('all'\)\}/);
   assert.match(features, /director-storyboard/);
 });
 
@@ -694,22 +709,55 @@ test('director storyboard auto output uses ordered videoUrls and skips standalon
 test('director storyboard bridge generation is per-pair and refresh can recover completed task ids', () => {
   const node = read('../src/components/nodes/DirectorStoryboardNode.tsx');
 
-  assert.doesNotMatch(node, /const runBridge = async \(bridgeId\?: string\) => \{\s*if \(isBusy\) return;/);
+  assert.match(node, /const runBridge = async \(bridgeId\?: string, reporter\?: RunNodeLifecycleReporter\) =>/);
   assert.match(node, /const bridgeAbortRefs = useRef<Map<string, AbortController>>\(new Map\(\)\)/);
   assert.match(node, /const isBridgeBusy = \(bridge\?: DirectorStoryboardBridge \| null\)/);
   assert.match(node, /disabled=\{isActiveBridgeBusy\}/);
   assert.match(node, /bridgeAbortRefs\.current\.set\(bridgeIdFromJob, controller\)/);
   assert.match(node, /bridgeAbortRefs\.current\.forEach\(\(controller\) => controller\.abort\(\)\)/);
   assert.match(node, /const syncBridgeResultFromState = \(bridge: DirectorStoryboardBridge, job: DirectorStoryboardJob\): boolean =>/);
-  assert.match(node, /const refreshStoryboardOutputs = async \(options: \{ bridgeId\?: string \} = \{\}\) =>/);
+  assert.match(node, /const refreshStoryboardOutputs = async \(\s*options: \{ bridgeId\?: string \} = \{\},\s*reporter\?: RunNodeLifecycleReporter/);
   assert.match(node, /const targetJobId = targetBridgeId \? `bridge-\$\{targetBridgeId\}` : ''/);
   assert.match(node, /syncBridgeResultFromState\(bridge, job\)/);
-  assert.match(node, /querySeedance\(result\.taskId, result\.taskProvider \|\| undefined\)/);
+  assert.match(node, /querySeedance\(result\.taskId, taskProvider\)/);
   assert.match(node, /filter\(\(\[, result\]\) => result\?\.taskId && !result\.videoUrl\)/);
   assert.match(node, /patchBridge\(bridgeIdFromJob, \{[\s\S]*status: 'success',[\s\S]*videoUrl: query\.videoUrl/);
+  assert.match(node, /reporter\?\.providerRequest\(baseTrace\)[\s\S]*reporter\?\.providerPolling\([\s\S]*reporter\?\.providerResponse/);
+  assert.match(node, /submitSeedance\(job\.payload\)[\s\S]*reporter\?\.providerSubmitted\([\s\S]*reporter\?\.providerPolling\(pollingTrace\)/);
+  assert.match(node, /catch \(error: any\) \{[\s\S]*reporter\?\.providerResponse\(\{[\s\S]*status: signal\?\.aborted \? 'cancelled' : 'failed'/);
+  assert.match(node, /runDirectorStoryboardJobs\(plan, \(job, signal\) => pollJob\(job, signal, reporter\)/);
+  assert.match(node, /throw new Error\(message\)/);
   assert.match(node, /activeBridgeResult\.taskId[\s\S]*activeBridge\.taskId[\s\S]*activeBridgeResult\.videoUrl[\s\S]*activeBridge\.videoUrl/);
   assert.match(node, /const isActiveBridgeLocallyPolling = bridgeAbortRefs\.current\.has\(activeBridge\.id\)/);
   assert.match(node, /disabled=\{!canRefreshActiveBridgeOutput \|\| isActiveBridgeLocallyPolling\}/);
-  assert.match(node, /refreshStoryboardOutputs\(\{ bridgeId: activeBridge\.id \}\)/);
+  assert.match(node, /requestStoryboardRun\('refresh-bridge-one', activeBridge\.id\)/);
   assert.match(node, /重新获取桥接/);
+});
+
+test('director storyboard bridge and refresh actions use one exact request-bound lifecycle dispatcher', () => {
+  const node = read('../src/components/nodes/DirectorStoryboardNode.tsx');
+
+  assert.equal((node.match(/useRunTrigger\(id,/g) || []).length, 1);
+  assert.match(node, /type DirectorStoryboardRunMode =[\s\S]*'bridge-one'[\s\S]*'bridge-all'[\s\S]*'refresh-bridge-one'[\s\S]*'refresh-all'/);
+  assert.match(node, /const requestId = createCanvasNodeRunRequestId\(id, DIRECTOR_STORYBOARD_RUN_PURPOSE\[mode\]\)/);
+  assert.match(node, /directorStoryboardRunTargetId: normalizedTargetId/);
+  assert.match(node, /const persistedRequestId = String\(liveData\?\.directorStoryboardRunRequestId/);
+  assert.match(node, /const requestedTargetId = String\(liveData\?\.directorStoryboardRunTargetId/);
+  assert.match(node, /if \(!persistedRequestId\) \{\s*await runStoryboard\(undefined, reporter\);\s*return;\s*\}/);
+  assert.match(node, /case 'bridge-one':[\s\S]*await runBridge\(requestedTargetId, reporter\)/);
+  assert.match(node, /case 'bridge-all':[\s\S]*await runBridge\(undefined, reporter\)/);
+  assert.match(node, /case 'refresh-bridge-one':[\s\S]*await refreshStoryboardOutputs\(\{ bridgeId: requestedTargetId \}, reporter\)/);
+  assert.match(node, /case 'refresh-all':[\s\S]*await refreshStoryboardOutputs\(\{\}, reporter\)/);
+  assert.match(node, /latestData\?\.directorStoryboardRunRequestId === contextRequestId[\s\S]*directorStoryboardRunTargetId: ''/);
+
+  assert.doesNotMatch(node, /onClick=\{[^}]*\brunBridge\s*\(/);
+  assert.doesNotMatch(node, /onClick=\{[^}]*\brefreshStoryboardOutputs\s*\(/);
+  assert.match(node, /requestStoryboardRun\('bridge-one', activeBridge\.id\)/);
+  assert.match(node, /requestStoryboardRun\('bridge-all'\)/);
+  assert.match(node, /requestStoryboardRun\('refresh-bridge-one', activeBridge\.id\)/);
+  assert.match(node, /requestStoryboardRun\('refresh-all'\)/);
+
+  assert.match(node, /refreshable\.length === 0[\s\S]*throw new Error\(message\)/);
+  assert.match(node, /controller\.signal\.aborted \|\| failed\.length > 0[\s\S]*throw new Error\(message\)/);
+  assert.match(node, /refreshErrors\.length > 0[\s\S]*throw new Error\(message\)/);
 });

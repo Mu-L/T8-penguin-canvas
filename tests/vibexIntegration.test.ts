@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 function projectFile(file: string) {
   return path.resolve(process.cwd(), file);
@@ -34,14 +35,14 @@ test('VibeX integration has a dedicated bridge contract and node registration', 
   const types = read('src/types/canvas.ts');
   assert.match(types, /\|\s*['"]vibex['"]/, 'NodeType must include vibex');
 
-  const registry = read('src/config/nodeRegistry.ts');
-  assert.match(registry, /type:\s*['"]vibex['"]/);
-  assert.match(registry, /label:\s*['"]VibeX工作台['"]/);
-  assert.match(registry, /icon:\s*['"]Clapperboard['"]/);
-
-  const ports = read('src/config/portTypes.ts');
-  assert.match(ports, /vibex:\s*\{\s*inputs:\s*\[\s*['"]text['"],\s*['"]image['"],\s*['"]video['"],\s*['"]audio['"]\s*\]/s);
-  assert.match(ports, /vibex:\s*\{[\s\S]*outputs:\s*\[\s*['"]text['"],\s*['"]image['"],\s*['"]video['"],\s*['"]audio['"]\s*\]/);
+  assertProductionNodeSchema('vibex', {
+    label: 'VibeX工作台',
+    category: 'rh',
+    inputs: ['text', 'image', 'video', 'audio'],
+    outputs: ['text', 'image', 'video', 'audio'],
+    executable: false,
+    icon: 'Clapperboard',
+  });
 });
 
 test('Canvas exposes VibeX as a toolbar workflow, canvas node, and postMessage receiver', () => {

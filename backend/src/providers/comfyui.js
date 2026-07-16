@@ -5,6 +5,7 @@ const {
   resolveMediaRef,
 } = require('./mediaResolver');
 const { isAllowedComfyuiUrl } = require('./comfyuiAccess');
+const { mergeProviderTrace, providerTrace } = require('./providerTrace');
 
 const DEFAULT_TIMEOUT_MS = 5000;
 const GENERATION_TIMEOUT_MS = 60 * 60 * 1000;
@@ -833,6 +834,7 @@ async function pollHistory(baseUrl, promptId, options = {}) {
   const minMaxPoll = Math.ceil(GENERATION_TIMEOUT_MS / Math.max(1, interval));
   const maxPoll = Math.max(requestedMaxPoll, minMaxPoll);
   let lastRaw = null;
+  let trace = {};
   for (let i = 0; i < maxPoll; i += 1) {
     if (i > 0 && interval > 0) await new Promise((resolve) => setTimeout(resolve, interval));
     const res = await fetchWithTimeout(`${baseUrl}/history/${encodeURIComponent(promptId)}`, {
@@ -842,23 +844,31 @@ async function pollHistory(baseUrl, promptId, options = {}) {
     });
     const raw = await responseJson(res);
     lastRaw = raw;
-    if (!res.ok) throw new Error(`ComfyUI history 查询失败：HTTP ${res.status}`);
+    trace = mergeProviderTrace(trace, providerTrace(res, raw, { pollCount: i + 1 }));
+    if (!res.ok) {
+      const error = new Error(`ComfyUI history 查询失败：HTTP ${res.status}`);
+      Object.assign(error, trace);
+      throw error;
+    }
     const outputs = collectComfyOutputs(raw, promptId, baseUrl);
     if (outputs.imageUrls.length || outputs.videoUrls.length || outputs.audioUrls.length || outputs.text) {
-      return { raw, ...outputs };
+      return { raw, ...outputs, ...trace };
     }
     const statusSource = raw?.[promptId] || raw?.data?.[promptId] || raw?.data || raw;
     const status = extractStatus(statusSource);
-    if (SUCCESS_STATUSES.has(status)) return { raw, ...outputs };
+    if (SUCCESS_STATUSES.has(status)) return { raw, ...outputs, ...trace };
     if (FAILURE_STATUSES.has(status)) {
       const classified = classifyComfyUiError(raw, 'ComfyUI 工作流执行失败。');
       const error = new Error(classified.error);
       error.code = classified.code;
       error.raw = raw;
+      Object.assign(error, trace);
       throw error;
     }
   }
-  throw new Error(`ComfyUI 工作流超时：${JSON.stringify(lastRaw || promptId).slice(0, 500)}`);
+  const error = new Error(`ComfyUI 工作流超时：${JSON.stringify(lastRaw || promptId).slice(0, 500)}`);
+  Object.assign(error, trace, { pollCount: maxPoll });
+  throw error;
 }
 
 async function generateImage(provider, input = {}, options = {}) {
@@ -885,6 +895,7 @@ async function generateImage(provider, input = {}, options = {}) {
     return { ok: false, code: 'invalid_workflow', providerId: provider.id, protocol: 'comfyui', error: 'ComfyUI 工作流 JSON 无效。' };
   }
 
+  let trace = {};
   try {
     const res = await fetchWithTimeout(`${baseUrl}/prompt`, {
       method: 'POST',
@@ -894,18 +905,20 @@ async function generateImage(provider, input = {}, options = {}) {
       fetchImpl: options.fetchImpl,
     });
     const raw = await responseJson(res);
+    trace = providerTrace(res, raw, { pollCount: 0 });
     if (!res.ok) {
       const classified = classifyComfyUiError(raw, `ComfyUI 提交失败：HTTP ${res.status}`);
-      return { ok: false, code: classified.code, providerId: provider.id, protocol: 'comfyui', error: classified.error, raw };
+      return { ok: false, code: classified.code, providerId: provider.id, protocol: 'comfyui', model: workflow.id || workflow.name, error: classified.error, raw, ...trace };
     }
     const promptId = extractPromptId(raw);
     if (!promptId) {
-      return { ok: false, code: 'missing_prompt_id', providerId: provider.id, protocol: 'comfyui', error: 'ComfyUI 未返回 prompt_id。', raw };
+      return { ok: false, code: 'missing_prompt_id', providerId: provider.id, protocol: 'comfyui', model: workflow.id || workflow.name, error: 'ComfyUI 未返回 prompt_id。', raw, ...trace };
     }
     const polled = await pollHistory(baseUrl, promptId, options);
+    trace = mergeProviderTrace(trace, polled);
     const outputKinds = outputKindsForResult(polled);
     if (!outputKinds.length) {
-      return { ok: false, code: 'empty_output', providerId: provider.id, protocol: 'comfyui', error: 'ComfyUI 工作流完成但没有返回图片、视频、音频或文本。', raw: polled.raw };
+      return { ok: false, code: 'empty_output', providerId: provider.id, protocol: 'comfyui', model: workflow.id || workflow.name, taskId: promptId, error: 'ComfyUI 工作流完成但没有返回图片、视频、音频或文本。', raw: polled.raw, ...trace };
     }
     const primaryKind = outputKinds[0];
     return {
@@ -923,10 +936,11 @@ async function generateImage(provider, input = {}, options = {}) {
       audioUrls: polled.audioUrls,
       text: polled.text,
       raw: polled.raw,
+      ...trace,
     };
   } catch (e) {
     const classified = classifyComfyUiError(e?.raw || e, e?.message || 'ComfyUI 调用失败。');
-    return { ok: false, code: e?.code || classified.code, providerId: provider.id, protocol: 'comfyui', error: classified.error };
+    return { ok: false, code: e?.code || classified.code, providerId: provider.id, protocol: 'comfyui', model: workflow.id || workflow.name, error: classified.error, ...mergeProviderTrace(trace, e) };
   }
 }
 

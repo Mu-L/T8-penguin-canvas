@@ -4,6 +4,33 @@ import fs, { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+
+const originalAssertMatch = assert.match.bind(assert);
+function makeSourceContractWildcardLazy(source: string) {
+  const token = '[\\s\\S]*';
+  let cursor = 0;
+  let output = '';
+  while (true) {
+    const index = source.indexOf(token, cursor);
+    if (index < 0) return output + source.slice(cursor);
+    output += source.slice(cursor, index) + token;
+    cursor = index + token.length;
+    if (source[cursor] !== '?') output += '?';
+  }
+}
+
+// Source-contract assertions only require ordered fragments to exist. Greedy
+// whole-file wildcards become prohibitively expensive as Canvas.tsx grows, so
+// make those wildcards lazy without changing the accepted ordering contract.
+Object.defineProperty(assert, 'match', {
+  configurable: true,
+  value(actual: string, expected: RegExp, message?: string) {
+    const optimized = expected.source.includes('[\\s\\S]*')
+      ? new RegExp(makeSourceContractWildcardLazy(expected.source), expected.flags)
+      : expected;
+    return originalAssertMatch(actual, optimized, message);
+  },
+});
 import {
   BASE_FARM_DAILY_WATER,
   FARM_ANIMAL_DEFINITIONS,
@@ -1843,9 +1870,11 @@ test('farm canvas types are wired into CanvasData, Canvas persistence, import, a
   assert.match(types, /selectedObjectId\?: string/);
   assert.match(types, /farmCanvas\?: FarmCanvasState/);
   assert.match(canvas, /import \{[\s\S]*FARM_BUILDING_DEFINITIONS[\s\S]*FARM_DECOR_DEFINITIONS[\s\S]*createFarmState[\s\S]*sanitizeFarmCanvasState[\s\S]*type FarmToolAction[\s\S]*\} from '\.\.\/utils\/farmCanvas'/);
-  assert.match(canvas, /farmCanvas,\s*setFarmCanvas/);
-  assert.match(canvas, /const nextFarmCanvas = pendingSave\?\.farmCanvas \|\| sanitizeFarmCanvasState\(data\.farmCanvas\)/);
-  assert.match(canvas, /snapshot = JSON\.stringify\(\{ nodes: persistNodes, edges: persistEdges, creativeDesk, farmCanvas, nextNodeSerialId \}\)/);
+  assert.match(canvas, /const \[farmCanvas, rawSetFarmCanvas\] = useState<FarmCanvasState>/);
+  assert.match(canvas, /const setFarmCanvas = useCallback\([\s\S]{0,420}?rawSetFarmCanvas\(next\.value\)/);
+  assert.match(canvas, /const authoritativeFarmCanvas = sanitizeFarmCanvasState\(data\.farmCanvas\)/);
+  assert.match(canvas, /let renderedState = authoritativeState;[\s\S]{0,900}?mergeConcurrentCanvasPatchState\(existingPending\.baseSnapshot, existingPending, authoritativeState\)/);
+  assert.match(canvas, /function persistableCanvasPatchStateFromParts\([\s\S]{0,900}?snapshot: JSON\.stringify\(\{ nodes: persistNodes, edges: persistEdges, creativeDesk, farmCanvas, nextNodeSerialId \}\)/);
   assert.match(canvas, new RegExp('pay' + 'load = \\{ nodes: persistNodes, edges: persistEdges, viewport: getViewport\\(\\), nextNodeSerialId, creativeDesk, farmCanvas \\}'));
   assert.match(canvas, /farmCanvas: sanitizeFarmCanvasState\(data\.farmCanvas\)/);
   assert.match(canvas, /setFarmCanvas\(sanitizeFarmCanvasState\(source\.farmCanvas\)\)/);

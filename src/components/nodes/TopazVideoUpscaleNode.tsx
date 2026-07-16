@@ -15,6 +15,7 @@ import {
 import { getTopazStatus, runTopazVideo, type TopazStatus } from '../../services/topaz';
 import { fileNameFromUrl, getMediaItemsFromData, type MediaItem } from '../../utils/mediaCollection';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useHasAutoOutput } from './useHasAutoOutput';
 import LoopingVideo from '../LoopingVideo';
@@ -365,7 +366,7 @@ function TopazVideoUpscaleNode({ id, data, selected }: { id: string; data: any; 
           </div>
         )}
 
-        <button type="button" className="t8-btn t8-btn-primary w-full px-3 py-2 text-sm" onClick={handleRun} disabled={statusText === 'running'}>
+        <button type="button" className="t8-btn t8-btn-primary w-full px-3 py-2 text-sm" onClick={() => requestCanvasNodeRun(id)} disabled={statusText === 'running'}>
           {statusText === 'running' ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
           {statusText === 'running' ? '处理中...' : '运行视频高清化'}
         </button>

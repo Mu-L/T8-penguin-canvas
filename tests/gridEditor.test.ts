@@ -1,16 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 const loadGridEditorUtils = async () => import('../src/utils/gridEditor.ts');
 
 test('grid editor node is registered as a visible image-to-image utility node', () => {
-  const registry = readFileSync(new URL('../src/config/nodeRegistry.ts', import.meta.url), 'utf8');
-  const ports = readFileSync(new URL('../src/config/portTypes.ts', import.meta.url), 'utf8');
   const types = readFileSync(new URL('../src/types/canvas.ts', import.meta.url), 'utf8');
 
-  assert.match(registry, /type:\s*'grid-editor'[\s\S]*label:\s*'宫格编辑'[\s\S]*category:\s*'utility'/);
-  assert.match(ports, /'grid-editor':\s*\{\s*inputs:\s*\['image'\],\s*outputs:\s*\['image'\]\s*\}/);
+  assertProductionNodeSchema('grid-editor', {
+    label: '宫格编辑',
+    category: 'utility',
+    inputs: ['image'],
+    outputs: ['image'],
+    executable: true,
+  });
   assert.match(types, /\|\s*'grid-editor'/);
 });
 

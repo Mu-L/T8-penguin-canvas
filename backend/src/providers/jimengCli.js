@@ -5,6 +5,7 @@ const os = require('os');
 const { spawn, spawnSync } = require('child_process');
 const config = require('../config');
 const { mediaRefToAbsoluteUrl, resolveMediaRef, mimeFromPath } = require('./mediaResolver');
+const { providerTrace } = require('./providerTrace');
 
 function cleanExecutablePath(provider) {
   return String(provider?.jimengConfig?.executablePath || '').trim();
@@ -655,8 +656,10 @@ async function materializeOutputs(raw, kind, options = {}) {
   return urls;
 }
 
-async function storeOutputs(raw, kind, provider, options = {}) {
+async function storeOutputs(raw, kind, provider, options = {}, tracker = {}) {
   const startedAt = Date.now();
+  tracker.pollCount = 0;
+  tracker.lastRaw = raw;
   let urls = await materializeOutputs(raw, kind, options);
   if (urls.length) return urls;
   const id = submitId(raw);
@@ -672,8 +675,10 @@ async function storeOutputs(raw, kind, provider, options = {}) {
   let lastStatus = '';
   let lastFailure = '';
   do {
+    tracker.pollCount += 1;
     const queried = await queryResult(provider, id, kind, options);
     lastRaw = queried;
+    tracker.lastRaw = queried;
     lastStatus = String(queried?.gen_status || queried?.status || '').trim();
     lastFailure = failureReason(queried);
     if (lastFailure) throw new Error(`即梦生成失败：${lastFailure}`);
@@ -723,6 +728,7 @@ async function generateImage(provider, input = {}, options = {}) {
   const args = [];
   const tempPaths = [];
   const mediaOptions = { ...options, tempPaths };
+  const tracker = { pollCount: 0, lastRaw: null };
   try {
     if (refs.length) {
       const refPath = await resolveLocalMedia(refs[0], 'image', provider, mediaOptions);
@@ -736,10 +742,13 @@ async function generateImage(provider, input = {}, options = {}) {
     if (generateNum > 1) args.push(`--generate_num=${generateNum}`);
     args.push(`--resolution_type=${imageResolution(model, input.size || '1024x1024')}`, `--poll=${pollSeconds(provider)}`);
     const raw = await runCli(provider, args, options, 120);
-    const imageUrls = await storeOutputs(raw, 'image', provider, options);
-    return { ok: true, kind: 'image', code: 'completed', providerId: provider.id, protocol: 'jimeng-cli', model, imageUrls, taskId: submitId(raw), raw };
+    tracker.lastRaw = raw;
+    const imageUrls = await storeOutputs(raw, 'image', provider, options, tracker);
+    const finalRaw = tracker.lastRaw || raw;
+    return { ok: true, kind: 'image', code: 'completed', providerId: provider.id, protocol: 'jimeng-cli', model, imageUrls, taskId: submitId(raw), raw: finalRaw, ...providerTrace(null, finalRaw, { pollCount: tracker.pollCount }) };
   } catch (e) {
-    return { ok: false, code: 'cli_failed', providerId: provider.id, protocol: 'jimeng-cli', error: e?.message || '即梦 CLI 调用失败。' };
+    const finalRaw = tracker.lastRaw;
+    return { ok: false, code: 'cli_failed', providerId: provider.id, protocol: 'jimeng-cli', model, taskId: submitId(finalRaw), error: e?.message || '即梦 CLI 调用失败。', ...providerTrace(null, finalRaw, { pollCount: tracker.pollCount }) };
   } finally {
     cleanupTempPaths(tempPaths);
   }
@@ -758,6 +767,7 @@ async function generateVideo(provider, input = {}, options = {}) {
   const mode = videoMode(input);
   const tempPaths = [];
   const mediaOptions = { ...options, tempPaths };
+  const tracker = { pollCount: 0, lastRaw: null };
   try {
     if (videos.length || audios.length || (mode === 'omni' && refs.length)) {
       const imagePaths = await resolveLocalMediaList(refs.slice(0, 9), 'image', provider, mediaOptions);
@@ -800,10 +810,13 @@ async function generateVideo(provider, input = {}, options = {}) {
     }
     args.push(`--poll=${pollSeconds(provider)}`);
     const raw = await runCli(provider, args, options, 180);
-    const videoUrls = await storeOutputs(raw, 'video', provider, options);
-    return { ok: true, kind: 'video', code: 'completed', providerId: provider.id, protocol: 'jimeng-cli', model, videoUrls, taskId: submitId(raw), raw };
+    tracker.lastRaw = raw;
+    const videoUrls = await storeOutputs(raw, 'video', provider, options, tracker);
+    const finalRaw = tracker.lastRaw || raw;
+    return { ok: true, kind: 'video', code: 'completed', providerId: provider.id, protocol: 'jimeng-cli', model, videoUrls, taskId: submitId(raw), raw: finalRaw, ...providerTrace(null, finalRaw, { pollCount: tracker.pollCount }) };
   } catch (e) {
-    return { ok: false, code: 'cli_failed', providerId: provider.id, protocol: 'jimeng-cli', error: e?.message || '即梦 CLI 调用失败。' };
+    const finalRaw = tracker.lastRaw;
+    return { ok: false, code: 'cli_failed', providerId: provider.id, protocol: 'jimeng-cli', model, taskId: submitId(finalRaw), error: e?.message || '即梦 CLI 调用失败。', ...providerTrace(null, finalRaw, { pollCount: tracker.pollCount }) };
   } finally {
     cleanupTempPaths(tempPaths);
   }

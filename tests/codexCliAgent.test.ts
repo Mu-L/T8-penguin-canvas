@@ -4,6 +4,7 @@ import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, utimesSync
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 const require = createRequire(import.meta.url);
 
@@ -22,7 +23,6 @@ function readOptional(rel: string) {
 test('Codex CLI Agent is registered as a creator-facing canvas node', () => {
   const types = read('../src/types/canvas.ts');
   const registry = read('../src/config/nodeRegistry.ts');
-  const ports = read('../src/config/portTypes.ts');
   const canvas = read('../src/components/Canvas.tsx');
   const sidebar = read('../src/components/Sidebar.tsx');
   const features = read('../features.json');
@@ -30,9 +30,14 @@ test('Codex CLI Agent is registered as a creator-facing canvas node', () => {
 
   assert.match(types, /'codex-cli-agent'/);
   assert.match(types, /'codex'/);
-  assert.match(registry, /type:\s*'codex-cli-agent'[\s\S]*label:\s*'Codex CLI Agent'[\s\S]*category:\s*'codex'/);
+  assertProductionNodeSchema('codex-cli-agent', {
+    label: 'Codex CLI Agent',
+    category: 'codex',
+    inputs: ['text', 'image', 'video', 'audio'],
+    outputs: ['text', 'image', 'video', 'audio', 'model3d'],
+    executable: true,
+  });
   assert.match(registry, /codex:\s*\{\s*label:\s*'CODEX CLI'/);
-  assert.match(ports, /'codex-cli-agent':\s*\{\s*inputs:\s*\['text', 'image', 'video', 'audio'\],\s*outputs:\s*\['text', 'image', 'video', 'audio', 'model3d'\]/);
   assert.match(canvas, /CodexCliAgentNode/);
   assert.match(canvas, /import\('\.\/nodes\/CodexCliAgentNode'\)/);
   assert.match(canvas, /'codex-cli-agent': CodexCliAgentNode/);

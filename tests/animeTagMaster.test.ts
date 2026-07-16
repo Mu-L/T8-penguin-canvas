@@ -34,6 +34,7 @@ import {
   upsertAnimeTagInLibrary,
 } from '../src/utils/animeTagMaster.ts';
 import { ANIME_TAG_MASTER_CATEGORIES, ANIME_TAG_MASTER_ITEMS } from '../src/data/animeTagMasterManifest.ts';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 const require = createRequire(import.meta.url);
 const animeTagsRoute = require('../backend/src/routes/animeTags.js');
@@ -44,9 +45,8 @@ function read(rel: string) {
 
 test('anime tag master is registered in the Inspiration category', () => {
   const types = read('../src/types/canvas.ts');
-  const registry = read('../src/config/nodeRegistry.ts');
-  const ports = read('../src/config/portTypes.ts');
   const canvas = read('../src/components/Canvas.tsx');
+  const node = read('../src/components/nodes/AnimeTagMasterNode.tsx');
   const sidebar = read('../src/components/Sidebar.tsx');
   const placement = read('../src/utils/nodePlacement.ts');
   const server = read('../backend/src/server.js');
@@ -54,11 +54,23 @@ test('anime tag master is registered in the Inspiration category', () => {
   const features = read('../features.json');
 
   assert.match(types, /'anime-tag-master'/);
-  assert.match(registry, /type:\s*'anime-tag-master'[\s\S]*label:\s*'动漫标签大师'[\s\S]*category:\s*'inspiration'/);
-  assert.match(ports, /'anime-tag-master':\s*\{\s*inputs:\s*\['text', 'image'\],\s*outputs:\s*\['text', 'image'\]/);
+  assertProductionNodeSchema('anime-tag-master', {
+    label: '动漫标签大师',
+    category: 'inspiration',
+    inputs: ['text', 'image'],
+    outputs: ['text', 'image'],
+    executable: true,
+  });
   assert.match(canvas, /AnimeTagMasterNode/);
   assert.match(canvas, /import\('\.\/nodes\/AnimeTagMasterNode'\)/);
   assert.match(canvas, /'anime-tag-master': AnimeTagMasterNode/);
+  assert.match(node, /import \{ requestCanvasNodeRun \} from '\.\.\/\.\.\/utils\/canvasRunRequest';/);
+  assert.equal(node.match(/requestCanvasNodeRun\(id\)/g)?.length, 1);
+  assert.match(node, /onClick=\{\(\) => requestAnimeTagRun\('tags'\)\}/);
+  assert.match(node, /onClick=\{\(\) => requestAnimeTagRun\('image'\)\}/);
+  assert.match(node, /animeTagOutputMode: mode,[\s\S]*?requestCanvasNodeRun\(id\);/);
+  assert.match(node, /liveData\?\.animeTagOutputMode === 'image'[\s\S]*?runAnimeTagOutput\(mode\)/);
+  assert.doesNotMatch(node, /void runAnimeTagOutput\(/);
   assert.match(sidebar, /'anime-tag-master': 'Tags'/);
   assert.match(placement, /'anime-tag-master':\s*\{\s*w:\s*500,\s*h:\s*660\s*\}/);
   assert.match(server, /animeTagsRouter/);
@@ -514,8 +526,8 @@ test('anime tag master frontend keeps compact scrolling, lightbox and theme hook
   assert.doesNotMatch(node, /setCategory\(items\[0\]\.categoryId\)/);
   assert.match(node, /输出标签/);
   assert.match(node, /输出图像/);
-  assert.match(node, /runAnimeTagOutput\('tags'\)/);
-  assert.match(node, /runAnimeTagOutput\('image'\)/);
+  assert.match(node, /requestAnimeTagRun\('tags'\)/);
+  assert.match(node, /requestAnimeTagRun\('image'\)/);
   assert.match(node, /新增分类/);
   assert.match(node, /删除分类/);
   assert.match(node, /导入/);

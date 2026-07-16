@@ -5,6 +5,7 @@ const tls = require('tls');
 const { Agent, fetch: undiciFetch } = require('undici');
 const config = require('../config');
 const { mimeFromPath, resolveMediaRef } = require('./mediaResolver');
+const { providerTrace } = require('./providerTrace');
 
 const PROVIDER_ID = 'seedance-nz';
 const BASE_URL = config.ZHENZHEN_SD2_BASE_URL;
@@ -269,9 +270,12 @@ function upstreamError(data, status) {
   );
 }
 
-function createUpstreamError(data, status) {
+function createUpstreamError(data, responseOrStatus) {
+  const response = responseOrStatus && typeof responseOrStatus === 'object' ? responseOrStatus : null;
+  const status = Number(response?.status ?? responseOrStatus);
   const error = new Error(upstreamError(data, status));
   error.status = status;
+  Object.assign(error, providerTrace(response, data));
   return error;
 }
 
@@ -378,7 +382,7 @@ async function uploadMedia(source, kind, apiKey, options = {}) {
         });
         const data = await responseJson(response, 'seedance.nz 文件上传');
         if (!response.ok) {
-          throw createUpstreamError(data, response.status);
+          throw createUpstreamError(data, response);
         }
         const url = uploadUrlFromResponse(data);
         if (!url) throw new Error('seedance.nz 文件上传成功但未返回 URL');
@@ -628,10 +632,10 @@ async function submitHappyHorseTask(request, apiKey, options = {}) {
     body: JSON.stringify(built.payload),
   });
   const data = await responseJson(response, 'seedance.nz Happy Horse 任务提交');
-  if (!response.ok) throw createUpstreamError(data, response.status);
+  if (!response.ok) throw createUpstreamError(data, response);
   const taskId = String(data?.id || data?.task_id || data?.data?.id || '').trim();
   if (!taskId) throw new Error('seedance.nz Happy Horse 未返回任务 ID');
-  return { taskId, model: built.model, taskType: built.taskType, raw: data };
+  return { taskId, model: built.model, taskType: built.taskType, raw: data, ...providerTrace(response, data, { pollCount: 0 }) };
 }
 
 async function submitWanTask(request, apiKey, options = {}) {
@@ -648,10 +652,10 @@ async function submitWanTask(request, apiKey, options = {}) {
     body: JSON.stringify(built.payload),
   });
   const data = await responseJson(response, 'seedance.nz Wan 2.7 Spicy 任务提交');
-  if (!response.ok) throw createUpstreamError(data, response.status);
+  if (!response.ok) throw createUpstreamError(data, response);
   const taskId = String(data?.id || data?.task_id || data?.data?.id || '').trim();
   if (!taskId) throw new Error('seedance.nz Wan 2.7 Spicy 未返回任务 ID');
-  return { taskId, model: built.model, taskType: built.taskType, raw: data };
+  return { taskId, model: built.model, taskType: built.taskType, raw: data, ...providerTrace(response, data, { pollCount: 0 }) };
 }
 
 async function buildAudioPayload(request, apiKey, options = {}) {
@@ -712,10 +716,10 @@ async function submitAudioTask(request, apiKey, options = {}) {
     body: JSON.stringify(built.payload),
   });
   const data = await responseJson(response, 'seedance.nz Seed Audio 任务提交');
-  if (!response.ok) throw createUpstreamError(data, response.status);
+  if (!response.ok) throw createUpstreamError(data, response);
   const taskId = String(data?.task_id || data?.id || data?.data?.task_id || '').trim();
   if (!taskId) throw new Error('seedance.nz Seed Audio 未返回任务 ID');
-  return { taskId, model: built.model, raw: data };
+  return { taskId, model: built.model, raw: data, ...providerTrace(response, data, { pollCount: 0 }) };
 }
 
 async function queryAudioTask(taskId, apiKey, options = {}) {
@@ -726,7 +730,7 @@ async function queryAudioTask(taskId, apiKey, options = {}) {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
   const data = await responseJson(response, 'seedance.nz Seed Audio 任务查询');
-  if (!response.ok) throw createUpstreamError(data, response.status);
+  if (!response.ok) throw createUpstreamError(data, response);
   const record = data?.data && typeof data.data === 'object' ? data.data : data;
   const status = normalizeImageTaskStatus(record?.status || data?.status);
   const nested = record?.data && typeof record.data === 'object' ? record.data : {};
@@ -742,6 +746,7 @@ async function queryAudioTask(taskId, apiKey, options = {}) {
       ? String(record?.fail_reason || record?.error?.message || record?.error || data?.message || 'Seed Audio 任务失败')
       : null,
     raw: data,
+    ...providerTrace(response, data),
   };
 }
 
@@ -759,10 +764,10 @@ async function submitImageTask(request, apiKey, options = {}) {
     body: JSON.stringify(built.payload),
   });
   const data = await responseJson(response, 'seedance.nz Seedream 任务提交');
-  if (!response.ok) throw createUpstreamError(data, response.status);
+  if (!response.ok) throw createUpstreamError(data, response);
   const taskId = String(data?.task_id || data?.id || data?.data?.task_id || data?.data?.id || '').trim();
   if (!taskId) throw new Error('seedance.nz Seedream 未返回任务 ID');
-  return { taskId, model: built.model, taskType: built.taskType, raw: data };
+  return { taskId, model: built.model, taskType: built.taskType, raw: data, ...providerTrace(response, data, { pollCount: 0 }) };
 }
 
 function normalizeImageTaskStatus(value) {
@@ -781,7 +786,7 @@ async function queryImageTask(taskId, apiKey, options = {}) {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
   const data = await responseJson(response, 'seedance.nz Seedream 任务查询');
-  if (!response.ok) throw createUpstreamError(data, response.status);
+  if (!response.ok) throw createUpstreamError(data, response);
   const record = data?.data && typeof data.data === 'object' ? data.data : data;
   const status = normalizeImageTaskStatus(record?.status || data?.status);
   const nested = record?.data && typeof record.data === 'object' ? record.data : {};
@@ -796,6 +801,7 @@ async function queryImageTask(taskId, apiKey, options = {}) {
       ? String(record?.fail_reason || record?.error?.message || record?.error || data?.message || 'Seedream 任务失败')
       : null,
     raw: data,
+    ...providerTrace(response, data),
   };
 }
 
@@ -813,10 +819,10 @@ async function submitTask(request, apiKey, options = {}) {
     body: JSON.stringify(built.payload),
   });
   const data = await responseJson(response, 'seedance.nz 任务提交');
-  if (!response.ok) throw createUpstreamError(data, response.status);
+  if (!response.ok) throw createUpstreamError(data, response);
   const taskId = String(data?.id || data?.task_id || data?.data?.id || '').trim();
   if (!taskId) throw new Error('seedance.nz 未返回任务 ID');
-  return { taskId, taskType: built.taskType, model: built.model, raw: data };
+  return { taskId, taskType: built.taskType, model: built.model, raw: data, ...providerTrace(response, data, { pollCount: 0 }) };
 }
 
 function normalizeStatus(value) {
@@ -835,7 +841,7 @@ async function queryTask(taskId, apiKey, options = {}) {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
   const data = await responseJson(response, 'seedance.nz 任务查询');
-  if (!response.ok) throw createUpstreamError(data, response.status);
+  if (!response.ok) throw createUpstreamError(data, response);
   const status = normalizeStatus(data?.status || data?.data?.status);
   const metadata = data?.metadata || data?.data?.metadata || {};
   return {
@@ -848,6 +854,7 @@ async function queryTask(taskId, apiKey, options = {}) {
       ? String(data?.error?.message || data?.error || data?.fail_reason || data?.message || '任务失败')
       : null,
     raw: data,
+    ...providerTrace(response, data),
   };
 }
 

@@ -11,6 +11,8 @@ import {
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useHasAutoOutput } from './useHasAutoOutput';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
+import type { RunNodeLifecycleReporter } from '../../types/project';
 import { logBus } from '../../stores/logs';
 import { useThemeStore } from '../../stores/theme';
 import { useUpstreamMaterials, type Material } from './useUpstreamMaterials';
@@ -292,6 +294,7 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
     tid: string,
     runId: number,
     taskProvider?: Exclude<SeedanceTaskProvider, 'auto'>,
+    reporter?: RunNodeLifecycleReporter,
   ): Promise<void> => {
     stopPoll();
     return new Promise<void>((resolve, reject) => {
@@ -323,6 +326,20 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
           }
           // 进度条估算 (对齐主项目: 30 + a*65/max)
           const pct = Math.min(95, Math.round(30 + (elapsed * 65) / MAX));
+          await reporter?.polling({
+            provider: r.taskProvider || taskProvider || effectiveTaskProvider,
+            model: r.model || builtinModel,
+            taskId: tid,
+            requestId: r.requestId,
+            transportHttpStatus: r.transportHttpStatus,
+            upstreamHttpStatus: r.upstreamHttpStatus,
+            usage: r.usage,
+            httpStatusSource: 'local-backend',
+            pollCount: elapsed,
+            pollLimit: MAX,
+            status: r.status,
+            progress: r.progress || `${pct}%`,
+          });
           if (r.progress && r.progress !== lastProgress) {
             lastProgress = r.progress;
             logBus.debug(`[${elapsed}/${MAX}] status=${r.status} progress=${r.progress}`, src);
@@ -339,6 +356,23 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
               taskProvider: r.taskProvider || taskProvider,
               resolvedModel: r.model || d?.resolvedModel,
               taskType: r.taskType || d?.taskType,
+              requestId: r.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+            });
+            await reporter?.providerResponse({
+              provider: r.taskProvider || taskProvider || effectiveTaskProvider,
+              model: r.model || builtinModel,
+              upstreamTaskId: tid,
+              requestId: r.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+              status: 'succeeded',
+              httpStatusSource: 'local-backend',
             });
             logBus.success(`任务完成 → ${r.videoUrl}`, src);
             taskCompletionSound.notifyComplete(id, 'seedance');
@@ -347,6 +381,19 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
             pollRejectRef.current = null;
             stopPoll();
             const msg = r.failReason || '生成失败';
+            await reporter?.providerResponse({
+              provider: r.taskProvider || taskProvider || effectiveTaskProvider,
+              model: r.model || builtinModel,
+              upstreamTaskId: tid,
+              requestId: r.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+              status: 'failed',
+              error: { message: msg },
+              httpStatusSource: 'local-backend',
+            });
             update({ status: 'error', error: msg });
             setError(msg);
             logBus.error(`生成失败: ${msg}`, src);
@@ -366,7 +413,7 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
     });
   };
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (reporter?: RunNodeLifecycleReporter) => {
     setError(null);
     const { prompt: upstreamPrompt, imageUrls, videoUrls, audioUrls } = collectUpstream();
     const resolvedLocalPrompt = resolveMediaMentions(localPrompt, promptMentions, mentionMaterials);
@@ -378,6 +425,11 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
     }
     const runId = nextGenerationRun();
     cancelActivePoll();
+    const traceProvider = isExternalSelected && providerSelection.provider
+      ? providerSelection.provider.id
+      : effectiveTaskProvider;
+    const traceModel = isExternalSelected && providerSelection.provider ? externalProviderModel : builtinModel;
+    await reporter?.providerRequest({ provider: traceProvider, model: traceModel });
     taskCompletionSound.primeAudio();
     update({ status: 'submitting', error: null, videoUrl: null, taskId: null });
 
@@ -418,12 +470,41 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
         if (!isCurrentGenerationRun(runId)) return;
         const nextVideoUrl = r.videoUrls[0];
         if (!nextVideoUrl) throw new Error('扩展平台没有返回视频。');
+        if (r.taskId || r.requestId) {
+          await reporter?.providerSubmitted({
+            provider: traceProvider,
+            model: traceModel,
+            upstreamTaskId: r.taskId,
+            requestId: r.requestId,
+            transportHttpStatus: r.transportHttpStatus,
+            upstreamHttpStatus: r.upstreamHttpStatus,
+            usage: r.usage,
+            httpStatusSource: 'local-backend',
+          });
+        }
+        await reporter?.providerResponse({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: r.taskId,
+          requestId: r.requestId,
+          transportHttpStatus: r.transportHttpStatus,
+          upstreamHttpStatus: r.upstreamHttpStatus,
+          usage: r.usage,
+          status: 'succeeded',
+          httpStatusSource: 'local-backend',
+        });
         update({
           status: 'success',
           videoUrl: nextVideoUrl,
           videoUrls: r.videoUrls,
           remoteVideoUrls: r.remoteVideoUrls,
           taskId: r.taskId || null,
+          provider: traceProvider,
+          resolvedModel: traceModel,
+          requestId: r.requestId,
+          transportHttpStatus: r.transportHttpStatus,
+          upstreamHttpStatus: r.upstreamHttpStatus,
+          usage: r.usage,
           lastPrompt: finalPrompt,
           progress: '100%',
         });
@@ -494,6 +575,16 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
       const r = await submitSeedance(payload);
       if (!isCurrentGenerationRun(runId)) return;
       const submittedProvider = r.taskProvider || effectiveTaskProvider;
+      await reporter?.providerSubmitted({
+        provider: submittedProvider,
+        model: r.model || builtinModel,
+        upstreamTaskId: r.taskId,
+        requestId: r.requestId,
+        transportHttpStatus: r.transportHttpStatus,
+        upstreamHttpStatus: r.upstreamHttpStatus,
+        usage: r.usage,
+        httpStatusSource: 'local-backend',
+      });
       update({
         status: 'polling',
         taskId: r.taskId,
@@ -505,10 +596,20 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
       });
       logBus.info(`异步任务已提交 taskId=${r.taskId}, 进入轮询…`, src);
       // v1.2.9.11: await 让 useRunTrigger 等到任务真正完成才 markDone，循环器才能拿到 videoUrl
-      await startPolling(r.taskId, runId, submittedProvider);
+      await startPolling(r.taskId, runId, submittedProvider, reporter);
     } catch (e: any) {
       if (!isCurrentGenerationRun(runId)) return;
       const msg = e?.message || '提交失败';
+      await reporter?.providerResponse({
+        provider: traceProvider,
+        model: traceModel,
+        requestId: e?.requestId,
+        transportHttpStatus: e?.transportHttpStatus,
+        upstreamHttpStatus: e?.upstreamHttpStatus,
+        status: 'failed',
+        error: { message: msg, code: e?.code },
+        httpStatusSource: 'local-backend',
+      });
       setError(msg);
       update({ status: 'error', error: msg });
       logBus.error(`提交失败: ${msg}`, src);
@@ -531,10 +632,10 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
   };
 
   // 批量运行接入
-  useRunTrigger(id, async () => {
+  useRunTrigger(id, async (reporter) => {
     if (status === 'submitting' || status === 'polling') return;
-    await handleGenerate();
-  }, 'seedance');
+    await handleGenerate(reporter);
+  }, 'seedance', { lifecycleAware: true });
 
   // === 跨节点拖拽: source (输出视频可拖出) ===
   const startDrag = useDragMaterialStore((s) => s.start);
@@ -1024,7 +1125,7 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
 
         {!isBusy ? (
           <button
-            onClick={handleGenerate}
+            onClick={() => requestCanvasNodeRun(id)}
             className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded bg-fuchsia-500/20 hover:bg-fuchsia-500/30 text-fuchsia-200 text-xs font-medium transition-colors"
           >
             <Sparkles size={12} /> 生成视频

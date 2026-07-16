@@ -26,6 +26,7 @@ import {
   ARTIST_STYLE_MASTER_MOVEMENTS,
 } from '../../data/artistStyleMasterManifest';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { defaultSizeOf, placeSingleNode } from '../../utils/nodePlacement';
 import {
   ARTIST_STYLE_MASTER_STORAGE_KEY,
@@ -379,7 +380,7 @@ function ArtistStyleMasterNode({ id, data, selected }: NodeProps) {
     reader.readAsDataURL(file);
   }, []);
 
-  const runArtistStyleOutput = useCallback(async (mode: ArtistStyleOutputMode = outputMode) => {
+  const runArtistStyleOutput = useCallback(async (mode: ArtistStyleOutputMode) => {
     if (!selectedStyle) throw new Error('请先选择一个艺术风格');
     const payload = buildArtistStyleOutputPayload(selectedStyle, mode);
     const nodes = rf.getNodes();
@@ -406,9 +407,22 @@ function ArtistStyleMasterNode({ id, data, selected }: NodeProps) {
       lastArtistStyleImageUrl: payload.data.directImageUrl || '',
     });
     setStatus(mode === 'image' ? '已输出风格图片。' : '已输出风格提示词。');
-  }, [id, outputMode, rf, selectedStyle, update]);
+  }, [id, rf, selectedStyle, update]);
 
-  const handleRun = useCallback(() => runArtistStyleOutput(outputMode), [outputMode, runArtistStyleOutput]);
+  const handleRun = useCallback(() => {
+    const liveData = rf.getNode(id)?.data as Record<string, unknown> | undefined;
+    const mode: ArtistStyleOutputMode = liveData?.artistStyleOutputMode === 'image' ? 'image' : 'prompt';
+    return runArtistStyleOutput(mode);
+  }, [id, rf, runArtistStyleOutput]);
+
+  const requestArtistStyleRun = useCallback((mode: ArtistStyleOutputMode) => {
+    setOutputMode(mode);
+    update({
+      artistStyleOutputMode: mode,
+      artistStyleSelectedId: selectedStyle?.id,
+    });
+    requestCanvasNodeRun(id);
+  }, [id, selectedStyle?.id, update]);
 
   useRunTrigger(id, handleRun, 'artist-style-master');
 
@@ -620,20 +634,14 @@ function ArtistStyleMasterNode({ id, data, selected }: NodeProps) {
           <button
             type="button"
             className={outputMode === 'prompt' ? 'active' : ''}
-            onClick={() => {
-              setOutputMode('prompt');
-              void runArtistStyleOutput('prompt');
-            }}
+            onClick={() => requestArtistStyleRun('prompt')}
           >
             <FileText size={15} /> 输出风格提示词
           </button>
           <button
             type="button"
             className={outputMode === 'image' ? 'active' : ''}
-            onClick={() => {
-              setOutputMode('image');
-              void runArtistStyleOutput('image');
-            }}
+            onClick={() => requestArtistStyleRun('image')}
           >
             <ImageIcon size={15} /> 输出风格图片
           </button>
@@ -659,7 +667,7 @@ function ArtistStyleMasterNode({ id, data, selected }: NodeProps) {
 
       <footer className="artist-style-master-footer nodrag nopan">
         <span>{filteredStyles.length} 个匹配 · {library.styles.length} 个自定义</span>
-        <button type="button" onClick={() => void handleRun()}>
+        <button type="button" onClick={() => requestArtistStyleRun(outputMode)}>
           {outputMode === 'image' ? <ImageIcon size={17} /> : <FileText size={17} />}
           运行
         </button>

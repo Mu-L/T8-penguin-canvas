@@ -13,6 +13,7 @@ const LOCAL_REQUIRED_FRONTEND_ENTRY = path.resolve(
   ['Re', 'charge', 'Modal.tsx'].join(''),
 );
 const EMPTY_EXTENSIONS_ENTRY = path.resolve(__dirname, 'src', 'extensions', 'emptyLocalExtensions.tsx');
+const APP_VERSION = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8')).version;
 
 function requireLocalPrivateFrontend() {
   if (process.env.T8_REQUIRE_LOCAL_PRIVATE !== '1') return;
@@ -110,7 +111,7 @@ export default defineConfig({
     },
   },
   define: {
-    __APP_VERSION__: JSON.stringify('2.5.3'),
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
     __APP_NAME__: JSON.stringify('T8-penguin-canvas'),
   },
 });

@@ -42,6 +42,7 @@ import {
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useHasAutoOutput } from './useHasAutoOutput';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { useThemeStore } from '../../stores/theme';
 import { logBus } from '../../stores/logs';
 import { useDragMaterialStore, type MaterialPayload } from '../../stores/dragMaterial';
@@ -72,6 +73,7 @@ import {
 import { COMFY_APP_SOURCE_LABELS } from '../../utils/comfyuiApps';
 import { canonicalizeComfyFieldsByWorkflow, comfyFieldInputValue } from '../../utils/comfyuiWorkflow';
 import { LocalNodeAddonSlot } from 'virtual:t8-local-extensions';
+import type { RunNodeLifecycleReporter } from '../../types/project';
 
 /**
  * ImageNode - 图像生成(ZhenzhenMagic)
@@ -588,7 +590,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
     else update({ mjOrefImages: mjOrefImages.filter((_, i) => i !== idx) });
   };
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (reporter?: RunNodeLifecycleReporter) => {
     setError(null);
     const { prompt: upstreamPrompt, images: upstreamImages } = collectUpstream();
     const resolvedLocalPrompt = resolveMediaMentions(localPrompt, promptMentions, mentionMaterials);
@@ -621,6 +623,23 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
       }
     }
     const runId = nextGenerationRun();
+    const traceProvider = isExternalSelected && providerSelection.provider
+      ? providerSelection.provider.id
+      : isFal
+        ? 'fal'
+        : isSeedreamNz
+          ? 'seedance-nz'
+          : isMj
+            ? 'zhenzhen-mj'
+            : 'zhenzhen';
+    const traceModel = isExternalSelected
+      ? externalProviderModel
+      : isSeedreamNz
+        ? seedreamNzUiModel
+        : isMj
+          ? mjVersion
+          : apiModel;
+    await reporter?.providerRequest({ provider: traceProvider, model: traceModel });
     taskCompletionSound.primeAudio();
     update({ status: 'generating', progress: '0%', error: null });
     try {
@@ -683,6 +702,27 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         if (!isCurrentGenerationRun(runId)) return;
         const urls = res.imageUrls || [];
         if (!urls.length) throw new Error('扩展平台完成但未返回图片');
+        if (res.taskId || res.requestId) await reporter?.providerSubmitted({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: res.taskId,
+          requestId: res.requestId,
+          transportHttpStatus: res.transportHttpStatus,
+          upstreamHttpStatus: res.upstreamHttpStatus,
+          usage: res.usage,
+          httpStatusSource: 'local-backend',
+        });
+        await reporter?.providerResponse({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: res.taskId,
+          requestId: res.requestId,
+          transportHttpStatus: res.transportHttpStatus,
+          upstreamHttpStatus: res.upstreamHttpStatus,
+          usage: res.usage,
+          status: 'succeeded',
+          httpStatusSource: 'local-backend',
+        });
         update({
           status: 'success',
           progress: '100%',
@@ -692,6 +732,10 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           lastPrompt: finalPrompt,
           usedI2I: allRefs.length > 0,
           taskId: res.taskId || d?.taskId,
+          requestId: res.requestId,
+          transportHttpStatus: res.transportHttpStatus,
+          upstreamHttpStatus: res.upstreamHttpStatus,
+          usage: res.usage,
         });
         logBus.success(`扩展平台完成 → ${urls[0]}`, src);
         taskCompletionSound.notifyComplete(id, 'image');
@@ -754,6 +798,16 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         });
         if (!isCurrentGenerationRun(runId)) return;
         const taskId = submit.taskId;
+        await reporter?.providerSubmitted({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: taskId,
+          requestId: submit.requestId,
+          transportHttpStatus: submit.transportHttpStatus,
+          upstreamHttpStatus: submit.upstreamHttpStatus,
+          usage: submit.usage,
+          httpStatusSource: 'local-backend',
+        });
         logBus.info(`MJ 任务已提交 taskId=${taskId} fullPrompt="${fullPrompt.slice(0, 120)}${fullPrompt.length > 120 ? '…' : ''}"`, src);
         update({ progress: '15%', taskId });
         const interval = Math.max(1, Math.min(30, mjPollInt || 3)) * 1000;
@@ -767,6 +821,21 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           if (!isCurrentGenerationRun(runId)) return;
           const q = await queryMjTask(taskId, mjSpeed);
           if (!isCurrentGenerationRun(runId)) return;
+          await reporter?.polling({
+            provider: traceProvider,
+            model: traceModel,
+            taskId,
+            recovery: { kind: 'mj', taskId, model: traceModel, speed: mjSpeed, pollIntervalMs: interval, maxPolls: maxPoll },
+            requestId: q.requestId,
+            transportHttpStatus: q.transportHttpStatus,
+            upstreamHttpStatus: q.upstreamHttpStatus,
+            usage: q.usage,
+            httpStatusSource: 'local-backend',
+            pollCount: i + 1,
+            pollLimit: maxPoll,
+            status: q.status,
+            progress: q.progress,
+          });
           if (q.status === 'FAILURE') {
             throw new Error(`MJ 失败: ${q.failReason || '未知错误'}`);
           }
@@ -797,8 +866,25 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
               imageUrls: all,
               lastPrompt: finalPrompt,
               usedI2I: allRefs.length > 0 || mjSrefImages.length > 0 || mjOrefImages.length > 0,
+              requestId: q.requestId,
+              transportHttpStatus: q.transportHttpStatus,
+              upstreamHttpStatus: q.upstreamHttpStatus,
+              usage: q.usage,
+              pollCount: i + 1,
             });
             taskCompletionSound.notifyComplete(id, 'image');
+            await reporter?.providerResponse({
+              provider: traceProvider,
+              model: traceModel,
+              upstreamTaskId: taskId,
+              requestId: q.requestId || submit.requestId,
+              transportHttpStatus: q.transportHttpStatus,
+              upstreamHttpStatus: q.upstreamHttpStatus,
+              usage: q.usage,
+              pollCount: i + 1,
+              status: 'succeeded',
+              httpStatusSource: 'local-backend',
+            });
             return;
           }
         }
@@ -841,6 +927,16 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
 
         // 同步完成
         if (submit.sync && submit.urls && submit.urls.length) {
+          await reporter?.providerResponse({
+            provider: traceProvider,
+            model: traceModel,
+            requestId: submit.requestId,
+            transportHttpStatus: submit.transportHttpStatus,
+            upstreamHttpStatus: submit.upstreamHttpStatus,
+            usage: submit.usage,
+            status: 'succeeded',
+            httpStatusSource: 'local-backend',
+          });
           logBus.success(`FAL同步返回 → ${submit.urls[0]}`, src);
           update({
             status: 'success',
@@ -848,6 +944,10 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             imageUrl: submit.urls[0],
             lastPrompt: finalPrompt,
             usedI2I: allRefs.length > 0,
+            requestId: submit.requestId,
+            transportHttpStatus: submit.transportHttpStatus,
+            upstreamHttpStatus: submit.upstreamHttpStatus,
+            usage: submit.usage,
           });
           taskCompletionSound.notifyComplete(id, 'image');
           return;
@@ -856,6 +956,15 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         // 异步轮询: 1200×3s = 3600s，避免 FAL 图像长队列 30min 提前超时。
         const { requestId, responseUrl, endpoint } = submit;
         if (!requestId || !responseUrl) throw new Error('FAL 提交后未获得 request_id/response_url');
+        await reporter?.providerSubmitted({
+          provider: traceProvider,
+          model: traceModel,
+          requestId,
+          transportHttpStatus: submit.transportHttpStatus,
+          upstreamHttpStatus: submit.upstreamHttpStatus,
+          usage: submit.usage,
+          httpStatusSource: 'local-backend',
+        });
         logBus.info(`FAL异步任务已提交 requestId=${requestId}`, src);
         update({
           progress: '5%',
@@ -871,6 +980,23 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           const q = await queryImageFal({ responseUrl, endpoint, requestId });
           if (!isCurrentGenerationRun(runId)) return;
           const st = String(q.status || '').toLowerCase();
+          await reporter?.polling({
+            provider: traceProvider,
+            model: traceModel,
+            requestId,
+            recovery: {
+              kind: 'image-fal', requestId, responseUrl, endpoint, model: traceModel,
+              pollIntervalMs: interval, maxPolls: maxPoll,
+            },
+            transportHttpStatus: q.transportHttpStatus,
+            upstreamHttpStatus: q.upstreamHttpStatus,
+            usage: q.usage,
+            httpStatusSource: 'local-backend',
+            pollCount: i + 1,
+            pollLimit: maxPoll,
+            status: st,
+            providerStatus: q.falStatus,
+          });
           if (st === 'completed') {
             const url = q.urls?.[0];
             if (!url) throw new Error('FAL 任务完成但未返回图片');
@@ -881,8 +1007,24 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
               imageUrl: url,
               lastPrompt: finalPrompt,
               usedI2I: allRefs.length > 0,
+              requestId: q.requestId || requestId,
+              transportHttpStatus: q.transportHttpStatus,
+              upstreamHttpStatus: q.upstreamHttpStatus,
+              usage: q.usage,
+              pollCount: i + 1,
             });
             taskCompletionSound.notifyComplete(id, 'image');
+            await reporter?.providerResponse({
+              provider: traceProvider,
+              model: traceModel,
+              requestId: q.requestId || requestId,
+              transportHttpStatus: q.transportHttpStatus,
+              upstreamHttpStatus: q.upstreamHttpStatus,
+              usage: q.usage,
+              pollCount: i + 1,
+              status: 'succeeded',
+              httpStatusSource: 'local-backend',
+            });
             return;
           }
           if (st === 'failed') {
@@ -920,6 +1062,16 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         if (!isCurrentGenerationRun(runId)) return;
         const taskId = submit.taskId;
         if (!taskId) throw new Error('贞贞的平价AI工坊（国内） Seedream 未返回任务 ID');
+        await reporter?.providerSubmitted({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: taskId,
+          requestId: submit.requestId,
+          transportHttpStatus: submit.transportHttpStatus,
+          upstreamHttpStatus: submit.upstreamHttpStatus,
+          usage: submit.usage,
+          httpStatusSource: 'local-backend',
+        });
         update({ progress: submit.progress || '0%', taskId });
         const interval = 3000;
         const maxPoll = minPollCountForTimeout(interval);
@@ -929,6 +1081,20 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           if (!isCurrentGenerationRun(runId)) return;
           const query = await querySeedreamNz(taskId);
           if (!isCurrentGenerationRun(runId)) return;
+          await reporter?.polling({
+            provider: traceProvider,
+            model: traceModel,
+            taskId,
+            requestId: query.requestId,
+            transportHttpStatus: query.transportHttpStatus,
+            upstreamHttpStatus: query.upstreamHttpStatus,
+            usage: query.usage,
+            httpStatusSource: 'local-backend',
+            pollCount: i + 1,
+            pollLimit: maxPoll,
+            status: query.status,
+            progress: query.progress,
+          });
           if (query.progress && query.progress !== lastProgress) {
             lastProgress = query.progress;
             update({ progress: query.progress });
@@ -945,8 +1111,25 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
               imageUrls: query.urls,
               lastPrompt: finalPrompt,
               usedI2I: allRefs.length > 0,
+              requestId: query.requestId,
+              transportHttpStatus: query.transportHttpStatus,
+              upstreamHttpStatus: query.upstreamHttpStatus,
+              usage: query.usage,
+              pollCount: i + 1,
             });
             taskCompletionSound.notifyComplete(id, 'image');
+            await reporter?.providerResponse({
+              provider: traceProvider,
+              model: traceModel,
+              upstreamTaskId: taskId,
+              requestId: query.requestId || submit.requestId,
+              transportHttpStatus: query.transportHttpStatus,
+              upstreamHttpStatus: query.upstreamHttpStatus,
+              usage: query.usage,
+              pollCount: i + 1,
+              status: 'succeeded',
+              httpStatusSource: 'local-backend',
+            });
             return;
           }
           if (queryStatus === 'failed' || queryStatus === 'failure' || queryStatus === 'error') {
@@ -987,14 +1170,38 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           imageUrls: submit.urls,
           lastPrompt: finalPrompt,
           usedI2I: allRefs.length > 0,
+          requestId: submit.requestId,
+          transportHttpStatus: submit.transportHttpStatus,
+          upstreamHttpStatus: submit.upstreamHttpStatus,
+          usage: submit.usage,
         });
         taskCompletionSound.notifyComplete(id, 'image');
+        await reporter?.providerResponse({
+          provider: traceProvider,
+          model: traceModel,
+          requestId: submit.requestId,
+          transportHttpStatus: submit.transportHttpStatus,
+          upstreamHttpStatus: submit.upstreamHttpStatus,
+          usage: submit.usage,
+          status: 'succeeded',
+          httpStatusSource: 'local-backend',
+        });
         return;
       }
 
       // 分支二:异步任务 → 轮询状态(对齐主项目 gpt-image-2-web pollTask)
       const taskId = submit.taskId;
       if (!taskId) throw new Error('未获取到 taskId 且无同步结果');
+      await reporter?.providerSubmitted({
+        provider: traceProvider,
+        model: traceModel,
+        upstreamTaskId: taskId,
+        requestId: submit.requestId,
+        transportHttpStatus: submit.transportHttpStatus,
+        upstreamHttpStatus: submit.upstreamHttpStatus,
+        usage: submit.usage,
+        httpStatusSource: 'local-backend',
+      });
       logBus.info(`异步任务已提交 taskId=${taskId} 进入轮询…`, src);
       update({ progress: submit.progress || '5%', taskId });
       // GPT2 / nano-banana / nano-banana-pro 标准路径轮询上限:
@@ -1007,6 +1214,21 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         if (!isCurrentGenerationRun(runId)) return;
         const q = await queryImageStatus(taskId, apiModel);
         if (!isCurrentGenerationRun(runId)) return;
+        await reporter?.polling({
+          provider: traceProvider,
+          model: traceModel,
+          taskId,
+          recovery: { kind: 'image', taskId, model: apiModel || traceModel, pollIntervalMs: interval, maxPolls: maxPoll },
+          requestId: q.requestId,
+          transportHttpStatus: q.transportHttpStatus,
+          upstreamHttpStatus: q.upstreamHttpStatus,
+          usage: q.usage,
+          httpStatusSource: 'local-backend',
+          pollCount: i + 1,
+          pollLimit: maxPoll,
+          status: q.status,
+          progress: q.progress,
+        });
         if (q.progress && q.progress !== lastProg) {
           lastProg = q.progress;
           update({ progress: q.progress });
@@ -1024,8 +1246,25 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             imageUrls: q.urls,
             lastPrompt: finalPrompt,
             usedI2I: allRefs.length > 0,
+            requestId: q.requestId,
+            transportHttpStatus: q.transportHttpStatus,
+            upstreamHttpStatus: q.upstreamHttpStatus,
+            usage: q.usage,
+            pollCount: i + 1,
           });
           taskCompletionSound.notifyComplete(id, 'image');
+          await reporter?.providerResponse({
+            provider: traceProvider,
+            model: traceModel,
+            upstreamTaskId: taskId,
+            requestId: q.requestId || submit.requestId,
+            transportHttpStatus: q.transportHttpStatus,
+            upstreamHttpStatus: q.upstreamHttpStatus,
+            usage: q.usage,
+            pollCount: i + 1,
+            status: 'succeeded',
+            httpStatusSource: 'local-backend',
+          });
           return;
         }
         if (st === 'failed' || st === 'failure' || st === 'error') {
@@ -1036,6 +1275,16 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
     } catch (e: any) {
       if (!isCurrentGenerationRun(runId)) return;
       const msg = e?.message || '生成失败';
+      await reporter?.providerResponse({
+        provider: traceProvider,
+        model: traceModel,
+        requestId: e?.requestId,
+        transportHttpStatus: e?.transportHttpStatus,
+        upstreamHttpStatus: e?.upstreamHttpStatus,
+        status: 'failed',
+        error: { message: msg, code: e?.code },
+        httpStatusSource: 'local-backend',
+      });
       setError(msg);
       logBus.error(`生成失败: ${msg}`, src);
       update({ status: 'error', error: msg });
@@ -1050,7 +1299,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   };
 
   // 接入运行总线,供批量运行调起
-  useRunTrigger(id, handleGenerate, 'image');
+  useRunTrigger(id, handleGenerate, 'image', { lifecycleAware: true });
 
   // === 跨节点拖拽: source (从输出图 Ctrl+拖出) ===
   const startDrag = useDragMaterialStore((s) => s.start);
@@ -2229,7 +2478,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           </button>
         ) : (
           <button
-            onClick={handleGenerate}
+            onClick={() => requestCanvasNodeRun(id)}
             className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-medium transition-colors"
           >
             <Sparkles size={12} /> 生成

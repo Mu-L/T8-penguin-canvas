@@ -13,12 +13,12 @@ import {
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
-test('video model type order keeps legacy families before Happy Horse', () => {
+test('video model type order keeps Grok Video, Veo, Sora2 before Wan and Happy Horse', () => {
   const visibleVideoModels = VIDEO_MODELS.filter((model) => model.kind !== 'seedance');
 
   assert.deepEqual(
     visibleVideoModels.map((model) => model.label),
-    ['Grok Video', 'Veo', 'Sora2', 'Happy Horse'],
+    ['Grok Video', 'Veo', 'Sora2', 'Wan', 'Happy Horse'],
   );
   assert.equal(VIDEO_MODELS[0].kind, 'grok');
 });

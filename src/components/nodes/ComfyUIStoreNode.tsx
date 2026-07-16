@@ -3,6 +3,7 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { AlertCircle, ArrowLeft, Boxes, Download, FileText, Film, Loader2, Music, Play, Plus, RefreshCw, Search, Settings, Trash2, Upload, Workflow } from 'lucide-react';
 import { COMFYUI_APP_MANIFEST } from '../../data/comfyuiAppManifest';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { runComfyuiApp } from '../../services/comfyuiApps';
 import { useApiKeysStore } from '../../stores/apiKeys';
 import { logBus } from '../../stores/logs';
@@ -673,7 +674,7 @@ const ComfyUIStoreNode = ({ id, data, selected }: NodeProps) => {
               ))}
             </div>
 
-            <button type="button" className={`${buttonCls} w-full py-2 text-sm font-black`} style={{ ...inputStyle, borderColor: accent, color: accent }} disabled={isBusy} onClick={handleRun}>
+            <button type="button" className={`${buttonCls} w-full py-2 text-sm font-black`} style={{ ...inputStyle, borderColor: accent, color: accent }} disabled={isBusy} onClick={() => requestCanvasNodeRun(id)}>
               {isBusy ? <><Loader2 size={14} className="animate-spin" /> 运行中...</> : <><Play size={14} /> 运行 ComfyUI</>}
             </button>
 

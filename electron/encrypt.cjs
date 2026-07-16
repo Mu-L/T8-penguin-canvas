@@ -21,6 +21,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const bytenode = require('bytenode');
 const { encryptBuffer } = require('./loader.cjs');
 
@@ -43,6 +44,14 @@ const EXCLUDED_BACKEND_FILES = new Set([
   // Local VibeX static adapter is intentionally not part of public/Electron
   // releases. The node uses the online VibeX page plus vibexBridge instead.
   'routes/vibex.js',
+]);
+const CANVAS_AGENT_INTEGRITY_MANIFEST = 'canvas-agent-source-integrity.json';
+const CANVAS_AGENT_INTEGRITY_FILES = Object.freeze([
+  { source: 'routes/canvasAgentTools.js', output: 'routes/canvasAgentTools.t8c', format: 't8c' },
+  { source: 'services/canvasAgentTools.js', output: 'services/canvasAgentTools.t8c', format: 't8c' },
+  { source: 'services/canvasAgentPublicView.js', output: 'services/canvasAgentPublicView.t8c', format: 't8c' },
+  { source: 'services/runEvidenceDiagnosis.js', output: 'services/runEvidenceDiagnosis.t8c', format: 't8c' },
+  { source: 'shared/canvasNodeSchema.json', output: 'shared/canvasNodeSchema.json', format: 'json' },
 ]);
 
 function walk(dir, results = []) {
@@ -84,15 +93,17 @@ function encryptFile(srcAbs, sourceRoot = BACKEND_SRC, outRoot = OUT_DIR) {
   const rel = path.relative(sourceRoot, srcAbs).replace(/\\/g, '/');
   const dst = path.join(outRoot, rel.replace(/\.(?:js|cjs)$/, '.t8c'));
   ensureDir(path.dirname(dst));
+  const sourceBytes = fs.readFileSync(srcAbs);
+  const sourceSha256 = sha256Buffer(sourceBytes);
 
   if (srcAbs.endsWith('.json')) {
-    // JSON 直接复制(本项目 backend/src 暂未直接含 json,保留扩展性)
-    fs.copyFileSync(srcAbs, path.join(OUT_DIR, rel));
+    // JSON 保持原始字节复制，供加密后端的相对 require 直接读取。
+    fs.writeFileSync(dst, sourceBytes);
     console.log('[copy ]', rel);
-    return;
+    return { sourceSha256, outputSha256: sha256File(dst) };
   }
 
-  let src = fs.readFileSync(srcAbs, 'utf-8');
+  let src = sourceBytes.toString('utf8');
   src = rewriteRequires(src);
 
   // bytenode.compileCode 返回 V8 字节码 Buffer (同步,无需临时文件)
@@ -110,11 +121,54 @@ function encryptFile(srcAbs, sourceRoot = BACKEND_SRC, outRoot = OUT_DIR) {
   const enc = encryptBuffer(jsc);
   fs.writeFileSync(dst, enc);
   console.log('[T8ENC]', rel, '→', path.relative(path.resolve(__dirname, '..'), dst));
+  return { sourceSha256, outputSha256: sha256File(dst) };
 }
 
 function isExcludedBackendFile(srcAbs) {
   const rel = path.relative(BACKEND_SRC, srcAbs).replace(/\\/g, '/');
   return EXCLUDED_BACKEND_FILES.has(rel);
+}
+
+function sha256File(filename) {
+  return sha256Buffer(fs.readFileSync(filename));
+}
+
+function sha256Buffer(bytes) {
+  return crypto.createHash('sha256').update(bytes).digest('hex');
+}
+
+function writeCanvasAgentIntegrityManifest(buildHashes) {
+  const entries = CANVAS_AGENT_INTEGRITY_FILES.map((item) => {
+    const sourcePath = path.join(BACKEND_SRC, ...item.source.split('/'));
+    const outputPath = path.join(OUT_DIR, ...item.output.split('/'));
+    if (!fs.existsSync(sourcePath)) {
+      throw new Error(`[encrypt] canvas Agent source missing: ${item.source}`);
+    }
+    if (!fs.existsSync(outputPath)) {
+      throw new Error(`[encrypt] canvas Agent output missing: ${item.output}`);
+    }
+    const captured = buildHashes && buildHashes.get(item.source);
+    if (!captured) {
+      throw new Error(`[encrypt] canvas Agent build hash missing: ${item.source}`);
+    }
+    const sourceSha256 = sha256File(sourcePath);
+    const outputSha256 = sha256File(outputPath);
+    if (captured.sourceSha256 !== sourceSha256 || captured.outputSha256 !== outputSha256) {
+      throw new Error(`[encrypt] canvas Agent source/output changed during encryption: ${item.source}`);
+    }
+    if (item.format === 'json' && sourceSha256 !== outputSha256) {
+      throw new Error(`[encrypt] canvas Agent JSON copy differs from source: ${item.source}`);
+    }
+    return { ...item, sourceSha256, outputSha256 };
+  });
+  const manifest = {
+    schema: 't8-canvas-agent-electron-integrity-v1',
+    hashAlgorithm: 'sha256',
+    entries,
+  };
+  const target = path.join(OUT_DIR, CANVAS_AGENT_INTEGRITY_MANIFEST);
+  fs.writeFileSync(target, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  console.log('[hash ]', CANVAS_AGENT_INTEGRITY_MANIFEST);
 }
 
 function main() {
@@ -125,14 +179,20 @@ function main() {
 
   const backendFiles = walk(BACKEND_SRC);
   const files = backendFiles.filter((file) => !isExcludedBackendFile(file));
+  const canvasAgentBuildHashes = new Map();
   const skipped = backendFiles.length - files.length;
   console.log(`[encrypt] backend src files: ${files.length}${skipped ? ` (${skipped} release-excluded)` : ''}`);
   for (const f of backendFiles.filter(isExcludedBackendFile)) {
     console.log('[skip ]', path.relative(BACKEND_SRC, f).replace(/\\/g, '/'));
   }
   for (const f of files) {
-    encryptFile(f);
+    const hashes = encryptFile(f);
+    const rel = path.relative(BACKEND_SRC, f).replace(/\\/g, '/');
+    if (CANVAS_AGENT_INTEGRITY_FILES.some((item) => item.source === rel)) {
+      canvasAgentBuildHashes.set(rel, hashes);
+    }
   }
+  writeCanvasAgentIntegrityManifest(canvasAgentBuildHashes);
 
   const localPrivateDisabled = process.env.T8_ENABLE_LOCAL_PRIVATE === '0'
     || process.env.T8_DISABLE_LOCAL_EXTENSIONS === '1';
@@ -197,4 +257,11 @@ if (require.main === module) {
   }
 }
 
-module.exports = { main, encryptFile, rewriteRequires };
+module.exports = {
+  CANVAS_AGENT_INTEGRITY_FILES,
+  CANVAS_AGENT_INTEGRITY_MANIFEST,
+  main,
+  encryptFile,
+  rewriteRequires,
+  writeCanvasAgentIntegrityManifest,
+};

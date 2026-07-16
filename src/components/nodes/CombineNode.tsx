@@ -4,6 +4,7 @@ import { AlertCircle, Loader2, Sparkles, Combine } from 'lucide-react';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { opCombine } from '../../services/imageOps';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { useHasAutoOutput } from './useHasAutoOutput';
 import SmartImage from '../SmartImage';
 
@@ -108,7 +109,7 @@ const CombineNode = (p: NodeProps) => {
         </div>
 
         <button
-          onClick={handleRun}
+          onClick={() => requestCanvasNodeRun(p.id)}
           disabled={status === 'running'}
           className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded text-xs font-medium disabled:opacity-50 transition-colors bg-orange-500/20 hover:bg-orange-500/30 text-orange-200"
         >

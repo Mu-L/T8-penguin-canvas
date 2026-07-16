@@ -9,6 +9,7 @@ const DEFAULT_SOURCE = path.join(os.tmpdir(), 't8-ict-facekit');
 const DEFAULT_OUTPUT = path.resolve('public/assets/face-expression/t8-ict-neutral-head-v1.glb');
 const SCALE = 0.09;
 const OFFSET = [0, 0.115, -0.174];
+const IRIS_FORWARD_OFFSET = 0.006;
 
 const TARGETS = [
   ['browDownLeft', ['browDown_L']],
@@ -181,12 +182,11 @@ function parseNeutral(file) {
     }
   }
 
-  // ICT's untextured sclera sits slightly in front of the iris geometry. The
-  // original renderer solves this with eye shaders; the clay GLB instead moves
-  // both iris surfaces forward by 0.025 world units so they remain visible.
+  // Keep the untextured iris just above the sclera without pushing it through
+  // the eyelids when the eyeBlink morph closes the eye.
   const irisVertices = new Set([...materialVertices[5], ...materialVertices[7]]);
   for (let index = 0; index < originalIndices.length; index += 1) {
-    if (irisVertices.has(originalIndices[index])) vertices[index * 3 + 2] += 0.025;
+    if (irisVertices.has(originalIndices[index])) vertices[index * 3 + 2] += IRIS_FORWARD_OFFSET;
   }
 
   const normals = new Float32Array(vertices.length);

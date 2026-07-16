@@ -1,3 +1,5 @@
+import { FACE_EXPRESSION_LIBRARY_PRESETS } from './faceExpressionPresetLibrary.ts';
+
 export const FACE_EXPRESSION_SCHEMA = 't8-face-expression-state' as const;
 export const FACE_EXPRESSION_VERSION = 1 as const;
 export const BUILTIN_FACE_ADAPTER_ID = 't8-ict-neutral-head-v1' as const;
@@ -22,7 +24,7 @@ export const FACE_CHANNELS = [
 
 export type FaceChannel = typeof FACE_CHANNELS[number];
 export type FaceChannelValues = Record<FaceChannel, number>;
-export type FaceExpressionTab = 'expression' | 'pose' | 'camera' | 'lighting' | 'output' | 'batch';
+export type FaceExpressionTab = 'expression' | 'presets' | 'pose' | 'camera' | 'lighting' | 'output' | 'batch';
 
 export interface FacePhotoCalibration {
   sourceUrl: string;
@@ -493,7 +495,7 @@ export function normalizeFaceExpressionState(input: unknown): FaceExpression3DSt
 
 export function allFacePresets(state: FaceExpression3DState): FaceExpressionPreset[] {
   const seen = new Set<string>();
-  return [...FACE_EXPRESSION_PRESETS, ...state.customPresets].filter((item) => {
+  return [...FACE_EXPRESSION_PRESETS, ...FACE_EXPRESSION_LIBRARY_PRESETS, ...state.customPresets].filter((item) => {
     if (!item.id || seen.has(item.id)) return false;
     seen.add(item.id);
     return true;

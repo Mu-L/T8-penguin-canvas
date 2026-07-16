@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 function read(path: string) {
   return readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -14,7 +15,6 @@ function readOptional(path: string) {
 test('Grok OAuth Agent is registered as an independent public-shell node', () => {
   const types = read('../src/types/canvas.ts');
   const registry = read('../src/config/nodeRegistry.ts');
-  const ports = read('../src/config/portTypes.ts');
   const canvas = read('../src/components/Canvas.tsx');
   const sidebar = read('../src/components/Sidebar.tsx');
   const features = read('../features.json');
@@ -22,9 +22,13 @@ test('Grok OAuth Agent is registered as an independent public-shell node', () =>
   assert.match(types, /'grok-oauth-agent'/);
   assert.match(types, /'grok'/);
   assert.match(registry, /label:\s*'GROK OAuth'/);
-  assert.match(registry, /type:\s*'grok-oauth-agent'/);
-  assert.match(registry, /category:\s*'grok'/);
-  assert.match(ports, /'grok-oauth-agent':\s*\{\s*inputs:\s*\['text', 'image', 'video', 'audio'\],\s*outputs:\s*\['text', 'image', 'video', 'audio'\]/);
+  assertProductionNodeSchema('grok-oauth-agent', {
+    label: 'Grok OAuth Agent',
+    category: 'grok',
+    inputs: ['text', 'image', 'video', 'audio'],
+    outputs: ['text', 'image', 'video', 'audio'],
+    executable: true,
+  });
   assert.match(canvas, /GrokOAuthAgentNode/);
   assert.match(canvas, /import\('\.\/nodes\/GrokOAuthAgentNode'\)/);
   assert.match(canvas, /'grok-oauth-agent': GrokOAuthAgentNode/);
@@ -137,11 +141,11 @@ test('Grok OAuth frontend service and node use an Agent studio with manual publi
   assert.match(node, /const quickPromptMentions = \(Array\.isArray\(d\.quickPromptMentions\) \? d\.quickPromptMentions : \[\]\) as MediaMention\[\]/);
   assert.match(node, /const handleQuickRun = useCallback/);
   assert.match(node, /title="Grok 简易 Prompt"/);
-  assert.match(node, /onSubmit=\{\(value, mentions\) => void handleQuickRun\(\{ prompt: value, mentions \}\)\}/);
+  assert.match(node, /onSubmit=\{\(value, mentions\) => requestGrokCanvasRun\('quick', \{ prompt: value, mentions \}\)\}/);
   assert.match(node, /promptTemplateKind=\{mode === 'video' \? 'video' : 'image'\}/);
   assert.match(node, /小节点简易生成不会写入 Grok 创作台历史/);
   assert.match(node, /update\(\{ quickPrompt: '', quickPromptMentions: \[\] \}\)/);
-  assert.match(node, /update\(buildArtifactOutputPatch\(outputArtifact/);
+  assert.match(node, /update\(\{[\s\S]*\.\.\.buildArtifactOutputPatch\(outputArtifact/);
   assert.match(node, /quickLastRunSummary/);
   assert.match(node, /conversationMessages: \[\]/);
   assert.match(node, /uploadFile/);
@@ -212,8 +216,8 @@ test('Grok OAuth frontend service and node use an Agent studio with manual publi
   assert.match(node, /stopImmediatePropagation/);
   assert.match(node, /document\.addEventListener\('pointerdown', stopSelectableTextGesture, true\)/);
   assert.match(node, /userSelect:\s*'text'/);
-  assert.match(node, /useRunTrigger\(id, handleQuickRun, 'grok-oauth-agent'\)/);
-  assert.match(node, /onRun=\{\(override\) => void handleRun\(override\)\}/);
+  assert.match(node, /useRunTrigger\([\s\S]*reporter\.runContext\?\.requestId === liveData\?\.grokRunRequestId[\s\S]*await handleRun\(\)[\s\S]*await handleQuickRun\(undefined, reporter\)[\s\S]*grokRunRequestId: ''[\s\S]*'grok-oauth-agent'[\s\S]*lifecycleAware:\s*true/);
+  assert.match(node, /onRun=\{\(override\) => requestGrokCanvasRun\('studio', override\)\}/);
   assert.match(canvas, /'grok-oauth-agent'/);
   assert.match(canvas, /pushTxt\(d\.outputText\)/);
   assert.match(canvas, /kind:\s*'text' \| 'image' \| 'video' \| 'audio'/);
