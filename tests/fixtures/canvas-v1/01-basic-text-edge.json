@@ -1,0 +1,15 @@
+{
+  "id": "legacy-basic-board",
+  "name": "基础文案接力",
+  "updatedAt": 1704067200001,
+  "nodes": [
+    { "id": "text-1", "type": "text", "position": { "x": 80, "y": 120 }, "data": { "label": "标题", "prompt": "夏日海报主标题" } },
+    { "id": "output-1", "type": "output", "position": { "x": 420, "y": 120 }, "data": { "label": "成品" } }
+  ],
+  "edges": [
+    { "id": "edge-1", "source": "text-1", "target": "output-1", "sourceHandle": "text-out:text", "targetHandle": "output-in:text" }
+  ],
+  "viewport": { "x": 12, "y": -8, "zoom": 0.9 },
+  "nextNodeSerialId": 3,
+  "legacyAudit": { "format": "desktop-v1", "savedBy": "manual" }
+}

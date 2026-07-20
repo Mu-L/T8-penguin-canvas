@@ -7,10 +7,17 @@ const { execFileSync } = require('node:child_process');
 const { crc32 } = require('node:zlib');
 const express = require('express');
 const sharp = require('sharp');
-const { ProjectDatabase } = require('../backend/src/services/projectDatabase');
+const {
+  ProjectDatabase,
+  ProjectDatabaseStorageCapacityError,
+} = require('../backend/src/services/projectDatabase');
+const {
+  mapProjectDatabaseStorageCapacityPublicError,
+} = require('../backend/src/services/projectDatabasePublicError');
 const { resolveBundledFfmpeg, resolveBundledFfprobe } = require('../backend/src/providers/llmMedia');
 const {
   AssetIndexer,
+  getBackgroundAssetIndexer,
   createDerivedMedia,
   differenceHash,
   dctPerceptualHash,
@@ -456,7 +463,7 @@ test('reindexing restores persisted succeeded preview results when asset metadat
     database.completeAssetPreviewJob(claimed.id, {
       thumbnailUrl: '/files/thumbnails/persisted-thumb.webp',
       perceptualHash: '0123456789abcdef',
-    });
+    }, { expectedAttempt: claimed, expectedAssetSnapshot: claimed.availabilitySnapshot });
     database.upsertAsset({ ...database.getAsset(first.id), metadata: { previewStatus: 'queued', overwritten: true } });
 
     const restored = await indexer.indexFile(source, { projectId: 'preview-restore', rootName: 'input', rootPath: input, publicPrefix: '/files/input/' });
@@ -838,6 +845,12 @@ test('linked assets become explicitly missing without deleting their index or so
     assert.equal(missing.metadata.health, 'missing');
     assert.equal(database.getAssetLineage(asset.id)[0].sourceType, 'linked-file');
     fs.writeFileSync(linkedPath, 'restored source');
+    const changedResult = await indexer.scan();
+    assert.equal(changedResult.availability.sourceChanged, 1);
+    assert.equal(changedResult.availability.restored, 0);
+    assert.equal(database.getAsset(asset.id).availability, 'missing');
+    assert.equal(database.getAsset(asset.id).metadata.availabilityNeedsReindex, true);
+    fs.writeFileSync(linkedPath, 'linked source');
     const restoredResult = await indexer.scan();
     assert.equal(restoredResult.availability.restored, 1);
     assert.equal(database.getAsset(asset.id).availability, 'available');
@@ -865,5 +878,280 @@ test('corrupt 3D files stay indexed with an explicit corrupt availability state'
   } finally {
     database.close();
     fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('asset indexer shares only the owning project scan and isolates project status and results', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-asset-indexer-project-status-'));
+  const input = path.join(directory, 'input');
+  const output = path.join(directory, 'output');
+  fs.mkdirSync(input, { recursive: true });
+  fs.mkdirSync(output, { recursive: true });
+  const database = new ProjectDatabase(':memory:');
+  try {
+    const indexer = new AssetIndexer({ INPUT_DIR: input, OUTPUT_DIR: output }, database);
+    const projectA = 'project/indexer-a';
+    const projectB = 'project/indexer-b';
+
+    const scanA = indexer.scan({ projectId: projectA, concurrency: 1 });
+    const sameProjectScan = indexer.scan({ projectId: projectA, concurrency: 4 });
+    const scanB = indexer.scan({ projectId: projectB, concurrency: 1 });
+    assert.strictEqual(sameProjectScan, scanA, 'one project must share its exact owning promise');
+    assert.notStrictEqual(scanB, scanA, 'different projects must never share a scan promise');
+    assert.deepEqual(indexer.status(projectA), { projectId: projectA, running: true, lastResult: null });
+    assert.deepEqual(indexer.status(projectB), { projectId: projectB, running: true, lastResult: null });
+
+    const [resultA, resultB] = await Promise.all([scanA, scanB]);
+    assert.equal(resultA.projectId, projectA);
+    assert.equal(resultB.projectId, projectB);
+    assert.equal(resultA.catalogRevision, 1);
+    assert.equal(resultB.catalogRevision, 1);
+    assert.deepEqual(
+      { total: resultA.total, indexed: resultA.indexed, failed: resultA.failed },
+      { total: 0, indexed: 0, failed: 0 },
+    );
+    assert.deepEqual(
+      { total: resultB.total, indexed: resultB.indexed, failed: resultB.failed },
+      { total: 0, indexed: 0, failed: 0 },
+    );
+
+    const statusA = indexer.status(projectA);
+    const statusB = indexer.status(projectB);
+    assert.equal(statusA.projectId, projectA);
+    assert.equal(statusB.projectId, projectB);
+    assert.equal(statusA.running, false);
+    assert.equal(statusB.running, false);
+    assert.strictEqual(statusA.lastResult, resultA);
+    assert.strictEqual(statusB.lastResult, resultB);
+
+    const secondScanA = indexer.scan({ projectId: projectA, concurrency: 1 });
+    assert.notStrictEqual(secondScanA, scanA, 'a completed owning promise must be released');
+    assert.equal(indexer.status(projectA).running, true);
+    assert.equal(indexer.status(projectB).running, false);
+    const secondResultA = await secondScanA;
+    assert.equal(secondResultA.projectId, projectA);
+    assert.strictEqual(indexer.status(projectA).lastResult, secondResultA);
+    assert.strictEqual(indexer.status(projectB).lastResult, resultB);
+  } finally {
+    await database.close();
+    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 6, retryDelay: 100 });
+  }
+});
+
+test('background asset indexer singleton is scoped to the ProjectDatabase instance', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-asset-indexer-database-owner-'));
+  const input = path.join(directory, 'input');
+  const output = path.join(directory, 'output');
+  fs.mkdirSync(input, { recursive: true });
+  fs.mkdirSync(output, { recursive: true });
+  const config = { INPUT_DIR: input, OUTPUT_DIR: output };
+  const databaseA = new ProjectDatabase(':memory:');
+  const databaseB = new ProjectDatabase(':memory:');
+  try {
+    const pipelineA = { owner: 'pipeline-a' };
+    const pipelineB = { owner: 'pipeline-b' };
+    const indexerA = getBackgroundAssetIndexer(config, databaseA, pipelineA);
+    const sameDatabase = getBackgroundAssetIndexer({ ...config }, databaseA, pipelineB);
+    const indexerB = getBackgroundAssetIndexer(config, databaseB, pipelineB);
+
+    assert.strictEqual(sameDatabase, indexerA);
+    assert.notStrictEqual(indexerB, indexerA);
+    assert.strictEqual(indexerA.database, databaseA);
+    assert.strictEqual(indexerB.database, databaseB);
+    assert.strictEqual(indexerA.previewPipeline, pipelineA);
+    assert.strictEqual(indexerB.previewPipeline, pipelineB);
+  } finally {
+    await databaseA.close();
+    await databaseB.close();
+    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 6, retryDelay: 100 });
+  }
+});
+
+test('asset indexer aborts a first-file SQLITE_FULL without publishing a successful scan result', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-asset-indexer-first-full-'));
+  const input = path.join(directory, 'input');
+  const output = path.join(directory, 'output');
+  fs.mkdirSync(input, { recursive: true });
+  fs.mkdirSync(output, { recursive: true });
+  fs.writeFileSync(path.join(input, 'a.txt'), 'first');
+  fs.writeFileSync(path.join(input, 'b.txt'), 'tail');
+  let indexCalls = 0;
+  let availabilityReads = 0;
+  const database = {
+    listAssetAvailabilitySnapshots() {
+      availabilityReads += 1;
+      throw new Error('availability must not run after a fatal index write');
+    },
+  };
+  const indexer = new AssetIndexer({ INPUT_DIR: input, OUTPUT_DIR: output }, database);
+  const fatal = Object.assign(new Error(`SQLITE_FULL leaked path: ${directory}`), { code: 'SQLITE_FULL' });
+  indexer.indexFile = async () => {
+    indexCalls += 1;
+    throw fatal;
+  };
+  try {
+    let propagated = null;
+    await assert.rejects(
+      indexer.scan({ projectId: 'project/indexer-first-full', concurrency: 1 }),
+      (error) => {
+        propagated = error;
+        return error === fatal;
+      },
+    );
+    assert.equal(indexCalls, 1);
+    assert.equal(availabilityReads, 0);
+    assert.deepEqual(indexer.status('project/indexer-first-full'), {
+      projectId: 'project/indexer-first-full',
+      running: false,
+      lastResult: null,
+    });
+    const mapped = mapProjectDatabaseStorageCapacityPublicError(propagated, { operation: 'asset.scan' });
+    assert.equal(mapped.status, 507);
+    assert.equal(mapped.body.code, 'project_database_storage_capacity_exceeded');
+    assert.equal(mapped.body.reason, 'sqlite-full');
+    assert.equal(mapped.body.error.includes(directory), false);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 6, retryDelay: 100 });
+  }
+});
+
+test('asset indexer settles concurrent claimed workers after a late capacity failure and starts no tail work', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-asset-indexer-late-full-'));
+  const input = path.join(directory, 'input');
+  const output = path.join(directory, 'output');
+  fs.mkdirSync(input, { recursive: true });
+  fs.mkdirSync(output, { recursive: true });
+  for (let index = 0; index < 8; index += 1) {
+    fs.writeFileSync(path.join(input, `${index}.txt`), String(index));
+  }
+  let availabilityReads = 0;
+  const database = {
+    listAssetAvailabilitySnapshots() {
+      availabilityReads += 1;
+      throw new Error('availability must not run after a fatal index write');
+    },
+  };
+  const indexer = new AssetIndexer({ INPUT_DIR: input, OUTPUT_DIR: output }, database);
+  const fatal = new ProjectDatabaseStorageCapacityError('sqlite-full', { operation: 'asset.index' });
+  const started = [];
+  const settled = [];
+  let releaseFatal;
+  let releaseSurvivors;
+  const fatalGate = new Promise((resolve) => { releaseFatal = resolve; });
+  const survivorGate = new Promise((resolve) => { releaseSurvivors = resolve; });
+  indexer.indexFile = async () => {
+    const ordinal = started.length + 1;
+    started.push(ordinal);
+    if (ordinal === 2) {
+      await fatalGate;
+      settled.push(ordinal);
+      throw fatal;
+    }
+    await survivorGate;
+    settled.push(ordinal);
+  };
+  try {
+    const scan = indexer.scan({ projectId: 'project/indexer-late-full', concurrency: 3 });
+    let scanSettled = false;
+    scan.then(
+      () => { scanSettled = true; },
+      () => { scanSettled = true; },
+    );
+    for (let attempt = 0; attempt < 20 && started.length < 3; attempt += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    assert.equal(started.length, 3, 'the initial concurrency window must be claimed');
+
+    releaseFatal();
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(started.length, 3, 'fatal observation must stop all new claims');
+    assert.equal(scanSettled, false, 'scan must wait for already-started workers before rejecting');
+
+    releaseSurvivors();
+    await assert.rejects(scan, (error) => error === fatal);
+    assert.deepEqual([...settled].sort((left, right) => left - right), [1, 2, 3]);
+    assert.equal(availabilityReads, 0);
+    const startedAfterRejection = started.length;
+    const settledAfterRejection = settled.length;
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(started.length, startedAfterRejection, 'no worker may claim tail work after rejection');
+    assert.equal(settled.length, settledAfterRejection, 'no worker may write after rejection');
+    assert.deepEqual(indexer.status('project/indexer-late-full'), {
+      projectId: 'project/indexer-late-full',
+      running: false,
+      lastResult: null,
+    });
+  } finally {
+    releaseFatal?.();
+    releaseSurvivors?.();
+    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 6, retryDelay: 100 });
+  }
+});
+
+test('asset indexer treats quota and database-busy errors as fatal while ordinary file failures stay attributable', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-asset-indexer-fatal-classification-'));
+  const input = path.join(directory, 'input');
+  const output = path.join(directory, 'output');
+  fs.mkdirSync(input, { recursive: true });
+  fs.mkdirSync(output, { recursive: true });
+  fs.writeFileSync(path.join(input, 'a.txt'), 'a');
+  fs.writeFileSync(path.join(input, 'b.txt'), 'b');
+  const database = {
+    listAssetAvailabilitySnapshots(projectId) {
+      return { projectId, catalogRevision: 1, snapshots: [] };
+    },
+    syncAssetAvailabilityObservations() {
+      throw new Error('empty availability must not open a writer');
+    },
+  };
+  try {
+    for (const phase of ['metadata', 'derived']) {
+      const fatal = Object.assign(new Error(`private ${phase} ENOSPC detail`), { code: 'ENOSPC' });
+      await assert.rejects(
+        readStableAssetSource(path.join(input, 'a.txt'), phase === 'metadata' ? 'text' : 'image', {
+          attempts: 1,
+          readMetadata: async (_filename, _kind, stat) => {
+            if (phase === 'metadata') throw fatal;
+            return { size: stat.size, modifiedAt: stat.mtimeMs, health: 'ok' };
+          },
+          buildDerived: phase === 'derived' ? async () => { throw fatal; } : null,
+        }),
+        (error) => error === fatal,
+        `${phase} capacity failures must not be downgraded to corrupt preview metadata`,
+      );
+    }
+
+    for (const code of ['ENOSPC', 'EDQUOT', 'SQLITE_BUSY_SNAPSHOT', 'SQLITE_LOCKED_SHAREDCACHE']) {
+      const projectId = `project/indexer-${code.toLowerCase()}`;
+      const indexer = new AssetIndexer({ INPUT_DIR: input, OUTPUT_DIR: output }, database);
+      const fatal = Object.assign(new Error(`private ${code} detail`), { code });
+      let calls = 0;
+      indexer.indexFile = async () => {
+        calls += 1;
+        throw fatal;
+      };
+      await assert.rejects(indexer.scan({ projectId, concurrency: 1 }), (error) => error === fatal);
+      assert.equal(calls, 1, `${code} must stop before the second file`);
+      assert.equal(indexer.status(projectId).lastResult, null);
+    }
+
+    const ordinaryIndexer = new AssetIndexer({ INPUT_DIR: input, OUTPUT_DIR: output }, database);
+    let ordinaryCalls = 0;
+    ordinaryIndexer.indexFile = async () => {
+      ordinaryCalls += 1;
+      if (ordinaryCalls === 1) {
+        throw Object.assign(new Error('attributable metadata parse failure'), { code: 'INVALID_MODEL_METADATA' });
+      }
+      return { id: 'indexed' };
+    };
+    const result = await ordinaryIndexer.scan({ projectId: 'project/indexer-ordinary-failure', concurrency: 1 });
+    assert.deepEqual(
+      { total: result.total, indexed: result.indexed, failed: result.failed },
+      { total: 2, indexed: 1, failed: 1 },
+    );
+    assert.strictEqual(ordinaryIndexer.status('project/indexer-ordinary-failure').lastResult, result);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 6, retryDelay: 100 });
   }
 });

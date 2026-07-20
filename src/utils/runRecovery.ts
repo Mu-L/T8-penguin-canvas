@@ -18,8 +18,6 @@ export interface RunRecoveryDescriptor {
   taskId?: string;
   taskIds?: string[];
   requestId?: string;
-  responseUrl?: string;
-  statusUrl?: string;
   endpoint?: string;
   model?: string;
   site?: 'cn' | 'intl';
@@ -51,8 +49,6 @@ function normalizeExplicitRecovery(value: unknown): RunRecoveryDescriptor | null
     taskId: text(raw.taskId, 512) || undefined,
     taskIds: taskIds.length ? taskIds : undefined,
     requestId: text(raw.requestId, 512) || undefined,
-    responseUrl: text(raw.responseUrl, 4096) || undefined,
-    statusUrl: text(raw.statusUrl, 4096) || undefined,
     endpoint: text(raw.endpoint, 1024) || undefined,
     model: text(raw.model, 240) || undefined,
     site: ['cn', 'intl'].includes(text(raw.site, 20).toLowerCase()) ? text(raw.site, 20).toLowerCase() as 'cn' | 'intl' : undefined,
@@ -63,7 +59,7 @@ function normalizeExplicitRecovery(value: unknown): RunRecoveryDescriptor | null
   };
   if (kind === 'suno') return descriptor.taskIds?.length ? descriptor : null;
   if (kind === 'image-fal' || kind === 'video-fal') {
-    return descriptor.requestId && (descriptor.responseUrl || descriptor.endpoint) ? descriptor : null;
+    return descriptor.requestId && descriptor.endpoint ? descriptor : null;
   }
   return descriptor.taskId ? descriptor : null;
 }

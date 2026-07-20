@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
+import sharp from 'sharp';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -17,6 +18,18 @@ async function listen(app: any) {
 test('Seedream NZ proxy uses the independent SD2 key and stores completed output locally', async (t) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 't8-seedream-nz-route-'));
   t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  const validPng = await sharp({
+    create: { width: 2, height: 2, channels: 4, background: { r: 220, g: 120, b: 40, alpha: 1 } },
+  }).png().toBuffer();
+  let mediaDownloads = 0;
+  const mediaApp = express();
+  mediaApp.get('/seedream-result.png', (_req, res) => {
+    mediaDownloads += 1;
+    res.type('image/png').send(validPng);
+  });
+  const mediaServer = await listen(mediaApp);
+  const mediaUrl = `http://media.test:${mediaServer.address().port}/seedream-result.png?token=seedream-output-secret&signature=seedream-signature`;
+  t.after(() => mediaServer.close());
   const config = require('../backend/src/config.js');
   const oldConfig = { SETTINGS_FILE: config.SETTINGS_FILE, OUTPUT_DIR: config.OUTPUT_DIR };
   config.SETTINGS_FILE = path.join(tmpDir, 'settings.json');
@@ -49,16 +62,21 @@ test('Seedream NZ proxy uses the independent SD2 key and stores completed output
   seedanceNz.queryImageTask = async () => ({
     status: 'succeeded',
     progress: '100%',
-    imageUrl: 'https://cdn.example.com/seedream-result.png',
+    imageUrl: mediaUrl,
     raw: { data: { status: 'SUCCESS' } },
-  });
-  seedanceNz.fetchRemote = async () => new Response(Buffer.from('PNG-RESULT'), {
-    status: 200,
-    headers: { 'Content-Type': 'image/png' },
   });
   t.after(() => Object.assign(seedanceNz, originals));
 
   const proxyRouter = require('../backend/src/routes/proxy.js');
+  const safeLookupHosts: string[] = [];
+  proxyRouter._test.setProxySafeRemoteTestOptions({
+    allowPrivateForTests: (hostname: string) => hostname === 'media.test',
+    lookupImpl: async (hostname: string) => {
+      safeLookupHosts.push(hostname);
+      return [{ address: '127.0.0.1', family: 4 }];
+    },
+  });
+  t.after(() => proxyRouter._test.setProxySafeRemoteTestOptions(null));
   const app = express();
   app.use(express.json({ limit: '4mb' }));
   app.use('/api/proxy', proxyRouter);
@@ -88,6 +106,9 @@ test('Seedream NZ proxy uses the independent SD2 key and stores completed output
   assert.equal(status.success, true);
   assert.equal(status.data.status, 'completed');
   assert.match(status.data.urls[0], /^\/files\/output\/img_/);
-  assert.equal(status.data.remoteUrls[0], 'https://cdn.example.com/seedream-result.png');
+  assert.equal(Object.hasOwn(status.data, 'remoteUrls'), false);
+  assert.doesNotMatch(JSON.stringify(status), /seedream-output-secret|seedream-signature|media\.test/);
   assert.equal(fs.readdirSync(config.OUTPUT_DIR).length, 1);
+  assert.equal(mediaDownloads, 1);
+  assert.deepEqual(safeLookupHosts, ['media.test']);
 });

@@ -1,0 +1,21 @@
+{
+  "id": "unknown-fields-board",
+  "name": "未来字段兼容样本",
+  "updatedAt": 1704067200005,
+  "nodes": [
+    {
+      "id": "future-node-a",
+      "type": "text",
+      "position": { "x": 10, "y": 20 },
+      "data": { "label": "未来节点", "futureScalar": 37, "futureObject": { "enabled": true, "weights": [0.2, 0.8] } },
+      "futureNodeField": { "mode": "keep-verbatim", "nested": { "unicode": "未知业务字段" } }
+    },
+    { "id": "future-node-b", "type": "output", "position": { "x": 330, "y": 20 }, "data": { "futureNull": null } }
+  ],
+  "edges": [
+    { "id": "future-edge", "source": "future-node-a", "target": "future-node-b", "futureEdgeField": ["alpha", { "beta": 2 }] }
+  ],
+  "viewport": { "x": 1, "y": 2, "zoom": 1, "futureViewportField": "preserve" },
+  "futureRootField": { "schema": 99, "payload": [1, 2, { "three": true }] },
+  "pluginState": { "thirdParty": { "opaque": "do-not-drop" } }
+}

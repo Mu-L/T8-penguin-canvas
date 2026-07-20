@@ -9,7 +9,6 @@ import {
   Download,
   FolderSearch,
   GitFork,
-  Globe2,
   History,
   Heart,
   Loader2,
@@ -23,7 +22,7 @@ import {
   X,
 } from 'lucide-react';
 import * as api from '../services/api';
-import type { AssetRef, CanvasPatch, CanvasPatchPreview, CanvasPatchRecord, CollaborationExecutionPolicySnapshot, CollaborationStatus, NodeRunSummary, RunAttemptSummary, RunDetail, RunEventRecord, RunIntent, RunRecoveryOverview, RunRetentionPolicy, RunSummary, WorkspaceRole } from '../types/project';
+import type { AssetRef, CanvasPatch, CanvasPatchPreview, CanvasPatchRecord, CollaborationExecutionPolicySnapshot, NodeRunSummary, RunAttemptSummary, RunDetail, RunEventRecord, RunIntent, RunRecoveryOverview, RunRetentionPolicy, RunSummary } from '../types/project';
 import { diffSubflowDefinitions, upgradeSubflowInstances, type SubflowDefinition, type SubflowUpgradeResult } from '../utils/subflows';
 import {
   analyzeWorkflow,
@@ -85,6 +84,7 @@ import {
 } from '../utils/canvasPatchMerge';
 import { useApiKeysStore } from '../stores/apiKeys';
 import { useRunBusStore } from '../stores/runBus';
+import CollaborationHostPanel from './CollaborationHostPanel';
 
 type WorkbenchTab = 'subflows' | 'runs' | 'assets' | 'doctor' | 'collaboration';
 type ProjectRunReplayMode = 'full-current' | 'failed-original' | 'full-original';
@@ -339,13 +339,6 @@ export default function ProjectWorkbench(props: ProjectWorkbenchProps) {
     || agentPreviewQueueItem.previewDigest !== patchPreview.preview.previewDigest
     || agentAuthority?.canApplyCanvasPatch !== true
   ));
-  const [collaboration, setCollaboration] = useState<CollaborationStatus>({ running: false });
-  const [runIntents, setRunIntents] = useState<RunIntent[]>([]);
-  const [collabHost, setCollabHost] = useState('127.0.0.1');
-  const [collabPort, setCollabPort] = useState(18767);
-  const [inviteRole, setInviteRole] = useState<WorkspaceRole>('reviewer');
-  const [inviteUrl, setInviteUrl] = useState('');
-  const [publicBaseUrl, setPublicBaseUrl] = useState(() => localStorage.getItem('t8-collaboration-public-base-url') || '');
   const [doctorRemoteContext, setDoctorRemoteContext] = useState<DoctorRemoteContext>(EMPTY_DOCTOR_REMOTE_CONTEXT);
   const doctorLoadGenerationRef = useRef(0);
   const subflowLoadGenerationRef = useRef(0);
@@ -548,14 +541,6 @@ export default function ProjectWorkbench(props: ProjectWorkbenchProps) {
       if (generation === runLoadGenerationRef.current && requestScopeKey === patchScopeKeyRef.current) setBusy(false);
     }
   }, [patchScopeKey, props.canvasId, props.projectId, runFilter.initiatorId, runFilter.model, runFilter.provider, runStatus]);
-  const loadCollaboration = useCallback(() => withBusy(async () => {
-    const [status, intents] = await Promise.all([api.getCollaborationStatus(), api.listCollaborationRunIntents('actionable', props.projectId)]);
-    setCollaboration(status);
-    setRunIntents(intents);
-    if (status.host) setCollabHost(status.host);
-    if (status.port) setCollabPort(status.port);
-  }), [props.projectId, withBusy]);
-
   const updateAgentQueueItem = useCallback((queueItemId: string, patch: Partial<CanvasAgentPatchQueueItem>) => {
     setAgentPatchQueue((current) => current.map((item) => item.id === queueItemId ? { ...item, ...patch } : item));
   }, []);
@@ -1118,8 +1103,7 @@ export default function ProjectWorkbench(props: ProjectWorkbenchProps) {
     if (!props.open) return;
     if (tab === 'subflows') void loadSubflows('');
     if (tab === 'runs') void loadRuns();
-    if (tab === 'collaboration') void loadCollaboration();
-  }, [loadCollaboration, loadRuns, loadSubflows, props.open, tab]);
+  }, [loadRuns, loadSubflows, props.open, tab]);
 
   useEffect(() => {
     if (!props.open || tab !== 'doctor') return;
@@ -1159,7 +1143,7 @@ export default function ProjectWorkbench(props: ProjectWorkbenchProps) {
           },
         }, { signal: controller.signal }).then((result) => parseCanvasAgentRunEvidence(result, doctorEvidenceTarget))
         : Promise.resolve(null);
-      const intentsPromise = api.listCollaborationRunIntents('actionable', props.projectId, { signal: controller.signal });
+      const intentsPromise = api.listCollaborationRunIntents('actionable', props.projectId, props.canvasId, { signal: controller.signal });
       const policyPromise = intentsPromise.then((intents) => {
         const reservedIntent = selectDoctorReservedRunIntent(intents);
         return api.getCollaborationExecutionPolicy(props.projectId, {
@@ -1235,21 +1219,6 @@ export default function ProjectWorkbench(props: ProjectWorkbenchProps) {
   }, [doctorAssetIdKey, doctorEvidenceTarget, doctorScopeKey, props.canvasId, props.canvasRevision, props.open, props.projectId, tab]);
 
   if (!props.open) return null;
-
-  const createInvite = () => withBusy(async () => {
-    const invite = await api.createCollaborationInvite({ role: inviteRole, maxUses: 20, expiresInMs: 7 * 24 * 60 * 60 * 1000 });
-    let nextUrl = invite.localUrl || '';
-    if (publicBaseUrl.trim() && nextUrl) {
-      const base = new URL(publicBaseUrl.trim());
-      if (!/^https?:$/.test(base.protocol)) throw new Error('对外地址必须使用 http 或 https');
-      const local = new URL(nextUrl);
-      nextUrl = `${base.toString().replace(/\/$/, '')}${local.pathname}${local.search}`;
-      localStorage.setItem('t8-collaboration-public-base-url', publicBaseUrl.trim());
-    }
-    setInviteUrl(nextUrl);
-    if (nextUrl) await navigator.clipboard?.writeText(nextUrl);
-    setMessage(nextUrl ? '邀请链接已生成并复制。' : '网关尚未启动，先启动后再创建邀请。');
-  });
 
   const inspectSubflowFile = (file: File) => withBusy(async () => {
     const inspection = await api.inspectSubflowPackage(file);
@@ -1654,7 +1623,11 @@ export default function ProjectWorkbench(props: ProjectWorkbenchProps) {
           )}
 
           {tab === 'collaboration' && (
-            <section className="mx-auto max-w-2xl"><div className="mb-5 flex items-center justify-between"><div><h3 className="text-sm font-bold">独立协作网关</h3><p className="text-xs text-[var(--text-secondary)]">只暴露协作白名单接口，不代理本机私有后端。</p></div><span className={`rounded px-3 py-1 text-xs font-bold ${collaboration.running ? 'bg-green-500/15 text-green-500' : 'bg-zinc-500/15'}`}>{collaboration.running ? '已运行' : '未启动'}</span></div><div className="grid gap-4 sm:grid-cols-2"><label className="text-xs font-semibold">监听地址<input value={collabHost} className="mt-1 h-10 w-full rounded border border-[var(--border-primary)] bg-[var(--bg-secondary)] px-3" onChange={(event) => setCollabHost(event.target.value)} /></label><label className="text-xs font-semibold">端口<input type="number" min={1024} max={65535} value={collabPort} className="mt-1 h-10 w-full rounded border border-[var(--border-primary)] bg-[var(--bg-secondary)] px-3" onChange={(event) => setCollabPort(Number(event.target.value) || 18767)} /></label></div>{collabHost !== '127.0.0.1' && collabHost !== 'localhost' && <div className="mt-3 rounded border border-amber-500/40 bg-amber-500/10 p-3 text-xs leading-5">当前设置会监听局域网或公网网卡。请同时配置系统防火墙、TLS 反向代理和访问域名。</div>}<div className="mt-4 flex gap-2"><button type="button" className="flex h-10 flex-1 items-center justify-center gap-2 rounded bg-[var(--accent-primary)] text-xs font-bold text-white" onClick={() => void withBusy(async () => setCollaboration(await api.startCollaborationGateway({ host: collabHost, port: collabPort })))}><Globe2 size={15} />启动 / 更新</button><button type="button" className="h-10 rounded border border-[var(--border-primary)] px-4 text-xs font-bold" disabled={!collaboration.running} onClick={() => void withBusy(async () => setCollaboration(await api.stopCollaborationGateway()))}>停止</button></div><hr className="my-6 border-[var(--border-primary)]" /><h3 className="mb-3 text-sm font-bold">创建邀请</h3><div className="grid gap-4 sm:grid-cols-2"><label className="text-xs font-semibold">角色<select value={inviteRole} className="mt-1 h-10 w-full rounded border border-[var(--border-primary)] bg-[var(--bg-secondary)] px-3" onChange={(event) => setInviteRole(event.target.value as WorkspaceRole)}><option value="editor">编辑者</option><option value="reviewer">审阅者</option><option value="viewer">查看者</option></select></label><label className="text-xs font-semibold">对外基础地址（可选）<input value={publicBaseUrl} placeholder="https://canvas.example.com" className="mt-1 h-10 w-full rounded border border-[var(--border-primary)] bg-[var(--bg-secondary)] px-3" onChange={(event) => setPublicBaseUrl(event.target.value)} /></label></div><button type="button" className="mt-4 flex h-10 items-center gap-2 rounded border border-[var(--border-primary)] px-4 text-xs font-bold" disabled={!collaboration.running} onClick={() => void createInvite()}><Share2 size={15} />生成并复制邀请链接</button>{inviteUrl && <input readOnly value={inviteUrl} className="mt-3 h-10 w-full rounded border border-[var(--border-primary)] bg-[var(--bg-secondary)] px-3 text-xs" onFocus={(event) => event.currentTarget.select()} />}<hr className="my-6 border-[var(--border-primary)]" /><div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-bold">待处理运行请求</h3><span className="text-xs opacity-55">{runIntents.length}</span></div><div className="space-y-2">{runIntents.map((intent) => <article key={intent.id} className="border-b border-[var(--border-primary)] py-3"><div className="flex items-center gap-3"><Play size={15} className="text-[var(--accent-primary)]" /><div className="min-w-0 flex-1"><div className="truncate text-xs font-bold">{intent.requestedBy}</div><div className="text-[10px] opacity-55">revision {intent.canvasRevision} · {intent.nodeIds.length || '全部'} 节点 · {formatTime(intent.createdAt)}</div></div><button type="button" className="h-8 rounded bg-[var(--accent-primary)] px-3 text-[11px] font-bold text-white" onClick={() => void withBusy(async () => { await props.onAcceptRunIntent(intent); await loadCollaboration(); })}>接受</button><button type="button" className="h-8 rounded border border-[var(--border-primary)] px-3 text-[11px] font-bold" onClick={() => void withBusy(async () => { await api.updateCollaborationRunIntent(intent.id, { status: 'rejected' }); await loadCollaboration(); })}>拒绝</button></div></article>)}{!runIntents.length && <div className="py-6 text-center text-xs opacity-55">暂无远程运行请求</div>}</div></section>
+            <CollaborationHostPanel
+              projectId={props.projectId}
+              canvasId={props.canvasId}
+              onAcceptRunIntent={props.onAcceptRunIntent}
+            />
           )}
         </main>
       </aside>

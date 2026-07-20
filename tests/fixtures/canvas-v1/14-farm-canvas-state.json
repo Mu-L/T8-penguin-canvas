@@ -1,0 +1,30 @@
+{
+  "canvasId": "farm-story-board",
+  "projectId": "theme-project",
+  "name": "牧场故事存档",
+  "updatedAt": 1704067200014,
+  "theme": { "name": "farm-story", "mode": "day", "season": "spring" },
+  "nodes": [
+    { "id": "farm-poster", "type": "image", "position": { "x": 520, "y": 180 }, "data": { "label": "牧场海报", "prompt": "温暖的春日牧场" } }
+  ],
+  "edges": [],
+  "viewport": { "x": 320, "y": 210, "zoom": 0.7 },
+  "farmCanvas": {
+    "version": 1,
+    "coordinateMode": "flow",
+    "gridSize": 48,
+    "day": 6,
+    "season": "spring",
+    "weather": "rainy",
+    "resources": { "gold": 420, "wood": 35, "stone": 18, "water": 7, "experience": 95, "seeds": { "turnip": 4, "sunflower": 2 } },
+    "inventory": { "crops": { "turnip": 3 }, "animalProducts": { "egg": 2 }, "decorIds": ["spring-banner"] },
+    "objects": [
+      { "id": "plot-a1", "kind": "plot", "x": 2, "y": 3, "widthCells": 1, "heightCells": 1, "crop": { "cropId": "turnip", "plantedDay": 4, "daysGrown": 2, "wateredToday": true, "dryDays": 0, "stage": "growing" }, "createdDay": 2 },
+      { "id": "barn-a", "kind": "building", "x": 7, "y": 2, "widthCells": 3, "heightCells": 2, "buildingId": "barn", "createdDay": 1 }
+    ],
+    "animals": [{ "id": "hen-luna", "kind": "chicken", "name": "露娜", "mood": "happy", "placedDay": 2, "productCount": 1 }],
+    "orders": [], "festivalTasks": [], "npcVisits": [], "rareEvents": [], "eventLog": [],
+    "discoveredCropIds": ["turnip", "sunflower"], "unlockedDecorIds": ["spring-banner"],
+    "stats": { "plotsTilled": 4, "cropsPlanted": 5, "cropsWatered": 8, "cropsHarvested": 2, "ordersCompleted": 1, "npcVisitsCompleted": 0, "rareEventsFound": 0, "objectsPlaced": 3, "buildingsPlaced": 1, "decorPlaced": 1, "daysAdvanced": 5 }
+  }
+}

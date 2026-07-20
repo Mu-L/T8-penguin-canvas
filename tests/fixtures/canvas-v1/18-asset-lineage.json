@@ -1,0 +1,21 @@
+{
+  "canvasId": "asset-lineage-board",
+  "projectId": "catalog-project",
+  "name": "素材血缘链",
+  "updatedAt": 1704067200018,
+  "assets": [
+    { "id": "asset-original", "kind": "image", "filename": "original.tif", "metadata": { "width": 4096, "height": 4096, "colorSpace": "Display P3" }, "provenance": { "sourceType": "upload" } },
+    { "id": "asset-cutout", "kind": "image", "filename": "cutout.png", "parentAssetIds": ["asset-original"], "metadata": { "width": 4096, "height": 4096, "alpha": true }, "provenance": { "sourceType": "remove-bg", "parentAssetIds": ["asset-original"] } },
+    { "id": "asset-banner", "kind": "image", "filename": "banner.webp", "parentAssetIds": ["asset-cutout"], "metadata": { "width": 1920, "height": 640 }, "provenance": { "sourceType": "compose", "parentAssetIds": ["asset-cutout"] } }
+  ],
+  "nodes": [
+    { "id": "lineage-upload", "type": "upload", "position": { "x": 0, "y": 80 }, "data": { "sourceAssetId": "asset-original" } },
+    { "id": "lineage-remove", "type": "remove-bg", "position": { "x": 300, "y": 80 }, "data": { "sourceAssetId": "asset-cutout", "assetRefs": ["asset-original", "asset-cutout"] } },
+    { "id": "lineage-output", "type": "output", "position": { "x": 620, "y": 80 }, "data": { "sourceAssetId": "asset-banner" } }
+  ],
+  "edges": [
+    { "id": "lineage-e1", "source": "lineage-upload", "target": "lineage-remove" },
+    { "id": "lineage-e2", "source": "lineage-remove", "target": "lineage-output" }
+  ],
+  "viewport": { "x": 90, "y": 60, "zoom": 0.85 }
+}

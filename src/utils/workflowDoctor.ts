@@ -915,35 +915,81 @@ export function workflowIssuesFromCanvasAgentValidation(
   for (const rawDiagnostic of diagnostics) {
     if (!rawDiagnostic || typeof rawDiagnostic !== 'object' || Array.isArray(rawDiagnostic)) continue;
     const diagnostic = rawDiagnostic as Record<string, unknown>;
-    if (diagnostic.ruleId !== 'topology.cycle'
-      || diagnostic.severity !== 'error'
+    if (diagnostic.severity !== 'error'
+      || diagnostic.targetType !== 'subflow'
       || !diagnostic.facts
       || typeof diagnostic.facts !== 'object'
       || Array.isArray(diagnostic.facts)) continue;
     const facts = diagnostic.facts as Record<string, unknown>;
-    if (facts.variant !== 'subflow-dependency') continue;
     const rootRefs = Array.isArray(facts.rootRefs)
       ? facts.rootRefs.filter((value): value is string => typeof value === 'string' && PUBLIC_SUBFLOW_REF_PATTERN.test(value)).slice(0, 20)
       : [];
-    const cycleRefs = Array.isArray(facts.cycleRefs)
-      ? facts.cycleRefs.filter((value): value is string => typeof value === 'string' && PUBLIC_SUBFLOW_REF_PATTERN.test(value)).slice(0, 20)
-      : [];
-    if (rootRefs.length === 0
-      || cycleRefs.length < 2
-      || cycleRefs[0] !== cycleRefs[cycleRefs.length - 1]) continue;
+    if (rootRefs.length === 0) continue;
     const targetNodeIds = [...new Set(rootRefs.flatMap((ref) => nodesByRootRef.get(ref) || []))].sort();
     if (targetNodeIds.length === 0) continue;
-    const definitionCount = Number(facts.definitionCount);
-    const maxDepth = Number(facts.maxDepth);
-    issues.push(workflowIssue('topology.cycle', {
-      id: `subflow-dependency-cycle-${stableTextHash(cycleRefs.join('\u0000'))}`,
-      detail: `固定版本子工作流依赖形成循环：${cycleRefs.join(' → ')}`,
-      evidence: {
-        variant: 'subflow-dependency',
+    if (diagnostic.ruleId === 'topology.cycle' && facts.variant === 'subflow-dependency') {
+      const cycleRefs = Array.isArray(facts.cycleRefs)
+        ? facts.cycleRefs.filter((value): value is string => typeof value === 'string' && PUBLIC_SUBFLOW_REF_PATTERN.test(value)).slice(0, 20)
+        : [];
+      if (cycleRefs.length < 2 || cycleRefs[0] !== cycleRefs[cycleRefs.length - 1]) continue;
+      const definitionCount = Number(facts.definitionCount);
+      const maxDepth = Number(facts.maxDepth);
+      issues.push(workflowIssue('topology.cycle', {
+        id: `subflow-dependency-cycle-${stableTextHash(cycleRefs.join('\u0000'))}`,
+        detail: `固定版本子工作流依赖形成循环：${cycleRefs.join(' → ')}`,
+        evidence: {
+          variant: 'subflow-dependency',
+          rootRefs,
+          cycleRefs,
+          definitionCount: Number.isSafeInteger(definitionCount) && definitionCount >= 0 ? definitionCount : 0,
+          maxDepth: Number.isSafeInteger(maxDepth) && maxDepth > 0 ? maxDepth : 0,
+        },
+        location: { scope: 'subflow', nodeId: targetNodeIds[0], field: 'definitionDependencies' },
+        nodeIds: targetNodeIds,
+      }));
+      continue;
+    }
+    if (diagnostic.ruleId !== 'subflow.version-invalid') continue;
+    const variant = String(facts.variant || '');
+    if (![
+      'subflow-dependency-limit',
+      'subflow-dependency-unavailable',
+      'subflow-dependency-pin-mismatch',
+      'subflow-dependency-depth-limit',
+    ].includes(variant)) continue;
+    const dependencyRef = typeof facts.dependencyRef === 'string' && PUBLIC_SUBFLOW_REF_PATTERN.test(facts.dependencyRef)
+      ? facts.dependencyRef
+      : '';
+    const definitionRef = typeof facts.definitionRef === 'string' && PUBLIC_SUBFLOW_REF_PATTERN.test(facts.definitionRef)
+      ? facts.definitionRef
+      : '';
+    const maximum = Number(facts.maximum);
+    const safeMaximum = Number.isSafeInteger(maximum) && maximum > 0 ? maximum : 0;
+    if ((variant === 'subflow-dependency-limit' || variant === 'subflow-dependency-depth-limit') && safeMaximum === 0) continue;
+    const detail = variant === 'subflow-dependency-limit'
+      ? `固定版本子工作流依赖超过 ${safeMaximum} 项，权威验证已失败关闭。`
+      : variant === 'subflow-dependency-depth-limit'
+        ? `固定版本子工作流依赖展开超过 ${safeMaximum} 层${definitionRef ? `（${definitionRef}）` : ''}，权威验证已失败关闭。`
+        : variant === 'subflow-dependency-pin-mismatch'
+          ? `固定版本子工作流依赖不满足权威版本契约${definitionRef ? `（${definitionRef}）` : ''}。`
+          : dependencyRef
+            ? `嵌套子工作流固定版本 ${dependencyRef} 不存在或不属于当前项目。`
+            : '固定版本子工作流依赖仓储暂不可用，权威验证已失败关闭。';
+    issues.push(workflowIssue('subflow.version-invalid', {
+      id: `subflow-dependency-invalid-${stableTextHash(JSON.stringify([
+        variant,
         rootRefs,
-        cycleRefs,
-        definitionCount: Number.isSafeInteger(definitionCount) && definitionCount >= 0 ? definitionCount : 0,
-        maxDepth: Number.isSafeInteger(maxDepth) && maxDepth > 0 ? maxDepth : 0,
+        dependencyRef,
+        definitionRef,
+        safeMaximum,
+      ]))}`,
+      detail,
+      evidence: {
+        variant,
+        rootRefs,
+        dependencyRef,
+        definitionRef,
+        maximum: safeMaximum,
       },
       location: { scope: 'subflow', nodeId: targetNodeIds[0], field: 'definitionDependencies' },
       nodeIds: targetNodeIds,

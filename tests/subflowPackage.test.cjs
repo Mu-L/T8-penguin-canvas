@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const yazl = require('yazl');
 const {
+  containsPlaintextSecret,
   createSubflowPackage,
   hydrateDependencyDefinitions,
   importSubflowPackage,
@@ -50,6 +51,45 @@ test('t8flow import rejects check/use archive hash changes and plaintext credent
     { accessKeySecret: 'access-secret' },
     { sourceUrl: 'https://example.com/media.png?X-Amz-Signature=private' },
   ]) await assert.rejects(() => createSubflowPackage({ ...definition, nodes: [{ ...definition.nodes[0], data }] }), /明文凭据/);
+
+  for (const plaintext of [
+    ['sk-', 'abcdefghijklmnopqrstuvwxyz123456'].join(''),
+    'Bearer test-bearer-token-value',
+    ['ghp_', 'A'.repeat(36)].join(''),
+    ['github_pat_', 'A'.repeat(32)].join(''),
+    ['AKIA', 'ABCDEFGHIJKLMNOP'].join(''),
+    ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiJ0ZXN0In0', 'c2lnbmF0dXJl'].join('.'),
+    'data:image/png;base64,QUJDREVGRw==',
+  ]) {
+    const unsafeDefinition = {
+      ...definition,
+      nodes: [{
+        ...definition.nodes[0],
+        data: { prompt: plaintext },
+      }],
+    };
+    assert.equal(containsPlaintextSecret(unsafeDefinition), true, plaintext);
+    await assert.rejects(() => createSubflowPackage(unsafeDefinition), /明文凭据/);
+
+    const definitionBuffer = Buffer.from(`${JSON.stringify(unsafeDefinition)}\n`);
+    const manifest = {
+      schema: 't8-subflow-package',
+      version: 1,
+      definition: 'definition.json',
+      files: [{
+        path: 'definition.json',
+        size: definitionBuffer.length,
+        sha256: sha256(definitionBuffer),
+        kind: 'definition',
+      }],
+    };
+    const unsafeArchive = await zipEntries([
+      { path: 'manifest.json', content: `${JSON.stringify(manifest)}\n` },
+      { path: 'definition.json', content: definitionBuffer },
+    ]);
+    await assert.rejects(() => inspectSubflowPackage(unsafeArchive), /明文凭据/);
+    await assert.rejects(() => importSubflowPackage(unsafeArchive), /明文凭据/);
+  }
 });
 
 test('t8flow preflight rejects traversal, undeclared files and abnormal compression ratios', async () => {

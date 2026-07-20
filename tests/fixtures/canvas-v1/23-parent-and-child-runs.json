@@ -1,0 +1,24 @@
+{
+  "canvasId": "parent-run-board",
+  "projectId": "run-project",
+  "name": "父子运行关联",
+  "updatedAt": 1704067200023,
+  "nodes": [
+    { "id": "outer-subflow-node", "type": "subflow", "position": { "x": 80, "y": 80 }, "data": { "definitionId": "external-fixed-flow", "definitionVersion": 8 } },
+    { "id": "outer-output", "type": "output", "position": { "x": 420, "y": 80 }, "data": {} }
+  ],
+  "edges": [{ "id": "outer-run-edge", "source": "outer-subflow-node", "target": "outer-output" }],
+  "runs": [
+    {
+      "id": "parent-run-old", "status": "failed", "nodeIds": ["outer-subflow-node"],
+      "nodeRuns": [{ "id": "outer-node-run", "nodeId": "outer-subflow-node", "definitionId": "external-fixed-flow", "definitionVersion": 8, "status": "failed", "attempts": [{ "id": "outer-attempt", "status": "failed", "error": { "code": "fixture-timeout" } }] }],
+      "events": [{ "id": "parent-event-1", "nodeRunId": "outer-node-run", "type": "node.failed", "payload": { "retryable": true } }]
+    },
+    {
+      "id": "child-retry-old", "parentRunId": "parent-run-old", "status": "succeeded", "nodeIds": ["outer-subflow-node"],
+      "nodeRuns": [{ "id": "retry-node-run", "nodeId": "outer-subflow-node", "parentNodeRunId": "outer-node-run", "definitionId": "external-fixed-flow", "definitionVersion": 8, "status": "succeeded", "attempts": [{ "id": "retry-attempt", "status": "succeeded" }] }],
+      "events": [{ "id": "child-event-1", "nodeRunId": "retry-node-run", "type": "run.finished", "payload": { "recovered": true } }]
+    }
+  ],
+  "viewport": { "x": 70, "y": 70, "zoom": 0.9 }
+}

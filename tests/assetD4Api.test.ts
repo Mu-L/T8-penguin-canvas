@@ -11,10 +11,14 @@ import type {
 import {
   deleteProjectAssetSemanticModel,
   downloadProjectAssetSemanticModel,
+  getProjectAssetPipelineStatus,
   getProjectAssetSemanticDocuments,
   getProjectAssetSemanticStatus,
+  refreshProjectAssetSemanticModels,
+  refreshProjectAssetAvailability,
   rebuildProjectAssetSemanticIndex,
   retryProjectAssetSemanticJob,
+  scanProjectAssets,
   searchProjectAssetsSemantic,
   updateProjectAssetSemanticProfile,
 } from '../src/services/api.ts';
@@ -120,6 +124,151 @@ function statusData(): AssetSemanticStatus {
   };
 }
 
+test('availability maintenance sends exactly one frozen six-field JSON POST and validates the safe response identity', async () => {
+  const originalFetch = globalThis.fetch;
+  const controller = new AbortController();
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const input = {
+    projectId: 'project/a',
+    expectedCatalogRevision: 17,
+    entityUid: '019f6d00-0000-7000-8000-000000000001',
+    contentRevision: 4,
+    organizationRevision: 9,
+    contentHash: 'a'.repeat(64),
+  };
+  const responses = [
+    json({ success: true, data: {
+      assetId: 'asset/a', projectId: 'project/a', state: 'source-changed',
+      reason: 'source-content-changed', changed: true, availability: 'missing',
+      organizationRevision: 10, catalogRevision: 18,
+      managedPath: 'C:\\private\\source.png', observedContentHash: 'b'.repeat(64),
+    } }),
+    json({ success: true, data: {
+      assetId: 'another-asset', projectId: 'project/a', state: 'available',
+      reason: 'source-content-verified', changed: false, availability: 'available',
+      organizationRevision: 10, catalogRevision: 18,
+    } }),
+    json({ success: false, code: 'asset_catalog_revision_conflict', error: '素材目录已变化' }, 409),
+  ];
+  globalThis.fetch = (async (request: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(request), init });
+    return responses.shift()!;
+  }) as typeof fetch;
+  try {
+    const result = await refreshProjectAssetAvailability('asset/a', input, { signal: controller.signal });
+    assert.deepEqual(result, {
+      assetId: 'asset/a', projectId: 'project/a', state: 'source-changed',
+      reason: 'source-content-changed', changed: true, availability: 'missing',
+      organizationRevision: 10, catalogRevision: 18,
+    });
+    assert.equal(JSON.stringify(result).includes('private'), false);
+    assert.equal(calls[0].url, '/api/project-assets/asset%2Fa/availability/refresh');
+    assert.equal(calls[0].init?.method, 'POST');
+    assert.equal(calls[0].init?.signal, controller.signal);
+    assert.deepEqual(JSON.parse(String(calls[0].init?.body)), input);
+    await assert.rejects(
+      () => refreshProjectAssetAvailability('asset/a', input),
+      (error: unknown) => error instanceof Error
+        && error.name === 'ApiRequestError'
+        && /响应无效/.test(error.message),
+    );
+    const callsBeforeConflict = calls.length;
+    await assert.rejects(
+      () => refreshProjectAssetAvailability('asset/a', input),
+      (error: unknown) => error instanceof Error
+        && error.name === 'ApiRequestError'
+        && 'status' in error
+        && error.status === 409,
+    );
+    assert.equal(calls.length, callsBeforeConflict + 1, '409 must never replay the POST automatically');
+    assert.ok(calls.every((call) => call.init?.method === 'POST'));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('pipeline status and scan are project-bound and reject a mismatched response identity', async () => {
+  const originalFetch = globalThis.fetch;
+  const controller = new AbortController();
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const scanResult = {
+    projectId: 'project/a', catalogRevision: 18, total: 3, indexed: 2, failed: 1,
+    availability: { checked: 3, changed: 2, missing: 1, restored: 0, sourceChanged: 1, indeterminate: 1 },
+    startedAt: 10, finishedAt: 20,
+  };
+  const responses = [
+    json({ success: true, data: {
+      projectId: 'project/a',
+      scan: { projectId: 'project/a', running: false, lastResult: scanResult },
+      previews: {
+        projectId: 'project/a', active: 0, activeModel3d: 0,
+        concurrency: 2, concurrencyScope: 'global',
+        counts: { queued: 0, running: 0, retrying: 0, succeeded: 4, failed: 0 },
+        pending: { completions: 0, reschedules: 0, reruns: 0 },
+      },
+    } }),
+    json({ success: true, data: scanResult }),
+    json({ success: true, data: {
+      projectId: 'project/a',
+      scan: { projectId: 'project/b', running: false, lastResult: null },
+      previews: { projectId: 'project/a', active: 0, concurrency: 1, concurrencyScope: 'global', counts: {} },
+    } }),
+    json({ success: true, data: {
+      projectId: 'project/b',
+      scan: { projectId: 'project/a', running: false, lastResult: null },
+      previews: { projectId: 'project/a', active: 0, concurrency: 1, concurrencyScope: 'global', counts: {} },
+    } }),
+    json({ success: true, data: {
+      projectId: 'project/a',
+      scan: { projectId: 'project/a', running: false, lastResult: null },
+      previews: { projectId: 'project/b', active: 0, concurrency: 1, concurrencyScope: 'global', counts: {} },
+    } }),
+  ];
+  globalThis.fetch = (async (request: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(request), init });
+    return responses.shift()!;
+  }) as typeof fetch;
+  try {
+    const status = await getProjectAssetPipelineStatus('project/a', { signal: controller.signal });
+    assert.equal(status.scan.projectId, 'project/a');
+    assert.equal(status.scan.lastResult?.projectId, 'project/a');
+    assert.equal(status.previews.projectId, 'project/a');
+    assert.equal(status.previews.concurrencyScope, 'global');
+    const scan = await scanProjectAssets('project/a', { signal: controller.signal });
+    assert.equal(scan.projectId, 'project/a');
+    assert.equal(scan.catalogRevision, 18);
+    assert.equal(scan.availability?.sourceChanged, 1);
+    assert.equal(calls[0].url, '/api/project-assets/status?projectId=project%2Fa');
+    assert.equal(calls[0].init?.signal, controller.signal);
+    assert.equal(calls[1].url, '/api/project-assets/scan');
+    assert.equal(calls[1].init?.method, 'POST');
+    assert.deepEqual(JSON.parse(String(calls[1].init?.body)), { projectId: 'project/a' });
+    await assert.rejects(
+      () => getProjectAssetPipelineStatus('project/a'),
+      (error: unknown) => error instanceof Error
+        && error.name === 'ApiRequestError'
+        && 'status' in error
+        && error.status === 502,
+    );
+    await assert.rejects(
+      () => getProjectAssetPipelineStatus('project/a'),
+      (error: unknown) => error instanceof Error
+        && error.name === 'ApiRequestError'
+        && 'status' in error
+        && error.status === 502,
+    );
+    await assert.rejects(
+      () => getProjectAssetPipelineStatus('project/a'),
+      (error: unknown) => error instanceof Error
+        && error.name === 'ApiRequestError'
+        && 'status' in error
+        && error.status === 502,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('semantic status uses the fixed URL, forwards AbortSignal, and whitelists public model fields', async () => {
   const originalFetch = globalThis.fetch;
   const controller = new AbortController();
@@ -150,6 +299,29 @@ test('semantic status uses the fixed URL, forwards AbortSignal, and whitelists p
     for (const forbidden of ['private/repository', 'C:\\private\\models', 'private.invalid', 'must-not-cross-wire', 'embeddingVector', 'internalQueue']) {
       assert.equal(serialized.includes(forbidden), false, `must strip ${forbidden}`);
     }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('semantic model maintenance performs one explicit JSON POST and returns normalized full status', async () => {
+  const originalFetch = globalThis.fetch;
+  const controller = new AbortController();
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const canonical = statusData();
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(input), init });
+    return json({ success: true, data: canonical });
+  }) as typeof fetch;
+  try {
+    const result = await refreshProjectAssetSemanticModels('project/a', { signal: controller.signal });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, '/api/project-assets/semantic/models/refresh');
+    assert.equal(calls[0].init?.method, 'POST');
+    assert.equal(calls[0].init?.signal, controller.signal);
+    assert.deepEqual(JSON.parse(String(calls[0].init?.body)), { projectId: 'project/a' });
+    assert.equal(result.project.projectId, canonical.project.projectId);
+    assert.deepEqual(result.models, canonical.models);
   } finally {
     globalThis.fetch = originalFetch;
   }

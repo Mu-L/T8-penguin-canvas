@@ -638,11 +638,18 @@ export interface CanvasData {
   schemaVersion?: 2;
   projectId?: string;
   canvasId?: string;
+  entityUid?: string;
   revision?: number;
+  viewportRevision?: number;
   updatedAt?: number;
   nodes: any[];
   edges: any[];
   viewport: { x: number; y: number; zoom: number };
+  subflowInstances?: Array<Record<string, unknown>>;
+  tombstones?: {
+    nodes: Record<string, object>;
+    edges: Record<string, object>;
+  };
   nextNodeSerialId?: number;
   creativeDesk?: CreativeDeskState;
   farmCanvas?: FarmCanvasState;

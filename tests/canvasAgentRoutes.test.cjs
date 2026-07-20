@@ -124,6 +124,13 @@ test('local Agent HTTP route returns bounded 200/400/403/404/409/413 contracts',
   assert.equal(ok.body.data.canvasId, 'canvas-a');
   assert.equal(ok.body.data.canvasRevision, 4);
   assert.equal(ok.body.data.readOnly, true);
+  assert.deepEqual(ok.body.data.authority, {
+    advisoryOnly: false,
+    canPreviewCanvasPatch: true,
+    canApplyCanvasPatch: true,
+    canManageHostCredentials: false,
+    credentialVisibility: 'configured-state-only',
+  });
   assert.match(ok.body.data.digest, /^[a-f0-9]{64}$/);
   assert.doesNotMatch(JSON.stringify(ok.body), /private prompt/);
 
@@ -239,7 +246,12 @@ test('collaboration Agent route is pre-parsed, authenticated, scope-forced, and 
   assert.match(route, /sessionId: req\.collaborationSession\.id/);
   assert.match(route, /role: req\.collaborationSession\.role/);
   assert.match(route, /capabilities: req\.collaborationSession\.capabilities/);
-  assert.match(route, /executeCanvasAgentTool\(this\.database/);
+  assert.match(route, /const resourceScope = this\.canvasResourceScope\(req\.collaborationSession\)/);
+  assert.match(
+    route,
+    /executeCanvasAgentTool\(\s*this\.collaborationAgentDatabase\(req\.collaborationSession, resourceScope\)/,
+  );
+  assert.doesNotMatch(route, /executeCanvasAgentTool\(this\.database/);
   assert.match(route, /sendCanvasPatchError\(res, error/);
   assert.match(route, /fallbackCode: 'agent_tool_failed'/);
   assert.doesNotMatch(route, /(?:apply|save|update|delete|restore|revert)Canvas|broadcast\(/);

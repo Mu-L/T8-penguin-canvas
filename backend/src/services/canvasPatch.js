@@ -38,9 +38,64 @@ const SENSITIVE_KEY_PATTERN = /(?:token|api.?key|authorization|authentication|co
 const SECRET_TEXT_PATTERN = /(?:\bBearer\s+[^\s,;"'`<>]+|\bsk-[A-Za-z0-9_-]{8,}\b|\bgh(?:p|o|u|s|r)_[A-Za-z0-9]{20,}\b|\bgithub_pat_[A-Za-z0-9_]{20,}\b|\bAKIA[0-9A-Z]{16}\b|\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b|data:[^;,\s]+;base64,)/i;
 const HOST_CREDENTIAL_FIELD_EXACT = new Set([
   'apikey', 'apitoken', 'auth', 'authentication', 'authorization', 'bearer',
-  'clientsecret', 'cookie', 'cookies', 'credential', 'credentials', 'key',
+  'authorizationcode', 'clientsecret', 'codeverifier', 'cookie', 'cookies',
+  'credential', 'credentials', 'devicecode', 'key',
+  'oauthloginurl', 'oauthloginsessionid', 'oauthstate',
   'password', 'passwd', 'passphrase', 'privatekey', 'pwd', 'secret', 'secretkey',
-  'sessionid', 'sessionkey', 'sessiontoken', 'signature', 'token', 'tokens',
+  'pkceverifier', 'sessionid', 'sessionkey', 'sessiontoken', 'signature',
+  'token', 'tokens', 'usercode', 'verificationuricomplete',
+]);
+const CREDENTIAL_DESCRIPTOR_KEYS = new Set([
+  'field', 'fieldname', 'header', 'headername', 'id', 'key', 'name',
+  'parameter', 'parametername', 'property', 'propertyname',
+]);
+const CREDENTIAL_DESCRIPTOR_VALUE_KEYS = new Set(['content', 'defaultvalue', 'secret', 'value']);
+const CANVAS_FIELD_LIST_KEYS = new Set(['unsetkeys', 'dataunsetkeys']);
+const FEISHU_RESOURCE_NODE_TYPES = new Set([
+  'feishu-bitable-input',
+  'feishu-bitable-output',
+]);
+const FEISHU_RESOURCE_TOKEN_KEYS = new Set([
+  'apptoken',
+  'filetoken',
+  'feishuapptoken',
+  'feishuoutputapptoken',
+]);
+const OAUTH_TRANSACTION_QUERY_KEYS = new Set([
+  'authorizationcode',
+  'code',
+  'codechallenge',
+  'codeverifier',
+  'devicecode',
+  'oauthstate',
+  'sessionstate',
+  'state',
+  'usercode',
+  'verificationuricomplete',
+]);
+const OAUTH_CONTEXTUAL_QUERY_KEYS = new Set(['code', 'state']);
+const GENERIC_APPLICATION_KEY_COLLECTION_KEYS = new Set([
+  'categories',
+  'defaults',
+  'fields',
+  'inputs',
+  'items',
+  'outputs',
+  'parameters',
+  'params',
+  'presets',
+  'shortcuts',
+  'tabs',
+]);
+const GENERIC_APPLICATION_KEY_COMPANION_KEYS = new Set([
+  'description',
+  'id',
+  'kind',
+  'label',
+  'placeholder',
+  'shortcut',
+  'title',
+  'type',
 ]);
 const NON_CREDENTIAL_TOKEN_FIELD_PATTERN = /^(?:(?:max|min|input|output|prompt|completion|total|used|remaining|estimated|cached|reasoning)tokens?(?:count|limit|budget|usage)?|token(?:count|limit|budget|usage|estimate|length|window))$/;
 const MAX_CANVAS_COORDINATE = 10_000_000;
@@ -218,56 +273,501 @@ function isHostCredentialFieldKey(value) {
   });
 }
 
-function isStructuredCredentialContainerKey(value) {
-  const canonical = canonicalCredentialField(value);
-  return /(?:config|settings|headers?|params?|query|environment|env|options|request|body|payload|workflow|provider)(?:json)?$/.test(canonical);
+function canvasNodeCredentialScope(value) {
+  if (!isRecord(value)) return '';
+  return FEISHU_RESOURCE_NODE_TYPES.has(String(value.type || '')) ? 'feishu-resource' : '';
 }
 
-function structuredStringContainsHostCredentialField(value, depth, state) {
-  const decoded = decodeCredentialFieldText(value).trim();
-  if (!decoded || decoded.length > CANVAS_PATCH_JSON_LIMIT) return false;
-  if (decoded.startsWith('{') || decoded.startsWith('[')) {
-    try {
-      return valueContainsHostCredentialField(JSON.parse(decoded), depth + 1, state, '');
-    } catch (_) {}
+function canonicalCredentialPath(path) {
+  return (Array.isArray(path) ? path : []).map(canonicalCredentialField).filter(Boolean).join('.');
+}
+
+function isPublicCanvasResourceTokenField(value, scope = '', path = []) {
+  if (scope !== 'feishu-resource') return false;
+  const canonical = canonicalCredentialField(value);
+  if (!FEISHU_RESOURCE_TOKEN_KEYS.has(canonical)) return false;
+  const containerPath = canonicalCredentialPath(path);
+  const dataRoots = new Set([
+    'data',
+    'node.data',
+    'datapatch',
+    'patch.data',
+    'payload.node.data',
+    'payload.datapatch',
+    'payload.patch.data',
+  ]);
+  if ((canonical === 'feishuapptoken' || canonical === 'feishuoutputapptoken')
+    && dataRoots.has(containerPath)) return true;
+  const rowRoots = new Set();
+  for (const root of dataRoots) {
+    rowRoots.add(`${root}.feishurows`);
+    rowRoots.add(`${root}.feishubitablerows`);
+    rowRoots.add(`${root}.metadata.feishurows`);
+    rowRoots.add(`${root}.metadata.feishubitable.rows`);
   }
-  const assignments = decoded.matchAll(/(?:^|[{,&;\r\n])\s*["']?([^"':=,&{}\r\n]{1,160})["']?\s*[:=]/g);
-  for (const match of assignments) {
-    if (isHostCredentialFieldKey(match[1])) return true;
+  if (canonical === 'apptoken' && (
+    rowRoots.has(containerPath)
+    || [...dataRoots].some((root) => containerPath === `${root}.metadata.feishubitable`)
+    || [...dataRoots].some((root) => containerPath === `${root}.metadata.feishubitablewrite`)
+  )) return true;
+  if (canonical === 'filetoken') {
+    const rowTokenContainers = ['media', 'attachments', 'fields', 'rowdata'];
+    if ([...rowRoots].some((root) => rowTokenContainers.some((container) => (
+      containerPath === `${root}.${container}`
+      || containerPath.startsWith(`${root}.${container}.`)
+    )))) return true;
+    if ([...dataRoots].some((root) => (
+      containerPath === `${root}.feishurecords`
+      || containerPath.startsWith(`${root}.feishurecords.`)
+      || containerPath === `${root}.feishuwriteresult`
+      || containerPath.startsWith(`${root}.feishuwriteresult.`)
+    ))) return true;
   }
   return false;
 }
 
-function valueContainsHostCredentialField(value, depth = 0, state = null, parentKey = '') {
+function isOAuthCredentialContext(parentKey = '', path = []) {
+  const values = [parentKey, ...(Array.isArray(path) ? path : [])]
+    .map(canonicalCredentialField)
+    .filter(Boolean);
+  return values.some((value) => (
+    value.includes('oauth')
+    || value.includes('authorization')
+    || value.includes('callback')
+    || value.includes('device')
+    || value.includes('pkce')
+    || value.includes('signin')
+    || value.includes('login')
+    || value.includes('sso')
+    || value === 'urlquery'
+    || /auth(?:response|result|params|parameters|payload|data|session|state|code)/.test(value)
+  ));
+}
+
+function objectDescribesHostCredential(value, scope = '', path = []) {
+  if (!isRecord(value)) return false;
+  const entries = Object.entries(value);
+  if (!entries.some(([key]) => CREDENTIAL_DESCRIPTOR_VALUE_KEYS.has(canonicalCredentialField(key)))) return false;
+  return entries.some(([key, item]) => (
+    CREDENTIAL_DESCRIPTOR_KEYS.has(canonicalCredentialField(key))
+    && typeof item === 'string'
+    && isHostCredentialFieldKey(item)
+    && !isPublicCanvasResourceTokenField(item, scope, path)
+  ));
+}
+
+function genericApplicationKeyIsSafe(item, container, parentKey = '') {
+  if (typeof item !== 'string'
+    || !item
+    || item.length > 240
+    || SECRET_TEXT_PATTERN.test(item)
+    || isHostCredentialFieldKey(item)
+    || !isRecord(container)) return false;
+  const containerKeys = new Set(Object.keys(container).map(canonicalCredentialField));
+  if ([...CREDENTIAL_DESCRIPTOR_VALUE_KEYS].some((key) => containerKeys.has(key))) return true;
+  const parent = canonicalCredentialField(parentKey);
+  return GENERIC_APPLICATION_KEY_COLLECTION_KEYS.has(parent)
+    && [...GENERIC_APPLICATION_KEY_COMPANION_KEYS].some((key) => containerKeys.has(key));
+}
+
+function canvasCredentialFieldIsSensitive(key, item, container, scope = '', parentKey = '', path = []) {
+  const canonical = canonicalCredentialField(key);
+  if (OAUTH_CONTEXTUAL_QUERY_KEYS.has(canonical) && isOAuthCredentialContext(parentKey, path)) return true;
+  if (!isHostCredentialFieldKey(key)) return false;
+  if (isPublicCanvasResourceTokenField(key, scope, path)) return false;
+  if (canonical !== 'key') return true;
+  if (objectDescribesHostCredential(container, scope, path)) return true;
+  return !genericApplicationKeyIsSafe(item, container, parentKey);
+}
+
+function isStructuredCredentialContainerKey(value) {
+  const canonical = canonicalCredentialField(value);
+  return /(?:config|settings|headers?|params?|query|environment|env|options|request|body|payload|workflow|provider)(?:json|raw|text|data)?$/.test(canonical);
+}
+
+function isCanvasFieldListKey(value) {
+  return CANVAS_FIELD_LIST_KEYS.has(canonicalCredentialField(value));
+}
+
+function printableCredentialText(buffer) {
+  const text = buffer.toString('utf8');
+  if (!text || text.includes('\u0000') || text.includes('\ufffd')) return null;
+  const characters = [...text];
+  const printable = characters.filter((character) => (
+    character === '\t'
+    || character === '\n'
+    || character === '\r'
+    || character.codePointAt(0) >= 0x20
+  )).length;
+  return printable / characters.length >= 0.9 ? text : null;
+}
+
+function structuredCredentialTextCandidates(value) {
+  const initial = decodeCredentialFieldText(value);
+  if (!initial || initial.length > CANVAS_PATCH_JSON_LIMIT) return [];
+  const candidates = [];
+  const queue = [{ text: initial, opaque: false, generation: 0 }];
+  const seen = new Set();
+  while (queue.length > 0 && candidates.length < 8) {
+    const candidate = queue.shift();
+    const text = decodeCredentialFieldText(candidate.text);
+    if (!text || text.length > CANVAS_PATCH_JSON_LIMIT || seen.has(text)) continue;
+    seen.add(text);
+    candidates.push({ text, opaque: candidate.opaque });
+    if (candidate.generation >= 2) continue;
+    const compact = text.trim().replace(/\s+/g, '');
+    const decoded = [];
+    if (/^(?:[0-9a-f]{2}){4,}$/i.test(compact)) {
+      try {
+        const printable = printableCredentialText(Buffer.from(compact, 'hex'));
+        if (printable) decoded.push(printable);
+      } catch (_) {}
+    }
+    if (/^[A-Za-z0-9+/_-]{8,}={0,2}$/.test(compact) && compact.length % 4 !== 1) {
+      try {
+        const printable = printableCredentialText(
+          Buffer.from(compact.replace(/-/g, '+').replace(/_/g, '/'), 'base64'),
+        );
+        if (printable) decoded.push(printable);
+      } catch (_) {}
+    }
+    decoded.forEach((next) => queue.push({
+      text: next,
+      opaque: true,
+      generation: candidate.generation + 1,
+    }));
+  }
+  return candidates;
+}
+
+function rawUrlParameterEntries(section) {
+  let text = String(section || '')
+    .replace(/&amp;/gi, '&')
+    .replace(/&#0*38;?/gi, '&')
+    .replace(/^#/, '');
+  const queryIndex = text.indexOf('?');
+  if (queryIndex >= 0) text = text.slice(queryIndex + 1);
+  if (!text || (!text.includes('=') && !text.includes('&') && !text.includes(';'))) return [];
+  return text.split(/[&;]/).filter(Boolean).map((part) => {
+    const equalsIndex = part.indexOf('=');
+    const rawKey = equalsIndex >= 0 ? part.slice(0, equalsIndex) : part;
+    const rawValue = equalsIndex >= 0 ? part.slice(equalsIndex + 1) : '';
+    return [decodeCredentialFieldText(rawKey), decodeCredentialFieldText(rawValue)];
+  });
+}
+
+function structuredUrlContainsHostCredentialField(value, depth = 0, state = null) {
+  const raw = String(value || '')
+    .replace(/&amp;/gi, '&')
+    .replace(/&#0*38;?/gi, '&')
+    .trim();
+  if (!/^(?:https?:\/\/|\/(?:api|files|input|output)\/)/i.test(raw)) return false;
+  if (depth > 16) return true;
+  let parsed;
+  try {
+    parsed = new URL(raw, 'http://t8-canvas.invalid');
+  } catch (_) {
+    return false;
+  }
+  if (parsed.username || parsed.password) return true;
+  const urlLooksLikeAuthorization = /(?:oauth|authorize|authorization|callback|device|login|signin|sign-in|sso|token)/i
+    .test(`${parsed.hostname}${parsed.pathname}${parsed.hash.split('?')[0]}`);
+  const entries = [
+    ...parsed.searchParams.entries(),
+    ...rawUrlParameterEntries(parsed.search),
+    ...rawUrlParameterEntries(parsed.hash),
+  ];
+  const seen = new Set();
+  for (const [key, item] of entries) {
+    const identity = `${key}\u0000${item}`;
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    const canonical = canonicalCredentialField(key);
+    if (OAUTH_TRANSACTION_QUERY_KEYS.has(canonical)) return true;
+    if (urlLooksLikeAuthorization && OAUTH_CONTEXTUAL_QUERY_KEYS.has(canonical)) return true;
+    if (canvasCredentialFieldIsSensitive(key, item, {}, '', '', [])) return true;
+    if (structuredStringContainsHostCredentialField(
+      item,
+      depth + 1,
+      state || { nodes: 0 },
+      'urlQuery',
+      '',
+    )) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function structuredStringContainsHostCredentialField(value, depth, state, parentKey = '', scope = '') {
+  if (depth > 16) return true;
+  const context = state || { nodes: 0 };
+  context.nodes += 1;
+  if (context.nodes > 10_000) return true;
+  const raw = String(value || '');
+  if (SECRET_TEXT_PATTERN.test(raw)) return true;
+  if (raw.length > CANVAS_PATCH_JSON_LIMIT) {
+    const trimmed = raw.trimStart();
+    const looksStructured = isStructuredCredentialContainerKey(parentKey)
+      || trimmed.startsWith('{')
+      || trimmed.startsWith('[')
+      || /^(?:https?:\/\/|\/(?:api|files|input|output)\/)/i.test(trimmed)
+      || /^(?:[0-9a-f]{2}){4,}$/i.test(trimmed.replace(/\s+/g, ''))
+      || (/^[A-Za-z0-9+/_-]{8,}={0,2}$/.test(trimmed.replace(/\s+/g, ''))
+        && trimmed.replace(/\s+/g, '').length % 4 !== 1);
+    return looksStructured;
+  }
+  const candidates = structuredCredentialTextCandidates(value);
+  for (const candidate of candidates) {
+    const decoded = candidate.text.trim();
+    if (!decoded) continue;
+    if (decoded.startsWith('{') || decoded.startsWith('[')) {
+      try {
+        if (valueContainsHostCredentialField(
+          JSON.parse(decoded),
+          depth + 1,
+          context,
+          parentKey,
+          '',
+          [],
+        )) return true;
+      } catch (_) {}
+    }
+    if (structuredUrlContainsHostCredentialField(decoded, depth + 1, context)) return true;
+    if (!candidate.opaque && !isStructuredCredentialContainerKey(parentKey)) continue;
+    const assignments = decoded.matchAll(/(?:^|[{,&;\r\n])\s*["']?([^"':=,&{}\r\n]{1,160})["']?\s*[:=]/g);
+    for (const match of assignments) {
+      if (canvasCredentialFieldIsSensitive(match[1], '', {}, '', parentKey, [])) return true;
+    }
+  }
+  return false;
+}
+
+function valueContainsHostCredentialField(
+  value,
+  depth = 0,
+  state = null,
+  parentKey = '',
+  inheritedScope = '',
+  path = [],
+) {
   const context = state || { nodes: 0 };
   context.nodes += 1;
   if (context.nodes > 10_000 || depth > 16) return true;
+  const scope = inheritedScope;
   if (Array.isArray(value)) {
+    if (!isCanvasFieldListKey(parentKey)
+      && value.length >= 2
+      && typeof value[0] === 'string'
+      && canvasCredentialFieldIsSensitive(value[0], value[1], {}, '', parentKey, path)) return true;
     return value.some((item) => {
-      if (isStructuredCredentialContainerKey(parentKey)
-        && Array.isArray(item) && typeof item[0] === 'string' && isHostCredentialFieldKey(item[0])) return true;
-      return valueContainsHostCredentialField(item, depth + 1, context, parentKey);
+      if (!isCanvasFieldListKey(parentKey)
+        && Array.isArray(item)
+        && typeof item[0] === 'string'
+        && canvasCredentialFieldIsSensitive(item[0], item[1], {}, '', parentKey, path)) return true;
+      return valueContainsHostCredentialField(item, depth + 1, context, parentKey, scope, path);
     });
   }
-  if (typeof value === 'string' && isStructuredCredentialContainerKey(parentKey)) {
-    return structuredStringContainsHostCredentialField(value, depth, context);
+  if (typeof value === 'string') {
+    return structuredStringContainsHostCredentialField(value, depth, context, parentKey, '');
   }
   if (!isRecord(value)) return false;
+  if (objectDescribesHostCredential(value, scope, path)) return true;
   return Object.keys(value).some((key) => (
-    isHostCredentialFieldKey(key)
-    || valueContainsHostCredentialField(value[key], depth + 1, context, key)
+    canvasCredentialFieldIsSensitive(key, value[key], value, scope, parentKey, path)
+    || valueContainsHostCredentialField(value[key], depth + 1, context, key, scope, [...path, key])
   ));
+}
+
+function canvasStringContainsHostCredentialField(value, options = {}) {
+  if (typeof value !== 'string') return false;
+  return structuredStringContainsHostCredentialField(
+    value,
+    0,
+    { nodes: 0 },
+    options.parentKey || '',
+    options.scope || '',
+  );
 }
 
 function canvasPatchTouchesHostCredentials(patch) {
   return (Array.isArray(patch?.operations) ? patch.operations : []).some((operation) => {
     if (operation?.type === 'node.add' || operation?.type === 'node.restore') {
-      return valueContainsHostCredentialField(operation?.payload?.node);
+      const node = operation?.payload?.node;
+      return valueContainsHostCredentialField(node, 0, null, '', canvasNodeCredentialScope(node));
     }
     if (operation?.type !== 'node.patch') return false;
     if (valueContainsHostCredentialField(operation?.payload?.dataPatch)) return true;
     return (Array.isArray(operation?.payload?.dataUnsetKeys) ? operation.payload.dataUnsetKeys : [])
-      .some((key) => isHostCredentialFieldKey(key));
+      .some((key) => (
+        isHostCredentialFieldKey(key)
+        && canonicalCredentialField(key) !== 'key'
+        && !isPublicCanvasResourceTokenField(key)
+      ));
+  });
+}
+
+function canvasDocumentTouchesHostCredentials(document) {
+  if (!isRecord(document)) return true;
+  const nodes = Array.isArray(document.nodes) ? document.nodes : [];
+  const edges = Array.isArray(document.edges) ? document.edges : [];
+  if (nodes.some((node) => (
+    valueContainsHostCredentialField(node, 0, null, '', canvasNodeCredentialScope(node))
+  ))) return true;
+  if (edges.some((edge) => valueContainsHostCredentialField(edge))) return true;
+  return Object.entries(document).some(([key, value]) => (
+    key !== 'nodes'
+    && key !== 'edges'
+    && valueContainsHostCredentialField(value, 0, null, key)
+  ));
+}
+
+function hostCredentialProjection(
+  value,
+  parentKey = '',
+  inheritedScope = '',
+  depth = 0,
+  state = null,
+  path = [],
+) {
+  const context = state || { remaining: 100_000, seen: new WeakSet() };
+  if (context.remaining <= 0 || depth > 24) return { overflow: true };
+  context.remaining -= 1;
+  const scope = inheritedScope;
+  if (typeof value === 'string') {
+    return structuredStringContainsHostCredentialField(value, depth, { nodes: 0 }, parentKey, '')
+      ? { structured: sha256(value) }
+      : null;
+  }
+  if (!value || typeof value !== 'object' || Buffer.isBuffer(value)) return null;
+  if (context.seen.has(value)) return { cycle: true };
+  context.seen.add(value);
+  if (Array.isArray(value)) {
+    if (value.length >= 2
+      && typeof value[0] === 'string'
+      && canvasCredentialFieldIsSensitive(value[0], value[1], {}, '', parentKey, path)) {
+      context.seen.delete(value);
+      return { credentialPair: sha256(stableJson(value.slice(0, 2))) };
+    }
+    const output = {};
+    value.forEach((item, index) => {
+      const projection = hostCredentialProjection(item, parentKey, scope, depth + 1, context, path);
+      if (projection) output[index] = projection;
+    });
+    context.seen.delete(value);
+    return Object.keys(output).length ? output : null;
+  }
+  const output = {};
+  if (objectDescribesHostCredential(value, scope, path)) {
+    output.credentialDescriptor = { credential: sha256(stableJson(value)) };
+  }
+  for (const [key, item] of Object.entries(value)) {
+    if (canvasCredentialFieldIsSensitive(key, item, value, scope, parentKey, path)) {
+      output[key] = { credential: sha256(stableJson(item)) };
+      continue;
+    }
+    const projection = hostCredentialProjection(item, key, scope, depth + 1, context, [...path, key]);
+    if (projection) output[key] = projection;
+  }
+  context.seen.delete(value);
+  return Object.keys(output).length ? output : null;
+}
+
+function applyNodePatchForCredentialComparison(current, payload) {
+  const patch = isRecord(payload?.patch) ? payload.patch : {};
+  const dataPatch = isRecord(payload?.dataPatch) ? payload.dataPatch : null;
+  const next = {
+    ...current,
+    ...patch,
+    id: current.id,
+    entityUid: current.entityUid,
+    type: current.type,
+  };
+  if (dataPatch) {
+    const baseData = isRecord(patch.data)
+      ? patch.data
+      : (isRecord(current.data) ? current.data : {});
+    next.data = { ...baseData, ...dataPatch };
+  }
+  for (const key of Array.isArray(payload?.unsetKeys) ? payload.unsetKeys : []) {
+    if (typeof key === 'string') delete next[key];
+  }
+  if (Array.isArray(payload?.dataUnsetKeys)) {
+    const nextData = isRecord(next.data) ? { ...next.data } : {};
+    for (const key of payload.dataUnsetKeys) {
+      if (typeof key === 'string') delete nextData[key];
+    }
+    next.data = nextData;
+  }
+  return next;
+}
+
+function hostCredentialProjectionChanged(before, after, scope = '') {
+  return stableJson(hostCredentialProjection(before, '', scope))
+    !== stableJson(hostCredentialProjection(after, '', scope));
+}
+
+function canvasOperationsTouchHostCredentials(document, operations) {
+  const documentNodes = Array.isArray(document?.nodes) ? document.nodes : [];
+  const documentEdges = Array.isArray(document?.edges) ? document.edges : [];
+  const nodesById = new Map();
+  const edgesById = new Map();
+  documentNodes.forEach((node) => {
+    if (node?.id != null) nodesById.set(String(node.id), node);
+    if (node?.entityUid != null) nodesById.set(String(node.entityUid), node);
+  });
+  documentEdges.forEach((edge) => {
+    if (edge?.id != null) edgesById.set(String(edge.id), edge);
+    if (edge?.entityUid != null) edgesById.set(String(edge.entityUid), edge);
+  });
+  return (Array.isArray(operations) ? operations : []).some((operation) => {
+    const payload = isRecord(operation?.payload) ? operation.payload : {};
+    const operationType = String(operation?.type || '');
+    const payloadNode = isRecord(payload.node) ? payload.node : null;
+    const targetNode = nodesById.get(String(payload.nodeId || payloadNode?.id || ''));
+    const addedNode = ['node.add', 'node.restore'].includes(operationType)
+      ? payloadNode
+      : null;
+    const operationScope = operationType === 'node.patch'
+      ? canvasNodeCredentialScope(targetNode)
+      : canvasNodeCredentialScope(addedNode);
+    if (valueContainsHostCredentialField(payload, 0, null, '', operationScope)) return true;
+    const unsetKeys = [
+      ...(Array.isArray(payload.unsetKeys)
+        ? payload.unsetKeys.map((key) => ({ key, path: ['patch'] }))
+        : []),
+      ...(Array.isArray(payload.dataUnsetKeys)
+        ? payload.dataUnsetKeys.map((key) => ({ key, path: ['dataPatch'] }))
+        : []),
+    ];
+    if (unsetKeys.some(({ key, path: fieldPath }) => (
+      isHostCredentialFieldKey(key)
+      && !isPublicCanvasResourceTokenField(key, operationScope, fieldPath)
+    ))) return true;
+    if (operation?.type === 'node.patch' || operation?.type === 'node.delete') {
+      const current = nodesById.get(String(payload.nodeId || ''));
+      const currentScope = canvasNodeCredentialScope(current);
+      if (current && operation.type === 'node.delete'
+        && hostCredentialProjection(current, '', currentScope)) return true;
+      if (current && operation.type === 'node.delete') {
+        const identities = new Set([String(current.id || ''), String(current.entityUid || '')]);
+        if (documentEdges.some((edge) => (
+          (identities.has(String(edge?.source || '')) || identities.has(String(edge?.target || '')))
+          && hostCredentialProjection(edge)
+        ))) return true;
+      }
+      if (current && operation.type === 'node.patch'
+        && hostCredentialProjectionChanged(
+          current,
+          applyNodePatchForCredentialComparison(current, payload),
+          currentScope,
+        )) return true;
+    }
+    if (operation?.type === 'edge.delete') {
+      const current = edgesById.get(String(payload.edgeId || ''));
+      if (current && hostCredentialProjection(current)) return true;
+    }
+    return false;
   });
 }
 
@@ -291,6 +791,22 @@ function assertCanvasPatchCredentialAuthority(patch, context = {}) {
   const authority = normalizeCanvasPatchAuthority(context);
   if (!canvasPatchTouchesHostCredentials(patch) || authority.canManageHostCredentials) return authority;
   throw new CanvasPatchPermissionError('此来源不能通过 CanvasPatch 修改主机凭据', {
+    code: 'canvas_patch_host_credentials_forbidden',
+  });
+}
+
+function assertCanvasDocumentCredentialAuthority(document, context = {}) {
+  const authority = normalizeCanvasPatchAuthority(context);
+  if (!canvasDocumentTouchesHostCredentials(document) || authority.canManageHostCredentials) return authority;
+  throw new CanvasPatchPermissionError('此来源不能恢复包含主机凭据或私有授权事务的画布历史', {
+    code: 'canvas_snapshot_host_credentials_forbidden',
+  });
+}
+
+function assertCanvasOperationCredentialAuthority(document, operations, context = {}) {
+  const authority = normalizeCanvasPatchAuthority(context);
+  if (!canvasOperationsTouchHostCredentials(document, operations) || authority.canManageHostCredentials) return authority;
+  throw new CanvasPatchPermissionError('此来源不能修改、替换或删除包含主机凭据的画布内容', {
     code: 'canvas_patch_host_credentials_forbidden',
   });
 }
@@ -371,12 +887,21 @@ function safeCanvasMutationErrorCode(error, fallback = 'canvas_patch_invalid') {
 
 function canvasMutationErrorStatus(error, code, defaultStatus = 400) {
   const explicit = Number(error?.statusCode ?? error?.status);
-  if ([400, 401, 403, 404, 409, 413, 422, 429, 500, 503].includes(explicit)) return explicit;
+  if ([400, 401, 403, 404, 409, 413, 422, 429, 500, 503, 507].includes(explicit)) return explicit;
   if (/(?:forbidden|permission|not_owner|actor_mismatch|access_denied)/i.test(code)) return 403;
   if (/(?:not_found|missing_record|unknown_patch|canvas_missing)$/i.test(code)) return 404;
   if (/(?:revision_conflict|stale|digest_mismatch|conflict|already_applied|already_reverted|operation_id_reserved|busy)/i.test(code)) return 409;
   return [400, 500].includes(Number(defaultStatus)) ? Number(defaultStatus) : 400;
 }
+
+const PUBLIC_PROJECT_DATABASE_CAPACITY_REASONS = new Set([
+  'main-page-limit',
+  'wal-pressure',
+  'filesystem-reserve',
+  'sqlite-full',
+  'temp-storage-full',
+  'backup-storage-full',
+]);
 
 function mapCanvasMutationError(error, options = {}) {
   const fallbackCode = typeof options.fallbackCode === 'string' ? options.fallbackCode : 'canvas_patch_invalid';
@@ -389,6 +914,11 @@ function mapCanvasMutationError(error, options = {}) {
     error: safeCanvasPatchErrorMessage(error?.message, options.fallbackMessage || 'CanvasPatch 请求无效'),
   };
   if (Number.isSafeInteger(currentRevision) && currentRevision >= 0) body.currentRevision = currentRevision;
+  if (code === 'project_database_storage_capacity_exceeded') {
+    const reason = String(error?.reason || error?.details?.reason || '');
+    if (PUBLIC_PROJECT_DATABASE_CAPACITY_REASONS.has(reason)) body.reason = reason;
+    body.retryable = error?.retryable === true || error?.details?.retryable === true;
+  }
   return {
     status: canvasMutationErrorStatus(error, code, options.defaultStatus),
     body,
@@ -763,12 +1293,15 @@ function claimTarget(claimed, kind, id, operationIndex) {
 
 function buildCanvasPatchPlan(inputDocument, inputPatch, context = {}) {
   const patch = validateCanvasPatch(inputPatch);
-  assertCanvasPatchCredentialAuthority(patch, context);
-  const document = normalizeCanvasDocument(inputDocument?.canvasId || context.canvasId || 'unknown', inputDocument, {
+  const normalizePlanDocument = typeof context.normalizeDocument === 'function'
+    ? context.normalizeDocument
+    : normalizeCanvasDocument;
+  const document = normalizePlanDocument(inputDocument?.canvasId || context.canvasId || 'unknown', inputDocument, {
     projectId: inputDocument?.projectId || context.projectId,
     revision: inputDocument?.revision,
     updatedAt: inputDocument?.updatedAt,
   });
+  assertCanvasOperationCredentialAuthority(document, patch.operations, context);
   if (patch.baseRevision !== document.revision) {
     throw new CanvasPatchConflictError('CanvasPatch baseRevision 已过期', {
       code: 'canvas_patch_revision_conflict',
@@ -805,7 +1338,7 @@ function buildCanvasPatchPlan(inputDocument, inputPatch, context = {}) {
         const nodeId = String(payload.node.id);
         claimTarget(claimed, 'node', nodeId, operationIndex);
         const applied = applyCanvasOperation(working, { ...envelope, type: rawOperation.type, payload });
-        working = normalizeCanvasDocument(document.canvasId, applied.document, {
+        working = normalizePlanDocument(document.canvasId, applied.document, {
           projectId: document.projectId,
           revision: working.revision + 1,
           updatedAt: document.updatedAt,
@@ -851,7 +1384,7 @@ function buildCanvasPatchPlan(inputDocument, inputPatch, context = {}) {
           ...dataKeys.map((key) => fieldState(current, 'data', key)),
         ];
         const applied = applyCanvasOperation(working, { ...envelope, type: rawOperation.type, payload });
-        working = normalizeCanvasDocument(document.canvasId, applied.document, {
+        working = normalizePlanDocument(document.canvasId, applied.document, {
           projectId: document.projectId,
           revision: working.revision + 1,
           updatedAt: document.updatedAt,
@@ -910,7 +1443,7 @@ function buildCanvasPatchPlan(inputDocument, inputPatch, context = {}) {
         const beforeState = fieldState(current, 'node', 'position');
         const payload = { nodeId, position: cloneJson(rawOperation.payload.position) };
         const applied = applyCanvasOperation(working, { ...envelope, type: rawOperation.type, payload });
-        working = normalizeCanvasDocument(document.canvasId, applied.document, {
+        working = normalizePlanDocument(document.canvasId, applied.document, {
           projectId: document.projectId,
           revision: working.revision + 1,
           updatedAt: document.updatedAt,
@@ -957,7 +1490,7 @@ function buildCanvasPatchPlan(inputDocument, inputPatch, context = {}) {
         connectedEdges.forEach((edge) => claimTarget(claimed, 'edge', String(edge.id), operationIndex));
         const payload = { nodeId };
         const applied = applyCanvasOperation(working, { ...envelope, type: rawOperation.type, payload });
-        working = normalizeCanvasDocument(document.canvasId, applied.document, {
+        working = normalizePlanDocument(document.canvasId, applied.document, {
           projectId: document.projectId,
           revision: working.revision + 1,
           updatedAt: document.updatedAt,
@@ -998,7 +1531,7 @@ function buildCanvasPatchPlan(inputDocument, inputPatch, context = {}) {
         const source = resolveNode(working, payload.edge.source, operationIndex);
         const target = resolveNode(working, payload.edge.target, operationIndex);
         const applied = applyCanvasOperation(working, { ...envelope, type: rawOperation.type, payload });
-        working = normalizeCanvasDocument(document.canvasId, applied.document, {
+        working = normalizePlanDocument(document.canvasId, applied.document, {
           projectId: document.projectId,
           revision: working.revision + 1,
           updatedAt: document.updatedAt,
@@ -1034,7 +1567,7 @@ function buildCanvasPatchPlan(inputDocument, inputPatch, context = {}) {
         const beforeViewport = cloneJson(working.viewport);
         const payload = cloneJson(rawOperation.payload);
         const applied = applyCanvasOperation(working, { ...envelope, type: rawOperation.type, payload });
-        working = normalizeCanvasDocument(document.canvasId, applied.document, {
+        working = normalizePlanDocument(document.canvasId, applied.document, {
           projectId: document.projectId,
           revision: working.revision + 1,
           updatedAt: document.updatedAt,
@@ -1063,7 +1596,7 @@ function buildCanvasPatchPlan(inputDocument, inputPatch, context = {}) {
       claimTarget(claimed, 'edge', edgeId, operationIndex);
       const payload = { edgeId };
       const applied = applyCanvasOperation(working, { ...envelope, type: rawOperation.type, payload });
-      working = normalizeCanvasDocument(document.canvasId, applied.document, {
+      working = normalizePlanDocument(document.canvasId, applied.document, {
         projectId: document.projectId,
         revision: working.revision + 1,
         updatedAt: document.updatedAt,
@@ -1257,10 +1790,16 @@ module.exports = {
   CanvasPatchPermissionError,
   CanvasPatchRevertConflictError,
   CanvasPatchValidationError,
+  assertCanvasDocumentCredentialAuthority,
+  assertCanvasOperationCredentialAuthority,
   assertCanvasPatchCredentialAuthority,
   assertCanvasPatchPostconditions,
   buildCanvasPatchPlan,
+  canvasNodeCredentialScope,
+  canvasDocumentTouchesHostCredentials,
+  canvasOperationsTouchHostCredentials,
   canvasPatchTouchesHostCredentials,
+  canvasStringContainsHostCredentialField,
   canvasPatchRequestDigest,
   mapCanvasMutationError,
   normalizeCanvasPatchAuthority,
@@ -1271,5 +1810,6 @@ module.exports = {
   scopedCanvasPatchOperationId,
   stableJson,
   isHostCredentialFieldKey,
+  isPublicCanvasResourceTokenField,
   validateCanvasPatch,
 };

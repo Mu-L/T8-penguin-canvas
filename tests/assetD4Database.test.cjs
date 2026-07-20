@@ -7,11 +7,62 @@ const BetterSqlite3 = require('better-sqlite3');
 
 const {
   ProjectDatabase,
+  ProjectDatabaseSchemaInvalidError,
+  PROJECT_DATABASE_MIGRATIONS,
   PROJECT_DATABASE_SCHEMA_VERSION,
   encodeFloat32LE,
   decodeFloat32LE,
   cosineSimilarity,
 } = require('../backend/src/services/projectDatabase');
+const {
+  PROJECT_DATABASE_MIGRATION_29_DOWN_SQL,
+} = require('../backend/src/services/projectDatabaseMigration29');
+const {
+  PROJECT_DATABASE_MIGRATION_30_DOWN_SQL,
+} = require('../backend/src/services/projectDatabaseMigration30');
+const {
+  PROJECT_DATABASE_MIGRATION_31,
+} = require('../backend/src/services/projectDatabaseMigration31');
+const {
+  PROJECT_DATABASE_MIGRATION_31_DURABLE_LEDGER_OWNED_OBJECTS,
+} = require('../backend/src/services/projectDatabaseMigration31DurableLedgers');
+const {
+  PROJECT_DATABASE_MIGRATION_31_LEGACY_GAPS_DOWN_SQL,
+} = require('../backend/src/services/projectDatabaseMigration31LegacyGaps');
+const {
+  assertCurrentProjectDatabaseRegistry,
+  stripSchema32ForSyntheticSchema31,
+} = require('./helpers/projectDatabaseVersion.cjs');
+
+function stripSchema31ForHistoricalFixture(database) {
+  stripSchema32ForSyntheticSchema31(database);
+  database.exec(PROJECT_DATABASE_MIGRATION_31_LEGACY_GAPS_DOWN_SQL);
+  const drop = (type, name) => database.exec(`DROP ${type} IF EXISTS "${name}"`);
+  PROJECT_DATABASE_MIGRATION_31_DURABLE_LEDGER_OWNED_OBJECTS.triggers
+    .forEach((name) => drop('TRIGGER', name));
+  PROJECT_DATABASE_MIGRATION_31_DURABLE_LEDGER_OWNED_OBJECTS.views
+    .forEach((name) => drop('VIEW', name));
+  PROJECT_DATABASE_MIGRATION_31_DURABLE_LEDGER_OWNED_OBJECTS.indexes
+    .forEach((name) => drop('INDEX', name));
+  [...PROJECT_DATABASE_MIGRATION_31_DURABLE_LEDGER_OWNED_OBJECTS.tables]
+    .reverse()
+    .forEach((name) => drop('TABLE', name));
+  database.prepare('DELETE FROM schema_migration_receipts WHERE version = ?')
+    .run(PROJECT_DATABASE_MIGRATION_31.version);
+  database.prepare('DELETE FROM schema_migrations WHERE version = ?')
+    .run(PROJECT_DATABASE_MIGRATION_31.version);
+}
+
+function removeSyntheticFutureMigrationArtifacts(filename) {
+  for (const suffix of [
+    '.pre-migration-v22.sqlite3',
+    '.pre-migration-v28.sqlite3',
+    '.pre-migration-v29.sqlite3',
+    '.pre-migration-v30.sqlite3',
+  ]) {
+    fs.rmSync(`${filename}${suffix}`, { force: true });
+  }
+}
 
 function addAsset(db, projectId, id, input = {}) {
   return db.upsertAsset({
@@ -159,7 +210,15 @@ function stripLatestSchemaToSchema16(filename) {
   const raw = new BetterSqlite3(filename);
   try {
     raw.pragma('foreign_keys = OFF');
+    stripSchema31ForHistoricalFixture(raw);
+    raw.prepare('DELETE FROM schema_migration_receipts WHERE version = 30').run();
+    raw.prepare('DELETE FROM schema_migrations WHERE version = 30').run();
+    raw.exec(PROJECT_DATABASE_MIGRATION_30_DOWN_SQL);
+    raw.exec(PROJECT_DATABASE_MIGRATION_29_DOWN_SQL);
+    raw.prepare('DELETE FROM schema_migrations WHERE version = 29').run();
+    assert.deepEqual(raw.pragma('foreign_key_check'), []);
     raw.exec(`
+      DROP TABLE run_output_commits;
       DROP TABLE asset_upload_chunks;
       DROP TABLE asset_upload_sessions;
       DROP INDEX idx_asset_blobs_storage_state;
@@ -180,6 +239,7 @@ function stripLatestSchemaToSchema16(filename) {
   } finally {
     raw.close();
   }
+  removeSyntheticFutureMigrationArtifacts(filename);
 }
 
 function seedSchema16(filename) {
@@ -200,6 +260,13 @@ function stripLateSchema17IdempotencyColumns(filename) {
   const raw = new BetterSqlite3(filename);
   try {
     raw.pragma('foreign_keys = OFF');
+    stripSchema31ForHistoricalFixture(raw);
+    raw.prepare('DELETE FROM schema_migration_receipts WHERE version = 30').run();
+    raw.prepare('DELETE FROM schema_migrations WHERE version = 30').run();
+    raw.exec(PROJECT_DATABASE_MIGRATION_30_DOWN_SQL);
+    raw.exec(PROJECT_DATABASE_MIGRATION_29_DOWN_SQL);
+    raw.prepare('DELETE FROM schema_migrations WHERE version = 29').run();
+    assert.deepEqual(raw.pragma('foreign_key_check'), []);
     raw.exec(`
       DROP TABLE asset_semantic_generations;
       DROP TABLE asset_semantic_models;
@@ -238,10 +305,12 @@ function stripLateSchema17IdempotencyColumns(filename) {
         finished_at INTEGER,
         PRIMARY KEY(project_id, generation)
       );
+      DELETE FROM schema_migrations WHERE version >= 17;
     `);
   } finally {
     raw.close();
   }
+  removeSyntheticFutureMigrationArtifacts(filename);
 }
 
 test('latest schema migrates schema 16 data in one idempotent transaction with FTS, upload, and ownership constraints', () => {
@@ -251,7 +320,7 @@ test('latest schema migrates schema 16 data in one idempotent transaction with F
     seedSchema16(filename);
     const database = new ProjectDatabase(filename, { autoBackup: false });
     try {
-      assert.equal(PROJECT_DATABASE_SCHEMA_VERSION, 22);
+      assertCurrentProjectDatabaseRegistry(PROJECT_DATABASE_SCHEMA_VERSION, PROJECT_DATABASE_MIGRATIONS);
       assert.equal(database.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, PROJECT_DATABASE_SCHEMA_VERSION);
       assert.equal(database.db.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get().count, PROJECT_DATABASE_SCHEMA_VERSION);
       assert.equal(database.getAsset('schema16-preserved-asset').metadata.legacyMarker, true);
@@ -287,37 +356,31 @@ test('latest schema migrates schema 16 data in one idempotent transaction with F
   }
 });
 
-test('schema 17 repairs local prerelease databases missing the final idempotency columns before creating indexes', () => {
+test('malformed schema-16 prerelease tables fail closed when migration cannot restore canonical constraints', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-schema17-prerelease-repair-'));
   const filename = path.join(directory, 'projects.sqlite3');
   try {
     new ProjectDatabase(filename, { autoBackup: false }).close();
     stripLateSchema17IdempotencyColumns(filename);
-    const database = new ProjectDatabase(filename, { autoBackup: false });
+    assert.throws(
+      () => new ProjectDatabase(filename, { autoBackup: false }),
+      (error) => error instanceof ProjectDatabaseSchemaInvalidError
+        && error.code === 'project_database_schema_invalid'
+        && error.details?.context === 'legacy-bridge-result'
+        && error.details?.schemaVersion === 28,
+    );
+    const database = new BetterSqlite3(filename, { readonly: true, fileMustExist: true });
     try {
-      const modelColumns = new Set(database.db.pragma('table_info(asset_semantic_models)').map((column) => column.name));
-      const generationColumns = new Set(database.db.pragma('table_info(asset_semantic_generations)').map((column) => column.name));
-      assert.equal(modelColumns.has('download_idempotency_key'), true);
-      assert.equal(modelColumns.has('download_request_revision'), true);
-      assert.equal(generationColumns.has('idempotency_key'), true);
-      assert.equal(generationColumns.has('jobs_sealed'), true);
-      assert.equal(generationColumns.has('expected_job_count'), true);
-      assert.equal(generationColumns.has('eligible_asset_count'), true);
-      assert.equal(generationColumns.has('excluded_asset_count'), true);
-      assert.equal(generationColumns.has('payload_pruned_at'), true);
-      assert.ok(database.db.prepare("SELECT sql FROM sqlite_master WHERE name = 'idx_asset_semantic_generations_idempotency'").get());
-      const model = database.setAssetSemanticModelState({
-        modelKey: 'caption-prerelease-repair',
-        modelVersion: 'fixed-v1',
-        capability: 'caption',
-        status: 'downloading',
-        totalBytes: 100,
-        downloadIdempotencyKey: 'repair/download/request-1',
-        downloadRequestRevision: 1,
-      }, { expectedRevision: 0 });
-      assert.equal(model.downloadIdempotencyKey, 'repair/download/request-1');
-      assert.equal(model.downloadRequestRevision, 1);
-      assert.equal(database.db.pragma('quick_check', { simple: true }), 'ok');
+      const modelColumns = new Set(database.pragma('table_info(asset_semantic_models)').map((column) => column.name));
+      const generationColumns = new Set(database.pragma('table_info(asset_semantic_generations)').map((column) => column.name));
+      assert.equal(modelColumns.has('download_idempotency_key'), false);
+      assert.equal(modelColumns.has('download_request_revision'), false);
+      assert.equal(generationColumns.has('idempotency_key'), false);
+      assert.equal(generationColumns.has('jobs_sealed'), false);
+      assert.equal(database.prepare("SELECT sql FROM sqlite_master WHERE name = 'idx_asset_semantic_generations_idempotency'").get(), undefined);
+      assert.equal(database.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 16);
+      assert.equal(database.pragma('quick_check', { simple: true }), 'ok');
+      assert.deepEqual(database.pragma('foreign_key_check'), []);
     } finally {
       database.close();
     }

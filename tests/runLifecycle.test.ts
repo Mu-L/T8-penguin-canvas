@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   createRunNodeLifecycleController,
+  executeAfterRunLifecycleBarrier,
   resolveRunExecutionDisposition,
 } from '../src/utils/runLifecycle.ts';
 
@@ -27,6 +28,7 @@ test('lifecycle reporter serializes node and provider events with stable identit
       createdAt: 1,
     },
     executionToken: 'token-a',
+    executionEvidence: () => ({ nodeRunId: 'node-run-a', attemptId: 'attempt-a' }),
     basePayload: { nodeId: 'node-a', contextId: 'context-a' },
     sink: {
       write: async (type, payload) => {
@@ -59,6 +61,59 @@ test('lifecycle reporter serializes node and provider events with stable identit
   assert.equal(writes.every((item) => item.payload.contextId === 'context-a'), true);
   assert.equal(controller.outputEmitted(), true);
   assert.equal(controller.reporter.runContext?.runId, 'run-a');
+  assert.equal(controller.reporter.nodeRunId, 'node-run-a');
+  assert.equal(controller.reporter.attemptId, 'attempt-a');
+});
+
+test('failed initial lifecycle persistence invokes the expensive callback zero times', async () => {
+  let callbackCalls = 0;
+  let persistenceCalls = 0;
+  const controller = createRunNodeLifecycleController({
+    executionToken: 'token-initial-persistence-failure',
+    sink: {
+      write: async () => {
+        persistenceCalls += 1;
+        throw new Error('initial lifecycle write failed');
+      },
+    },
+  });
+  await assert.rejects(
+    executeAfterRunLifecycleBarrier(
+      async () => {
+        await controller.reporter.progress({ phase: 'executing', progress: 0 });
+      },
+      async () => { callbackCalls += 1; },
+    ),
+    /initial lifecycle write failed/,
+  );
+  assert.equal(persistenceCalls, 1);
+  assert.equal(callbackCalls, 0);
+});
+
+test('output persistence fails closed and cannot mark output as emitted', async () => {
+  const writes: string[] = [];
+  const failure = new Error('authoritative artifact write failed');
+  const controller = createRunNodeLifecycleController({
+    executionToken: 'token-output-failure',
+    sink: {
+      write: async (type) => {
+        writes.push(type);
+        if (type === 'node.output') throw failure;
+      },
+    },
+  });
+
+  await assert.rejects(
+    controller.reporter.output({ outputCount: 1 }),
+    /authoritative artifact write failed/,
+  );
+  assert.equal(controller.outputEmitted(), false);
+
+  // The serialized queue remains usable for terminal evidence, while flush
+  // keeps reporting the first authoritative persistence failure.
+  await controller.reporter.providerResponse({ status: 'failed' });
+  await assert.rejects(controller.flush(), /authoritative artifact write failed/);
+  assert.deepEqual(writes, ['node.output', 'provider.response']);
 });
 
 test('topology entry and single-node action bar share the persisted RunContext path', () => {
@@ -80,6 +135,9 @@ test('topology entry and single-node action bar share the persisted RunContext p
   assert.match(hook, /providerTraceAttemptPatch/);
   assert.match(hook, /collectRunOutputAssets/);
   assert.match(hook, /persistProjectRunOutputAssets/);
+  assert.match(hook, /!executionCallbackStarted[\s\S]*type === 'node\.output'[\s\S]*type === 'provider\.request'/);
+  assert.match(hook, /executeAfterRunLifecycleBarrier/);
+  assert.match(hook, /if \(status === 'succeeded'\) throw lifecyclePersistenceError/);
   assert.match(hook, /providerRequest/);
   assert.match(hook, /providerSubmitted/);
   assert.match(hook, /providerResponse/);

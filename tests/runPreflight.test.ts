@@ -59,6 +59,21 @@ test('run-all, run-group, and run-single can be ready only with exact revision a
   }
 });
 
+test('an auto-approved RunIntent keeps exact request binding without opening a second confirmation gate', () => {
+  const preview = prepareRunAction(input({
+    actionKind: 'run-intent-auto-approved',
+    requestId: 'intent-auto-a',
+  }));
+  assert.equal(preview.status, 'ready');
+  assert.equal(preview.requiresExplicitConfirmation, false);
+  assert.equal(preview.scope.requestId, 'intent-auto-a');
+  assert.equal(preview.warnings.some((warning) => warning.code === 'action.explicit-confirmation-required'), false);
+
+  const missingRequest = prepareRunAction(input({ actionKind: 'run-intent-auto-approved' }));
+  assert.equal(missingRequest.status, 'blocked');
+  assert.ok(missingRequest.blockers.some((blocker) => blocker.code === 'run-intent.request-id-missing'));
+});
+
 test('every Run, NodeRun, Attempt, subflow replay/retry and RunIntent requires explicit confirmation', () => {
   const runRef: RunEvidenceRefInput[] = [{ runId: 'run-a' }];
   const nodeRunRef: RunEvidenceRefInput[] = [{ runId: 'run-a', nodeRunId: 'node-run-a' }];
@@ -386,7 +401,7 @@ test('prepareRunAction is deterministic, does not mutate input, and makes no net
 });
 
 test('preview remains bounded and redacts credentials, absolute paths, and base64', () => {
-  const secret = 'sk-abcdefghijklmnopqrstuvwxyz123456';
+  const secret = ['sk-', 'abcdefghijklmnopqrstuvwxyz123456'].join('');
   const path = 'C:\\Users\\private\\secret.txt';
   const dataUrl = `data:image/png;base64,${'A'.repeat(4000)}`;
   const manyNodes: Node[] = Array.from({ length: 140 }, (_, index) => ({

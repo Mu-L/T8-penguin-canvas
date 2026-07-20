@@ -23,6 +23,10 @@ const PRIVATE_PATH_KEYS = new Set([
   'sourcepath',
 ]);
 
+const PRIVATE_OBSERVATION_KEYS = new Set([
+  'observedcontenthash',
+]);
+
 const SENSITIVE_KEYS = new Set([
   'accesskeyid',
   'apikey',
@@ -195,6 +199,7 @@ function sanitizePublicValue(value, options = {}, depth = 0, key = '', state = n
     const normalizedKey = normalizePublicKey(key);
     if (['__proto__', 'constructor', 'prototype'].includes(String(key))) return;
     if (PRIVATE_PATH_KEYS.has(normalizedKey)) return;
+    if (PRIVATE_OBSERVATION_KEYS.has(normalizedKey)) return;
     if (isSensitivePublicKey(normalizedKey)) return;
     if (normalizedKey === 'relativepath' && options.storageMode === 'linked') {
       const basename = linkedBasename(item);

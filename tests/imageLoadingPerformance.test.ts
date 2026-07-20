@@ -25,24 +25,26 @@ test('local canvas image previews use cached backend thumbnails', () => {
   assert.match(filesRoute, /router\.get\('\/thumbnail'/);
   assert.match(filesRoute, /sharp\(sourcePath/);
   assert.match(filesRoute, /thumbnailInflight/);
-  assert.match(filesRoute, /previewPipeline\.runEphemeral/);
+  assert.match(filesRoute, /function getFilesPreviewPipeline\(\)/);
+  assert.match(filesRoute, /getFilesPreviewPipeline\(\)\.runEphemeral/);
   assert.match(filesRoute, /writeAtomicTarget/);
   assert.match(filesRoute, /MAX_IMAGE_INPUT_PIXELS/);
   assert.match(filesRoute, /Cache-Control', 'public, max-age=31536000, immutable'/);
   assert.match(filesRoute, /THUMBNAILS_DIR/);
 });
 
-test('local file uploads do not set an app-level size limit', () => {
+test('local file uploads stay disk-backed and enforce a bounded application limit', () => {
   const config = read('../backend/src/config.js');
   const filesRoute = read('../backend/src/routes/files.js');
 
   assert.match(config, /MAX_FILE_SIZE:\s*0/);
   assert.match(filesRoute, /const uploadSingleFile = upload\.single\('file'\)/);
   assert.match(filesRoute, /err instanceof multer\.MulterError/);
-  assert.doesNotMatch(filesRoute, /limits:\s*\{\s*fileSize/);
-  assert.doesNotMatch(filesRoute, /LIMIT_FILE_SIZE/);
-  assert.doesNotMatch(filesRoute, /file_too_large/);
-  assert.doesNotMatch(filesRoute, /文件超过上传上限/);
+  assert.match(filesRoute, /multer\.diskStorage/);
+  assert.match(filesRoute, /limits:\s*\{[\s\S]*fileSize:\s*FILE_UPLOAD_MAX_BYTES/);
+  assert.match(filesRoute, /DEFAULT_FILE_UPLOAD_MAX_BYTES\s*=\s*512\s*\*\s*1024\s*\*\s*1024/);
+  assert.match(filesRoute, /LIMIT_FILE_SIZE/);
+  assert.doesNotMatch(filesRoute, /multer\.memoryStorage/);
 });
 
 test('initial canvas boot keeps heavy nodes behind lazy boundaries', () => {

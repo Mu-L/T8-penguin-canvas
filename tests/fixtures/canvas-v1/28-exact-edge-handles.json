@@ -1,0 +1,18 @@
+{
+  "canvasId": "exact-handle-board",
+  "projectId": "ports-project",
+  "name": "精确端口连线",
+  "updatedAt": 1704067200028,
+  "nodes": [
+    { "id": "frame-pair-old", "type": "frame-pair", "position": { "x": 20, "y": 120 }, "data": { "label": "首尾帧" } },
+    { "id": "seedance-old", "type": "seedance", "position": { "x": 400, "y": 120 }, "data": { "label": "首尾帧生成", "taskType": "i2v" } },
+    { "id": "video-output-old", "type": "video-output", "position": { "x": 780, "y": 120 }, "data": { "label": "视频输出" } }
+  ],
+  "edges": [
+    { "id": "first-frame-binding", "source": "frame-pair-old", "target": "seedance-old", "sourceHandle": "frame-pair-out:first-frame:image", "targetHandle": "seedance-in:first-frame:image", "data": { "portType": "image", "slot": "first" } },
+    { "id": "last-frame-binding", "source": "frame-pair-old", "target": "seedance-old", "sourceHandle": "frame-pair-out:last-frame:image", "targetHandle": "seedance-in:last-frame:image", "data": { "portType": "image", "slot": "last" } },
+    { "id": "generated-video-binding", "source": "seedance-old", "target": "video-output-old", "sourceHandle": "seedance-out:video", "targetHandle": "video-output-in:video", "data": { "portType": "video" } }
+  ],
+  "viewport": { "x": 100, "y": 80, "zoom": 0.82 },
+  "connectionPolicy": { "strictHandles": true, "rejectDuplicate": true, "capacity": "schema" }
+}

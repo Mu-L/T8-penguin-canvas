@@ -23,6 +23,15 @@ export interface RunNodeLifecycleController {
   flush(): Promise<void>;
 }
 
+/** Keep an expensive callback behind an awaited durable lifecycle write. */
+export async function executeAfterRunLifecycleBarrier<T>(
+  persistEvidence: () => Promise<void>,
+  execute: () => Promise<T> | T,
+): Promise<T> {
+  await persistEvidence();
+  return execute();
+}
+
 /**
  * Serializes lifecycle writes so a provider may report progress without
  * awaiting every call while terminal persistence can still wait for all
@@ -31,15 +40,16 @@ export interface RunNodeLifecycleController {
 export function createRunNodeLifecycleController(input: {
   runContext: RunContext | null;
   executionToken: string;
+  executionEvidence?: () => { nodeRunId?: string | null; attemptId?: string | null };
   basePayload?: Record<string, unknown>;
   sink: RunNodeLifecycleSink;
 }): RunNodeLifecycleController {
   let queue = Promise.resolve();
   let didEmitOutput = false;
+  let firstPersistenceFailure: unknown = null;
   let sequence = 0;
 
   const write = (type: RunNodeLifecycleEventType, payload: Record<string, unknown> = {}) => {
-    if (type === 'node.output') didEmitOutput = true;
     sequence += 1;
     const eventPayload = {
       ...(input.basePayload || {}),
@@ -47,8 +57,14 @@ export function createRunNodeLifecycleController(input: {
       executionToken: input.executionToken,
       sequence,
     };
-    const operation = queue.then(() => input.sink.write(type, eventPayload));
-    queue = operation.catch(() => undefined);
+    const operation = queue
+      .then(() => input.sink.write(type, eventPayload))
+      .then(() => {
+        if (type === 'node.output') didEmitOutput = true;
+      });
+    queue = operation.catch((error) => {
+      if (firstPersistenceFailure == null) firstPersistenceFailure = error;
+    });
     return operation;
   };
 
@@ -56,6 +72,12 @@ export function createRunNodeLifecycleController(input: {
     reporter: {
       runContext: input.runContext,
       executionToken: input.executionToken,
+      get nodeRunId() {
+        return input.executionEvidence?.().nodeRunId || null;
+      },
+      get attemptId() {
+        return input.executionEvidence?.().attemptId || null;
+      },
       progress: (payload = {}) => write('node.progress', payload),
       polling: (payload = {}) => write('node.polling', payload),
       output: (payload = {}) => write('node.output', payload),
@@ -66,6 +88,9 @@ export function createRunNodeLifecycleController(input: {
       providerUsage: (payload = {}) => write('provider.usage', payload),
     },
     outputEmitted: () => didEmitOutput,
-    flush: () => queue,
+    flush: async () => {
+      await queue;
+      if (firstPersistenceFailure != null) throw firstPersistenceFailure;
+    },
   };
 }

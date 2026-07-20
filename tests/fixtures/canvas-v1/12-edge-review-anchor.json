@@ -1,0 +1,26 @@
+{
+  "canvasId": "edge-review-board",
+  "projectId": "review-project",
+  "name": "连线锚点审阅",
+  "updatedAt": 1704067200012,
+  "nodes": [
+    { "id": "audio-source", "type": "audio", "position": { "x": 20, "y": 60 }, "data": { "label": "旁白" } },
+    { "id": "video-target", "type": "video", "position": { "x": 380, "y": 60 }, "data": { "label": "画面" } }
+  ],
+  "edges": [
+    { "id": "voiceover-binding", "source": "audio-source", "target": "video-target", "sourceHandle": "audio-out:audio", "targetHandle": "video-in:audio", "animated": true }
+  ],
+  "reviewThreads": [
+    {
+      "id": "thread-edge-sync",
+      "canvasRevision": 11,
+      "anchor": { "kind": "edge", "edgeId": "voiceover-binding", "label": "旁白与画面对齐" },
+      "status": "resolved",
+      "severity": "important",
+      "createdBy": "reviewer-edge",
+      "comments": [{ "id": "edge-comment", "body": "第三秒口型已经对齐。", "createdBy": "reviewer-edge", "createdAt": 1704067100012 }]
+    }
+  ],
+  "viewport": { "x": 80, "y": 50, "zoom": 1.05 },
+  "timelineSelection": { "startMs": 2500, "endMs": 3800 }
+}

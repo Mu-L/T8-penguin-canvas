@@ -1,0 +1,16 @@
+{
+  "canvasId": "large-negative-space",
+  "projectId": "layout-project",
+  "name": "负坐标大画布",
+  "updatedAt": 1704067200016,
+  "nodes": [
+    { "id": "far-left-node", "type": "text", "position": { "x": -8400.5, "y": -2200.25 }, "data": { "label": "远端注释", "prompt": "保留精确小数坐标" } },
+    { "id": "origin-node", "type": "output", "position": { "x": 0, "y": 0 }, "data": { "label": "原点" } }
+  ],
+  "edges": [
+    { "id": "long-distance-edge", "source": "far-left-node", "target": "origin-node", "style": { "strokeWidth": 2, "strokeDasharray": "6 4" } }
+  ],
+  "viewport": { "x": -3760.75, "y": -940.5, "zoom": 0.12 },
+  "selection": { "nodeIds": ["far-left-node"], "edgeIds": ["long-distance-edge"] },
+  "minimap": { "visible": true, "colorMode": "type" }
+}

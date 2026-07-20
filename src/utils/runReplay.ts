@@ -1,4 +1,4 @@
-import type { Edge, Node } from '@xyflow/react';
+import type { Edge, Node, NodeChange } from '@xyflow/react';
 import type { RunAttemptSummary, RunDetail, NodeRunSummary } from '../types/project';
 
 export const RUN_NODE_INPUT_SNAPSHOT_SCHEMA = 't8-run-node-input-v1' as const;
@@ -257,6 +257,189 @@ export function captureRunNodeInputSnapshot(nodes: Node[], edges: Edge[], nodeId
   return cloneValue(rawSnapshot);
 }
 
+const RUN_REPLAY_RUNTIME_NODE_ID_PATTERN = /^__t8-(?:run-(?:intent|replay)|subflow-run-replay)-/;
+
+export function runReplayRuntimeNodeChangeId(change: NodeChange): string {
+  return change.type === 'add'
+    ? String(change.item?.id || '')
+    : String(change.id || '');
+}
+
+export interface RunReplayRuntimeNodeChangePartition {
+  runtimeChanges: NodeChange[];
+  visibleChanges: NodeChange[];
+  staleRuntimeChanges: NodeChange[];
+}
+
+export function partitionRunReplayRuntimeNodeChanges(
+  changes: NodeChange[],
+  runtimeNodes: Node[],
+  visibleNodes: Node[],
+): RunReplayRuntimeNodeChangePartition {
+  const runtimeIds = new Set(runtimeNodes.map((node) => node.id));
+  const visibleIds = new Set(visibleNodes.map((node) => node.id));
+  const partition: RunReplayRuntimeNodeChangePartition = {
+    runtimeChanges: [],
+    visibleChanges: [],
+    staleRuntimeChanges: [],
+  };
+
+  for (const change of changes) {
+    const id = runReplayRuntimeNodeChangeId(change);
+    if (runtimeIds.has(id)) {
+      partition.runtimeChanges.push(change);
+    } else if (
+      visibleIds.has(id)
+      || !RUN_REPLAY_RUNTIME_NODE_ID_PATTERN.test(id)
+    ) {
+      partition.visibleChanges.push(change);
+    } else {
+      // A reserved runtime ID that belongs to neither the mounted runtime nor
+      // the visible graph is a delayed update from a runtime that was cleared.
+      partition.staleRuntimeChanges.push(change);
+    }
+  }
+
+  return partition;
+}
+
+export function currentRunReplayRuntimeNodeChanges(
+  nodes: Node[],
+  changes: NodeChange[],
+): NodeChange[] {
+  const currentIds = new Set(nodes.map((node) => node.id));
+  return changes.filter((change) => currentIds.has(runReplayRuntimeNodeChangeId(change)));
+}
+
+function allocateRunReplayRuntimeNodeIds(
+  originalIds: readonly string[],
+  prefix: string,
+  safeNonce: string,
+  occupiedNodeIds: readonly string[],
+): Map<string, string> {
+  const occupiedIds = new Set(occupiedNodeIds.map(String));
+  const runtimeIdByOriginalId = new Map<string, string>();
+  originalIds.forEach((originalId, index) => {
+    const baseId = `${prefix}${safeNonce}-${index}`;
+    let runtimeId = baseId;
+    let collisionIndex = 1;
+    while (occupiedIds.has(runtimeId)) {
+      runtimeId = `${baseId}-${collisionIndex}`;
+      collisionIndex += 1;
+    }
+    occupiedIds.add(runtimeId);
+    runtimeIdByOriginalId.set(originalId, runtimeId);
+  });
+  return runtimeIdByOriginalId;
+}
+
+/**
+ * Materialize an invisible, deeply cloned execution graph for one accepted
+ * remote RunIntent. Collaborators may keep editing the visible next revision
+ * while every Provider-facing node in this runtime continues to observe the
+ * exact graph that passed host preflight.
+ */
+export function buildFrozenRunIntentRuntime(
+  nodes: Node[],
+  edges: Edge[],
+  requestedNodeIds: string[],
+  nonce: string,
+  occupiedNodeIds: readonly string[] = [],
+): RunReplayRuntimeGraph {
+  const requested = [...new Set(requestedNodeIds.map(String).filter(Boolean))];
+  if (!requested.length) throw new Error('远程运行意图没有可冻结的执行节点');
+
+  const snapshots = new Map<string, ReplayableRunNodeInputSnapshot>();
+  for (const nodeId of requested) {
+    const snapshot = captureRunNodeInputSnapshot(nodes, edges, nodeId);
+    if (!isReplayableRunNodeInputSnapshot(snapshot)) {
+      throw new Error(`无法冻结远程运行输入：${snapshot.reason}`);
+    }
+    snapshots.set(nodeId, snapshot);
+  }
+
+  const graphNodes = new Map<string, RunReplayNodeSnapshot>();
+  const graphEdges = new Map<string, RunReplayEdgeSnapshot>();
+  for (const snapshot of snapshots.values()) {
+    for (const upstream of snapshot.upstreamNodes) {
+      if (!graphNodes.has(upstream.id)) graphNodes.set(upstream.id, cloneValue(upstream));
+    }
+    for (const edge of snapshot.incomingEdges) {
+      const key = `${edge.source}:${edge.sourceHandle || ''}->${edge.target}:${edge.targetHandle || ''}`;
+      if (!graphEdges.has(key)) graphEdges.set(key, cloneValue(edge));
+    }
+  }
+  for (const nodeId of requested) {
+    graphNodes.set(nodeId, cloneValue(snapshots.get(nodeId)!.node));
+  }
+  if (graphNodes.size > MAX_REPLAY_NODES || graphEdges.size > MAX_REPLAY_EDGES) {
+    throw new Error(`无法冻结远程运行输入：输入图超过上限（${graphNodes.size} 节点 / ${graphEdges.size} 连线）`);
+  }
+
+  const safeNonce = String(nonce || Date.now()).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 48) || 'intent-runtime';
+  const runtimeIdByOriginalId = allocateRunReplayRuntimeNodeIds(
+    [...graphNodes.keys()],
+    '__t8-run-intent-',
+    safeNonce,
+    [...nodes.map((node) => node.id), ...occupiedNodeIds],
+  );
+  const originalNodeIdByRuntimeId: Record<string, string> = {};
+  const runtimeNodes = [...graphNodes.values()].map((node) => {
+    const id = runtimeIdByOriginalId.get(node.id)!;
+    originalNodeIdByRuntimeId[id] = node.id;
+    return {
+      id,
+      type: node.type,
+      position: cloneValue(node.position),
+      data: cloneValue(node.data),
+      selectable: false,
+      draggable: false,
+      connectable: false,
+      focusable: false,
+      style: { opacity: 0, pointerEvents: 'none' },
+      __runReplayOriginalNodeId: node.id,
+    } as Node & { __runReplayOriginalNodeId: string };
+  });
+  const runtimeEdges = [...graphEdges.values()].flatMap((edge, index) => {
+    const source = runtimeIdByOriginalId.get(edge.source);
+    const target = runtimeIdByOriginalId.get(edge.target);
+    if (!source || !target) return [];
+    return [{
+      id: `__t8-run-intent-edge-${safeNonce}-${index}`,
+      source,
+      target,
+      sourceHandle: edge.sourceHandle,
+      targetHandle: edge.targetHandle,
+      data: edge.data ? cloneValue(edge.data) : undefined,
+      selectable: false,
+      animated: false,
+      style: { opacity: 0, pointerEvents: 'none' },
+    } as Edge];
+  });
+  const executionNodeIds = requested.map((id) => runtimeIdByOriginalId.get(id)!).filter(Boolean);
+  const executionContexts = Object.fromEntries(executionNodeIds.map((runtimeId) => {
+    const originalId = originalNodeIdByRuntimeId[runtimeId];
+    const sourceSnapshot = snapshots.get(originalId)!.node;
+    return [runtimeId, {
+      subflowPath: [],
+      originalNodeId: originalId,
+      runNodeId: originalId,
+      inputSnapshot: {
+        schema: RUN_NODE_INPUT_SNAPSHOT_SCHEMA,
+        nodeType: sourceSnapshot.type,
+        nodeData: cloneValue(sourceSnapshot.data),
+      },
+    } satisfies RunReplayExecutionContext];
+  }));
+  return {
+    nodes: runtimeNodes,
+    edges: runtimeEdges,
+    executionNodeIds,
+    originalNodeIdByRuntimeId,
+    executionContexts,
+  };
+}
+
 export function isReplayableRunNodeInputSnapshot(value: unknown): value is ReplayableRunNodeInputSnapshot {
   if (!value || typeof value !== 'object') return false;
   const snapshot = value as Partial<ReplayableRunNodeInputSnapshot>;
@@ -353,6 +536,7 @@ export function buildSubflowNodeRunOriginalReplayRuntime(
   run: RunDetail,
   nodeRunId: string,
   nonce: string,
+  occupiedNodeIds: readonly string[] = [],
 ): SubflowNodeRunReplayRuntimeGraph {
   const validation = validateSubflowNodeRunOriginalReplay(run, nodeRunId);
   if (!validation.ok) throw new Error(`无法使用原输入重试内部节点：${validation.reason}`);
@@ -361,8 +545,12 @@ export function buildSubflowNodeRunOriginalReplayRuntime(
   const snapshot = sourceNodeRun.inputSnapshot as unknown as ReplayableRunNodeInputSnapshot;
   const graphNodes = [...snapshot.upstreamNodes, snapshot.node].map(cloneValue);
   const safeNonce = String(nonce || Date.now()).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 48) || 'subflow-runtime';
-  const runtimeIdByOriginalId = new Map<string, string>();
-  graphNodes.forEach((node, index) => runtimeIdByOriginalId.set(node.id, `__t8-subflow-run-replay-${safeNonce}-${index}`));
+  const runtimeIdByOriginalId = allocateRunReplayRuntimeNodeIds(
+    graphNodes.map((node) => node.id),
+    '__t8-subflow-run-replay-',
+    safeNonce,
+    occupiedNodeIds,
+  );
   const originalNodeIdByRuntimeId: Record<string, string> = {};
   const nodes = graphNodes.map((node) => {
     const id = runtimeIdByOriginalId.get(node.id)!;
@@ -426,6 +614,7 @@ export function buildRunOriginalReplayRuntime(
   run: RunDetail,
   requestedNodeIds: string[],
   nonce: string,
+  occupiedNodeIds: readonly string[] = [],
 ): RunReplayRuntimeGraph {
   const requested = [...new Set(requestedNodeIds.map(String).filter(Boolean))];
   const validation = validateRunOriginalReplay(run, requested);
@@ -451,8 +640,12 @@ export function buildRunOriginalReplayRuntime(
     throw new Error(`无法使用原输入重放：合并输入图超过上限（${graphNodes.size} 节点 / ${graphEdges.size} 连线）`);
   }
   const safeNonce = String(nonce || Date.now()).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 48) || 'runtime';
-  const runtimeIdByOriginalId = new Map<string, string>();
-  [...graphNodes.keys()].forEach((id, index) => runtimeIdByOriginalId.set(id, `__t8-run-replay-${safeNonce}-${index}`));
+  const runtimeIdByOriginalId = allocateRunReplayRuntimeNodeIds(
+    [...graphNodes.keys()],
+    '__t8-run-replay-',
+    safeNonce,
+    occupiedNodeIds,
+  );
   const originalNodeIdByRuntimeId: Record<string, string> = {};
   const nodes = [...graphNodes.values()].map((node) => {
     const id = runtimeIdByOriginalId.get(node.id)!;
@@ -509,6 +702,7 @@ export function buildRunAttemptOriginalReplayRuntime(
   nodeRunId: string,
   attemptId: string,
   nonce: string,
+  occupiedNodeIds: readonly string[] = [],
 ): RunAttemptReplayRuntimeGraph {
   const validation = validateRunAttemptOriginalReplay(run, nodeRunId, attemptId);
   if (!validation.ok) throw new Error(`无法重试该 Attempt：${validation.reason}`);
@@ -521,14 +715,24 @@ export function buildRunAttemptOriginalReplayRuntime(
       ...run,
       nodeRuns: run.nodeRuns.map((item) => item.id === sourceNodeRun.id ? { ...item, status: sourceAttempt.status } : item),
     };
-    const runtime = buildSubflowNodeRunOriginalReplayRuntime(validationRun, sourceNodeRun.id, nonce);
+    const runtime = buildSubflowNodeRunOriginalReplayRuntime(
+      validationRun,
+      sourceNodeRun.id,
+      nonce,
+      occupiedNodeIds,
+    );
     return {
       ...runtime,
       sourceNodeRun: cloneValue(sourceNodeRun),
       sourceAttempt: cloneValue(sourceAttempt),
     };
   }
-  const runtime = buildRunOriginalReplayRuntime(run, [topLevelNodeRunIdentity(sourceNodeRun)], nonce);
+  const runtime = buildRunOriginalReplayRuntime(
+    run,
+    [topLevelNodeRunIdentity(sourceNodeRun)],
+    nonce,
+    occupiedNodeIds,
+  );
   return {
     ...runtime,
     sourceNodeRun: cloneValue(sourceNodeRun),

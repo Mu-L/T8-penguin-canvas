@@ -48,6 +48,8 @@ export interface SubflowDependencyRef {
 
 export interface SubflowDefinition {
   id: string;
+  /** Present on persisted/collaborative definitions after B1 normalization. */
+  entityUid?: string;
   version: number;
   revision?: number;
   projectId?: string;

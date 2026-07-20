@@ -14,6 +14,10 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
+const {
+  exactTopLevelVersion,
+  latestInstallerMetadata,
+} = require('../scripts/latest-yml.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
 const PACKAGE_JSON = require(path.join(ROOT, 'package.json'));
@@ -32,6 +36,30 @@ const CANVAS_AGENT_INTEGRITY_FILES = Object.freeze([
   { source: 'services/runEvidenceDiagnosis.js', output: 'services/runEvidenceDiagnosis.t8c', format: 't8c' },
   { source: 'shared/canvasNodeSchema.json', output: 'shared/canvasNodeSchema.json', format: 'json' },
 ]);
+const RUNTIME_ARCHIVE_REQUIREMENTS = Object.freeze({
+  'remove-ai-watermarks': Object.freeze({
+    id: 'remove-ai-watermarks',
+    archiveFile: 'remove-ai-watermarks-runtime.zip',
+    minimumArchiveBytes: 500_000_000,
+    minimumSourceFiles: 40_000,
+    minimumSourceBytes: 1_000_000_000,
+    requiredEntries: Object.freeze([
+      'python/python.exe',
+      'python/Scripts/remove-ai-watermarks.exe',
+      'runtime-manifest.json',
+    ]),
+  }),
+  'parsehub-pythonlibs': Object.freeze({
+    id: 'parsehub-pythonlibs',
+    archiveFile: 'parsehub-pythonlibs.zip',
+    minimumArchiveBytes: 50_000_000,
+    minimumSourceFiles: 6_000,
+    minimumSourceBytes: 200_000_000,
+    requiredEntries: Object.freeze([
+      'parsehub/__init__.py',
+    ]),
+  }),
+});
 
 function ok(p) {
   console.log('  ✅', path.relative(UNPACKED, p));
@@ -143,7 +171,156 @@ function failSecurity(message, p) {
 }
 
 function sha256File(filename) {
-  return crypto.createHash('sha256').update(fs.readFileSync(filename)).digest('hex');
+  const hash = crypto.createHash('sha256');
+  const buffer = Buffer.allocUnsafe(8 * 1024 * 1024);
+  const handle = fs.openSync(filename, 'r');
+  try {
+    let bytesRead = 0;
+    do {
+      bytesRead = fs.readSync(handle, buffer, 0, buffer.length, null);
+      if (bytesRead > 0) hash.update(buffer.subarray(0, bytesRead));
+    } while (bytesRead > 0);
+  } finally {
+    fs.closeSync(handle);
+  }
+  return hash.digest('hex');
+}
+
+function require7zaForRuntimeVerification() {
+  try {
+    const sevenZip = require('7zip-bin');
+    if (sevenZip?.path7za && fs.existsSync(sevenZip.path7za)) return sevenZip.path7za;
+  } catch (_) {}
+  failSecurity('strict runtime archive verification requires 7zip-bin');
+  return '';
+}
+
+function normalizeArchiveEntry(entry) {
+  return String(entry || '').replace(/\\/g, '/').replace(/^\.\//, '');
+}
+
+function verifyPackagedRuntimeArchive(requirement, archive, manifestPath) {
+  if (!fs.existsSync(archive)) failSecurity(`packaged runtime archive is missing: ${requirement.id}`, archive);
+  if (!fs.existsSync(manifestPath)) failSecurity(`packaged runtime manifest is missing: ${requirement.id}`, manifestPath);
+
+  const archiveStat = fs.statSync(archive);
+  if (!archiveStat.isFile() || archiveStat.size < requirement.minimumArchiveBytes) {
+    failSecurity(
+      `packaged runtime archive is implausibly small: ${requirement.id} (${archiveStat.size} bytes)`,
+      archive,
+    );
+  }
+
+  let manifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  } catch (_) {
+    failSecurity('packaged runtime archive manifest must be valid JSON:', manifestPath);
+  }
+  const entry = manifest?.runtimes?.[requirement.id];
+  if (!entry
+    || entry.archiveFile !== requirement.archiveFile
+    || Number(entry.archiveBytes || 0) !== archiveStat.size
+    || Number(entry.sourceFiles || 0) < requirement.minimumSourceFiles
+    || Number(entry.sourceBytes || 0) < requirement.minimumSourceBytes
+    || !/^[a-f0-9]{64}$/i.test(String(entry.sourceSha256 || ''))
+    || !/^[a-f0-9]{64}$/i.test(String(entry.archiveSha256 || ''))) {
+    failSecurity(`packaged runtime archive manifest entry is invalid: ${requirement.id}`, manifestPath);
+  }
+
+  const archiveSha256 = sha256File(archive);
+  if (archiveSha256 !== String(entry.archiveSha256).toLowerCase()) {
+    failSecurity(`packaged runtime archive SHA-256 mismatch: ${requirement.id}`, archive);
+  }
+
+  const path7za = require7zaForRuntimeVerification();
+  const commonOptions = {
+    encoding: 'utf8',
+    windowsHide: true,
+    maxBuffer: 64 * 1024 * 1024,
+  };
+  const testResult = spawnSync(path7za, ['t', '-bso0', '-bsp0', '-bb0', '--', archive], commonOptions);
+  if (testResult.error || testResult.status !== 0) {
+    failSecurity(`packaged runtime archive CRC verification failed: ${requirement.id}`, archive);
+  }
+  const listResult = spawnSync(path7za, ['l', '-slt', '-bsp0', '-bb0', '--', archive], commonOptions);
+  if (listResult.error || listResult.status !== 0) {
+    failSecurity(`packaged runtime archive entry listing failed: ${requirement.id}`, archive);
+  }
+  const archiveEntries = new Set(
+    String(listResult.stdout || '')
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith('Path = '))
+      .map((line) => normalizeArchiveEntry(line.slice('Path = '.length))),
+  );
+  const missingEntries = requirement.requiredEntries.filter((requiredEntry) => {
+    return !archiveEntries.has(normalizeArchiveEntry(requiredEntry));
+  });
+  if (missingEntries.length > 0) {
+    failSecurity(
+      `packaged runtime archive is missing required entries: ${requirement.id} (${missingEntries.join(', ')})`,
+      archive,
+    );
+  }
+  console.log(`  ✅ ${requirement.id} archive SHA-256, CRC and required entries verified`);
+}
+
+function isPlausibleRuntimeFile(filePath, minimumBytes = 16 * 1024) {
+  try {
+    const stat = fs.statSync(filePath);
+    return stat.isFile() && stat.size >= minimumBytes;
+  } catch (_) {
+    return false;
+  }
+}
+
+function verifyDirectAiWatermarkRuntime(runtimeRoot) {
+  if (!fs.existsSync(runtimeRoot)) return false;
+  const layouts = [
+    [path.join(runtimeRoot, 'remove-ai-watermarks.exe')],
+    [path.join(runtimeRoot, 'Scripts', 'remove-ai-watermarks.exe')],
+    [
+      path.join(runtimeRoot, 'python', 'python.exe'),
+      path.join(runtimeRoot, 'python', 'Scripts', 'remove-ai-watermarks.exe'),
+    ],
+    [
+      path.join(runtimeRoot, '.venv', 'Scripts', 'python.exe'),
+      path.join(runtimeRoot, '.venv', 'Scripts', 'remove-ai-watermarks.exe'),
+    ],
+  ];
+  const layout = layouts.find((requiredFiles) => (
+    requiredFiles.every((filePath) => isPlausibleRuntimeFile(filePath))
+  ));
+  if (!layout) {
+    failSecurity('direct remove-ai-watermarks runtime is incomplete or implausibly small:', runtimeRoot);
+  }
+  layout.forEach(ok);
+  const manifestPath = path.join(runtimeRoot, 'runtime-manifest.json');
+  if (fs.existsSync(manifestPath)) {
+    let manifest;
+    try {
+      manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    } catch (_) {
+      failSecurity('direct remove-ai-watermarks runtime manifest must be valid JSON:', manifestPath);
+    }
+    if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
+      failSecurity('direct remove-ai-watermarks runtime manifest must be an object:', manifestPath);
+    }
+    ok(manifestPath);
+  } else if (process.env.T8_REQUIRE_AI_WATERMARK_RUNTIME === '1') {
+    failSecurity('required direct remove-ai-watermarks runtime manifest is missing:', manifestPath);
+  }
+  return true;
+}
+
+function verifyDirectParseHubRuntime(libsRoot) {
+  if (!fs.existsSync(libsRoot)) return false;
+  const packageEntry = path.join(libsRoot, 'parsehub', '__init__.py');
+  if (!isPlausibleRuntimeFile(packageEntry, 64)) {
+    failSecurity('direct ParseHub runtime is incomplete or implausibly small:', packageEntry);
+  }
+  ok(packageEntry);
+  return true;
 }
 
 function checkCanvasAgentIntegrity() {
@@ -288,33 +465,38 @@ function checkRequiredLocalPrivateArtifacts() {
   console.log('  ✅ formal release local private frontend/backend artifacts verified');
 }
 
-function checkAiWatermarkRuntime() {
-  const runtimeRoot = path.join(RES, 'tools', 'remove-ai-watermarks');
-  const archiveRoot = path.join(RES, 'tools', 'runtime-archives');
+function checkAiWatermarkRuntime(resourcesRoot = RES) {
+  const runtimeRoot = path.join(resourcesRoot, 'tools', 'remove-ai-watermarks');
+  const archiveRoot = path.join(resourcesRoot, 'tools', 'runtime-archives');
   const archive = path.join(archiveRoot, 'remove-ai-watermarks-runtime.zip');
   const archiveManifest = path.join(archiveRoot, 'runtime-archives-manifest.json');
   const required = process.env.T8_REQUIRE_AI_WATERMARK_RUNTIME === '1';
-  const candidates = [
-    path.join(runtimeRoot, 'remove-ai-watermarks.exe'),
-    path.join(runtimeRoot, 'Scripts', 'remove-ai-watermarks.exe'),
-    path.join(runtimeRoot, 'python.exe'),
-    path.join(runtimeRoot, 'python', 'python.exe'),
-    path.join(runtimeRoot, '.venv', 'Scripts', 'python.exe'),
-  ];
-  const found = candidates.find((p) => fs.existsSync(p));
-  if (found) {
-    ok(found);
-    const manifest = path.join(runtimeRoot, 'runtime-manifest.json');
-    if (fs.existsSync(manifest)) ok(manifest);
-    else console.log('  ⚠️  optional runtime-manifest.json not found');
+  const archiveStrict = process.env.T8_REQUIRE_RUNTIME_ARCHIVES === '1';
+  if (archiveStrict) {
+    verifyPackagedRuntimeArchive(
+      RUNTIME_ARCHIVE_REQUIREMENTS['remove-ai-watermarks'],
+      archive,
+      archiveManifest,
+    );
+    ok(archive);
+    ok(archiveManifest);
+    verifyDirectAiWatermarkRuntime(runtimeRoot);
     return;
   }
+  if (verifyDirectAiWatermarkRuntime(runtimeRoot)) return;
   if (fs.existsSync(archive)) {
     ok(archive);
     if (fs.existsSync(archiveManifest)) ok(archiveManifest);
     else {
       missingCount += 1;
       bad(archiveManifest);
+    }
+    if (required) {
+      verifyPackagedRuntimeArchive(
+        RUNTIME_ARCHIVE_REQUIREMENTS['remove-ai-watermarks'],
+        archive,
+        archiveManifest,
+      );
     }
     return;
   }
@@ -418,26 +600,41 @@ function checkFfprobeRuntime() {
   console.log('  ✅ packaged ffprobe JSON probe verified');
 }
 
-function checkParseHubRuntime() {
-  const bridge = path.join(RES, 'tools', 'parsehub-bridge', 'parsehub_bridge.py');
-  const libsRoot = path.join(RES, 'tools', 'parsehub-pythonlibs');
-  const parsehubPkg = path.join(libsRoot, 'parsehub');
-  const archiveRoot = path.join(RES, 'tools', 'runtime-archives');
+function checkParseHubRuntime(resourcesRoot = RES) {
+  const bridge = path.join(resourcesRoot, 'tools', 'parsehub-bridge', 'parsehub_bridge.py');
+  const libsRoot = path.join(resourcesRoot, 'tools', 'parsehub-pythonlibs');
+  const archiveRoot = path.join(resourcesRoot, 'tools', 'runtime-archives');
   const archive = path.join(archiveRoot, 'parsehub-pythonlibs.zip');
   const archiveManifest = path.join(archiveRoot, 'runtime-archives-manifest.json');
   const strict = process.env.T8_REQUIRE_PARSEHUB_RUNTIME === '1';
+  const archiveStrict = process.env.T8_REQUIRE_RUNTIME_ARCHIVES === '1';
 
   checkFile(bridge);
-  if (fs.existsSync(parsehubPkg)) {
-    ok(parsehubPkg);
+  if (archiveStrict) {
+    verifyPackagedRuntimeArchive(
+      RUNTIME_ARCHIVE_REQUIREMENTS['parsehub-pythonlibs'],
+      archive,
+      archiveManifest,
+    );
+    ok(archive);
+    ok(archiveManifest);
+    verifyDirectParseHubRuntime(libsRoot);
     return;
   }
+  if (verifyDirectParseHubRuntime(libsRoot)) return;
   if (fs.existsSync(archive)) {
     ok(archive);
     if (fs.existsSync(archiveManifest)) ok(archiveManifest);
     else {
       missingCount += 1;
       bad(archiveManifest);
+    }
+    if (strict) {
+      verifyPackagedRuntimeArchive(
+        RUNTIME_ARCHIVE_REQUIREMENTS['parsehub-pythonlibs'],
+        archive,
+        archiveManifest,
+      );
     }
     return;
   }
@@ -491,15 +688,17 @@ function checkUpdateArtifacts() {
 
   if (fs.existsSync(latest)) {
     const text = fs.readFileSync(latest, 'utf-8');
-    if (!new RegExp(`version:\\s*${APP_VERSION.replace(/\./g, '\\.')}`).test(text)) {
+    if (!exactTopLevelVersion(text, APP_VERSION)) {
       missingCount += 1;
       console.error(`  ❌ latest.yml version mismatch, expected ${APP_VERSION}`);
     } else {
       ok(latest);
     }
-    if (!text.includes(installerName)) {
+    try {
+      latestInstallerMetadata(text, installerName);
+    } catch (error) {
       missingCount += 1;
-      console.error(`  ❌ latest.yml does not reference ${installerName}`);
+      console.error(`  ❌ ${error?.message || String(error)}`);
     }
   }
 }
@@ -679,6 +878,9 @@ function main() {
   checkFile(path.join(RES, 'backend-enc', 'routes', 'collaboration.t8c'));
   checkFile(path.join(RES, 'backend-enc', 'routes', 'canvasAgentTools.t8c'));
   checkFile(path.join(RES, 'backend-enc', 'services', 'projectDatabase.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'projectDatabaseMigration23.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'projectDatabaseMigration29.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'projectDatabaseMigration30.t8c'));
   checkFile(path.join(RES, 'backend-enc', 'services', 'assetBlobStore.t8c'));
   checkFile(path.join(RES, 'backend-enc', 'services', 'assetUploadManager.t8c'));
   checkFile(path.join(RES, 'backend-enc', 'services', 'assetIndexer.t8c'));
@@ -802,3 +1004,10 @@ function main() {
 }
 
 if (require.main === module) main();
+
+module.exports = {
+  checkAiWatermarkRuntime,
+  checkParseHubRuntime,
+  verifyDirectAiWatermarkRuntime,
+  verifyDirectParseHubRuntime,
+};

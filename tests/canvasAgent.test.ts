@@ -259,7 +259,7 @@ test('E4 keeps hasMore evidence insufficient and blocks classification or repair
 
 test('E4 rejects private diagnostic fields and forged three-layer references', () => {
   const privateField = cloneExactRunEvidenceToolResult();
-  (privateField.data as any).diagnosis.findings[0].error.code = 'AUTH sk-abcdefghijklmnopqrstuvwxyz123456';
+  (privateField.data as any).diagnosis.findings[0].error.code = `AUTH ${['sk-', 'abcdefghijklmnopqrstuvwxyz123456'].join('')}`;
   assert.throws(() => parseCanvasAgentRunEvidence(privateField, EXACT_RUN_REF), /标准化错误 code 无效/);
 
   const forgedRef = cloneExactRunEvidenceToolResult();

@@ -12,11 +12,16 @@ const { app, BrowserWindow, shell, ipcMain, session, safeStorage, nativeImage, d
 const path = require('path');
 const fs = require('fs');
 const net = require('net');
+const http = require('node:http');
+const crypto = require('node:crypto');
 const { spawn } = require('child_process');
 const { fileURLToPath } = require('url');
 
 const APP_VERSION = require('../package.json').version;
 const UPDATE_DISABLED_MESSAGE = '开发模式不会检查 GitHub Release 更新';
+const ELECTRON_BACKEND_SHUTDOWN_DEADLINE_MS = 15_000;
+const ELECTRON_SINGLE_INSTANCE_OWNER = app.requestSingleInstanceLock();
+if (!ELECTRON_SINGLE_INSTANCE_OWNER) app.quit();
 
 // 允许在 Linux/某些机型上规避 GPU 沙盒导致的启动延迟
 app.commandLine.appendSwitch('disable-features', 'OutOfBlinkCors');
@@ -30,6 +35,13 @@ let logWindow = null;
 let backendModule = null; // 后端 Express app(同进程加载) 或 子进程句柄
 let backendProcess = null;
 let backendPort = 18766;
+let backendInstanceId = '';
+let backendStartPromise = null;
+let backendShutdownPromise = null;
+let electronQuitRequested = false;
+let electronQuitReady = false;
+let electronQuitFinalizationPromise = null;
+let collaborationManagementToken = '';
 let logBuffer = [];
 let autoUpdater = null;
 let initialUpdateCheckStarted = false;
@@ -48,6 +60,9 @@ let updaterState = {
 
 const PARSE_AUTH_PARTITION = 'persist:t8-parsehub-auth';
 const VIBEX_HOSTNAME = 'vibex.runninghub.cn';
+const COLLABORATION_MANAGEMENT_HEADER = 'x-t8-collaboration-management-token';
+const COLLABORATION_MANAGEMENT_SCHEMA = 't8-collaboration-management-authority-v1';
+const ELECTRON_MANAGEMENT_SCHEMA = 't8-electron-collaboration-management-authority-v1';
 const VIBEX_RH_COOKIE_DOMAIN = '.runninghub.cn';
 const VIBEX_RH_TOKEN_KEYS = ['Rh-Accesstoken', 'Rh-Refreshtoken', 'Rh-Identify'];
 const VIBEX_RH_TOKEN_ALIASES = {
@@ -92,6 +107,13 @@ const PARSE_AUTH_PROFILES = [
   { id: 'threads', label: 'Threads', authUrl: 'https://www.threads.net/', domains: ['threads.net'] },
   { id: 'tieba', label: '贴吧', authUrl: 'https://tieba.baidu.com/', domains: ['tieba.baidu.com'] },
 ];
+
+app.on('second-instance', () => {
+  if (!ELECTRON_SINGLE_INSTANCE_OWNER || !mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+});
 
 function isSafeExternalUrl(url) {
   try {
@@ -1080,6 +1102,183 @@ function getUserDataDir() {
   return path.resolve(__dirname, '..');
 }
 
+function normalizedCollaborationManagementToken(value) {
+  const token = String(value || '').trim();
+  return /^[A-Za-z0-9_-]{43,128}$/.test(token) ? token : '';
+}
+
+const COLLABORATION_MANAGEMENT_CREATE_WAIT = new Int32Array(new SharedArrayBuffer(4));
+
+function readManagementAuthorityAfterConcurrentCreate(reader, errorMessage) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      const token = reader();
+      if (token) return token;
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < 19) Atomics.wait(COLLABORATION_MANAGEMENT_CREATE_WAIT, 0, 0, 10);
+  }
+  if (lastError) throw lastError;
+  throw new Error(errorMessage);
+}
+
+function writePrivateAuthorityRecord(file, record) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  try {
+    fs.writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`, {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+    try { fs.chmodSync(file, 0o600); } catch (_) {}
+    return true;
+  } catch (error) {
+    if (error?.code === 'EEXIST') return false;
+    throw error;
+  }
+}
+
+function developmentManagementAuthorityPath() {
+  return path.join(path.resolve(__dirname, '..'), '.t8-collaboration-management-authority.json');
+}
+
+function readDevelopmentManagementAuthority() {
+  const file = developmentManagementAuthorityPath();
+  let record;
+  try {
+    record = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (error) {
+    if (error?.code === 'ENOENT') return '';
+    throw new Error('本地协作管理 authority 文件无法读取');
+  }
+  const token = record?.schema === COLLABORATION_MANAGEMENT_SCHEMA
+    ? normalizedCollaborationManagementToken(record.token)
+    : '';
+  if (!token) throw new Error('本地协作管理 authority 文件格式无效');
+  return token;
+}
+
+function ensureDevelopmentManagementAuthority() {
+  const existing = readDevelopmentManagementAuthority();
+  if (existing) return existing;
+  const token = crypto.randomBytes(32).toString('base64url');
+  const created = writePrivateAuthorityRecord(developmentManagementAuthorityPath(), {
+    schema: COLLABORATION_MANAGEMENT_SCHEMA,
+    version: 1,
+    token,
+  });
+  return created
+    ? token
+    : readManagementAuthorityAfterConcurrentCreate(
+      readDevelopmentManagementAuthority,
+      '本地协作管理 authority 文件并发创建未完成',
+    );
+}
+
+function electronManagementAuthorityPath() {
+  return path.join(app.getPath('userData'), 'data', 'collaboration-management-authority.json');
+}
+
+function ensureElectronManagementEncryption() {
+  if (!safeStorage || !safeStorage.isEncryptionAvailable()) {
+    throw new Error('系统安全存储不可用，已拒绝启动协作管理接口');
+  }
+}
+
+function readElectronManagementAuthority() {
+  const file = electronManagementAuthorityPath();
+  let record;
+  try {
+    record = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (error) {
+    if (error?.code === 'ENOENT') return '';
+    throw new Error('协作管理 authority 安全存储无法读取');
+  }
+  if (record?.schema !== ELECTRON_MANAGEMENT_SCHEMA
+    || record?.encoding !== 'electron-safeStorage:v1'
+    || typeof record?.tokenEnc !== 'string') {
+    throw new Error('协作管理 authority 安全存储格式无效');
+  }
+  ensureElectronManagementEncryption();
+  let token = '';
+  try {
+    token = normalizedCollaborationManagementToken(
+      safeStorage.decryptString(Buffer.from(record.tokenEnc, 'base64')),
+    );
+  } catch (_) {
+    throw new Error('协作管理 authority 安全存储无法解密');
+  }
+  if (!token) throw new Error('协作管理 authority token 格式无效');
+  return token;
+}
+
+function ensureElectronManagementAuthority() {
+  const existing = readElectronManagementAuthority();
+  if (existing) return existing;
+  ensureElectronManagementEncryption();
+  const token = crypto.randomBytes(32).toString('base64url');
+  const created = writePrivateAuthorityRecord(electronManagementAuthorityPath(), {
+    schema: ELECTRON_MANAGEMENT_SCHEMA,
+    version: 1,
+    encoding: 'electron-safeStorage:v1',
+    tokenEnc: safeStorage.encryptString(token).toString('base64'),
+  });
+  return created
+    ? token
+    : readManagementAuthorityAfterConcurrentCreate(
+      readElectronManagementAuthority,
+      '协作管理 authority 安全存储并发创建未完成',
+    );
+}
+
+function ensureCollaborationManagementAuthority() {
+  return isPackaged()
+    ? ensureElectronManagementAuthority()
+    : ensureDevelopmentManagementAuthority();
+}
+
+function isExactLocalCollaborationManagementUrl(value) {
+  try {
+    const parsed = new URL(String(value || ''));
+    return parsed.protocol === 'http:'
+      && parsed.hostname === '127.0.0.1'
+      && parsed.port === String(backendPort)
+      && (parsed.pathname === '/api/collaboration'
+        || parsed.pathname.startsWith('/api/collaboration/'));
+  } catch (_) {
+    return false;
+  }
+}
+
+function installMainWindowManagementAuthority(window) {
+  if (!window || window.isDestroyed() || !normalizedCollaborationManagementToken(collaborationManagementToken)) {
+    throw new Error('主窗口缺少协作管理 authority');
+  }
+  const webContentsId = window.webContents.id;
+  window.webContents.session.webRequest.onBeforeSendHeaders(
+    {
+      urls: [
+        `http://127.0.0.1:${backendPort}/api/collaboration`,
+        `http://127.0.0.1:${backendPort}/api/collaboration/*`,
+      ],
+    },
+    (details, callback) => {
+      if (details.webContentsId !== webContentsId || !isExactLocalCollaborationManagementUrl(details.url)) {
+        callback({ requestHeaders: details.requestHeaders });
+        return;
+      }
+      const requestHeaders = { ...(details.requestHeaders || {}) };
+      for (const name of Object.keys(requestHeaders)) {
+        if (name.toLowerCase() === COLLABORATION_MANAGEMENT_HEADER) delete requestHeaders[name];
+      }
+      requestHeaders[COLLABORATION_MANAGEMENT_HEADER] = collaborationManagementToken;
+      callback({ requestHeaders });
+    },
+  );
+}
+
 function isPathInside(parentDir, candidatePath) {
   const parent = path.resolve(parentDir);
   const candidate = path.resolve(candidatePath);
@@ -1558,8 +1757,11 @@ async function findFreePort(preferred, maxTries = 20) {
 
 // ---------- 启动后端 ----------
 async function startBackend() {
+  delete process.env.T8_COLLAB_MANAGEMENT_TOKEN;
   backendPort = await findFreePort(18766);
+  backendInstanceId = crypto.randomBytes(32).toString('base64url');
   dbgLog(`[backend] picked port=${backendPort}`);
+  collaborationManagementToken = ensureCollaborationManagementAuthority();
 
   // 把环境变量传给后端
   process.env.PORT = String(backendPort);
@@ -1567,6 +1769,7 @@ async function startBackend() {
   process.env.T8PC_USER_DATA = getUserDataDir();
   process.env.T8PC_PACKAGED = isPackaged() ? '1' : '0';
   process.env.T8PC_APP_VERSION = APP_VERSION;
+  process.env.T8PC_BACKEND_INSTANCE_ID = backendInstanceId;
   process.env.T8PC_RES = isPackaged() ? process.resourcesPath : path.resolve(__dirname, '..');
   // 生产模式让 Express 同时托管前端 dist/
   process.env.T8PC_FRONTEND_DIST = isPackaged()
@@ -1576,22 +1779,102 @@ async function startBackend() {
   // 同进程内加载后端,先注册 T8ENC1 + bytenode loader
   try {
     require('./loader.cjs');
+    let entry;
     if (isPackaged()) {
       // 打包后:加载加密的字节码入口
-      const entry = path.join(process.resourcesPath, 'backend-enc', 'server.t8c');
+      entry = path.join(process.resourcesPath, 'backend-enc', 'server.t8c');
       dbgLog(`[backend] loading encrypted entry: ${entry}`);
-      require(entry);
     } else {
       // 开发模式:直接 require 源码
-      const entry = path.resolve(__dirname, '..', 'backend', 'src', 'server.js');
+      entry = path.resolve(__dirname, '..', 'backend', 'src', 'server.js');
       dbgLog(`[backend] loading dev entry: ${entry}`);
-      require(entry);
+    }
+    process.env.T8_COLLAB_MANAGEMENT_TOKEN = collaborationManagementToken;
+    try {
+      backendModule = require(entry);
+    } finally {
+      delete process.env.T8_COLLAB_MANAGEMENT_TOKEN;
+      delete process.env.T8PC_BACKEND_INSTANCE_ID;
+    }
+    const start = await backendModule?.serverStartPromise;
+    if (!start || start.state !== 'listening') {
+      await backendModule?.gracefulShutdown?.('LISTEN_ERROR');
+      const error = start?.error || new Error('后端未返回可验证的监听状态');
+      throw error;
     }
     dbgLog(`[backend] started in-process on http://127.0.0.1:${backendPort}`);
   } catch (e) {
     dbgLog(`[backend] FAILED to start: ${e && e.stack ? e.stack : e}`);
     throw e;
   }
+}
+
+function stopLegacyBackendProcess() {
+  if (!backendProcess) return;
+  try {
+    if (process.platform === 'win32') {
+      spawn('taskkill', ['/pid', String(backendProcess.pid), '/f', '/t'], {
+        windowsHide: true,
+      });
+    } else {
+      backendProcess.kill('SIGTERM');
+    }
+  } catch (_) {}
+  backendProcess = null;
+}
+
+function settleWithinElectronDeadline(work, timeoutMs, onTimeout) {
+  const deadlineMs = Math.max(1, Math.trunc(Number(timeoutMs) || 1));
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      callback(value);
+    };
+    const timer = setTimeout(() => {
+      try {
+        finish(resolve, onTimeout?.());
+      } catch (error) {
+        finish(reject, error);
+      }
+    }, deadlineMs);
+    Promise.resolve(work).then(
+      (value) => finish(resolve, value),
+      (error) => finish(reject, error),
+    );
+  });
+}
+
+function shutdownBackendForElectron(reason = 'ELECTRON_QUIT') {
+  if (!backendShutdownPromise) {
+    const shutdownWork = (async () => {
+      if (backendStartPromise) {
+        try { await backendStartPromise; } catch (_) { /* cleanup the partially started module below */ }
+      }
+      try {
+        const outcome = await backendModule?.gracefulShutdown?.(reason);
+        if (outcome?.storageDeferred === true) {
+          dbgLog('[backend] bounded shutdown left tracked work deferred; waiting within the Electron cutoff');
+        }
+        await backendModule?.waitForRuntimeStorageCloseLifecycle?.();
+        return outcome || null;
+      } finally {
+        stopLegacyBackendProcess();
+      }
+    })();
+    backendShutdownPromise = settleWithinElectronDeadline(
+      shutdownWork,
+      ELECTRON_BACKEND_SHUTDOWN_DEADLINE_MS,
+      () => {
+        dbgLog(`[backend] Electron shutdown deadline reached after ${ELECTRON_BACKEND_SHUTDOWN_DEADLINE_MS}ms (${reason})`);
+        stopLegacyBackendProcess();
+        return { timedOut: true, reason };
+      },
+    );
+  }
+  return backendShutdownPromise;
 }
 
 // ---------- 创建主窗口 ----------
@@ -1613,6 +1896,7 @@ function createMainWindow() {
   });
 
   mainWindow.removeMenu();
+  installMainWindowManagementAuthority(mainWindow);
 
   const url = `http://127.0.0.1:${backendPort}/`;
   dbgLog(`[main] loading ${url}`);
@@ -1652,8 +1936,10 @@ function createMainWindow() {
     void openExternalUrl(targetUrl);
   });
 
-  mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
+  const pendingMainWindow = mainWindow;
+  pendingMainWindow.once('ready-to-show', () => {
+    if (electronQuitRequested || pendingMainWindow.isDestroyed()) return;
+    pendingMainWindow.show();
     startInitialUpdateCheck();
   });
 
@@ -1752,34 +2038,73 @@ ipcMain.on('t8pc:drag-file-out', (event, payload) => {
 
 // ---------- 生命周期 ----------
 app.whenReady().then(async () => {
+  if (!ELECTRON_SINGLE_INSTANCE_OWNER || electronQuitRequested) return;
   createLogWindow();
   try {
-    await startBackend();
+    backendStartPromise = startBackend();
+    await backendStartPromise;
+    if (electronQuitRequested) return;
     // 等后端真正可访问
-    const backendReady = await waitForBackend(backendPort, 30);
+    const backendReady = await waitForBackend(backendPort, backendInstanceId, 30);
     if (!backendReady) throw new Error(`后端未能在端口 ${backendPort} 就绪`);
+    if (electronQuitRequested) return;
     createMainWindow();
     setTimeout(() => {
       if (logWindow && !logWindow.isDestroyed()) logWindow.close();
     }, 600);
   } catch (e) {
     dbgLog(`[fatal] ${e && e.stack ? e.stack : e}`);
+    try {
+      await shutdownBackendForElectron('STARTUP_FAILURE');
+    } catch (shutdownError) {
+      dbgLog(`[backend] startup failure cleanup failed: ${shutdownError && shutdownError.stack ? shutdownError.stack : shutdownError}`);
+    }
   }
 });
 
-function waitForBackend(port, maxTries = 30) {
+function waitForBackend(port, expectedInstanceId, maxTries = 30) {
   return new Promise((resolve) => {
     let n = 0;
     const tick = () => {
       n += 1;
-      const sock = net.createConnection({ port, host: '127.0.0.1' }, () => {
-        sock.end();
-        resolve(true);
+      let settled = false;
+      const retry = () => {
+        if (settled) return;
+        settled = true;
+        if (n >= maxTries) resolve(false);
+        else setTimeout(tick, 200);
+      };
+      const request = http.get({
+        host: '127.0.0.1',
+        port,
+        path: '/api/status',
+        headers: { Accept: 'application/json' },
+      }, (response) => {
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => {
+          if (body.length <= 64 * 1024) body += chunk;
+          if (body.length > 64 * 1024) request.destroy(new Error('backend status response too large'));
+        });
+        response.on('end', () => {
+          if (settled) return;
+          try {
+            const status = JSON.parse(body);
+            if (response.statusCode === 200
+              && status?.ok === true
+              && status?.service === 't8-penguin-canvas-backend'
+              && status?.instanceId === expectedInstanceId
+              && Number(status?.port) === Number(port)) {
+              settled = true;
+              resolve(true);
+              return;
+            }
+          } catch (_) {}
+          retry();
+        });
       });
-      sock.on('error', () => {
-        if (n >= maxTries) return resolve(false);
-        setTimeout(tick, 200);
-      });
+      request.setTimeout(1_000, () => request.destroy(new Error('backend status timeout')));
+      request.on('error', retry);
     };
     tick();
   });
@@ -1790,16 +2115,19 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('before-quit', () => {
-  if (backendProcess) {
-    try {
-      if (process.platform === 'win32') {
-        spawn('taskkill', ['/pid', String(backendProcess.pid), '/f', '/t'], {
-          windowsHide: true,
-        });
-      } else {
-        backendProcess.kill('SIGTERM');
-      }
-    } catch (_) {}
+app.on('before-quit', (event) => {
+  electronQuitRequested = true;
+  if (!ELECTRON_SINGLE_INSTANCE_OWNER) return;
+  if (electronQuitReady) return;
+  event.preventDefault();
+  if (!electronQuitFinalizationPromise) {
+    electronQuitFinalizationPromise = shutdownBackendForElectron('ELECTRON_QUIT')
+      .catch((error) => {
+        dbgLog(`[backend] Electron quit cleanup failed: ${error && error.stack ? error.stack : error}`);
+      })
+      .finally(() => {
+        electronQuitReady = true;
+        app.quit();
+      });
   }
 });

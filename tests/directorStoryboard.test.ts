@@ -558,11 +558,14 @@ test('director bridge run plan uses prepared first and last frames instead of sh
   assert.deepEqual(plan[0].payload.providerParams, { zhenzhenGroup: 'gemini优质' });
 });
 
-test('seedance proxy reports detailed zhenzhen file-upload failures before task submission', () => {
+test('seedance proxy bounds zhenzhen file-upload failures without exposing provider details', () => {
   const proxy = read('../backend/src/routes/proxy.js');
 
   assert.match(proxy, /async function uploadRefToZhenzhen\(ref,\s*apiKey,\s*label = '参考素材'\)/);
-  assert.match(proxy, /throw new Error\(`\$\{label\} 上传失败: \/v1\/files HTTP \$\{upR\.status\}/);
+  assert.match(proxy, /const providerError = await boundedProviderHttpError\(upR, `\$\{label\} \/v1\/files upload failed`\);/);
+  assert.match(proxy, /if \(!upR\.ok\) \{\s*const providerError = await boundedProviderHttpError[\s\S]*?throw providerError;\s*\}/);
+  assert.doesNotMatch(proxy, /await upR\.text\(\)/);
+  assert.doesNotMatch(proxy, /throw new Error\(`\$\{label\} 上传失败: \/v1\/files HTTP \$\{upR\.status\}/);
   assert.match(proxy, /uploadRefToZhenzhen\(a,\s*apiKey,\s*`reference_audio \$\{i \+ 1\}`\)/);
 });
 

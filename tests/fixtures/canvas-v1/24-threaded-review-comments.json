@@ -1,0 +1,29 @@
+{
+  "canvasId": "threaded-review-board",
+  "projectId": "review-project",
+  "name": "多层评论回复",
+  "updatedAt": 1704067200024,
+  "nodes": [
+    { "id": "poster-review", "type": "image", "position": { "x": 180, "y": 110 }, "data": { "label": "主视觉", "version": 5 } }
+  ],
+  "edges": [],
+  "reviewThreads": [
+    {
+      "id": "poster-color-thread", "canvasRevision": 15,
+      "anchor": { "kind": "node", "nodeId": "poster-review", "x": 0.72, "y": 0.18 },
+      "status": "open", "severity": "blocking", "createdBy": "art-director",
+      "comments": [
+        { "id": "poster-comment-root", "body": "右上角品牌色不够准确。", "createdBy": "art-director", "createdAt": 1704067000024 },
+        { "id": "poster-comment-reply", "parentId": "poster-comment-root", "body": "已按色板 #0A84FF 调整。", "createdBy": "designer", "createdAt": 1704067050024 },
+        { "id": "poster-comment-confirm", "parentId": "poster-comment-reply", "body": "预览正确，等待替换高清图。", "createdBy": "art-director", "createdAt": 1704067100024 }
+      ]
+    },
+    {
+      "id": "poster-copy-thread", "canvasRevision": 15,
+      "anchor": { "kind": "node", "nodeId": "poster-review", "x": 0.4, "y": 0.82 },
+      "status": "resolved", "severity": "normal", "createdBy": "copy-reviewer",
+      "comments": [{ "id": "copy-comment-root", "body": "副标题已确认。", "createdBy": "copy-reviewer", "createdAt": 1704067120024 }]
+    }
+  ],
+  "viewport": { "x": 110, "y": 90, "zoom": 1.35 }
+}

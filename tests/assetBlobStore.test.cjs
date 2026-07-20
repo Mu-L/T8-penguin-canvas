@@ -327,6 +327,41 @@ test('install commit hooks and guarded deletes serialize references with the sam
   assert.deepEqual(fs.readFileSync(reinstalled.path), content);
 });
 
+test('locked verified reads keep replay verification and its commit callback atomic against deletion', async (t) => {
+  const { root, sources } = fixture(t);
+  const reader = new AssetBlobStore(root);
+  const deleter = new AssetBlobStore(root);
+  const content = Buffer.from('locked-replay-verification');
+  const expectedHash = sha256(content);
+  const source = writeSource(sources, 'locked-replay.bin', content);
+  const installed = await reader.installVerifiedFile(source, {
+    expectedHash,
+    expectedSize: content.length,
+  });
+  let references = 0;
+  let callbackEntered;
+  let releaseCallback;
+  const entered = new Promise((resolve) => { callbackEntered = resolve; });
+  const gate = new Promise((resolve) => { releaseCallback = resolve; });
+
+  const replay = reader.withVerifiedBlobLock(expectedHash, content.length, async (verified) => {
+    assert.equal(verified.path, installed.path);
+    callbackEntered();
+    await gate;
+    references = 1;
+    return 'committed';
+  });
+  await entered;
+  const deleting = deleter.removeVerifiedBlob(expectedHash, {
+    expectedSize: content.length,
+    beforeDelete: () => references === 0,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseCallback();
+  assert.deepEqual(await Promise.all([replay, deleting]), ['committed', false]);
+  assert.equal(fs.existsSync(installed.path), true);
+});
+
 test('a failed install commit restores an explicitly removed source and rolls back a new blob', async (t) => {
   const { sources, store } = fixture(t);
   const content = Buffer.from('restore-source-after-commit-failure');

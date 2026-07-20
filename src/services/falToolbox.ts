@@ -42,7 +42,6 @@ export interface RunFalToolboxToolOptions {
 export interface RunFalToolboxToolResult extends FalToolboxOutputClassification {
   tool: FalToolboxTool;
   requestId?: string;
-  responseUrl?: string;
   raw?: any;
   transportHttpStatus?: number;
   upstreamHttpStatus?: number;
@@ -129,8 +128,6 @@ export async function submitFalToolbox(payload: FalToolboxRunPayload): Promise<a
 export async function queryFalToolbox(payload: {
   endpoint: string;
   requestId: string;
-  responseUrl?: string;
-  statusUrl?: string;
   outputSchema?: any[];
   statusPath?: string;
 }): Promise<any> {
@@ -196,7 +193,6 @@ export async function runFalToolboxTool(options: RunFalToolboxToolOptions): Prom
       ...initial,
       tool,
       requestId: submitted.requestId,
-      responseUrl: submitted.responseUrl,
       raw: submitted.raw || submitted,
       transportHttpStatus: submitted.transportHttpStatus,
       upstreamHttpStatus: submitted.upstreamHttpStatus,
@@ -211,8 +207,6 @@ export async function runFalToolboxTool(options: RunFalToolboxToolOptions): Prom
   if (!requestId) {
     throw new Error('FAL 未返回 request_id');
   }
-  const responseUrl = submitted.responseUrl || submitted.response_url;
-  const statusUrl = submitted.statusUrl || submitted.status_url;
   const pollIntervalMs = Math.max(1000, tool.runtime?.pollIntervalMs || 3000);
   const maxPolls = Math.max(1, tool.runtime?.maxPolls || 360);
   let lastRaw: any = submitted.raw || submitted;
@@ -232,8 +226,6 @@ export async function runFalToolboxTool(options: RunFalToolboxToolOptions): Prom
       query = await queryFalToolbox({
         endpoint: tool.endpoint,
         requestId,
-        responseUrl,
-        statusUrl,
         outputSchema: tool.outputSchema,
         statusPath: tool.runtime?.statusPath,
       });
@@ -271,7 +263,6 @@ export async function runFalToolboxTool(options: RunFalToolboxToolOptions): Prom
         ...classified,
         tool,
         requestId,
-        responseUrl,
         raw: lastRaw,
         transportHttpStatus: query.transportHttpStatus,
         upstreamHttpStatus: query.upstreamHttpStatus,

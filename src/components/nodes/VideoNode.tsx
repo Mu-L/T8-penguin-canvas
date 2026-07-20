@@ -542,7 +542,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   };
 
   // FAL 轮询
-  const falPollRef = useRef<{ responseUrl?: string; endpoint?: string; requestId?: string } | null>(null);
+  const falPollRef = useRef<{ endpoint?: string; requestId?: string } | null>(null);
 
   // v1.2.9.11: 同样改造为 Promise（理由同 startPolling）
   const startFalPolling = (runId: number, reporter?: RunNodeLifecycleReporter): Promise<void> => {
@@ -576,7 +576,6 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             recovery: {
               kind: 'video-fal',
               requestId: falPollRef.current?.requestId || null,
-              responseUrl: falPollRef.current?.responseUrl,
               endpoint: falPollRef.current?.endpoint,
               model: apiModel,
               pollIntervalMs: POLL_INT,
@@ -940,7 +939,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           logBus.success(`FAL 同步完成 → ${r.videoUrl}`, src);
           taskCompletionSound.notifyComplete(id, 'video');
         } else {
-          falPollRef.current = { responseUrl: r.responseUrl, endpoint: r.endpoint, requestId: r.requestId };
+          falPollRef.current = { endpoint: r.endpoint, requestId: r.requestId };
           await reporter?.providerSubmitted({
             provider: traceProvider,
             model: traceModel,

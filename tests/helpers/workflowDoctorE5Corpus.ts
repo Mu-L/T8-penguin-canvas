@@ -317,6 +317,7 @@ export const WORKFLOW_DOCTOR_E5_BAD_CASES: readonly WorkflowDoctorE5Case[] = Obj
   ...selfEdgeCases(),
   ...duplicateEdgeCases(),
 ]);
+
 export const WORKFLOW_DOCTOR_E5_CLEAN_CASES: readonly WorkflowDoctorE5Case[] = Object.freeze(
   cleanControlCases(),
 );

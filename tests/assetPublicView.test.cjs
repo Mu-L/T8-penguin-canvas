@@ -101,6 +101,28 @@ test('public views recursively drop sensitive keys regardless of spelling or nes
   assert.equal(JSON.stringify(view).includes('signed-value'), false);
 });
 
+test('public asset views recursively hide observed replacement hashes while preserving canonical content hashes', () => {
+  const contentHash = 'a'.repeat(64);
+  const observedContentHash = 'b'.repeat(64);
+  const view = publicAsset({
+    id: 'asset-observed-hash',
+    contentHash,
+    metadata: {
+      observedContentHash,
+      nested: {
+        observed_content_hash: observedContentHash,
+      },
+      values: [{ 'Observed-Content-Hash': observedContentHash, label: 'keep-me' }],
+    },
+  });
+
+  assert.equal(view.contentHash, contentHash);
+  assert.equal(Object.hasOwn(view.metadata, 'observedContentHash'), false);
+  assert.equal(Object.hasOwn(view.metadata.nested, 'observed_content_hash'), false);
+  assert.deepEqual(view.metadata.values, [{ label: 'keep-me' }]);
+  assert.equal(JSON.stringify(view).includes(observedContentHash), false);
+});
+
 test('public recursive values are bounded and circular references fail closed', () => {
   const circular = { label: 'cycle' };
   circular.self = circular;

@@ -1,15 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import type { Edge, Node } from '@xyflow/react';
+import { applyNodeChanges, type Edge, type Node } from '@xyflow/react';
 import type { NodeRunSummary, RunDetail } from '../src/types/project.ts';
 import {
   RUN_NODE_INPUT_SNAPSHOT_SCHEMA,
+  buildFrozenRunIntentRuntime,
   buildRunAttemptOriginalReplayRuntime,
   buildRunOriginalReplayRuntime,
   buildSubflowNodeRunOriginalReplayRuntime,
   captureRunNodeInputSnapshot,
+  currentRunReplayRuntimeNodeChanges,
   isReplayableRunNodeInputSnapshot,
+  partitionRunReplayRuntimeNodeChanges,
   validateSubflowNodeRunOriginalReplay,
   validateRunAttemptOriginalReplay,
   validateRunOriginalReplay,
@@ -119,6 +122,48 @@ test('capture is deeply isolated from later canvas mutations', () => {
   assert.deepEqual(snapshot.incomingEdges[0].data, { label: 'a-b' });
 });
 
+test('accepted RunIntent runtime freezes the exact executable inputs while the visible canvas keeps changing', () => {
+  const source = node('source', 'text', { text: 'frozen prompt' });
+  const first = node('first', 'image', { model: 'model-a' });
+  const second = node('second', 'video', { seconds: 5 });
+  const nodes = [source, first, second];
+  const edges = [
+    edge('source-first', 'source', 'first', 'text', 'prompt'),
+    edge('first-second', 'first', 'second', 'image', 'first-frame'),
+  ];
+  const runtime = buildFrozenRunIntentRuntime(nodes, edges, ['first', 'second'], 'intent-a');
+  assert.deepEqual(runtime.executionNodeIds.map((id) => runtime.originalNodeIdByRuntimeId[id]), ['first', 'second']);
+  assert.equal(runtime.nodes.length, 3);
+  assert.equal(runtime.edges.length, 2);
+  assert.equal(runtime.nodes.every((item) => item.style?.opacity === 0 && item.selectable === false), true);
+
+  (source.data as Record<string, unknown>).text = 'later revision';
+  (first.data as Record<string, unknown>).model = 'model-b';
+  const frozenSource = runtime.nodes.find((item) => runtime.originalNodeIdByRuntimeId[item.id] === 'source');
+  const frozenFirst = runtime.nodes.find((item) => runtime.originalNodeIdByRuntimeId[item.id] === 'first');
+  assert.equal((frozenSource?.data as Record<string, unknown>).text, 'frozen prompt');
+  assert.equal((frozenFirst?.data as Record<string, unknown>).model, 'model-a');
+});
+
+test('frozen RunIntent runtime IDs deterministically avoid every visible node ID', () => {
+  const collidingVisibleId = '__t8-run-intent-collision-0';
+  const collidingLiveId = `${collidingVisibleId}-1`;
+  const nodes = [
+    node('source', 'text', { text: 'safe' }),
+    node('target', 'image', { prompt: 'safe' }),
+    node(collidingVisibleId, 'text', { text: 'imported legacy node' }),
+  ];
+  const edges = [edge('source-target', 'source', 'target', 'text', 'prompt')];
+  const first = buildFrozenRunIntentRuntime(nodes, edges, ['target'], 'collision', [collidingLiveId]);
+  const second = buildFrozenRunIntentRuntime(nodes, edges, ['target'], 'collision', [collidingLiveId]);
+  const visibleIds = new Set([...nodes.map((item) => item.id), collidingLiveId]);
+
+  assert.deepEqual(first.nodes.map((item) => item.id), second.nodes.map((item) => item.id));
+  assert.equal(first.nodes.some((item) => visibleIds.has(item.id)), false);
+  assert.equal(new Set([...visibleIds, ...first.nodes.map((item) => item.id)]).size, visibleIds.size + first.nodes.length);
+  assert.equal(first.nodes.some((item) => item.id === `${collidingVisibleId}-2`), true);
+});
+
 test('capture fails closed for values that backend redaction would alter', () => {
   const cases: Array<[string, Record<string, unknown>]> = [
     ['secret field', { apiKey: 'never-store-me' }],
@@ -173,7 +218,8 @@ test('runtime graph merges stored inputs, keeps succeeded upstream passive, and 
   ]);
   const before = structuredClone(sourceRun);
 
-  const runtime = buildRunOriginalReplayRuntime(sourceRun, ['b', 'c'], 'test nonce');
+  const occupiedRuntimeId = '__t8-run-replay-testnonce-0';
+  const runtime = buildRunOriginalReplayRuntime(sourceRun, ['b', 'c'], 'test nonce', [occupiedRuntimeId]);
   assert.equal(runtime.nodes.length, 3);
   assert.equal(runtime.edges.length, 2);
   assert.equal(runtime.executionNodeIds.length, 2);
@@ -181,6 +227,8 @@ test('runtime graph merges stored inputs, keeps succeeded upstream passive, and 
   assert.equal(Object.values(runtime.originalNodeIdByRuntimeId).includes('a'), true);
   assert.equal(runtime.executionNodeIds.some((id) => runtime.originalNodeIdByRuntimeId[id] === 'a'), false);
   assert.equal(new Set(runtime.nodes.map((item) => item.id)).size, runtime.nodes.length);
+  assert.equal(runtime.nodes.some((item) => item.id === occupiedRuntimeId), false);
+  assert.equal(runtime.nodes.some((item) => item.id === `${occupiedRuntimeId}-1`), true);
   assert.equal(runtime.nodes.every((item) => item.style?.opacity === 0 && item.selectable === false), true);
   assert.equal(runtime.edges.every((item) => item.style?.opacity === 0 && item.selectable === false), true);
   for (const runtimeId of runtime.executionNodeIds) {
@@ -359,6 +407,125 @@ test('Canvas mounts replay clones only in rendered graph, never in persisted nod
   assert.match(source, /nodes=\{renderedNodes\}[\s\S]*?edges=\{renderedEdges\}/);
   assert.doesNotMatch(source, /setNodes\([^\n]*runReplayRuntime/);
   assert.doesNotMatch(source, /setEdges\([^\n]*runReplayRuntime/);
+  assert.match(source, /partitionRunReplayRuntimeNodeChanges\(\s*changes,\s*runReplayRuntimeRef\.current\?\.nodes \|\| \[\],\s*nodesRef\.current,\s*\)/);
+  assert.match(source, /currentRunReplayRuntimeNodeChanges\(current\.nodes, runtimeChanges\)/);
+  assert.match(source, /nodes: applyNodeChanges\(currentChanges, current\.nodes\)/);
+  assert.match(source, /if \(visibleChanges\.length === 0\) return/);
+  assert.match(source, /applyNodeChanges\(visibleChanges, nds\)/);
+});
+
+test('runtime node changes update only the exact mounted runtime and stale lifecycle changes cannot cross intents', () => {
+  const runtimeA = buildFrozenRunIntentRuntime(
+    [node('source', 'text', { text: 'before' }), node('target', 'image', { prompt: 'before' })],
+    [edge('source-target', 'source', 'target', 'text', 'prompt')],
+    ['target'],
+    'intent-a-1',
+  );
+  const runtimeB = buildFrozenRunIntentRuntime(
+    [node('source', 'text', { text: 'next' }), node('target', 'image', { prompt: 'next' })],
+    [edge('source-target', 'source', 'target', 'text', 'prompt')],
+    ['target'],
+    'intent-b-1',
+  );
+  const runtimeAId = runtimeA.executionNodeIds[0];
+  const runtimeBId = runtimeB.executionNodeIds[0];
+  const runtimeAChange = {
+    id: runtimeAId,
+    type: 'replace',
+    item: {
+      ...runtimeA.nodes.find((item) => item.id === runtimeAId)!,
+      data: { prompt: 'provider-output-a' },
+    },
+  } as const;
+  const visibleChange = {
+    id: 'visible-node',
+    type: 'select',
+    selected: true,
+  } as const;
+
+  const activePartition = partitionRunReplayRuntimeNodeChanges(
+    [runtimeAChange, visibleChange],
+    runtimeA.nodes,
+    [node('visible-node', 'text')],
+  );
+  assert.deepEqual(activePartition.runtimeChanges, [runtimeAChange]);
+  assert.deepEqual(activePartition.visibleChanges, [visibleChange]);
+  assert.deepEqual(activePartition.staleRuntimeChanges, []);
+  const currentAChanges = currentRunReplayRuntimeNodeChanges(runtimeA.nodes, [runtimeAChange]);
+  assert.deepEqual(currentAChanges, [runtimeAChange]);
+  const updatedA = applyNodeChanges(currentAChanges, runtimeA.nodes);
+  assert.equal(
+    (updatedA.find((item) => item.id === runtimeAId)?.data as Record<string, unknown>).prompt,
+    'provider-output-a',
+  );
+  assert.deepEqual(
+    currentRunReplayRuntimeNodeChanges(runtimeB.nodes, [runtimeAChange]),
+    [],
+    'a delayed change from cleared runtime A must not enter mounted runtime B',
+  );
+  assert.equal(
+    (runtimeB.nodes.find((item) => item.id === runtimeBId)?.data as Record<string, unknown>).prompt,
+    'next',
+  );
+  assert.notEqual(runtimeAId, runtimeBId);
+});
+
+test('exact partition preserves prefixed visible nodes and drops stale run and subflow runtime changes', () => {
+  const runtimeA = buildFrozenRunIntentRuntime(
+    [node('target', 'image', { prompt: 'a' })],
+    [],
+    ['target'],
+    'partition-a',
+  );
+  const runtimeB = buildFrozenRunIntentRuntime(
+    [node('target', 'image', { prompt: 'b' })],
+    [],
+    ['target'],
+    'partition-b',
+  );
+  const prefixedVisible = node('__t8-run-intent-imported-visible', 'text', { text: 'before' });
+  const visibleChange = {
+    id: prefixedVisible.id,
+    type: 'replace',
+    item: { ...prefixedVisible, data: { text: 'after' } },
+  } as const;
+  const staleRuntimeAChange = {
+    id: runtimeA.executionNodeIds[0],
+    type: 'select',
+    selected: true,
+  } as const;
+  const activeRuntimeBChange = {
+    id: runtimeB.executionNodeIds[0],
+    type: 'select',
+    selected: true,
+  } as const;
+  const staleSubflowChange = {
+    id: '__t8-subflow-run-replay-cleared-0',
+    type: 'select',
+    selected: true,
+  } as const;
+
+  const mountedB = partitionRunReplayRuntimeNodeChanges(
+    [staleRuntimeAChange, activeRuntimeBChange, staleSubflowChange, visibleChange],
+    runtimeB.nodes,
+    [prefixedVisible],
+  );
+  assert.deepEqual(mountedB.runtimeChanges, [activeRuntimeBChange]);
+  assert.deepEqual(mountedB.visibleChanges, [visibleChange]);
+  assert.deepEqual(mountedB.staleRuntimeChanges, [staleRuntimeAChange, staleSubflowChange]);
+  assert.equal(
+    (applyNodeChanges(mountedB.visibleChanges, [prefixedVisible])[0].data as Record<string, unknown>).text,
+    'after',
+  );
+
+  const cleared = partitionRunReplayRuntimeNodeChanges(
+    [activeRuntimeBChange, staleSubflowChange, visibleChange],
+    [],
+    [prefixedVisible],
+  );
+  assert.deepEqual(cleared.runtimeChanges, []);
+  assert.deepEqual(cleared.visibleChanges, [visibleChange]);
+  assert.deepEqual(cleared.staleRuntimeChanges, [activeRuntimeBChange, staleSubflowChange]);
 });
 
 test('actual trigger capture, original identity, and replay actions stay wired together', () => {

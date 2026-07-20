@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const express = require('express');
@@ -30,6 +31,35 @@ async function requestJson(baseUrl, pathname, options = {}) {
   return { response, payload, text };
 }
 
+async function postJsonWithHost(baseUrl, pathname, host, body) {
+  const target = new URL(`${baseUrl}${pathname}`);
+  const serialized = JSON.stringify(body);
+  return new Promise((resolve, reject) => {
+    const request = http.request({
+      hostname: target.hostname,
+      port: target.port,
+      path: `${target.pathname}${target.search}`,
+      method: 'POST',
+      headers: {
+        Host: host,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(serialized),
+      },
+    }, (response) => {
+      let text = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => { text += chunk; });
+      response.on('end', () => resolve({
+        response: { status: response.statusCode },
+        payload: text ? JSON.parse(text) : null,
+        text,
+      }));
+    });
+    request.once('error', reject);
+    request.end(serialized);
+  });
+}
+
 function assertPrivateDataRedacted(payload, forbiddenValues = []) {
   const serialized = JSON.stringify(payload);
   for (const value of forbiddenValues) {
@@ -49,8 +79,10 @@ test('D3 project-assets HTTP contract is atomic, revisioned, paginated, and path
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-project-assets-d3-http-'));
   const previousPackaged = process.env.T8PC_PACKAGED;
   const previousUserData = process.env.T8PC_USER_DATA;
+  const previousManagementToken = process.env.T8_COLLAB_MANAGEMENT_TOKEN;
   process.env.T8PC_PACKAGED = '1';
   process.env.T8PC_USER_DATA = directory;
+  process.env.T8_COLLAB_MANAGEMENT_TOKEN = 'A'.repeat(43);
   fs.mkdirSync(path.join(directory, 'input'), { recursive: true });
   fs.mkdirSync(path.join(directory, 'output'), { recursive: true });
 
@@ -204,6 +236,65 @@ test('D3 project-assets HTTP contract is atomic, revisioned, paginated, and path
     });
 
     await t.test('near/exact duplicate discovery is public-safe and decisions use optimistic CAS', async () => {
+      const scanRequired = await requestJson(baseUrl, `/${nearSource.id}/duplicates?mode=near&maxDistance=1&limit=50`);
+      assert.equal(scanRequired.response.status, 409);
+      assert.equal(scanRequired.payload.code, 'asset_duplicate_scan_required');
+      assert.equal(scanRequired.payload.current.assetId, nearSource.id);
+
+      const wrongMethod = await requestJson(baseUrl, `/${nearSource.id}/duplicates/refresh`);
+      assert.equal(wrongMethod.response.status, 405);
+      assert.equal(wrongMethod.response.headers.get('allow'), 'POST');
+      const wrongPutMethod = await requestJson(baseUrl, `/${nearSource.id}/duplicates/refresh`, {
+        method: 'PUT', body: { expectedCatalogRevision: database.getAssetCatalogRevision(projectId) },
+      });
+      assert.equal(wrongPutMethod.response.status, 405);
+      assert.equal(wrongPutMethod.response.headers.get('allow'), 'POST');
+
+      const missingRevision = await requestJson(baseUrl, `/${nearSource.id}/duplicates/refresh`, {
+        method: 'POST', body: {},
+      });
+      assert.equal(missingRevision.response.status, 400);
+      assert.equal(missingRevision.payload.code, 'asset_duplicate_catalog_revision_required');
+
+      const nonJson = await requestJson(baseUrl, `/${nearSource.id}/duplicates/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: { expectedCatalogRevision: database.getAssetCatalogRevision(projectId) },
+      });
+      assert.equal(nonJson.response.status, 415);
+      assert.equal(nonJson.payload.code, 'asset_duplicate_refresh_json_required');
+
+      const hostileOrigin = await requestJson(baseUrl, `/${nearSource.id}/duplicates/refresh`, {
+        method: 'POST',
+        headers: { Origin: 'http://127.0.0.1:6553' },
+        body: { expectedCatalogRevision: database.getAssetCatalogRevision(projectId) },
+      });
+      assert.equal(hostileOrigin.response.status, 403);
+      assert.equal(hostileOrigin.payload.code, 'trusted_loopback_required');
+
+      const reboundHost = await postJsonWithHost(
+        baseUrl,
+        `/${nearSource.id}/duplicates/refresh`,
+        'attacker.example',
+        { expectedCatalogRevision: database.getAssetCatalogRevision(projectId) },
+      );
+      assert.equal(reboundHost.response.status, 403);
+      assert.equal(reboundHost.payload.code, 'trusted_loopback_required');
+
+      const catalogRevision = database.getAssetCatalogRevision(projectId);
+      const refreshed = await requestJson(baseUrl, `/${nearSource.id}/duplicates/refresh`, {
+        method: 'POST', body: { expectedCatalogRevision: catalogRevision },
+      });
+      assert.equal(refreshed.response.status, 200);
+      assert.equal(refreshed.payload.data.refreshed, true);
+      assert.equal(refreshed.payload.data.catalogRevision, catalogRevision);
+
+      const staleRefresh = await requestJson(baseUrl, `/${nearSource.id}/duplicates/refresh`, {
+        method: 'POST', body: { expectedCatalogRevision: catalogRevision - 1 },
+      });
+      assert.equal(staleRefresh.response.status, 409);
+      assert.equal(staleRefresh.payload.code, 'asset_catalog_revision_conflict');
+
       const near = await requestJson(baseUrl, `/${nearSource.id}/duplicates?mode=near&maxDistance=1&limit=50`);
       assert.equal(near.response.status, 200);
       const candidate = near.payload.data.find((item) => item.asset.id === nearTarget.id);
@@ -212,18 +303,31 @@ test('D3 project-assets HTTP contract is atomic, revisioned, paginated, and path
       assert.equal(candidate.algorithm, 'phash-dct64-v1');
       assert.equal(candidate.decision, 'pending');
       assert.equal(candidate.decisionRevision, 1);
+      assert.equal(near.payload.meta.catalogRevision, catalogRevision);
       assert.equal(near.payload.data.some((item) => item.asset.id === 'http-near-different-algorithm'), false);
       assertPrivateDataRedacted(near.payload, [privateRoot]);
 
       const missingDecisionRevision = await requestJson(baseUrl, `/duplicate-candidates/${candidate.id}/decision`, {
-        method: 'PUT', body: { projectId, decision: 'dismissed' },
+        method: 'PUT', body: { projectId, decision: 'dismissed', expectedCatalogRevision: catalogRevision },
       });
       assert.equal(missingDecisionRevision.response.status, 400);
       assert.equal(missingDecisionRevision.payload.code, 'expected_revision_required');
 
+      const missingDecisionCatalogRevision = await requestJson(baseUrl, `/duplicate-candidates/${candidate.id}/decision`, {
+        method: 'PUT', body: { projectId, decision: 'dismissed', expectedRevision: candidate.decisionRevision },
+      });
+      assert.equal(missingDecisionCatalogRevision.response.status, 400);
+      assert.equal(missingDecisionCatalogRevision.payload.code, 'asset_duplicate_catalog_revision_required');
+
       const decided = await requestJson(baseUrl, `/duplicate-candidates/${candidate.id}/decision`, {
         method: 'PUT',
-        body: { projectId, decision: 'dismissed', expectedRevision: candidate.decisionRevision, actorId: 'http-reviewer' },
+        body: {
+          projectId,
+          decision: 'dismissed',
+          expectedRevision: candidate.decisionRevision,
+          expectedCatalogRevision: catalogRevision,
+          actorId: 'http-reviewer',
+        },
       });
       assert.equal(decided.response.status, 200);
       assert.equal(decided.payload.data.decision, 'dismissed');
@@ -232,7 +336,13 @@ test('D3 project-assets HTTP contract is atomic, revisioned, paginated, and path
 
       const stale = await requestJson(baseUrl, `/duplicate-candidates/${candidate.id}/decision`, {
         method: 'PUT',
-        body: { projectId, decision: 'confirmed', expectedRevision: 1, actorId: 'stale-reviewer' },
+        body: {
+          projectId,
+          decision: 'confirmed',
+          expectedRevision: 1,
+          expectedCatalogRevision: catalogRevision,
+          actorId: 'stale-reviewer',
+        },
       });
       assert.equal(stale.response.status, 409);
       assert.equal(stale.payload.success, false);
@@ -855,11 +965,13 @@ test('D3 project-assets HTTP contract is atomic, revisioned, paginated, and path
     });
   } finally {
     await new Promise((resolve) => server.close(resolve));
-    database.close();
+    await database.close();
     fs.rmSync(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
     if (previousPackaged == null) delete process.env.T8PC_PACKAGED;
     else process.env.T8PC_PACKAGED = previousPackaged;
     if (previousUserData == null) delete process.env.T8PC_USER_DATA;
     else process.env.T8PC_USER_DATA = previousUserData;
+    if (previousManagementToken == null) delete process.env.T8_COLLAB_MANAGEMENT_TOKEN;
+    else process.env.T8_COLLAB_MANAGEMENT_TOKEN = previousManagementToken;
   }
 });

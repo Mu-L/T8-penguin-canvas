@@ -20,18 +20,49 @@ const {
 } = require('../services/subflowDefinition');
 const { createDerivedMedia, extensionInfo, previewStatePatchForJob, readMetadata, stableAssetId } = require('../services/assetIndexer');
 const { getAssetPreviewPipeline } = require('../services/assetPreviewPipeline');
+const { sendProjectDatabaseStorageCapacityError } = require('../services/projectDatabasePublicError');
 
 const router = express.Router();
-const database = getProjectDatabase(config);
-const previewPipeline = getAssetPreviewPipeline(config, database);
-const collaborationGateway = getCollaborationGateway(config);
 const packageUpload = multer({
   storage: multer.memoryStorage(),
   limits: { files: 1, fileSize: DEFAULT_LIMITS.archiveBytes },
 });
 
+function runtimeDatabase() {
+  return getProjectDatabase(config);
+}
+
+function runtimePreviewPipeline() {
+  return getAssetPreviewPipeline(config, runtimeDatabase());
+}
+
+function runtimeCollaborationGateway() {
+  return getCollaborationGateway(config);
+}
+
+function broadcastSubflowPublicationBestEffort(collaborationGateway, saved) {
+  try {
+    collaborationGateway.broadcastSubflowPublication(
+      saved.projectId,
+      saved.id,
+      saved.version,
+      {
+        type: 'subflow.published',
+        publication: publicSubflowPublication(saved),
+      },
+    );
+    return [];
+  } catch (_) {
+    console.warn('[subflows] committed publication broadcast failed');
+    return [{
+      code: 'subflow_publication_broadcast_failed',
+      message: '子工作流已成功保存，但实时协作通知暂未送达；客户端可通过版本列表重新同步。',
+    }];
+  }
+}
+
 function collectDependencyDefinitions(definition, environment = {}) {
-  const projectDatabase = environment.database || database;
+  const projectDatabase = environment.database || runtimeDatabase();
   const collected = new Map();
   const visit = (current, stack = []) => {
     for (const node of current.nodes || []) {
@@ -56,7 +87,7 @@ function collectDependencyDefinitions(definition, environment = {}) {
 }
 
 function collectPackageAssets(definition, environment = {}) {
-  const projectDatabase = environment.database || database;
+  const projectDatabase = environment.database || runtimeDatabase();
   return (Array.isArray(definition.assetRefs) ? definition.assetRefs : []).map((assetRef) => {
     const asset = projectDatabase.getAsset(String(assetRef));
     if (!asset || asset.projectId !== String(definition.projectId || 'project-local')) throw new Error(`找不到同项目素材引用: ${String(assetRef)}`);
@@ -81,10 +112,11 @@ function replaceAssetReferences(value, replacements) {
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, replaceAssetReferences(item, replacements)]));
 }
 
-function rollbackImportedAssets(items, projectDatabase = database) {
+function rollbackImportedAssets(items, projectDatabase = null) {
+  const targetDatabase = projectDatabase || runtimeDatabase();
   for (const item of [...(items || [])].reverse()) {
-    if (item.previousAsset) projectDatabase.upsertAsset(item.previousAsset);
-    else projectDatabase.removeAssetIndex(item.id);
+    if (item.previousAsset) targetDatabase.upsertAsset(item.previousAsset);
+    else targetDatabase.removeAssetIndex(item.id);
     if (item.wasCreated) {
       try { fs.unlinkSync(item.path); } catch (_) {}
     }
@@ -92,10 +124,10 @@ function rollbackImportedAssets(items, projectDatabase = database) {
 }
 
 async function persistImportedAssets(imported, projectId, environment = {}) {
-  const projectDatabase = environment.database || database;
+  const projectDatabase = environment.database || runtimeDatabase();
   const runtimeConfig = environment.config || config;
   const backgroundPreviewPipeline = environment.previewPipeline
-    || (!environment.database && !environment.config ? previewPipeline : null);
+    || (!environment.database && !environment.config ? runtimePreviewPipeline() : null);
   const root = path.join(runtimeConfig.INPUT_DIR, 'subflows', imported.archiveSha256.slice(0, 16));
   fs.mkdirSync(root, { recursive: true });
   const replacements = new Map();
@@ -157,11 +189,14 @@ async function persistImportedAssets(imported, projectId, environment = {}) {
 }
 
 router.get('/', (req, res) => {
+  const database = runtimeDatabase();
   res.json({ success: true, data: database.listSubflowDefinitions({ projectId: req.query?.projectId, query: req.query?.query }) });
 });
 
 router.post('/', (req, res) => {
   try {
+    const database = runtimeDatabase();
+    const collaborationGateway = runtimeCollaborationGateway();
     validateSubflowDefinition(req.body);
     const projectId = String(req.body.projectId || 'project-local');
     const id = String(req.body.id || '');
@@ -175,12 +210,14 @@ router.post('/', (req, res) => {
       sessionId: 'local-subflow-api',
       changeSummary,
     });
-    collaborationGateway.broadcastProject(saved.projectId, {
-      type: 'subflow.published',
-      publication: publicSubflowPublication(saved),
+    const warnings = broadcastSubflowPublicationBestEffort(collaborationGateway, saved);
+    res.status(201).json({
+      success: true,
+      data: saved,
+      ...(warnings.length ? { warnings } : {}),
     });
-    res.status(201).json({ success: true, data: saved });
   } catch (error) {
+    if (sendProjectDatabaseStorageCapacityError(res, error, { operation: 'subflow.definition.publish' })) return;
     if (error instanceof SubflowRevisionConflictError) {
       return res.status(409).json({ success: false, code: error.code, error: error.message, data: error.current });
     }
@@ -200,6 +237,8 @@ router.post('/package/inspect', packageUpload.single('file'), async (req, res) =
 
 router.post('/package/import', packageUpload.single('file'), async (req, res) => {
   let importedAssets = null;
+  const database = runtimeDatabase();
+  const collaborationGateway = runtimeCollaborationGateway();
   try {
     if (!req.file?.buffer) throw new Error('请选择 .t8flow 文件');
     if (!String(req.body?.archiveSha256 || '').trim()) throw new Error('导入前必须先检查并提供归档 SHA256');
@@ -223,13 +262,19 @@ router.post('/package/import', packageUpload.single('file'), async (req, res) =>
       sessionId: 'local-subflow-import',
       changeSummary: '导入 .t8flow 归档',
     });
-    collaborationGateway.broadcastProject(saved.projectId, {
-      type: 'subflow.published',
-      publication: publicSubflowPublication(saved),
+    const warnings = broadcastSubflowPublicationBestEffort(collaborationGateway, saved);
+    res.status(201).json({
+      success: true,
+      data: {
+        definition: saved,
+        archiveSha256: imported.archiveSha256,
+        importedAssetIds: importedAssets.created.map((item) => item.id),
+      },
+      ...(warnings.length ? { warnings } : {}),
     });
-    res.status(201).json({ success: true, data: { definition: saved, archiveSha256: imported.archiveSha256, importedAssetIds: importedAssets.created.map((item) => item.id) } });
   } catch (error) {
     rollbackImportedAssets(importedAssets?.created || [], database);
+    if (sendProjectDatabaseStorageCapacityError(res, error, { operation: 'subflow.package.import' })) return;
     if (error instanceof SubflowRevisionConflictError) {
       return res.status(409).json({ success: false, code: error.code, error: error.message, data: error.current });
     }
@@ -239,6 +284,7 @@ router.post('/package/import', packageUpload.single('file'), async (req, res) =>
 
 router.get('/:id/:version/package', async (req, res) => {
   try {
+    const database = runtimeDatabase();
     const definition = database.getSubflowDefinition(req.params.id, req.params.version, req.query?.projectId);
     if (!definition) return res.status(404).json({ success: false, error: '子工作流定义不存在' });
     const archive = await createSubflowPackage(definition, collectPackageAssets(definition), collectDependencyDefinitions(definition));
@@ -253,10 +299,12 @@ router.get('/:id/:version/package', async (req, res) => {
 });
 
 router.get('/:id/versions', (req, res) => {
+  const database = runtimeDatabase();
   res.json({ success: true, data: database.listSubflowVersions(req.params.id, req.query?.projectId) });
 });
 
 function sendDefinition(req, res) {
+  const database = runtimeDatabase();
   const definition = database.getSubflowDefinition(req.params.id, req.params.version, req.query?.projectId);
   if (!definition) return res.status(404).json({ success: false, error: '子工作流定义不存在' });
   res.json({ success: true, data: definition });
@@ -273,3 +321,4 @@ module.exports.collectPackageAssets = collectPackageAssets;
 module.exports.persistImportedAssets = persistImportedAssets;
 module.exports.rollbackImportedAssets = rollbackImportedAssets;
 module.exports.replaceAssetReferences = replaceAssetReferences;
+module.exports.broadcastSubflowPublicationBestEffort = broadcastSubflowPublicationBestEffort;

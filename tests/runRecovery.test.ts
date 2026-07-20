@@ -23,10 +23,12 @@ test('frontend stores credential-free recovery recipes for supported provider po
 test('explicit recovery rejects arbitrary kinds and incomplete FAL descriptors', () => {
   assert.equal(inferRunRecoveryDescriptor({ recovery: { kind: 'http', taskId: 'x', url: 'https://evil.example' } }), null);
   assert.equal(inferRunRecoveryDescriptor({ recovery: { kind: 'video-fal', requestId: 'only-request' } }), null);
-  assert.equal(inferRunRecoveryDescriptor({
+  const falRecovery = inferRunRecoveryDescriptor({
     recovery: {
       kind: 'video-fal', requestId: 'req-1', responseUrl: 'https://queue.fal.run/result',
       endpoint: 'fal-ai/model', pollIntervalMs: 100, maxPolls: 9000,
     },
-  })?.pollIntervalMs, 250);
+  });
+  assert.equal(falRecovery?.pollIntervalMs, 250);
+  assert.equal(Object.hasOwn(falRecovery || {}, 'responseUrl'), false);
 });

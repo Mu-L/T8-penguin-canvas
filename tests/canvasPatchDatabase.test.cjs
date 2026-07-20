@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -9,6 +10,7 @@ const { Worker } = require('node:worker_threads');
 const {
   applyCanvasOperation,
   normalizeCanvasDocument,
+  validateOperation,
 } = require('../backend/src/collaboration/protocol');
 const {
   CANVAS_PATCH_CONTRACT,
@@ -20,18 +22,36 @@ const {
   CanvasPatchValidationError,
   assertCanvasPatchCredentialAuthority,
   buildCanvasPatchPlan,
+  canvasDocumentTouchesHostCredentials,
+  canvasOperationsTouchHostCredentials,
   canvasPatchTouchesHostCredentials,
   canvasPatchRequestDigest,
+  canvasStringContainsHostCredentialField,
   isHostCredentialFieldKey,
   normalizeCanvasPatchAuthority,
   safeCanvasPatchErrorMessage,
   scopedCanvasPatchOperationId,
+  stableJson,
 } = require('../backend/src/services/canvasPatch');
 const {
+  PROJECT_DATABASE_MIGRATIONS,
   PROJECT_DATABASE_SCHEMA_VERSION,
   ProjectDatabase,
   RevisionConflictError,
 } = require('../backend/src/services/projectDatabase');
+const {
+  PROJECT_DATABASE_MIGRATION_29_DOWN_SQL,
+} = require('../backend/src/services/projectDatabaseMigration29');
+const {
+  PROJECT_DATABASE_MIGRATION_30_DOWN_SQL,
+} = require('../backend/src/services/projectDatabaseMigration30');
+const {
+  PROJECT_DATABASE_SCHEMA_31_OWNED_OBJECTS,
+} = require('../backend/src/services/projectDatabaseMigration31');
+const {
+  assertCurrentProjectDatabaseRegistry,
+  stripSchema32ForSyntheticSchema31,
+} = require('./helpers/projectDatabaseVersion.cjs');
 
 const PATCH_ID = '11111111-1111-4111-8111-111111111111';
 const LOCAL_OWNER_PATCH_AUTHORITY = Object.freeze({
@@ -58,6 +78,100 @@ function patch(overrides = {}) {
     }],
     ...overrides,
   };
+}
+
+function sha256Stable(value) {
+  return crypto.createHash('sha256').update(stableJson(value)).digest('hex');
+}
+
+function quoteSqlIdentifier(value) {
+  return `"${String(value).replaceAll('"', '""')}"`;
+}
+
+// TEST-ONLY fixture teardown. Production schema31 DOWN remains backup-only;
+// this removes only source-controlled schema31 objects from a disposable DB.
+function removeSchema31ExtensionForSyntheticSchema30(database) {
+  stripSchema32ForSyntheticSchema31(database);
+  database.pragma('foreign_keys = OFF');
+  try {
+    database.transaction(() => {
+      for (const name of [...PROJECT_DATABASE_SCHEMA_31_OWNED_OBJECTS.triggers].reverse()) {
+        database.exec(`DROP TRIGGER IF EXISTS ${quoteSqlIdentifier(name)}`);
+      }
+      for (const name of [...PROJECT_DATABASE_SCHEMA_31_OWNED_OBJECTS.views].reverse()) {
+        database.exec(`DROP VIEW IF EXISTS ${quoteSqlIdentifier(name)}`);
+      }
+      for (const name of [...PROJECT_DATABASE_SCHEMA_31_OWNED_OBJECTS.indexes].reverse()) {
+        database.exec(`DROP INDEX IF EXISTS ${quoteSqlIdentifier(name)}`);
+      }
+      for (const name of [...PROJECT_DATABASE_SCHEMA_31_OWNED_OBJECTS.tables].reverse()) {
+        database.exec(`DROP TABLE IF EXISTS ${quoteSqlIdentifier(name)}`);
+      }
+      database.prepare('DELETE FROM schema_migration_receipts WHERE version = 31').run();
+      database.prepare('DELETE FROM schema_migrations WHERE version = 31').run();
+    }).immediate();
+  } finally {
+    database.pragma('foreign_keys = ON');
+  }
+  const ownedNames = Object.values(PROJECT_DATABASE_SCHEMA_31_OWNED_OBJECTS).flat();
+  const placeholders = ownedNames.map(() => '?').join(', ');
+  assert.equal(database.prepare(`
+    SELECT COUNT(*) AS count FROM sqlite_master WHERE name IN (${placeholders})
+  `).get(...ownedNames).count, 0);
+  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM schema_migration_receipts WHERE version = 31').get().count, 0);
+  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM schema_migrations WHERE version = 31').get().count, 0);
+  assert.equal(database.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 30);
+  assert.deepEqual(database.pragma('foreign_key_check'), []);
+}
+
+function rewriteAppliedPatchAsLegacyIdentityGuard(sqlite, context) {
+  const row = sqlite.prepare(`
+    SELECT * FROM canvas_patch_applications
+    WHERE project_id = ? AND canvas_id = ? AND patch_id = ?
+  `).get(context.projectId, context.canvasId, context.patchId);
+  assert.ok(row);
+  const operations = JSON.parse(row.forward_ops_json);
+  const inverseOperations = JSON.parse(row.inverse_ops_json);
+  const postconditions = JSON.parse(row.postconditions_json);
+  const strippedFields = [];
+  for (const condition of postconditions) {
+    if (condition?.kind === 'node.added') {
+      if (Object.prototype.hasOwnProperty.call(condition.node, 'legacyAliases')) {
+        delete condition.node.legacyAliases;
+        strippedFields.push('node.legacyAliases');
+      }
+    }
+    if (condition?.kind === 'edge.added') {
+      for (const key of ['legacyAliases', 'sourceEntityUid', 'targetEntityUid']) {
+        if (Object.prototype.hasOwnProperty.call(condition.edge, key)) {
+          delete condition.edge[key];
+          strippedFields.push(`edge.${key}`);
+        }
+      }
+    }
+  }
+  const guardDigest = sha256Stable({ operations, inverseOperations, postconditions });
+  const previewDigest = sha256Stable({
+    schema: row.schema,
+    requestDigest: row.request_digest,
+    projectId: row.project_id,
+    canvasId: row.canvas_id,
+    currentRevision: Number(row.base_revision),
+    guardDigest,
+  });
+  const updated = sqlite.prepare(`
+    UPDATE canvas_patch_applications
+    SET postconditions_json = ?, preview_digest = ?
+    WHERE project_id = ? AND canvas_id = ? AND patch_id = ?
+  `).run(
+    JSON.stringify(postconditions),
+    previewDigest,
+    row.project_id,
+    row.canvas_id,
+    row.patch_id,
+  );
+  assert.equal(updated.changes, 1);
+  return { postconditions, strippedFields };
 }
 
 function seed(db, canvasId = 'canvas-patch') {
@@ -470,6 +584,20 @@ test('credential field detection is obfuscation-resistant without blocking ordin
     'maxTokens', 'tokenCount', 'inputTokens', 'outputTokenCount',
     'cacheKey', 'resourceKey', 'objectKey', 'modelKey', 'keyboardShortcut',
   ]) assert.equal(isHostCredentialFieldKey(key), false, key);
+  for (const url of [
+    'https://example.test/?state=STATE_SECRET',
+    'https://example.test/?code=AUTH_CODE_SECRET',
+    'https://example.test/oauth#access_token=FRAGMENT_ACCESS_SECRET',
+    'https://example.test/#/callback?code=HASH_CODE_SECRET&state=HASH_STATE_SECRET',
+    'https://user:password@example.test/path',
+    `https://example.test/?next=${encodeURIComponent('https://auth.example/callback?code=NESTED_CODE_SECRET')}`,
+    `https://example.test/?payload=${Buffer.from(JSON.stringify({ apiKey: 'NESTED_JSON_SECRET' })).toString('base64url')}`,
+    'https://example.test/callback#next=apiKey%3DNESTED_ASSIGNMENT_SECRET',
+    'https://example.test/callback?next=access_token%3DNESTED_QUERY_ASSIGNMENT_SECRET',
+    'https://example.test/callback?foo=1;code=SEMICOLON_CODE_SECRET',
+    'https://example.test/callback?foo=1&amp;code=HTML_CODE_SECRET',
+  ]) assert.equal(canvasStringContainsHostCredentialField(url), true, url);
+  assert.equal(canvasStringContainsHostCredentialField('https://example.test/result.png?page=2&productCode=ABC'), false);
 
   const document = normalizeCanvasDocument('credential-service', {
     nodes: [{ id: 'a', type: 'text', position: { x: 0, y: 0 }, data: { prompt: 'before' } }],
@@ -493,6 +621,381 @@ test('credential field detection is obfuscation-resistant without blocking ordin
     authority: { source: 'agent', role: 'owner', capabilities: ['manageProviders'] },
   });
   assert.equal(normalPlan.resultingDocument.nodes[0].data.prompt, 'after; 示例文本 {"apiKey":"fictional-not-a-setting"}');
+  for (const value of [
+    { items: [['apiKey', 'PAIR_SECRET']] },
+    { tabs: [['access_token', 'TAB_PAIR_SECRET']] },
+    { rawPairs: JSON.stringify([['apiKey', 'JSON_PAIR_SECRET']]) },
+  ]) {
+    assert.equal(canvasOperationsTouchHostCredentials(document, [{
+      type: 'node.patch',
+      payload: { nodeId: 'a', dataPatch: value },
+    }]), true);
+  }
+  assert.equal(canvasOperationsTouchHostCredentials(document, [{
+    type: 'node.patch',
+    payload: { nodeId: 'a', dataPatch: { items: [['prompt', 'visible']] } },
+  }]), false);
+  for (const plaintext of [
+    ['sk-', 'abcdefghijklmnopqrstuvwxyz123456'].join(''),
+    'Bearer test-bearer-token-value',
+    ['ghp_', 'A'.repeat(36)].join(''),
+    ['AKIA', 'ABCDEFGHIJKLMNOP'].join(''),
+    ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiJ0ZXN0In0', 'c2lnbmF0dXJl'].join('.'),
+    'data:image/png;base64,QUJDREVGRw==',
+  ]) {
+    assert.equal(canvasOperationsTouchHostCredentials(document, [{
+      type: 'node.patch',
+      payload: { nodeId: 'a', dataPatch: { prompt: plaintext } },
+    }]), true, plaintext);
+  }
+  assert.equal(canvasDocumentTouchesHostCredentials(normalizeCanvasDocument('oauth-context', {
+    nodes: [{
+      id: 'oauth',
+      type: 'text',
+      position: { x: 0, y: 0 },
+      data: {
+        oauthResponse: { code: 'OBJECT_CODE_SECRET', state: 'OBJECT_STATE_SECRET' },
+        callbackParams: { code: 'CALLBACK_CODE_SECRET' },
+        oauthResponseRaw: JSON.stringify({ code: 'RAW_CODE_SECRET', state: 'RAW_STATE_SECRET' }),
+      },
+    }],
+    edges: [],
+  }, { projectId: 'project-patch', revision: 1 })), true);
+  assert.equal(canvasPatchTouchesHostCredentials(patch({
+    id: 'agent-normal-generic-keys',
+    operations: [{
+      type: 'node.patch',
+      payload: {
+        nodeId: 'a',
+        dataPatch: {
+          parameter: { key: 'prompt', value: 'ordinary value' },
+          tabs: [{ key: 'timeline', label: '时间线' }],
+        },
+      },
+    }],
+  })), false);
+  assert.equal(canvasPatchTouchesHostCredentials(patch({
+    id: 'agent-real-feishu-node-add',
+    operations: [{
+      type: 'node.add',
+      payload: {
+        node: {
+          id: 'feishu-new',
+          type: 'feishu-bitable-input',
+          position: { x: 100, y: 0 },
+          data: {
+            feishuAppToken: 'bascnPublicResourceId',
+            feishuRows: [{
+              appToken: 'bascnPublicResourceId',
+              media: [{ fileToken: 'boxcnPublicFileId' }],
+            }],
+          },
+        },
+      },
+    }],
+  })), false);
+  assert.equal(canvasPatchTouchesHostCredentials(patch({
+    id: 'agent-fake-feishu-container-node-add',
+    operations: [{
+      type: 'node.add',
+      payload: {
+        node: {
+          id: 'text-with-fake-feishu-container',
+          type: 'text',
+          position: { x: 100, y: 0 },
+          data: {
+            feishuRows: [{
+              appToken: 'must-remain-forbidden',
+              media: [{ fileToken: 'must-remain-forbidden' }],
+            }],
+          },
+        },
+      },
+    }],
+  })), true);
+  assert.equal(canvasPatchTouchesHostCredentials(patch({
+    id: 'agent-generic-key-credential-descriptor',
+    operations: [{
+      type: 'node.patch',
+      payload: {
+        nodeId: 'a',
+        dataPatch: { parameter: { key: 'apiKey', value: 'must remain forbidden' } },
+      },
+    }],
+  })), true);
+  assert.equal(canvasPatchTouchesHostCredentials(patch({
+    id: 'agent-id-credential-descriptor',
+    operations: [{
+      type: 'node.patch',
+      payload: {
+        nodeId: 'a',
+        dataPatch: {
+          providerParameter: { id: 'apiKey', value: 'must remain forbidden' },
+          authorizationParameter: { id: 'authorization', defaultValue: 'must remain forbidden' },
+        },
+      },
+    }],
+  })), true);
+  assert.equal(canvasPatchTouchesHostCredentials(patch({
+    id: 'agent-bare-generic-key',
+    operations: [{
+      type: 'node.patch',
+      payload: { nodeId: 'a', dataPatch: { key: 'opaque-value' } },
+    }],
+  })), true);
+  assert.equal(canvasPatchTouchesHostCredentials(patch({
+    id: 'agent-fake-feishu-scope',
+    operations: [{
+      type: 'node.patch',
+      payload: {
+        nodeId: 'a',
+        dataPatch: { feishuAppToken: 'marker', fileToken: 'opaque-value' },
+      },
+    }],
+  })), true);
+  for (const [field, value] of [
+    ['comfyMakerWorkflowRaw', '{"1":{"inputs":{"key":"opaque-value"}}}'],
+    ['workflowJson', Buffer.from('{"apiKey":"opaque-value"}').toString('base64')],
+    ['providerConfig', Buffer.from('{"apiKey":"opaque-value"}').toString('hex')],
+  ]) {
+    assert.equal(canvasPatchTouchesHostCredentials(patch({
+      id: `agent-structured-${field}`,
+      operations: [{
+        type: 'node.patch',
+        payload: { nodeId: 'a', dataPatch: { [field]: value } },
+      }],
+    })), true, field);
+  }
+  assert.equal(canvasPatchTouchesHostCredentials(patch({
+    id: 'agent-oversized-structured-workflow',
+    operations: [{
+      type: 'node.patch',
+      payload: {
+        nodeId: 'a',
+        dataPatch: {
+          comfyMakerWorkflowRaw: JSON.stringify({
+            padding: 'x'.repeat((512 * 1024) + 1024),
+            apiKey: 'opaque-value',
+          }),
+        },
+      },
+    }],
+  })), true);
+  const sensitiveDocument = normalizeCanvasDocument('credential-operation-scope', {
+    nodes: [{
+      id: 'sensitive',
+      type: 'text',
+      position: { x: 0, y: 0 },
+      data: { prompt: 'before', apiKey: 'host-owned-value' },
+    }],
+    edges: [],
+  }, { projectId: 'project-patch', revision: 1 });
+  assert.equal(canvasDocumentTouchesHostCredentials(sensitiveDocument), true);
+  assert.equal(canvasOperationsTouchHostCredentials(sensitiveDocument, [{
+    type: 'node.patch',
+    payload: { nodeId: 'sensitive', dataPatch: { prompt: 'ordinary edit' } },
+  }]), false);
+  assert.equal(canvasOperationsTouchHostCredentials(sensitiveDocument, [{
+    type: 'node.patch',
+    payload: { nodeId: 'sensitive', unsetKeys: ['data'] },
+  }]), true);
+  assert.equal(canvasOperationsTouchHostCredentials(sensitiveDocument, [{
+    type: 'node.patch',
+    payload: { nodeId: 'sensitive', patch: { data: {} } },
+  }]), true);
+  assert.equal(canvasOperationsTouchHostCredentials(sensitiveDocument, [{
+    type: 'node.delete',
+    payload: { nodeId: 'sensitive' },
+  }]), true);
+  const sensitiveEntityUid = sensitiveDocument.nodes[0].entityUid;
+  assert.equal(canvasOperationsTouchHostCredentials(sensitiveDocument, [{
+    type: 'node.patch',
+    payload: { nodeId: sensitiveEntityUid, unsetKeys: ['data'] },
+  }]), true);
+  assert.equal(canvasOperationsTouchHostCredentials(sensitiveDocument, [{
+    type: 'node.delete',
+    payload: { nodeId: sensitiveEntityUid },
+  }]), true);
+  const realFeishuDocument = normalizeCanvasDocument('credential-real-feishu-scope', {
+    nodes: [{
+      id: 'feishu',
+      type: 'feishu-bitable-input',
+      position: { x: 0, y: 0 },
+      data: {
+        feishuAppToken: 'bascnExistingResourceId',
+        feishuRows: [{
+          appToken: 'bascnExistingResourceId',
+          media: [{ fileToken: 'boxcnExistingFileId' }],
+        }],
+        feishuBitableRows: [{
+          appToken: 'bascnExistingBitableResourceId',
+          fields: { attachment: [{ file_token: 'boxcnExistingRawFieldFileId' }] },
+          rowData: { attachment: [{ fileToken: 'boxcnExistingRowDataFileId' }] },
+          media: [{ fileToken: 'boxcnExistingBitableFileId' }],
+          attachments: [{ fileToken: 'boxcnExistingAttachmentFileId' }],
+        }],
+        feishuRecords: [{
+          fields: { attachment: [{ file_token: 'boxcnExistingRecordFileId' }] },
+        }],
+        feishuWriteResult: [{
+          fields: { attachment: [{ file_token: 'boxcnExistingWriteResultFileId' }] },
+        }],
+        metadata: {
+          feishuBitable: {
+            appToken: 'bascnExistingMetadataContainerResourceId',
+            rows: [{
+              appToken: 'bascnExistingMetadataResourceId',
+              media: [{ fileToken: 'boxcnExistingMetadataFileId' }],
+            }],
+          },
+          feishuBitableWrite: { appToken: 'bascnExistingWriteResourceId' },
+        },
+      },
+    }],
+    edges: [],
+  }, { projectId: 'project-patch', revision: 1 });
+  assert.equal(canvasDocumentTouchesHostCredentials(realFeishuDocument), false);
+  assert.equal(canvasOperationsTouchHostCredentials(realFeishuDocument, [{
+    type: 'node.patch',
+    payload: {
+      nodeId: 'feishu',
+      dataPatch: {
+        feishuRows: [{
+          appToken: 'bascnNextResourceId',
+          media: [{ fileToken: 'boxcnNextFileId' }],
+        }],
+        feishuBitableRows: [{
+          appToken: 'bascnNextBitableResourceId',
+          fields: { attachment: [{ file_token: 'boxcnNextRawFieldFileId' }] },
+          rowData: { attachment: [{ fileToken: 'boxcnNextRowDataFileId' }] },
+          media: [{ fileToken: 'boxcnNextBitableFileId' }],
+          attachments: [{ fileToken: 'boxcnNextAttachmentFileId' }],
+        }],
+        feishuRecords: [{
+          fields: { attachment: [{ file_token: 'boxcnNextRecordFileId' }] },
+        }],
+        feishuWriteResult: [{
+          fields: { attachment: [{ file_token: 'boxcnNextWriteResultFileId' }] },
+        }],
+        metadata: {
+          feishuBitable: {
+            appToken: 'bascnNextMetadataContainerResourceId',
+            rows: [{
+              appToken: 'bascnNextMetadataResourceId',
+              media: [{ fileToken: 'boxcnNextMetadataFileId' }],
+            }],
+          },
+          feishuBitableWrite: { appToken: 'bascnNextWriteResourceId' },
+        },
+      },
+    },
+  }]), false);
+  assert.equal(canvasOperationsTouchHostCredentials(realFeishuDocument, [{
+    type: 'node.patch',
+    payload: { nodeId: 'feishu', dataUnsetKeys: ['feishuAppToken'] },
+  }]), false);
+  assert.equal(canvasOperationsTouchHostCredentials(realFeishuDocument, [{
+    type: 'node.patch',
+    payload: {
+      nodeId: 'feishu',
+      dataUnsetKeys: ['feishuAppToken', 'feishuOutputAppToken'],
+    },
+  }]), false);
+  assert.equal(canvasOperationsTouchHostCredentials(realFeishuDocument, [{
+    type: 'node.patch',
+    payload: {
+      nodeId: 'feishu',
+      dataPatch: {
+        ignored: {
+          feishuRows: [{
+            appToken: 'NESTED_FAKE_APP_SECRET',
+            media: [{ fileToken: 'NESTED_FAKE_FILE_SECRET' }],
+          }],
+        },
+      },
+    },
+  }]), true);
+  const smuggledMove = {
+    type: 'node.move',
+    payload: {
+      nodeId: 'feishu',
+      position: { x: 20, y: 30 },
+      junk: { appToken: 'MOVE_ENVELOPE_SECRET' },
+    },
+  };
+  assert.equal(canvasOperationsTouchHostCredentials(realFeishuDocument, [smuggledMove]), true);
+  assert.throws(() => validateOperation(smuggledMove), /node\.move\.payload 包含不支持字段: junk/);
+  const realFeishuPatch = patch({
+    id: 'agent-real-feishu-contextual-patch',
+    operations: [{
+      type: 'node.patch',
+      payload: {
+        nodeId: 'feishu',
+        dataPatch: {
+          feishuRows: [{
+            appToken: 'bascnPlanResourceId',
+            media: [{ fileToken: 'boxcnPlanFileId' }],
+          }],
+        },
+      },
+    }],
+  });
+  assert.equal(canvasPatchTouchesHostCredentials(realFeishuPatch), true);
+  const realFeishuPlan = buildCanvasPatchPlan(realFeishuDocument, realFeishuPatch, {
+    authority: { source: 'agent', role: 'owner', capabilities: ['editGraph'] },
+  });
+  assert.equal(
+    realFeishuPlan.resultingDocument.nodes[0].data.feishuRows[0].media[0].fileToken,
+    'boxcnPlanFileId',
+  );
+  const fakeFeishuDocument = normalizeCanvasDocument('credential-fake-feishu-scope', {
+    nodes: [{
+      id: 'text',
+      type: 'text',
+      position: { x: 0, y: 0 },
+      data: { prompt: 'ordinary' },
+    }],
+    edges: [],
+  }, { projectId: 'project-patch', revision: 1 });
+  assert.equal(canvasOperationsTouchHostCredentials(fakeFeishuDocument, [{
+    type: 'node.patch',
+    payload: {
+      nodeId: 'text',
+      dataUnsetKeys: ['apiKey', 'accessToken'],
+    },
+  }]), true);
+  assert.equal(canvasOperationsTouchHostCredentials(fakeFeishuDocument, [{
+    type: 'node.patch',
+    payload: {
+      nodeId: 'text',
+      dataPatch: {
+        feishuRows: [{
+          appToken: 'must-remain-forbidden',
+          media: [{ fileToken: 'must-remain-forbidden' }],
+        }],
+      },
+    },
+  }]), true);
+  const sensitiveEdgeDocument = normalizeCanvasDocument('credential-edge-scope', {
+    nodes: [
+      { id: 'left', type: 'text', position: { x: 0, y: 0 }, data: { prompt: 'left' } },
+      { id: 'right', type: 'text', position: { x: 100, y: 0 }, data: { prompt: 'right' } },
+    ],
+    edges: [{
+      id: 'sensitive-edge',
+      source: 'left',
+      target: 'right',
+      data: { accessToken: 'host-owned-edge-value' },
+    }],
+  }, { projectId: 'project-patch', revision: 1 });
+  assert.equal(canvasOperationsTouchHostCredentials(sensitiveEdgeDocument, [{
+    type: 'node.delete',
+    payload: { nodeId: sensitiveEdgeDocument.nodes[0].entityUid },
+  }]), true);
+  assert.equal(canvasOperationsTouchHostCredentials(sensitiveEdgeDocument, [{
+    type: 'edge.delete',
+    payload: { edgeId: sensitiveEdgeDocument.edges[0].entityUid },
+  }]), true);
 
   const authorities = [
     { source: 'agent', role: 'owner', capabilities: ['manageProviders'], canManageHostCredentials: true },
@@ -632,6 +1135,63 @@ test('database enforces credential authority before duplicate lookup and leaves 
   }
 });
 
+test('database preview and apply use authoritative Feishu node context for public resource tokens', () => {
+  const db = new ProjectDatabase(':memory:');
+  try {
+    db.ensureCanvas('feishu-contextual-patch', {
+      nodes: [{
+        id: 'feishu',
+        type: 'feishu-bitable-input',
+        position: { x: 0, y: 0 },
+        data: {
+          feishuAppToken: 'bascnExistingResourceId',
+          feishuRows: [{
+            appToken: 'bascnExistingResourceId',
+            media: [{ fileToken: 'boxcnExistingFileId' }],
+          }],
+        },
+      }],
+      edges: [],
+    }, 'project-patch');
+    const input = patch({
+      id: 'feishu-contextual-database-patch',
+      operations: [{
+        type: 'node.patch',
+        payload: {
+          nodeId: 'feishu',
+          dataPatch: {
+            feishuAppToken: 'bascnNextResourceId',
+            feishuRows: [{
+              appToken: 'bascnNextResourceId',
+              media: [{ fileToken: 'boxcnNextFileId' }],
+            }],
+          },
+        },
+      }],
+    });
+    const authority = { source: 'agent', role: 'owner', capabilities: ['editGraph'] };
+    const preview = db.previewCanvasPatch('feishu-contextual-patch', input, {
+      actorId: 'canvas-agent',
+      sessionId: 'canvas-agent-session',
+      authority,
+    });
+    const applied = db.applyCanvasPatch('feishu-contextual-patch', input, {
+      actorId: 'canvas-agent',
+      sessionId: 'canvas-agent-session',
+      authority,
+      previewDigest: preview.previewDigest,
+      confirmed: true,
+    });
+    assert.equal(applied.revision, 2);
+    assert.equal(
+      applied.document.nodes[0].data.feishuRows[0].media[0].fileToken,
+      'boxcnNextFileId',
+    );
+  } finally {
+    db.close();
+  }
+});
+
 test('public digest and plan helpers cannot bypass validation and the operation type export is immutable', () => {
   const document = normalizeCanvasDocument('direct-service', {
     nodes: [{ id: 'a', type: 'text', data: {} }],
@@ -685,6 +1245,19 @@ test('all protocol operation kinds have preview, atomic apply and inverse-operat
     assert.equal(applied.document.nodes.some((node) => node.id === 'c'), true);
     assert.equal(applied.document.edges.some((edge) => edge.id === 'edge-bc'), true);
     assert.deepEqual(applied.document.viewport, { x: 10, y: 20, zoom: 1.5 });
+    const persisted = JSON.parse(db.db.prepare(`
+      SELECT snapshot_json FROM canvas_documents WHERE canvas_id = ?
+    `).get('canvas-patch').snapshot_json);
+    const loaded = db.getCanvas('canvas-patch');
+    assert.deepEqual(persisted, applied.document);
+    assert.deepEqual(loaded, applied.document);
+    const nodeB = loaded.nodes.find((node) => node.id === 'b');
+    const nodeC = loaded.nodes.find((node) => node.id === 'c');
+    const edgeBC = loaded.edges.find((edge) => edge.id === 'edge-bc');
+    assert.deepEqual(nodeC.legacyAliases, ['c']);
+    assert.deepEqual(edgeBC.legacyAliases, ['edge-bc']);
+    assert.equal(edgeBC.sourceEntityUid, nodeB.entityUid);
+    assert.equal(edgeBC.targetEntityUid, nodeC.entityUid);
 
     const reverted = db.revertCanvasPatch('canvas-patch', input.id, {
       actorId: 'member-a', expectedRevision: 5,
@@ -694,6 +1267,199 @@ test('all protocol operation kinds have preview, atomic apply and inverse-operat
     assert.equal(reverted.document.nodes.some((node) => node.id === 'c'), false);
     assert.equal(reverted.document.edges.some((edge) => edge.id === 'edge-bc'), false);
     assert.deepEqual(reverted.document.viewport, { x: 0, y: 0, zoom: 1 });
+  } finally {
+    db.close();
+  }
+});
+
+test('project-only unverified references force snapshot fallback while exact deltas and stable aliases stay safe', () => {
+  const db = new ProjectDatabase(':memory:');
+  try {
+    const simpleBase = seed(db, 'canvas-simple-project-delta');
+    const simpleResult = db.applyOperations('canvas-simple-project-delta', [{
+      opId: 'simple-project-delta',
+      type: 'node.patch',
+      payload: { nodeId: 'a', dataPatch: { label: 'plain-text' } },
+    }], { expectedRevision: 1 });
+    assert.equal(db.db.prepare(`
+      SELECT requires_snapshot FROM canvas_operations WHERE op_id = ?
+    `).get('simple-project-delta').requires_snapshot, 0);
+    const simpleSync = db.syncCanvas('canvas-simple-project-delta', 1);
+    assert.equal(simpleSync.mode, 'operations');
+    const simpleReplay = applyCanvasOperation(simpleBase, simpleSync.operations[0]).document;
+    assert.deepEqual(simpleReplay.nodes, simpleResult.document.nodes);
+    assert.deepEqual(simpleReplay.edges, simpleResult.document.edges);
+
+    seed(db, 'canvas-derived-project-delta');
+    const derivedResult = db.applyOperations('canvas-derived-project-delta', [{
+      opId: 'derived-project-delta',
+      type: 'node.patch',
+      payload: { nodeId: 'a', dataPatch: { sourceAssetId: 'asset-x' } },
+    }], { expectedRevision: 1 });
+    const derivedNode = derivedResult.document.nodes.find((node) => node.id === 'a');
+    assert.equal(derivedNode.data.sourceAssetEntityUid, undefined);
+    assert.deepEqual(derivedNode.data.unverifiedIdentityReferences, [{
+      status: 'legacy-unverified',
+      kind: 'asset',
+      field: 'sourceAssetId',
+      stableField: 'sourceAssetEntityUid',
+      legacyReference: 'asset-x',
+    }]);
+    assert.equal(db.db.prepare(`
+      SELECT requires_snapshot FROM canvas_operations WHERE op_id = ?
+    `).get('derived-project-delta').requires_snapshot, 1);
+    const derivedSync = db.syncCanvas('canvas-derived-project-delta', 1);
+    assert.equal(derivedSync.mode, 'snapshot');
+    assert.equal(derivedSync.reason, 'snapshot_required');
+    assert.deepEqual(derivedSync.document, derivedResult.document);
+
+    seed(db, 'canvas-derived-add-project-delta');
+    const derivedAdd = db.applyOperations('canvas-derived-add-project-delta', [{
+      opId: 'derived-add-project-delta',
+      type: 'node.add',
+      payload: {
+        node: {
+          id: 'asset-node',
+          type: 'text',
+          position: { x: 300, y: 0 },
+          data: { sourceAssetId: 'asset-y' },
+        },
+      },
+    }], { expectedRevision: 1 });
+    assert.equal(db.db.prepare(`
+      SELECT requires_snapshot FROM canvas_operations WHERE op_id = ?
+    `).get('derived-add-project-delta').requires_snapshot, 1);
+    assert.equal(db.syncCanvas('canvas-derived-add-project-delta', 1).reason, 'snapshot_required');
+    const derivedAddNode = derivedAdd.document.nodes.find((node) => node.id === 'asset-node');
+    assert.equal(derivedAddNode.data.sourceAssetEntityUid, undefined);
+    assert.deepEqual(derivedAddNode.data.unverifiedIdentityReferences, [{
+      status: 'legacy-unverified',
+      kind: 'asset',
+      field: 'sourceAssetId',
+      stableField: 'sourceAssetEntityUid',
+      legacyReference: 'asset-y',
+    }]);
+
+    seed(db, 'canvas-protected-alias');
+    for (const [opId, payload] of [
+      ['patch-protected-alias', { nodeId: 'a', patch: { legacyAliases: ['forged-alias'] } }],
+      ['unset-protected-alias', { nodeId: 'a', unsetKeys: ['legacyAliases'] }],
+    ]) {
+      assert.throws(() => db.applyOperations('canvas-protected-alias', [{
+        opId,
+        type: 'node.patch',
+        payload,
+      }], { expectedRevision: 1 }));
+    }
+    assert.equal(db.getCanvas('canvas-protected-alias').revision, 1);
+    assert.equal(db.db.prepare(`
+      SELECT COUNT(*) AS count FROM canvas_operations WHERE canvas_id = ?
+    `).get('canvas-protected-alias').count, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('pre-schema26 guard-v1 added-entity postconditions lift to canonical project identity without weakening checks', () => {
+  let legacyRewrite = null;
+  const db = new ProjectDatabase(':memory:', {
+    beforeCanvasPatchCommit: (sqlite, context) => {
+      if (context.phase === 'apply') {
+        legacyRewrite = rewriteAppliedPatchAsLegacyIdentityGuard(sqlite, context);
+      }
+    },
+  });
+  try {
+    seed(db);
+    const input = patch({
+      id: 'doctor-patch-pre-schema26-guard-v1',
+      diagnosticsResolved: [],
+      operations: [
+        { type: 'node.add', payload: { node: { id: 'c', type: 'text', position: { x: 200, y: 0 }, data: { prompt: 'C' } } } },
+        { type: 'edge.add', payload: { edge: { id: 'edge-bc', source: 'b', target: 'c', type: 'default' } } },
+      ],
+    });
+    const preview = db.previewCanvasPatch('canvas-patch', input, {
+      authority: LOCAL_OWNER_PATCH_AUTHORITY,
+    });
+    const applied = db.applyCanvasPatch('canvas-patch', input, {
+      previewDigest: preview.previewDigest,
+      confirmed: true,
+      actorId: 'member-a',
+      authority: LOCAL_OWNER_PATCH_AUTHORITY,
+    });
+    assert.equal(applied.revision, 3);
+    assert.deepEqual(legacyRewrite.strippedFields.sort(), [
+      'edge.legacyAliases',
+      'edge.sourceEntityUid',
+      'edge.targetEntityUid',
+      'node.legacyAliases',
+    ]);
+    const storedLegacyConditions = JSON.parse(db.db.prepare(`
+      SELECT postconditions_json FROM canvas_patch_applications WHERE patch_id = ?
+    `).get(input.id).postconditions_json);
+    const legacyNode = storedLegacyConditions.find((condition) => condition.kind === 'node.added').node;
+    const legacyEdge = storedLegacyConditions.find((condition) => condition.kind === 'edge.added').edge;
+    assert.equal(Object.prototype.hasOwnProperty.call(legacyNode, 'legacyAliases'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(legacyEdge, 'legacyAliases'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(legacyEdge, 'sourceEntityUid'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(legacyEdge, 'targetEntityUid'), false);
+
+    const reverted = db.revertCanvasPatch('canvas-patch', input.id, {
+      actorId: 'member-a',
+      expectedRevision: 3,
+      authority: LOCAL_OWNER_PATCH_AUTHORITY,
+    });
+    assert.equal(reverted.revision, 5);
+    assert.equal(reverted.document.nodes.some((node) => node.id === 'c'), false);
+    assert.equal(reverted.document.edges.some((edge) => edge.id === 'edge-bc'), false);
+  } finally {
+    db.close();
+  }
+});
+
+test('pre-schema26 guard-v1 compatibility still rejects added-entity identity tampering', () => {
+  const db = new ProjectDatabase(':memory:', {
+    beforeCanvasPatchCommit: (sqlite, context) => {
+      if (context.phase === 'apply') rewriteAppliedPatchAsLegacyIdentityGuard(sqlite, context);
+    },
+  });
+  try {
+    seed(db);
+    const input = patch({
+      id: 'doctor-patch-pre-schema26-guard-v1-tamper',
+      diagnosticsResolved: [],
+      operations: [
+        { type: 'node.add', payload: { node: { id: 'c', type: 'text', position: { x: 200, y: 0 }, data: { prompt: 'C' } } } },
+        { type: 'edge.add', payload: { edge: { id: 'edge-bc', source: 'b', target: 'c', type: 'default' } } },
+      ],
+    });
+    const preview = db.previewCanvasPatch('canvas-patch', input, {
+      authority: LOCAL_OWNER_PATCH_AUTHORITY,
+    });
+    db.applyCanvasPatch('canvas-patch', input, {
+      previewDigest: preview.previewDigest,
+      confirmed: true,
+      actorId: 'member-a',
+      authority: LOCAL_OWNER_PATCH_AUTHORITY,
+    });
+    const tampered = db.getCanvas('canvas-patch');
+    const addedNode = tampered.nodes.find((node) => node.id === 'c');
+    addedNode.legacyAliases = [...addedNode.legacyAliases, 'attacker-alias'];
+    const update = db.db.prepare(`
+      UPDATE canvas_documents SET snapshot_json = ? WHERE canvas_id = ? AND revision = ?
+    `).run(JSON.stringify(tampered), 'canvas-patch', 3);
+    assert.equal(update.changes, 1);
+    assert.throws(() => db.revertCanvasPatch('canvas-patch', input.id, {
+      actorId: 'member-a',
+      expectedRevision: 3,
+      authority: LOCAL_OWNER_PATCH_AUTHORITY,
+    }), CanvasPatchRevertConflictError);
+    assert.equal(db.getCanvas('canvas-patch').nodes.find((node) => node.id === 'c')
+      .legacyAliases.includes('attacker-alias'), true);
+    assert.equal(db.db.prepare(`
+      SELECT status FROM canvas_patch_applications WHERE patch_id = ?
+    `).get(input.id).status, 'applied');
   } finally {
     db.close();
   }
@@ -730,7 +1496,9 @@ test('node.restore and edge.restore are previewed and reverted without snapshot 
     assert.equal(applied.document.nodes.some((node) => node.id === 'a'), true);
     assert.equal(applied.document.edges.some((edge) => edge.id === 'edge-ab'), true);
     const reverted = db.revertCanvasPatch('canvas-patch', input.id, {
-      actorId: 'member-a', expectedRevision: 4,
+      actorId: 'member-a',
+      expectedRevision: 4,
+      authority: LOCAL_OWNER_PATCH_AUTHORITY,
     });
     assert.equal(reverted.revision, 6);
     assert.equal(reverted.document.nodes.some((node) => node.id === 'a'), false);
@@ -1075,8 +1843,8 @@ test('public preview, patch history and audit redact summary secrets, paths and 
   const db = new ProjectDatabase(':memory:');
   try {
     seed(db);
-    const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature123456';
-    const githubToken = 'ghp_0123456789abcdefghijklmnopqrstuvwxyz';
+    const jwt = ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', 'signature123456'].join('.');
+    const githubToken = ['ghp_', '0123456789abcdefghijklmnopqrstuvwxyz'].join('');
     const encodedPath = 'C%3A%5CUsers%5Calice%5Cprivate%5Csecret.txt';
     const encodedRootPath = 'path=%2Froot%2Fprivate%2Fsecret.txt';
     const encodedCredential = 'api_key%3DplainCredentialValue123456';
@@ -1154,12 +1922,15 @@ test('revert appends inverse operations, preserves unrelated later fields and re
         { type: 'node.delete', payload: { nodeId: 'a' } },
       ],
     });
-    const preview = db.previewCanvasPatch('canvas-patch', input);
+    const preview = db.previewCanvasPatch('canvas-patch', input, {
+      authority: LOCAL_OWNER_PATCH_AUTHORITY,
+    });
     const applied = db.applyCanvasPatch('canvas-patch', input, {
       previewDigest: preview.previewDigest,
       confirmed: true,
       actorId: 'member-a',
       sessionId: 'session-a',
+      authority: LOCAL_OWNER_PATCH_AUTHORITY,
     });
     assert.equal(applied.revision, 3);
     assert.deepEqual(applied.document.nodes.map((node) => node.id), ['b']);
@@ -1178,7 +1949,10 @@ test('revert appends inverse operations, preserves unrelated later fields and re
       actorId: 'member-b', expectedRevision: 4,
     }), CanvasPatchPermissionError);
     const reverted = db.revertCanvasPatch('canvas-patch', PATCH_ID, {
-      actorId: 'member-a', sessionId: 'session-revert', expectedRevision: 4,
+      actorId: 'member-a',
+      sessionId: 'session-revert',
+      expectedRevision: 4,
+      authority: LOCAL_OWNER_PATCH_AUTHORITY,
     });
     assert.equal(reverted.status, 'reverted');
     assert.equal(reverted.duplicate, false);
@@ -1304,10 +2078,10 @@ test('durable field provenance rejects ABA but allows same-node unrelated fields
   }
 });
 
-test('schema 22 retains project-scoped durable provenance, operation identity and stale preview rejection', () => {
+test('latest schema retains schema 22 project-scoped provenance, operation identity and stale preview rejection', () => {
   const db = new ProjectDatabase(':memory:');
   try {
-    assert.equal(PROJECT_DATABASE_SCHEMA_VERSION, 22);
+    assertCurrentProjectDatabaseRegistry(PROJECT_DATABASE_SCHEMA_VERSION, PROJECT_DATABASE_MIGRATIONS);
     assert.equal(db.db.prepare('SELECT 1 AS ok FROM schema_migrations WHERE version = 21').get().ok, 1);
     const columns = db.db.pragma('table_info(canvas_patch_applications)').map((row) => row.name);
     for (const column of [
@@ -1357,10 +2131,15 @@ test('concurrent generic operation writers serialize to one commit and stable re
     const workerSource = `
       const { parentPort, workerData } = require('node:worker_threads');
       const { ProjectDatabase } = require(workerData.modulePath);
-      const db = new ProjectDatabase(workerData.filename, { autoBackup: false });
+      const db = new ProjectDatabase(workerData.filename, {
+        autoBackup: false,
+        unsafeDisableOwnerGuardForTests: true,
+      });
       const gate = new Int32Array(workerData.gate);
-      const usesImmediate = String(ProjectDatabase.prototype.applyOperations).includes('.immediate(');
-      if (!usesImmediate) {
+      const writerSource = String(ProjectDatabase.prototype.applyOperations);
+      const usesSerializedWriter = writerSource.includes('.immediate(')
+        || writerSource.includes('withProjectDatabaseWrite(');
+      if (!usesSerializedWriter) {
         const getCanvas = db.getCanvas.bind(db);
         let barrierArmed = true;
         db.getCanvas = (canvasId) => {
@@ -1471,11 +2250,16 @@ test('snapshot save and restore serialize across two real sqlite connections wit
     const workerSource = `
       const { parentPort, workerData } = require('node:worker_threads');
       const { ProjectDatabase } = require(workerData.modulePath);
-      const db = new ProjectDatabase(workerData.filename, { autoBackup: false });
+      const db = new ProjectDatabase(workerData.filename, {
+        autoBackup: false,
+        unsafeDisableOwnerGuardForTests: true,
+      });
       const gate = new Int32Array(workerData.gate);
       const method = ProjectDatabase.prototype[workerData.method];
-      const usesImmediate = String(method).includes('.immediate(');
-      if (!usesImmediate) {
+      const writerSource = String(method);
+      const usesSerializedWriter = writerSource.includes('.immediate(')
+        || writerSource.includes('withProjectDatabaseWrite(');
+      if (!usesSerializedWriter) {
         const getCanvas = db.getCanvas.bind(db);
         let barrierArmed = true;
         db.getCanvas = (canvasId) => {
@@ -1582,6 +2366,11 @@ test('snapshot save and restore serialize across two real sqlite connections wit
         opId: `snapshot-restore-race-${index}`,
         actorId: `restore-writer-${index}`,
         sessionId: `restore-session-${index}`,
+        authority: {
+          source: 'local-owner',
+          role: 'owner',
+          capabilities: ['manageProviders'],
+        },
       },
     ]));
     assert.equal(restoreResults.filter((result) => result.ok).length, 1);
@@ -1632,7 +2421,10 @@ test('eight concurrent baseRevision writers yield one commit and stable revision
     const workerSource = `
       const { parentPort, workerData } = require('node:worker_threads');
       const { ProjectDatabase } = require(workerData.modulePath);
-      const db = new ProjectDatabase(workerData.filename, { autoBackup: false });
+      const db = new ProjectDatabase(workerData.filename, {
+        autoBackup: false,
+        unsafeDisableOwnerGuardForTests: true,
+      });
       parentPort.postMessage({ type: 'ready' });
       Atomics.wait(new Int32Array(workerData.gate), 0, 0);
       try {
@@ -1767,7 +2559,7 @@ test('patch apply, personal history, audit and revert survive two real sqlite re
   }
 });
 
-test('schema 19 through 22 migration is atomic, idempotent and preserves the existing canvas', () => {
+test('schema 19 bridge commits schema 28 before executable schema 29 rolls back atomically and retries idempotently', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-canvas-patch-schema21-'));
   const filename = path.join(directory, 'projects.sqlite3');
   try {
@@ -1778,28 +2570,33 @@ test('schema 19 through 22 migration is atomic, idempotent and preserves the exi
         unexpectedOpen = new ProjectDatabase(filename, {
           autoBackup: false,
           beforeMigrationCommit: (_db, version) => {
-            if (version === 22) throw new Error('schema22-injected-failure');
+            if (version === 29) throw new Error('schema-29-injected-failure');
           },
         });
-      }, /schema22-injected-failure/);
+      }, /schema-29-injected-failure/);
     } finally {
       unexpectedOpen?.close();
     }
     const rolledBack = new BetterSqlite3(filename, { readonly: true });
     try {
-      assert.equal(rolledBack.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 19);
-      assert.equal(rolledBack.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='canvas_mutation_provenance'").get(), undefined);
+      assert.equal(rolledBack.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 28);
+      assert.equal(rolledBack.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='canvas_mutation_provenance'").get().ok, 1);
+      assert.equal(rolledBack.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='schema_migration_receipts'").get(), undefined);
       const patchColumns = rolledBack.pragma('table_info(canvas_patch_applications)').map((row) => row.name);
-      assert.equal(patchColumns.includes('guard_version'), false);
+      assert.equal(patchColumns.includes('guard_version'), true);
       assert.equal(rolledBack.prepare('SELECT revision FROM canvas_documents WHERE canvas_id = ?').get('legacy-patch-canvas').revision, 7);
       assert.equal(rolledBack.pragma('quick_check', { simple: true }), 'ok');
+      assert.deepEqual(rolledBack.pragma('foreign_key_check'), []);
     } finally {
       rolledBack.close();
     }
 
     const migrated = new ProjectDatabase(filename, { autoBackup: false });
     try {
-      assert.equal(migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 22);
+      assert.equal(
+        migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version,
+        PROJECT_DATABASE_SCHEMA_VERSION,
+      );
       assert.equal(migrated.getCanvas('legacy-patch-canvas').revision, 7);
       assert.equal(migrated.getCanvas('legacy-patch-canvas').nodes[0].data.prompt, 'preserve-me');
       const patchColumns = migrated.db.pragma('table_info(canvas_patch_applications)').map((row) => row.name);
@@ -1817,7 +2614,10 @@ test('schema 19 through 22 migration is atomic, idempotent and preserves the exi
       assert.equal(migrated.db.pragma('quick_check', { simple: true }), 'ok');
       assert.deepEqual(migrated.db.pragma('foreign_key_check'), []);
       assert.doesNotThrow(() => migrated.migrate());
-      assert.equal(migrated.db.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get().count, 22);
+      assert.equal(
+        migrated.db.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get().count,
+        PROJECT_DATABASE_SCHEMA_VERSION,
+      );
     } finally {
       migrated.close();
     }
@@ -1826,9 +2626,17 @@ test('schema 19 through 22 migration is atomic, idempotent and preserves the exi
   }
 });
 
-test('schema 20 to 22 migration preserves schema 21 operation identity, rolls back atomically and is idempotent across reopen', () => {
+test('schema 20 bridge preserves operation identity at schema 28 when executable schema 29 rolls back and retries', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-canvas-operation-schema21-'));
   const filename = path.join(directory, 'projects.sqlite3');
+  const retryMigrationOptions = {
+    autoBackup: false,
+    // The fixture rewinds after adding business rows, so the simulated second
+    // upgrade must not reuse the first-open migration backup generation.
+    preMigrationBackupFilename: path.join(directory, 'retry-pre-migration-v28.sqlite3'),
+    preMigration30BackupFilename: path.join(directory, 'retry-pre-migration-v29.sqlite3'),
+    preMigration31BackupFilename: path.join(directory, 'retry-pre-migration-v30.sqlite3'),
+  };
   const operation = {
     opId: 'schema20-operation-to-backfill',
     projectId: 'project-patch',
@@ -1852,12 +2660,20 @@ test('schema 20 to 22 migration preserves schema 21 operation identity, rolls ba
 
     const downgrade = new BetterSqlite3(filename);
     try {
+      removeSchema31ExtensionForSyntheticSchema30(downgrade);
+      downgrade.prepare('DELETE FROM schema_migration_receipts WHERE version = 30').run();
+      downgrade.prepare('DELETE FROM schema_migrations WHERE version = 30').run();
+      downgrade.exec(PROJECT_DATABASE_MIGRATION_30_DOWN_SQL);
+      downgrade.exec(PROJECT_DATABASE_MIGRATION_29_DOWN_SQL);
+      downgrade.prepare('DELETE FROM schema_migrations WHERE version = 29').run();
+      assert.deepEqual(downgrade.pragma('foreign_key_check'), []);
       downgrade.exec(`
-        DELETE FROM schema_migrations WHERE version IN (21, 22);
+        DELETE FROM schema_migrations WHERE version >= 21;
         DROP TABLE IF EXISTS canvas_operation_idempotency;
       `);
       assert.equal(downgrade.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 20);
       assert.equal(downgrade.prepare('SELECT 1 AS ok FROM canvas_operations WHERE op_id = ?').get(operation.opId).ok, 1);
+      assert.deepEqual(downgrade.pragma('foreign_key_check'), []);
     } finally {
       downgrade.close();
     }
@@ -1866,27 +2682,30 @@ test('schema 20 to 22 migration preserves schema 21 operation identity, rolls ba
     try {
       assert.throws(() => {
         failedOpen = new ProjectDatabase(filename, {
-          autoBackup: false,
+          ...retryMigrationOptions,
           beforeMigrationCommit: (_db, version) => {
-            if (version === 22) throw new Error('schema22-ledger-injected-failure');
+            if (version === 29) throw new Error('schema-29-ledger-injected-failure');
           },
         });
-      }, /schema22-ledger-injected-failure/);
+      }, /schema-29-ledger-injected-failure/);
     } finally {
       failedOpen?.close();
     }
 
     const rolledBack = new BetterSqlite3(filename, { readonly: true });
     try {
-      assert.equal(rolledBack.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 20);
-      assert.equal(rolledBack.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='canvas_operation_idempotency'").get(), undefined);
+      assert.equal(rolledBack.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 28);
+      assert.equal(rolledBack.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='canvas_operation_idempotency'").get().ok, 1);
+      assert.equal(rolledBack.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='schema_migration_receipts'").get(), undefined);
+      assert.equal(rolledBack.prepare('SELECT COUNT(*) AS count FROM canvas_operation_idempotency WHERE op_id = ?').get(operation.opId).count, 1);
       assert.equal(rolledBack.prepare('SELECT 1 AS ok FROM canvas_operations WHERE op_id = ?').get(operation.opId).ok, 1);
       assert.equal(rolledBack.prepare('SELECT revision FROM canvas_documents WHERE canvas_id = ?').get(operation.canvasId).revision, 2);
+      assert.deepEqual(rolledBack.pragma('foreign_key_check'), []);
     } finally {
       rolledBack.close();
     }
 
-    const migrated = new ProjectDatabase(filename, { autoBackup: false });
+    const migrated = new ProjectDatabase(filename, retryMigrationOptions);
     try {
       const identity = migrated.db.prepare('SELECT * FROM canvas_operation_idempotency WHERE op_id = ?').get(operation.opId);
       assert.equal(identity.project_id, operation.projectId);

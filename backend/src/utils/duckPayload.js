@@ -7,6 +7,12 @@ const WATERMARK_SKIP_H_RATIO = 0.08;
 const DUCK_CHANNELS = 3;
 const TRY_LSB_BITS = [2, 6, 8];
 const MAX_DUCK_HEADER_BYTES = 512 * 1024 * 1024;
+const MAX_DUCK_INPUT_PIXELS = 32 * 1024 * 1024;
+const MAX_DUCK_RAW_BYTES = 96 * 1024 * 1024;
+const MAX_DUCK_DIMENSION = 32_768;
+const MAX_DUCK_FRAMES = 1;
+const MAX_DUCK_CHANNELS = 4;
+const DUCK_BIT_READER_YIELD_BYTES = 64 * 1024;
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif']);
 const VIDEO_EXTS = new Set(['mp4', 'webm', 'mov', 'm4v', 'mkv', 'avi']);
@@ -60,13 +66,22 @@ class LsbBitReader {
     return false;
   }
 
-  nextBit() {
-    if (this.bitShift < 0 && !this.loadNextValue()) {
-      throw new Error('duck payload bits exhausted');
+  nextByte() {
+    let byte = 0;
+    let needed = 8;
+    while (needed > 0) {
+      if (this.bitShift < 0 && !this.loadNextValue()) {
+        throw new Error('duck payload bits exhausted');
+      }
+      const available = this.bitShift + 1;
+      const take = Math.min(needed, available);
+      const shift = available - take;
+      const segment = (this.current >> shift) & ((1 << take) - 1);
+      byte = (byte << take) | segment;
+      this.bitShift -= take;
+      needed -= take;
     }
-    const bit = (this.current >> this.bitShift) & 1;
-    this.bitShift -= 1;
-    return bit;
+    return byte;
   }
 }
 
@@ -80,20 +95,26 @@ function usableCapacityBits(width, height, channels, bitsPerChannel) {
 
 function readUInt32FromBits(reader) {
   let n = 0;
-  for (let i = 0; i < 32; i += 1) {
-    n = n * 2 + reader.nextBit();
+  for (let i = 0; i < 4; i += 1) {
+    n = n * 256 + reader.nextByte();
   }
   return n;
 }
 
-function readBytesFromBits(reader, length) {
+function yieldToEventLoop() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+async function readBytesFromBits(reader, length) {
   const out = Buffer.allocUnsafe(length);
   for (let i = 0; i < length; i += 1) {
-    let b = 0;
-    for (let bit = 0; bit < 8; bit += 1) {
-      b = b * 2 + reader.nextBit();
+    out[i] = reader.nextByte();
+    if ((i + 1) % DUCK_BIT_READER_YIELD_BYTES === 0 && i + 1 < length) {
+      // A legal large Duck payload can require millions of bit reads. Keep the
+      // protocol byte-for-byte compatible while allowing timers and requests
+      // on the backend event loop to make progress between bounded CPU slices.
+      await yieldToEventLoop();
     }
-    out[i] = b;
   }
   return out;
 }
@@ -197,11 +218,13 @@ function parseDuckHeader(header) {
     decoded: true,
     passwordProtected: false,
     originalExt,
-    payload: Buffer.from(header.subarray(idx)),
+    // The decoded header already owns this allocation. Retain a view instead
+    // of doubling the payload at the largest point in the decode.
+    payload: header.subarray(idx),
   };
 }
 
-function extractHeaderWithBits(raw, info, bitsPerChannel) {
+async function extractHeaderWithBits(raw, info, bitsPerChannel) {
   const channels = Math.min(info.channels || DUCK_CHANNELS, DUCK_CHANNELS);
   const capacityBits = usableCapacityBits(info.width, info.height, channels, bitsPerChannel);
   if (capacityBits < 40) throw new Error('duck image too small');
@@ -212,22 +235,24 @@ function extractHeaderWithBits(raw, info, bitsPerChannel) {
   if (headerLen <= 0 || headerLen > MAX_DUCK_HEADER_BYTES || totalBits > capacityBits) {
     throw new Error('duck payload length invalid');
   }
-  const header = readBytesFromBits(reader, headerLen);
+  const header = await readBytesFromBits(reader, headerLen);
   return parseDuckHeader(header);
 }
 
 function trimTrailingZeroBytes(buf) {
   let end = buf.length;
   while (end > 0 && buf[end - 1] === 0) end -= 1;
-  return Buffer.from(buf.subarray(0, end));
+  return buf.subarray(0, end);
 }
 
 async function binPngPayloadToBytes(payload) {
-  const raw = await sharp(payload, { limitInputPixels: false })
+  await assertBoundedDuckPngMetadata(payload);
+  const raw = await sharp(payload, { limitInputPixels: MAX_DUCK_INPUT_PIXELS, sequentialRead: true })
     .toColourspace('srgb')
     .removeAlpha()
     .raw()
     .toBuffer();
+  if (raw.length > MAX_DUCK_RAW_BYTES) throw new Error('duck raw image exceeds memory limit');
   return trimTrailingZeroBytes(raw);
 }
 
@@ -244,20 +269,22 @@ async function tryDecodeDuckPayload(buf) {
   let raw;
   let info;
   try {
-    const result = await sharp(buf, { limitInputPixels: false })
+    await assertBoundedDuckPngMetadata(buf);
+    const result = await sharp(buf, { limitInputPixels: MAX_DUCK_INPUT_PIXELS, sequentialRead: true })
       .toColourspace('srgb')
       .removeAlpha()
       .raw()
       .toBuffer({ resolveWithObject: true });
     raw = result.data;
     info = result.info;
+    if (raw.length > MAX_DUCK_RAW_BYTES) return null;
   } catch {
     return null;
   }
 
   for (const bits of TRY_LSB_BITS) {
     try {
-      const parsed = extractHeaderWithBits(raw, info, bits);
+      const parsed = await extractHeaderWithBits(raw, info, bits);
       if (parsed.passwordProtected) {
         return {
           isDuck: true,
@@ -295,7 +322,31 @@ async function tryDecodeDuckPayload(buf) {
   return null;
 }
 
+async function assertBoundedDuckPngMetadata(buf) {
+  const metadata = await sharp(buf, { limitInputPixels: MAX_DUCK_INPUT_PIXELS, sequentialRead: true }).metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.pageHeight || metadata.height || 0);
+  const frames = Number(metadata.pages || 1);
+  const channels = Number(metadata.channels || DUCK_CHANNELS);
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height)
+    || !Number.isSafeInteger(frames) || !Number.isSafeInteger(channels)
+    || width <= 0 || height <= 0 || frames <= 0 || channels <= 0
+    || width > MAX_DUCK_DIMENSION || height > MAX_DUCK_DIMENSION
+    || frames > MAX_DUCK_FRAMES || channels > MAX_DUCK_CHANNELS) {
+    throw new Error('duck image metadata exceeds limits');
+  }
+  const pixels = BigInt(width) * BigInt(height) * BigInt(frames);
+  const rawBytes = pixels * BigInt(Math.min(channels, DUCK_CHANNELS));
+  if (pixels > BigInt(MAX_DUCK_INPUT_PIXELS) || rawBytes > BigInt(MAX_DUCK_RAW_BYTES)) {
+    throw new Error('duck image dimensions exceed memory limit');
+  }
+  return { width, height, frames, channels };
+}
+
 module.exports = {
+  MAX_DUCK_INPUT_PIXELS,
+  MAX_DUCK_RAW_BYTES,
+  assertBoundedDuckPngMetadata,
   tryDecodeDuckPayload,
   kindFromExt,
   mimeFromExt,

@@ -101,6 +101,7 @@ import {
   parseNodeSerialInput,
 } from '../utils/nodeSerialIds';
 import { resolveConnectionByNodeSerialId } from '../utils/connectByNodeSerialId';
+import { ensureCanvasEntityUids } from '../utils/canvasEntityIdentity';
 import { formatShortcutList, matchesAnyShortcut } from '../utils/keyboardShortcuts';
 import { applyNodeAlignment, type NodeAlignAction } from '../utils/nodeAlign';
 import {
@@ -206,7 +207,14 @@ import {
   type CanvasPatchPendingEnvelope,
 } from '../utils/canvasPatchMerge';
 import { collectFailedDownstreamNodeIds, getRunPlannedEdges, getRunPlannedNodeIds } from '../utils/runCenter';
-import { buildRunAttemptOriginalReplayRuntime, buildRunOriginalReplayRuntime, buildSubflowNodeRunOriginalReplayRuntime } from '../utils/runReplay';
+import {
+  buildFrozenRunIntentRuntime,
+  buildRunAttemptOriginalReplayRuntime,
+  buildRunOriginalReplayRuntime,
+  buildSubflowNodeRunOriginalReplayRuntime,
+  currentRunReplayRuntimeNodeChanges,
+  partitionRunReplayRuntimeNodeChanges,
+} from '../utils/runReplay';
 import {
   prepareRunAction,
   type RunActionKind,
@@ -322,6 +330,7 @@ interface RunNodesByOrderOptions {
   evidenceRefs?: RunEvidenceRefInput[];
   requestId?: string;
   runIntentSnapshot?: RunIntent | null;
+  suppressBlockedPreflightPresentation?: boolean;
   expectedRevision?: number;
   cost?: RunCostEstimateInput;
   preflightContextNodes?: Node[];
@@ -1441,9 +1450,9 @@ const SPECIFIC_NODES: Record<string, any> = {
   'feishu-bitable-output': FeishuBitableOutputNode,
 };
 
+const WorkflowDoctorHighlightContext = createContext<ReadonlyMap<string, WorkflowDoctorCanvasHighlight>>(new Map());
 const NODE_SERIAL_ANCHOR_LEFT = '--t8-node-serial-anchor-left';
 const NODE_SERIAL_ANCHOR_TOP = '--t8-node-serial-anchor-top';
-const WorkflowDoctorHighlightContext = createContext<ReadonlyMap<string, WorkflowDoctorCanvasHighlight>>(new Map());
 
 function findNodeSerialAnchorTarget(badgeEl: HTMLElement): HTMLElement | null {
   const parent = badgeEl.parentElement;
@@ -1916,8 +1925,6 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     excludedMaterialIds: [],
     status: 'idle',
     requestId: '',
-    responseUrl: '',
-    statusUrl: '',
     urls: [],
     imageUrl: '',
     imageUrls: [],
@@ -3571,21 +3578,24 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   const edgesRef = useRef<Edge[]>(edges);
   const setNodes = useCallback((action: SetStateAction<Node[]>) => {
     const next = advanceCanvasPatchMutation({ value: nodesRef.current, epoch: graphMutationEpochRef.current }, action);
-    nodesRef.current = next.value;
+    const identified = ensureCanvasEntityUids(next.value, 'node');
+    nodesRef.current = identified;
     graphMutationEpochRef.current = next.epoch;
-    rawSetNodes(next.value);
+    rawSetNodes(identified);
   }, []);
   const setEdges = useCallback((action: SetStateAction<Edge[]>) => {
     const next = advanceCanvasPatchMutation({ value: edgesRef.current, epoch: graphMutationEpochRef.current }, action);
-    edgesRef.current = next.value;
+    const identified = ensureCanvasEntityUids(next.value, 'edge');
+    edgesRef.current = identified;
     graphMutationEpochRef.current = next.epoch;
-    rawSetEdges(next.value);
+    rawSetEdges(identified);
   }, []);
   const [runReplayRuntime, setRunReplayRuntime] = useState<{ nodes: Node[]; edges: Edge[] } | null>(null);
+  const runReplayRuntimeRef = useRef(runReplayRuntime);
+  runReplayRuntimeRef.current = runReplayRuntime;
   const [generationHistoryOpen, setGenerationHistoryOpen] = useState(false);
   const [projectWorkbenchOpen, setProjectWorkbenchOpen] = useState(false);
   const [workflowDoctorHighlights, setWorkflowDoctorHighlights] = useState<WorkflowDoctorCanvasHighlight[]>([]);
-  const [canvasPatchConflictMessage, setCanvasPatchConflictMessage] = useState('');
   const workflowDoctorHighlightMap = useMemo(
     () => new Map(workflowDoctorHighlights.map((highlight) => [highlight.nodeId, highlight])),
     [workflowDoctorHighlights],
@@ -3593,6 +3603,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   const handleDoctorHighlightsChange = useCallback((highlights: WorkflowDoctorCanvasHighlight[]) => {
     setWorkflowDoctorHighlights(highlights);
   }, []);
+  const [canvasPatchConflictMessage, setCanvasPatchConflictMessage] = useState('');
   const generationHistoryDataKey = useMemo(() => buildGenerationHistoryDataKey(nodes), [nodes]);
   const generationHistoryCount = useMemo(() => countGenerationHistoryItems(nodes), [generationHistoryDataKey]);
   const generationHistoryItems = useMemo(
@@ -4389,6 +4400,15 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   // and terminal writes. React state alone leaves an await window where a
   // second click can create another Run and overwrite the active RunContext.
   const runExecutionGateRef = useRef<symbol | null>(null);
+  const runIntentWorkerIdRef = useRef('');
+  if (!runIntentWorkerIdRef.current) {
+    const nonce = typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    runIntentWorkerIdRef.current = `host-renderer:${nonce}`;
+  }
+  const runIntentWorkerBusyRef = useRef(false);
+  const runIntentRetryAfterRef = useRef<Map<string, number>>(new Map());
   const runPreflightDecisionRef = useRef<((confirmed: boolean) => void) | null>(null);
   const runPreflightPresentedDigestRef = useRef<string | null>(null);
   const batchTotal = useRunBusStore((s) => s.batchTotal);
@@ -8367,6 +8387,28 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     };
   }, []);
 
+  const captureRunExecutionSnapshot = useCallback((
+    runIntent: RunIntent | null | undefined,
+  ): RunPreflightExecutionSnapshot | null => {
+    const current = captureRunPreflightSnapshot();
+    if (!runIntent) return current;
+    const revision = Number(runIntent.canvasRevision);
+    if (!current
+      || current.projectId !== runIntent.projectId
+      || current.canvasId !== runIntent.canvasId
+      || !Number.isSafeInteger(revision)
+      || revision < 1) return null;
+    // A remote intent executes an immutable historical runtime. Visible rN+1
+    // edits must not invalidate rN, while an active project/canvas switch still
+    // fails every subsequent preflight/persistence/Provider guard closed.
+    return {
+      projectId: runIntent.projectId,
+      canvasId: runIntent.canvasId,
+      revision,
+      graphMutationEpoch: 0,
+    };
+  }, [captureRunPreflightSnapshot]);
+
   useEffect(() => {
     runPreflightAbortRef.current?.abort();
     settleRunPreflightDecision(false);
@@ -8388,7 +8430,8 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       logBus.warn('已有运行体检正在进行，请先完成或取消当前预览', '运行体检');
       return null;
     }
-    const snapshot = captureRunPreflightSnapshot();
+    const captureExecutionSnapshot = () => captureRunExecutionSnapshot(options.runIntentSnapshot);
+    const snapshot = captureExecutionSnapshot();
     if (!snapshot) {
       logBus.warn('当前项目或画布身份尚未稳定，已停止运行', '运行体检');
       return null;
@@ -8555,7 +8598,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
           structureCoverage = false;
         }
 
-        const current = captureRunPreflightSnapshot();
+        const current = captureExecutionSnapshot();
         return prepareRunAction({
           actionKind,
           projectId: snapshot.projectId,
@@ -8583,8 +8626,10 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         snapshot,
         signal: controller.signal,
         prepare: preparePreview,
-        captureCurrent: captureRunPreflightSnapshot,
-        present: presentRunPreflightPreview,
+        captureCurrent: captureExecutionSnapshot,
+        present: options.suppressBlockedPreflightPresentation
+          ? async () => false
+          : presentRunPreflightPreview,
         revalidate: preparePreview,
       });
       if (!authorization.authorized && authorization.reason === 'stale') {
@@ -8606,7 +8651,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       runPreflightPresentedDigestRef.current = null;
       setRunPreflightModal(null);
     }
-  }, [captureRunPreflightSnapshot, presentRunPreflightPreview]);
+  }, [captureRunExecutionSnapshot, presentRunPreflightPreview]);
 
   // ===== 批量运行 =====
   // 通用: 在指定节点子集上拓扑排序 + 串行调 runBus
@@ -8623,6 +8668,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         ...options,
         requestId: options.requestId || createCanvasNodeRunRequestId('canvas', options.actionKind || 'run'),
       };
+      const captureExecutionSnapshot = () => captureRunExecutionSnapshot(options.runIntentSnapshot);
       const plannedSubgraph = options.executionOrder
         ? { nodes: subNodes, edges: subEdges }
         : excludeRandomRouteBranchDescendants(subNodes, subEdges);
@@ -8667,9 +8713,9 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
           throw new Error('次级 Provider action 与最终体检授权范围不一致，已停止运行');
         }
       }
-      const persistenceSnapshot = captureRunPreflightSnapshot();
+      const persistenceSnapshot = captureExecutionSnapshot();
       if (!persistenceSnapshot) return -1;
-      if (!isSameRunPreflightExecutionSnapshot(persistenceSnapshot, captureRunPreflightSnapshot())) {
+      if (!isSameRunPreflightExecutionSnapshot(persistenceSnapshot, captureExecutionSnapshot())) {
         throw new Error('确认后画布、revision 或执行图发生变化，已停止创建 Run');
       }
       const plannedNodeIds = new Set(order);
@@ -8685,42 +8731,154 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         sourceHandle: edge.sourceHandle ?? null,
         targetHandle: edge.targetHandle ?? null,
       }));
+      let runIntentLease: api.CollaborationRunIntentDispatchLease | null = null;
+      if (options.runIntentId) {
+        const intent = options.runIntentSnapshot;
+        const queueRevision = Number(intent?.queueRevision);
+        if (!intent
+          || intent.id !== options.runIntentId
+          || intent.projectId !== persistenceSnapshot.projectId
+          || intent.canvasId !== persistenceSnapshot.canvasId
+          || intent.canvasRevision !== persistenceSnapshot.revision
+          || intent.status !== 'accepted'
+          || !Number.isSafeInteger(queueRevision)
+          || queueRevision < 1) {
+          throw new Error('远程运行请求缺少精确 accepted 队列快照，已停止领取租约');
+        }
+        runIntentLease = await api.leaseCollaborationRunIntent({
+          projectId: intent.projectId,
+          canvasId: intent.canvasId,
+          workerId: runIntentWorkerIdRef.current,
+          expectedIntentId: intent.id,
+          leaseDurationMs: 60_000,
+        });
+        if (!runIntentLease) {
+          logBus.info('该请求尚未轮到执行，主机将继续按队列顺序处理', '协作运行');
+          return -1;
+        }
+        const leasedRevision = Number(runIntentLease.intent.queueRevision);
+        if (runIntentLease.intent.id !== intent.id
+          || runIntentLease.intent.projectId !== intent.projectId
+          || runIntentLease.intent.canvasId !== intent.canvasId
+          || runIntentLease.intent.status !== 'dispatching'
+          || runIntentLease.lease.owner !== runIntentWorkerIdRef.current
+          || !runIntentLease.lease.token
+          || !Number.isSafeInteger(leasedRevision)
+          || leasedRevision < 1) {
+          throw new Error('主机返回了不匹配的运行租约，已停止执行');
+        }
+      }
       const { triggerRun, setBatchProgress, cancelAll, setActiveRunContext } = useRunBusStore.getState();
       let unregisterExecutionContexts: () => void = () => undefined;
       let unregisterPreparedExecutionContexts: () => void = () => undefined;
+      let stopRunIntentCancellationMonitor: () => void = () => undefined;
       let preparedRunExecution: PreparedRunExecution | null = null;
       let runContext: RunContext | null = null;
       let runId: string | null = null;
       let failedCount = 0;
       let executionStarted = false;
+      const proposedRunId = runIntentLease
+        ? `run-${typeof globalThis.crypto?.randomUUID === 'function'
+          ? globalThis.crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
+        : null;
+      const recoverOrReleaseRunIntentClaim = async () => {
+        if (!runIntentLease || !proposedRunId) return null;
+        const readIntent = async () => api.getCollaborationRunIntent(
+          runIntentLease!.intent.id,
+          runIntentLease!.intent.projectId,
+          runIntentLease!.intent.canvasId,
+        );
+        let current: RunIntent;
+        try {
+          current = await readIntent();
+        } catch {
+          // Unknown state: leave the private lease to expire. Releasing without
+          // proving the exact current revision could race a committed claim.
+          return null;
+        }
+        if (current.runId === proposedRunId) {
+          try {
+            return await api.getProjectRun(proposedRunId);
+          } catch {
+            return null;
+          }
+        }
+        if (current.runId) return null;
+        const currentRevision = Number(current.queueRevision);
+        if (current.status !== 'dispatching'
+          || !Number.isSafeInteger(currentRevision)
+          || currentRevision < 1) return null;
+        try {
+          await api.releaseCollaborationRunIntentLease(current.id, {
+            projectId: current.projectId,
+            canvasId: current.canvasId,
+            expectedQueueRevision: currentRevision,
+            workerId: runIntentLease.lease.owner,
+            leaseToken: runIntentLease.lease.token,
+            retryable: true,
+            errorCode: 'run_create_unconfirmed',
+            errorMessage: '主机未确认 Run 创建结果，已安全释放租约等待重试',
+          });
+          return null;
+        } catch {
+          // A claim and a release may race. Re-read once and resume only when
+          // the durable intent is bound to this renderer's pre-generated ID.
+          try {
+            const latest = await readIntent();
+            if (latest.runId === proposedRunId) return await api.getProjectRun(proposedRunId);
+          } catch {
+            // The lease will expire if neither durable mutation can be proven.
+          }
+          return null;
+        }
+      };
       try {
         try {
-          const run = await api.createProjectRun({
-            canvasId: persistenceSnapshot.canvasId,
-            canvasRevision: persistenceSnapshot.revision,
-            status: 'queued',
-            parentRunId: options.parentRunId,
-            summary: {
-              plannedNodeIds: recordedOrder,
-              plannedEdges,
-              authorizedNodeIds,
-              authorizedEdges,
-              nodeCount: order.length,
-              authorizedNodeCount: authorizedNodeIds.length,
-              replayMode: options.replayMode || null,
-              replaySourceRunId: options.replaySourceRunId || null,
-              replaySourceAttemptId: options.replaySourceAttemptId || null,
-              runIntentId: options.runIntentId || null,
-              runIntentRecovery: options.runIntentSnapshot?.status === 'accepted' ? 'legacy-accepted' : null,
-              runRequestId: options.requestId || null,
-              secondaryProviderActionSchema: secondaryProviderAction?.schema || null,
-              secondaryProviderActionId: secondaryProviderAction?.actionId || null,
-              secondaryProviderActionTarget: secondaryProviderAction?.target || null,
-              secondaryProviderActionDigest: secondaryProviderAction?.digest || null,
-            },
-          });
+          let run: Awaited<ReturnType<typeof api.createProjectRun>>;
+          try {
+            run = await api.createProjectRun({
+              ...(proposedRunId ? { id: proposedRunId } : {}),
+              canvasId: persistenceSnapshot.canvasId,
+              canvasRevision: persistenceSnapshot.revision,
+              status: 'queued',
+              parentRunId: options.parentRunId,
+              ...(runIntentLease ? {
+                runIntentClaim: {
+                  intentId: runIntentLease.intent.id,
+                  expectedQueueRevision: Number(runIntentLease.intent.queueRevision),
+                  leaseToken: runIntentLease.lease.token,
+                  leaseOwner: runIntentLease.lease.owner,
+                },
+              } : {}),
+              summary: {
+                plannedNodeIds: recordedOrder,
+                plannedEdges,
+                authorizedNodeIds,
+                authorizedEdges,
+                nodeCount: order.length,
+                authorizedNodeCount: authorizedNodeIds.length,
+                replayMode: options.replayMode || null,
+                replaySourceRunId: options.replaySourceRunId || null,
+                replaySourceAttemptId: options.replaySourceAttemptId || null,
+                runIntentId: options.runIntentId || null,
+                runRequestId: options.requestId || null,
+                secondaryProviderActionSchema: secondaryProviderAction?.schema || null,
+                secondaryProviderActionId: secondaryProviderAction?.actionId || null,
+                secondaryProviderActionTarget: secondaryProviderAction?.target || null,
+                secondaryProviderActionDigest: secondaryProviderAction?.digest || null,
+                secondaryProviderActionInputDigest: secondaryProviderAction && 'inputDigest' in secondaryProviderAction.params
+                  ? secondaryProviderAction.params.inputDigest
+                  : null,
+              },
+            });
+          } catch (createError) {
+            const recovered = await recoverOrReleaseRunIntentClaim();
+            if (!recovered) throw createError;
+            run = recovered;
+          }
           runId = run.id;
-          if (!isSameRunPreflightExecutionSnapshot(persistenceSnapshot, captureRunPreflightSnapshot())) {
+          if (!isSameRunPreflightExecutionSnapshot(persistenceSnapshot, captureExecutionSnapshot())) {
             failedCount += 1;
             throw new Error('创建 Run 期间画布或执行输入发生变化，已停止调用 Provider');
           }
@@ -8742,6 +8900,9 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
             secondaryProviderActionId: secondaryProviderAction?.actionId || null,
             secondaryProviderActionTarget: secondaryProviderAction?.target || null,
             secondaryProviderActionDigest: secondaryProviderAction?.digest || null,
+            secondaryProviderActionInputDigest: secondaryProviderAction && 'inputDigest' in secondaryProviderAction.params
+              ? secondaryProviderAction.params.inputDigest
+              : null,
             createdAt: Date.now(),
           };
           await api.updateProjectRun(run.id, {
@@ -8749,7 +8910,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
             startedAt: Date.now(),
             summary: { runContextId: runContext.contextId, executionMode: runContext.mode },
           });
-          if (!isSameRunPreflightExecutionSnapshot(persistenceSnapshot, captureRunPreflightSnapshot())) {
+          if (!isSameRunPreflightExecutionSnapshot(persistenceSnapshot, captureExecutionSnapshot())) {
             failedCount += 1;
             throw new Error('启动 Run 期间画布或执行输入发生变化，已停止调用 Provider');
           }
@@ -8768,7 +8929,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
             throw error;
           }
         }
-        if (!isSameRunPreflightExecutionSnapshot(persistenceSnapshot, captureRunPreflightSnapshot())) {
+        if (!isSameRunPreflightExecutionSnapshot(persistenceSnapshot, captureExecutionSnapshot())) {
           failedCount += 1;
           throw new Error('准备运行期间画布或执行输入发生变化，已停止调用 Provider');
         }
@@ -8784,6 +8945,37 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         setIsRunning(true);
         executionStarted = true;
         setBatchProgress(order.length, 0);
+        if (options.runIntentId && options.runIntentSnapshot) {
+          const monitorAbort = new AbortController();
+          let monitorTimer: number | null = null;
+          let monitorStopped = false;
+          const checkCancellation = async () => {
+            if (monitorStopped || monitorAbort.signal.aborted) return;
+            try {
+              const current = await api.getCollaborationRunIntent(
+                options.runIntentId!,
+                options.runIntentSnapshot!.projectId,
+                options.runIntentSnapshot!.canvasId,
+                { signal: monitorAbort.signal },
+              );
+              if (current.cancelRequestedAt || current.status === 'cancelled') {
+                cancelRunRef.current = true;
+                await cancelAll();
+                return;
+              }
+            } catch (error) {
+              if (monitorAbort.signal.aborted) return;
+              console.warn('[run-intent] cancellation check failed:', error);
+            }
+            if (!monitorStopped) monitorTimer = window.setTimeout(checkCancellation, 1500);
+          };
+          stopRunIntentCancellationMonitor = () => {
+            monitorStopped = true;
+            monitorAbort.abort();
+            if (monitorTimer !== null) window.clearTimeout(monitorTimer);
+          };
+          void checkCancellation();
+        }
         for (let i = 0; i < order.length; i++) {
           if (cancelRunRef.current) break;
           const id = order[i];
@@ -8818,6 +9010,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         if (failedCount === 0) failedCount = 1;
         throw error;
       } finally {
+        stopRunIntentCancellationMonitor();
         let status: ProjectRunTerminalStatus = cancelRunRef.current ? 'stopped' : failedCount > 0 ? 'failed' : 'succeeded';
         let finalizationError: unknown = null;
         if (cancelRunRef.current) {
@@ -8860,6 +9053,9 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
                 secondaryProviderActionId: secondaryProviderAction?.actionId || null,
                 secondaryProviderActionTarget: secondaryProviderAction?.target || null,
                 secondaryProviderActionDigest: secondaryProviderAction?.digest || null,
+                secondaryProviderActionInputDigest: secondaryProviderAction && 'inputDigest' in secondaryProviderAction.params
+                  ? secondaryProviderAction.params.inputDigest
+                  : null,
                 terminalEvidencePersistenceFailed: Boolean(finalizationError),
               },
             });
@@ -8887,7 +9083,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         if (runExecutionGateRef.current === executionGateToken) runExecutionGateRef.current = null;
       }
     },
-    [authorizeRunNodes, captureRunPreflightSnapshot]
+    [authorizeRunNodes, captureRunExecutionSnapshot]
   );
 
   const handleRunAll = useCallback(async () => {
@@ -9027,7 +9223,12 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     const requestedIds = failedAndDownstream
       ? plannedIds.filter((nodeId) => failedAndDownstream.has(nodeId))
       : plannedIds;
-    const runtime = buildRunOriginalReplayRuntime(run, requestedIds, `${run.id}-${Date.now()}`);
+    const runtime = buildRunOriginalReplayRuntime(
+      run,
+      requestedIds,
+      `${run.id}-${Date.now()}`,
+      nodesRef.current.map((node) => node.id),
+    );
     setRunReplayRuntime({ nodes: runtime.nodes, edges: runtime.edges });
     try {
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve())));
@@ -9057,8 +9258,19 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       return 0;
     }
     const runtime = sourceAttempt
-      ? buildRunAttemptOriginalReplayRuntime(run, nodeRun.id, sourceAttempt.id, `${run.id}-${sourceAttempt.id}-${Date.now()}`)
-      : buildSubflowNodeRunOriginalReplayRuntime(run, nodeRun.id, `${run.id}-${nodeRun.id}-${Date.now()}`);
+      ? buildRunAttemptOriginalReplayRuntime(
+        run,
+        nodeRun.id,
+        sourceAttempt.id,
+        `${run.id}-${sourceAttempt.id}-${Date.now()}`,
+        nodesRef.current.map((node) => node.id),
+      )
+      : buildSubflowNodeRunOriginalReplayRuntime(
+        run,
+        nodeRun.id,
+        `${run.id}-${nodeRun.id}-${Date.now()}`,
+        nodesRef.current.map((node) => node.id),
+      );
     if (!runtime.parentNodeRun) throw new Error('内部节点重试缺少外层实例记录');
     setRunReplayRuntime({ nodes: runtime.nodes, edges: runtime.edges });
     try {
@@ -9140,7 +9352,13 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     }
     if (nodeRun.parentNodeRunId) return executeSubflowNodeReplay(run, nodeRun, attempt);
     if (isRunning || !activeId || run.canvasId !== activeId) return 0;
-    const runtime = buildRunAttemptOriginalReplayRuntime(run, nodeRun.id, attempt.id, `${run.id}-${attempt.id}-${Date.now()}`);
+    const runtime = buildRunAttemptOriginalReplayRuntime(
+      run,
+      nodeRun.id,
+      attempt.id,
+      `${run.id}-${attempt.id}-${Date.now()}`,
+      nodesRef.current.map((node) => node.id),
+    );
     setRunReplayRuntime({ nodes: runtime.nodes, edges: runtime.edges });
     try {
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve())));
@@ -9160,49 +9378,167 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     }
   }, [activeId, executeSubflowNodeReplay, isRunning, runNodesByOrder]);
 
-  const handleAcceptRunIntent = useCallback(async (intent: import('../types/project').RunIntent) => {
-    const currentRevision = activeId ? canvasRevisionsRef.current.get(activeId) || 0 : 0;
-    if (!activeId || intent.canvasId !== activeId || intent.canvasRevision !== currentRevision) {
-      logBus.warn('远程运行请求对应的画布或版本已经变化，已标记为过期', '协作运行');
-      await api.updateCollaborationRunIntent(intent.id, { status: 'stale' });
+  const handleAcceptRunIntent = useCallback(async (sourceIntent: import('../types/project').RunIntent) => {
+    let intent = sourceIntent;
+    const markStale = async (reason: string) => {
+      const expectedQueueRevision = Number(intent.queueRevision);
+      if (!['pending', 'accepted'].includes(intent.status)
+        || !Number.isSafeInteger(expectedQueueRevision)
+        || expectedQueueRevision < 1) {
+        logBus.warn(`${reason}；权威队列 revision 不可用，未执行盲写`, '协作运行');
+        return;
+      }
+      try {
+        intent = await api.updateCollaborationRunIntent(intent.id, intent.projectId, intent.canvasId, {
+          status: 'stale',
+          expectedQueueRevision,
+        });
+      } catch (error) {
+        console.warn('[run-intent] exact stale transition lost a queue race:', error);
+      }
+      logBus.warn(reason, '协作运行');
+    };
+
+    try {
+      if (intent.status === 'pending') {
+        const expectedQueueRevision = Number(intent.queueRevision);
+        if (!Number.isSafeInteger(expectedQueueRevision) || expectedQueueRevision < 1) {
+          logBus.warn('运行请求缺少权威队列 revision，不能确认', '协作运行');
+          return false;
+        }
+        intent = await api.acceptCollaborationRunIntent(intent.id, intent.projectId, intent.canvasId, {
+          expectedQueueRevision,
+        });
+      }
+      if (intent.status !== 'accepted') return false;
+
+      if (!activeId
+        || activeProjectIdRef.current !== intent.projectId
+        || intent.canvasId !== activeId) {
+        await markStale('远程运行请求对应的项目或画布已经变化，已标记为过期');
+        return false;
+      }
+
+      // Read only the host-authorized, pinned historical document that created
+      // the intent. The visible canvas may already be rN+1; neither it nor a
+      // missing history row may be substituted for the confirmed rN input.
+      let authoritative: Awaited<ReturnType<typeof api.getCollaborationRunIntentSnapshot>>;
+      try {
+        authoritative = await api.getCollaborationRunIntentSnapshot(
+          intent.id,
+          intent.projectId,
+          intent.canvasId,
+          intent.canvasRevision,
+        );
+      } catch (error) {
+        if (error instanceof api.ApiRequestError && [404, 409].includes(error.status)) {
+          await markStale('远程运行请求的精确历史画布快照不可用，已标记为过期');
+          return false;
+        }
+        throw error;
+      }
+      if (authoritative.projectId !== intent.projectId
+        || authoritative.canvasId !== intent.canvasId
+        || Number(authoritative.revision) !== intent.canvasRevision) {
+        await markStale('远程运行请求的精确历史画布快照不匹配，已标记为过期');
+        return false;
+      }
+      const authoritativeNodes = Array.isArray(authoritative.nodes) ? authoritative.nodes as Node[] : [];
+      const authoritativeEdges = Array.isArray(authoritative.edges) ? authoritative.edges as Edge[] : [];
+      const planned = excludeRandomRouteBranchDescendants(authoritativeNodes, authoritativeEdges);
+      const requestedIds = intent.nodeIds.filter((id) => planned.nodes.some((node) => node.id === id));
+      if (intent.nodeIds.length > 0 && requestedIds.length !== intent.nodeIds.length) {
+        await markStale('远程运行请求包含权威快照中已不存在的节点，已标记为过期');
+        return false;
+      }
+      const requestedSet = new Set(requestedIds.length ? requestedIds : planned.nodes.map((node) => node.id));
+      const requestedNodes = planned.nodes.filter((node) => requestedSet.has(node.id));
+      const requestedEdges = planned.edges.filter((edge) => requestedSet.has(edge.source) && requestedSet.has(edge.target));
+      const executionOrder = topologicalSort(requestedNodes, requestedEdges, EXECUTABLE_NODE_TYPES);
+      if (!executionOrder.length) {
+        await markStale('远程运行请求没有可执行节点，已标记为过期');
+        return false;
+      }
+
+      const runtime = buildFrozenRunIntentRuntime(
+        authoritativeNodes,
+        authoritativeEdges,
+        executionOrder,
+        `${intent.id}-${intent.queueRevision || 0}`,
+        nodesRef.current.map((node) => node.id),
+      );
+      setRunReplayRuntime({ nodes: runtime.nodes, edges: runtime.edges });
+      try {
+        await new Promise<void>((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve())));
+        const autoApproved = intent.confirmationRequired === false;
+        const count = await runNodesByOrder(runtime.nodes, runtime.edges, {
+          runIntentId: intent.id,
+          actionKind: autoApproved ? 'run-intent-auto-approved' : 'run-intent',
+          requestId: intent.id,
+          runIntentSnapshot: intent,
+          suppressBlockedPreflightPresentation: autoApproved,
+          executionOrder: runtime.executionNodeIds,
+          originalNodeIdByRuntimeId: runtime.originalNodeIdByRuntimeId,
+          executionContexts: runtime.executionContexts,
+          cost: intent.estimatedCostKnown === true && intent.estimatedCost != null
+            ? { known: true, amount: Math.max(0, Number(intent.estimatedCost) || 0), currency: 'USD' }
+            : { known: false },
+          expectedRevision: intent.canvasRevision,
+          preflightContextNodes: runtime.nodes,
+          preflightContextEdges: runtime.edges,
+          preflightScopeMode: 'exact-plan',
+        });
+        return count > 0;
+      } finally {
+        setRunReplayRuntime(null);
+      }
+    } catch (error) {
+      console.warn('[run-intent] host execution failed closed:', error);
+      logBus.warn(`远程运行请求未执行：${error instanceof Error ? error.message : String(error)}`, '协作运行');
       return false;
     }
-    const requestedIds = intent.nodeIds.filter((id) => nodesRef.current.some((node) => node.id === id));
-    if (intent.nodeIds.length > 0 && requestedIds.length !== intent.nodeIds.length) {
-      logBus.warn('远程运行请求包含已删除节点，已标记为过期', '协作运行');
-      await api.updateCollaborationRunIntent(intent.id, { status: 'stale' });
-      return false;
-    }
-    const currentNodes = nodesRef.current;
-    const currentEdges = edgesRef.current;
-    const planned = excludeRandomRouteBranchDescendants(currentNodes, currentEdges);
-    const requestedSet = new Set(requestedIds.length ? requestedIds : planned.nodes.map((node) => node.id));
-    const runNodes = planned.nodes.filter((node) => requestedSet.has(node.id));
-    const runEdges = planned.edges.filter((edge) => requestedSet.has(edge.source) && requestedSet.has(edge.target));
-    if (!runNodes.some((node) => node.type && EXECUTABLE_NODE_TYPES.has(node.type))) {
-      await api.updateCollaborationRunIntent(intent.id, { status: 'stale' });
-      return false;
-    }
-    const count = await runNodesByOrder(runNodes, runEdges, {
-      runIntentId: intent.id,
-      actionKind: 'run-intent',
-      requestId: intent.id,
-      runIntentSnapshot: intent,
-      cost: intent.estimatedCostKnown === true && intent.estimatedCost != null
-        ? { known: true, amount: Math.max(0, Number(intent.estimatedCost) || 0), currency: 'USD' }
-        : { known: false },
-      expectedRevision: intent.canvasRevision,
-      preflightContextNodes: requestedIds.length ? currentNodes : planned.nodes,
-      preflightContextEdges: requestedIds.length ? currentEdges : planned.edges,
-      preflightScopeMode: requestedIds.length ? 'selection-input-context' : 'exact-plan',
-    });
-    if (count < 0) return false;
-    if (count === 0) {
-      await api.updateCollaborationRunIntent(intent.id, { status: 'stale' });
-      return false;
-    }
-    return true;
   }, [activeId, runNodesByOrder]);
+
+  useEffect(() => {
+    if (!activeId
+      || !activeProjectId
+      || !loaded
+      || loadedCanvasId !== activeId) return undefined;
+    let stopped = false;
+    let timer: number | null = null;
+    const poll = async () => {
+      if (stopped) return;
+      try {
+        if (!runIntentWorkerBusyRef.current && !runExecutionGateRef.current) {
+          const now = Date.now();
+          const intents = await api.listCollaborationRunIntents('accepted', activeProjectId, activeId);
+          const candidate = intents
+            .filter((item) => item.confirmationRequired === false
+              && (!item.nextAttemptAt || item.nextAttemptAt <= now)
+              && (runIntentRetryAfterRef.current.get(item.id) || 0) <= now)
+            .sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id))[0];
+          if (candidate) {
+            runIntentWorkerBusyRef.current = true;
+            try {
+              const completed = await handleAcceptRunIntent(candidate);
+              if (completed) runIntentRetryAfterRef.current.delete(candidate.id);
+              else runIntentRetryAfterRef.current.set(candidate.id, Date.now() + 30_000);
+            } finally {
+              runIntentWorkerBusyRef.current = false;
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('[run-intent] automatic worker poll failed:', error);
+      }
+      if (!stopped) timer = window.setTimeout(poll, 2500);
+    };
+    void poll();
+    return () => {
+      stopped = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [activeId, activeProjectId, handleAcceptRunIntent, loaded, loadedCanvasId]);
 
   // ===== ALT+拖动复制节点 =====
   // 思路: dragStart 时在原位插入占位克隆(临时ID),用户拖动过程中原位看起来有节点不动;
@@ -10119,14 +10455,33 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   // xyflow 事件
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
-      const removedIds = changes
+      const { runtimeChanges, visibleChanges } = partitionRunReplayRuntimeNodeChanges(
+        changes,
+        runReplayRuntimeRef.current?.nodes || [],
+        nodesRef.current,
+      );
+      if (runtimeChanges.length > 0) {
+        setRunReplayRuntime((current) => {
+          if (!current) return current;
+          // Match the mounted runtime by exact node ID. A delayed update from a
+          // cleared runtime must be dropped instead of entering the next intent.
+          const currentChanges = currentRunReplayRuntimeNodeChanges(current.nodes, runtimeChanges);
+          if (currentChanges.length === 0) return current;
+          return {
+            ...current,
+            nodes: applyNodeChanges(currentChanges, current.nodes),
+          };
+        });
+      }
+      if (visibleChanges.length === 0) return;
+      const removedIds = visibleChanges
         .filter((c) => c.type === 'remove' && typeof (c as any).id === 'string')
         .map((c) => (c as any).id as string);
       if (removedIds.length > 0) {
         markManualNodeDeletion(removedIds, nodesRef.current);
       }
       // 检测拖拽状态,避免拖拽中频繁压栈
-      for (const c of changes) {
+      for (const c of visibleChanges) {
         if (c.type === 'position') {
           if ((c as any).dragging === true) {
             isDraggingRef.current = true;
@@ -10136,7 +10491,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         }
       }
       setNodes((nds) => {
-        const next = applyNodeChanges(changes, nds);
+        const next = applyNodeChanges(visibleChanges, nds);
         // 同步选中数(用 next 计算更准确)
         const selCount = next.reduce((acc, n) => acc + (n.selected ? 1 : 0), 0);
         setSelectedCount(selCount);
@@ -12638,7 +12993,6 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         onUpgradeSubflowInstances={handleUpgradeSubflowInstances}
         onInsertAsset={handleInsertProjectAsset}
         onFocusNode={focusGenerationHistoryNode}
-        onDoctorHighlightsChange={handleDoctorHighlightsChange}
         onPreviewPatch={handlePreviewCanvasPatch}
         onApplyPatch={handleApplyCanvasPatch}
         onRevertPatch={handleRevertCanvasPatch}
@@ -12647,6 +13001,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         onRetryRun={handleRetryProjectRun}
         onRetrySubflowNodeRun={handleRetrySubflowNodeRun}
         onRetryRunAttempt={handleRetryProjectRunAttempt}
+        onDoctorHighlightsChange={handleDoctorHighlightsChange}
       />
       <FarmStoryPanel
         visualStyle={visualStyle}

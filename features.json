@@ -1,13 +1,13 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.5.6",
-  "lastUpdated": "2026-07-16-canvas-agent-workflow-doctor-round-5-evaluation-security-recovery",
+  "version": "2.5.8",
+  "lastUpdated": "2026-07-20-worktree-integration-snapshot-gates-unreleased",
   "sixSystemsImplementationAudit": {
-    "version": "post-v2.5.6-dev",
-    "status": "verified-unreleased",
-    "date": "2026-07-16",
-    "lastUpdated": "2026-07-16-canvas-agent-workflow-doctor-round-5-evaluation-security-recovery",
-    "completedRounds": 19,
+    "version": "2.5.8",
+    "status": "verified-local-b1-f2-f7-b2-schema32-f9-f10-uncommitted-unreleased",
+    "date": "2026-07-18",
+  "lastUpdated": "2026-07-20-f6-f7-local-regression-closure",
+    "completedRounds": 27,
     "plannedRounds": 32,
     "completedRoundIds": [
       "reusable-subflow-round-1-definition-ports-compiler",
@@ -27,42 +27,96 @@
       "canvas-agent-workflow-doctor-round-1-deterministic-diagnostics",
       "canvas-agent-workflow-doctor-round-2-canvas-patch-atomic-revert-audit",
       "canvas-agent-workflow-doctor-round-3-readonly-tools-subflow-first-plan",
-      "canvas-agent-workflow-doctor-round-4-run-evidence-preflight-diagnosis",
-      "canvas-agent-workflow-doctor-round-5-evaluation-security-recovery"
+      "canvas-agent-workflow-doctor-round-4-run-evidence-preflight-failure-diagnosis",
+      "canvas-agent-workflow-doctor-round-5-evaluation-security-recovery",
+      "collaboration-review-public-hardening-round-1-gateway-invites-roles-readonly",
+      "collaboration-review-public-hardening-round-2-websocket-presence-reconnect-sync",
+      "collaboration-review-public-hardening-round-3-structural-operations-concurrency",
+      "common-protocol-storage-permissions-round-1-protocol-migration",
+      "collaboration-review-public-hardening-round-4-collaborative-text-conflict-undo",
+      "collaboration-review-public-hardening-round-5-resumable-asset-upload-acl-quota",
+      "collaboration-review-public-hardening-round-6-review-comments-approvals",
+      "collaboration-review-public-hardening-round-7-authoritative-run-queue-audit"
     ],
     "systemStatus": {
-      "commonProtocolStoragePermissions": "partial-0-of-3",
+      "commonProtocolStoragePermissions": "completed-local-1-of-3",
       "reusableSubflows": "completed-4-of-4",
       "runCenterDebugger": "completed-5-of-5",
       "intelligentAssetCenter": "completed-5-of-5",
       "canvasAgentWorkflowDoctor": "completed-5-of-5",
-      "collaborationReviewPublicHardening": "partial-0-of-10"
+      "collaborationReviewPublicHardening": "completed-local-7-of-10"
     },
     "currentIncrement": {
-      "name": "canvas-agent-workflow-doctor-round-5-evaluation-security-recovery",
-      "status": "verified-corpus-recursive-subflows-ephemeral-highlights-red-team-three-client-recovery-performance-electron-double-cold-start-unreleased",
+      "name": "b2-schema32-f9-f10-local-hardening-and-assetcenter-p2",
+      "status": "verified-local-uncommitted-unreleased",
       "capabilities": [
-        "建立 120 个固定合成坏工作流和 20 个干净对照，共 140 例、150 个逐例诊断真值；本语料 TP=150、FP=0、FN=0，precision/recall 均为 1，120/120 自动修复得到预期图、误修为 0 且源图不变。结果只覆盖非法坐标、悬空边、自连边、重复边四个修复家族和五个 ruleId，不外推为全部 30 条规则的整体准确率。",
-        "权威校验按固定 definitionId/version 有界加载递归子工作流依赖图，检测循环、版本缺失、固定版本不一致和边界超限；validateCanvas、simulateExecutionPlan 与运行前校验复用同一结果。前端只接受摘要校验后的递归诊断，并按当前画布固定引用重新定位，不信任远端 nodeId。",
-        "Doctor 打开时以临时 DOM 标记高亮问题节点和精确端口，关闭、切换 Tab 与重载后全部清除，不写入 node.data、保存、历史或 Patch；真实浏览器验证 revision 2→2、图不变。",
-        "红队覆盖提示覆盖/系统提示披露、API Key 与本机文件读取、shell/filesystem 工具请求、编码或嵌套凭据注入、角色能力伪造、恶意 Patch、缺失/冲突 baseRevision 和过期 revision。reviewer 即使异常携带 editGraph 仍只能建议；editor 只有真实 editGraph 能力时才能进入既有 Patch 路径，任何角色均不能管理主机凭据。",
-        "三个本机回环真实编辑会话验证同 revision 竞争、409 重同步重放、删除/编辑竞争、tombstone 防隐式复活、断线后增量同步和陈旧 RunIntent 拒绝；故障恢复覆盖 Patch 提交失败全回滚、冷重开无残留、应用/个人撤回/显式保存后再重开，以及崩溃旧 Attempt 无法向同 nodeId 的新 Run 写入。该验收不等同于 F 系统的双设备或公网协作完成。"
+        "2026-07-20 工作树防复发与无损集成门已补强：项目根物理 AGENTS.md 固定 legacy F2 精确路径/分支/HEAD、core 只读、禁止破坏性 Git/生产构建和 TEMP-only 数据库测试；只读 integration audit report schema 2 在 staged 门之外，会对两项永久保护文件核对普通文件属性、精确 bytes 与 SHA-256，缺失、符号链接、尺寸或内容漂移均失败关闭。Git 检查使用进程级精确 safe.directory 与 GIT_OPTIONAL_LOCKS=0，不修改全局 Git 配置，并在 Codex 隔离账户实测。专项 12/12；真实源/core 审计保持 408 个待语义解决的碰撞，保护快照 2/2 完整。该工具门不执行 checkpoint/merge，也不增加完成轮次。",
+        "2026-07-20 当前数据库生产代码已切换到 schema 32 `physical-capacity-and-canonical-backup-contract`：migration checksum 为 a667e75b6d6ba425146a773d2a037ec55e09dbf38bc5fff62f02702996e4c999，extension fingerprint 为 bae4f62ab94effb8bafe3027c7bd037ab51e7c13f28bbdda5dcf80f8dce85276。该本地切片把 database identity、write sequence、物理容量 admission、canonical backup 自包含 freshness receipt、精确 v31→v32 lineage/备份和 7 个提交前 hard-exit + 1 个提交后控制例接入生产路径；这仍是 B2 的本地自动化切片，真实 Windows/磁盘/安装升级证据不足，不增加 completedRounds。",
+        "2026-07-20 当前 ProjectDatabase writer inventory 为 455：read 198、write 182、maintenance 43、migration 32、test-only 0；policy 为 compliant 408 / noncompliant 11 / unresolved 4 / not-applicable 32。classificationComplete/classificationGatePassed=true，policyCompliant=false，类外 raw DB 命中为 0。11 个公开 lifecycle 边界与 4 个内部 maintenance helper 已由独立 lifecycle policy 精确冻结为 15 项 allowlist，contract fingerprint 89b2c1610a9aa9c0edde07abc483bedb544c9fc3398a6a0e4627512c438cce26，生产调用暴露 0、专项 3/3；主 writer policy 继续保持 false 是分域设计，不能把 startup/recovery/backup/close 错包进业务 coordinator，也不能把独立门的通过伪装成主门为 true。",
+        "2026-07-20 全节点 RunEvent 本地门已闭合：共享 canvasNodeSchema 的 executable 标记生成唯一权威集合，当前 51 个可执行节点类型被逐项分类；每个 renderer 恰好注册一个 durable useRunTrigger，所有已审计的可见主执行入口与 Face 3D 单次/批量/编辑器导出、姿势大师单次/批量/关键帧、全景 3D 生成/画面/场景快照/控制快照/E 快捷键均先进入 Canvas 的 Run/NodeRun/Attempt 持久链，再允许输出或 Provider 回调。secondary run mode/target/requestId 进入 execution graph digest 与精确分发，Face 空返回和 Pose 吞异常造成的假成功已关闭；完整事件词汇、初始持久化失败零 Provider 调用和终态证据 fail-closed 均有自动化锁定。该结论关闭旧文档中的“全部节点事件仍缺”，但不替代真实设备/安装版执行验收。",
+        "F9 本地机制已实现公网 Base URL 校验、自检与部署安全边界：Base URL 配置接受绝对 http 或 https URL且必须以 /collab 结尾，配置为 HTTP 时非本机请求保持能力降级；health、邀请、WebSocket、微型上传和 Range 五项探针使用一次性内存 challenge，执行 DNS pin/SSRF、重定向、总时限、响应大小和零持久污染约束。非本机请求默认降级 owner/original；只有匹配已配置 HTTPS host 且由真实 TLS socket，或由精确可信代理提供无歧义 X-Forwarded-Proto:https，才恢复完整能力。配置通过有界 checksum sidecar 原子持久化并跨重启恢复，损坏/不可读/写入失败继续 fail-closed；管理面支持查看与清除，Nginx/Caddy 示例和部署说明已补齐。只有 F10 正式发布证据门强制真实 HTTPS DNS /collab。真实域名、证书、TLS/SNI 与公网反代尚未实测，因此 F9 仍未完成。",
+        "F10 本地机制已实现有界单调的分级加权 fixed-window 限速：邀请、上传请求与实际分片字节、下载请求与流式带宽、WebSocket 连接/握手/presence/heartbeat/join/未知消息分别按 IP/session 原子预算，HTTP 返回稳定 429/Retry-After，WebSocket 返回稳定 1013/retry。F8-F10 发布证据契约已升级为 t8-collaboration-release-evidence-v2：至少两台物理 Windows 各自提供匿名设备身份与独立 attestation，至少三个跨设备隔离客户端/profile/session 各自提供证据并绑定 challenge/source/time window；F8 的并发、60 秒断网、重启/backup、Electron 双设备安装升级、Chrome/Edge 与 100 MiB Range 指标绑定实际参与者。F9 强制 TLS/公共 DNS/200、邀请成功及重放/过期拒绝、三客户端 WebSocket 101、上传 SHA；F10 强制至少 100 峰值连接、10,000 操作且 100 ops/s、0 非预期断开/错误。安全采集 CLI 只在真实 Windows + 显式物理确认下创建匿名 device JSON，client 只接受 session SHA-256，并独占创建文件、脱敏控制台输出。正式 Electron/GitHub Release 仍要求真实执行全部证据；dry-run 不发布，因此 F8-F10 仍未完成。",
+        "AssetCenter 1280×768 响应式 P2 已关闭：展开完整语义设置时使用有界内部滚动，避免设置面板继续压缩素材网格；该系统严格状态保持 5/5。",
+        "2026-07-19 schema32 前置历史：recovery-generation sidecar 已拆为显式 startup bootstrap 与纯 getter；当时 sidecar 尚不含 database/project/canvas identity，也不能证明 backup freshness，这一限制现已由上方 schema32 当前记录取代。ProjectDatabase 同目录独立 SQLite exclusive owner guard 与 Electron 最早期 single-instance lock 保持有效；第二进程不能进入 migration、backup、recovery 或启动窗口。",
+        "RunRecovery recovery.started 现以 Attempt entityUid 派生确定性 Event UID，并与 NodeRun/Attempt claim 在同一事务持久化。独立 Electron 子进程在交易提交后真实 abort 再冷开，精确重放不新增事件、不增长 NodeRun/Attempt revision，终态再启 pending=0；唯一完整旧证据可采用，残缺、多重或冲突证据稳定 409 fail-close。",
+        "F2/F4/F5 前端对 workspace、heartbeat、HostPanel、评论编辑器与上传任务使用 generation/scope/request fence，拒绝旧 canvas/session/member 或 unmount 后迟到响应。F5 在首个 durable commit 和 live finalize 前都以同一 IMMEDIATE 事务重读 session、authorization epoch、capability 与 scope；漂移返回 asset_upload_authorization_changed，不刷新 grant 也不排 preview。刷新不盲取消且不用 Web Storage；只发现 exact scope active reservation，必须重选原文件并匹配 session ID、文件名、大小与全文 SHA-256 才续传，无哈希旧会话只能显式取消。",
+        "F6 reviewer/viewer 的 canvas、sync、subflow、text、WebSocket 与 Common Review 首次 mutation/exact replay HTTP 响应统一经过可见性策略。生成 request/config/params 容器和节点直接生成参数被隐藏，输出媒体 URL、缩略图、width/height/duration/format 保持原类型与结构；editor/owner 保持完整可见，大画布不会因脱敏预算而被字符串静默替换对象/数组。",
+        "2026-07-19 writer/schema31 历史基线为 416：read 196、write 158、maintenance 34、migration 28；policy 为 197 / 11 / 180 / 28。该口径已由上方 2026-07-20 的 454 方法与 schema32 当前记录取代；严格进度始终保持 27/32。",
+        "共同底座 B1 已统一节点、连线、素材、子工作流、Run/NodeRun/Attempt、评论与主机产物的稳定 entityUid、旧身份迁移、project/canvas/baseRevision 操作信封、领域权威写入、精确幂等与 tombstone；歧义旧身份保持 unverified，不猜测合并。",
+        "B2 已在冻结的 schema 29 基础上推进到 schema 30：新增真实可执行 v29→v30 migration，冻结 checksum receipt d3a817bae5cae028e8c13885180a6be23c5e3f08564827fc3397571a9275d69a、extension fingerprint d8ae5191a2f65deefd5d83222bd987732d36dcccdab4fde3329848f4a75850cb、10 组精确 v29→v30 schema lineage 和独立 pre-migration-v29 backup；v29 contract/checksum 保持不变。collaboration_operation_identities、canvas_operation_idempotency、canvas_operation_batches、collaboration_common_operation_batches、collaboration_domain_operation_idempotency、collaboration_text_update_idempotency、collaboration_text_noop_idempotency 7 张永久账本已统一纳入 project/canvas policy/usage，精确统计每个 present TEXT/JSON 的 UTF-8 BLOB 长度及每个 present INTEGER 的 8 字节，默认每画布每账本 250000 行/512 MiB，并以事务内 accounting、聚合硬门、scope/immutable/delete guard 与冷开复算 fail-close 防止绕过。graph replay/legacy repair、text update/no-op、review、subflow、host artifact 在容量拒绝时均返回稳定 507 并整事务回滚；精确重放在满额边界仍不重复计费。",
+        "B2 已按不可变 Git 证据把 v2.5.6/v2.5.7 的精确 schema 22 → v2.5.8 schema 23 `room-resource-scope` 恢复为可执行历史 migration：checksum a4b823ba46bc23817f9986c1a24618ec5372ff9365b100df95588c939e44ceca，from/to 指纹 912a9d8633ccf9c52de9bcd39d94e15ad2f055a6bfc21496be09aa5f6c21e140 → 9507c7c9d50ed8df6bc1d8bbf33cd9a4b941abc49cf3b40885a5091a241b7c45。磁盘迁移强制生成并验证非碰撞 v22 恢复备份；单/多/零画布 scope、凭据撤销、未运行 RunIntent stale/audit、resource state 和 ledger/receipt 均与历史语义一致并同事务提交，7 个提交前 checkpoint 与提交后控制例已由独立 Electron ABI 130 子进程验证。DOWN 只能恢复备份；v2.5.8 fresh schema 23 无 receipt 继续兼容，receipt 存在时严格校验，但缺失 receipt 不能被诚实宣称为删除检测。v1–21、v24–28 以及非精确 v22/v23 兼容路径仍明确保留 legacy bridge/fallback。该段是 schema30 时的历史切片；其中 RunEvent/audit 持久台账、全局容量、backup/多写 SQLITE_FULL、截断/WAL-SHM、owner/snapshot 和全节点事件等本地缺口现已分别由 schema31/32 与当前事件覆盖门关闭。B2 仍不能完成的原因只保留真实历史端点、真实 Windows/物理磁盘和 Electron 安装/升级/回退证据。",
+        "2026-07-19 schema31 历史基线为 `strict-durable-evidence-boundaries`，checksum 33922f67c1f2d5126728f4cd74db10c2e1f381b37685935564031e85d898f444、extension fingerprint 2ac8af2dfa9ec92cdf1f2a978dc9a924ad147efbb8ad2fa749df6b522628e658；旧 migration 源码保持冻结。schema32 已在 2026-07-20 按上方不可拆分边界接入生产路径。",
+        "2026-07-19 schema31 canonical backup 只能结构校验、不能证明最后一次确认写入，因此当时自动恢复统一返回 503 / backup_freshness_unknown 并保留全部候选；该历史前置缺口现由 schema32 自包含 freshness receipt 收口，但不外推为真实磁盘/安装升级已经验收。",
+        "RunRecovery 的 recovery.started、NodeRun、Attempt 三写已统一进入 run.recovery.start，同一轮 Attempt poll progress 与 provider.polling 两写统一进入 run.recovery.poll；真实 late SQLITE_FULL 时全组回滚并翻译为对应 operation 的稳定 507，Provider query、等待与广播保持事务外。每个阶段在事务内复核 Run/NodeRun/Attempt 的 active status、稳定 identity 与预期 revision，查询期间发生并发终态时稳定返回 run_recovery_state_conflict 而不复活；同一四票批次会等待全部 settle 后才释放 running fence，不能在仍有旧查询运行时启动第二轮。started 观察事件的 hard-crash 幂等已由当前确定性 Event/Attempt claim 切片关闭，但这仍不代表全部 writer policy 或 schema32 完成。",
+        "getAssetCatalogRevision 与 getAssetAccessPolicy 已从 lazy INSERT 改成纯 SELECT/default：缺失 catalog 行返回 revision 1，缺失 policy 行返回稳定 project-scope 虚拟 policy，同时保留异常旧状态中的既有 grants，不在 GET 中修复。setAssetAccessPolicy 现由 asset.permissions.update coordinator 显式初始化缺失 policy；stale CAS、ENOSPC 与 grant/catalog/organization revision 属于同一回滚边界。near/all duplicate GET 也已移除 candidate/scan 隐式写：缺 current/canonical scan 稳定返回 asset_duplicate_scan_required，显式可信本机 POST refresh 在事务外有界计算后以 source identity/content/catalog CAS、coordinator、507 和并发 no-op 原子写入；exact/cursor GET 纯读，start/end catalog CAS 拒绝混合快照。candidate 使用 canonical pair evidence；旧 cache 显式重算，catalog-only refresh 保留人工 decision 但 bump revision，证据变化重置 pending。decision DB writer 强制 candidate expectedRevision 与 page expectedCatalogRevision 双 CAS，前端另以 duplicate generation/活动页 catalog 拒绝迟到响应。semantic status/listModels 也已改为 DB + 固定三模型 manifest 的纯观察：缺行公开虚拟 not-installed/revision 1，不读取 worker 安装状态、不物化行、不排队 SHA；durable 对账只由监听后一次后台任务或可信本机 JSON POST 显式执行。三模型以事务外完整 presence/revision/rowDigest 观察和单一 asset.semantic.models.sync batch CAS 原子提交，旧观察不重试，并发 download/delete 不能被覆盖，第三写 SQLITE_FULL 全组回滚为 507。缺失 media availability repair 已拆成纯读媒体门禁与显式 maintenance，默认 session authentication 与 recovery-generation getter 也均已纯化为零写读取；这些局部证据不能外推为所有 GET 的动态调用图均已完备证明。",
+        "ProjectDatabase writer classification gate 会对重复、漏分、新方法、未知类别、manifest/source 漂移、read 分类新增的可观察 SQL/文件/transitive stateful 副作用及 unresolved callable/prototype 注入失败关闭；扫描器覆盖 alias、prototype assignment/defineProperty、call/apply、prepared fluent UPDATE RETURNING 与同名 statement shadow。2026-07-19 的 416 / 197-11-180-28 结果为历史快照，当前权威结果是上方 455 / 408-11-4-32；classification gate 为 true、policyCompliant 仍为 false。",
+        "missing-media availability repair 已从 GET/HEAD 隐式修复拆为纯读校验和显式 maintenance：媒体读取只接受 availability=available、健康状态非 missing/source-changed/corrupt 且当前普通文件完整 stat identity 与冻结 SHA-256 一致的 fd；有界进程缓存仅以完整 stat/素材身份复用校验，cache miss 在数据库事务外哈希，GET/HEAD 均 no-store 且不写库。单素材只由可信本机六字段 POST 明确校验，批量扫描复用同一最多四并发 observer；ENOENT/ENOTDIR 标记 missing，权限/瞬态/变化中状态保持 indeterminate 零写，不同 SHA 保持旧素材 missing 并要求 reindex，只有精确 SHA 可恢复 missing/unverified，既有 corrupt verdict 永不被 presence 观察洗白。数据库 writer 先复核整组 snapshot digest 与 catalog CAS，再原子更新每个 organization revision 并只 bump 一次 catalog；late SQLITE_FULL 全组回滚为脱敏 507。预览 completion/reschedule 绑定精确 claim attempt 与 claim-time 素材身份，恢复只改 job；前端只在 managed/linked 冻结身份完整时显示手动校验，项目/选择/请求代次防迟到写回，409 不自动重放。扫描容量失败、预览 kind 漂移、跨项目 status 及 observedContentHash 公开泄漏也在同一终审中失败关闭。",
+        "默认 collaboration authentication、HTTP session GET、WebSocket upgrade/message/broadcast refresh 现只调用纯读 getSession，不再隐式更新 last_seen_at。durable 续期改由严格五字段、4 KiB、UTF-8 JSON、no-store 的 POST /api/collab/session/heartbeat 显式触发；heartbeatSession 在 collaboration.session.heartbeat IMMEDIATE 边界获得写锁后重读服务器时间、expiry、authorization epoch 与 last-seen，以身份/epoch/last-seen CAS 单调更新，30 秒内请求零 writer。客户端使用独立 60 秒 recursive timeout、跨 generation single-flight 和 cleanup stale guard，与 5 秒 WebSocket liveness 分离；401/403/409 才终止或刷新，429/503/507/网络错误不打断创作。late FULL 为 canonical 脱敏 507，BUSY/LOCKED 为 503；established WS 的 authentication/resource-scope 读取异常只安全关闭 exact socket（1013）并重连，不能终止后端或泄露 DB 细节。",
+        "B3 原始代码侧清单已完成本地闭环：邀请撤销、成员移除/改角色、单会话/项目会话吊销、参与者自助轮换/登出和管理审计 UI/API 均按精确作用域落库；主机代执行具备模型白名单、每日额度、单次成本、并发与未知成本 fail-closed。动态 Origin、分级限流、总空间/MIME/JSON 深度/SSRF/日志脱敏及远程路由反向枚举已覆盖，网关 stop 只在端口真实回收后返回。新增权限 manifest 冻结 59 条公开协作路由的 method/path/scope/capability/handlerAuthority 与全部 18 个 app.use 的顺序、mount 和源码摘要，并和 Express 运行时注册表、owner/editor/reviewer/viewer 生产 capability guard 矩阵对齐；app.all、app.route、计算属性、未知方法和动态 app.use 均失败关闭。Provider JSON/SSE 有界读取与取消、原始响应/签名 URL 隔离、FAL 私有轮询注册表、Seedance NZ、安全远程素材、Duck 和文件保存边界也已收口，本地范围无残余 P0/P1；真实安装、公网 TLS/SNI、Provider 实网和资源负载仍是 B3 整轮的外部证据门，因此 completedRounds 不增加。",
+        "F4 已接通 Prompt、标题与评论文本的 Yjs/持久事务、个人撤销、离线冲突面和安全复制恢复；活动 sessionStorage 队列继续只允许精确同作用域 node.move，不把文本、评论、运行、上传或结构增删悄悄离线重放。",
+        "F5 已完成严格作用域分片上传、断点对账、暂停/恢复/取消、哈希与 CAS 去重、原子配额、代理/缩略图优先、原件双重授权、会话/授权轮换失效和多请求竞争；无派生预览时只保留安全元数据，不伪造媒体 URL。",
+        "F6 已完成 canvas/node/edge/asset/video 帧锚点、@成员、内容哈希固定附件、嵌套回复、解决/重开、审批/请求修改、revision 过期、筛选/导航、JSON/Markdown 导出、收件人通知、版本比较与完整可见性策略；显式 review lifecycle 为 draft → in_review → changes_requested/approved，resolution 与 review status 独立。审批同态重申仍要求 approve 权限，comment 权限不能移动决策 pin；legacy status 兼容入口在 HTTP、Common Operation authority 与 ProjectDatabase 三层执行同一状态机，open/resolved 只改 resolution，approved/changes_requested 只改 review status，不能绕过 draft 送审或 approved 终态。list/count/export 的授权、过滤、计数、导出和过期态水合位于同一 SQLite 读快照。所有写入同时校验 canvas 和 thread CAS。",
+        "F7 已完成房间执行策略、低风险自动批准、高风险人工确认、project/canvas 作用域严格 FIFO、不可跳队租约、续租/释放/重试/取消、最终策略复核、固定 Run ID 对账和 Run/RunIntent/Event/Audit 原子认领；租约 token/owner 不进入 DTO、WebSocket、摘要或审计。",
+        "F7 主机 Worker 只执行创建意图的权威 SQLite revision，并在不可见冻结 runtime 中运行；渲染器后续编辑不会改变已确认输入。intent/history/subflow replay runtime ID 会确定性避让当前可见节点，迟到旧 runtime 更新不能污染新 runtime 或可见画布，保留前缀的真实旧节点仍可正常更新。未知 HTTP 结果只在 durable intent 精确绑定预生成 Run ID 时恢复，否则精确释放或等待租约过期，绝不继续调用 Provider。",
+        "普通 RUN 的 cost.unknown 保持诚实提示但不再弹出确认窗口；阻断性结构/能力/素材/策略错误仍 fail-closed，历史重试/重放及高风险远程运行仍必须显式确认。"
       ],
       "verification": [
-        "最终全量 214 个测试文件、1670/1670 通过（TS 171 文件 1310 项，CJS 43 文件 360 项）。",
-        "npm run type-check -- --pretty false、public:check、rh-toolbox:check、git diff --check 与生产 build 通过，仅保留既有 empty react-vendor 和 chunk-size 提示。",
-        "真实浏览器在 1480×920 下显示 2 个节点标记、2 个端口标记；关闭/切换/重载后标记为 0，revision 2→2、图不变、控制台 error 为 0。",
-        "20,000 节点、19,999 连线的确定性链式画布诊断约 284 ms，低于 5 秒闸门；该数字只代表本机该图形和 Doctor 分析器，不代表所有图形或 UI 渲染性能。",
-        "Electron 33.4.11 目录包严格 post-build 通过：94 个 t8c、0 明文后端代码、私有扩展和充值后端均加密、Canvas Agent 完整性 5/5。包内 Electron ABI 130 实际打开 SQLite 3.53.2；同一全新 userData 连续冷启动两次均选择 18767、加载加密入口、状态接口与前端可用、正常关闭后进程树和端口为 0。schema 22、迁移 1-22 连续、quick_check=ok、foreign_key_check=0，运行证据表齐全；根 Node ABI 127 与用户现有服务保持不变。"
+        "2026-07-20 schema32 生产切换与故障矩阵：18 个串行文件 113/113 通过，冻结 schema32 checksum/extension、精确 source→target lineage、freshness receipt、physical admission、7+1 hard-exit，以及 cold PRAGMA、WAL 长读者、TEMP SQLITE_FULL、backup fsync/rename、main/WAL/journal/SHM 故障边界；新增覆盖 v31→v32 末段真实 SQLITE_FULL 的精确回滚/重试、SQLite 内部页单比特损坏与当前 schema 外键孤儿的冷开和恢复候选拒绝，且受保护证据不被改写。该结果只属于临时数据库自动化，不代表真实 Windows 磁盘和安装升级验收。",
+      "2026-07-20 writer audit：455 个方法，read 198 / write 182 / maintenance 43 / migration 32 / test-only 0；policy 408 compliant / 11 noncompliant / 4 unresolved / 32 not-applicable，classification gate=true、policyCompliant=false、external raw=0，audit --compact --check exit 0。",
+      "2026-07-20 F6/F7 最终聚焦回归：Electron F6 CJS 19/19、Node TS 9/9；F7 replay/preflight 35/35。覆盖决策重绑权限、单读快照导出、冻结历史 revision、runtime/可见节点分流、三类 replay 前缀 ID 避让和迟到 runtime 隔离。legacy patch 身份复用相邻 Patch/迁移组 46/46，冻结 patch_applied identity 在任何画布/快照写入前失败关闭。",
+      "2026-07-20 最终全量基线：Electron-as-Node CJS 184 文件 1358/1358（180 个常规文件六组 276/210/283/215/177/173，共 1334；4 个隔离服务边界文件 24/24）；TS 194 文件 1505/1505（纯 Node 190 文件 1448/1448，Electron-native 4 文件 57/57），合计 378 文件 2863/2863。最终审计发现并修复 legacy review status 生命周期绕过后，又以 8 个 F6/Common Review CJS 文件 31/31 和 3 个 F6 TS 文件 12/12 做受影响复核；type-check、writer/lifecycle policy、public/rh-toolbox、JSON、语法、worktree 与 diff 门均通过。该口径不包含 build/package，也不替代外部环境验收。",
+        "2026-07-20 全节点 RunEvent 聚焦回归：canvasNodeRunRequest 契约 6/6；与 runLifecycle、runLifecycleBackend、runPersistenceGate、runPreflightExecution、secondaryProviderAction 的六文件合并组 32/32。权威 executable 集合为 51/51，覆盖每个 renderer 唯一 listener、主/次输出入口持久链、mode/target/requestId 摘要与精确分发、完整事件词汇、持久化前置门和终态失败关闭。",
+        "2026-07-20 B2 新故障证据两文件 11/11，并已纳入 schema32 串行 18 文件 113/113：覆盖 v31→v32 末段真实 SQLITE_FULL、SQLite 页单比特损坏、当前 schema 外键孤儿、freshness fence、WAL 长读者、TEMP FULL、backup fsync/rename 与 main/WAL/journal/SHM 恢复边界。B3/F1 管理与安全 CJS Electron 组 83/83，独立 Node TS UI/参与者会话组 14/14；新增路由/中间件权限 manifest 专项 4/4、相邻安全组 37/37，各组存在重叠且不得相加。",
+        "2026-07-20 F9/F10 本地安全机制已通过聚焦测试：覆盖 http/https /collab Base URL、HTTP 公网降级、HTTPS 可信代理/直连判定、五项自检、DNS pin/SSRF、总 deadline、配置持久化与 fail-closed、分级限流、稳定 429/1013，以及只由正式发布证据门强制的真实 HTTPS DNS /collab；准确测试总数以最终主代理回归日志为准，不在此把重叠分组相加。F8-F10 evidence v2 验证器 3/3，安全 attestation 采集器 4/4；仍不代表真实双机、公网、红队或负载已经执行。",
+        "2026-07-20 AssetCenter 响应式 P2 聚焦测试 5/5 通过，1280×768 展开语义设置时改为面板内部滚动；智能素材中心严格状态保持 5/5。",
+        "2026-07-19 owner/recovery hard-crash 增量证据：RunRecovery 宽相邻组 111/111，hard-crash 专项 4/4，ProjectDatabase owner 真实多进程 5/5，Electron single-instance/packaging 与前端相邻组 36/36。锁定独立目录 guard、crash reclaim、第二实例退出/聚焦、交易提交后真实 abort、唯一 recovery.started identity、零 revision 重放与终态不复活。分组有重叠，不并入 2026-07-18 的 2294/2294 历史全量；未 build/package/Git/GitHub/core integration。",
+        "2026-07-19 F5 授权与刷新恢复增量证据：后端最终 35 assertions / 32 top-level，前端/state/F1 22/22；独立恢复实现阶段还有后端 46 项、前端/state 22 项与 writer inventory 8 项。覆盖 session revoke、epoch drift、capability removal、生产环境 hook 惰性、exact scope discovery、全文 SHA-256 绑定、legacy cancel/quota release、route ordering 和 stale generation/Abort。分组互有重叠，不得相加；type-check、语法、writer audit 与 diff gate 通过。",
+        "2026-07-19 F6 可见性增量证据：Electron F6 visibility/gateway/ProjectDatabase 最终相邻组 13/13，前端 review protocol/workspace 另为 8/8。锁定 reviewer 脱敏、editor/owner 原值、Common Review 首次 mutation/exact replay、真实 node.data 输出 metadata 形状、node.patch 直接参数、常见 token/beam/Comfy 生成字段与 25,100 节点大画布 traversal。相关 JS/CJS 语法和 git diff --check 通过；分组不并入历史全量，未 build/package/Git/GitHub/core integration。",
+        "2026-07-19 默认 session touch 纯化证据：最终隐藏 Electron-as-Node 聚焦/相邻组合为 44/44，另一个九文件相邻组 59/59；前端相邻七文件 65/65，最终聚焦 19/19；writer inventory 8/8，该切片当时的 399/read183/write151/maintenance37/migration28 与 policy 184/120/67/28 被锁定，已由当前 416 方法口径取代。覆盖 query_only HTTP/WS authenticate、显式 no-op/due heartbeat、fresh lock-time expiry、authorization/identity CAS、MAX_SAFE fail-close、late FULL/重试/BUSY、canonical 507、401/409/429/503、4 KiB/UTF-8/CORS/Fetch-Site/405、session limiter 隔离、established WS 读取异常 exact 1013、前端 StrictMode/cancel/stale generation。npm run type-check、相关语法、writer audit --check 与 git diff --check 通过；前端独立复审无 P0/P1/P2，后端最终复审见冻结交接。分组互有重叠，不并入 2026-07-18 的 2294/2294 历史全量；未 build/package/Git/GitHub/core integration。",
+        "2026-07-19 missing-media availability repair 增量证据：数据库/预览 attempt/capacity/writer 聚焦组 67/67，availability HTTP + indexer + 素材后端组 28/28，availability/preview/public-view 聚焦组 32/32，前端 D3/D4 API/集成 33/33，D3/D4/duplicate/semantic/read-purity 相邻组 50/50，npm run type-check 与 writer audit --check 通过。覆盖纯 getter、空/非空同一 snapshot、missing/source-changed/exact restore、corrupt 全观察零写、整组 CAS、A→B→A catalog、malformed metadata、late FULL 联合回滚、preview attempt/kind/startedAt fence、可信 JSON/Host/Origin/405/415/409/507、frozen-hash GET/HEAD、scan fatal capacity、project-bound status、公开脱敏、前端 epoch 与显式 mutation。以上分组相互重叠，未并入或重跑 2026-07-18 的 2294/2294 历史全量；未 build/package/Git/GitHub/core integration。",
+        "2026-07-19 semantic status/model sync 纯化证据：assetSemanticPipeline 31/31 锁定 fresh DB 下 PRAGMA query_only、重复虚拟 revision 1、零 model row、零 worker 安装状态/进度/SHA、三模型单 SELECT durable snapshot，显式 refresh 原子物化/no-op、零 stale retry、非 owner transient 完整保持、等价 download/verification loser 单一物理 owner、旧 download task 精确 durable key/revision fence、旧 SHA task replacement，以及 cancel→observe 与 observe→cancel→commit 两个 exact owner-token 窗口。owner observation 在同步 DB 提交前重验同一 task 的 active/abort/revision/status，失效只保留冻结 durable row；已有 durable downloading/verifying 且没有 owner-death 证明时，相同 key 仅 replay，新 key 与删除失败关闭。ProjectDatabase batch/refresh HTTP/D4 组合 16/16 覆盖完整 row digest CAS、等价并发 no-op、真实第三写 SQLITE_FULL 全回滚精确重试、GET 零 refresh、可信 JSON POST、hostile localhost Origin 403、packaged 固定 Vite 端口 403、开发配置 Vite Origin 200、409 不重放与脱敏 507。前端设置面板是唯一 status I/O owner，父级同步 epoch/project guard 只接受请求发起时 token；API/设置面板 11/11、前端集成/设置面板 12/12、npm run type-check、writer inventory 8/8 与 audit --check 通过，后端 owner 与前端 epoch 独立复审均无残余 P0/P1/P2。以上均为增量专项，未重跑或改写 2026-07-18 的 2294/2294 历史全量；未 build/package/Git/GitHub/core integration。",
+        "2026-07-19 writer classification gate 证据：projectDatabaseWriterInventoryB2 当前为 79/79，逐名锁定 416 个方法及 read 196/write 158/maintenance 34/migration 28/test-only 0、policy 197/11/180/28 与 external raw 0；该测试此前的 399/401 口径均已被当前结果取代。单个真实临时源码 fixture 继续覆盖新增/重复/未知 manifest 漂移、DB/FS alias、call/apply、函数/绑定/直接别名 field、声明式/赋值式 prototype 解构与 assignment/Object.assign/Object/Reflect defineProperty 系列（含 bind/call/apply）、dynamic source/spread/getter descriptor unresolved fail-close、prepared fluent UPDATE RETURNING、同名 statement shadow 终止性、类外 owner/handle/prepared alias 的 containing-function 隔离及真实 CLI exit 1；新增 exact operation 断言覆盖 canvas/core、semantic、lineage、upload/blob 和 collaboration text，动态 upload transition 锁定 normalizedAction→pause/resume/cancel。audit --compact --check exit 0；classificationComplete/classificationGatePassed=true 与 policyCompliant=false 分开记录，未加载 retained database，也未执行 build/package/Git/GitHub 写入。",
+        "2026-07-19 near-duplicate 显式 maintenance 证据：新增 projectDatabaseDuplicateRefreshB2 8/8，覆盖 query_only missing/current/legacy-format scan、同 catalog legacy stale candidate 权威清扫、all exact→near cursor 收敛与 stale cursor 零写 409、canonical 双端 evidence、catalog/evidence decision revision、candidate revision ABA、跨连接 list start/end CAS、计算期 identity drift、双连接 refresh no-op、异常第 65 个 fingerprint fail-close，以及 fresh insert/existing confirmed update 两条真实 late SQLITE_FULL 全回滚与精确重试。D3/ProjectDatabase/read-purity/writer/素材 HTTP 宽相邻 Electron ABI 为 91/91；project-assets duplicate refresh 覆盖 409/405/415/Host/Origin/双 CAS/507，前端 adapter/UI 16/16，npm run type-check 通过。聚焦与宽组有重叠，不并入 2026-07-18 的 2294/2294 历史全量。",
+        "2026-07-19 默认 metadata 纯读证据：新增 projectDatabaseReadPurityB2 3/3，使用 PRAGMA query_only=ON 与 total_changes 锁定 catalog、permissions、semantic search、exact duplicate list/detail 在默认行缺失时零写入，并覆盖残留 grant 兼容、stale 初始化回滚及最后 catalog 写入处 late ENOSPC 后的全组回滚/精确重试；writer inventory 5/5，合组 8/8。D3/D4/F6/HTTP/asset capacity 六文件相邻回归 48/48；补充宽版 ProjectDatabase、素材后端与 D4 HTTP 单次回归 51/51。",
+        "2026-07-19 backup freshness fail-close 与 RunRecovery writer closure 聚焦证据：projectDatabaseRecoveryGenerationB2 18/18、runRecoveryBackend 7/7、新增 runRecoveryStorageCapacityB2 4/4；RunRecovery/容量/writer inventory/server lifecycle 六文件相邻组 31/31。新专项覆盖 start/poll real FULL、query 期间并发终态 CAS、同批失败票与阻塞票的 allSettled singleton fence。首次三文件组合中的唯一失败是既有备份 ENOSPC 测试仍期待原始 errno，而生产公开 ABI 已统一为 507；改为校验 project_database_storage_capacity_exceeded / backup-storage-full 后专项 18/18。",
+        "2026-07-19 schema 31 基线冻结的 Electron ABI 聚焦测试 13/13 通过；该新增证据尚未并入或重跑 2026-07-18 的 2294/2294 全量统计。",
+        "2026-07-18 当前源码按正确 ABI 分组完成公开 295 个测试文件、2294/2294：Node ABI 127 纯 TS 185 文件 1402/1402，Electron ABI 130 原生依赖 TS 4 文件 57/57，Electron-as-Node CJS 106 文件 835/835。",
+        "CJS 主组 102 文件 811/811，assetD4Database 15/15、filesSaveBoundaryB3 7/7、serverOriginBoundaryB3 1/1、staticMediaBoundaryB3 1/1；最新 projectDatabase* 14 文件 194/194，历史 v22→v23 专项 26/26、migration ledger 12/12，二者组合 38/38。聚焦分组均为全量子集，不重复相加；100 MiB 上传验收因系统盘余量不足改用 E 盘临时目录后通过，未改产品阈值。所有数据库 fixture 只使用临时 DB/backup，retained 开发 DB 及其关联文件未被测试进程作为 SQLite 打开或改写。",
+        "npm run type-check -- --pretty false、npm run public:check、npm run rh-toolbox:check、当前 120 个变更 JS/CJS 的 node --check、features/package JSON 解析和 git diff --check 全部通过；服务型边界测试隔离运行且未接受 EPIPE。",
+        "B3 安全窗口覆盖 Provider 响应头/总时限/空闲/大小、JSON/SSE 复杂度、精确密钥脱敏、签名 URL/原始响应隔离、远端产物本地化、FAL 重启恢复、SSRF 逐跳复核、Origin、路径穿越、junction/符号链接、MIME 欺骗、超限/截断与 exclusive 写入失败清理。",
+        "F7 故障窗口覆盖策略从自动批准漂移为人工确认后精确退回 pending、并发 2→1 最终拒绝、跨午夜每日额度、租约泄漏扫描、固定 Run ID 未知响应、广播失败后已提交 Run 仍返回 201、取消传播和权威冻结输入。",
+	        "2026-07-20 用户明确授权后已完成两个独立本地冻结点：release/F2 工作区 e0c6679b5a22539dd5b4983165ecc3f9d5c790e1，core 工作区 4e3061094014b5dc2720d52ed178a62e8469a9d3；随后在第三工作树 codex/integration-f2-core-20260720 进行三方语义合并。127 个冲突文件、1486 个冲突块已按 F2/F3 → B1 → B2/B3 → F4/F5 → F6 → F7 → Provider/媒体 → F9/F10/配置顺序逐项解决，未使用整树 ours/theirs 覆盖。",
+	        "第三工作树提交前验证覆盖 193 个 TS 与 186 个 CJS 测试文件：共 2872 项，最终 2865 通过、7 跳过；一次整组高并发恢复文件身份时序失败已单项复测通过。npm run type-check、public:check、rh-toolbox:check、writer audit、lifecycle policy、278 个变更 JS/CJS/MJS 语法检查、JSON 解析、worktree:check 与 git diff --check 均通过。测试数据库只使用临时目录；本轮仍未执行生产 build、Electron/NSIS 打包、版本升级、推送、tag 或 GitHub Release，因此不是安装包、双设备或公网生产验收。"
       ]
     },
     "nextRequiredWork": [
-      "按 roadmap 固定顺序推进 F1：补齐网关设置页的监听网卡选择、LAN 地址/二维码、房间/成员/邀请撤销、断开全部会话和关闭端口确认，并完成角色与只读连接的完整验收。",
-      "F2-F10 的客户端离线队列、指数退避重连、通用冲突面板、个人撤销、完整审片通知/审批过期、双设备、公网 HTTPS/反代和滥用压测仍未完成；不得把 E5 的三个本机回环会话外推为这些轮次已经闭环。",
-      "继续按 roadmap.md 完成剩余 13 轮及共同底座与多人协作/审片/公网加固的真实环境门槛。",
-      "1280×768 下展开完整语义设置面板时素材网格可用高度过小；Electron 默认 1480×920 及设置折叠状态可用，后续 UI 回归需收紧该响应式 P2。"
+      "schema32 本地生产切片已经落地并通过 18 文件 113/113；全节点 RunEvent 权威清单和持久链也已由 51/51 executable coverage、canvas 契约 6/6 与六文件合并组 32/32 关闭，不得重复实现。11 个 lifecycle noncompliant 与 4 个 maintenance helper unresolved 已由独立 lifecycle policy 以 15 项精确契约、0 个生产调用暴露和专项 3/3 完成分域证明；不得为追求主 policyCompliant=true 而把 startup/recovery/backup/close 强塞进业务 coordinator。下一步只补仍缺的真实 Windows/物理磁盘和安装/升级/回退证据；主 classification gate=true、policyCompliant=false 的分域口径继续保留。",
+      "继续共同底座 B2/B3：v1–21、v24–28 和非精确兼容端点在找到真实历史源码/数据库前继续标为 legacy bridge/fallback，不得伪造。B3 会话/权限/网关/执行策略/本地红队的源码清单已经闭合；下一步只收集真实 Provider、公网 TLS/SNI、安装版端口与权限、以及资源负载证据。本轮 schema32/F9/F10 本地机制不能替代这些证据。",
+      "F8-F10 发布证据 v2 的本地失败关闭契约已完成；下一步必须由至少三个独立客户端、两台真实 Windows 设备生成各自 attestation/evidence，并实际验证同时编辑、断网 60 秒、主机重启、备份恢复和 Electron 安装版。没有这些实物证据不得勾选 F8。",
+      "F9 的 Base URL、自检、安全降级、持久化与 Nginx/Caddy 示例已完成本地自动化；仍必须在真实域名、证书和 HTTPS 反向代理下验证 health、invite、WebSocket、upload、Range 及 TLS/SNI。F10 的分级限速与发布证据门已完成本地自动化；仍必须完成真实公网红队、连接/吞吐/100MB+ 上传/10 万素材和存储增长压测。",
+	      "release/core 独立 checkpoint 与第三工作树语义合并已经完成；下一步只有在用户再次明确授权后，才能把已验证的 integration merge commit 推进核心开发分支或进入发布阶段。正式发布仍须先补真实 Windows/双设备/公网/负载证据并重新执行发布门；Electron/NSIS 正式包仍只允许构建一次。"
     ],
-    "releaseBoundary": "可复用子工作流 4/4、运行中心 5/5、智能素材中心 5/5、画布 Agent / 工作流医生 5/5 已闭环，严格总进度为 19/32；共同底座和多人协作/审片/公网加固仍有 13 轮未完成。E1-E4 已随 v2.5.6 发布，E5 当前仅完成本地源码、测试、浏览器和 Electron 目录包验收，尚未形成新的公开提交、tag、正式 NSIS 或自动更新 Release；既有 v2.5.6 Release 与 latest.yml 未被覆盖。"
+	    "releaseBoundary": "严格本地自动化进度仍为 27/32：共同底座 1/3、多人协作 7/10、智能素材中心 5/5。schema32、全节点 RunEvent、B3 原始代码侧清单、F9 本地自检/安全持久化、F10 本地分级限流/发布证据门和 AssetCenter 响应式 P2 已落地，并已从 release/F2 与 core 两个冻结点合入第三工作树；但 B2/B3 的真实历史/Windows/安装/Provider/公网/负载证据、F8 双设备/Electron、F9 真实公网 HTTPS/TLS/SNI 与 F10 真实红队/负载仍未闭环，不能增加 completedRounds。发布事实不变：E5 随 v2.5.7、只有协作 F1 随 v2.5.8 发布；其余能力仍只是本地集成开发结果。本轮未执行生产 build、Electron/NSIS 打包、版本升级、推送、tag 或 GitHub Release，不能称为生产级多人协作正式版。"
   },
   "wan27DolaSeedreamModels": {
     "version": "2.5.5",
@@ -90,6 +144,118 @@
       "实现参数同时核对 api.seedance.nz 官方 llms.txt 与本地 ComfyUI_Seedance 参考节点；测试 Key 未写入源码、设置、日志、文档或构建产物。"
     ],
     "releaseBoundary": "已纳入 v2.5.5 Electron 自动更新版；公开提交只包含 Wan/Dola 功能、测试、版本记录和 release notes，私有 sidecar 仅进入加密安装包。"
+  },
+  "electronReleaseV258": {
+    "version": "2.5.8",
+    "status": "released",
+    "date": "2026-07-17",
+    "description": "v2.5.8 Electron 自动更新版正式发布多人协作、审片及公网加固路线 F1 的独立协作网关、画布资源授权、邀请、角色/能力、只读连接和主机管理。",
+    "sourceCommit": "5aba6f7fdfeeca9f313afee3b9846f3958ed64f0",
+    "tagCommit": "5aba6f7fdfeeca9f313afee3b9846f3958ed64f0",
+    "verification": [
+      "T8_RELEASE_APPROVAL=release-2.5.8、固定 T8_RELEASE_TARGET 的 npm run dist:release 完整成功，正式包通过私有 sidecar、加密后端、运行时归档、Electron native rebuild、post-build、NSIS 和自动更新资产闸门。",
+      "发布内置最终验证与独立 release:verify 均确认 Release 非草稿、非预发布、为 Latest，tag/source commit 一致，三项远端资产 size/SHA-256 与 sealed recovery 完全一致。",
+      "发布时 origin/main 与 tag 均指向 sourceCommit；本 postrelease 记录随后仅追加发布事实，不移动 tag。"
+    ],
+    "release": {
+      "tag": "v2.5.8",
+      "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.5.8",
+      "publishedAt": "2026-07-16T21:19:14Z",
+      "isDraft": false,
+      "isPrerelease": false,
+      "isLatest": true,
+      "installer": {
+        "name": "T8-PenguinCanvas-Setup-2.5.8.exe",
+        "bytes": 1278617225,
+        "sha256": "752D58C8989B9F3DF39D7F0D03C1F84D26C9427DFB37CC6204A82993D63FD875",
+        "sha512": "k68xoB4wTaOE26r6ZUfDI5kwF41BJtZXfxEzagyhu2G8U0FwBG2Fyu4xSGW3TtoFSZrzYNq4a7mG6C7hY1fhWQ=="
+      },
+      "blockmap": {
+        "name": "T8-PenguinCanvas-Setup-2.5.8.exe.blockmap",
+        "bytes": 1332385,
+        "sha256": "F8869F1653E3AB7A0E2E345B3A3A02FA06F0B0B4B6F93F5EEE01265E21EA9863"
+      },
+      "metadata": {
+        "name": "latest.yml",
+        "bytes": 362,
+        "sha256": "7FE7EFDF1FCB0CBFD4D5DA444E23DB820FBB3C0122D79FA233798D8DF0F03427"
+      }
+    }
+  },
+  "electronReleaseV257": {
+    "version": "2.5.7",
+    "status": "released",
+    "date": "2026-07-17",
+    "description": "v2.5.7 Electron 自动更新版正式发布画布 Agent / 工作流医生 E5 的固定评测、递归子工作流诊断、临时问题定位、安全红队、多人竞争与失败恢复。",
+    "sourceCommit": "a0934fb761cb725c53dbd4c704a0c4013005e778",
+    "tagCommit": "a0934fb761cb725c53dbd4c704a0c4013005e778",
+    "verification": [
+      "T8_RELEASE_APPROVAL=release-2.5.7 npm run dist:release 完整成功，正式包通过私有 sidecar、加密后端、运行时归档、Electron native rebuild、post-build、NSIS 和自动更新资产闸门。",
+      "发布内置最终验证与独立 release:verify 均确认 Release 非草稿、非预发布、为 Latest，tag/source commit 一致，三项远端资产 size/SHA-256 与 sealed recovery 完全一致。",
+      "发布时 origin/main 与 tag 均指向 sourceCommit；本 postrelease 记录随后仅追加发布事实，不移动 tag。"
+    ],
+    "release": {
+      "tag": "v2.5.7",
+      "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.5.7",
+      "publishedAt": "2026-07-16T16:21:17Z",
+      "isDraft": false,
+      "isPrerelease": false,
+      "isLatest": true,
+      "installer": {
+        "name": "T8-PenguinCanvas-Setup-2.5.7.exe",
+        "bytes": 1278246531,
+        "sha256": "00BA00AAFFE0806290FDCE75E508BEA41FE3C75869C03AEB9C72BF04F290EA79",
+        "sha512": "Jx3ulYFlqJkSQjKg9EY2g/7zJ5OGXEZOrbGKxKqsotH8HqzHHccRvwOZFNtpJKjOA7vqn+8l2xX7FMlJcrv3Wg=="
+      },
+      "blockmap": {
+        "name": "T8-PenguinCanvas-Setup-2.5.7.exe.blockmap",
+        "bytes": 1331255,
+        "sha256": "FF4D274DD4A304DCEEC1E0C06584AF092E649F81A6EC74B802B7F4960FAFEC55"
+      },
+      "metadata": {
+        "name": "latest.yml",
+        "bytes": 362,
+        "sha256": "B7F15B1C284B5D1D99260A77665503494A4EF64894B6EFB4753C86716E974662"
+      }
+    }
+  },
+  "electronReleaseV256": {
+    "version": "2.5.6",
+    "status": "released",
+    "date": "2026-07-16",
+    "description": "v2.5.6 Electron 自动更新版正式发布画布 Agent / 工作流医生 E4 的运行证据、执行前体检和失败后诊断，并继续包含 Wan 2.7 Spicy 与 Dola Seedream 5.0 Pro。",
+    "sourceCommit": "affdaa07c04262746a4b65af96af7835d8d6744e",
+    "tagCommit": "affdaa07c04262746a4b65af96af7835d8d6744e",
+    "verification": [
+      "全量 211 个测试文件、1655/1655 通过；type-check、public:check、rh-toolbox:check、git diff --check、公开 2088 modules 与正式 Electron / 私有 2090 modules 构建通过。",
+      "正式包使用 Electron 33.4.11 编译并加入版本失败保护；93 个 .t8c、0 个明文后端 JS，EXE ProductVersion 2.5.6.0、FileVersion 2.5.6。",
+      "同一隔离 userData 双冷启动均返回 v2.5.6 / 18767，正常关闭并释放端口；SQLite schema 22、quick_check=ok、foreign_key_check=0，运行证据表完整。",
+      "内置 release:verify 与独立 GitHub API 核验均确认 Release 非草稿、非预发布、为 Latest，tag/source commit 一致且 main 随后仅追加发布记录，三项远端资产 size 与 SHA-256 digest 和本地一致。"
+    ],
+    "release": {
+      "tag": "v2.5.6",
+      "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.5.6",
+      "publishedAt": "2026-07-16T09:48:23Z",
+      "isDraft": false,
+      "isPrerelease": false,
+      "isLatest": true,
+      "installer": {
+        "name": "T8-PenguinCanvas-Setup-2.5.6.exe",
+        "bytes": 1278179610,
+        "sha256": "EAE3A7C47FC2A593141B5D4C4AA82D237785DF93E43C3154EC57E686B13B296F",
+        "sha512": "0/BeGvgqm81vNlEwI0Ds8SddmGSRZnC/FE48tgk/hHrZuRAMHkg3kJ8Vb6dHBNnl/DIwRb8daHhYbO8RX+nsWg=="
+      },
+      "blockmap": {
+        "name": "T8-PenguinCanvas-Setup-2.5.6.exe.blockmap",
+        "bytes": 1331444,
+        "sha256": "6420AAE705965492D66FAD3E45A853F78E3BB2C908384E83A64EFBB89ECADDF4"
+      },
+      "metadata": {
+        "name": "latest.yml",
+        "bytes": 362,
+        "sha256": "A8E84F2B41C58069C74604B33507BA950F0E16C7FC985087607F948E2FF5DCA2"
+      }
+    }
   },
   "electronReleaseV255": {
     "version": "2.5.5",
@@ -5024,13 +5190,13 @@
     "description": "Electron NSIS 桌面端打包链路(v1.2.1 起标准化, 严禁未明确指令主动打包)。完整产物拓扑: app.asar(electron/{main,loader,preload}.cjs + node_modules) + app.asar.unpacked(node_modules/sharp + @img) + resources/backend-enc/*.t8c(extraResources, asar 外) + resources/frontend(extraResources, asar 外)。前端版本号由 vite define 注入 __APP_VERSION__、Sidebar 左下角自动同步。",
     "scripts": {
       "encrypt": "cross-env ELECTRON_RUN_AS_NODE=1 electron electron/encrypt.cjs (必须用 Electron 内置 Node, 否则 V8 字节码版本不匹配)",
-      "prepack:enc": "npm run build && npm run encrypt (vite 前端产物 + bytenode .jsc + T8ENC1 加密 → build/backend-enc/*.t8c)",
+      "prepack:enc": "npm run rh-toolbox:check && npm run build && npm run encrypt (先核对 RH 工具箱发布清单，再生成 vite 前端产物 + bytenode .jsc + T8ENC1 加密 → build/backend-enc/*.t8c)",
       "prepack:runtimes": "node scripts/prepare-runtime-archives.cjs (把 tools/remove-ai-watermarks-runtime 与 tools/parsehub-pythonlibs 打成 tools/runtime-archives/*.zip，防止 NSIS 安装时复制几万散文件)",
-      "dist:dir": "npm run prepack:enc && npm run prepack:runtimes && electron-builder --win --x64 --dir && node electron/_post_build.cjs (只出 win-unpacked 目录, 不打 NSIS)",
-      "dist": "npm run prepack:enc && npm run prepack:runtimes && electron-builder --win --x64 && node electron/_post_build.cjs (出最终 T8-PenguinCanvas-Setup-${version}.exe)",
-      "dist:release": "node scripts/dist-release.cjs (注入 T8_REQUIRE_AI_WATERMARK_RUNTIME=1、T8_REQUIRE_PARSEHUB_RUNTIME=1、T8_REQUIRE_RUNTIME_ARCHIVES=1 与 T8_REQUIRE_UPDATE_ARTIFACTS=1，本地构建并上传 GitHub Release 自动更新资产)",
-      "release:github": "node scripts/release-github.cjs (复用当前 dist_electron 产物创建/更新 GitHub Release)",
-      "release:verify": "node scripts/verify-github-release.cjs (校验 GitHub Release 是否包含 installer/blockmap/latest.yml)"
+      "dist:dir": "npm run prepack:enc && npm run prepack:runtimes && npm run rebuild:electron && electron-builder --win --x64 --dir --config.npmRebuild=false && cross-env T8_DIRECTORY_BUILD=1 node electron/_post_build.cjs (只出 win-unpacked 目录, 不要求 NSIS 自动更新资产)",
+      "dist": "npm run prepack:enc && npm run prepack:runtimes && npm run rebuild:electron && electron-builder --win --x64 --config.npmRebuild=false && node electron/_post_build.cjs (出最终 T8-PenguinCanvas-Setup-${version}.exe)",
+      "dist:release": "node scripts/dist-release.cjs (强制注入 T8_REQUIRE_AI_WATERMARK_RUNTIME=1、T8_REQUIRE_PARSEHUB_RUNTIME=1、T8_REQUIRE_RUNTIME_ARCHIVES=1、T8_REQUIRE_UPDATE_ARTIFACTS=1、T8_REQUIRE_LOCAL_PRIVATE=1、T8_ENABLE_LOCAL_PRIVATE=1 与 T8_DISABLE_LOCAL_EXTENSIONS=0；执行 Electron native rebuild、NSIS 构建并上传 GitHub Release 自动更新资产，父环境不能降级这些闸门)",
+      "release:github": "node scripts/release-github.cjs（仅供 dist:release 继承固定 T8_RELEASE_TARGET 与本地 Git 元数据恢复记录中的 T8_RELEASE_BUILD_NONCE；必须同时匹配不可覆盖的封存 recovery、release-provenance.json、source target、唯一 nonce marker、标题、正文和三资产摘要。封存后优先复用原产物直接续发，不重建；原产物缺失时仅允许 --remote-artifacts-only 接管已完整上传且摘要完全匹配的草稿。补传每项缺失资产前重新核对同一 databaseId 的 owned draft，并使用受校验 uploadUrl 上传，不按 tag 定位、不 clobber；发布也绑定 databaseId，二次发布前重新核对。失败不自动删除/回滚远端；已公开且完全匹配时 --reconcile-only 只读对账，不重建或上传；成功后清除本地恢复记录。不假定 GitHub 仓库级 immutable releases 已启用）",
+      "release:verify": "node scripts/verify-github-release.cjs（需显式提供发布源 T8_RELEASE_TARGET；校验 tag/source、draft/prerelease/Latest、installer/blockmap/latest.yml 精确资产集合与 GitHub digest/size。默认按本地产物下载回读并校验 latest.yml 的真实 YAML 结构、版本、path、files 条目、sha512 与 size；--metadata-only --recovery-manifest 使用封存恢复记录做元数据对账，--recovery-manifest 的完整下载模式可在原产物丢失但远端三资产完整时按封存摘要和 installer SHA-512 复验）"
     },
     "runtimeEnvVars": {
       "T8PC_PACKAGED": "1=打包模式 / 0=开发模式 (由 main.cjs 在 startBackend 注入)",
@@ -5041,13 +5207,15 @@
       "T8_PARSEHUB_LIB_PATHS": "可选，覆盖 ParseHub Python 依赖搜索路径；正式包首次使用会把 resources/tools/runtime-archives/parsehub-pythonlibs.zip 解压到 runtime-cache 后使用",
       "T8_RUNTIME_ARCHIVES_DIR": "可选，覆盖内置运行时归档搜索目录；默认打包为 resources/tools/runtime-archives",
       "T8_RUNTIME_CACHE_DIR": "可选，覆盖运行时归档解压缓存目录；默认打包模式为 %APPDATA%/t8-penguin-canvas/runtime-cache",
-      "T8_ENABLE_LOCAL_PRIVATE": "可选，0=强制关闭本机 local-private/extensions 私有扩展；默认只要本机 ignored 私有扩展存在，开发环境和本机打包 release 都会自动带入。GitHub/clean clone 因为没有 local-private 目录，所以不会带充值实现。"
+      "T8_REQUIRE_LOCAL_PRIVATE": "正式 dist:release 固定为 1；缺少本机私有前端入口、后端扩展或 post-build sidecar 时失败关闭。",
+      "T8_ENABLE_LOCAL_PRIVATE": "开发环境和普通本机构建可选；0=关闭本机 local-private/extensions 私有扩展。正式 dist:release 固定为 1，不能被父环境降级。GitHub/clean clone 因为没有 local-private 目录，不包含充值实现。",
+      "T8_DISABLE_LOCAL_EXTENSIONS": "开发环境可选；1=关闭本地扩展。正式 dist:release 固定为 0，确保本机私有 sidecar 参与加密打包与后置校验。"
     },
-    "version": "2.5.1",
-    "semverVersion": "2.5.1",
+    "version": "2.5.8",
+    "semverVersion": "2.5.8",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；当前发布版本为 v2.5.1，新增庭院守卫完整主题 / 塔防面板与 Seedream V5 Pro 文生图和多图编辑；公开源码仍排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.5.1 作为 Electron 自动更新发布版本：npm run dist:release 与 npm run release:github 继续带 T8_RELEASE_APPROVAL=release-2.5.1 防误触闸，只有用户明确要求发布后才能设置该变量并发布自动更新资产。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；当前正式发布版本为 v2.5.8，新增多人协作 F1 的独立网关、画布资源授权、邀请、角色/能力、只读连接、主机管理与真实 LAN 验收，并保留 v2.5.7 的画布 Agent / 工作流医生 E5；公开源码仍排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.5.8 已使用 T8_RELEASE_APPROVAL=release-2.5.8、固定 T8_RELEASE_TARGET 的 npm run dist:release 完整发布，并通过私有 sidecar、加密后端、运行时归档、显式 Electron native rebuild、post-build、NSIS、自动更新资产、GitHub 全量回下载及独立 release:verify 闸门；GitHub Release 为非草稿、非预发布和 Latest。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",

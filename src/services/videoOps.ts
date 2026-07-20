@@ -1,4 +1,5 @@
 import type { VideoEditClip, VideoEditSettings, VideoEditTimelineRenderPlan, VideoEditTimelineV2 } from '../utils/videoEdit';
+import type { VideoEditExecutionInputSnapshot } from '../utils/videoEditExecution';
 
 function looksLikeHtmlRouteMiss(text: string): boolean {
   return /<\s*!DOCTYPE html|<\s*html/i.test(text) && /Cannot POST\s+\/api\/video-ops\//i.test(text);
@@ -116,7 +117,7 @@ export interface VideoTimelinePreviewResult {
 
 export interface VideoJobStatus {
   id: string;
-  status: 'idle' | 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+  status: 'idle' | 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'interrupted';
   progress: number;
   message?: string;
   createdAt?: number;
@@ -125,11 +126,30 @@ export interface VideoJobStatus {
   result?: VideoComposeResult;
   error?: string;
   errorCode?: 'cancelled' | 'download-failed' | 'probe-failed' | 'ffmpeg-failed' | 'invalid-input' | 'video-ops-failed';
+  durableEvidence?: VideoOperationExecutionEvidence;
+}
+
+export interface VideoOperationExecutionEvidence {
+  schema: 't8-video-operation-execution-v1';
+  projectId: string;
+  canvasId: string;
+  runId: string;
+  nodeRunId: string;
+  attemptId: string;
+  nodeId: string;
+  requestId: string;
+  actionId: 'video-edit.compose' | 'video-edit.platform-export';
+  actionTarget: 'compose' | 'platform-export';
+  actionDigest: string;
+  inputDigest: string;
+  operationIndex: number;
 }
 
 export interface VideoComposeOptions {
   timelineV2?: VideoEditTimelineV2;
   renderPlan?: VideoEditTimelineRenderPlan;
+  executionEvidence?: VideoOperationExecutionEvidence;
+  executionInput?: VideoEditExecutionInputSnapshot;
 }
 
 export function probeVideo(videoUrl: string): Promise<VideoProbeResult> {

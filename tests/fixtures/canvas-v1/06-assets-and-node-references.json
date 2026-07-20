@@ -1,0 +1,18 @@
+{
+  "canvasId": "asset-reference-board",
+  "projectId": "catalog-project",
+  "name": "素材引用与节点关联",
+  "updatedAt": 1704067200006,
+  "assets": [
+    { "id": "asset-cover-old", "kind": "image", "filename": "cover.webp", "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "metadata": { "width": 1920, "height": 1080 }, "tags": ["封面", "精选"] },
+    { "id": "asset-music-old", "kind": "audio", "filename": "theme.wav", "contentHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "metadata": { "duration": 12.5, "sampleRate": 48000 } }
+  ],
+  "nodes": [
+    { "id": "upload-cover", "type": "upload", "position": { "x": 50, "y": 50 }, "data": { "sourceAssetId": "asset-cover-old", "assetRefs": ["asset-cover-old"], "label": "封面素材" } },
+    { "id": "video-compose", "type": "video", "position": { "x": 390, "y": 50 }, "data": { "assetRefs": ["asset-cover-old", "asset-music-old"], "label": "图文成片" } }
+  ],
+  "edges": [
+    { "id": "asset-compose-edge", "source": "upload-cover", "target": "video-compose", "sourceHandle": "upload-out:image", "targetHandle": "video-in:image" }
+  ],
+  "viewport": { "x": -40, "y": 15, "zoom": 0.75 }
+}

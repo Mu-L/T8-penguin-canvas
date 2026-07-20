@@ -1,0 +1,16 @@
+{
+  "id": "tetris-theme-board",
+  "name": "俄罗斯方块主题工作区",
+  "updatedAt": 1704067200015,
+  "theme": { "name": "tetris", "mode": "dark", "palette": "neon", "hudCollapsed": false },
+  "nodes": [
+    { "id": "tetris-idea", "type": "idea", "position": { "x": 64, "y": 96 }, "data": { "label": "关卡灵感", "text": "30 级通关庆祝动画" } },
+    { "id": "tetris-video", "type": "video", "position": { "x": 430, "y": 96 }, "data": { "label": "通关动画", "duration": 5 } }
+  ],
+  "edges": [
+    { "id": "tetris-plan", "source": "tetris-idea", "target": "tetris-video", "sourceHandle": "idea-out:text", "targetHandle": "video-in:text" }
+  ],
+  "viewport": { "x": 16, "y": 24, "zoom": 1 },
+  "themeState": { "level": 30, "score": 88000, "lines": 242, "chapter": "clean", "achievements": ["combo-8", "clean-lv30"] },
+  "layoutHints": { "snapToGrid": true, "grid": [24, 24] }
+}

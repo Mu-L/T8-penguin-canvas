@@ -12,8 +12,10 @@ test('RunningHub local upload conversion accepts both input and output file URLs
 
   assert.match(proxy, /url\.startsWith\('\/files\/output\/'\)/);
   assert.match(proxy, /url\.startsWith\('\/files\/input\/'\)/);
-  assert.match(proxy, /path\.join\(config\.OUTPUT_DIR/);
-  assert.match(proxy, /path\.join\(config\.INPUT_DIR/);
+  assert.match(proxy, /const local = readMountedFileReference\(url, \[/);
+  assert.match(proxy, /\{ prefixes: \['\/files\/output\/', '\/output\/'\], root: config\.OUTPUT_DIR \}/);
+  assert.match(proxy, /\{ prefixes: \['\/files\/input\/', '\/input\/'\], root: config\.INPUT_DIR \}/);
+  assert.match(proxy, /本地素材不存在、超限或越出允许目录/);
   assert.match(runninghub, /v\.startsWith\('\/files\/output\/'\)/);
   assert.match(runninghub, /v\.startsWith\('\/files\/input\/'\)/);
 });

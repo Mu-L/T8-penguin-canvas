@@ -142,9 +142,21 @@ test('download/rebuild idempotency keys are explicit, stable when seeded, and wi
 test('settings panel is collapsed, abortable, generation guarded, explicit about downloads, and conflict safe', () => {
   const source = read('src/components/assets/AssetSemanticSettingsPanel.tsx');
   const beforeDownloadHandler = source.slice(0, source.indexOf('const downloadModel ='));
-  assert.match(source, /export interface AssetSemanticSettingsPanelProps \{\s*projectId: string;\s*onStatusChange\?: \(status: AssetSemanticStatus\) => void;/);
+  const automaticReadEffect = source.slice(
+    source.indexOf('useEffect(() => {'),
+    source.indexOf('useEffect(() => () => mutationAbortRef.current?.abort()'),
+  );
+  const modelRefreshHandler = source.slice(
+    source.indexOf('const refreshLocalModelStatus ='),
+    source.indexOf('const downloadModel ='),
+  );
+  assert.match(source, /export interface AssetSemanticSettingsPanelProps \{\s*projectId: string;\s*externalRefreshToken\?: number;\s*onStatusChange\?: \(status: AssetSemanticStatus, externalRefreshToken: number\) => void;/);
   assert.match(source, /<details className=/);
   assert.doesNotMatch(source, /<details[^>]+\sopen(?:=|\s|>)/);
+  assert.match(source, /data-asset-semantic-settings-scroll-region/);
+  assert.match(source, /max-h-\[min\(42vh,34rem\)\]/);
+  assert.match(source, /\[@media\(max-height:820px\)\]:max-h-44/);
+  assert.match(source, /overflow-y-auto overscroll-contain/);
   assert.match(source, /const projectGenerationRef = useRef\(0\)/);
   assert.match(source, /const currentProjectRef = useRef\(projectId\)/);
   assert.match(source, /new AbortController\(\)/);
@@ -152,6 +164,18 @@ test('settings panel is collapsed, abortable, generation guarded, explicit about
   assert.match(source, /document\.addEventListener\('visibilitychange'/);
   assert.match(source, /assetSemanticSettingsPollMs\(next\)/);
   assert.match(source, /getProjectAssetSemanticStatus\(projectId, \{ signal: controller\.signal \}\)/);
+  assert.match(automaticReadEffect, /const sourceRefreshToken = externalRefreshToken;[\s\S]*acceptStatus\(next, false, sourceRefreshToken\)/);
+  assert.match(source, /onStatusChangeRef\.current\?\.\(next, sourceRefreshToken\)/);
+  assert.match(source, /const sourceRefreshToken = externalRefreshTokenRef\.current;[\s\S]*applyResult\(result, sourceRefreshToken\)/);
+  assert.match(source, /acceptStatus\(next, true, sourceRefreshToken\)/);
+  assert.match(source, /\[acceptStatus, externalRefreshToken, projectId, refreshToken\]/);
+  assert.match(source, /if \(mutationAbortRef\.current\) \{\s*schedule\(ASSET_SEMANTIC_IDLE_POLL_MS\);\s*return;/);
+  assert.match(source, /readAbortRef\.current\?\.abort\(\);\s*mutationAbortRef\.current\?\.abort\(\);/);
+  assert.doesNotMatch(automaticReadEffect, /refreshProjectAssetSemanticModels\(/, 'poll and visibility refresh must stay pure GET');
+  assert.match(modelRefreshHandler, /runMutation\('model-status-refresh',[\s\S]*refreshProjectAssetSemanticModels\(projectId, \{ signal \}\)/);
+  assert.doesNotMatch(modelRefreshHandler, /window\.confirm\(/, 'local model reconciliation is explicit but does not need a confirm dialog');
+  assert.match(source, /同步本机模型状态/);
+  assert.match(source, /立即刷新（只读）/);
   assert.doesNotMatch(beforeDownloadHandler, /downloadProjectAssetSemanticModel\(/, 'polling must never auto-download');
   assert.match(source, /window\.confirm\([\s\S]*本机大模型[\s\S]*绝不会自动下载模型/);
   assert.match(source, /downloadProjectAssetSemanticModel\([\s\S]*expectedRevision: model\.revision[\s\S]*idempotencyKey:/);

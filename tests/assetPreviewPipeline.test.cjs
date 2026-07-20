@@ -53,6 +53,21 @@ function targetFromUrl(config, url) {
   return path.join(config.THUMBNAILS_DIR, ...relative.split('/').map(decodeURIComponent));
 }
 
+function previewMutationInput(claimed, options = {}) {
+  return {
+    ...options,
+    expectedAttempt: claimed,
+    expectedAssetSnapshot: claimed.availabilitySnapshot,
+  };
+}
+
+function markAssetMissing(database, assetId, now = Date.now()) {
+  const snapshot = database.getAssetAvailabilitySnapshot(assetId);
+  return database.syncAssetAvailabilityObservations([
+    { expected: snapshot, state: 'missing', reason: 'source-missing' },
+  ], { expectedCatalogRevision: snapshot.catalogRevision, now });
+}
+
 test('preview jobs are unique and expose queued, running, retrying, ready, failed and retry states', () => {
   const database = new ProjectDatabase(':memory:');
   try {
@@ -83,7 +98,7 @@ test('preview jobs are unique and expose queued, running, retrying, ready, faile
     const retrying = database.rescheduleAssetPreviewJob(first.id, {
       code: 'transient-preview-error',
       message: '上游暂时不可用',
-    }, { retryable: true, now: 110, nextAttemptAt: 210 });
+    }, previewMutationInput(attemptOne, { retryable: true, now: 110, nextAttemptAt: 210 }));
     assert.equal(retrying.status, 'retrying');
     assert.equal(database.getAsset(asset.id).metadata.previewStatus, 'retrying');
     assert.equal(database.claimNextAssetPreviewJob({ now: 209 }), null);
@@ -94,7 +109,7 @@ test('preview jobs are unique and expose queued, running, retrying, ready, faile
     const completed = database.completeAssetPreviewJob(first.id, {
       thumbnailUrl: '/files/thumbnails/asset-previews/ready.webp',
       perceptualHash: '0123456789abcdef',
-    }, { now: 220 });
+    }, previewMutationInput(attemptTwo, { now: 220 }));
     assert.equal(completed.applied, true);
     assert.equal(database.getAssetPreviewJob(first.id).status, 'succeeded');
     assert.equal(database.getAsset(asset.id).metadata.previewStatus, 'ready');
@@ -102,15 +117,15 @@ test('preview jobs are unique and expose queued, running, retrying, ready, faile
     const failing = database.enqueueAssetPreviewJob({
       assetId: asset.id,
       contentHash: asset.contentHash,
-      jobKind: 'image-preview-failure',
-      pipelineVersion: 'asset-preview-v1',
+      jobKind: 'image-preview',
+      pipelineVersion: 'asset-preview-v1-failure',
       maxAttempts: 1,
     });
-    database.claimNextAssetPreviewJob({ now: 300 });
+    const failingAttempt = database.claimNextAssetPreviewJob({ now: 300 });
     const failed = database.rescheduleAssetPreviewJob(failing.id, {
       code: 'permanent-preview-error',
       message: '无法解析素材',
-    }, { retryable: true, now: 310, nextAttemptAt: 400 });
+    }, previewMutationInput(failingAttempt, { retryable: true, now: 310, nextAttemptAt: 400 }));
     assert.equal(failed.status, 'failed');
     assert.equal(database.getAsset(asset.id).metadata.previewStatus, 'failed');
     const retried = database.retryAssetPreviewJobs(asset.id, asset.contentHash, { now: 320 });
@@ -120,6 +135,168 @@ test('preview jobs are unique and expose queued, running, retrying, ready, faile
     database.removeAssetIndex(asset.id);
     assert.equal(database.getAssetPreviewJob(first.id), null);
     assert.equal(database.getAssetPreviewJob(failing.id), null);
+  } finally {
+    database.close();
+  }
+});
+
+test('preview enqueue requires a canonical asset job kind and a positive safe integer createdAt', () => {
+  const database = new ProjectDatabase(':memory:');
+  try {
+    const asset = insertAsset(database, {
+      id: 'asset-preview-enqueue-fence',
+      contentHash: 'e'.repeat(64),
+    });
+    for (const [index, createdAt] of [100.5, -1, 0, NaN, Infinity, -Infinity, Number.MAX_SAFE_INTEGER + 1, '100'].entries()) {
+      assert.throws(
+        () => database.enqueueAssetPreviewJob({
+          id: `job-invalid-created-at-${index}`,
+          assetId: asset.id,
+          contentHash: asset.contentHash,
+          jobKind: 'image-preview',
+          pipelineVersion: 'asset-preview-v1',
+          createdAt,
+        }),
+        (error) => error?.code === 'asset_preview_created_at_invalid' && error?.status === 422,
+      );
+    }
+    assert.equal(database.listAssetPreviewJobs({ assetId: asset.id }).length, 0);
+    assert.throws(
+      () => database.enqueueAssetPreviewJob({
+        id: 'job-kind-mismatch',
+        assetId: asset.id,
+        contentHash: asset.contentHash,
+        jobKind: 'video-preview',
+        pipelineVersion: 'asset-preview-v1',
+      }),
+      (error) => error?.code === 'asset_preview_job_kind_invalid' && error?.status === 422,
+    );
+    assert.equal(database.listAssetPreviewJobs({ assetId: asset.id }).length, 0);
+
+    const queued = database.enqueueAssetPreviewJob({
+      id: 'job-created-at-default',
+      assetId: asset.id,
+      contentHash: asset.contentHash,
+      jobKind: 'image-preview',
+      pipelineVersion: 'asset-preview-v1',
+    });
+    assert.equal(Number.isSafeInteger(queued.createdAt), true);
+    assert.equal(queued.createdAt > 0, true);
+  } finally {
+    database.close();
+  }
+});
+
+test('preview kind drift terminates old jobs before claim and fences completion and reschedule after claim', () => {
+  const database = new ProjectDatabase(':memory:');
+  try {
+    const beforeClaimAsset = insertAsset(database, {
+      id: 'asset-kind-drift-before-claim',
+      contentHash: 'a'.repeat(64),
+    });
+    const beforeClaimJob = database.enqueueAssetPreviewJob({
+      id: 'job-kind-drift-before-claim',
+      assetId: beforeClaimAsset.id,
+      contentHash: beforeClaimAsset.contentHash,
+      jobKind: 'image-preview',
+      pipelineVersion: 'asset-preview-v1',
+      createdAt: 100,
+    });
+    database.upsertAsset({
+      ...database.getAsset(beforeClaimAsset.id),
+      kind: 'model3d',
+      mimeType: 'model/obj',
+      filename: 'kind-drift.obj',
+      metadata: { marker: 'kind-drift-before-claim' },
+    });
+    const beforeClaimCatalog = database.getAssetCatalogRevision(beforeClaimAsset.projectId);
+    assert.equal(database.claimNextAssetPreviewJob({ now: 200 }), null);
+    const terminalBeforeClaim = database.getAssetPreviewJob(beforeClaimJob.id);
+    assert.equal(terminalBeforeClaim.status, 'failed');
+    assert.equal(terminalBeforeClaim.errorCode, 'source-preview-kind-changed');
+    assert.equal(terminalBeforeClaim.attemptCount, 0);
+    assert.equal(database.getAsset(beforeClaimAsset.id).metadata.marker, 'kind-drift-before-claim');
+    assert.equal(database.getAssetCatalogRevision(beforeClaimAsset.projectId), beforeClaimCatalog);
+
+    const completeAsset = insertAsset(database, {
+      id: 'asset-kind-drift-complete',
+      contentHash: 'b'.repeat(64),
+    });
+    const completeJob = database.enqueueAssetPreviewJob({
+      id: 'job-kind-drift-complete',
+      assetId: completeAsset.id,
+      contentHash: completeAsset.contentHash,
+      jobKind: 'image-preview',
+      pipelineVersion: 'asset-preview-v1',
+      createdAt: 300,
+    });
+    const completeAttempt = database.claimNextAssetPreviewJob({ now: 310 });
+    assert.equal(completeAttempt.assetKind, 'image');
+    database.upsertAsset({
+      ...database.getAsset(completeAsset.id),
+      kind: 'video',
+      mimeType: 'video/mp4',
+      filename: 'kind-drift.mp4',
+      metadata: { marker: 'kind-drift-complete', previewStatus: 'queued' },
+    });
+    const completeCatalog = database.getAssetCatalogRevision(completeAsset.projectId);
+    const completed = database.completeAssetPreviewJob(
+      completeJob.id,
+      {
+        thumbnailUrl: '/files/thumbnails/must-not-apply.webp',
+        perceptualHash: '0123456789abcdef',
+      },
+      previewMutationInput(completeAttempt, { now: 320 }),
+    );
+    assert.equal(completed.applied, false);
+    assert.equal(completed.reason, 'source-content-changed');
+    assert.equal(completed.job.errorCode, 'source-preview-kind-changed');
+    assert.equal(database.getAssetPreviewJob(completeJob.id).status, 'failed');
+    const completionAssetAfter = database.getAsset(completeAsset.id);
+    assert.equal(completionAssetAfter.kind, 'video');
+    assert.equal(completionAssetAfter.metadata.marker, 'kind-drift-complete');
+    assert.equal(Object.hasOwn(completionAssetAfter.metadata, 'thumbnailUrl'), false);
+    assert.equal(database.listAssetFingerprints(completeAsset.id).length, 0);
+    assert.equal(database.getAssetCatalogRevision(completeAsset.projectId), completeCatalog);
+
+    const rescheduleAsset = insertAsset(database, {
+      id: 'asset-kind-drift-reschedule',
+      contentHash: 'c'.repeat(64),
+    });
+    const rescheduleJob = database.enqueueAssetPreviewJob({
+      id: 'job-kind-drift-reschedule',
+      assetId: rescheduleAsset.id,
+      contentHash: rescheduleAsset.contentHash,
+      jobKind: 'image-preview',
+      pipelineVersion: 'asset-preview-v1',
+      createdAt: 400,
+    });
+    const rescheduleAttempt = database.claimNextAssetPreviewJob({ now: 410 });
+    database.upsertAsset({
+      ...database.getAsset(rescheduleAsset.id),
+      kind: 'audio',
+      mimeType: 'audio/wav',
+      filename: 'kind-drift.wav',
+      metadata: { marker: 'kind-drift-reschedule', previewStatus: 'queued' },
+      perceptualHash: 'fedcba9876543210',
+      perceptualHashAlgorithm: 'dhash64-v1',
+    });
+    const fingerprintsBefore = database.listAssetFingerprints(rescheduleAsset.id);
+    const rescheduleCatalog = database.getAssetCatalogRevision(rescheduleAsset.projectId);
+    const rescheduled = database.rescheduleAssetPreviewJob(
+      rescheduleJob.id,
+      { code: 'preview-failed', message: 'old renderer failed' },
+      previewMutationInput(rescheduleAttempt, { retryable: false, now: 420 }),
+    );
+    assert.equal(rescheduled.applied, true);
+    assert.equal(rescheduled.reason, 'source-preview-kind-changed');
+    assert.equal(database.getAssetPreviewJob(rescheduleJob.id).status, 'failed');
+    const rescheduleAssetAfter = database.getAsset(rescheduleAsset.id);
+    assert.equal(rescheduleAssetAfter.kind, 'audio');
+    assert.equal(rescheduleAssetAfter.metadata.marker, 'kind-drift-reschedule');
+    assert.equal(Object.hasOwn(rescheduleAssetAfter.metadata, 'previewError'), false);
+    assert.deepEqual(database.listAssetFingerprints(rescheduleAsset.id), fingerprintsBefore);
+    assert.equal(database.getAssetCatalogRevision(rescheduleAsset.projectId), rescheduleCatalog);
   } finally {
     database.close();
   }
@@ -144,7 +321,7 @@ test('a retryable preview job stops honestly after exactly three attempts', () =
       const result = database.rescheduleAssetPreviewJob(job.id, {
         code: 'transient-preview-error',
         message: `第 ${attempt} 次失败`,
-      }, { retryable: true, now: now + 1, nextAttemptAt: now + 50 });
+      }, previewMutationInput(claimed, { retryable: true, now: now + 1, nextAttemptAt: now + 50 }));
       assert.equal(result.status, attempt < 3 ? 'retrying' : 'failed');
     }
     assert.equal(database.getAssetPreviewJob(job.id).attemptCount, 3);
@@ -156,7 +333,7 @@ test('a retryable preview job stops honestly after exactly three attempts', () =
   }
 });
 
-test('restart recovery updates both persisted jobs and current-hash asset metadata', () => {
+test('restart recovery updates persisted jobs without guessing current asset metadata', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-preview-recovery-'));
   const filename = path.join(directory, 'project.sqlite');
   let database = new ProjectDatabase(filename, { autoBackup: false });
@@ -174,9 +351,9 @@ test('restart recovery updates both persisted jobs and current-hash asset metada
     try {
       assert.deepEqual(pipeline.recovery, { recovered: 1, failed: 1 });
       assert.equal(database.getAssetPreviewJob(recoverableJob.id).status, 'retrying');
-      assert.equal(database.getAsset(recoverable.id).metadata.previewStatus, 'retrying');
+      assert.equal(database.getAsset(recoverable.id).metadata.previewStatus, 'running');
       assert.equal(database.getAssetPreviewJob(exhaustedJob.id).status, 'failed');
-      assert.equal(database.getAsset(exhausted.id).metadata.previewStatus, 'failed');
+      assert.equal(database.getAsset(exhausted.id).metadata.previewStatus, 'running');
     } finally {
       pipeline.close();
     }
@@ -191,13 +368,17 @@ test('stale preview completion never writes an old result onto changed asset con
   try {
     const asset = insertAsset(database, { id: 'asset-stale', contentHash: '4'.repeat(64) });
     const job = database.enqueueAssetPreviewJob({ assetId: asset.id, contentHash: asset.contentHash, jobKind: 'image-preview', pipelineVersion: 'v1' });
-    database.claimNextAssetPreviewJob();
+    const claimed = database.claimNextAssetPreviewJob();
     database.upsertAsset({
       ...asset,
       contentHash: '5'.repeat(64),
       metadata: { currentMarker: true, previewStatus: 'queued' },
     });
-    const result = database.completeAssetPreviewJob(job.id, { thumbnailUrl: '/files/thumbnails/stale.webp' });
+    const result = database.completeAssetPreviewJob(
+      job.id,
+      { thumbnailUrl: '/files/thumbnails/stale.webp' },
+      previewMutationInput(claimed),
+    );
     assert.equal(result.applied, false);
     assert.equal(result.reason, 'source-content-changed');
     assert.equal(database.getAssetPreviewJob(job.id).status, 'failed');
@@ -332,9 +513,13 @@ test('unavailable and corrupt assets are rejected at enqueue, retry and persiste
       pipelineVersion: pipeline.pipelineVersion,
       maxAttempts: 1,
     });
-    database.claimNextAssetPreviewJob();
-    database.rescheduleAssetPreviewJob(retryJob.id, { code: 'preview-failed', message: 'failed' }, { retryable: false });
-    database.updateAssetAvailability(retryAsset.id, 'missing', { health: 'missing' });
+    const retryAttempt = database.claimNextAssetPreviewJob();
+    database.rescheduleAssetPreviewJob(
+      retryJob.id,
+      { code: 'preview-failed', message: 'failed' },
+      previewMutationInput(retryAttempt, { retryable: false }),
+    );
+    markAssetMissing(database, retryAsset.id);
     assert.throws(
       () => pipeline.retryAsset(retryAsset.id),
       (error) => error?.code === 'asset-unavailable' && !String(error.message).includes(directory),
@@ -415,7 +600,7 @@ test('persistent jobs and ephemeral thumbnails share one active concurrency ceil
     enter('persistent');
     markPersistentStarted();
     await persistentGate;
-    database.completeAssetPreviewJob(job.id, {});
+    database.completeAssetPreviewJob(job.id, {}, previewMutationInput(job));
     leave('persistent');
   };
   try {
@@ -455,7 +640,7 @@ test('persistent preview jobs are not starved by ephemeral work and the ephemera
   const started = new Promise((resolve) => { firstStarted = resolve; });
   pipeline.runPersistentJob = async (claimed) => {
     order.push('persistent');
-    database.completeAssetPreviewJob(claimed.id, {});
+    database.completeAssetPreviewJob(claimed.id, {}, previewMutationInput(claimed));
   };
   try {
     const first = pipeline.runEphemeral(async () => {

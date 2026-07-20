@@ -28,6 +28,7 @@ async function requestJson(url, options = {}) {
 async function redeem(baseUrl, gateway, role, displayName) {
   const invite = gateway.auth.createInvite({
     projectId: 'project-e5-collaboration',
+    canvasId: 'canvas-e5',
     role,
     maxUses: 1,
   });
@@ -144,7 +145,7 @@ function graphProjection(document) {
   };
 }
 
-test('E5 three clients rebase stale additions, resolve delete/edit races, reconnect by delta, and reject stale run intent', {
+test('E5 three clients rebase stale additions, preserve an existing pinned intent, and reject a newly stale intent', {
   timeout: 20_000,
 }, async () => {
   const directory = makeDirectory('t8-e5-three-client-');
@@ -302,21 +303,28 @@ test('E5 three clients rebase stale additions, resolve delete/edit races, reconn
       opId: 'e5-change-run-target',
       clientSeq: 7,
       type: 'node.patch',
-      payload: { nodeId: 'run-image-node', dataPatch: { prompt: 'new task after old intent' } },
+      payload: { nodeId: 'run-image-node', dataPatch: { seed: 424242 } },
     });
     assert.equal(changeRunTarget.response.status, 200, JSON.stringify(changeRunTarget.payload));
     current = changeRunTarget.payload.data.document;
 
     const executionPolicy = new HostExecutionPolicy(database);
-    assert.throws(
-      () => executionPolicy.authorizeRunIntent(oldIntent.id, {
-        allowedStatuses: ['pending'],
-        requireUnclaimed: true,
-        reservationAlreadyCounted: true,
-      }),
-      (error) => error?.code === 'intent_canvas_stale'
-        && error?.details?.expectedRevision === beforeDisconnect.revision
-        && error?.details?.currentRevision === current.revision,
+    const authorizedOldIntent = executionPolicy.authorizeRunIntent(oldIntent.id, {
+      allowedStatuses: ['pending'],
+      requireUnclaimed: true,
+      reservationAlreadyCounted: true,
+    });
+    assert.equal(authorizedOldIntent.canvas.revision, beforeDisconnect.revision);
+    assert.equal(authorizedOldIntent.currentCanvas.revision, current.revision);
+    assert.equal(
+      authorizedOldIntent.canvas.nodes.find((node) => node.id === 'run-image-node')?.data?.seed,
+      undefined,
+      'the existing intent must keep its rN Provider input',
+    );
+    assert.equal(
+      authorizedOldIntent.currentCanvas.nodes.find((node) => node.id === 'run-image-node')?.data?.seed,
+      424242,
+      'the visible rN+1 input remains separate from the pinned intent',
     );
     const staleIntent = await requestJson(`${baseUrl}/api/collab/run-intents`, {
       method: 'POST',

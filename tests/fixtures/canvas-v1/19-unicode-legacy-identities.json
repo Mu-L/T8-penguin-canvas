@@ -1,0 +1,18 @@
+{
+  "canvasId": "中文 画布 旧版",
+  "projectId": "客户项目·夏季",
+  "name": "包含空格与中文旧身份",
+  "updatedAt": 1704067200019,
+  "nodes": [
+    { "id": "节点 甲", "type": "text", "position": { "x": 12, "y": 34 }, "data": { "label": "文案节点", "prompt": "海风、晚霞、企鹅" } },
+    { "id": "node/乙:输出", "type": "output", "position": { "x": 420, "y": 34 }, "data": { "label": "结果节点" } }
+  ],
+  "edges": [
+    { "id": "连线 甲→乙", "source": "节点 甲", "target": "node/乙:输出", "label": "中文关系" }
+  ],
+  "assets": [
+    { "id": "素材 海边 01", "kind": "image", "filename": "海边参考图.webp", "tags": ["海边", "企鹅"] }
+  ],
+  "viewport": { "x": 88, "y": 66, "zoom": 1.08 },
+  "customLabels": { "节点 甲": "开场", "node/乙:输出": "交付" }
+}

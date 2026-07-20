@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('node:crypto');
 
 // T8-penguin-canvas 后端配置
 // 运行模式:
@@ -10,6 +11,80 @@ const os = require('os');
 //             前端静态产物位于 T8PC_FRONTEND_DIST(默认 resources/frontend)。
 const IS_PACKAGED = process.env.T8PC_PACKAGED === '1';
 const PROJECT_DIR = path.resolve(__dirname, '..', '..');
+const DEV_MANAGEMENT_AUTHORITY_FILE = path.join(PROJECT_DIR, '.t8-collaboration-management-authority.json');
+const MANAGEMENT_AUTHORITY_SCHEMA = 't8-collaboration-management-authority-v1';
+const MANAGEMENT_AUTHORITY_CREATE_WAIT = new Int32Array(new SharedArrayBuffer(4));
+
+function normalizedManagementAuthorityToken(value) {
+  const token = String(value || '').trim();
+  return /^[A-Za-z0-9_-]{43,128}$/.test(token) ? token : '';
+}
+
+function readDevManagementAuthority() {
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(DEV_MANAGEMENT_AUTHORITY_FILE, 'utf8'));
+  } catch (error) {
+    if (error?.code === 'ENOENT') return '';
+    throw new Error('本地协作管理 authority 文件无法读取');
+  }
+  const token = parsed?.schema === MANAGEMENT_AUTHORITY_SCHEMA
+    ? normalizedManagementAuthorityToken(parsed.token)
+    : '';
+  if (!token) throw new Error('本地协作管理 authority 文件格式无效');
+  return token;
+}
+
+function readDevManagementAuthorityAfterConcurrentCreate() {
+  let lastError = null;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      const token = readDevManagementAuthority();
+      if (token) return token;
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < 19) Atomics.wait(MANAGEMENT_AUTHORITY_CREATE_WAIT, 0, 0, 10);
+  }
+  if (lastError) throw lastError;
+  throw new Error('本地协作管理 authority 文件并发创建未完成');
+}
+
+function ensureDevManagementAuthority() {
+  const existing = readDevManagementAuthority();
+  if (existing) return existing;
+  const token = crypto.randomBytes(32).toString('base64url');
+  const record = `${JSON.stringify({
+    schema: MANAGEMENT_AUTHORITY_SCHEMA,
+    version: 1,
+    token,
+  }, null, 2)}\n`;
+  try {
+    fs.writeFileSync(DEV_MANAGEMENT_AUTHORITY_FILE, record, {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+    try { fs.chmodSync(DEV_MANAGEMENT_AUTHORITY_FILE, 0o600); } catch (_) {}
+    return token;
+  } catch (error) {
+    if (error?.code === 'EEXIST') return readDevManagementAuthorityAfterConcurrentCreate();
+    throw new Error('本地协作管理 authority 文件无法安全创建');
+  }
+}
+
+function resolveManagementAuthorityToken() {
+  const injectedRaw = process.env.T8_COLLAB_MANAGEMENT_TOKEN;
+  if (injectedRaw != null) {
+    delete process.env.T8_COLLAB_MANAGEMENT_TOKEN;
+    const injected = normalizedManagementAuthorityToken(injectedRaw);
+    if (!injected) throw new Error('T8_COLLAB_MANAGEMENT_TOKEN 格式无效');
+    return injected;
+  }
+  if (IS_PACKAGED) throw new Error('打包后端缺少协作管理 authority token');
+  return ensureDevManagementAuthority();
+}
+
 function resolveAppVersion() {
   const injected = String(process.env.T8PC_APP_VERSION || '').trim();
   if (injected) return injected;
@@ -20,6 +95,21 @@ function resolveAppVersion() {
   }
 }
 const APP_VERSION = resolveAppVersion();
+
+function resolveBackendInstanceId() {
+  const injectedRaw = process.env.T8PC_BACKEND_INSTANCE_ID;
+  if (injectedRaw != null) {
+    delete process.env.T8PC_BACKEND_INSTANCE_ID;
+    const injected = String(injectedRaw || '').trim();
+    if (!/^[A-Za-z0-9_-]{43,128}$/.test(injected)) {
+      throw new Error('T8PC_BACKEND_INSTANCE_ID 格式无效');
+    }
+    return injected;
+  }
+  return crypto.randomBytes(32).toString('base64url');
+}
+
+const BACKEND_INSTANCE_ID = resolveBackendInstanceId();
 const USER_DATA = process.env.T8PC_USER_DATA && process.env.T8PC_USER_DATA.trim().length > 0
   ? process.env.T8PC_USER_DATA
   : PROJECT_DIR;
@@ -37,6 +127,8 @@ const config = {
   HOST: process.env.HOST || '127.0.0.1',
   PORT: process.env.PORT || 18766, // 注意:与主项目 18765 错开
   APP_VERSION,
+  BACKEND_INSTANCE_ID,
+  HTTP_SHUTDOWN_TIMEOUT_MS: Math.max(100, Math.min(120_000, Number.parseInt(process.env.T8PC_HTTP_SHUTDOWN_TIMEOUT_MS || '5000', 10) || 5_000)),
   NODE_ENV: process.env.NODE_ENV || (IS_PACKAGED ? 'production' : 'development'),
   IS_PACKAGED,
 
@@ -51,6 +143,7 @@ const config = {
   ASSET_PREVIEWS_DIR: path.join(DATA_ROOT, 'thumbnails', 'asset-previews'),
   ASSET_BLOB_DIR: path.join(DATA_ROOT, 'data', 'asset-blobs'),
   COLLAB_UPLOAD_TEMP_DIR: path.join(DATA_ROOT, 'data', 'collaboration-uploads'),
+  COLLAB_PUBLIC_EXPOSURE_FILE: path.join(DATA_ROOT, 'data', 'collaboration-public-exposure.json'),
   ASSET_SEMANTIC_MODELS_DIR: path.join(DATA_ROOT, 'semantic-models'),
   ASSET_SEMANTIC_WORK_DIR: path.join(DATA_ROOT, 'data', 'asset-semantic'),
   ASSET_SEMANTIC_SNAPSHOTS_DIR: path.join(DATA_ROOT, 'data', 'asset-semantic', 'snapshots'),
@@ -63,7 +156,37 @@ const config = {
   PROJECT_DB_BACKUP_FILE: path.join(DATA_ROOT, 'data', 't8-projects.sqlite3.backup'),
   COLLAB_HOST: process.env.T8_COLLAB_HOST || '127.0.0.1',
   COLLAB_PORT: Number(process.env.T8_COLLAB_PORT || 18767),
+  COLLAB_MANAGEMENT_TOKEN: resolveManagementAuthorityToken(),
   COLLAB_ALLOWED_ORIGINS: String(process.env.T8_COLLAB_ALLOWED_ORIGINS || '').split(',').map((value) => value.trim()).filter(Boolean),
+  COLLAB_PUBLIC_BASE_URL: String(process.env.T8_COLLAB_PUBLIC_BASE_URL || '').trim(),
+  // Forwarded headers are ignored unless the immediately connected proxy is
+  // explicitly listed here. Values are exact IPv4/IPv6 addresses, not hop counts.
+  COLLAB_TRUST_PROXY_ADDRESSES: String(process.env.T8_COLLAB_TRUST_PROXY_ADDRESSES || '').split(',').map((value) => value.trim()).filter(Boolean),
+  COLLAB_RATE_LIMIT_MAX_BUCKETS: Math.max(64, Math.min(65_536, Number(process.env.T8_COLLAB_RATE_LIMIT_MAX_BUCKETS) || 4_096)),
+  COLLAB_INVITE_REDEEMS_PER_MINUTE_PER_IP: Math.max(1, Math.min(1_000, Number(process.env.T8_COLLAB_INVITE_REDEEMS_PER_MINUTE_PER_IP) || 12)),
+  COLLAB_INVITE_REDEEMS_PER_MINUTE_PER_CODE: Math.max(1, Math.min(1_000, Number(process.env.T8_COLLAB_INVITE_REDEEMS_PER_MINUTE_PER_CODE) || 12)),
+  COLLAB_UPLOAD_REQUESTS_PER_MINUTE_PER_IP: Math.max(1, Math.min(10_000, Number(process.env.T8_COLLAB_UPLOAD_REQUESTS_PER_MINUTE_PER_IP) || 600)),
+  COLLAB_UPLOAD_REQUESTS_PER_MINUTE_PER_SESSION: Math.max(1, Math.min(10_000, Number(process.env.T8_COLLAB_UPLOAD_REQUESTS_PER_MINUTE_PER_SESSION) || 300)),
+  COLLAB_UPLOAD_BYTES_PER_MINUTE_PER_IP: Math.max(1024 * 1024, Math.min(64 * 1024 * 1024 * 1024, Number(process.env.T8_COLLAB_UPLOAD_BYTES_PER_MINUTE_PER_IP) || 1024 * 1024 * 1024)),
+  COLLAB_UPLOAD_BYTES_PER_MINUTE_PER_SESSION: Math.max(1024 * 1024, Math.min(32 * 1024 * 1024 * 1024, Number(process.env.T8_COLLAB_UPLOAD_BYTES_PER_MINUTE_PER_SESSION) || 512 * 1024 * 1024)),
+  COLLAB_DOWNLOAD_REQUESTS_PER_MINUTE_PER_IP: Math.max(1, Math.min(10_000, Number(process.env.T8_COLLAB_DOWNLOAD_REQUESTS_PER_MINUTE_PER_IP) || 600)),
+  COLLAB_DOWNLOAD_REQUESTS_PER_MINUTE_PER_SESSION: Math.max(1, Math.min(10_000, Number(process.env.T8_COLLAB_DOWNLOAD_REQUESTS_PER_MINUTE_PER_SESSION) || 300)),
+  COLLAB_DOWNLOAD_BYTES_PER_SECOND_PER_IP: Math.max(64 * 1024, Math.min(4 * 1024 * 1024 * 1024, Number(process.env.T8_COLLAB_DOWNLOAD_BYTES_PER_SECOND_PER_IP) || 64 * 1024 * 1024)),
+  COLLAB_DOWNLOAD_BYTES_PER_SECOND_PER_SESSION: Math.max(64 * 1024, Math.min(2 * 1024 * 1024 * 1024, Number(process.env.T8_COLLAB_DOWNLOAD_BYTES_PER_SECOND_PER_SESSION) || 32 * 1024 * 1024)),
+  COLLAB_WS_MAX_CONNECTIONS_PER_IP: Math.max(1, Math.min(1_024, Number(process.env.T8_COLLAB_WS_MAX_CONNECTIONS_PER_IP) || 64)),
+  COLLAB_WS_MAX_CONNECTIONS_PER_SESSION: Math.max(1, Math.min(128, Number(process.env.T8_COLLAB_WS_MAX_CONNECTIONS_PER_SESSION) || 8)),
+  COLLAB_WS_HANDSHAKES_PER_MINUTE_PER_IP: Math.max(1, Math.min(10_000, Number(process.env.T8_COLLAB_WS_HANDSHAKES_PER_MINUTE_PER_IP) || 120)),
+  COLLAB_WS_HANDSHAKES_PER_MINUTE_PER_SESSION: Math.max(1, Math.min(1_000, Number(process.env.T8_COLLAB_WS_HANDSHAKES_PER_MINUTE_PER_SESSION) || 60)),
+  COLLAB_WS_MESSAGES_PER_WINDOW: Math.max(1, Math.min(1_000_000, Number(process.env.T8_COLLAB_WS_MESSAGES_PER_WINDOW) || 240)),
+  COLLAB_WS_MESSAGE_WINDOW_MS: Math.max(1_000, Math.min(60_000, Number(process.env.T8_COLLAB_WS_MESSAGE_WINDOW_MS) || 10_000)),
+  COLLAB_WS_PRESENCE_MESSAGES_PER_WINDOW_PER_IP: Math.max(1, Math.min(1_000_000, Number(process.env.T8_COLLAB_WS_PRESENCE_MESSAGES_PER_WINDOW_PER_IP) || 1_200)),
+  COLLAB_WS_PRESENCE_MESSAGES_PER_WINDOW_PER_SESSION: Math.max(1, Math.min(1_000_000, Number(process.env.T8_COLLAB_WS_PRESENCE_MESSAGES_PER_WINDOW_PER_SESSION) || 600)),
+  COLLAB_WS_HEARTBEAT_MESSAGES_PER_WINDOW_PER_IP: Math.max(1, Math.min(1_000_000, Number(process.env.T8_COLLAB_WS_HEARTBEAT_MESSAGES_PER_WINDOW_PER_IP) || 600)),
+  COLLAB_WS_HEARTBEAT_MESSAGES_PER_WINDOW_PER_SESSION: Math.max(1, Math.min(1_000_000, Number(process.env.T8_COLLAB_WS_HEARTBEAT_MESSAGES_PER_WINDOW_PER_SESSION) || 120)),
+  COLLAB_WS_JOIN_MESSAGES_PER_WINDOW_PER_IP: Math.max(1, Math.min(1_000_000, Number(process.env.T8_COLLAB_WS_JOIN_MESSAGES_PER_WINDOW_PER_IP) || 120)),
+  COLLAB_WS_JOIN_MESSAGES_PER_WINDOW_PER_SESSION: Math.max(1, Math.min(1_000_000, Number(process.env.T8_COLLAB_WS_JOIN_MESSAGES_PER_WINDOW_PER_SESSION) || 30)),
+  COLLAB_WS_UNKNOWN_MESSAGES_PER_WINDOW_PER_IP: Math.max(1, Math.min(1_000_000, Number(process.env.T8_COLLAB_WS_UNKNOWN_MESSAGES_PER_WINDOW_PER_IP) || 120)),
+  COLLAB_WS_UNKNOWN_MESSAGES_PER_WINDOW_PER_SESSION: Math.max(1, Math.min(1_000_000, Number(process.env.T8_COLLAB_WS_UNKNOWN_MESSAGES_PER_WINDOW_PER_SESSION) || 60)),
   COLLAB_PROJECT_QUOTA_BYTES: Math.max(1, Number(process.env.T8_COLLAB_PROJECT_QUOTA_BYTES) || 20 * 1024 * 1024 * 1024),
   COLLAB_MEMBER_QUOTA_BYTES: Math.max(1, Number(process.env.T8_COLLAB_MEMBER_QUOTA_BYTES) || 5 * 1024 * 1024 * 1024),
   COLLAB_UPLOAD_CHUNK_BYTES: Math.max(1024 * 1024, Math.min(16 * 1024 * 1024, Number(process.env.T8_COLLAB_UPLOAD_CHUNK_BYTES) || 8 * 1024 * 1024)),
@@ -89,6 +212,7 @@ const config = {
   ASSET_PREVIEW_MAX_ATTEMPTS: Math.max(1, Math.min(3, Number.parseInt(process.env.T8PC_ASSET_PREVIEW_MAX_ATTEMPTS || '3', 10) || 3)),
   ASSET_PREVIEW_RETRY_BASE_MS: Math.max(100, Math.min(60_000, Number.parseInt(process.env.T8PC_ASSET_PREVIEW_RETRY_BASE_MS || '750', 10) || 750)),
   ASSET_PREVIEW_EPHEMERAL_QUEUE_LIMIT: Math.max(1, Math.min(256, Number.parseInt(process.env.T8PC_ASSET_PREVIEW_EPHEMERAL_QUEUE_LIMIT || '64', 10) || 64)),
+  ASSET_PREVIEW_SHUTDOWN_TIMEOUT_MS: Math.max(100, Math.min(120_000, Number.parseInt(process.env.T8PC_ASSET_PREVIEW_SHUTDOWN_TIMEOUT_MS || '10000', 10) || 10_000)),
   ASSET_PREVIEW_TEMP_MAX_AGE_MS: Math.max(60_000, Math.min(7 * 24 * 60 * 60 * 1000, Number.parseInt(process.env.T8PC_ASSET_PREVIEW_TEMP_MAX_AGE_MS || String(6 * 60 * 60 * 1000), 10) || 6 * 60 * 60 * 1000)),
   ASSET_PREVIEW_PIPELINE_VERSION: 'asset-preview-v2-phash',
   ASSET_INDEX_STABILITY_ATTEMPTS: Math.max(1, Math.min(3, Number.parseInt(process.env.T8PC_ASSET_INDEX_STABILITY_ATTEMPTS || '2', 10) || 2)),

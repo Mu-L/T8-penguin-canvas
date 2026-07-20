@@ -32,7 +32,16 @@ async function patchJson(url, body) {
   return { response, body: await response.json() };
 }
 
-test('NodeRun and Attempt terminal evidence commits atomically and rolls back with its event', async (t) => {
+async function postJson(url, body) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return { response, body: await response.json() };
+}
+
+test('NodeRun creation, state transitions, and terminal evidence commit atomically with their events', async (t) => {
   const database = new ProjectDatabase(':memory:', { autoBackup: false });
   t.after(() => database.close());
   const run = database.createRun({ projectId: 'project-terminal', canvasId: 'canvas-terminal', status: 'running' });
@@ -65,12 +74,71 @@ test('NodeRun and Attempt terminal evidence commits atomically and rolls back wi
   t.after(() => closeServer(server));
   const baseUrl = `http://127.0.0.1:${server.address().port}/api/project-runs`;
 
+  const appendRunEvent = database.appendRunEvent.bind(database);
+  database.appendRunEvent = (runId, event) => {
+    if (event.nodeRunId === 'node-create-rollback' && event.type === 'node.queued') {
+      throw new Error('forced queued event failure');
+    }
+    return appendRunEvent(runId, event);
+  };
+  const failedCreate = await postJson(`${baseUrl}/${run.id}/nodes`, {
+    id: 'node-create-rollback',
+    nodeId: 'provider-node-create-rollback',
+    inputSnapshot: { prompt: 'must roll back' },
+  });
+  assert.equal(failedCreate.response.status, 400);
+  assert.match(failedCreate.body.error, /forced queued event failure/);
+  assert.equal(database.getNodeRun('node-create-rollback'), null);
+  assert.equal(database.getRunEvents(run.id, 0).some((event) => event.nodeRunId === 'node-create-rollback'), false);
+
+  database.appendRunEvent = appendRunEvent;
+  const created = await postJson(`${baseUrl}/${run.id}/nodes`, {
+    id: 'node-create-commit',
+    nodeId: 'provider-node-create-commit',
+    inputSnapshot: { prompt: 'commit atomically' },
+  });
+  assert.equal(created.response.status, 201);
+  assert.equal(database.getNodeRun('node-create-commit').status, 'queued');
+  assert.deepEqual(
+    database.getRunEvents(run.id, 0).filter((event) => event.nodeRunId === 'node-create-commit').map((event) => event.type),
+    ['node.queued'],
+  );
+
+  const transitionNode = database.createNodeRun({
+    id: 'node-transition-rollback',
+    runId: run.id,
+    nodeId: 'provider-node-transition-rollback',
+    status: 'queued',
+  });
+  database.appendRunEvent = (runId, event) => {
+    if (event.nodeRunId === transitionNode.id && event.type === 'node.started') {
+      throw new Error('forced transition event failure');
+    }
+    return appendRunEvent(runId, event);
+  };
+  const failedTransition = await patchJson(`${baseUrl}/${run.id}/nodes/${transitionNode.id}`, {
+    status: 'running',
+  });
+  assert.equal(failedTransition.response.status, 400);
+  assert.match(failedTransition.body.error, /forced transition event failure/);
+  assert.equal(database.getNodeRun(transitionNode.id).status, 'queued');
+  assert.equal(database.getNodeRun(transitionNode.id).revision, transitionNode.revision);
+  assert.equal(database.getRunEvents(run.id, 0).some((event) => event.nodeRunId === transitionNode.id), false);
+  database.appendRunEvent = appendRunEvent;
+
   const succeeded = await patchJson(
     `${baseUrl}/${run.id}/nodes/${nodeRun.id}/attempts/${attempt.id}/terminal`,
     {
       status: 'succeeded',
       timestamps: { finishedAt: 1234 },
-      eventPayload: { executionToken: 'token-a', contextId: 'context-a' },
+      eventPayload: {
+        executionToken: 'token-a',
+        contextId: 'context-a',
+        nodeId: 'forged-node',
+        attemptId: 'forged-attempt',
+        status: 'failed',
+        outputRefs: ['forged-output-ref'],
+      },
     },
   );
   assert.equal(succeeded.response.status, 200);
@@ -83,10 +151,13 @@ test('NodeRun and Attempt terminal evidence commits atomically and rolls back wi
   assert.equal(terminalEvent.payload.attemptId, attempt.id);
   assert.equal(terminalEvent.payload.executionToken, '[redacted]');
   assert.equal(terminalEvent.payload.contextId, 'context-a');
+  assert.equal(terminalEvent.payload.nodeId, nodeRun.nodeId);
+  assert.equal(terminalEvent.payload.attemptId, attempt.id);
+  assert.equal(terminalEvent.payload.status, 'succeeded');
+  assert.deepEqual(terminalEvent.payload.outputRefs, []);
 
   const rollbackNode = database.createNodeRun({ runId: run.id, nodeId: 'provider-node-rollback', status: 'running' });
   const rollbackAttempt = database.createAttempt({ nodeRunId: rollbackNode.id, provider: 'test', model: 'model-b', status: 'running' });
-  const appendRunEvent = database.appendRunEvent.bind(database);
   database.appendRunEvent = (runId, event) => {
     if (event.nodeRunId === rollbackNode.id && event.type === 'node.failed') throw new Error('forced terminal event failure');
     return appendRunEvent(runId, event);
@@ -107,9 +178,16 @@ test('NodeRun and Attempt terminal evidence commits atomically and rolls back wi
   assert.equal(database.getRunEvents(run.id, 0).some((event) => event.nodeRunId === rollbackNode.id), false);
 
   const createLinkedRunIntent = (suffix) => {
+    const canvasId = `canvas-run-terminal-${suffix}`;
+    database.ensureCanvas(canvasId, {
+      name: `Run terminal ${suffix}`,
+      nodes: [],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+    }, 'project-terminal');
     const linkedRun = database.createRun({
       projectId: 'project-terminal',
-      canvasId: `canvas-run-terminal-${suffix}`,
+      canvasId,
       canvasRevision: 1,
       status: 'running',
     });

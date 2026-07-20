@@ -93,6 +93,7 @@ export function createIndependentSubflowDraft(
   options: { id: string; projectId?: string; name?: string },
 ) {
   const {
+    entityUid: _entityUid,
     version: _version,
     revision: _revision,
     changeSummary: _changeSummary,

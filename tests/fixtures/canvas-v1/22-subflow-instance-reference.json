@@ -1,0 +1,24 @@
+{
+  "canvasId": "subflow-instance-board",
+  "projectId": "instance-project",
+  "name": "定义与实例分离",
+  "updatedAt": 1704067200022,
+  "nodes": [
+    { "id": "instance-node-visible", "type": "subflow", "position": { "x": 260, "y": 120 }, "data": { "definitionId": "catalog-flow", "definitionVersion": 4, "instanceId": "instance-record-old" } }
+  ],
+  "edges": [],
+  "subflowDefinitions": [
+    {
+      "id": "catalog-flow", "version": 4, "name": "商品目录图",
+      "nodes": [{ "id": "catalog-image", "type": "image", "position": { "x": 0, "y": 0 }, "data": { "prompt": "目录风格商品图" } }],
+      "edges": [],
+      "inputs": [{ "id": "catalog-prompt", "name": "描述", "type": "text", "internalNodeId": "catalog-image", "internalHandleId": "image-in:text" }],
+      "outputs": [{ "id": "catalog-output", "name": "图片", "type": "image", "internalNodeId": "catalog-image", "internalHandleId": "image-out:image" }],
+      "exposedParameters": [{ "id": "aspect-ratio", "name": "比例", "nodeId": "catalog-image", "dataKey": "aspectRatio", "defaultValue": "4:5" }]
+    }
+  ],
+  "subflowInstances": [
+    { "instanceId": "instance-record-old", "definitionId": "catalog-flow", "definitionVersion": 4, "nodeId": "instance-node-visible", "parameterOverrides": { "aspect-ratio": "1:1" }, "detached": false }
+  ],
+  "viewport": { "x": 125, "y": 75, "zoom": 1.25 }
+}

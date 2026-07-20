@@ -1,0 +1,39 @@
+{
+  "canvasId": "subflow-parameter-board",
+  "projectId": "workflow-project",
+  "name": "多端口参数子工作流",
+  "updatedAt": 1704067200008,
+  "nodes": [
+    { "id": "instance-color-grade", "type": "subflow", "position": { "x": 200, "y": 80 }, "data": { "definitionId": "color-grade-v1", "definitionVersion": 3, "parameterOverrides": { "strength": 0.65 } } }
+  ],
+  "edges": [],
+  "subflowDefinitions": [
+    {
+      "id": "color-grade-v1",
+      "version": 3,
+      "name": "双路调色",
+      "nodes": [
+        { "id": "input-image-node", "type": "relay", "position": { "x": 0, "y": 0 }, "data": {} },
+        { "id": "input-mask-node", "type": "relay", "position": { "x": 0, "y": 180 }, "data": {} },
+        { "id": "grade-node", "type": "image", "position": { "x": 360, "y": 80 }, "data": { "strength": 0.5, "curve": "film" } }
+      ],
+      "edges": [
+        { "id": "grade-image-edge", "source": "input-image-node", "target": "grade-node", "sourceHandle": "relay-out:image", "targetHandle": "image-in:image" },
+        { "id": "grade-mask-edge", "source": "input-mask-node", "target": "grade-node", "sourceHandle": "relay-out:image", "targetHandle": "image-in:mask" }
+      ],
+      "inputs": [
+        { "id": "main-image", "name": "主图", "type": "image", "internalNodeId": "input-image-node", "internalHandleId": "relay-in:image", "required": true },
+        { "id": "mask-image", "name": "蒙版", "type": "image", "internalNodeId": "input-mask-node", "internalHandleId": "relay-in:image", "required": false }
+      ],
+      "outputs": [
+        { "id": "graded-image", "name": "调色结果", "type": "image", "internalNodeId": "grade-node", "internalHandleId": "image-out:image" }
+      ],
+      "exposedParameters": [
+        { "id": "strength", "name": "强度", "nodeId": "grade-node", "dataKey": "strength", "valueType": "number", "defaultValue": 0.5 },
+        { "id": "curve", "name": "曲线", "nodeId": "grade-node", "dataKey": "curve", "valueType": "string", "defaultValue": "film" }
+      ],
+      "assetRefs": []
+    }
+  ],
+  "viewport": { "x": 100, "y": 70, "zoom": 1.2 }
+}

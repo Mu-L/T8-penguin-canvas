@@ -5,10 +5,30 @@ const { execFile } = require('child_process');
 const { StringDecoder } = require('string_decoder');
 const sharp = require('sharp');
 const { resolveBundledFfmpeg, resolveBundledFfprobe } = require('../providers/llmMedia');
+const { DEFAULT_PROJECT_ID, stableEntityUuid } = require('../collaboration/protocol');
+const { COMMON_OPERATION_BATCH_CONTRACT } = require('../collaboration/commonOperationProtocol');
+const { AssetBlobStoreError, getAssetBlobStore } = require('./assetBlobStore');
+const { reconcileAssetAvailabilitySnapshots } = require('./assetAvailability');
+const { isUtf8 } = require('buffer');
+const { safeRemoteMediaDownload } = require('../utils/safeRemoteMediaFetch');
 
 const MAX_IMAGE_INPUT_PIXELS = 100_000_000;
 const PHASH_DCT64_ALGORITHM = 'phash-dct64-v1';
 const DEFAULT_ASSET_PREVIEW_PIPELINE_VERSION = 'asset-preview-v2-phash';
+const DEFAULT_HOST_ARTIFACT_REMOTE_MAX_BYTES = 256 * 1024 * 1024;
+const MAX_HOST_ARTIFACT_REMOTE_MAX_BYTES = 512 * 1024 * 1024;
+const MAX_HOST_ARTIFACT_INLINE_TEXT_BYTES = 1024 * 1024;
+const DEFAULT_HOST_ARTIFACT_TOTAL_MAX_BYTES = 1024 * 1024 * 1024;
+const MAX_HOST_ARTIFACT_TOTAL_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+const DEFAULT_HOST_ARTIFACT_DEADLINE_MS = 2 * 60_000;
+const MAX_HOST_ARTIFACT_DEADLINE_MS = 5 * 60_000;
+const DEFAULT_HOST_ARTIFACT_CONCURRENCY = 2;
+const MAX_HOST_ARTIFACT_CONCURRENCY = 4;
+const DEFAULT_HOST_ARTIFACT_QUEUE_LIMIT = 16;
+const MAX_HOST_ARTIFACT_QUEUE_LIMIT = 64;
+const DEFAULT_HOST_ARTIFACT_STAGING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const HOST_ARTIFACT_STAGING_FILE_PATTERN = /^host-artifact-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.part$/i;
+const HOST_ARTIFACT_SOURCE_DESCRIPTOR_VERSION = 't8-host-artifact-source-v1';
 const PHASH_SAMPLE_SIZE = 32;
 const PHASH_LOW_FREQUENCY_SIZE = 8;
 const PHASH_DCT_COSINES = Object.freeze(Array.from(
@@ -134,6 +154,189 @@ const EXTENSION_INFO = Object.freeze({
   glb: ['model3d', 'model/gltf-binary'], gltf: ['model3d', 'model/gltf+json'], obj: ['model3d', 'model/obj'], fbx: ['model3d', 'application/octet-stream'], stl: ['model3d', 'model/stl'], usdz: ['model3d', 'model/vnd.usdz+zip'],
   txt: ['text', 'text/plain'], md: ['text', 'text/markdown'], json: ['text', 'application/json'], csv: ['text', 'text/csv'], srt: ['text', 'application/x-subrip'], vtt: ['text', 'text/vtt'],
 });
+
+const MIME_EXTENSION = Object.freeze({
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'image/bmp': 'bmp',
+  'image/avif': 'avif',
+  'image/tiff': 'tiff',
+  'video/mp4': 'mp4',
+  'video/webm': 'webm',
+  'video/quicktime': 'mov',
+  'video/x-m4v': 'm4v',
+  'video/x-matroska': 'mkv',
+  'video/x-msvideo': 'avi',
+  'audio/mpeg': 'mp3',
+  'audio/wav': 'wav',
+  'audio/ogg': 'ogg',
+  'audio/mp4': 'm4a',
+  'audio/flac': 'flac',
+  'audio/aac': 'aac',
+  'model/gltf-binary': 'glb',
+  'model/gltf+json': 'gltf',
+  'model/obj': 'obj',
+  'model/stl': 'stl',
+  'model/vnd.usdz+zip': 'usdz',
+  'text/plain': 'txt',
+  'text/markdown': 'md',
+  'application/json': 'json',
+  'text/csv': 'csv',
+});
+
+const KIND_EXTENSION = Object.freeze({
+  image: 'png',
+  video: 'mp4',
+  audio: 'mp3',
+  model3d: 'glb',
+  text: 'txt',
+  other: 'bin',
+});
+
+function normalizedContentType(value) {
+  return String(value || '').split(';', 1)[0].trim().toLowerCase();
+}
+
+function sha256Value(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function canonicalJsonDigest(value) {
+  return sha256Value(Buffer.from(JSON.stringify(value), 'utf8'));
+}
+
+function sourceDescriptorDigest(sourceType, sourceIdentity) {
+  return canonicalJsonDigest({
+    contract: HOST_ARTIFACT_SOURCE_DESCRIPTOR_VERSION,
+    sourceType,
+    sourceIdentity,
+  });
+}
+
+function boundedPositiveInteger(value, fallback, maximum) {
+  const parsed = Math.trunc(Number(value));
+  return Number.isSafeInteger(parsed) && parsed > 0 ? Math.min(parsed, maximum) : fallback;
+}
+
+function canonicalHostArtifactFilename(sourceType, originalFilename, detected, outputOrdinal) {
+  const extension = detected.extension || KIND_EXTENSION[detected.kind] || 'bin';
+  if (sourceType === 'inline-text' || sourceType === 'remote-provider') {
+    return `run-output-${outputOrdinal}.${extension}`;
+  }
+  let stem = path.basename(String(originalFilename || ''), path.extname(String(originalFilename || '')))
+    .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '_')
+    .replace(/[. ]+$/g, '')
+    .trim()
+    .slice(0, 190);
+  if (!stem || stem === '.' || stem === '..') stem = `run-output-${outputOrdinal}`;
+  return `${stem}.${extension}`.slice(0, 240);
+}
+
+function bufferStartsWith(buffer, signature, offset = 0) {
+  return buffer.length >= offset + signature.length
+    && buffer.subarray(offset, offset + signature.length).equals(signature);
+}
+
+function artifactType(kind, mimeType, extension, options = {}) {
+  return { kind, mimeType, extension, ...options };
+}
+
+function detectHostArtifactType(filename, declaredContentType = '', sourceType = '') {
+  const descriptor = fs.openSync(filename, 'r');
+  let prefix;
+  let stat;
+  try {
+    stat = fs.fstatSync(descriptor);
+    const length = Math.min(Number(stat.size) || 0, 64 * 1024);
+    prefix = Buffer.alloc(length);
+    if (length > 0) fs.readSync(descriptor, prefix, 0, length, 0);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  const declared = normalizedContentType(declaredContentType);
+  const sourceExtension = path.extname(filename).slice(1).toLowerCase();
+  const known = (() => {
+    if (bufferStartsWith(prefix, Buffer.from('89504e470d0a1a0a', 'hex'))) return artifactType('image', 'image/png', 'png');
+    if (bufferStartsWith(prefix, Buffer.from('ffd8ff', 'hex'))) return artifactType('image', 'image/jpeg', 'jpg');
+    if (bufferStartsWith(prefix, Buffer.from('GIF87a')) || bufferStartsWith(prefix, Buffer.from('GIF89a'))) return artifactType('image', 'image/gif', 'gif');
+    if (bufferStartsWith(prefix, Buffer.from('BM'))) return artifactType('image', 'image/bmp', 'bmp');
+    if (bufferStartsWith(prefix, Buffer.from('49492a00', 'hex')) || bufferStartsWith(prefix, Buffer.from('4d4d002a', 'hex'))) return artifactType('image', 'image/tiff', 'tiff');
+    if (bufferStartsWith(prefix, Buffer.from('RIFF')) && prefix.subarray(8, 12).toString('ascii') === 'WEBP') return artifactType('image', 'image/webp', 'webp');
+    if (prefix.length >= 12 && prefix.subarray(4, 8).toString('ascii') === 'ftyp') {
+      const brand = prefix.subarray(8, 12).toString('ascii').toLowerCase();
+      if (brand === 'avif' || brand === 'avis') return artifactType('image', 'image/avif', 'avif');
+      if (brand === 'qt  ') return artifactType('video', 'video/quicktime', 'mov');
+      return artifactType('video', 'video/mp4', 'mp4');
+    }
+    if (bufferStartsWith(prefix, Buffer.from('1a45dfa3', 'hex'))) {
+      return declared === 'video/x-matroska'
+        ? artifactType('video', 'video/x-matroska', 'mkv')
+        : artifactType('video', 'video/webm', 'webm');
+    }
+    if (bufferStartsWith(prefix, Buffer.from('RIFF')) && prefix.subarray(8, 12).toString('ascii') === 'AVI ') return artifactType('video', 'video/x-msvideo', 'avi');
+    if (bufferStartsWith(prefix, Buffer.from('RIFF')) && prefix.subarray(8, 12).toString('ascii') === 'WAVE') return artifactType('audio', 'audio/wav', 'wav');
+    if (bufferStartsWith(prefix, Buffer.from('OggS'))) return artifactType('audio', 'audio/ogg', 'ogg');
+    if (bufferStartsWith(prefix, Buffer.from('fLaC'))) return artifactType('audio', 'audio/flac', 'flac');
+    if (prefix.length >= 2 && prefix[0] === 0xff && (prefix[1] === 0xf1 || prefix[1] === 0xf9)) return artifactType('audio', 'audio/aac', 'aac');
+    if (bufferStartsWith(prefix, Buffer.from('ID3')) || (prefix.length >= 2 && prefix[0] === 0xff && (prefix[1] & 0xe0) === 0xe0)) return artifactType('audio', 'audio/mpeg', 'mp3');
+    if (bufferStartsWith(prefix, Buffer.from('glTF'))) return artifactType('model3d', 'model/gltf-binary', 'glb');
+    if (bufferStartsWith(prefix, Buffer.from('Kaydara FBX Binary'))) return artifactType('model3d', 'application/octet-stream', 'fbx');
+    if (bufferStartsWith(prefix, Buffer.from('PK\x03\x04')) && declared === 'model/vnd.usdz+zip') return artifactType('model3d', 'model/vnd.usdz+zip', 'usdz');
+    return null;
+  })();
+  if (known) return { ...known, stat };
+
+  const textual = prefix.length === 0 || (isUtf8(prefix) && !prefix.includes(0));
+  const trimmed = textual ? prefix.toString('utf8').trimStart().toLowerCase() : '';
+  if (sourceType === 'remote-provider' && (
+    declared === 'text/html'
+    || declared === 'application/xhtml+xml'
+    || trimmed.startsWith('<!doctype html')
+    || trimmed.startsWith('<html')
+  )) {
+    return { ...artifactType('other', 'application/octet-stream', 'bin', { forbidden: true }), stat };
+  }
+  if (textual) {
+    const jsonLike = trimmed.startsWith('{') || trimmed.startsWith('[');
+    if (jsonLike && Number(stat.size) <= MODEL_METADATA_LIMITS.maxJsonBytes) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(filename, 'utf8'));
+        if (declared === 'model/gltf+json' && parsed && typeof parsed === 'object' && parsed.asset) {
+          return { ...artifactType('model3d', 'model/gltf+json', 'gltf'), stat };
+        }
+        return { ...artifactType('text', 'application/json', 'json'), stat };
+      } catch (_) {
+        if (declared === 'application/json' || declared === 'model/gltf+json') {
+          return { ...artifactType('other', 'application/octet-stream', 'bin', { forbidden: true }), stat };
+        }
+      }
+    }
+    if (declared === 'model/obj' || (sourceType === 'controlled-output' && sourceExtension === 'obj')) {
+      return { ...artifactType('model3d', 'model/obj', 'obj'), stat };
+    }
+    if (declared === 'model/stl' || (sourceType === 'controlled-output' && sourceExtension === 'stl')) {
+      return { ...artifactType('model3d', 'model/stl', 'stl'), stat };
+    }
+    if (declared === 'text/markdown') return { ...artifactType('text', 'text/markdown', 'md'), stat };
+    if (declared === 'text/csv') return { ...artifactType('text', 'text/csv', 'csv'), stat };
+    if (declared === 'text/vtt') return { ...artifactType('text', 'text/vtt', 'vtt'), stat };
+    if (declared === 'application/x-subrip') return { ...artifactType('text', 'application/x-subrip', 'srt'), stat };
+    return { ...artifactType('text', 'text/plain', 'txt'), stat };
+  }
+
+  const declaredKind = EXTENSION_INFO[MIME_EXTENSION[declared]]?.[0]
+    || (declared.startsWith('image/') ? 'image' : null)
+    || (declared.startsWith('video/') ? 'video' : null)
+    || (declared.startsWith('audio/') ? 'audio' : null)
+    || (declared.startsWith('model/') ? 'model3d' : null)
+    || (declared.startsWith('text/') ? 'text' : null);
+  if (sourceType === 'remote-provider' && ['image', 'video', 'audio', 'model3d', 'text'].includes(declaredKind)) {
+    return { ...artifactType('other', 'application/octet-stream', 'bin', { forbidden: true }), stat };
+  }
+  return { ...artifactType('other', 'application/octet-stream', 'bin'), stat };
+}
 
 function extensionInfo(filePath) {
   const extension = path.extname(filePath).slice(1).toLowerCase();
@@ -976,6 +1179,29 @@ function sourceChangedError() {
   return error;
 }
 
+function isFatalAssetScanError(error) {
+  const code = String(error?.code || '').trim().toUpperCase();
+  return code === 'PROJECT_DATABASE_STORAGE_CAPACITY_EXCEEDED'
+    || code === 'ENOSPC'
+    || code === 'EDQUOT'
+    || /^SQLITE_(?:FULL|BUSY|LOCKED)(?:_|$)/.test(code);
+}
+
+function hostArtifactCommitError(code, message, status = 400) {
+  const error = new Error(message);
+  error.code = code;
+  error.status = status;
+  return error;
+}
+
+function throwIfHostArtifactAborted(signal) {
+  if (!signal?.aborted) return;
+  const error = hostArtifactCommitError('host_artifact_aborted', '应用正在关闭，host artifact 提交已停止', 503);
+  error.name = 'AbortError';
+  error.retryable = true;
+  throw error;
+}
+
 async function readStableAssetSource(filename, kind, options = {}) {
   const absolute = path.resolve(filename);
   const attempts = Math.max(1, Math.min(3, Number(options.attempts) || 2));
@@ -994,6 +1220,7 @@ async function readStableAssetSource(filename, kind, options = {}) {
       try {
         metadata = await metadataReader(absolute, kind, before, options.metadataOptions || {});
       } catch (error) {
+        if (isFatalAssetScanError(error)) throw error;
         metadata = {
           size: before.size,
           modifiedAt: before.mtimeMs,
@@ -1015,6 +1242,7 @@ async function readStableAssetSource(filename, kind, options = {}) {
           try {
             metadata = { ...metadata, ...await buildDerived({ filename: absolute, kind, metadata, contentHash: firstHash }) };
           } catch (error) {
+            if (isFatalAssetScanError(error)) throw error;
             metadata.previewStatus = 'failed';
             metadata.previewError = error?.message || String(error);
           }
@@ -1054,7 +1282,12 @@ function walkFiles(root, maxFiles = 100000) {
   while (queue.length && result.length < maxFiles) {
     const directory = queue.shift();
     let entries = [];
-    try { entries = fs.readdirSync(directory, { withFileTypes: true }); } catch (_) { continue; }
+    try {
+      entries = fs.readdirSync(directory, { withFileTypes: true });
+    } catch (error) {
+      if (isFatalAssetScanError(error)) throw error;
+      continue;
+    }
     for (const entry of entries) {
       if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
       const fullPath = path.join(directory, entry.name);
@@ -1091,9 +1324,14 @@ class AssetIndexer {
     this.config = config;
     this.database = database;
     this.previewPipeline = options.previewPipeline || null;
+    this.blobStore = options.blobStore || null;
+    this.remoteMediaDownload = options.remoteMediaDownload || safeRemoteMediaDownload;
     this.modelMetadataLimits = normalizeModelMetadataLimits(options.modelMetadataLimits);
-    this.running = null;
-    this.lastResult = null;
+    this.hostArtifactActive = 0;
+    this.hostArtifactWaiters = [];
+    this.runningByProject = new Map();
+    this.lastResultByProject = new Map();
+    this.cleanupHostArtifactStaging();
   }
 
   roots() {
@@ -1103,14 +1341,259 @@ class AssetIndexer {
     ];
   }
 
-  status() {
-    return { running: Boolean(this.running), lastResult: this.lastResult };
+  hostArtifactLimits() {
+    return {
+      totalMaxBytes: boundedPositiveInteger(
+        this.config.HOST_ARTIFACT_TOTAL_MAX_BYTES,
+        DEFAULT_HOST_ARTIFACT_TOTAL_MAX_BYTES,
+        MAX_HOST_ARTIFACT_TOTAL_MAX_BYTES,
+      ),
+      remoteMaxBytes: boundedPositiveInteger(
+        this.config.HOST_ARTIFACT_REMOTE_MAX_BYTES,
+        DEFAULT_HOST_ARTIFACT_REMOTE_MAX_BYTES,
+        MAX_HOST_ARTIFACT_REMOTE_MAX_BYTES,
+      ),
+      deadlineMs: boundedPositiveInteger(
+        this.config.HOST_ARTIFACT_DEADLINE_MS,
+        DEFAULT_HOST_ARTIFACT_DEADLINE_MS,
+        MAX_HOST_ARTIFACT_DEADLINE_MS,
+      ),
+      concurrency: boundedPositiveInteger(
+        this.config.HOST_ARTIFACT_CONCURRENCY,
+        DEFAULT_HOST_ARTIFACT_CONCURRENCY,
+        MAX_HOST_ARTIFACT_CONCURRENCY,
+      ),
+      queueLimit: boundedPositiveInteger(
+        this.config.HOST_ARTIFACT_QUEUE_LIMIT,
+        DEFAULT_HOST_ARTIFACT_QUEUE_LIMIT,
+        MAX_HOST_ARTIFACT_QUEUE_LIMIT,
+      ),
+    };
+  }
+
+  cleanupHostArtifactStaging() {
+    try {
+      if (!this.config.OUTPUT_DIR || !fs.existsSync(this.config.OUTPUT_DIR)) return;
+      const outputRoot = fs.realpathSync.native(path.resolve(this.config.OUTPUT_DIR));
+      const stagingRoot = path.join(outputRoot, '.host-artifact-staging');
+      if (!fs.existsSync(stagingRoot)) return;
+      const stagingStat = fs.lstatSync(stagingRoot);
+      if (!stagingStat.isDirectory() || stagingStat.isSymbolicLink()) return;
+      const realStagingRoot = fs.realpathSync.native(stagingRoot);
+      if (!isPathInside(outputRoot, realStagingRoot)) return;
+      const maxAgeMs = boundedPositiveInteger(
+        this.config.HOST_ARTIFACT_STAGING_MAX_AGE_MS,
+        DEFAULT_HOST_ARTIFACT_STAGING_MAX_AGE_MS,
+        DEFAULT_HOST_ARTIFACT_STAGING_MAX_AGE_MS,
+      );
+      const cutoff = Date.now() - maxAgeMs;
+      for (const entry of fs.readdirSync(realStagingRoot, { withFileTypes: true })) {
+        if (!entry.isFile() || entry.isSymbolicLink() || !HOST_ARTIFACT_STAGING_FILE_PATTERN.test(entry.name)) continue;
+        const candidate = path.join(realStagingRoot, entry.name);
+        if (!isPathInside(realStagingRoot, candidate)) continue;
+        const stat = fs.lstatSync(candidate);
+        if (stat.isFile() && !stat.isSymbolicLink() && stat.mtimeMs < cutoff) fs.rmSync(candidate, { force: true });
+      }
+    } catch (_) {
+      // Cleanup is best-effort. The strict path checks run again before every
+      // new staging file and fail closed if the directory is unsafe.
+    }
+  }
+
+  hostArtifactStagingTarget(stagedPaths) {
+    const outputRoot = path.resolve(this.config.OUTPUT_DIR || '');
+    if (!this.config.OUTPUT_DIR || !fs.existsSync(outputRoot)) {
+      throw hostArtifactCommitError('host_artifact_output_root_missing', 'host artifact 输出目录不可用', 500);
+    }
+    const stagingRoot = path.join(outputRoot, '.host-artifact-staging');
+    try {
+      fs.mkdirSync(stagingRoot, { recursive: true, mode: 0o700 });
+      const realOutputRoot = fs.realpathSync.native(outputRoot);
+      const realStagingRoot = fs.realpathSync.native(stagingRoot);
+      const stagingStat = fs.lstatSync(realStagingRoot);
+      if (!stagingStat.isDirectory() || stagingStat.isSymbolicLink()
+        || !isPathInside(realOutputRoot, realStagingRoot)) {
+        throw hostArtifactCommitError('host_artifact_staging_unsafe', 'host artifact 临时目录越界', 500);
+      }
+      const stagedName = `host-artifact-${crypto.randomUUID()}.part`;
+      const absolute = path.join(realStagingRoot, stagedName);
+      if (!isPathInside(realStagingRoot, absolute)) {
+        throw hostArtifactCommitError('host_artifact_staging_unsafe', 'host artifact 临时文件越界', 500);
+      }
+      stagedPaths.add(absolute);
+      return {
+        absolute,
+        relativePath: path.relative(realOutputRoot, absolute),
+        materialized: true,
+      };
+    } catch (error) {
+      if (error?.code && String(error.code).startsWith('host_artifact_')) throw error;
+      throw hostArtifactCommitError('host_artifact_staging_failed', 'host artifact 临时文件写入失败', 500);
+    }
+  }
+
+  writeHostArtifactStagingFile(buffer, stagedPaths) {
+    const target = this.hostArtifactStagingTarget(stagedPaths);
+    try {
+      fs.writeFileSync(target.absolute, buffer, { flag: 'wx', mode: 0o600 });
+      return target;
+    } catch (_) {
+      throw hostArtifactCommitError('host_artifact_staging_failed', 'host artifact 临时文件写入失败', 500);
+    }
+  }
+
+  prepareHostArtifactInput(raw, index, outputOrdinal) {
+    const sourceValue = raw.sourceUrl == null ? '' : String(raw.sourceUrl);
+    if (sourceValue.length > 16_384) {
+      throw hostArtifactCommitError('host_artifact_source_forbidden', 'host artifact 输出来源无效', 403);
+    }
+    const sourceUrl = sourceValue.trim();
+    const hasInlineText = typeof raw.text === 'string';
+    if (sourceUrl && hasInlineText) {
+      throw hostArtifactCommitError('host_artifact_source_ambiguous', 'host artifact 输出来源不能同时包含 URL 和正文');
+    }
+    if (hasInlineText) {
+      const buffer = Buffer.from(raw.text, 'utf8');
+      if (buffer.length > MAX_HOST_ARTIFACT_INLINE_TEXT_BYTES) {
+        throw hostArtifactCommitError('host_artifact_inline_text_too_large', 'host artifact 文本超过 1 MiB 安全上限', 413);
+      }
+      return {
+        raw,
+        index,
+        outputOrdinal,
+        sourceType: 'inline-text',
+        buffer,
+        contentType: 'text/plain',
+        sourceDescriptorDigest: sourceDescriptorDigest('inline-text', {
+          contentHash: sha256Value(buffer),
+          byteSize: buffer.length,
+        }),
+      };
+    }
+
+    const controlled = resolveControlledOutputSource(sourceUrl, this.config);
+    if (controlled?.controlled) {
+      if (!controlled.safe) {
+        throw hostArtifactCommitError('host_artifact_source_forbidden', 'host artifact 本机输出路径不安全', 403);
+      }
+      if (!controlled.exists) {
+        throw hostArtifactCommitError('host_artifact_source_missing', 'host artifact 输出文件不存在', 409);
+      }
+      return {
+        raw,
+        index,
+        outputOrdinal,
+        sourceType: 'controlled-output',
+        controlled,
+        contentType: '',
+        sourceDescriptorDigest: null,
+      };
+    }
+
+    let target;
+    try { target = new URL(sourceUrl); } catch (_) {
+      throw hostArtifactCommitError('host_artifact_source_forbidden', 'host artifact 输出来源无效', 403);
+    }
+    if (target.protocol !== 'https:' || target.username || target.password) {
+      throw hostArtifactCommitError('host_artifact_source_forbidden', 'host artifact 远程来源协议无效', 403);
+    }
+    target.hash = '';
+    const canonicalSourceUrl = target.toString();
+    return {
+      raw,
+      index,
+      outputOrdinal,
+      sourceType: 'remote-provider',
+      sourceUrl: canonicalSourceUrl,
+      contentType: '',
+      sourceDescriptorDigest: sourceDescriptorDigest('remote-provider', { sourceUrl: canonicalSourceUrl }),
+    };
+  }
+
+  async materializeHostArtifactSource(prepared, stagedPaths, maximumBytes, deadlineMs) {
+    if (prepared.sourceType === 'inline-text') {
+      return {
+        ...this.writeHostArtifactStagingFile(prepared.buffer, stagedPaths),
+        sourceType: prepared.sourceType,
+        originalFilename: '',
+        contentType: 'text/plain',
+        sourceDescriptorDigest: prepared.sourceDescriptorDigest,
+      };
+    }
+    if (prepared.sourceType === 'controlled-output') {
+      return {
+        absolute: prepared.controlled.absolute,
+        relativePath: prepared.controlled.relativePath,
+        materialized: false,
+        sourceType: prepared.sourceType,
+        originalFilename: path.basename(prepared.controlled.absolute),
+        contentType: '',
+        sourceDescriptorDigest: null,
+      };
+    }
+
+    const target = this.hostArtifactStagingTarget(stagedPaths);
+    let remote;
+    try {
+      remote = await this.remoteMediaDownload(prepared.sourceUrl, target.absolute, {
+        maxBytes: maximumBytes,
+        timeoutMs: Math.min(deadlineMs, 60_000),
+        idleTimeoutMs: Math.min(deadlineMs, 30_000),
+        deadlineMs,
+        maxRedirects: 4,
+        protocols: ['https:'],
+        accept: 'image/*,video/*,audio/*,model/*,text/*,application/json,application/octet-stream;q=0.8',
+      });
+    } catch (error) {
+      const tooLarge = error?.code === 'item_too_large';
+      const status = tooLarge ? 413 : 502;
+      throw hostArtifactCommitError(
+        tooLarge ? 'host_artifact_remote_too_large' : 'host_artifact_remote_fetch_failed',
+        tooLarge ? 'host artifact 远程文件超过安全上限' : 'host artifact 远程文件获取失败',
+        status,
+      );
+    }
+    let stagedStat = null;
+    try { stagedStat = fs.lstatSync(target.absolute); } catch (_) {}
+    if (!remote || !Number.isSafeInteger(Number(remote.byteSize))
+      || Number(remote.byteSize) < 0 || Number(remote.byteSize) > maximumBytes
+      || !stagedStat || !stagedStat.isFile() || stagedStat.isSymbolicLink()
+      || Number(stagedStat.size) !== Number(remote.byteSize)) {
+      throw hostArtifactCommitError('host_artifact_remote_invalid', 'host artifact 远程响应无效', 502);
+    }
+    const contentType = normalizedContentType(remote.contentType);
+    return {
+      ...target,
+      sourceType: 'remote-provider',
+      originalFilename: '',
+      contentType,
+      sourceDescriptorDigest: prepared.sourceDescriptorDigest,
+    };
+  }
+
+  status(projectId = DEFAULT_PROJECT_ID) {
+    const key = String(projectId || DEFAULT_PROJECT_ID);
+    return {
+      projectId: key,
+      running: this.runningByProject.has(key),
+      lastResult: this.lastResultByProject.get(key) || null,
+    };
   }
 
   scan(options = {}) {
-    if (this.running) return this.running;
-    this.running = this.performScan(options).finally(() => { this.running = null; });
-    return this.running;
+    const projectId = String(options.projectId || DEFAULT_PROJECT_ID);
+    const running = this.runningByProject.get(projectId);
+    if (running) return running;
+    const promise = this.performScan({ ...options, projectId })
+      .then((result) => {
+        this.lastResultByProject.set(projectId, result);
+        return result;
+      })
+      .finally(() => {
+        if (this.runningByProject.get(projectId) === promise) this.runningByProject.delete(projectId);
+      });
+    this.runningByProject.set(projectId, promise);
+    return promise;
   }
 
   async indexFile(filename, options = {}) {
@@ -1333,6 +1816,657 @@ class AssetIndexer {
     return this.database.recordRunOutputAssets({ ...input, outputs: normalized });
   }
 
+  /**
+   * Commit output files produced by the trusted local host executor. Request
+   * metadata is intentionally ignored: the output root, source bytes, CAS
+   * address, media type and all common-operation identities are derived here.
+   * The nested CAS callbacks provide compensation if the single SQLite
+   * transaction fails after one or more new blobs were installed.
+   */
+  releaseHostArtifactPermit() {
+    const next = this.hostArtifactWaiters.shift();
+    if (next) {
+      next();
+      return;
+    }
+    this.hostArtifactActive = Math.max(0, this.hostArtifactActive - 1);
+  }
+
+  async acquireHostArtifactPermit(signal = null) {
+    throwIfHostArtifactAborted(signal);
+    const { concurrency, queueLimit } = this.hostArtifactLimits();
+    if (this.hostArtifactActive < concurrency) {
+      this.hostArtifactActive += 1;
+    } else {
+      if (this.hostArtifactWaiters.length >= queueLimit) {
+        throw hostArtifactCommitError('host_artifact_busy', 'host artifact 提交队列已满，请稍后重试', 429);
+      }
+      await new Promise((resolve, reject) => {
+        const waiter = () => {
+          signal?.removeEventListener?.('abort', onAbort);
+          resolve();
+        };
+        const onAbort = () => {
+          const index = this.hostArtifactWaiters.indexOf(waiter);
+          if (index >= 0) this.hostArtifactWaiters.splice(index, 1);
+          const error = hostArtifactCommitError('host_artifact_aborted', '应用正在关闭，host artifact 提交已停止', 503);
+          error.name = 'AbortError';
+          error.retryable = true;
+          reject(error);
+        };
+        signal?.addEventListener?.('abort', onAbort, { once: true });
+        this.hostArtifactWaiters.push(waiter);
+        if (signal?.aborted) onAbort();
+      });
+    }
+    try {
+      throwIfHostArtifactAborted(signal);
+    } catch (error) {
+      this.releaseHostArtifactPermit();
+      throw error;
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.releaseHostArtifactPermit();
+    };
+  }
+
+  hydrateHostArtifactCommit(committed, run, nodeRun, attempt) {
+    const assets = committed.results.map((result) => (
+      this.database.getAssetByEntityUid(result.artifactUid, run.projectId)
+      || this.database.getAsset(result.assetId)
+    ));
+    if (assets.some((asset) => !asset)) {
+      throw hostArtifactCommitError('host_artifact_result_missing', 'host artifact 提交结果无法读取', 500);
+    }
+    return {
+      ...committed,
+      run: this.database.getRun(run.id),
+      nodeRun: this.database.getNodeRun(nodeRun.id),
+      attempt: this.database.getAttempt(attempt.id),
+      assets,
+    };
+  }
+
+  buildHostArtifactBatch(run, nodeRun, attempt, document, artifacts, existingCommits = []) {
+    const ordinals = artifacts.map((artifact) => artifact.outputOrdinal);
+    const deterministicBatchId = stableEntityUuid(
+      't8-host-artifact-batch-v1',
+      run.entityUid,
+      nodeRun.entityUid,
+      attempt.entityUid,
+      ordinals.join(','),
+    );
+    const deterministicClientId = stableEntityUuid(
+      't8-host-artifact-client-v1',
+      run.entityUid,
+      nodeRun.entityUid,
+      attempt.entityUid,
+    );
+    if (existingCommits.length) {
+      const firstCommit = existingCommits[0];
+      const common = this.database.getCommonOperationBatch({ batchId: firstCommit.batchId });
+      let persistedOperationIds = null;
+      try { persistedOperationIds = JSON.parse(common?.operation_ids_json || 'null'); } catch (_) {}
+      const headerMatches = common
+        && firstCommit.batchId === deterministicBatchId
+        && common.batch_id === deterministicBatchId
+        && common.project_id === run.projectId
+        && common.canvas_id === run.canvasId
+        && common.client_id === deterministicClientId
+        && Number(common.client_seq) === Math.min(...ordinals)
+        && common.actor_id === 'host-executor'
+        && common.session_id === 'host-authority'
+        && Array.isArray(persistedOperationIds)
+        && persistedOperationIds.length === artifacts.length;
+      const recordsMatch = headerMatches && existingCommits.every((commit, index) => {
+        const artifact = artifacts[index];
+        return commit.batchId === deterministicBatchId
+          && commit.operationIndex === index
+          && persistedOperationIds[index] === artifact.opId
+          && commit.opId === artifact.opId
+          && commit.projectId === run.projectId
+          && commit.canvasId === run.canvasId
+          && commit.canvasRevision === Number(common.base_revision)
+          && commit.runId === run.id
+          && commit.runEntityUid === run.entityUid
+          && commit.nodeRunId === nodeRun.id
+          && commit.nodeRunEntityUid === nodeRun.entityUid
+          && commit.attemptId === attempt.id
+          && commit.attemptEntityUid === attempt.entityUid
+          && commit.nodeEntityUid === nodeRun.nodeEntityUid
+          && commit.outputOrdinal === artifact.outputOrdinal
+          && commit.assetId === `run-output-${artifact.artifactUid}`
+          && commit.assetEntityUid === artifact.artifactUid
+          && commit.blobEntityUid === artifact.blobUid
+          && commit.kind === artifact.kind
+          && commit.contentHash === artifact.contentHash
+          && commit.byteSize === artifact.byteSize
+          && commit.filename === artifact.filename
+          && commit.mimeType === artifact.mimeType
+          && (commit.sourceDescriptorDigest || null) === (artifact.sourceDescriptorDigest || null);
+      });
+      if (!recordsMatch) {
+        throw hostArtifactCommitError('host_artifact_output_slot_conflict', 'host artifact output slot 与冻结提交不一致', 409);
+      }
+      return {
+        contractVersion: COMMON_OPERATION_BATCH_CONTRACT,
+        projectId: run.projectId,
+        canvasId: run.canvasId,
+        baseRevision: Number(common.base_revision),
+        batchId: deterministicBatchId,
+        clientId: deterministicClientId,
+        clientSeq: Number(common.client_seq),
+        operations: artifacts.map((artifact, index) => {
+          const commit = existingCommits[index];
+          return {
+            opId: artifact.opId,
+            type: 'host.artifact.commit',
+            payload: {
+              artifactUid: artifact.artifactUid,
+              blobUid: artifact.blobUid,
+              runUid: run.entityUid,
+              nodeRunUid: nodeRun.entityUid,
+              attemptUid: attempt.entityUid,
+              nodeUid: nodeRun.nodeEntityUid,
+              expectedCanvasRevision: Number(common.base_revision),
+              expectedRunRevision: commit.runRevisionBefore,
+              expectedNodeRunRevision: commit.nodeRunRevisionBefore,
+              expectedAttemptRevision: commit.attemptRevisionBefore,
+              outputOrdinal: artifact.outputOrdinal,
+              kind: artifact.kind,
+              contentHash: artifact.contentHash,
+              byteSize: artifact.byteSize,
+              filename: artifact.filename,
+              mimeType: artifact.mimeType,
+            },
+          };
+        }),
+      };
+    }
+    return {
+      contractVersion: COMMON_OPERATION_BATCH_CONTRACT,
+      projectId: run.projectId,
+      canvasId: run.canvasId,
+      baseRevision: document.revision,
+      batchId: deterministicBatchId,
+      clientId: deterministicClientId,
+      clientSeq: Math.min(...ordinals),
+      operations: artifacts.map((artifact, index) => ({
+        opId: artifact.opId,
+        type: 'host.artifact.commit',
+        payload: {
+          artifactUid: artifact.artifactUid,
+          blobUid: artifact.blobUid,
+          runUid: run.entityUid,
+          nodeRunUid: nodeRun.entityUid,
+          attemptUid: attempt.entityUid,
+          nodeUid: nodeRun.nodeEntityUid,
+          expectedCanvasRevision: document.revision,
+          expectedRunRevision: run.revision + index,
+          expectedNodeRunRevision: nodeRun.revision + index,
+          expectedAttemptRevision: attempt.revision + index,
+          outputOrdinal: artifact.outputOrdinal,
+          kind: artifact.kind,
+          contentHash: artifact.contentHash,
+          byteSize: artifact.byteSize,
+          filename: artifact.filename,
+          mimeType: artifact.mimeType,
+        },
+      })),
+    };
+  }
+
+  async loadCommittedHostArtifact(prepared, commit, run, attempt, signal = null) {
+    throwIfHostArtifactAborted(signal);
+    if (!prepared.sourceDescriptorDigest
+      || commit.sourceDescriptorDigest !== prepared.sourceDescriptorDigest) {
+      throw hostArtifactCommitError('host_artifact_output_slot_conflict', 'host artifact 来源与冻结提交不一致', 409);
+    }
+    const blobStore = this.blobStore || (this.blobStore = getAssetBlobStore(this.config));
+    let verified;
+    try { verified = await blobStore.resolveVerifiedBlob(commit.contentHash, commit.byteSize); } catch (_) {
+      throw hostArtifactCommitError('host_artifact_cas_corrupt', 'host artifact 冻结 CAS 产物校验失败', 409);
+    }
+    throwIfHostArtifactAborted(signal);
+    if (!verified) {
+      throw hostArtifactCommitError('host_artifact_cas_missing', 'host artifact 冻结 CAS 产物缺失', 409);
+    }
+    const asset = this.database.getAssetByEntityUid(commit.assetEntityUid, run.projectId);
+    const artifactUid = stableEntityUuid('t8-host-artifact-v1', attempt.entityUid, prepared.outputOrdinal);
+    return {
+      opId: stableEntityUuid('t8-host-artifact-operation-v1', attempt.entityUid, prepared.outputOrdinal),
+      artifactUid,
+      blobUid: stableEntityUuid('t8-asset-blob-v1', 'sha256', commit.contentHash),
+      contentHash: commit.contentHash,
+      sourceDescriptorDigest: prepared.sourceDescriptorDigest,
+      byteSize: commit.byteSize,
+      kind: commit.kind,
+      filename: commit.filename,
+      mimeType: commit.mimeType,
+      outputOrdinal: prepared.outputOrdinal,
+      sourcePath: verified.path,
+      metadata: {
+        ...(asset?.metadata && typeof asset.metadata === 'object' ? asset.metadata : {}),
+        size: commit.byteSize,
+        sourceDescriptorDigest: prepared.sourceDescriptorDigest,
+      },
+      installed: {
+        path: verified.path,
+        storageKey: path.relative(blobStore.rootPath, verified.path).split(path.sep).join('/'),
+      },
+    };
+  }
+
+  async replayCommittedHostArtifacts(input, run, nodeRun, attempt, document, preparedOutputs, existingCommits) {
+    const signal = input.signal || null;
+    throwIfHostArtifactAborted(signal);
+    const limits = this.hostArtifactLimits();
+    const totalBytes = existingCommits.reduce((sum, commit) => sum + Number(commit.byteSize), 0);
+    if (!Number.isSafeInteger(totalBytes) || totalBytes > limits.totalMaxBytes) {
+      throw hostArtifactCommitError('host_artifact_total_too_large', 'host artifact 批次超过总字节安全上限', 413);
+    }
+    const blobStore = this.blobStore || (this.blobStore = getAssetBlobStore(this.config));
+    const locksByHash = new Map();
+    existingCommits.forEach((commit) => {
+      const hash = String(commit.contentHash || '').toLowerCase();
+      const byteSize = Number(commit.byteSize);
+      const existing = locksByHash.get(hash);
+      if (existing && existing.byteSize !== byteSize) {
+        throw hostArtifactCommitError('host_artifact_blob_metadata_conflict', '相同 CAS 内容具有冲突的 blob 元数据', 409);
+      }
+      locksByHash.set(hash, { contentHash: hash, byteSize });
+    });
+    const locks = [...locksByHash.values()]
+      .sort((left, right) => left.contentHash.localeCompare(right.contentHash));
+
+    const applyReplayUnderLocks = async () => {
+      throwIfHostArtifactAborted(signal);
+      const artifacts = [];
+      for (let index = 0; index < preparedOutputs.length; index += 1) {
+        artifacts.push(await this.loadCommittedHostArtifact(
+          preparedOutputs[index],
+          existingCommits[index],
+          run,
+          attempt,
+          signal,
+        ));
+        throwIfHostArtifactAborted(signal);
+      }
+      const batch = this.buildHostArtifactBatch(
+        run,
+        nodeRun,
+        attempt,
+        document,
+        artifacts,
+        existingCommits,
+      );
+      const verifiedAt = Date.now();
+      const verifiedArtifacts = artifacts.map((artifact, index) => ({
+        opId: artifact.opId,
+        artifactUid: artifact.artifactUid,
+        blobUid: artifact.blobUid,
+        contentHash: artifact.contentHash,
+        sourceDescriptorDigest: artifact.sourceDescriptorDigest,
+        byteSize: artifact.byteSize,
+        kind: artifact.kind,
+        filename: artifact.filename,
+        mimeType: artifact.mimeType,
+        outputOrdinal: artifact.outputOrdinal,
+        storageKey: artifact.installed.storageKey,
+        managedPath: artifact.installed.path,
+        metadata: artifact.metadata,
+        verifiedAt: verifiedAt + index,
+      }));
+      throwIfHostArtifactAborted(signal);
+      const committed = this.database.applyCommonHostArtifactBatch(batch, {
+        hostIdentity: { actorId: 'host-executor', sessionId: 'host-authority' },
+        verifiedArtifacts,
+        recoveryTerminal: input.recoveryTerminal,
+      });
+      return this.hydrateHostArtifactCommit(committed, run, nodeRun, attempt);
+    };
+
+    const acquireAt = async (index) => {
+      throwIfHostArtifactAborted(signal);
+      if (index >= locks.length) return applyReplayUnderLocks();
+      const lock = locks[index];
+      let result;
+      try {
+        result = await blobStore.withVerifiedBlobLock(
+          lock.contentHash,
+          lock.byteSize,
+          () => acquireAt(index + 1),
+        );
+      } catch (error) {
+        if (!(error instanceof AssetBlobStoreError)) throw error;
+        throw hostArtifactCommitError('host_artifact_cas_corrupt', 'host artifact 冻结 CAS 产物校验失败', 409);
+      }
+      throwIfHostArtifactAborted(signal);
+      if (result == null) {
+        throw hostArtifactCommitError('host_artifact_cas_missing', 'host artifact 冻结 CAS 产物缺失', 409);
+      }
+      return result;
+    };
+    return acquireAt(0);
+  }
+
+  async commitHostRunOutputAssets(input = {}) {
+    const signal = input.signal || null;
+    throwIfHostArtifactAborted(signal);
+    const release = await this.acquireHostArtifactPermit(signal);
+    const stagedPaths = new Set();
+    try {
+      throwIfHostArtifactAborted(signal);
+      return await this.commitMaterializedHostRunOutputAssets(input, stagedPaths);
+    } finally {
+      for (const filename of stagedPaths) {
+        try { fs.rmSync(filename, { force: true }); } catch (_) {}
+      }
+      release();
+    }
+  }
+
+  async commitMaterializedHostRunOutputAssets(input = {}, stagedPaths = new Set()) {
+    const signal = input.signal || null;
+    throwIfHostArtifactAborted(signal);
+    const run = this.database.getRun(String(input.runId || ''));
+    const nodeRun = this.database.getNodeRun(String(input.nodeRunId || ''));
+    const attempt = this.database.getAttempt(String(input.attemptId || ''));
+    if (!run || !nodeRun || nodeRun.runId !== run.id) {
+      throw hostArtifactCommitError('host_artifact_run_scope_invalid', '输出记录不属于当前 Run', 409);
+    }
+    if (!attempt || attempt.nodeRunId !== nodeRun.id) {
+      throw hostArtifactCommitError('host_artifact_attempt_scope_invalid', '输出 Attempt 不属于当前 NodeRun', 409);
+    }
+    const document = this.database.getCanvas(run.canvasId);
+    if (!document || document.projectId !== run.projectId) {
+      throw hostArtifactCommitError('host_artifact_canvas_scope_invalid', '输出 Run 不属于有效 Canvas', 409);
+    }
+    if (!nodeRun.nodeEntityUid) {
+      throw hostArtifactCommitError('host_artifact_node_identity_missing', 'NodeRun 缺少权威节点稳定身份', 409);
+    }
+
+    const rawOutputs = Array.isArray(input.outputs) ? input.outputs : [];
+    if (rawOutputs.length < 1 || rawOutputs.length > 100) {
+      throw hostArtifactCommitError('host_artifact_outputs_invalid', 'host artifact 必须包含 1-100 个输出');
+    }
+    const seenOrdinals = new Set();
+    const preparedOutputs = rawOutputs.map((raw, index) => {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        throw hostArtifactCommitError('host_artifact_output_invalid', `第 ${index + 1} 个输出无效`);
+      }
+      const outputOrdinal = raw.outputOrdinal == null ? index : raw.outputOrdinal;
+      if (!Number.isSafeInteger(outputOrdinal) || outputOrdinal < 0 || outputOrdinal > 999
+        || seenOrdinals.has(outputOrdinal)) {
+        throw hostArtifactCommitError('host_artifact_output_ordinal_invalid', 'host artifact outputOrdinal 必须是唯一的 0-999 整数');
+      }
+      seenOrdinals.add(outputOrdinal);
+      return this.prepareHostArtifactInput(raw, index, outputOrdinal);
+    }).sort((left, right) => left.outputOrdinal - right.outputOrdinal);
+
+    const existingCommits = preparedOutputs.map((prepared) => (
+      this.database.getRunOutputCommitBySlot(attempt.entityUid, prepared.outputOrdinal)
+    ));
+    const existingReservations = preparedOutputs.map((prepared) => (
+      this.database.getRunOutputSlotReservation(attempt.entityUid, prepared.outputOrdinal)
+    ));
+    const inconsistentReservation = existingCommits.some((commit, index) => {
+      const reservation = existingReservations[index];
+      return Boolean(commit) !== Boolean(reservation)
+        || (commit && reservation && (
+          reservation.reservationState !== 'host-verified'
+          || reservation.sourceDescriptorDigest !== commit.sourceDescriptorDigest
+          || reservation.assetEntityUid !== commit.assetEntityUid
+          || reservation.contentHash !== commit.contentHash
+        ));
+    });
+    if (inconsistentReservation) {
+      throw hostArtifactCommitError('host_artifact_output_slot_conflict', 'host artifact output slot 预留与冻结提交不一致', 409);
+    }
+    const existingCount = existingCommits.filter(Boolean).length;
+    if (existingCount > 0 && existingCount !== preparedOutputs.length) {
+      throw hostArtifactCommitError('host_artifact_output_slot_conflict', 'host artifact output slot 已被其他批次部分占用', 409);
+    }
+    if (existingCount === preparedOutputs.length
+      && preparedOutputs.every((prepared) => prepared.sourceType !== 'controlled-output')) {
+      return this.replayCommittedHostArtifacts(
+        input,
+        run,
+        nodeRun,
+        attempt,
+        document,
+        preparedOutputs,
+        existingCommits,
+      );
+    }
+
+    const limits = this.hostArtifactLimits();
+    const deadlineAt = Date.now() + limits.deadlineMs;
+    let totalBytes = 0;
+    const artifacts = [];
+    for (let preparedIndex = 0; preparedIndex < preparedOutputs.length; preparedIndex += 1) {
+      const prepared = preparedOutputs[preparedIndex];
+      const remainingBytes = limits.totalMaxBytes - totalBytes;
+      if (remainingBytes < 0 || Date.now() >= deadlineAt) {
+        throw hostArtifactCommitError(
+          remainingBytes < 0 ? 'host_artifact_total_too_large' : 'host_artifact_deadline_exceeded',
+          remainingBytes < 0 ? 'host artifact 批次超过总字节安全上限' : 'host artifact 提交超时',
+          remainingBytes < 0 ? 413 : 504,
+        );
+      }
+      if (existingCount && prepared.sourceType !== 'controlled-output') {
+        const committedArtifact = await this.loadCommittedHostArtifact(
+          prepared,
+          existingCommits[preparedIndex],
+          run,
+          attempt,
+          signal,
+        );
+        throwIfHostArtifactAborted(signal);
+        if (!Number.isSafeInteger(Number(committedArtifact.byteSize))
+          || Number(committedArtifact.byteSize) < 0
+          || Number(committedArtifact.byteSize) > remainingBytes) {
+          throw hostArtifactCommitError('host_artifact_total_too_large', 'host artifact 批次超过总字节安全上限', 413);
+        }
+        totalBytes += Number(committedArtifact.byteSize);
+        artifacts.push(committedArtifact);
+        continue;
+      }
+      const maximumBytes = prepared.sourceType === 'remote-provider'
+        ? Math.min(limits.remoteMaxBytes, remainingBytes)
+        : remainingBytes;
+      if (prepared.sourceType === 'remote-provider' && maximumBytes < 1) {
+        throw hostArtifactCommitError('host_artifact_total_too_large', 'host artifact 批次超过总字节安全上限', 413);
+      }
+      const materialized = await this.materializeHostArtifactSource(
+        prepared,
+        stagedPaths,
+        maximumBytes,
+        deadlineAt - Date.now(),
+      );
+      throwIfHostArtifactAborted(signal);
+      let initialStat;
+      try { initialStat = fs.lstatSync(materialized.absolute); } catch (_) {
+        throw hostArtifactCommitError('host_artifact_source_missing', 'host artifact 输出文件不存在', 409);
+      }
+      if (!initialStat.isFile() || initialStat.isSymbolicLink()) {
+        throw hostArtifactCommitError('host_artifact_source_forbidden', 'host artifact 输出必须是安全的普通文件', 403);
+      }
+      if (Number(initialStat.size) > maximumBytes) {
+        throw hostArtifactCommitError(
+          prepared.sourceType === 'remote-provider' ? 'host_artifact_remote_too_large' : 'host_artifact_total_too_large',
+          'host artifact 文件超过安全上限',
+          413,
+        );
+      }
+      const detected = detectHostArtifactType(
+        materialized.absolute,
+        materialized.contentType,
+        materialized.sourceType,
+      );
+      if (detected.forbidden) {
+        throw hostArtifactCommitError('host_artifact_type_forbidden', 'host artifact 响应类型与实际内容不一致', 415);
+      }
+      const stableSource = await readStableAssetSource(materialized.absolute, detected.kind, {
+        attempts: this.config.ASSET_INDEX_STABILITY_ATTEMPTS || 2,
+        metadataOptions: {
+          modelMetadataLimits: this.modelMetadataLimits,
+          sourceExtension: `.${detected.extension}`,
+        },
+      });
+      throwIfHostArtifactAborted(signal);
+      const verifiedType = detectHostArtifactType(
+        materialized.absolute,
+        materialized.contentType,
+        materialized.sourceType,
+      );
+      if (verifiedType.forbidden
+        || verifiedType.kind !== detected.kind
+        || verifiedType.mimeType !== detected.mimeType
+        || verifiedType.extension !== detected.extension
+        || !sameSourceStat(stableSource.stat, verifiedType.stat)) {
+        throw sourceChangedError();
+      }
+      if (stableSource.metadata?.health === 'corrupt'
+        && ['image', 'video', 'audio', 'model3d'].includes(detected.kind)) {
+        throw hostArtifactCommitError('host_artifact_media_corrupt', 'host artifact 媒体或模型文件无法通过解析校验', 415);
+      }
+      const byteSize = Number(stableSource.stat.size);
+      if (!Number.isSafeInteger(byteSize) || byteSize < 0 || byteSize > remainingBytes) {
+        throw hostArtifactCommitError('host_artifact_total_too_large', 'host artifact 批次超过总字节安全上限', 413);
+      }
+      totalBytes += byteSize;
+      const filename = canonicalHostArtifactFilename(
+        materialized.sourceType,
+        materialized.originalFilename,
+        detected,
+        prepared.outputOrdinal,
+      );
+      const contentHash = String(stableSource.contentHash).toLowerCase();
+      const artifactUid = stableEntityUuid('t8-host-artifact-v1', attempt.entityUid, prepared.outputOrdinal);
+      artifacts.push({
+        opId: stableEntityUuid('t8-host-artifact-operation-v1', attempt.entityUid, prepared.outputOrdinal),
+        artifactUid,
+        blobUid: stableEntityUuid('t8-asset-blob-v1', 'sha256', contentHash),
+        contentHash,
+        sourceDescriptorDigest: materialized.sourceDescriptorDigest,
+        byteSize,
+        kind: detected.kind,
+        filename,
+        mimeType: detected.mimeType,
+        outputOrdinal: prepared.outputOrdinal,
+        sourcePath: materialized.absolute,
+        metadata: {
+          ...stableSource.metadata,
+          size: byteSize,
+          extension: detected.extension,
+          root: 'output',
+          sourceType: materialized.sourceType,
+          ...(materialized.sourceDescriptorDigest
+            ? { sourceDescriptorDigest: materialized.sourceDescriptorDigest }
+            : {}),
+          ...(materialized.materialized
+            ? {}
+            : { relativePath: materialized.relativePath.replace(/\\/g, '/') }),
+        },
+      });
+    }
+
+    const batch = this.buildHostArtifactBatch(
+      run,
+      nodeRun,
+      attempt,
+      document,
+      artifacts,
+      existingCount ? existingCommits : [],
+    );
+    const groups = [];
+    const groupsByHash = new Map();
+    for (const artifact of artifacts) {
+      const existing = groupsByHash.get(artifact.contentHash);
+      if (existing) {
+        if (existing.mimeType !== artifact.mimeType || existing.byteSize !== artifact.byteSize) {
+          throw hostArtifactCommitError('host_artifact_blob_metadata_conflict', '相同 CAS 内容具有冲突的 blob 元数据', 409);
+        }
+        existing.artifacts.push(artifact);
+      } else {
+        const group = {
+          contentHash: artifact.contentHash,
+          byteSize: artifact.byteSize,
+          mimeType: artifact.mimeType,
+          sourcePath: artifact.sourcePath,
+          artifacts: [artifact],
+        };
+        groupsByHash.set(artifact.contentHash, group);
+        groups.push(group);
+      }
+    }
+    // Every request acquires per-hash CAS locks in the same global order. This
+    // prevents two multi-output commits with reversed artifact order from
+    // waiting on each other's nested compensation callbacks.
+    groups.sort((left, right) => left.contentHash.localeCompare(right.contentHash));
+    const installedByHash = new Map(artifacts
+      .filter((artifact) => artifact.installed)
+      .map((artifact) => [artifact.contentHash, artifact.installed]));
+    const blobStore = this.blobStore || (this.blobStore = getAssetBlobStore(this.config));
+    let committed;
+    const installAt = async (index) => {
+      throwIfHostArtifactAborted(signal);
+      if (index >= groups.length) {
+        const verifiedAt = Date.now();
+        const verifiedArtifacts = artifacts.map((artifact, artifactIndex) => {
+          const installed = installedByHash.get(artifact.contentHash);
+          return {
+            opId: artifact.opId,
+            artifactUid: artifact.artifactUid,
+            blobUid: artifact.blobUid,
+            contentHash: artifact.contentHash,
+            sourceDescriptorDigest: artifact.sourceDescriptorDigest,
+            byteSize: artifact.byteSize,
+            kind: artifact.kind,
+            filename: artifact.filename,
+            mimeType: artifact.mimeType,
+            outputOrdinal: artifact.outputOrdinal,
+            storageKey: installed.storageKey,
+            managedPath: installed.path,
+            metadata: artifact.metadata,
+            verifiedAt: verifiedAt + artifactIndex,
+          };
+        });
+        committed = this.database.applyCommonHostArtifactBatch(batch, {
+          hostIdentity: { actorId: 'host-executor', sessionId: 'host-authority' },
+          verifiedArtifacts,
+          recoveryTerminal: input.recoveryTerminal,
+        });
+        return;
+      }
+      if (Date.now() >= deadlineAt) {
+        throw hostArtifactCommitError('host_artifact_deadline_exceeded', 'host artifact 提交超时', 504);
+      }
+      const group = groups[index];
+      if (installedByHash.has(group.contentHash)) {
+        await installAt(index + 1);
+        return;
+      }
+      await blobStore.installVerifiedFile(group.sourcePath, {
+        expectedHash: group.contentHash,
+        expectedSize: group.byteSize,
+        onInstalled: async (installed) => {
+          throwIfHostArtifactAborted(signal);
+          installedByHash.set(group.contentHash, installed);
+          await installAt(index + 1);
+        },
+      });
+      throwIfHostArtifactAborted(signal);
+    };
+    await installAt(0);
+    throwIfHostArtifactAborted(signal);
+    return this.hydrateHostArtifactCommit(committed, run, nodeRun, attempt);
+  }
+
   indexLinkedFile(filename, options = {}) {
     return this.indexFile(filename, { ...options, rootName: 'linked', storageMode: 'linked' });
   }
@@ -1344,8 +2478,9 @@ class AssetIndexer {
     let indexed = 0;
     let failed = 0;
     let cursor = 0;
+    let fatalError = null;
     const workers = Array.from({ length: Math.min(4, Math.max(1, Number(options.concurrency) || 2)) }, async () => {
-      while (cursor < candidates.length) {
+      while (!fatalError && cursor < candidates.length) {
         const item = candidates[cursor++];
         const relativePath = path.relative(item.root.path, item.filename);
         try {
@@ -1358,25 +2493,47 @@ class AssetIndexer {
             storageMode: 'managed',
           });
           indexed += 1;
-        } catch (_) {
+        } catch (error) {
+          if (isFatalAssetScanError(error)) {
+            if (!fatalError) fatalError = error;
+            break;
+          }
           failed += 1;
         }
       }
     });
-    await Promise.all(workers);
-    const availability = this.database.refreshAssetAvailability?.(options.projectId) || { checked: 0, missing: 0, restored: 0 };
-    this.lastResult = { total: candidates.length, indexed, failed, availability, startedAt, finishedAt: Date.now() };
-    return this.lastResult;
+    // A fatal worker must not let the request reject while already-claimed
+    // index writes are still running in the background.
+    const workerResults = await Promise.allSettled(workers);
+    if (fatalError) throw fatalError;
+    const unexpectedWorkerFailure = workerResults.find((result) => result.status === 'rejected');
+    if (unexpectedWorkerFailure) throw unexpectedWorkerFailure.reason;
+    const availabilityBatch = this.database.listAssetAvailabilitySnapshots(options.projectId);
+    const availability = await reconcileAssetAvailabilitySnapshots(this.database, availabilityBatch, {
+      concurrency: options.availabilityConcurrency,
+    });
+    return {
+      projectId: String(options.projectId || DEFAULT_PROJECT_ID),
+      catalogRevision: availability.catalogRevision,
+      total: candidates.length,
+      indexed,
+      failed,
+      availability,
+      startedAt,
+      finishedAt: Date.now(),
+    };
   }
 }
 
-let backgroundIndexerSingleton = null;
+const backgroundIndexerSingletons = new WeakMap();
 
 function getBackgroundAssetIndexer(config, database, previewPipeline) {
-  if (!backgroundIndexerSingleton) {
-    backgroundIndexerSingleton = new AssetIndexer(config, database, { previewPipeline });
+  let indexer = backgroundIndexerSingletons.get(database);
+  if (!indexer) {
+    indexer = new AssetIndexer(config, database, { previewPipeline });
+    backgroundIndexerSingletons.set(database, indexer);
   }
-  return backgroundIndexerSingleton;
+  return indexer;
 }
 
 module.exports = {

@@ -6,7 +6,7 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const FRONTEND_DIST = path.join(ROOT, 'dist');
-const ARTIFACT_DIR = path.join(ROOT, '.e5-artifacts', 'workflow-doctor-ui');
+const ARTIFACT_DIR = path.join(ROOT, 'artifacts', 'workflow-doctor-e5-ui');
 const TEMP_ROOT = path.resolve(process.env.TEMP || process.env.TMP || path.join(ROOT, '.tmp'));
 const QA_ROOT = path.join(TEMP_ROOT, 't8-workflow-doctor-e5-ui');
 const CHROME_PROFILE = path.join(QA_ROOT, 'chrome-profile');

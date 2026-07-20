@@ -1,0 +1,19 @@
+{
+  "canvasId": "uuid-preservation-board",
+  "projectId": "uuid-project",
+  "entityUid": "00000000-0000-5000-8000-000000000001",
+  "revision": 12,
+  "updatedAt": 1704067200020,
+  "nodes": [
+    { "id": "10000000-0000-5000-8000-000000000001", "entityUid": "10000000-0000-5000-8000-000000000001", "type": "text", "position": { "x": 0, "y": 0 }, "data": { "label": "已是 UUID" } },
+    { "id": "legacy-visible-output", "entityUid": "10000000-0000-5000-8000-000000000002", "type": "output", "position": { "x": 320, "y": 0 }, "data": { "label": "已有独立稳定身份" } }
+  ],
+  "edges": [
+    { "id": "20000000-0000-5000-8000-000000000001", "entityUid": "20000000-0000-5000-8000-000000000001", "source": "10000000-0000-5000-8000-000000000001", "target": "legacy-visible-output" }
+  ],
+  "assets": [
+    { "id": "30000000-0000-5000-8000-000000000001", "entityUid": "30000000-0000-5000-8000-000000000001", "kind": "image", "filename": "stable.webp" }
+  ],
+  "viewport": { "x": 0, "y": 0, "zoom": 1 },
+  "migrationNote": "valid UUID identities must remain byte-for-byte stable"
+}

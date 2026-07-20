@@ -47,7 +47,7 @@ test('proxy routes seedance.nz independently and immediately stores completed ou
   assert.match(proxy, /requestedTaskProvider === seedanceNz\.PROVIDER_ID/);
   assert.match(proxy, /seedanceNz\.submitTask/);
   assert.match(proxy, /seedanceNz\.queryTask/);
-  assert.match(proxy, /saveRemoteVideo\(videoUrl, seedanceNz\.fetchRemote\)/);
+  assert.match(proxy, /saveRemoteVideo\(result\.videoUrl, seedanceNz\.fetchRemote\)/);
   assert.match(proxy, /provider: 'zhenzhen-legacy'/);
   assert.match(settings, /zhenzhenSd2ApiKey/);
   assert.match(settings, /zhenzhenSd2BaseUrl: config\.ZHENZHEN_SD2_BASE_URL/);
@@ -133,6 +133,6 @@ test('proxy keeps Happy Horse and Seed Audio on the domestic key and stores outp
   assert.match(proxy, /seedanceNz\.submitHappyHorseTask/);
   assert.match(proxy, /seedanceNz\.submitAudioTask/);
   assert.match(proxy, /settings\?\.zhenzhenSd2ApiKey/);
-  assert.match(proxy, /saveRemoteVideo\(videoUrl, seedanceNz\.fetchRemote\)/);
-  assert.match(proxy, /saveRemoteAudio\(audioUrl\)/);
+  assert.match(proxy, /saveRemoteVideo\(result\.videoUrl, seedanceNz\.fetchRemote\)/);
+  assert.match(proxy, /saveRemoteAudio\(result\.audioUrl\)/);
 });

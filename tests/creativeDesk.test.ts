@@ -70,8 +70,8 @@ test('canvas route persists creative desk background state with normal saves and
     PROJECT_DB_FILE: config.PROJECT_DB_FILE,
     PROJECT_DB_BACKUP_FILE: config.PROJECT_DB_BACKUP_FILE,
   };
-  t.after(() => {
-    require('../backend/src/services/projectDatabase.js').getProjectDatabase(config).close();
+  t.after(async () => {
+    await require('../backend/src/services/projectDatabase.js').getProjectDatabase(config).close();
     Object.assign(config, oldConfig);
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
@@ -97,7 +97,13 @@ test('canvas route persists creative desk background state with normal saves and
   const server = await new Promise<any>((resolve) => {
     const s = app.listen(0, '127.0.0.1', () => resolve(s));
   });
-  t.after(() => server.close());
+  t.after(async () => {
+    server.closeAllConnections?.();
+    if (!server.listening) return;
+    await new Promise<void>((resolve, reject) => {
+      server.close((error?: Error) => (error ? reject(error) : resolve()));
+    });
+  });
 
   const base = `http://127.0.0.1:${server.address().port}`;
   const body = {

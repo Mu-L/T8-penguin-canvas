@@ -151,11 +151,16 @@ const BLOCKER_TITLES: Record<DerivedExecutionScopeBlockerCode, string> = {
 };
 
 class DerivedScopeFailure extends Error {
+  readonly code: DerivedExecutionScopeBlockerCode;
+  readonly dependency?: SubflowDependencyRef;
+
   constructor(
-    readonly code: DerivedExecutionScopeBlockerCode,
-    readonly dependency?: SubflowDependencyRef,
+    code: DerivedExecutionScopeBlockerCode,
+    dependency?: SubflowDependencyRef,
   ) {
     super(code);
+    this.code = code;
+    this.dependency = dependency;
   }
 }
 

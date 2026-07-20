@@ -197,7 +197,7 @@ test('subflow and run loaders retain project identity and reject late responses'
   assert.match(subflows, /api\.listSubflows\(searchQuery, props\.projectId, \{ signal: controller\.signal \}\)/);
   assert.match(subflows, /controller\.signal\.aborted \|\| generation !== subflowLoadGenerationRef\.current \|\| requestScopeKey !== patchScopeKeyRef\.current/);
 
-  const runs = sourceBetween(workbench, 'const loadRuns = useCallback', 'const loadCollaboration = useCallback');
+  const runs = sourceBetween(workbench, 'const loadRuns = useCallback', 'const updateAgentQueueItem = useCallback');
   assert.match(runs, /const generation = \+\+runLoadGenerationRef\.current/);
   assert.match(runs, /runLoadAbortRef\.current\?\.abort\(\)/);
   assert.match(runs, /api\.listProjectRuns\(\{ projectId: props\.projectId, canvasId: props\.canvasId \|\| undefined,/);

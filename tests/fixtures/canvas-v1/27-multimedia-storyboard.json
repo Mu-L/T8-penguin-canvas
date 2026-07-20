@@ -1,0 +1,19 @@
+{
+  "canvasId": "multimedia-storyboard",
+  "projectId": "film-project",
+  "name": "多媒体分镜流程",
+  "updatedAt": 1704067200027,
+  "nodes": [
+    { "id": "story-idea", "type": "director-storyboard", "position": { "x": 0, "y": 0 }, "data": { "shots": [{ "index": 1, "description": "企鹅走入车站", "seconds": 3 }, { "index": 2, "description": "列车驶过雪原", "seconds": 4 }] } },
+    { "id": "story-audio", "type": "audio", "position": { "x": 360, "y": -100 }, "data": { "label": "配乐", "duration": 7 } },
+    { "id": "story-video", "type": "video", "position": { "x": 360, "y": 140 }, "data": { "label": "成片", "resolution": "1920x1080" } },
+    { "id": "story-output", "type": "output", "position": { "x": 740, "y": 80 }, "data": { "label": "交付" } }
+  ],
+  "edges": [
+    { "id": "story-to-video", "source": "story-idea", "target": "story-video", "sourceHandle": "storyboard-out:metadata", "targetHandle": "video-in:metadata" },
+    { "id": "audio-to-video", "source": "story-audio", "target": "story-video", "sourceHandle": "audio-out:audio", "targetHandle": "video-in:audio" },
+    { "id": "video-to-output", "source": "story-video", "target": "story-output", "sourceHandle": "video-out:video", "targetHandle": "output-in:video" }
+  ],
+  "viewport": { "x": 60, "y": 120, "zoom": 0.78 },
+  "storyboardPanel": { "selectedShot": 2, "showSafeAreas": true, "fps": 24 }
+}

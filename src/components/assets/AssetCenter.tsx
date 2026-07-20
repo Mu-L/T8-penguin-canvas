@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import * as api from '../../services/api';
 import type {
+  AssetAvailabilityRefreshInput,
   AssetBatchMutationSet,
   AssetCollection,
   AssetDuplicateCandidate,
@@ -155,6 +156,34 @@ function availabilityLabel(value: AssetRef['availability']): string {
   return { available: '可用', missing: '已丢失', corrupt: '已损坏', unverified: '未验证' }[value];
 }
 
+function frozenAssetAvailabilityInput(
+  asset: AssetRef | null,
+  projectId: string,
+  catalogRevision: AssetRevision | null,
+): AssetAvailabilityRefreshInput | null {
+  if (!asset
+    || asset.projectId !== projectId
+    || (asset.storageMode !== 'managed' && asset.storageMode !== 'linked')) return null;
+  const expectedCatalogRevision = Number(catalogRevision);
+  const contentRevision = Number(asset.contentRevision);
+  const organizationRevision = Number(asset.organizationRevision);
+  const entityUid = String(asset.entityUid || '').trim().toLowerCase();
+  const contentHash = String(asset.contentHash || '').trim().toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(entityUid)
+    || !/^[a-f0-9]{64}$/.test(contentHash)
+    || !Number.isSafeInteger(expectedCatalogRevision) || expectedCatalogRevision < 1
+    || !Number.isSafeInteger(contentRevision) || contentRevision < 1
+    || !Number.isSafeInteger(organizationRevision) || organizationRevision < 1) return null;
+  return {
+    projectId,
+    expectedCatalogRevision,
+    entityUid,
+    contentRevision,
+    organizationRevision,
+    contentHash,
+  };
+}
+
 function semanticEmptyMessage(
   state: ReturnType<typeof assetSemanticEmptyState>,
   availabilityMessage: string,
@@ -176,13 +205,61 @@ function semanticEmptyMessage(
 
 function normalizePipelineStatus(value: AssetPipelineStatus): AssetPipelineStatus {
   const raw = value as AssetPipelineStatus & { running?: boolean; lastResult?: AssetPipelineStatus['scan']['lastResult'] };
+  const scan = raw.scan;
+  const preview = raw.previews;
+  const pending = preview?.pending && typeof preview.pending === 'object'
+    ? preview.pending
+    : { completions: 0, reschedules: 0, reruns: 0 };
+  const storagePressure = preview?.storagePressure && typeof preview.storagePressure === 'object'
+    && preview.storagePressure.scope === 'global'
+    ? {
+        active: preview.storagePressure.active === true,
+        reason: String(preview.storagePressure.reason || 'storage-pressure').slice(0, 80),
+        retryable: preview.storagePressure.retryable === true,
+        nextRetryAt: Number.isFinite(Number(preview.storagePressure.nextRetryAt))
+          ? Number(preview.storagePressure.nextRetryAt)
+          : null,
+        scope: 'global' as const,
+      }
+    : null;
+  const databaseBusy = preview?.databaseBusy && typeof preview.databaseBusy === 'object'
+    && preview.databaseBusy.scope === 'global'
+    ? {
+        active: preview.databaseBusy.active === true,
+        code: String(preview.databaseBusy.code || 'project_database_busy').slice(0, 80),
+        nextRetryAt: Number.isFinite(Number(preview.databaseBusy.nextRetryAt))
+          ? Number(preview.databaseBusy.nextRetryAt)
+          : null,
+        scope: 'global' as const,
+      }
+    : null;
   return {
-    scan: raw.scan || { running: Boolean(raw.running), lastResult: raw.lastResult || null },
+    projectId: String(raw.projectId || ''),
+    scan: {
+      projectId: String(scan?.projectId || ''),
+      running: scan?.running === true || Boolean(raw.running),
+      lastResult: scan?.lastResult || raw.lastResult || null,
+    },
     previews: {
-      active: Number(raw.previews?.active || 0),
-      concurrency: Math.max(1, Number(raw.previews?.concurrency || 1)),
-      counts: { ...EMPTY_PREVIEW_COUNTS, ...(raw.previews?.counts || {}) },
-      nextAttemptAt: raw.previews?.nextAttemptAt || null,
+      projectId: String(preview?.projectId || ''),
+      active: Number(preview?.active || 0),
+      activeModel3d: Number(preview?.activeModel3d || 0),
+      concurrency: Math.max(1, Number(preview?.concurrency || 1)),
+      concurrencyScope: 'global',
+      counts: { ...EMPTY_PREVIEW_COUNTS, ...(preview?.counts || {}) },
+      pending: {
+        completions: Math.max(0, Number(pending.completions || 0)),
+        reschedules: Math.max(0, Number(pending.reschedules || 0)),
+        reruns: Math.max(0, Number(pending.reruns || 0)),
+      },
+      nextAttemptAt: preview?.nextAttemptAt || null,
+      ...(preview?.databaseStatusStale === true ? { databaseStatusStale: true } : {}),
+      ...(preview?.shuttingDown === true
+        ? { shuttingDown: true, shuttingDownScope: 'global' as const }
+        : {}),
+      ...(preview?.globalRecoveryPending === true ? { globalRecoveryPending: true } : {}),
+      ...(storagePressure?.active ? { storagePressure } : {}),
+      ...(databaseBusy?.active ? { databaseBusy } : {}),
     },
   };
 }
@@ -190,7 +267,16 @@ function normalizePipelineStatus(value: AssetPipelineStatus): AssetPipelineStatu
 function pipelineIsActive(status: AssetPipelineStatus | null): boolean {
   if (!status) return false;
   const counts = status.previews.counts;
-  return status.scan.running || Number(status.previews.active || 0) > 0 || counts.queued > 0 || counts.running > 0 || counts.retrying > 0;
+  const pending = status.previews.pending;
+  return status.scan.running
+    || Number(status.previews.active || 0) > 0
+    || counts.queued > 0
+    || counts.running > 0
+    || counts.retrying > 0
+    || status.previews.databaseStatusStale === true
+    || pending.completions > 0
+    || pending.reschedules > 0
+    || pending.reruns > 0;
 }
 
 function AssetDetailPreview({ asset }: { asset: AssetRef }) {
@@ -230,8 +316,6 @@ function AssetDetailPreview({ asset }: { asset: AssetRef }) {
 
 export default function AssetCenter({ canvasId, projectId, onInsertAsset }: AssetCenterProps) {
   const assetProjectId = String(projectId || 'project-local').trim() || 'project-local';
-  const assetProjectIdRef = useRef(assetProjectId);
-  assetProjectIdRef.current = assetProjectId;
   const pagesRef = useRef<Map<number, readonly AssetRef[]>>(new Map());
   const pageControllersRef = useRef(new Map<number, AbortController>());
   const visiblePageOffsetsRef = useRef<Set<number>>(new Set([0]));
@@ -249,15 +333,26 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
   const rangeSelectionControllerRef = useRef<AbortController | null>(null);
   const duplicateGenerationRef = useRef(0);
   const duplicateControllerRef = useRef<AbortController | null>(null);
+  const duplicatePagesRef = useRef<AssetDuplicatePage[]>([]);
+  const duplicatePageIndexRef = useRef(0);
   const duplicateGroupControllerRef = useRef<AbortController | null>(null);
   const duplicateGroupMemberControllerRef = useRef<AbortController | null>(null);
   const sourceTreeControllerRef = useRef<AbortController | null>(null);
   const lineageControllerRef = useRef<AbortController | null>(null);
   const semanticDocumentControllerRef = useRef<AbortController | null>(null);
-  const semanticStatusRefreshControllerRef = useRef<AbortController | null>(null);
+  const semanticStatusRefreshEpochRef = useRef(0);
+  const semanticStatusProjectRef = useRef(assetProjectId);
+  semanticStatusProjectRef.current = assetProjectId;
   const semanticConflictSeenRef = useRef(0);
   const pipelineSignatureRef = useRef('');
+  const pipelineProjectRef = useRef(assetProjectId);
+  pipelineProjectRef.current = assetProjectId;
+  const pipelineRequestEpochRef = useRef(0);
   const pipelineCatalogRefreshTimerRef = useRef<number | null>(null);
+  const scanRequestEpochRef = useRef(0);
+  const scanControllerRef = useRef<AbortController | null>(null);
+  const availabilityRefreshEpochRef = useRef(0);
+  const availabilityRefreshControllerRef = useRef<AbortController | null>(null);
   const [cacheRevision, setCacheRevision] = useState(0);
   const [total, setTotal] = useState(0);
   const [catalogLoading, setCatalogLoading] = useState(false);
@@ -269,6 +364,7 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
   const [semanticQueryInput, setSemanticQueryInput] = useState('');
   const [semanticQuery, setSemanticQuery] = useState('');
   const [semanticStatus, setSemanticStatus] = useState<AssetSemanticStatus | null>(null);
+  const [semanticStatusRefreshToken, setSemanticStatusRefreshToken] = useState(0);
   const [semanticDocuments, setSemanticDocuments] = useState<AssetSemanticDocument[]>([]);
   const [semanticDocumentsLoading, setSemanticDocumentsLoading] = useState(false);
   const [semanticDocumentsError, setSemanticDocumentsError] = useState('');
@@ -349,6 +445,10 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
     return () => window.clearTimeout(timer);
   }, [queryInput, searchMode]);
 
+  useEffect(() => {
+    duplicatePagesRef.current = duplicatePages;
+  }, [duplicatePages]);
+
   const filterKey = useMemo(() => JSON.stringify({ projectId: assetProjectId, query, kind, storageMode, availability, collectionId, tag: tagFilter, source: sourceFilter, sort: sortOrder }), [assetProjectId, availability, collectionId, kind, query, sortOrder, sourceFilter, storageMode, tagFilter]);
   const filters = useMemo<Omit<AssetCatalogFilters, 'offset'>>(() => ({
     projectId: assetProjectId,
@@ -381,22 +481,27 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
     tag: tagFilter || undefined,
     source: sourceFilter || undefined,
   }), [availability, collectionId, kind, sourceFilter, storageMode, tagFilter]);
-  const refreshSemanticStatus = useCallback(async () => {
-    semanticStatusRefreshControllerRef.current?.abort();
-    const controller = new AbortController();
-    semanticStatusRefreshControllerRef.current = controller;
-    const expectedProjectId = assetProjectId;
-    const next = await api.getProjectAssetSemanticStatus(expectedProjectId, { signal: controller.signal });
-    if (controller.signal.aborted || assetProjectIdRef.current !== expectedProjectId) return;
+  const requestSemanticStatusRefresh = useCallback(() => {
+    // AssetSemanticSettingsPanel is the single status I/O owner. Clearing the
+    // mirrored parent value prevents semantic search from reusing a stale
+    // identity while the panel aborts its old GET and reads a fresh snapshot.
+    const nextEpoch = semanticStatusRefreshEpochRef.current + 1;
+    semanticStatusRefreshEpochRef.current = nextEpoch;
+    setSemanticStatus(null);
+    setSemanticStatusRefreshToken(nextEpoch);
+  }, []);
+  const acceptSemanticStatus = useCallback((next: AssetSemanticStatus, refreshEpoch: number) => {
+    if (refreshEpoch !== semanticStatusRefreshEpochRef.current
+      || next.project.projectId !== semanticStatusProjectRef.current) return;
     setSemanticStatus(next);
-  }, [assetProjectId]);
+  }, []);
   const semanticCatalog = useAssetSemanticCatalog({
     active: searchMode === 'semantic',
     projectId: assetProjectId,
     query: semanticQuery,
     filters: semanticFilters,
     status: semanticStatus,
-    onConflict: refreshSemanticStatus,
+    onConflict: requestSemanticStatusRefresh,
   });
   const browserTotal = searchMode === 'semantic' ? semanticCatalog.total : total;
   const browserLoading = searchMode === 'semantic' ? semanticCatalog.loading : catalogLoading;
@@ -428,6 +533,18 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
   }, [batchCollectionId, batchCollectionSourceId, collections]);
 
   useEffect(() => {
+    pipelineRequestEpochRef.current += 1;
+    scanRequestEpochRef.current += 1;
+    scanControllerRef.current?.abort();
+    scanControllerRef.current = null;
+    availabilityRefreshEpochRef.current += 1;
+    availabilityRefreshControllerRef.current?.abort();
+    availabilityRefreshControllerRef.current = null;
+    pipelineSignatureRef.current = '';
+    if (pipelineCatalogRefreshTimerRef.current != null) {
+      window.clearTimeout(pipelineCatalogRefreshTimerRef.current);
+      pipelineCatalogRefreshTimerRef.current = null;
+    }
     detailGenerationRef.current += 1;
     duplicateGenerationRef.current += 1;
     rangeSelectionGenerationRef.current += 1;
@@ -439,7 +556,6 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
     sourceTreeControllerRef.current?.abort();
     lineageControllerRef.current?.abort();
     semanticDocumentControllerRef.current?.abort();
-    semanticStatusRefreshControllerRef.current?.abort();
     rangeSelectionControllerRef.current?.abort();
     selectedAssetIdRef.current = null;
     selectionAnchorIndexRef.current = null;
@@ -494,6 +610,9 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
     setPermissionScopeDraft('project');
     setPermissionGrantsDraft([]);
     setDeleteDraft(null);
+    setPipelineStatus(null);
+    setPipelineError('');
+    setMutation((current) => current === 'scan' || current === 'availability-refresh' ? '' : current);
   }, [assetProjectId]);
 
   useEffect(() => {
@@ -540,6 +659,14 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
         pagesRef.current = new Map();
         visiblePageOffsetsRef.current = new Set([0]);
         catalogRevisionRef.current = null;
+        duplicateGenerationRef.current += 1;
+        duplicateControllerRef.current?.abort();
+        duplicateControllerRef.current = null;
+        setDuplicatePages([]);
+        setDuplicatePageIndex(0);
+        setDuplicates([]);
+        setDuplicateHasMore(false);
+        setMutation((current) => current === 'duplicates' ? '' : current);
         setTotal(0);
         setCacheRevision((revision) => revision + 1);
         setCatalogError('素材目录 revision 已变化，正在重新加载一致快照。');
@@ -570,6 +697,14 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
     visiblePageOffsetsRef.current = new Set([0]);
     activeFiltersRef.current = requestFilters;
     catalogRevisionRef.current = null;
+    duplicateGenerationRef.current += 1;
+    duplicateControllerRef.current?.abort();
+    duplicateControllerRef.current = null;
+    setDuplicatePages([]);
+    setDuplicatePageIndex(0);
+    setDuplicates([]);
+    setDuplicateHasMore(false);
+    setMutation((current) => current === 'duplicates' ? '' : current);
     setTotal(0);
     setCatalogError('');
     setCatalogLoading(true);
@@ -861,7 +996,16 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
   }, [refreshVisibleCatalogPages]);
 
   const loadPipelineStatus = useCallback(async (signal?: AbortSignal) => {
-    const next = normalizePipelineStatus(await api.getProjectAssetPipelineStatus({ signal }));
+    const expectedProjectId = assetProjectId;
+    const requestEpoch = pipelineRequestEpochRef.current + 1;
+    pipelineRequestEpochRef.current = requestEpoch;
+    const next = normalizePipelineStatus(await api.getProjectAssetPipelineStatus(expectedProjectId, { signal }));
+    if (signal?.aborted
+      || requestEpoch !== pipelineRequestEpochRef.current
+      || pipelineProjectRef.current !== expectedProjectId
+      || next.projectId !== expectedProjectId
+      || next.scan.projectId !== expectedProjectId
+      || next.previews.projectId !== expectedProjectId) return null;
     setPipelineStatus(next);
     setPipelineError('');
     const signature = assetPipelineSignature(next);
@@ -871,7 +1015,7 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
     }
     pipelineSignatureRef.current = signature;
     return next;
-  }, [refreshSelectedAsset, schedulePipelineCatalogRefresh]);
+  }, [assetProjectId, refreshSelectedAsset, schedulePipelineCatalogRefresh]);
 
   useEffect(() => {
     let stopped = false;
@@ -883,7 +1027,7 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
       let delay = document.visibilityState === 'visible' ? 2500 : 5000;
       try {
         const status = await loadPipelineStatus(controller.signal);
-        if (pipelineIsActive(status)) delay = document.visibilityState === 'visible' ? 750 : 3000;
+        if (status && pipelineIsActive(status)) delay = document.visibilityState === 'visible' ? 750 : 3000;
       } catch (error) {
         if (!isAbortError(error)) setPipelineError(error instanceof Error ? error.message : String(error));
         delay = 5000;
@@ -909,7 +1053,11 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
     sourceTreeControllerRef.current?.abort();
     lineageControllerRef.current?.abort();
     semanticDocumentControllerRef.current?.abort();
-    semanticStatusRefreshControllerRef.current?.abort();
+    pipelineRequestEpochRef.current += 1;
+    scanRequestEpochRef.current += 1;
+    scanControllerRef.current?.abort();
+    availabilityRefreshEpochRef.current += 1;
+    availabilityRefreshControllerRef.current?.abort();
     if (pipelineCatalogRefreshTimerRef.current != null) window.clearTimeout(pipelineCatalogRefreshTimerRef.current);
   }, []);
 
@@ -917,6 +1065,12 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
     const generation = detailGenerationRef.current + 1;
     detailGenerationRef.current = generation;
     detailControllerRef.current?.abort();
+    availabilityRefreshEpochRef.current += 1;
+    availabilityRefreshControllerRef.current?.abort();
+    availabilityRefreshControllerRef.current = null;
+    duplicateGenerationRef.current += 1;
+    duplicateControllerRef.current?.abort();
+    duplicateControllerRef.current = null;
     sourceTreeControllerRef.current?.abort();
     lineageControllerRef.current?.abort();
     const controller = new AbortController();
@@ -929,6 +1083,8 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
     setDuplicateHasMore(false);
     setDuplicatePages([]);
     setDuplicatePageIndex(0);
+    setMutation((current) => current === 'duplicates' ? '' : current);
+    setMutation((current) => current === 'availability-refresh' ? '' : current);
     setLineagePages([]);
     setLineagePageIndex(0);
     setLineagePageOffset(0);
@@ -978,7 +1134,7 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
     setMessage('');
     try { await work(); }
     catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
-    finally { setMutation(''); }
+    finally { setMutation((current) => current === name ? '' : current); }
   }, []);
 
   const reloadCollections = useCallback(async (): Promise<AssetCollection[]> => {
@@ -1246,12 +1402,82 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
   });
 
   const scanAssets = () => runMutation('scan', async () => {
+    const expectedProjectId = assetProjectId;
+    const requestEpoch = scanRequestEpochRef.current + 1;
+    scanRequestEpochRef.current = requestEpoch;
+    scanControllerRef.current?.abort();
+    const controller = new AbortController();
+    scanControllerRef.current = controller;
     setMessage('扫描已开始；可继续浏览素材，进度与预览队列显示在上方。');
     void loadPipelineStatus();
-    const result = await api.scanProjectAssets(assetProjectId);
-    setMessage(`扫描完成：${result.indexed}/${result.total}，失败 ${result.failed}，新增缺失 ${result.availability?.missing || 0}，恢复 ${result.availability?.restored || 0}`);
-    resetCatalog();
-    await loadPipelineStatus();
+    try {
+      const result = await api.scanProjectAssets(expectedProjectId, { signal: controller.signal });
+      if (controller.signal.aborted
+        || requestEpoch !== scanRequestEpochRef.current
+        || pipelineProjectRef.current !== expectedProjectId
+        || result.projectId !== expectedProjectId) return;
+      setMessage(`扫描完成：${result.indexed}/${result.total}，失败 ${result.failed}，新增缺失 ${result.availability?.missing || 0}，恢复 ${result.availability?.restored || 0}，源内容变化 ${result.availability?.sourceChanged || 0}，暂不能判定 ${result.availability?.indeterminate || 0}`);
+      resetCatalog();
+      await loadPipelineStatus();
+    } catch (error) {
+      if (controller.signal.aborted || isAbortError(error)
+        || requestEpoch !== scanRequestEpochRef.current
+        || pipelineProjectRef.current !== expectedProjectId) return;
+      if (error instanceof api.ApiRequestError && error.status === 507) {
+        throw new Error('项目数据库存储空间不足，扫描结果未完整提交；清理空间后可再次手动扫描。');
+      }
+      throw error;
+    } finally {
+      if (scanControllerRef.current === controller) scanControllerRef.current = null;
+    }
+  });
+
+  const refreshSelectedAssetAvailability = () => runMutation('availability-refresh', async () => {
+    const targetAsset = selectedAsset;
+    const expectedProjectId = assetProjectId;
+    const input = frozenAssetAvailabilityInput(targetAsset, expectedProjectId, catalogRevisionRef.current);
+    if (!targetAsset || !input) throw new Error('当前素材缺少可校验的本机源文件冻结身份，请先刷新素材详情。');
+    const targetId = targetAsset.id;
+    const expectedSelectionRevision = detailGenerationRef.current + 1;
+    const requestEpoch = availabilityRefreshEpochRef.current + 1;
+    availabilityRefreshEpochRef.current = requestEpoch;
+    availabilityRefreshControllerRef.current?.abort();
+    const controller = new AbortController();
+    availabilityRefreshControllerRef.current = controller;
+    try {
+      const { value: result, revision } = await runSelectedMutationRequest(targetId, () => (
+        api.refreshProjectAssetAvailability(targetId, input, { signal: controller.signal })
+      ));
+      if (controller.signal.aborted
+        || requestEpoch !== availabilityRefreshEpochRef.current
+        || pipelineProjectRef.current !== expectedProjectId
+        || result.projectId !== expectedProjectId
+        || !canApplySelectedMutation(targetId, revision)) return;
+      if (result.changed) resetCatalog(activeFiltersRef.current);
+      const corruptionPreserved = !result.changed
+        && (targetAsset.availability === 'corrupt'
+          || String(targetAsset.metadata?.health || '').toLowerCase() === 'corrupt');
+      if (corruptionPreserved) setMessage('校验完成：已保留既有素材损坏判定；只有显式重新索引新的内容版本才能替换该判定。');
+      else if (result.state === 'missing') setMessage('校验完成：本机源文件不存在，素材已标记为缺失。');
+      else if (result.state === 'source-changed') setMessage('校验完成：源文件内容已变化，旧素材保持缺失；请重新索引以创建新的内容版本。');
+      else if (result.state === 'indeterminate') setMessage('暂时无法可靠判定源文件状态，未修改素材记录；请检查权限或稍后再次手动校验。');
+      else setMessage(result.changed ? '校验完成：冻结内容一致，素材已恢复为可用。' : '校验完成：冻结内容一致，素材状态无需修改。');
+    } catch (error) {
+      if (controller.signal.aborted || isAbortError(error)
+        || requestEpoch !== availabilityRefreshEpochRef.current
+        || pipelineProjectRef.current !== expectedProjectId
+        || !canApplySelectedMutation(targetId, expectedSelectionRevision)) return;
+      if (error instanceof api.ApiRequestError && error.status === 409) {
+        resetCatalog(activeFiltersRef.current);
+        throw new Error('素材或目录已变化，已刷新当前只读快照；请确认后再次手动校验，系统不会自动重放写请求。');
+      }
+      if (error instanceof api.ApiRequestError && error.status === 507) {
+        throw new Error('项目数据库存储空间不足，源文件状态未更新；清理空间后可再次手动校验。');
+      }
+      throw error;
+    } finally {
+      if (availabilityRefreshControllerRef.current === controller) availabilityRefreshControllerRef.current = null;
+    }
   });
 
   const retryPreview = () => runMutation('preview-retry', async () => {
@@ -1295,8 +1521,24 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
     const targetDraft = deleteDraft;
     if (!targetDraft || targetDraft.confirmation !== targetDraft.asset.filename) throw new Error('请输入完整文件名确认删除原文件');
     const targetId = targetDraft.asset.id;
-    const { revision } = await runSelectedMutationRequest(targetId, () => api.deleteProjectAssetFile(targetId, targetDraft.confirmation));
-    setMessage(`已删除原文件并移除索引：${targetDraft.asset.filename}`);
+    const { value: result, revision } = await runSelectedMutationRequest(targetId, () => api.deleteProjectAssetFile(
+      targetId,
+      targetDraft.confirmation,
+      {
+        entityUid: targetDraft.asset.entityUid,
+        contentRevision: Number(targetDraft.asset.contentRevision),
+        contentHash: String(targetDraft.asset.contentHash || ''),
+      },
+    ));
+    if (result.persistenceWarning?.phase === 'cas-record-finalize') {
+      setMessage(`索引已移除，原文件记录对账待完成：${targetDraft.asset.filename}`);
+    } else if (result.persistenceWarning) {
+      setMessage(`索引已移除，原文件清理待完成：${targetDraft.asset.filename}`);
+    } else if (result.blobRetained) {
+      setMessage(`索引已移除，共享原文件仍被其他素材使用：${targetDraft.asset.filename}`);
+    } else {
+      setMessage(`已删除原文件并移除索引：${targetDraft.asset.filename}`);
+    }
     setDeleteDraft((current) => current?.asset.id === targetId ? null : current);
     if (canApplySelectedMutation(targetId, revision)) {
       selectedAssetIdRef.current = null;
@@ -1317,6 +1559,7 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
   const showDuplicatePage = useCallback((index: number) => {
     const page = duplicatePages[index];
     if (!page) return;
+    duplicatePageIndexRef.current = index;
     setDuplicatePageIndex(index);
     setDuplicates(page.items);
     setDuplicateHasMore(page.hasMore);
@@ -1330,6 +1573,7 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
     if (nextPage && sameMode) {
       const cached = duplicatePages[duplicatePageIndex + 1];
       if (cached) {
+        duplicatePageIndexRef.current = duplicatePageIndex + 1;
         setDuplicatePageIndex(duplicatePageIndex + 1);
         setDuplicates(cached.items);
         setDuplicateHasMore(cached.hasMore);
@@ -1348,46 +1592,98 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
     setMutation('duplicates');
     setMessage('');
     try {
+      if (!nextPage && mode !== 'exact') {
+        const expectedCatalogRevision = catalogRevisionRef.current;
+        if (expectedCatalogRevision == null) {
+          throw new Error('素材目录正在同步，请稍后重新检测重复候选。');
+        }
+        await api.refreshProjectAssetDuplicates(targetId, {
+          expectedCatalogRevision,
+          signal: controller.signal,
+        });
+      }
       const page = await api.listProjectAssetDuplicates(targetId, {
         mode,
         limit: 25,
         cursor: requestCursor || undefined,
         signal: controller.signal,
       });
+      if (catalogRevisionRef.current == null
+        || String(page.catalogRevision) !== String(catalogRevisionRef.current)) {
+        throw new api.ApiRequestError('素材目录已变化，请重新加载重复候选。', 409, {
+          expectedCatalogRevision: catalogRevisionRef.current,
+          actualCatalogRevision: page.catalogRevision,
+        });
+      }
       if (generation !== duplicateGenerationRef.current || !canApplySelectedMutation(targetId, targetRevision)) return;
       setDuplicateMode(mode);
       if (nextPage) {
         setDuplicatePages((current) => [...current.slice(0, duplicatePageIndex + 1), page]);
+        duplicatePageIndexRef.current = duplicatePageIndex + 1;
         setDuplicatePageIndex(duplicatePageIndex + 1);
       } else {
         setDuplicatePages([page]);
+        duplicatePageIndexRef.current = 0;
         setDuplicatePageIndex(0);
       }
       setDuplicates(page.items);
       setDuplicateHasMore(page.hasMore);
     } catch (error) {
-      if (!isAbortError(error)) setMessage(error instanceof Error ? error.message : String(error));
+      if (!isAbortError(error)) {
+        if (generation !== duplicateGenerationRef.current || !canApplySelectedMutation(targetId, targetRevision)) return;
+        if (error instanceof api.ApiRequestError && error.status === 409) {
+          setDuplicatePages([]);
+          setDuplicatePageIndex(0);
+          setDuplicates([]);
+          setDuplicateHasMore(false);
+          resetCatalog(activeFiltersRef.current);
+        }
+        setMessage(error instanceof Error ? error.message : String(error));
+      }
     } finally {
       if (generation === duplicateGenerationRef.current) setMutation('');
     }
-  }, [canApplySelectedMutation, duplicateMode, duplicatePageIndex, duplicatePages, selectedAsset]);
+  }, [canApplySelectedMutation, duplicateMode, duplicatePageIndex, duplicatePages, resetCatalog, selectedAsset]);
 
   const decideDuplicate = (candidate: AssetDuplicateCandidate, decision: 'pending' | 'confirmed' | 'dismissed') => runMutation(`duplicate:${candidate.id}`, async () => {
     const targetId = selectedAssetIdRef.current;
     const targetRevision = detailGenerationRef.current;
+    const decisionDuplicateGeneration = duplicateGenerationRef.current;
+    const candidatePageIndex = duplicatePageIndexRef.current;
     try {
-      const updated = await api.decideProjectAssetDuplicate(candidate.id, decision, candidate.revision ?? 0, assetProjectId);
-      if (!targetId || !canApplySelectedMutation(targetId, targetRevision)) return;
+      const candidatePage = duplicatePagesRef.current[candidatePageIndex];
+      const expectedCatalogRevision = candidatePage?.items.some((item) => item.id === candidate.id)
+        ? candidatePage.catalogRevision
+        : null;
+      if (expectedCatalogRevision == null) throw new Error('重复候选目录版本缺失，请重新检测。');
+      const updated = await api.decideProjectAssetDuplicate(
+        candidate.id,
+        decision,
+        {
+          expectedRevision: candidate.revision ?? 0,
+          expectedCatalogRevision,
+          projectId: assetProjectId,
+        },
+      );
+      const currentCandidatePage = duplicatePagesRef.current[candidatePageIndex];
+      if (decisionDuplicateGeneration !== duplicateGenerationRef.current
+        || !targetId
+        || !canApplySelectedMutation(targetId, targetRevision)
+        || String(currentCandidatePage?.catalogRevision) !== String(expectedCatalogRevision)
+        || !currentCandidatePage?.items.some((item) => item.id === candidate.id)) return;
+      const candidatePageIsActive = duplicatePageIndexRef.current === candidatePageIndex;
       // The decision endpoint owns only the persisted decision row. Preserve
       // the selected-asset-relative target/evidence already loaded by the
       // duplicate query instead of replacing it with a partial wire record.
-      setDuplicates((current) => current.map((item) => item.id === candidate.id ? {
-        ...item,
-        decision: updated.decision,
-        revision: updated.revision,
-        updatedAt: updated.updatedAt,
-      } : item));
-      setDuplicatePages((current) => current.map((page, index) => index !== duplicatePageIndex ? page : {
+      if (candidatePageIsActive) {
+        setDuplicates((current) => current.map((item) => item.id === candidate.id ? {
+          ...item,
+          decision: updated.decision,
+          revision: updated.revision,
+          updatedAt: updated.updatedAt,
+        } : item));
+      }
+      setDuplicatePages((current) => current.map((page, index) => index !== candidatePageIndex ? page : {
         ...page,
         items: page.items.map((item) => item.id === candidate.id ? {
           ...item,
@@ -1398,7 +1694,18 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
       }));
       setMessage(decision === 'pending' ? '已撤销重复判断。' : decision === 'confirmed' ? '已确认重复关系；素材仍保持独立，未合并或删除。' : '已忽略该候选。');
     } catch (error) {
-      if (error instanceof api.ApiRequestError && error.status === 409) throw new Error(`409 候选版本冲突：${error.message}`);
+      const decisionStillCurrent = decisionDuplicateGeneration === duplicateGenerationRef.current
+        && Boolean(targetId)
+        && canApplySelectedMutation(targetId || '', targetRevision);
+      if (!decisionStillCurrent) return;
+      if (error instanceof api.ApiRequestError && error.status === 409) {
+        setDuplicatePages([]);
+        setDuplicatePageIndex(0);
+        setDuplicates([]);
+        setDuplicateHasMore(false);
+        resetCatalog(activeFiltersRef.current);
+        throw new Error(`409 候选版本冲突：${error.message}`);
+      }
       throw error;
     }
   });
@@ -1756,6 +2063,7 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
   const selectedSemanticHit = searchMode === 'semantic' && selectedAssetId
     ? semanticCatalog.getHitByAssetId(selectedAssetId)
     : undefined;
+  const selectedAvailabilityRefreshInput = frozenAssetAvailabilityInput(selectedAsset, assetProjectId, catalogRevision);
   const semanticEmpty = searchMode === 'semantic'
     ? assetSemanticEmptyState({
       availability: semanticCatalog.availability,
@@ -1820,12 +2128,17 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
       <div className="mt-2 flex min-h-9 flex-wrap items-center gap-x-3 gap-y-1 rounded border border-[var(--border-primary)] bg-[var(--bg-secondary)] px-3 py-1.5 text-[10px]" role="status" aria-live="polite" data-asset-pipeline-status>
         {tasksActive && <Loader2 size={13} className="animate-spin text-[var(--accent-primary)]" />}
         <strong>{pipelineStatus?.scan.running ? '正在扫描' : '媒体预览队列'}</strong>
-        <span>活动 {activePreviewCount}/{pipelineStatus?.previews.concurrency || 1}</span><span>排队 {counts.queued}</span><span>重试 {counts.retrying}</span><span>成功 {counts.succeeded}</span><span className={counts.failed ? 'font-bold text-red-500' : ''}>失败 {counts.failed}</span>
+        <span>本项目活动 {activePreviewCount}</span><span>全局槽位上限 {pipelineStatus?.previews.concurrency || 1}</span><span>排队 {counts.queued}</span><span>重试 {counts.retrying}</span><span>成功 {counts.succeeded}</span><span className={counts.failed ? 'font-bold text-red-500' : ''}>失败 {counts.failed}</span>
         {pipelineStatus?.previews.nextAttemptAt ? <span>下次重试 {formatTime(pipelineStatus.previews.nextAttemptAt)}</span> : null}
+        {pipelineStatus?.previews.databaseStatusStale && <span className="font-bold text-amber-600">数据库状态为缓存值，当前计数不能视为空闲</span>}
+        {pipelineStatus?.previews.storagePressure?.active && <span className="font-bold text-amber-600">全局存储压力，预览写入等待恢复</span>}
+        {pipelineStatus?.previews.databaseBusy?.active && <span className="font-bold text-amber-600">全局数据库忙，预览队列正在退避</span>}
+        {pipelineStatus?.previews.globalRecoveryPending && <span className="font-bold text-amber-600">全局预览恢复等待数据库可写</span>}
+        {pipelineStatus?.previews.shuttingDown && <span className="font-bold text-amber-600">全局预览管线正在关闭</span>}
         {!pipelineStatus && !pipelineError && <span className="opacity-55">读取任务状态…</span>}
         {pipelineError && <span className="text-red-500">状态暂不可用：{pipelineError}</span>}
       </div>
-      <div className="mt-2"><AssetSemanticSettingsPanel projectId={assetProjectId} onStatusChange={setSemanticStatus} /></div>
+      <div className="mt-2"><AssetSemanticSettingsPanel projectId={assetProjectId} externalRefreshToken={semanticStatusRefreshToken} onStatusChange={acceptSemanticStatus} /></div>
       {(message || browserError) && <div className={`mt-2 rounded border px-3 py-2 text-xs ${browserError ? 'border-red-500/50 text-red-500' : 'border-[var(--border-primary)]'}`} role={browserError ? 'alert' : 'status'}>{browserError || message}</div>}
       <div className="mt-2 rounded border border-[var(--border-primary)] bg-[var(--bg-secondary)] p-2" data-asset-batch-toolbar>
         <div className="flex flex-wrap items-center gap-2 text-[11px]">
@@ -1903,6 +2216,7 @@ export default function AssetCenter({ canvasId, projectId, onInsertAsset }: Asse
           </details>}
           {detailError && <div role="alert" className="mt-2 flex gap-2 text-[10px] text-red-500"><AlertTriangle size={13} className="shrink-0" />{detailError}</div>}
           <dl className="mt-3 grid grid-cols-2 gap-y-2 text-xs"><dt className="opacity-60">类型</dt><dd className="text-right">{selectedAsset.kind}</dd><dt className="opacity-60">尺寸 / 时长</dt><dd className="text-right">{selectedAsset.metadata?.width || '—'}×{selectedAsset.metadata?.height || '—'}{selectedAsset.metadata?.duration ? ` · ${Number(selectedAsset.metadata.duration).toFixed(1)}s` : ''}</dd><dt className="opacity-60">存储模式</dt><dd className="text-right">{storageModeLabel(selectedAsset.storageMode)}</dd><dt className="opacity-60">源文件状态</dt><dd className={`text-right ${selectedAsset.availability === 'missing' || selectedAsset.availability === 'corrupt' ? 'text-red-500' : ''}`}>{availabilityLabel(selectedAsset.availability)}</dd><dt className="opacity-60">预览任务</dt><dd className={`text-right ${selectedAsset.metadata?.previewStatus === 'failed' ? 'text-red-500' : ''}`}>{selectedAsset.metadata?.previewStatus || 'ready'}</dd><dt className="opacity-60">健康</dt><dd className={`text-right ${selectedAsset.metadata?.health === 'corrupt' ? 'text-red-500' : ''}`}>{String(selectedAsset.metadata?.health || '未知')}</dd><dt className="opacity-60">来源</dt><dd className="truncate text-right" title={String(selectedAsset.provenance?.source || '')}>{String(selectedAsset.provenance?.source || '未知')}</dd><dt className="opacity-60">颜色 / 帧 / 音频</dt><dd className="truncate text-right" title={String(selectedAsset.metadata?.colorSpace || selectedAsset.metadata?.space || selectedAsset.metadata?.sampleRate || '')}>{String(selectedAsset.metadata?.colorSpace || selectedAsset.metadata?.space || (selectedAsset.metadata?.frameCount ? `${selectedAsset.metadata.frameCount} 帧` : '') || (selectedAsset.metadata?.sampleRate ? `${selectedAsset.metadata.sampleRate} Hz` : '—'))}</dd><dt className="opacity-60">感知哈希</dt><dd className="truncate text-right font-mono" title={`${selectedAsset.perceptualHashAlgorithm || selectedAsset.metadata?.perceptualHashAlgorithm || ''} ${selectedAsset.perceptualHash || ''}`}>{selectedAsset.perceptualHash ? `${selectedAsset.perceptualHashAlgorithm || selectedAsset.metadata?.perceptualHashAlgorithm || 'legacy'} · ${selectedAsset.perceptualHash}` : '—'}</dd></dl>
+          {selectedAvailabilityRefreshInput && <button type="button" data-asset-availability-refresh disabled={Boolean(mutation)} className="mt-3 flex h-8 w-full items-center justify-center gap-1 rounded border border-[var(--border-primary)] text-[10px] font-bold disabled:opacity-40" onClick={() => void refreshSelectedAssetAvailability()}>{mutation === 'availability-refresh' ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}校验源文件状态</button>}
           {selectedAsset.kind === 'video' && (selectedAsset.metadata?.contactSheetUrl || selectedAsset.metadata?.keyframeUrls?.length || selectedAsset.metadata?.firstFrameUrl || selectedAsset.metadata?.lastFrameUrl) && <details className="mt-3 border-y border-[var(--border-primary)] py-2 text-[10px]" data-asset-video-derived-preview>
             <summary className="cursor-pointer font-bold">关键帧与联系表</summary>
             {selectedAsset.metadata.contactSheetUrl && <img src={selectedAsset.metadata.contactSheetUrl} alt={`${selectedAsset.filename} 联系表`} className="mt-2 max-h-40 w-full rounded object-contain" loading="lazy" />}

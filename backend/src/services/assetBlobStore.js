@@ -279,6 +279,27 @@ class AssetBlobStore {
     return this._verifyBlob(filename, hash, expectedSize);
   }
 
+  async withVerifiedBlobLock(contentHash, expectedSize, callback) {
+    const hash = normalizeSha256(contentHash);
+    const normalizedSize = normalizeExpectedSize(expectedSize);
+    if (typeof callback !== 'function') fail('CAS_CALLBACK_INVALID', 'CAS 锁内回调无效');
+    const target = this._target(hash);
+    this._assertExistingPathSafety(target);
+    if (!fs.existsSync(target.filename)) return null;
+    const release = await this._acquireLock(path.join(target.directory, `.cas-${hash}.lock`));
+    try {
+      this._assertExistingPathSafety(target);
+      if (!fs.existsSync(target.filename)) return null;
+      const verified = await this._verifyBlob(target.filename, hash, normalizedSize);
+      return await callback({
+        ...verified,
+        storageKey: path.relative(this.rootPath, target.filename).split(path.sep).join('/'),
+      });
+    } finally {
+      await release();
+    }
+  }
+
   async _copyAndVerifySource(sourcePath, temporary, expectedHash, expectedSize) {
     const source = await openRegularFile(sourcePath, '待安装源文件');
     let output;

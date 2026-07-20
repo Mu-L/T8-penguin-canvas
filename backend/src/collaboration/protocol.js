@@ -17,6 +17,17 @@ const OPERATION_TYPES = new Set([
   'edge.restore',
   'viewport.set',
 ]);
+const OPERATION_PAYLOAD_KEYS = Object.freeze({
+  'node.add': Object.freeze(['node']),
+  'node.patch': Object.freeze(['nodeId', 'patch', 'dataPatch', 'unsetKeys', 'dataUnsetKeys']),
+  'node.move': Object.freeze(['nodeId', 'position']),
+  'node.delete': Object.freeze(['nodeId']),
+  'node.restore': Object.freeze(['node']),
+  'edge.add': Object.freeze(['edge']),
+  'edge.delete': Object.freeze(['edgeId']),
+  'edge.restore': Object.freeze(['edge']),
+  'viewport.set': Object.freeze(['viewport']),
+});
 
 function cloneJson(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -44,7 +55,11 @@ function finiteNumber(value, fallback = 0) {
 }
 
 function normalizeViewport(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value)
+    ? cloneJson(value)
+    : {};
   return {
+    ...source,
     x: finiteNumber(value?.x),
     y: finiteNumber(value?.y),
     zoom: Math.max(0.01, finiteNumber(value?.zoom, 1)),
@@ -55,7 +70,7 @@ function normalizeTombstoneMap(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   return Object.fromEntries(Object.entries(value).flatMap(([id, record]) => {
     if (!id || !record || typeof record !== 'object' || Array.isArray(record)) return [];
-    return [[id, {
+    const normalized = {
       opId: String(record.opId || ''),
       actorId: String(record.actorId || 'unknown'),
       sessionId: String(record.sessionId || 'unknown'),
@@ -65,7 +80,32 @@ function normalizeTombstoneMap(value) {
       entityType: record.entityType == null ? null : String(record.entityType),
       source: record.source == null ? null : String(record.source),
       target: record.target == null ? null : String(record.target),
-    }]];
+    };
+    // Legacy tombstones predate named-handle binding. Preserve absence so an
+    // old deleted edge remains restorable, while every new tombstone records
+    // explicit null-or-string handle identity and can be checked exactly.
+    if (Object.prototype.hasOwnProperty.call(record, 'sourceHandle')) {
+      normalized.sourceHandle = record.sourceHandle == null ? null : String(record.sourceHandle);
+    }
+    if (Object.prototype.hasOwnProperty.call(record, 'targetHandle')) {
+      normalized.targetHandle = record.targetHandle == null ? null : String(record.targetHandle);
+    }
+    if (Array.isArray(record.legacyAliases)) {
+      normalized.legacyAliases = [...new Set(record.legacyAliases.map((alias) => (
+        assertSafeEntityIdentity(alias, `tombstone ${id} legacyAlias`)
+      )))];
+    }
+    if (Object.prototype.hasOwnProperty.call(record, 'sourceEntityUid')) {
+      normalized.sourceEntityUid = record.sourceEntityUid == null
+        ? null
+        : String(record.sourceEntityUid).toLowerCase();
+    }
+    if (Object.prototype.hasOwnProperty.call(record, 'targetEntityUid')) {
+      normalized.targetEntityUid = record.targetEntityUid == null
+        ? null
+        : String(record.targetEntityUid).toLowerCase();
+    }
+    return [[id, normalized]];
   }));
 }
 
@@ -84,10 +124,12 @@ function normalizeCanvasDocument(canvasId, input, options = {}) {
   const nodes = Array.isArray(source.nodes) ? cloneJson(source.nodes).map((node, index) => ({
     ...node,
     entityUid: entityUuid(node?.entityUid, projectId, normalizedCanvasId, 'node', node?.id || index),
+    entityRevision: Math.max(1, Math.trunc(finiteNumber(node?.entityRevision, 1))),
   })) : [];
   const edges = Array.isArray(source.edges) ? cloneJson(source.edges).map((edge, index) => ({
     ...edge,
     entityUid: entityUuid(edge?.entityUid, projectId, normalizedCanvasId, 'edge', edge?.id || index),
+    entityRevision: Math.max(1, Math.trunc(finiteNumber(edge?.entityRevision, 1))),
   })) : [];
   const subflowInstances = Array.isArray(source.subflowInstances) ? cloneJson(source.subflowInstances).map((instance, index) => ({
     ...instance,
@@ -104,17 +146,36 @@ function normalizeCanvasDocument(canvasId, input, options = {}) {
     nodes,
     edges,
     viewport: normalizeViewport(source.viewport),
+    viewportRevision: Math.max(1, Math.trunc(finiteNumber(source.viewportRevision, 1))),
     subflowInstances,
     tombstones: normalizeTombstones(source.tombstones),
     updatedAt: Math.max(1, Math.trunc(finiteNumber(options.updatedAt ?? source.updatedAt, Date.now()))),
   };
 }
 
+function normalizeOperationPayload(type, rawPayload) {
+  if (rawPayload == null) return {};
+  if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload) || Buffer.isBuffer(rawPayload)) {
+    throw new Error(`${type}.payload 必须是对象`);
+  }
+  const allowedKeys = OPERATION_PAYLOAD_KEYS[type] || [];
+  const allowed = new Set(allowedKeys);
+  const unknownKeys = Object.keys(rawPayload).filter((key) => !allowed.has(key));
+  if (unknownKeys.length > 0) {
+    throw new Error(`${type}.payload 包含不支持字段: ${unknownKeys.slice(0, 5).join(', ')}`);
+  }
+  const payload = {};
+  for (const key of allowedKeys) {
+    if (Object.prototype.hasOwnProperty.call(rawPayload, key)) payload[key] = cloneJson(rawPayload[key]);
+  }
+  return payload;
+}
+
 function validateOperation(raw) {
   if (!raw || typeof raw !== 'object') throw new Error('operation 必须是对象');
   const type = String(raw.type || '');
   if (!OPERATION_TYPES.has(type)) throw new Error(`不支持的 operation: ${type || '(empty)'}`);
-  const payload = raw.payload && typeof raw.payload === 'object' ? cloneJson(raw.payload) : {};
+  const payload = normalizeOperationPayload(type, raw.payload);
   return {
     opId: String(raw.opId || crypto.randomUUID()),
     projectId: raw.projectId == null ? null : String(raw.projectId),
@@ -157,7 +218,7 @@ function requireOperationBatchRevision(rawBaseRevision, rawOperations) {
 }
 
 function makeTombstone(operation, revision, identity = {}) {
-  return {
+  const tombstone = {
     opId: operation.opId,
     actorId: operation.actorId,
     sessionId: operation.sessionId,
@@ -168,6 +229,24 @@ function makeTombstone(operation, revision, identity = {}) {
     source: identity.source == null ? null : String(identity.source),
     target: identity.target == null ? null : String(identity.target),
   };
+  if (Object.prototype.hasOwnProperty.call(identity, 'sourceHandle')) {
+    tombstone.sourceHandle = identity.sourceHandle == null ? null : String(identity.sourceHandle);
+  }
+  if (Object.prototype.hasOwnProperty.call(identity, 'targetHandle')) {
+    tombstone.targetHandle = identity.targetHandle == null ? null : String(identity.targetHandle);
+  }
+  if (Array.isArray(identity.legacyAliases)) {
+    tombstone.legacyAliases = [...new Set(identity.legacyAliases.map((alias) => (
+      assertSafeEntityIdentity(alias, 'tombstone legacyAlias')
+    )))];
+  }
+  if (isUuid(identity.sourceEntityUid)) {
+    tombstone.sourceEntityUid = String(identity.sourceEntityUid).toLowerCase();
+  }
+  if (isUuid(identity.targetEntityUid)) {
+    tombstone.targetEntityUid = String(identity.targetEntityUid).toLowerCase();
+  }
+  return tombstone;
 }
 
 function deletedObjectError(kind, id) {
@@ -204,7 +283,9 @@ function nodeMatchesIdentity(document, storedIdentity, node) {
   return resolvedIndex >= 0 && document.nodes[resolvedIndex] === node;
 }
 
-const PROTECTED_NODE_PATCH_KEYS = new Set(['id', 'entityUid', 'type']);
+const PROTECTED_NODE_PATCH_KEYS = new Set([
+  'id', 'entityUid', 'entityRevision', 'legacyAliases', 'type',
+]);
 const UNSAFE_OBJECT_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
 function assertSafeEntityIdentity(value, label) {
@@ -267,7 +348,7 @@ function assertPosition(value, label) {
 function assertViewport(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('viewport 无效');
   const keys = Object.keys(value);
-  if (keys.some((key) => !['x', 'y', 'zoom'].includes(key))) throw new Error('viewport 包含无效字段');
+  if (keys.some((key) => UNSAFE_OBJECT_KEYS.has(key))) throw new Error('viewport 包含不安全字段');
   return {
     x: assertBoundedFiniteNumber(value.x, 'viewport.x', -MAX_CANVAS_COORDINATE, MAX_CANVAS_COORDINATE),
     y: assertBoundedFiniteNumber(value.y, 'viewport.y', -MAX_CANVAS_COORDINATE, MAX_CANVAS_COORDINATE),
@@ -284,49 +365,173 @@ function assertOptionalEntityType(value, label) {
   return value;
 }
 
+function identityValues(record, primaryId, label, requireEntityUid = true) {
+  const identities = new Set([assertSafeEntityIdentity(primaryId, `${label} id`)]);
+  if (record.entityUid != null) {
+    if (!isUuid(record.entityUid)) throw new Error(`${label} entityUid 无效`);
+    identities.add(String(record.entityUid).toLowerCase());
+  } else if (requireEntityUid) {
+    throw new Error(`${label} entityUid 无效`);
+  }
+  if (record.legacyAliases != null) {
+    if (!Array.isArray(record.legacyAliases) || record.legacyAliases.length > 500) {
+      throw new Error(`${label} legacyAliases 无效`);
+    }
+    for (const alias of record.legacyAliases) {
+      identities.add(assertSafeEntityIdentity(alias, `${label} legacyAlias`));
+    }
+  }
+  return identities;
+}
+
+function inheritRestoredLegacyAliases(entity, tombstone, label) {
+  const inherited = Array.isArray(tombstone?.legacyAliases)
+    ? [...new Set(tombstone.legacyAliases.map((alias) => (
+      assertSafeEntityIdentity(alias, `${label} tombstone legacyAlias`)
+    )))]
+    : [];
+  if (entity.legacyAliases != null) {
+    if (!Array.isArray(entity.legacyAliases) || entity.legacyAliases.length > 500) {
+      throw new Error(`${label} legacyAliases 无效`);
+    }
+    const supplied = [...new Set(entity.legacyAliases.map((alias) => (
+      assertSafeEntityIdentity(alias, `${label} legacyAlias`)
+    )))];
+    const inheritedSet = new Set(inherited);
+    if (supplied.length !== inherited.length || supplied.some((alias) => !inheritedSet.has(alias))) {
+      throw new Error(`${label} legacyAliases 与删除记录不一致`);
+    }
+  }
+  if (inherited.length > 0) entity.legacyAliases = inherited;
+  else delete entity.legacyAliases;
+}
+
+function registerIdentityValues(registry, identities, owner, conflictMessage) {
+  for (const identity of identities) {
+    const existing = registry.get(identity);
+    if (existing && existing !== owner) throw new Error(`${conflictMessage}: ${identity}`);
+    registry.set(identity, owner);
+  }
+}
+
+function assertEndpointEntityUid(value, endpoint, label) {
+  if (value == null) return;
+  if (!isUuid(value)) throw new Error(`${label} 无效`);
+  if (endpoint?.entityUid && String(value).toLowerCase() !== String(endpoint.entityUid).toLowerCase()) {
+    throw new Error(`${label} 与端点稳定身份不一致`);
+  }
+}
+
 function assertCanvasDocumentInvariants(document) {
   if (!document || typeof document !== 'object' || Array.isArray(document)) throw new Error('画布结构无效');
   if (!Array.isArray(document.nodes) || !Array.isArray(document.edges)) throw new Error('画布 nodes/edges 结构无效');
-  const nodeIdentities = new Map();
+  const activeNodeIdentities = new Map();
   for (const node of document.nodes) {
     if (!node || typeof node !== 'object' || Array.isArray(node)) throw new Error('画布节点结构无效');
     if (typeof node.id !== 'string') throw new Error('画布节点 id 无效');
     const id = assertSafeEntityIdentity(node.id, '画布节点 id');
-    if (!isUuid(node.entityUid)) throw new Error(`画布节点 entityUid 无效: ${id}`);
+    const identities = identityValues(node, id, `画布节点: ${id}`);
+    if (!Number.isSafeInteger(node.entityRevision) || node.entityRevision < 1 || node.entityRevision > document.revision) {
+      throw new Error(`画布节点 entityRevision 无效: ${id}`);
+    }
     assertOptionalEntityType(node.type, `画布节点 type: ${id}`);
     if (Object.prototype.hasOwnProperty.call(node, 'position')) assertPosition(node.position, `画布节点 position: ${id}`);
     if (Object.prototype.hasOwnProperty.call(node, 'data')
       && (!node.data || typeof node.data !== 'object' || Array.isArray(node.data))) {
       throw new Error(`画布节点 data 无效: ${id}`);
     }
-    for (const identity of [id, String(node.entityUid).toLowerCase()]) {
-      if (nodeIdentities.has(identity)) throw new Error(`画布节点身份重复: ${identity}`);
-      nodeIdentities.set(identity, node);
-    }
+    registerIdentityValues(activeNodeIdentities, identities, node, '画布节点身份重复');
   }
-  const edgeIdentities = new Set();
+
+  const allNodeIdentities = new Map(activeNodeIdentities);
+  const nodeTombstones = document.tombstones?.nodes;
+  const edgeTombstones = document.tombstones?.edges;
+  if (!nodeTombstones || typeof nodeTombstones !== 'object' || Array.isArray(nodeTombstones)
+    || !edgeTombstones || typeof edgeTombstones !== 'object' || Array.isArray(edgeTombstones)) {
+    throw new Error('画布 tombstones 结构无效');
+  }
+  for (const [id, record] of Object.entries(nodeTombstones)) {
+    if (!record || typeof record !== 'object' || Array.isArray(record)) throw new Error(`节点 tombstone 结构无效: ${id}`);
+    const identities = identityValues(record, id, `节点 tombstone: ${id}`, false);
+    if (record.revision != null
+      && (!Number.isSafeInteger(record.revision) || record.revision < 0 || record.revision > document.revision)) {
+      throw new Error(`节点 tombstone revision 无效: ${id}`);
+    }
+    assertOptionalEntityType(record.entityType, `节点 tombstone entityType: ${id}`);
+    registerIdentityValues(allNodeIdentities, identities, record, '活动节点与 tombstone 身份冲突');
+  }
+
+  const activeEdgeIdentities = new Map();
   for (const edge of document.edges) {
     if (!edge || typeof edge !== 'object' || Array.isArray(edge)) throw new Error('画布连线结构无效');
     if (typeof edge.id !== 'string') throw new Error('画布连线 id 无效');
     const id = assertSafeEntityIdentity(edge.id, '画布连线 id');
-    if (!isUuid(edge.entityUid)) throw new Error(`画布连线 entityUid 无效: ${id}`);
+    const identities = identityValues(edge, id, `画布连线: ${id}`);
+    if (!Number.isSafeInteger(edge.entityRevision) || edge.entityRevision < 1 || edge.entityRevision > document.revision) {
+      throw new Error(`画布连线 entityRevision 无效: ${id}`);
+    }
     const source = assertSafeEntityIdentity(edge.source, `画布连线 source: ${id}`);
     const target = assertSafeEntityIdentity(edge.target, `画布连线 target: ${id}`);
     assertOptionalEntityType(edge.type, `画布连线 type: ${id}`);
-    for (const identity of [id, String(edge.entityUid).toLowerCase()]) {
-      if (edgeIdentities.has(identity)) throw new Error(`画布连线身份重复: ${identity}`);
-      edgeIdentities.add(identity);
-    }
-    if (!nodeIdentities.has(source) || !nodeIdentities.has(target)) {
+    registerIdentityValues(activeEdgeIdentities, identities, edge, '画布连线身份重复');
+    const sourceNode = activeNodeIdentities.get(source);
+    const targetNode = activeNodeIdentities.get(target);
+    if (!sourceNode || !targetNode) {
       throw new Error(`画布连线 source/target 端点不存在: ${id}`);
     }
+    assertEndpointEntityUid(edge.sourceEntityUid, sourceNode, `画布连线 sourceEntityUid: ${id}`);
+    assertEndpointEntityUid(edge.targetEntityUid, targetNode, `画布连线 targetEntityUid: ${id}`);
+  }
+
+  const allEdgeIdentities = new Map(activeEdgeIdentities);
+  for (const [id, record] of Object.entries(edgeTombstones)) {
+    if (!record || typeof record !== 'object' || Array.isArray(record)) throw new Error(`连线 tombstone 结构无效: ${id}`);
+    const identities = identityValues(record, id, `连线 tombstone: ${id}`, false);
+    if (record.revision != null
+      && (!Number.isSafeInteger(record.revision) || record.revision < 0 || record.revision > document.revision)) {
+      throw new Error(`连线 tombstone revision 无效: ${id}`);
+    }
+    assertOptionalEntityType(record.entityType, `连线 tombstone entityType: ${id}`);
+    registerIdentityValues(allEdgeIdentities, identities, record, '活动连线与 tombstone 身份冲突');
+    const source = record.source == null ? null : assertSafeEntityIdentity(record.source, `连线 tombstone source: ${id}`);
+    const target = record.target == null ? null : assertSafeEntityIdentity(record.target, `连线 tombstone target: ${id}`);
+    assertEndpointEntityUid(record.sourceEntityUid, source == null ? null : allNodeIdentities.get(source), `连线 tombstone sourceEntityUid: ${id}`);
+    assertEndpointEntityUid(record.targetEntityUid, target == null ? null : allNodeIdentities.get(target), `连线 tombstone targetEntityUid: ${id}`);
   }
   assertViewport(document.viewport);
+  if (!Number.isSafeInteger(document.viewportRevision)
+    || document.viewportRevision < 1 || document.viewportRevision > document.revision) {
+    throw new Error('画布 viewportRevision 无效');
+  }
   return true;
+}
+
+function bindEdgeEndpointIdentity(document, edge, operationLabel) {
+  const sourceIndex = nodeIndex(document, edge.source);
+  const targetIndex = nodeIndex(document, edge.target);
+  if (sourceIndex < 0 || targetIndex < 0) {
+    throw new Error(`${operationLabel} 的 source/target 节点不存在`);
+  }
+  const sourceNode = document.nodes[sourceIndex];
+  const targetNode = document.nodes[targetIndex];
+  for (const [key, node] of [
+    ['sourceEntityUid', sourceNode],
+    ['targetEntityUid', targetNode],
+  ]) {
+    if (!isUuid(node?.entityUid)) throw new Error(`${operationLabel} 端点缺少稳定 entityUid`);
+    if (edge[key] != null) {
+      if (!isUuid(edge[key]) || String(edge[key]).toLowerCase() !== String(node.entityUid).toLowerCase()) {
+        throw new Error(`${operationLabel} ${key} 与端点稳定身份不一致`);
+      }
+    }
+    edge[key] = String(node.entityUid).toLowerCase();
+  }
+  return { sourceNode, targetNode };
 }
 
 function applyCanvasOperationInternal(inputDocument, rawOperation, deferInvariantValidation) {
   const document = normalizeCanvasDocument(inputDocument?.canvasId || 'unknown', inputDocument);
+  if (!deferInvariantValidation) assertCanvasDocumentInvariants(document);
   const operation = validateOperation(rawOperation);
   const payload = operation.payload;
 
@@ -338,7 +543,9 @@ function applyCanvasOperationInternal(inputDocument, rawOperation, deferInvarian
     const node = cloneJson(payload.node);
     if (!node || typeof node !== 'object' || !String(node.id || '')) throw new Error('node.add 缺少 node.id');
     node.id = assertSafeEntityIdentity(node.id, 'node.add node.id');
+    if (node.entityUid != null && !isUuid(node.entityUid)) throw new Error('node.add node.entityUid 无效');
     node.entityUid = entityUuid(node.entityUid, document.projectId, document.canvasId, 'node', node.id);
+    node.entityRevision = document.revision + 1;
     if (tombstoneEntry(document.tombstones.nodes, node.id) || tombstoneEntry(document.tombstones.nodes, node.entityUid)) {
       throw deletedObjectError('node', node.id);
     }
@@ -374,6 +581,7 @@ function applyCanvasOperationInternal(inputDocument, rawOperation, deferInvarian
       id: current.id,
       entityUid: current.entityUid,
       type: current.type,
+      entityRevision: document.revision + 1,
     };
     if (dataPatch) {
       const baseData = patch.data && typeof patch.data === 'object' && !Array.isArray(patch.data)
@@ -397,6 +605,7 @@ function applyCanvasOperationInternal(inputDocument, rawOperation, deferInvarian
     document.nodes[index] = {
       ...document.nodes[index],
       position,
+      entityRevision: document.revision + 1,
     };
   } else if (operation.type === 'node.delete') {
     const id = assertSafeEntityIdentity(payload.nodeId, 'node.delete nodeId');
@@ -414,13 +623,21 @@ function applyCanvasOperationInternal(inputDocument, rawOperation, deferInvarian
     document.tombstones.nodes[canonicalId] = makeTombstone(operation, document.revision + 1, {
       entityUid: existingNode?.entityUid,
       entityType: existingNode?.type,
+      legacyAliases: existingNode?.legacyAliases,
     });
     for (const edge of connectedEdges) {
+      const sourceNode = document.nodes[nodeIndex(document, edge.source)];
+      const targetNode = document.nodes[nodeIndex(document, edge.target)];
       if (edge?.id) document.tombstones.edges[String(edge.id)] = makeTombstone(operation, document.revision + 1, {
         entityUid: edge.entityUid,
         entityType: edge.type,
         source: edge.source,
         target: edge.target,
+        sourceHandle: edge.sourceHandle,
+        targetHandle: edge.targetHandle,
+        legacyAliases: edge.legacyAliases,
+        sourceEntityUid: sourceNode?.entityUid,
+        targetEntityUid: targetNode?.entityUid,
       });
     }
     document.nodes = document.nodes.filter((node) => String(node?.id || '') !== canonicalId);
@@ -430,6 +647,7 @@ function applyCanvasOperationInternal(inputDocument, rawOperation, deferInvarian
     const node = cloneJson(payload.node);
     if (!node || typeof node !== 'object' || !String(node.id || '')) throw new Error('node.restore 缺少 node.id');
     node.id = assertSafeEntityIdentity(node.id, 'node.restore node.id');
+    if (node.entityUid != null && !isUuid(node.entityUid)) throw new Error('node.restore node.entityUid 无效');
     const deleted = tombstoneEntry(document.tombstones.nodes, node.id)
       || tombstoneEntry(document.tombstones.nodes, node.entityUid);
     if (!deleted) throw new Error(`节点没有可恢复的删除记录: ${node.id}`);
@@ -440,7 +658,9 @@ function applyCanvasOperationInternal(inputDocument, rawOperation, deferInvarian
     }
     const restoredType = node.type == null ? null : String(node.type);
     if (restoredType !== deleted.record.entityType) throw new Error('node.restore type 与删除记录不一致');
+    inheritRestoredLegacyAliases(node, deleted.record, 'node.restore');
     node.entityUid = deleted.record.entityUid;
+    node.entityRevision = document.revision + 1;
     if (nodeIndex(document, node.id) >= 0 || nodeIndex(document, node.entityUid) >= 0) throw new Error(`节点已存在: ${node.id}`);
     delete document.tombstones.nodes[deleted.key];
     document.nodes.push(node);
@@ -448,16 +668,16 @@ function applyCanvasOperationInternal(inputDocument, rawOperation, deferInvarian
     const edge = cloneJson(payload.edge);
     if (!edge || typeof edge !== 'object' || !String(edge.id || '')) throw new Error('edge.add 缺少 edge.id');
     edge.id = assertSafeEntityIdentity(edge.id, 'edge.add edge.id');
+    if (edge.entityUid != null && !isUuid(edge.entityUid)) throw new Error('edge.add edge.entityUid 无效');
     edge.source = assertSafeEntityIdentity(edge.source, 'edge.add source');
     edge.target = assertSafeEntityIdentity(edge.target, 'edge.add target');
     edge.entityUid = entityUuid(edge.entityUid, document.projectId, document.canvasId, 'edge', edge.id);
+    edge.entityRevision = document.revision + 1;
     if (tombstoneEntry(document.tombstones.edges, edge.id) || tombstoneEntry(document.tombstones.edges, edge.entityUid)) throw deletedObjectError('edge', edge.id);
     if (edgeIndex(document, edge.id) >= 0 || edgeIndex(document, edge.entityUid) >= 0) throw new Error(`连线已存在: ${edge.id}`);
     if (tombstoneEntry(document.tombstones.nodes, edge.source)) throw deletedObjectError('node', edge.source);
     if (tombstoneEntry(document.tombstones.nodes, edge.target)) throw deletedObjectError('node', edge.target);
-    if (nodeIndex(document, edge.source) < 0 || nodeIndex(document, edge.target) < 0) {
-      throw new Error('edge.add 的 source/target 节点不存在');
-    }
+    bindEdgeEndpointIdentity(document, edge, 'edge.add');
     document.edges.push(edge);
   } else if (operation.type === 'edge.delete') {
     const id = assertSafeEntityIdentity(payload.edgeId, 'edge.delete edgeId');
@@ -468,19 +688,35 @@ function applyCanvasOperationInternal(inputDocument, rawOperation, deferInvarian
       throw new Error(`连线不存在: ${id}`);
     }
     const canonicalId = String(existingEdge?.id || id);
+    const sourceNode = document.nodes[nodeIndex(document, existingEdge?.source)];
+    const targetNode = document.nodes[nodeIndex(document, existingEdge?.target)];
     document.tombstones.edges[canonicalId] = makeTombstone(operation, document.revision + 1, {
       entityUid: existingEdge?.entityUid,
       entityType: existingEdge?.type,
       source: existingEdge?.source,
       target: existingEdge?.target,
+      sourceHandle: existingEdge?.sourceHandle,
+      targetHandle: existingEdge?.targetHandle,
+      legacyAliases: existingEdge?.legacyAliases,
+      sourceEntityUid: sourceNode?.entityUid,
+      targetEntityUid: targetNode?.entityUid,
     });
     document.edges = document.edges.filter((edge) => String(edge?.id || '') !== canonicalId);
   } else if (operation.type === 'edge.restore') {
     const edge = cloneJson(payload.edge);
     if (!edge || typeof edge !== 'object' || !String(edge.id || '')) throw new Error('edge.restore 缺少 edge.id');
     edge.id = assertSafeEntityIdentity(edge.id, 'edge.restore edge.id');
+    if (edge.entityUid != null && !isUuid(edge.entityUid)) throw new Error('edge.restore edge.entityUid 无效');
     edge.source = assertSafeEntityIdentity(edge.source, 'edge.restore source');
     edge.target = assertSafeEntityIdentity(edge.target, 'edge.restore target');
+    const restoredSourceHandle = edge.sourceHandle == null
+      ? null
+      : assertSafeEntityIdentity(edge.sourceHandle, 'edge.restore sourceHandle');
+    const restoredTargetHandle = edge.targetHandle == null
+      ? null
+      : assertSafeEntityIdentity(edge.targetHandle, 'edge.restore targetHandle');
+    if (edge.sourceHandle != null) edge.sourceHandle = restoredSourceHandle;
+    if (edge.targetHandle != null) edge.targetHandle = restoredTargetHandle;
     const deleted = tombstoneEntry(document.tombstones.edges, edge.id)
       || tombstoneEntry(document.tombstones.edges, edge.entityUid);
     if (!deleted) throw new Error(`连线没有可恢复的删除记录: ${edge.id}`);
@@ -494,18 +730,39 @@ function applyCanvasOperationInternal(inputDocument, rawOperation, deferInvarian
     if (edge.source !== deleted.record.source || edge.target !== deleted.record.target) {
       throw new Error('edge.restore source/target 与删除记录不一致');
     }
+    if (Object.prototype.hasOwnProperty.call(deleted.record, 'sourceHandle')
+      && restoredSourceHandle !== deleted.record.sourceHandle) {
+      throw new Error('edge.restore sourceHandle 与删除记录不一致');
+    }
+    if (Object.prototype.hasOwnProperty.call(deleted.record, 'targetHandle')
+      && restoredTargetHandle !== deleted.record.targetHandle) {
+      throw new Error('edge.restore targetHandle 与删除记录不一致');
+    }
+    const { sourceNode, targetNode } = bindEdgeEndpointIdentity(document, edge, 'edge.restore');
+    if (deleted.record.sourceEntityUid != null
+      && (!isUuid(deleted.record.sourceEntityUid)
+        || String(deleted.record.sourceEntityUid).toLowerCase() !== String(sourceNode.entityUid).toLowerCase())) {
+      throw new Error('edge.restore sourceEntityUid 与删除记录或端点不一致');
+    }
+    if (deleted.record.targetEntityUid != null
+      && (!isUuid(deleted.record.targetEntityUid)
+        || String(deleted.record.targetEntityUid).toLowerCase() !== String(targetNode.entityUid).toLowerCase())) {
+      throw new Error('edge.restore targetEntityUid 与删除记录或端点不一致');
+    }
+    inheritRestoredLegacyAliases(edge, deleted.record, 'edge.restore');
     edge.entityUid = deleted.record.entityUid;
+    edge.entityRevision = document.revision + 1;
     if (edgeIndex(document, edge.id) >= 0 || edgeIndex(document, edge.entityUid) >= 0) throw new Error(`连线已存在: ${edge.id}`);
-    if (nodeIndex(document, edge.source) < 0 || nodeIndex(document, edge.target) < 0) throw new Error('edge.restore 的 source/target 节点不存在');
     delete document.tombstones.edges[deleted.key];
     document.edges.push(edge);
   } else if (operation.type === 'viewport.set') {
     document.viewport = assertViewport(payload.viewport);
+    document.viewportRevision = document.revision + 1;
   }
 
   const normalized = normalizeCanvasDocument(document.canvasId, document, {
     projectId: document.projectId,
-    revision: document.revision,
+    revision: document.revision + 1,
     updatedAt: Date.now(),
   });
   if (!deferInvariantValidation) assertCanvasDocumentInvariants(normalized);
@@ -529,6 +786,7 @@ module.exports = {
   CANVAS_SCHEMA,
   CANVAS_SCHEMA_VERSION,
   DEFAULT_PROJECT_ID,
+  OPERATION_PAYLOAD_KEYS,
   OPERATION_TYPES,
   normalizeCanvasDocument,
   validateOperation,
