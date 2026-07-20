@@ -1,7 +1,7 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.5.8",
-  "lastUpdated": "2026-07-20-video-provider-error-normalization-unreleased",
+  "lastUpdated": "2026-07-20-vibex-select-scroll-hotfix-unreleased",
   "sixSystemsImplementationAudit": {
     "version": "2.5.8",
     "status": "verified-local-b1-f2-f7-b2-schema32-f9-f10-integrated-core-development-unreleased",
@@ -52,6 +52,7 @@
       "capabilities": [
         "2026-07-20 用户明确选择恢复简单工作流：E:\\PenguinPravite\\T8-penguin-canvas 是唯一默认开发目录，development mode 同时接受 canonical core 与可选的 T8-penguin-canvas-dev-<topic>，但继续拒绝全部 release 命名路径。此前‘core 只作 integration landing point、必须在第三工作树开发’的规则已被本条覆盖；predev/predev:vite/predev:backend/preelectron:dev 继续执行角色门，专项锁定 core/dev 接受与 release 拒绝。",
         "2026-07-20 视频节点结构化 Provider 错误已在核心目录热修：新增有界错误消息归一化器，只读取 message/error/detail/failReason/reason/code 等已知字段；普通视频与 FAL 查询边界保证 failReason/error 为字符串，HTTP 失败保留 transport trace；VideoNode 的普通轮询、FAL 轮询、提交异常和最终渲染均再次归一化，第三方返回 {message, code} 时不再触发 React error #31 或画布错误边界。动态回归 4/4、相关视频前端 43/43、type-check 通过；未生产 build、打包、升级版本或发布，不增加 completedRounds。",
+        "2026-07-20 VibeX 节点 Electron 下拉滚动已热修：iframe 原生 select 定位补丁不再把菜单自身的 scroll 当作外部页面滚动关闭；滚轮和拖动菜单滚动条时保持展开，overscroll containment 防止滚动链穿透，外部滚动、resize、Escape、点击外部及选择后的关闭行为保持。VibeX 组合 12/12、Electron main 语法、type-check 与 public-check 通过；未生产 build、打包、升级版本或发布，不增加 completedRounds。",
         "2026-07-20 工作树防复发与无损集成门已补强：项目根物理 AGENTS.md 固定 legacy F2 精确路径/分支/HEAD、禁止破坏性 Git/生产构建和 TEMP-only 数据库测试；只读 integration audit report schema 2 在 staged 门之外，会对两项永久保护文件核对普通文件属性、精确 bytes 与 SHA-256，缺失、符号链接、尺寸或内容漂移均失败关闭。Git 检查使用进程级精确 safe.directory 与 GIT_OPTIONAL_LOCKS=0，不修改全局 Git 配置，并在 Codex 隔离账户实测。专项 12/12；历史集成审计的 408 个碰撞已通过 checkpoint 与第三工作树语义合并关闭，保护快照 2/2 完整。该工具门不增加完成轮次。",
         "2026-07-20 当前数据库生产代码已切换到 schema 32 `physical-capacity-and-canonical-backup-contract`：migration checksum 为 a667e75b6d6ba425146a773d2a037ec55e09dbf38bc5fff62f02702996e4c999，extension fingerprint 为 bae4f62ab94effb8bafe3027c7bd037ab51e7c13f28bbdda5dcf80f8dce85276。该本地切片把 database identity、write sequence、物理容量 admission、canonical backup 自包含 freshness receipt、精确 v31→v32 lineage/备份和 7 个提交前 hard-exit + 1 个提交后控制例接入生产路径；这仍是 B2 的本地自动化切片，真实 Windows/磁盘/安装升级证据不足，不增加 completedRounds。",
         "2026-07-20 当前 ProjectDatabase writer inventory 为 455：read 198、write 182、maintenance 43、migration 32、test-only 0；policy 为 compliant 408 / noncompliant 11 / unresolved 4 / not-applicable 32。classificationComplete/classificationGatePassed=true，policyCompliant=false，类外 raw DB 命中为 0。11 个公开 lifecycle 边界与 4 个内部 maintenance helper 已由独立 lifecycle policy 精确冻结为 15 项 allowlist，contract fingerprint 89b2c1610a9aa9c0edde07abc483bedb544c9fc3398a6a0e4627512c438cce26，生产调用暴露 0、专项 3/3；主 writer policy 继续保持 false 是分域设计，不能把 startup/recovery/backup/close 错包进业务 coordinator，也不能把独立门的通过伪装成主门为 true。",

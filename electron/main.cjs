@@ -311,7 +311,7 @@ function buildVibeXFrameUiPatchScript() {
         '.' + TRIGGER_CLASS + ':disabled{cursor:not-allowed;opacity:.55;}',
         '.t8-vibex-custom-select-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
         '.t8-vibex-custom-select-caret{flex:0 0 auto;opacity:.8;font-size:13px;}',
-        '.' + MENU_CLASS + '{position:fixed;z-index:2147483647;box-sizing:border-box;max-height:280px;overflow:auto;border:1px solid rgba(96,165,250,.45);border-radius:10px;background:#020617;color:#f8fafc;padding:4px;box-shadow:0 18px 42px rgba(0,0,0,.52),0 0 0 1px rgba(255,255,255,.04);}',
+        '.' + MENU_CLASS + '{position:fixed;z-index:2147483647;box-sizing:border-box;max-height:280px;overflow:auto;overscroll-behavior:contain;border:1px solid rgba(96,165,250,.45);border-radius:10px;background:#020617;color:#f8fafc;padding:4px;box-shadow:0 18px 42px rgba(0,0,0,.52),0 0 0 1px rgba(255,255,255,.04);}',
         '.' + OPTION_CLASS + '{display:block;width:100%;border:0;border-radius:7px;background:transparent;color:inherit;padding:9px 10px;font:inherit;text-align:left;cursor:pointer;}',
         '.' + OPTION_CLASS + ':hover,.' + OPTION_CLASS + '[data-active="true"]{background:#2563eb;color:white;}',
       ].join('\n');
@@ -329,6 +329,11 @@ function buildVibeXFrameUiPatchScript() {
         openMenu.remove();
       } catch (_) {}
       openMenu = null;
+    }
+
+    function isOpenMenuTarget(target) {
+      if (!openMenu || !target) return false;
+      return target === openMenu || (typeof openMenu.contains === 'function' && openMenu.contains(target));
     }
 
     function updateTrigger(select) {
@@ -432,14 +437,17 @@ function buildVibeXFrameUiPatchScript() {
       if (!openMenu) return;
       const target = event.target;
       const isTrigger = target && typeof target.closest === 'function' && target.closest('.' + TRIGGER_CLASS);
-      if (openMenu.contains(target) || isTrigger) return;
+      if (isOpenMenuTarget(target) || isTrigger) return;
       closeMenu();
     }, true);
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') closeMenu();
     }, true);
     window.addEventListener('resize', closeMenu, true);
-    window.addEventListener('scroll', closeMenu, true);
+    window.addEventListener('scroll', (event) => {
+      if (isOpenMenuTarget(event.target)) return;
+      closeMenu();
+    }, true);
     setInterval(() => document.querySelectorAll('select[' + PATCH_ATTR + '="1"]').forEach(updateTrigger), 700);
     return 'installed:' + count;
   }
