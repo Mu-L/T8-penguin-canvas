@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 function read(rel: string) {
   return readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
@@ -8,15 +9,18 @@ function read(rel: string) {
 
 test('video edit node is registered as a lightweight core video workflow node', () => {
   const types = read('src/types/canvas.ts');
-  const registry = read('src/config/nodeRegistry.ts');
-  const ports = read('src/config/portTypes.ts');
   const placement = read('src/utils/nodePlacement.ts');
   const canvas = read('src/components/Canvas.tsx');
   const videoEdit = read('src/utils/videoEdit.ts');
 
   assert.match(types, /\|\s*'video-edit'/);
-  assert.match(registry, /type:\s*'video-edit'[\s\S]*label:\s*'视频剪辑'[\s\S]*category:\s*'core'/);
-  assert.match(ports, /'video-edit':\s*\{\s*inputs:\s*\['video'\],\s*outputs:\s*\['video',\s*'audio'\]\s*\}/);
+  assertProductionNodeSchema('video-edit', {
+    label: '视频剪辑',
+    category: 'core',
+    inputs: ['video'],
+    outputs: ['video', 'audio'],
+    executable: false,
+  });
   assert.match(placement, /'video-edit':\s*\{\s*w:\s*1120,\s*h:\s*680\s*\}/);
   assert.match(canvas, /const VideoEditNode = lazyCanvasNode\(\(\) => import\('\.\/nodes\/VideoEditNode'\), 'VideoEditNode'\)/);
   assert.match(canvas, /'video-edit':\s*VideoEditNode/);

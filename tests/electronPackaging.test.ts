@@ -30,11 +30,133 @@ test('clean installs include Three.js typings for Panorama3D type-check', () => 
 
 test('dir packaging verification ignores stale release metadata unless update artifacts are required', () => {
   const postBuild = read('../electron/_post_build.cjs');
+  const pkg = read('../package.json');
   assert.match(postBuild, /const strict = process\.env\.T8_REQUIRE_UPDATE_ARTIFACTS === '1'/);
+  assert.match(postBuild, /const directoryBuild = process\.env\.T8_DIRECTORY_BUILD === '1'/);
+  assert.match(pkg, /cross-env T8_DIRECTORY_BUILD=1 node electron\/_post_build\.cjs/);
+  assert.match(pkg, /"rebuild:electron": "electron-rebuild -f -w better-sqlite3 --arch x64"/);
+  assert.match(pkg, /electron-builder --win --x64 --dir --config\.npmRebuild=false/);
+  assert.match(pkg, /electron-builder --win --x64 --config\.npmRebuild=false/);
   assert.match(postBuild, /const hasInstaller = fs\.existsSync\(installer\)/);
   assert.match(postBuild, /const hasBlockmap = fs\.existsSync\(blockmap\)/);
-  assert.match(postBuild, /!strict && !hasInstaller && !hasBlockmap/);
+  assert.match(postBuild, /!strict && \(directoryBuild \|\| \(!hasInstaller && !hasBlockmap\)\)/);
   assert.match(postBuild, /skipping installer\/latest\.yml checks for dir build/);
+});
+
+test('Electron bytecode compilation is pinned to the project-local locked runtime', () => {
+  const packageJson = JSON.parse(read('../package.json'));
+  const packageLock = JSON.parse(read('../package-lock.json'));
+  const encrypt = read('../electron/encrypt.cjs');
+
+  assert.equal(
+    packageJson.scripts.encrypt,
+    'cross-env ELECTRON_RUN_AS_NODE=1 node node_modules/electron/cli.js electron/encrypt.cjs',
+  );
+  assert.equal(
+    packageLock.packages['node_modules/electron'].version,
+    packageJson.devDependencies.electron.replace(/^\^/, ''),
+  );
+  assert.match(encrypt, /function assertElectronCompilerRuntime\(\)/);
+  assert.match(encrypt, /package-lock=\$\{expected\}, compiler=\$\{actual\}/);
+  assert.match(encrypt, /project-local Electron \$\{expected\} is incomplete/);
+  assert.match(encrypt, /assertElectronCompilerRuntime\(\);/);
+});
+
+test('Electron does not open the renderer before the packaged backend is ready', () => {
+  const main = read('../electron/main.cjs');
+  assert.match(main, /const backendReady = await waitForBackend\(backendPort, 30\)/);
+  assert.match(main, /if \(!backendReady\) throw new Error\(`后端未能在端口 \$\{backendPort\} 就绪`\)/);
+  assert.ok(main.indexOf('if (!backendReady)') < main.indexOf('createMainWindow();', main.indexOf('app.whenReady()')));
+});
+
+test('Electron package verifies the crash-recovery service used on backend startup', () => {
+  const postBuild = read('../electron/_post_build.cjs');
+  const server = read('../backend/src/server.js');
+  assert.match(postBuild, /services['"], ['"]runRecovery\.t8c/);
+  assert.match(server, /getRunRecoveryManager\(\{\}\)\.recoverPendingRuns\(\)/);
+  assert.match(server, /\[run-recovery\] startup failed/);
+});
+
+test('Electron package locks canvas Agent bytecode and shared node schema to source SHA-256', () => {
+  const encrypt = read('../electron/encrypt.cjs');
+  const postBuild = read('../electron/_post_build.cjs');
+  const schema = JSON.parse(read('../backend/src/shared/canvasNodeSchema.json'));
+  const requiredSources = [
+    'routes/canvasAgentTools.js',
+    'services/canvasAgentTools.js',
+    'services/canvasAgentPublicView.js',
+    'services/runEvidenceDiagnosis.js',
+    'shared/canvasNodeSchema.json',
+  ];
+  const requiredOutputs = [
+    'routes/canvasAgentTools.t8c',
+    'services/canvasAgentTools.t8c',
+    'services/canvasAgentPublicView.t8c',
+    'services/runEvidenceDiagnosis.t8c',
+    'shared/canvasNodeSchema.json',
+  ];
+
+  assert.equal(schema.schema, 't8-canvas-node-schema-v1');
+  assert.equal(schema.version, 1);
+  assert.equal(schema.types.length, 69);
+  for (const source of requiredSources) assert.ok(encrypt.includes(`source: '${source}'`), source);
+  for (const output of requiredOutputs) {
+    assert.ok(encrypt.includes(`output: '${output}'`), output);
+    assert.ok(postBuild.includes(`output: '${output}'`), output);
+  }
+  assert.match(encrypt, /writeCanvasAgentIntegrityManifest\(canvasAgentBuildHashes\)/);
+  assert.match(encrypt, /const sourceSha256 = sha256Buffer\(sourceBytes\)/);
+  assert.match(encrypt, /const canvasAgentBuildHashes = new Map\(\)/);
+  assert.match(encrypt, /canvasAgentBuildHashes\.set\(rel, hashes\)/);
+  assert.match(encrypt, /captured\.sourceSha256 !== sourceSha256 \|\| captured\.outputSha256 !== outputSha256/);
+  assert.match(encrypt, /canvas Agent source\/output changed during encryption/);
+  assert.match(encrypt, /item\.format === 'json' && sourceSha256 !== outputSha256/);
+  assert.match(postBuild, /function checkCanvasAgentIntegrity\(\)/);
+  assert.match(postBuild, /canvas Agent encrypted output was built from stale source/);
+  assert.match(postBuild, /canvas Agent packaged output SHA-256 mismatch/);
+  assert.match(postBuild, /header !== 'T8ENC1\\n'/);
+  assert.match(postBuild, /checkCanvasAgentIntegrity\(\)/);
+  assert.match(postBuild, /services['"], ['"]runEvidenceDiagnosis\.t8c/);
+});
+
+test('Electron package verifies the intelligent asset center and picker media coverage', () => {
+  const packageJson = JSON.parse(read('../package.json'));
+  const postBuild = read('../electron/_post_build.cjs');
+  const encrypt = read('../electron/encrypt.cjs');
+  const main = read('../electron/main.cjs');
+  const workbench = read('../src/components/ProjectWorkbench.tsx');
+  const assetCenter = read('../src/components/assets/AssetCenter.tsx');
+  const semanticResource = packageJson.build.extraResources.find(
+    (item: { from?: string; to?: string }) => item.to === 'tools/asset-semantic',
+  );
+
+  assert.match(postBuild, /routes['"], ['"]projectAssets\.t8c/);
+  assert.match(postBuild, /routes['"], ['"]files\.t8c/);
+  assert.match(postBuild, /services['"], ['"]assetIndexer\.t8c/);
+  assert.match(postBuild, /services['"], ['"]assetPreviewPipeline\.t8c/);
+  assert.match(postBuild, /services['"], ['"]assetSemanticModels\.t8c/);
+  assert.match(postBuild, /services['"], ['"]assetSemanticWorker\.t8c/);
+  assert.match(postBuild, /services['"], ['"]assetSemanticPipeline\.t8c/);
+  assert.match(postBuild, /services['"], ['"]modelPreviewRenderer\.t8c/);
+  assert.match(postBuild, /services['"], ['"]assetPublicView\.t8c/);
+  assert.match(postBuild, /services['"], ['"]projectDatabase\.t8c/);
+  assert.match(postBuild, /services['"], ['"]assetBlobStore\.t8c/);
+  assert.match(postBuild, /services['"], ['"]assetUploadManager\.t8c/);
+  assert.match(postBuild, /collaboration['"], ['"]gateway\.t8c/);
+  assert.match(encrypt, /const backendFiles = walk\(BACKEND_SRC\)/);
+  assert.match(postBuild, /tools['"], ['"]asset-semantic['"], ['"]semantic_runner\.py/);
+  assert.deepEqual(semanticResource, {
+    from: 'tools/asset-semantic',
+    to: 'tools/asset-semantic',
+    filter: ['semantic_runner.py'],
+  });
+  assert.match(postBuild, /requiredAssetEncoders = \['libx264', 'aac', 'libwebp'\]/);
+  assert.match(main, /\['\.mp3', \{ kind: 'audio'/);
+  assert.match(main, /\['\.glb', \{ kind: 'model3d'/);
+  assert.match(main, /\['image', 'video', 'audio', 'model3d'\]/);
+  assert.match(workbench, /<AssetCenter/);
+  assert.match(assetCenter, /kinds: \['image', 'video', 'audio', 'model3d'\]/);
+  assert.match(assetCenter, /<AssetSemanticSettingsPanel/);
 });
 
 test('Electron release publishing requires explicit per-version approval', () => {
@@ -46,6 +168,8 @@ test('Electron release publishing requires explicit per-version approval', () =>
   assert.match(distRelease, /process\.env\.T8_RELEASE_APPROVAL === releaseApproval/);
   assert.match(distRelease, /refusing to run Electron release without explicit approval/);
   assert.match(distRelease, /only after the user explicitly asks to publish/);
+  assert.match(distRelease, /run\('rebuild native modules for Electron', command\('npm'\), \['run', 'rebuild:electron'\]\)/);
+  assert.match(distRelease, /\['--win', '--x64', '--config\.npmRebuild=false'\]/);
   assert.match(distRelease, /github release upload \+ verify/);
 
   assert.match(githubRelease, /const releaseApproval = `release-\$\{version\}`/);
@@ -113,4 +237,34 @@ test('Electron packaging verifies encrypted local extension hook points', () => 
     assert.match(localPostBuild, /private New API group source must be encrypted/);
     assert.match(localPostBuild, /backend-enc['"], ['"]local-private/);
   }
+});
+
+test('formal Electron releases fail closed when required private sidecars are missing', () => {
+  const distRelease = read('../scripts/dist-release.cjs');
+  const viteConfig = read('../vite.config.ts');
+  const encrypt = read('../electron/encrypt.cjs');
+  const postBuild = read('../electron/_post_build.cjs');
+
+  assert.match(distRelease, /T8_REQUIRE_LOCAL_PRIVATE:\s*['"]1['"]/);
+
+  assert.match(viteConfig, /LOCAL_RECHARGE_ENTRY/);
+  assert.match(viteConfig, /process\.env\.T8_REQUIRE_LOCAL_PRIVATE !== ['"]1['"]/);
+  assert.match(viteConfig, /formal release requires local private frontend/);
+  assert.match(viteConfig, /formal release cannot disable local private extensions/);
+
+  assert.match(encrypt, /REQUIRED_LOCAL_PRIVATE_BACKEND/);
+  assert.match(encrypt, /REQUIRED_LOCAL_PRIVATE_OUTPUT/);
+  assert.match(encrypt, /recharge['"], ['"]backend['"], ['"]routes\.cjs/);
+  assert.match(encrypt, /recharge['"], ['"]backend['"], ['"]routes\.t8c/);
+  assert.match(encrypt, /formal release requires local private backend/);
+  assert.match(encrypt, /local private bytecode missing after encryption/);
+
+  assert.match(postBuild, /const required = process\.env\.T8_REQUIRE_LOCAL_PRIVATE === ['"]1['"]/);
+  assert.match(postBuild, /formal release cannot disable local private build hook/);
+  assert.match(postBuild, /formal release requires local private build hook/);
+  assert.match(postBuild, /function checkRequiredLocalPrivateArtifacts\(\)/);
+  assert.match(postBuild, /formal release missing encrypted local private backend/);
+  assert.match(postBuild, /formal release leaked local private backend source/);
+  assert.match(postBuild, /local-private['"], ['"]recharge['"], ['"]backend['"], ['"]routes\.t8c/);
+  assert.match(postBuild, /checkRequiredLocalPrivateArtifacts\(\)/);
 });

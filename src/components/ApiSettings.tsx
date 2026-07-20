@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronRight, CloudUpload, Download, ExternalLink, Eye, EyeOff, FileUp, Info, KeyRound, Loader2, Lock, Plus, Save, Settings2, TestTube2, Trash2, X, FolderOpen, ServerCog, Volume2 } from 'lucide-react';
-import { useApiKeysStore, FIXED_ZHENZHEN_BASE, RH_BASE } from '../stores/apiKeys';
+import { useApiKeysStore, FIXED_ZHENZHEN_BASE, FIXED_ZHENZHEN_SD2_BASE, RH_BASE, RH_INTL_BASE } from '../stores/apiKeys';
 import { taskCompletionSound as taskCompletionSoundController } from '../stores/taskCompletionSound';
 import { useThemeStore } from '../stores/theme';
 import type { AdvancedProviderConfig, AdvancedProviderProtocol, ApiSettings, CloudUploadProvider, CloudUploadTargetConfig } from '../types/canvas';
@@ -38,7 +38,9 @@ interface ApiSettingsModalProps {
 // 主 Key 字段名类型
 type KeyField =
   | 'zhenzhenApiKey'
+  | 'zhenzhenSd2ApiKey'
   | 'rhApiKey'
+  | 'rhIntlApiKey'
   | 'llmApiKey'
   | 'gptImageApiKey'
   | 'nanoBananaApiKey'
@@ -57,8 +59,10 @@ interface KeySpec {
 }
 
 const COMMON_KEYS: KeySpec[] = [
-  { field: 'zhenzhenApiKey', label: '贞贞工坊 API Key', desc: '· 通用后备 · 用于图像/视频/音频生成', bullet: 'bg-amber-400' },
-  { field: 'rhApiKey', label: 'RunningHub API Key', desc: '· RunningHub 节点与 RH 钱包应用节点共用', bullet: 'bg-cyan-400' },
+  { field: 'zhenzhenApiKey', label: '贞贞的AI工坊（海外） API Key', desc: '· 通用后备 · 用于图像/视频/音频生成', bullet: 'bg-amber-400' },
+  { field: 'zhenzhenSd2ApiKey', label: '贞贞的平价AI工坊（国内） API Key', desc: '· 主力 API · 用于 Seedance 2.0、Happy Horse、Seedream 与 Seed Audio', bullet: 'bg-lime-400' },
+  { field: 'rhApiKey', label: 'RH APIKEY国内', desc: '· runninghub.cn 国内站应用', bullet: 'bg-cyan-400' },
+  { field: 'rhIntlApiKey', label: 'RH APIKEY海外', desc: '· runninghub.ai 海外站应用', bullet: 'bg-blue-400' },
   { field: 'llmApiKey', label: 'LLM 独立 API Key', desc: '· 额度隔离 · 用于 LLM/Vision', bullet: 'bg-emerald-400' },
 ];
 
@@ -156,7 +160,7 @@ const ADVANCED_PROVIDER_GUIDES: Record<AdvancedProviderProtocol, {
     description: '适合已经在本机配置好即梦 CLI 的用户。它不走 API Key，而是调用本地命令并轮询任务结果。',
     nodeScopes: ['图像节点', '视频节点', 'SD2.0 节点'],
     connectionHint: '填写 dreamina 可执行文件路径；如果 CLI 装在 WSL 里，再打开 WSL 并填写发行版名称。',
-    modelHint: '模型名按 CLI 支持的命令参数填写；图像可填 seedream-4.7，视频可填 seedance2.0fast_vip、seedance2.0_vip、seedance2.0fast、seedance2.0。每行一个。',
+    modelHint: '模型名按 CLI 支持的命令参数填写；图像可填 seedream-4.7 / seedream-5.0，视频可填 seedance2.0fast_vip、seedance2.0_vip(支持 4K)、seedance2.0mini、seedance1.5pro、seedance1.0fast、seedance1.0 等。每行一个。',
   },
 };
 
@@ -267,12 +271,12 @@ function AdvancedProviderFormBlock({
 }
 
 const emptyMap = (): Record<KeyField, string> => ({
-  zhenzhenApiKey: '', rhApiKey: '', llmApiKey: '',
+  zhenzhenApiKey: '', zhenzhenSd2ApiKey: '', rhApiKey: '', rhIntlApiKey: '', llmApiKey: '',
   gptImageApiKey: '', nanoBananaApiKey: '', mjApiKey: '', veoApiKey: '',
   soraApiKey: '', grokApiKey: '', seedanceApiKey: '', sunoApiKey: '',
 });
 const emptyShow = (): Record<KeyField, boolean> => ({
-  zhenzhenApiKey: false, rhApiKey: false, llmApiKey: false,
+  zhenzhenApiKey: false, zhenzhenSd2ApiKey: false, rhApiKey: false, rhIntlApiKey: false, llmApiKey: false,
   gptImageApiKey: false, nanoBananaApiKey: false, mjApiKey: false, veoApiKey: false,
   soraApiKey: false, grokApiKey: false, seedanceApiKey: false, sunoApiKey: false,
 });
@@ -407,6 +411,7 @@ export default function ApiSettingsModal({ open, onClose }: ApiSettingsModalProp
 
   const getCurrentEditableSettings = (): Partial<ApiSettings> => ({
     zhenzhenApiKey: inputs.zhenzhenApiKey.trim(),
+    zhenzhenSd2ApiKey: inputs.zhenzhenSd2ApiKey.trim(),
     rhApiKey: inputs.rhApiKey.trim(),
     llmApiKey: inputs.llmApiKey.trim(),
     gptImageApiKey: inputs.gptImageApiKey.trim(),
@@ -494,6 +499,7 @@ export default function ApiSettingsModal({ open, onClose }: ApiSettingsModalProp
         zhenzhenBaseUrl: FIXED_ZHENZHEN_BASE,
         llmBaseUrl: FIXED_ZHENZHEN_BASE,
         rhBaseUrl: RH_BASE,
+        rhIntlBaseUrl: RH_INTL_BASE,
       };
       const payload = {
         schema: SETTINGS_BACKUP_SCHEMA,
@@ -779,7 +785,19 @@ export default function ApiSettingsModal({ open, onClose }: ApiSettingsModalProp
           type="button"
           onClick={() => openExternal('https://ai.t8star.org/register?aff=dP7j')}
           className={linkBtnCls}
-          title="前往贞贞工坊注册获取 APIKEY"
+          title="前往贞贞的AI工坊（海外）注册获取 APIKEY"
+        >
+          <ExternalLink size={11} /> 获取 APIKey
+        </button>
+      );
+    }
+    if (field === 'zhenzhenSd2ApiKey') {
+      return (
+        <button
+          type="button"
+          onClick={() => openExternal('https://api.seedance.nz/sign-up?aff=ibVH')}
+          className={linkBtnCls}
+          title="前往贞贞的平价AI工坊（国内）注册获取 APIKEY"
         >
           <ExternalLink size={11} /> 获取 APIKey
         </button>
@@ -787,24 +805,26 @@ export default function ApiSettingsModal({ open, onClose }: ApiSettingsModalProp
     }
     if (field === 'rhApiKey') {
       return (
-        <>
-          <button
-            type="button"
-            onClick={() => openExternal('https://www.runninghub.cn/user-center/1819214514410942465/webapp?inviteCode=rh-v1121')}
-            className={linkBtnCls}
-            title="国内用户·前往 runninghub.cn 获取 APIKEY"
-          >
-            <ExternalLink size={11} /> 获取 APIKey：国内用户
-          </button>
-          <button
-            type="button"
-            onClick={() => openExternal('https://www.runninghub.ai/user-center/1819214514410942465/webapp?inviteCode=rh-v1121')}
-            className={linkBtnAltCls}
-            title="国外用户·前往 runninghub.ai 获取 APIKEY"
-          >
-            <ExternalLink size={11} /> 国外用户
-          </button>
-        </>
+        <button
+          type="button"
+          onClick={() => openExternal('https://www.runninghub.cn/user-center/1819214514410942465/webapp?inviteCode=rh-v1121')}
+          className={linkBtnCls}
+          title="前往 runninghub.cn 获取国内站 APIKEY"
+        >
+          <ExternalLink size={11} /> 获取国内站 APIKey
+        </button>
+      );
+    }
+    if (field === 'rhIntlApiKey') {
+      return (
+        <button
+          type="button"
+          onClick={() => openExternal('https://www.runninghub.ai/user-center/1819214514410942465/webapp?inviteCode=rh-v1121')}
+          className={linkBtnAltCls}
+          title="前往 runninghub.ai 获取海外站 APIKEY"
+        >
+          <ExternalLink size={11} /> 获取海外站 APIKey
+        </button>
       );
     }
     return null;
@@ -2334,13 +2354,13 @@ export default function ApiSettingsModal({ open, onClose }: ApiSettingsModalProp
   };
 
   // 渲染单个 Key 表项
-  const renderKey = (spec: KeySpec, opts: { fallbackHint?: boolean; baseUrlNote?: string }) => {
+  const renderKey = (spec: KeySpec, opts: { fallbackHint?: boolean; baseUrlNote?: string; clearable?: boolean }) => {
     const f = spec.field;
     const rawVal = (settings as any)[f] as string | undefined;
     const hasSaved = !!rawVal;
     const maskedDisplay = toMaskedDisplay(rawVal);
     const pendingClear = !!clearedFields[f];
-    const showClearButton = !!opts.fallbackHint;
+    const showClearButton = !!opts.fallbackHint || !!opts.clearable;
     const clearDisabled = showClearButton && !pendingClear && !hasSaved && !inputs[f].trim();
     return (
       <div key={f} className="space-y-2">
@@ -2368,7 +2388,9 @@ export default function ApiSettingsModal({ open, onClose }: ApiSettingsModalProp
             type={shows[f] ? 'text' : 'password'}
             value={inputs[f]}
             onChange={(e) => setInputAt(f, e.target.value)}
-            placeholder={pendingClear ? '已标记清空，保存后回到通用 Key' : (hasSaved ? '留空保持不变 / 输入新值覆盖' : (opts.fallbackHint ? '留空则使用通用 Key / 输入独立 Key' : '请输入 sk-...'))}
+            placeholder={pendingClear
+              ? (opts.fallbackHint ? '已标记清空，保存后回到通用 Key' : '已标记清空，保存后移除该 Key')
+              : (hasSaved ? '留空保持不变 / 输入新值覆盖' : (opts.fallbackHint ? '留空则使用通用 Key / 输入独立 Key' : '请输入 sk-...'))}
             className={inputCls}
             autoComplete="off"
           />
@@ -2524,8 +2546,9 @@ export default function ApiSettingsModal({ open, onClose }: ApiSettingsModalProp
             </div>
           </div>
 
-          {/* 三套通用 Key */}
+          {/* 通用与主力 Key */}
           {renderKey(COMMON_KEYS[0], { baseUrlNote: `Base URL 锁定: ${FIXED_ZHENZHEN_BASE}` })}
+          {renderKey(COMMON_KEYS[1], { baseUrlNote: `Base URL 锁定: ${FIXED_ZHENZHEN_SD2_BASE}`, clearable: true })}
           <LocalSettingsAddonSlot
             open={open}
             isPixel={isPixel}
@@ -2533,8 +2556,9 @@ export default function ApiSettingsModal({ open, onClose }: ApiSettingsModalProp
             settings={settings as any}
             onSaved={load}
           />
-          {renderKey(COMMON_KEYS[1], { baseUrlNote: `Base URL: ${RH_BASE}` })}
-          {renderKey(COMMON_KEYS[2], { baseUrlNote: `Base URL 锁定: ${FIXED_ZHENZHEN_BASE} (与贞贞同地址, Key 独立)` })}
+          {renderKey(COMMON_KEYS[2], { baseUrlNote: `Base URL: ${RH_BASE}` })}
+          {renderKey(COMMON_KEYS[3], { baseUrlNote: `Base URL: ${RH_INTL_BASE}`, clearable: true })}
+          {renderKey(COMMON_KEYS[4], { baseUrlNote: `Base URL 锁定: ${FIXED_ZHENZHEN_BASE} (与贞贞同地址, Key 独立)` })}
 
           {/* 分类独立 Key（默认折叠，点击展开 —— 新手友好） */}
           <div className="t8-api-settings-divider pt-3 border-t">

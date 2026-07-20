@@ -1,7 +1,8 @@
-import { memo, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import { Handle, Position, useNodeConnections, useNodesData, useReactFlow, type Node, type NodeProps } from '@xyflow/react';
 import { Download, ImagePlus, Loader2, ScanLine, Sparkles } from 'lucide-react';
 import { generateImage } from '../../services/generation';
+import { useRunTrigger } from '../../hooks/useRunTrigger';
 import { logBus } from '../../stores/logs';
 import {
   CREATIVE_TARGET_NODE_TYPE,
@@ -9,6 +10,16 @@ import {
   collectCanvasSelectionSummary,
 } from '../../utils/canvasCreativeWorkflow';
 import { getMediaItemsFromData } from '../../utils/mediaCollection';
+import { extractRunProviderTrace } from '../../utils/runProviderTrace';
+import {
+  createSecondaryProviderAction,
+  requestCanvasSecondaryProviderAction,
+  resolveSecondaryProviderActionForRun,
+  secondaryProviderActionFromNodeData,
+  secondaryProviderActionNodePatch,
+  type SecondaryProviderActionEnvelope,
+} from '../../utils/secondaryProviderAction';
+import type { RunNodeLifecycleReporter } from '../../types/project';
 import { useUpdateNodeData } from './useUpdateNodeData';
 
 function textFromData(data: any): string {
@@ -63,31 +74,44 @@ const GenerationTargetNode = ({ id, data, selected }: NodeProps) => {
   const status = String(d.status || 'idle');
   const isBusy = status === 'generating' || !!busyMode;
 
-  const run = async (mode: 'replace' | 'keep-version') => {
-    const finalPrompt = prompt.trim();
-    if (!finalPrompt) {
-      update({ status: 'failed', error: '请先输入提示词，或把文本节点连接到目标框。' });
-      return;
-    }
+  const executeGenerateAction = useCallback(async (
+    action: Extract<SecondaryProviderActionEnvelope, { actionId: 'generation-target.generate' }>,
+    reporter: RunNodeLifecycleReporter,
+  ) => {
+    const mode = action.target;
+    const params = action.params;
+    let providerRequested = false;
+    let providerResponded = false;
     setBusyMode(mode);
-    update({ status: 'generating', error: '', prompt: finalPrompt });
+    update({ status: 'generating', error: '', prompt: params.prompt });
     try {
-      const selectedSummary = collectCanvasSelectionSummary(selectedNodesForTarget(id, rf.getNodes()), {
-        viewportAnchor: rf.getNode(id)?.position,
+      await reporter.providerRequest({
+        provider: 'zhenzhen',
+        model: params.apiModel,
+        actionId: action.actionId,
+        actionTarget: action.target,
       });
+      providerRequested = true;
       const result = await generateImage({
-        model: d.model || 'gpt-image-2',
-        apiModel: d.apiModel || d.model || 'gpt-image-2',
-        prompt: finalPrompt,
-        aspectRatio,
-        aspect_ratio: aspectRatio,
-        sizeLevel,
-        image_size: sizeLevel,
-        images: upstreamImages.length > 0 ? upstreamImages : selectedSummary.images.map((item) => item.url),
+        model: params.model,
+        apiModel: params.apiModel,
+        prompt: params.prompt,
+        aspectRatio: params.aspectRatio,
+        aspect_ratio: params.aspectRatio,
+        sizeLevel: params.sizeLevel,
+        image_size: params.sizeLevel,
+        images: params.images,
         n: 1,
       });
       const urls = Array.isArray(result.urls) ? result.urls.filter(Boolean) : [];
       if (urls.length === 0) throw new Error('生成完成但没有返回图片');
+      await reporter.providerResponse({
+        provider: 'zhenzhen',
+        model: params.apiModel,
+        ...extractRunProviderTrace(result),
+        status: 'succeeded',
+      });
+      providerResponded = true;
       const target = rf.getNode(id) || ({
         id: creativeTargetId,
         type: CREATIVE_TARGET_NODE_TYPE,
@@ -96,8 +120,8 @@ const GenerationTargetNode = ({ id, data, selected }: NodeProps) => {
       } as Node);
       const built = buildCreativeTargetResult(target, urls, {
         mode,
-        sourceNodeIds: [...upstreamNodes.map((node) => node.id), ...selectedSummary.selectedNodeIds],
-        prompt: finalPrompt,
+        sourceNodeIds: params.sourceNodeIds,
+        prompt: params.prompt,
       });
       rf.setNodes((prev) => {
         const patched = prev.map((node) =>
@@ -107,13 +131,85 @@ const GenerationTargetNode = ({ id, data, selected }: NodeProps) => {
         );
         return built.outputNode ? [...patched, built.outputNode] : patched;
       });
+      await reporter.output({
+        status: 'succeeded',
+        assets: urls.map((url) => ({ kind: 'image', sourceUrl: url })),
+      });
       logBus.success(mode === 'replace' ? '已替换到生成目标框内' : '已在目标框右侧保留一个新版本', '生成目标框');
     } catch (error: any) {
       const message = error?.message || '生成失败';
       update({ status: 'failed', error: message });
       logBus.error(message, '生成目标框');
+      if (providerRequested && !providerResponded) {
+        await reporter.providerResponse({
+          provider: 'zhenzhen',
+          model: params.apiModel,
+          status: 'failed',
+        });
+      }
+      throw error;
     } finally {
       setBusyMode(null);
+    }
+  }, [creativeTargetId, d, id, rf, update]);
+
+  const runSecondaryAction = useCallback(async (reporter: RunNodeLifecycleReporter) => {
+    const liveData = rf.getNode(id)?.data;
+    const action = resolveSecondaryProviderActionForRun({
+      nodeId: id,
+      nodeType: 'generation-target',
+      nodeData: liveData,
+      runContext: reporter.runContext,
+    });
+    if (!action || action.actionId !== 'generation-target.generate') {
+      throw new Error('生成目标框缺少已确认的次级 Provider action，已停止调用 Provider');
+    }
+    try {
+      await executeGenerateAction(action, reporter);
+    } finally {
+      const current = secondaryProviderActionFromNodeData(rf.getNode(id)?.data);
+      if (current?.requestId === action.requestId) update(secondaryProviderActionNodePatch(null));
+    }
+  }, [executeGenerateAction, id, rf, update]);
+
+  useRunTrigger(id, runSecondaryAction, 'image', { lifecycleAware: true });
+
+  const requestGenerateAction = (mode: 'replace' | 'keep-version') => {
+    const finalPrompt = prompt.trim();
+    if (!finalPrompt) {
+      update({ status: 'failed', error: '请先输入提示词，或把文本节点连接到目标框。' });
+      return;
+    }
+    const selectedSummary = collectCanvasSelectionSummary(selectedNodesForTarget(id, rf.getNodes()), {
+      viewportAnchor: rf.getNode(id)?.position,
+    });
+    try {
+      const action = createSecondaryProviderAction({
+        nodeId: id,
+        nodeType: 'generation-target',
+        actionId: 'generation-target.generate',
+        target: mode,
+        params: {
+          prompt: finalPrompt,
+          model: String(d.model || 'gpt-image-2'),
+          apiModel: String(d.apiModel || d.model || 'gpt-image-2'),
+          aspectRatio,
+          sizeLevel,
+          images: upstreamImages.length > 0 ? upstreamImages : selectedSummary.images.map((item) => item.url),
+          sourceNodeIds: [...upstreamNodes.map((node) => node.id), ...selectedSummary.selectedNodeIds],
+        },
+      });
+      update({ ...secondaryProviderActionNodePatch(action), error: '' });
+      queueMicrotask(() => {
+        if (!requestCanvasSecondaryProviderAction(action)) {
+          const current = secondaryProviderActionFromNodeData(rf.getNode(id)?.data);
+          if (current?.requestId === action.requestId) {
+            update({ ...secondaryProviderActionNodePatch(null), status: 'failed', error: '无法请求运行体检' });
+          }
+        }
+      });
+    } catch (error: any) {
+      update({ status: 'failed', error: error?.message || '次级生成动作参数无效' });
     }
   };
 
@@ -211,11 +307,11 @@ const GenerationTargetNode = ({ id, data, selected }: NodeProps) => {
       {upstreamImages.length > 0 ? <div className="t8-generation-target-hint">参考图 {upstreamImages.length} 张</div> : null}
 
       <div className="t8-generation-target-actions">
-        <button type="button" className="nodrag" disabled={isBusy} onClick={() => void run('replace')}>
+        <button type="button" className="nodrag" disabled={isBusy} onClick={() => requestGenerateAction('replace')}>
           {busyMode === 'replace' ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
           <span>替换到框内</span>
         </button>
-        <button type="button" className="nodrag" disabled={isBusy} onClick={() => void run('keep-version')}>
+        <button type="button" className="nodrag" disabled={isBusy} onClick={() => requestGenerateAction('keep-version')}>
           {busyMode === 'keep-version' ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />}
           <span>保留版本</span>
         </button>

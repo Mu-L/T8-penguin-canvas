@@ -26,6 +26,9 @@ export interface RunComfyuiAppResult {
   remoteImageUrls?: string[];
   videoUrls?: string[];
   audioUrls?: string[];
+  outputKinds: Array<'image' | 'video' | 'audio' | 'text'>;
+  primaryKind: 'image' | 'video' | 'audio' | 'text';
+  outputSaveErrors?: Array<{ kind: string; url: string; error: string }>;
   text?: string;
   taskId?: string;
   raw?: any;
@@ -82,13 +85,30 @@ export async function runComfyuiApp(options: RunComfyuiAppOptions): Promise<RunC
 
   const result = await generateExternalImage(request);
 
+  const imageUrls = result.imageUrls || [];
+  const videoUrls = result.videoUrls || [];
+  const audioUrls = result.audioUrls || [];
+  const text = result.text || '';
+  const outputKinds = result.outputKinds?.length
+    ? result.outputKinds
+    : [
+      ...(imageUrls.length ? ['image' as const] : []),
+      ...(videoUrls.length ? ['video' as const] : []),
+      ...(audioUrls.length ? ['audio' as const] : []),
+      ...(text.trim() ? ['text' as const] : []),
+    ];
+  const primaryKind = result.primaryKind || outputKinds[0] || 'image';
+
   return {
-    imageUrls: result.imageUrls || [],
+    imageUrls,
     remoteImageUrls: result.remoteImageUrls,
     taskId: result.taskId,
     raw: result.raw,
-    videoUrls: result.videoUrls,
-    audioUrls: result.audioUrls,
-    text: result.text || '',
+    videoUrls,
+    audioUrls,
+    text,
+    outputKinds,
+    primaryKind,
+    outputSaveErrors: result.outputSaveErrors,
   };
 }

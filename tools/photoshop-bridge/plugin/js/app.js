@@ -63,6 +63,52 @@
     els.runGenerate.disabled = !on || !state.providers.length;
   }
 
+  function canvasUrl() {
+    const explicit = net.normalizeFrontendUrl ? net.normalizeFrontendUrl(state.frontendUrl) : '';
+    if (explicit) return explicit;
+    const host = String(state.host || '127.0.0.1:18766').trim();
+    const match = host.match(/^([^:]+):(\d+)$/);
+    if (match) {
+      const port = Number(match[2]);
+      if (port >= 18766 && port <= 18776) return `http://${match[1]}:11422`;
+    }
+    return `http://${host}/`;
+  }
+
+  function markPreviewBroken(thumbBox, text) {
+    thumbBox.classList.add('thumb-broken');
+    thumbBox.textContent = text || '预览失败';
+  }
+
+  function loadImagePreview(img, thumbBox, url) {
+    const direct = net.absUrl(url);
+    if (!direct) {
+      markPreviewBroken(thumbBox, '无预览');
+      return;
+    }
+    const token = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    let usingFetchedData = false;
+    img.setAttribute('data-preview-token', token);
+    img.addEventListener('error', () => {
+      if (img.getAttribute('data-preview-token') !== token || usingFetchedData) return;
+      markPreviewBroken(thumbBox, '预览失败');
+    });
+    img.src = direct;
+    if (!net.imageDataUrl) return;
+    net.imageDataUrl(url).then((src) => {
+      if (!src || img.getAttribute('data-preview-token') !== token) return;
+      usingFetchedData = true;
+      thumbBox.classList.remove('thumb-broken');
+      if (!thumbBox.contains(img)) {
+        thumbBox.textContent = '';
+        thumbBox.appendChild(img);
+      }
+      img.src = src;
+    }).catch(() => {
+      // Keep the direct URL fallback if the UXP fetch path is unavailable.
+    });
+  }
+
   function switchTab(tab) {
     state.tab = tab;
     els.tabs.forEach((btn) => btn.classList.toggle('active', btn.getAttribute('data-tab') === tab));
@@ -141,7 +187,7 @@
     renderAssetPager(pageInfo, items.length);
     pageItems.forEach((item) => {
       const selected = item.id === state.selectedAssetId ? ' selected' : '';
-      const thumb = net.absUrl(item.thumbUrl || item.url);
+      const thumb = item.thumbUrl || item.url;
       const card = document.createElement('div');
       card.className = `card${selected}`;
       card.setAttribute('data-id', String(item.id || ''));
@@ -154,15 +200,10 @@
       if (thumb) {
         const img = document.createElement('img');
         img.alt = '';
-        img.src = thumb;
-        img.addEventListener('error', () => {
-          thumbBox.classList.add('thumb-broken');
-          thumbBox.textContent = '预览失败';
-        });
         thumbBox.appendChild(img);
+        loadImagePreview(img, thumbBox, thumb);
       } else {
-        thumbBox.classList.add('thumb-broken');
-        thumbBox.textContent = '无预览';
+        markPreviewBroken(thumbBox, '无预览');
       }
 
       const meta = document.createElement('div');
@@ -234,12 +275,8 @@
       thumbBox.className = 'thumb';
       const img = document.createElement('img');
       img.alt = '';
-      img.src = net.absUrl(item.url);
-      img.addEventListener('error', () => {
-        thumbBox.classList.add('thumb-broken');
-        thumbBox.textContent = '预览失败';
-      });
       thumbBox.appendChild(img);
+      loadImagePreview(img, thumbBox, item.url);
 
       const meta = document.createElement('div');
       meta.className = 'meta';
@@ -308,6 +345,9 @@
     try {
       const json = await net.apiGet('/api/photoshop-bridge/commands/pending?limit=6');
       const commands = (json.data && Array.isArray(json.data.commands)) ? json.data.commands : [];
+      if (commands.length > 0) {
+        setMsg(els.assetMsg, `正在从 T8 画布置入 ${commands.length} 个任务 …`);
+      }
       let placed = 0;
       for (const command of commands) {
         const commandId = command.commandId || command.id;
@@ -327,7 +367,10 @@
         setMsg(els.assetMsg, `已从 T8 画布置入 ${placed} 张图像。`, 'ok');
       }
     } catch (err) {
-      if (state.connected) setMsg(els.settingsMsg, err.message || String(err), 'err');
+      if (state.connected) {
+        setMsg(els.assetMsg, err.message || String(err), 'err');
+        setMsg(els.settingsMsg, err.message || String(err), 'err');
+      }
     } finally {
       state.commandBusy = false;
       scheduleCommandPoll(1800);
@@ -482,7 +525,7 @@
     state.model = els.modelSelect.value;
   });
   els.runGenerate.addEventListener('click', runGenerate);
-  els.openT8.addEventListener('click', () => ps.openUrl(`http://${state.host}/`));
+  els.openT8.addEventListener('click', () => ps.openUrl(canvasUrl()));
   ps.onDocChange(() => setConnected(state.connected));
 
   connect();

@@ -16,6 +16,7 @@ import {
   type BatchProcessorItem,
 } from '../src/utils/batchProcessor.ts';
 import { copyFileToOutput, openOutputFolder } from '../src/services/imageOps.ts';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 const require = createRequire(import.meta.url);
 
@@ -157,24 +158,25 @@ test('batch processor work pool bounds concurrency, retries failures, and preser
 });
 
 test('batch processor node is a toolbox executable that does not auto-output to the canvas', () => {
-  const registry = read('src/config/nodeRegistry.ts');
-  const ports = read('src/config/portTypes.ts');
   const types = read('src/types/canvas.ts');
   const canvas = read('src/components/Canvas.tsx');
-  const actionBar = read('src/components/NodeActionBar.tsx');
   const loop = read('src/components/nodes/LoopNode.tsx');
   const placement = read('src/utils/nodePlacement.ts');
   const node = read('src/components/nodes/BatchProcessorNode.tsx');
   const features = read('features.json');
 
-  assert.match(registry, /type:\s*'batch-processor'[\s\S]*label:\s*'批量素材处理'[\s\S]*category:\s*'toolbox'/);
-  assert.match(ports, /'batch-processor':\s*\{\s*inputs:\s*\['image',\s*'video',\s*'audio',\s*'model3d'\],\s*outputs:\s*\[\]\s*\}/);
+  assertProductionNodeSchema('batch-processor', {
+    label: '批量素材处理',
+    category: 'toolbox',
+    inputs: ['image', 'video', 'audio', 'model3d'],
+    outputs: [],
+    executable: true,
+  });
   assert.match(types, /\|\s*'batch-processor'/);
   assert.match(canvas, /const BatchProcessorNode = lazyCanvasNode\(\(\) => import\('\.\/nodes\/BatchProcessorNode'\)/);
   assert.match(canvas, /'batch-processor':\s*BatchProcessorNode/);
   assert.match(canvas, /'batch-processor':\s*\{[\s\S]*batchProcessorNameMode:\s*'original'/);
-  assert.match(actionBar, /'batch-processor'/);
-  assert.match(loop, /'aggregate-parser',\s*'batch-processor'/);
+  assert.match(loop, /topologicalSort\(routePlanned\.nodes, routePlanned\.edges, EXECUTABLE_NODE_TYPES\)/);
   assert.match(placement, /'batch-processor':\s*\{\s*w:\s*640,\s*h:\s*560\s*\}/);
   assert.match(features, /"nodeType":\s*"batch-processor"/);
   assert.match(features, /"totalNodes":\s*54/);

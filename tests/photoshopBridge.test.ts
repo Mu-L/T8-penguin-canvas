@@ -121,6 +121,25 @@ test('Photoshop bridge exposes image providers, image generation/editing route, 
   assert.match(route, /imageUrls/);
 });
 
+test('Photoshop bridge status exposes the canvas frontend URL separately from the backend bridge', async (t) => {
+  const route = require('../backend/src/routes/photoshopBridge.js');
+  const app = express();
+  app.use(express.json({ limit: '2mb' }));
+  app.use('/api/photoshop-bridge', route);
+  const server = await listen(app);
+  t.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  const status = await fetch(`${base}/api/photoshop-bridge/status`).then((res) => res.json());
+
+  assert.equal(status.success, true);
+  assert.equal(status.data.service, 't8-photoshop-bridge');
+  assert.equal(status.data.backendUrl, base);
+  assert.equal(status.data.frontendUrl, 'http://127.0.0.1:11422');
+  assert.equal(status.data.canvasUrl, status.data.frontendUrl);
+  assert.notEqual(status.data.frontendUrl, status.data.backendUrl);
+});
+
 test('Photoshop bridge queues canvas image materials for the UXP plugin', async (t) => {
   const route = require('../backend/src/routes/photoshopBridge.js');
   const app = express();
@@ -451,6 +470,107 @@ test('Photoshop UXP net connect falls back when the default local bridge port is
     'http://127.0.0.1:18766/api/photoshop-bridge/status',
     'http://127.0.0.1:18767/api/photoshop-bridge/status',
   ]);
+});
+
+test('Photoshop UXP plugin opens the canvas frontend and fetches asset previews for UXP rendering', () => {
+  const state = read('tools/photoshop-bridge/plugin/js/state.js');
+  const net = read('tools/photoshop-bridge/plugin/js/net.js');
+  const app = read('tools/photoshop-bridge/plugin/js/app.js');
+
+  assert.match(state, /frontendUrl/, 'plugin state should remember the frontend canvas URL reported by the bridge');
+  assert.match(net, /state\.frontendUrl/, 'connect() should store the frontend canvas URL from /status');
+  assert.match(net, /imageDataUrl/, 'plugin should fetch local thumbnails and convert them into data URLs for UXP images');
+  assert.match(app, /function\s+canvasUrl\(/, 'open canvas button should resolve a dedicated frontend URL');
+  assert.match(app, /ps\.openUrl\(canvasUrl\(\)\)/, 'open canvas button must not open the backend bridge root');
+  assert.doesNotMatch(app, /ps\.openUrl\(`http:\/\/\$\{state\.host\}\/`\)/, 'opening the backend bridge root shows Cannot GET / in dev');
+  assert.match(app, /loadImagePreview/, 'asset and result cards should use the UXP preview loader');
+  assert.match(app, /net\.imageDataUrl/, 'preview loader should use fetched image data instead of only direct localhost img src');
+  assert.match(app, /正在从 T8 画布置入/, 'canvas-to-Photoshop command polling should show visible asset-tab progress');
+  assert.match(app, /setMsg\(els\.assetMsg,\s*err\.message \|\| String\(err\),\s*['"]err['"]\)/, 'command polling errors should be visible outside the settings tab');
+});
+
+function createPhotoshopPlaceContext(options: { addLayerOnPlace?: boolean } = {}) {
+  const calls: any[] = [];
+  const tempFile = {
+    write: async () => undefined,
+    read: async () => new ArrayBuffer(0),
+  };
+  const doc: any = {
+    id: 10,
+    name: 'canvas.psd',
+    layers: [{ id: 1, name: '背景' }],
+  };
+  const context: any = {
+    console,
+    ArrayBuffer,
+    Uint8Array,
+    window: {},
+    T8PS: {
+      net: {
+        fetchBytes: async () => new Uint8Array([137, 80, 78, 71]).buffer,
+      },
+    },
+    require: (name: string) => {
+      if (name === 'uxp') {
+        return {
+          storage: {
+            formats: { binary: 'binary' },
+            localFileSystem: {
+              getTemporaryFolder: async () => ({
+                createFile: async () => tempFile,
+              }),
+              createSessionToken: async () => 'session-token',
+            },
+          },
+          shell: { openExternal: async () => undefined },
+        };
+      }
+      if (name === 'photoshop') {
+        return {
+          app: {
+            documents: [doc],
+            activeDocument: doc,
+            open: async () => undefined,
+          },
+          core: {
+            executeAsModal: async (fn: any) => fn(),
+          },
+          action: {
+            batchPlay: async (descriptors: any[], batchOptions: any) => {
+              calls.push({ descriptors, batchOptions });
+              if (options.addLayerOnPlace) doc.layers.push({ id: 2, name: 'T8 placed image' });
+              return [{ _obj: 'placedLayer' }];
+            },
+            addNotificationListener: () => undefined,
+          },
+        };
+      }
+      throw new Error(`unexpected require ${name}`);
+    },
+  };
+  context.window = context;
+  vm.createContext(context);
+  vm.runInContext(read('tools/photoshop-bridge/plugin/js/ps.js'), context);
+  return { context, calls, doc };
+}
+
+test('Photoshop UXP placeImage only reports success after Photoshop creates a layer', async () => {
+  const noOp = createPhotoshopPlaceContext({ addLayerOnPlace: false });
+  await assert.rejects(
+    () => noOp.context.T8PS.ps.placeImage({ url: '/files/output/noop.png', name: 'noop.png' }),
+    /未新增图层|置入/,
+  );
+
+  const placed = createPhotoshopPlaceContext({ addLayerOnPlace: true });
+  const result = await placed.context.T8PS.ps.placeImage({ url: '/files/output/ok.png', name: 'ok.png' });
+
+  assert.equal(result.placed, true);
+  assert.equal(placed.doc.layers.length, 2);
+  assert.equal(placed.calls.length, 1);
+  assert.equal(placed.calls[0].descriptors[0]._obj, 'placeEvent');
+  assert.equal(placed.calls[0].descriptors[0].linked, false);
+  assert.equal(placed.calls[0].descriptors[0]._options.dialogOptions, 'dontDisplay');
+  assert.equal(placed.calls[0].batchOptions.synchronousExecution, true);
 });
 
 test('T8 app packages Photoshop plugin and drains Photoshop bridge messages into canvas', () => {

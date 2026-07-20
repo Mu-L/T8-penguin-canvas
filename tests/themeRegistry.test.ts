@@ -2,6 +2,32 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 
+const originalAssertMatch = assert.match.bind(assert);
+function makeSourceContractWildcardLazy(source: string) {
+  const token = '[\\s\\S]*';
+  let cursor = 0;
+  let output = '';
+  while (true) {
+    const index = source.indexOf(token, cursor);
+    if (index < 0) return output + source.slice(cursor);
+    output += source.slice(cursor, index) + token;
+    cursor = index + token.length;
+    if (source[cursor] !== '?') output += '?';
+  }
+}
+
+// These source contracts assert ordered fragments, so lazy whole-file
+// wildcards preserve the contract and avoid quadratic regex backtracking.
+Object.defineProperty(assert, 'match', {
+  configurable: true,
+  value(actual: string, expected: RegExp, message?: string) {
+    const optimized = expected.source.includes('[\\s\\S]*')
+      ? new RegExp(makeSourceContractWildcardLazy(expected.source), expected.flags)
+      : expected;
+    return originalAssertMatch(actual, optimized, message);
+  },
+});
+
 function read(rel: string) {
   return readFileSync(new URL(rel, import.meta.url), 'utf8');
 }
@@ -296,11 +322,11 @@ test('Farm Story theme mounts canvas chrome, sidebar icons, cuts, minimap, and t
   assert.match(canvas, /nodes=\{renderedNodes\}/);
   assert.match(canvas, /function farmPortTypeFromHandleId/);
   assert.match(canvas, /function inferFarmHandlePortType/);
-  assert.match(canvas, /const annotateFarmPortHandles = useCallback/);
+  assert.match(canvas, /const annotateThemedPortHandles = useCallback/);
   assert.match(canvas, /data-t8-port-type/);
   assert.match(canvas, /data-t8-port-label/);
   assert.match(canvas, /data-t8-port-aria/);
-  assert.match(canvas, /new MutationObserver\(\(\) => annotateFarmPortHandles\(\)\)/);
+  assert.match(canvas, /new MutationObserver\(\(\) => annotateThemedPortHandles\(\)\)/);
   assert.match(canvas, /PORT_LABEL\[portType\]/);
   assert.match(edge, /type FarmEdgeKind = 'rope' \| 'water' \| 'path'/);
   assert.match(edge, /function farmEdgeKindFromPortType/);
@@ -386,8 +412,8 @@ test('Farm Story theme mounts canvas chrome, sidebar icons, cuts, minimap, and t
   assert.match(canvas, /onRefreshResourceDecor=\{loadFarmResourceDecorItems\}/);
   assert.match(canvas, /onSelectResourceDecor=\{handleFarmSelectResourceDecor\}/);
   assert.match(canvas, /<FarmStoryPanel[\s\S]*visualStyle=\{visualStyle\}/);
-  assert.match(canvas, /width:\s*isFarmStory \? 214/);
-  assert.match(canvas, /maskColor=\{isFarmStory \? 'rgba\(111,191,74,\.22\)'/);
+  assert.match(canvas, /width:\s*isGardenDefense \? 224 : isFarmStory \? 214/);
+  assert.match(canvas, /maskColor=\{isGardenDefense \? 'rgba\(255,216,83,\.2\)' : isFarmStory \? 'rgba\(111,191,74,\.22\)'/);
   assert.match(canvas, /const FARM_MINIMAP_MARKER_LIMIT = 140/);
   assert.match(canvas, /const FARM_MINIMAP_HEAVY_OBJECT_COUNT = 500/);
   assert.match(canvas, /layoutFarmMiniMapMarkers\(farmMiniMapMarkers, nodes\)/);

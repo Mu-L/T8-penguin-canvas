@@ -25,6 +25,7 @@ import {
 } from '../../services/generation';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { logBus } from '../../stores/logs';
 import { PORT_COLOR } from '../../config/portTypes';
 import { useDragMaterialStore, type MaterialPayload } from '../../stores/dragMaterial';
@@ -52,6 +53,7 @@ import {
   filterExcludedMaterials,
   normalizeExcludedMaterialIds,
 } from '../../utils/materialExclusion';
+import type { RunNodeLifecycleReporter } from '../../types/project';
 
 /**
  * LLM / Vision 节点 —— 完全对齐 gpt-image-2-web Chat (index.html L1600 / L8128~L8400)
@@ -387,7 +389,7 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
     return msgs;
   };
 
-  const handleSend = async () => {
+  const handleSend = async (reporter?: RunNodeLifecycleReporter) => {
     setError(null);
     setWarning(null);
     setStreamingText('');
@@ -403,6 +405,9 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
       return;
     }
     const llmVideoOptions = { llmVideoMode, videoMaxWidth, videoMaxHeight, videoMaxBase64Mb, videoCrf, videoFrameCount };
+    const traceProvider = isExternalSelected && providerSelection.provider ? providerSelection.provider.id : 'zhenzhen';
+    const traceModel = activeModel || model;
+    await reporter?.providerRequest({ provider: traceProvider, model: traceModel });
 
     taskCompletionSound.primeAudio();
     update({ status: 'generating', error: null });
@@ -437,6 +442,21 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
         );
         abortRef.current = null;
         const replyText = streamResult.content || '';
+        if (streamResult.usage) await reporter?.providerUsage({
+          provider: traceProvider,
+          model: traceModel,
+          requestId: streamResult.requestId,
+          usage: streamResult.usage,
+        });
+        await reporter?.providerResponse({
+          provider: traceProvider,
+          model: traceModel,
+          requestId: streamResult.requestId,
+          transportHttpStatus: streamResult.transportHttpStatus,
+          httpStatusSource: 'local-backend',
+          finishReason: streamResult.finishReason,
+          status: 'succeeded',
+        });
         const truncationWarning = isLlmReplyTruncated(streamResult) ? llmTokenLimitWarning(maxTokens) : '';
         const finalHistory: ChatTurn[] = [...nextHistory, { role: 'assistant', text: replyText }];
         update({
@@ -447,6 +467,9 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
           // 记录本轮被「消化」的上游文本: 下游 useUpstreamMaterials 聚合时
           // 会跳过这些文本, 避免「原始 TextNode + LLM 优化结果」同时出现 2 条文本。
           consumedTexts: orderedTexts.map((t) => t.url).filter((s) => !!s),
+          requestId: streamResult.requestId,
+          httpStatus: streamResult.transportHttpStatus,
+          usage: streamResult.usage,
         });
         setStreamingText('');
         setPickedFiles([]);
@@ -472,6 +495,21 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
             })
           : await generateLlm({ model, messages, temperature, max_tokens: maxTokens, ...llmVideoOptions });
         const replyText = res.content || '';
+        if (res.usage) await reporter?.providerUsage({
+          provider: traceProvider,
+          model: traceModel,
+          requestId: res.requestId,
+          usage: res.usage,
+        });
+        await reporter?.providerResponse({
+          provider: traceProvider,
+          model: traceModel,
+          requestId: res.requestId,
+          transportHttpStatus: res.transportHttpStatus,
+          httpStatusSource: 'local-backend',
+          finishReason: res.finishReason,
+          status: 'succeeded',
+        });
         const imgs = res.imageUrls || [];
         const truncationWarning = isLlmReplyTruncated(res) ? llmTokenLimitWarning(maxTokens) : '';
         const finalHistory: ChatTurn[] = [
@@ -487,6 +525,9 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
           imageUrls: imgs.length ? imgs : undefined,
           // 同上: 记录被消化的上游文本(非流式分支)
           consumedTexts: orderedTexts.map((t) => t.url).filter((s) => !!s),
+          requestId: res.requestId,
+          httpStatus: res.transportHttpStatus,
+          usage: res.usage,
         });
         setPickedFiles([]);
         setPickedVideos([]);
@@ -505,6 +546,7 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
       }
     } catch (e: any) {
       const msg = e?.message || '调用失败';
+      await reporter?.providerResponse({ provider: traceProvider, model: traceModel, status: 'failed', error: { message: msg } });
       setError(msg);
       update({ status: 'error', error: msg });
       logBus.error(msg, src);
@@ -627,7 +669,7 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
   }, [addNodes, getNode, getNodes, id, src]);
 
   // 接入运行总线
-  useRunTrigger(id, handleSend, 'llm');
+  useRunTrigger(id, handleSend, 'llm', { lifecycleAware: true });
 
   // === 跨节点拖拽: source (生成图可拖出) ===
   const startDrag = useDragMaterialStore((s) => s.start);
@@ -1074,7 +1116,7 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
         {/* 按钮 */}
         <div className="flex gap-1.5">
           <button
-            onClick={handleSend}
+            onClick={() => requestCanvasNodeRun(id)}
             disabled={status === 'generating'}
             className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-medium disabled:opacity-50 transition-colors"
           >

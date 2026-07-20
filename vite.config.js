@@ -4,8 +4,19 @@ import fs from 'fs';
 import path from 'path';
 var LOCAL_EXTENSIONS_MODULE = 'virtual:t8-local-extensions';
 var LOCAL_EXTENSIONS_ENTRY = path.resolve(__dirname, 'local-private', 'extensions', 'frontend', 'index.tsx');
+var LOCAL_RECHARGE_ENTRY = path.resolve(__dirname, 'local-private', 'recharge', 'frontend', 'RechargeModal.tsx');
 var EMPTY_EXTENSIONS_ENTRY = path.resolve(__dirname, 'src', 'extensions', 'emptyLocalExtensions.tsx');
+var APP_VERSION = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8')).version;
+function requireLocalPrivateFrontend() {
+    if (process.env.T8_REQUIRE_LOCAL_PRIVATE !== '1')
+        return;
+    var missing = [LOCAL_EXTENSIONS_ENTRY, LOCAL_RECHARGE_ENTRY].filter(function (file) { return !fs.existsSync(file); });
+    if (missing.length > 0) {
+        throw new Error("[t8-local-extensions] formal release requires local private frontend: ".concat(missing.join(', ')));
+    }
+}
 function localExtensionsPlugin() {
+    requireLocalPrivateFrontend();
     return {
         name: 't8-local-extensions',
         resolveId: function (id) {
@@ -13,6 +24,9 @@ function localExtensionsPlugin() {
                 return null;
             var disabled = process.env.T8_ENABLE_LOCAL_PRIVATE === '0'
                 || process.env.T8_DISABLE_LOCAL_EXTENSIONS === '1';
+            if (process.env.T8_REQUIRE_LOCAL_PRIVATE === '1' && disabled) {
+                throw new Error('[t8-local-extensions] formal release cannot disable local private extensions');
+            }
             var enabled = !disabled;
             return enabled && fs.existsSync(LOCAL_EXTENSIONS_ENTRY)
                 ? LOCAL_EXTENSIONS_ENTRY
@@ -89,7 +103,7 @@ export default defineConfig({
         },
     },
     define: {
-        __APP_VERSION__: JSON.stringify('2.4.8'),
+        __APP_VERSION__: JSON.stringify(APP_VERSION),
         __APP_NAME__: JSON.stringify('T8-penguin-canvas'),
     },
 });

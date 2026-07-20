@@ -38,7 +38,7 @@ function pushUniqueUrl(out, value) {
 function collectUrls(...values) {
   const out = [];
   values.forEach((value) => pushUniqueUrl(out, value));
-  return out.slice(0, 24);
+  return out.slice(0, 50);
 }
 
 function cleanMetadata(value) {
@@ -56,6 +56,28 @@ function cleanMetadata(value) {
   return out;
 }
 
+function cleanWebAssetItems(value, fallbackPageUrl = '') {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue;
+    const url = cleanUrl(raw.url || raw.imageUrl);
+    if (!url) continue;
+    out.push({
+      url,
+      name: cleanText(raw.name, 200),
+      mime: cleanText(raw.mime, 120),
+      size: Math.max(0, Number(raw.size) || 0),
+      width: Math.max(0, Number(raw.width) || 0),
+      height: Math.max(0, Number(raw.height) || 0),
+      sourceUrl: cleanUrl(raw.sourceUrl),
+      pageUrl: cleanText(raw.pageUrl || fallbackPageUrl, 2048),
+    });
+    if (out.length >= 50) break;
+  }
+  return out;
+}
+
 function normalizeMessage(input) {
   const raw = input && typeof input === 'object' ? input : {};
   const payload = raw.payload && typeof raw.payload === 'object' ? raw.payload : raw;
@@ -64,10 +86,14 @@ function normalizeMessage(input) {
     const prompt = cleanText(payload.prompt || payload.text || payload.outputText);
     if (images.length === 0 && !prompt) return null;
 
-    const mode = ['prompt', 'image', 'both'].includes(String(payload.mode || '').trim())
+    const mode = ['prompt', 'image', 'both', 'reference'].includes(String(payload.mode || '').trim())
       ? String(payload.mode || '').trim()
       : 'both';
     const messageId = cleanText(payload.messageId || raw.messageId || `web-image-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, 180);
+    const pageUrl = cleanText(payload.pageUrl || raw.pageUrl, 2048);
+    const webAssetItems = mode === 'reference'
+      ? cleanWebAssetItems(payload.webAssetItems || payload.images, pageUrl)
+      : [];
     return {
       type: WEB_IMAGE_MESSAGE_TYPE,
       source: WEB_IMAGE_MESSAGE_SOURCE,
@@ -76,12 +102,13 @@ function normalizeMessage(input) {
         messageId,
         mode,
         prompt,
-        images,
+        images: webAssetItems.length ? webAssetItems : images,
         imageUrls: images,
         sourceImageUrl: cleanUrl(payload.sourceImageUrl),
-        pageUrl: cleanText(payload.pageUrl || raw.pageUrl, 2048),
+        pageUrl,
         pageTitle: cleanText(payload.pageTitle || raw.pageTitle, 200),
-        source: 'web-image-reverse',
+        source: mode === 'reference' ? 'web-asset-importer' : 'web-image-reverse',
+        webAssetItems,
         createdAt: Number(payload.createdAt) || Date.now(),
         metadata: {
           ...cleanMetadata(payload.metadata),

@@ -60,6 +60,7 @@ export const NODE_DEFAULT_SIZE: Record<string, { w: number; h: number }> = {
   'artist-style-master': { w: 480, h: 620 },
   'anime-tag-master': { w: 500, h: 660 },
   'model-3d-preview': { w: 520, h: 440 },
+  'face-expression-3d': { w: 520, h: 520 },
   'comfyui-store': { w: 400, h: 560 },
   'comfyui-app-maker': { w: 720, h: 620 },
   ...(import.meta.env?.DEV ? { 'rh-toolbox-maker': { w: 760, h: 620 }, 'fal-toolbox-maker': { w: 720, h: 620 } } : {}),

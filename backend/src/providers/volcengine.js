@@ -1,5 +1,6 @@
 const openaiCompatible = require('./openaiCompatible');
 const { resolveMediaRef } = require('./mediaResolver');
+const { mergeProviderTrace, providerTrace } = require('./providerTrace');
 
 const GENERATION_TIMEOUT_MS = 60 * 60 * 1000;
 const VOLCENGINE_API_PREFIX = '/api/v3';
@@ -335,6 +336,7 @@ async function generateImage(provider, input = {}, options = {}) {
       fetchImpl: options.fetchImpl,
     });
     const raw = await responseJson(res);
+    const trace = providerTrace(res, raw, { pollCount: 0 });
     if (!res.ok) {
       const upstreamMessage = volcengineErrorMessage(raw);
       const code = /modelnotopen/i.test(volcengineErrorCode(raw)) ? 'model_not_open' : 'http_error';
@@ -343,15 +345,17 @@ async function generateImage(provider, input = {}, options = {}) {
         code,
         providerId: provider.id,
         protocol: 'volcengine',
+        model,
         error: `火山图像调用失败：HTTP ${res.status}${upstreamMessage ? `，${upstreamMessage}` : ''}`,
         raw,
+        ...trace,
       };
     }
     const imageUrls = openaiCompatible.extractImageUrls(raw);
     if (!imageUrls.length) {
-      return { ok: false, code: 'empty_image', providerId: provider.id, protocol: 'volcengine', error: '火山图像接口没有返回图片。', raw };
+      return { ok: false, code: 'empty_image', providerId: provider.id, protocol: 'volcengine', model, error: '火山图像接口没有返回图片。', raw, ...trace };
     }
-    return { ok: true, kind: 'image', code: 'completed', providerId: provider.id, protocol: 'volcengine', model, imageUrls, raw };
+    return { ok: true, kind: 'image', code: 'completed', providerId: provider.id, protocol: 'volcengine', model, imageUrls, raw, ...trace };
   } catch (e) {
     return { ok: false, code: e?.name === 'AbortError' ? 'timeout' : 'network_error', providerId: provider.id, protocol: 'volcengine', error: e?.message || '火山图像调用失败。' };
   }
@@ -364,6 +368,7 @@ async function pollVideoTask(provider, taskId, options = {}) {
   const minMaxPoll = Math.ceil(GENERATION_TIMEOUT_MS / Math.max(1, interval));
   const maxPoll = Math.max(requestedMaxPoll, minMaxPoll);
   let lastRaw = null;
+  let trace = {};
   for (let i = 0; i < maxPoll; i += 1) {
     if (i > 0 && interval > 0) await new Promise((resolve) => setTimeout(resolve, interval));
     const res = await openaiCompatible.fetchWithTimeout(pollUrl, {
@@ -374,16 +379,25 @@ async function pollVideoTask(provider, taskId, options = {}) {
     });
     const raw = await responseJson(res);
     lastRaw = raw;
-    if (!res.ok) throw new Error(`火山视频任务查询失败：HTTP ${res.status}`);
+    trace = mergeProviderTrace(trace, providerTrace(res, raw, { pollCount: i + 1 }));
+    if (!res.ok) {
+      const error = new Error(`火山视频任务查询失败：HTTP ${res.status}`);
+      Object.assign(error, trace);
+      throw error;
+    }
     const status = extractStatus(raw);
     const urls = [...new Set(collectMediaUrls(raw))];
-    if (SUCCESS_STATUSES.has(status) || (!status && urls.length)) return { raw, videoUrls: urls };
+    if (SUCCESS_STATUSES.has(status) || (!status && urls.length)) return { raw, videoUrls: urls, ...trace };
     if (FAILURE_STATUSES.has(status)) {
       const data = raw?.data && typeof raw.data === 'object' ? raw.data : raw;
-      throw new Error(data?.message || data?.error?.message || raw?.message || '火山视频任务失败。');
+      const error = new Error(data?.message || data?.error?.message || raw?.message || '火山视频任务失败。');
+      Object.assign(error, trace);
+      throw error;
     }
   }
-  throw new Error(`火山视频任务超时：${JSON.stringify(lastRaw || taskId).slice(0, 500)}`);
+  const error = new Error(`火山视频任务超时：${JSON.stringify(lastRaw || taskId).slice(0, 500)}`);
+  Object.assign(error, trace, { pollCount: maxPoll });
+  throw error;
 }
 
 async function generateVideo(provider, input = {}, options = {}) {
@@ -447,6 +461,7 @@ async function generateVideo(provider, input = {}, options = {}) {
   if (truthyParam(providerParams.watermark ?? input.watermark)) body.watermark = true;
   if (truthyParam(providerParams.camerafixed ?? input.camerafixed)) body.camerafixed = true;
 
+  let trace = {};
   try {
     const res = await openaiCompatible.fetchWithTimeout(endpointUrl(provider, '/contents/generations/tasks', ['videoGenerationEndpoint', 'video_generation_endpoint']), {
       method: 'POST',
@@ -456,6 +471,7 @@ async function generateVideo(provider, input = {}, options = {}) {
       fetchImpl: options.fetchImpl,
     });
     const raw = await responseJson(res);
+    trace = providerTrace(res, raw, { pollCount: 0 });
     if (!res.ok) {
       const upstreamMessage = volcengineErrorMessage(raw);
       const code = /modelnotopen/i.test(volcengineErrorCode(raw)) ? 'model_not_open' : 'http_error';
@@ -464,25 +480,28 @@ async function generateVideo(provider, input = {}, options = {}) {
         code,
         providerId: provider.id,
         protocol: 'volcengine',
+        model,
         error: `火山视频提交失败：HTTP ${res.status}${upstreamMessage ? `，${upstreamMessage}` : ''}`,
         raw,
+        ...trace,
       };
     }
     const taskId = extractTaskId(raw);
     const directUrls = [...new Set(collectMediaUrls(raw))];
     if (directUrls.length) {
-      return { ok: true, kind: 'video', code: 'completed', providerId: provider.id, protocol: 'volcengine', model, taskId, videoUrls: directUrls, raw };
+      return { ok: true, kind: 'video', code: 'completed', providerId: provider.id, protocol: 'volcengine', model, taskId, videoUrls: directUrls, raw, ...trace };
     }
     if (!taskId) {
-      return { ok: false, code: 'missing_task_id', providerId: provider.id, protocol: 'volcengine', error: '火山视频提交后未返回 task id。', raw };
+      return { ok: false, code: 'missing_task_id', providerId: provider.id, protocol: 'volcengine', model, error: '火山视频提交后未返回 task id。', raw, ...trace };
     }
     const polled = await pollVideoTask(provider, taskId, options);
+    trace = mergeProviderTrace(trace, polled);
     if (!polled.videoUrls.length) {
-      return { ok: false, code: 'empty_video', providerId: provider.id, protocol: 'volcengine', error: '火山视频任务完成但没有返回视频。', raw: polled.raw };
+      return { ok: false, code: 'empty_video', providerId: provider.id, protocol: 'volcengine', model, taskId, error: '火山视频任务完成但没有返回视频。', raw: polled.raw, ...trace };
     }
-    return { ok: true, kind: 'video', code: 'completed', providerId: provider.id, protocol: 'volcengine', model, taskId, videoUrls: polled.videoUrls, raw: polled.raw };
+    return { ok: true, kind: 'video', code: 'completed', providerId: provider.id, protocol: 'volcengine', model, taskId, videoUrls: polled.videoUrls, raw: polled.raw, ...trace };
   } catch (e) {
-    return { ok: false, code: e?.name === 'AbortError' ? 'timeout' : 'network_error', providerId: provider.id, protocol: 'volcengine', error: e?.message || '火山视频调用失败。' };
+    return { ok: false, code: e?.name === 'AbortError' ? 'timeout' : 'network_error', providerId: provider.id, protocol: 'volcengine', model, error: e?.message || '火山视频调用失败。', ...mergeProviderTrace(trace, e) };
   }
 }
 

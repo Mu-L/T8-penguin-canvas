@@ -5,6 +5,7 @@ import { useUpdateNodeData } from './useUpdateNodeData';
 import { generateImage } from '../../services/generation';
 import { IMAGE_MODELS } from '../../providers/models';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import SmartImage from '../SmartImage';
 import PromptTextarea from '../PromptTextarea';
 
@@ -192,7 +193,7 @@ const PresetImageNode = (p: NodeProps) => {
         />
 
         <button
-          onClick={handleGenerate}
+          onClick={() => requestCanvasNodeRun(p.id)}
           disabled={status === 'running'}
           className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded text-xs font-medium disabled:opacity-50 transition-colors bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-100"
         >

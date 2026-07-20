@@ -638,7 +638,21 @@ function shouldKeepAudio(settings, clip, index, probe) {
   return true;
 }
 
-async function makeSegment({ source, clip, index, probe, settings, width, height, targetDir, job, forceMuteAudio = false }) {
+function hasAudibleEnvelopeControls(segment) {
+  if (!segment || typeof segment !== 'object') return false;
+  return Math.abs(safeRenderPlanNumber(segment.volume, 1) - 1) > 0.0001
+    || normalizeTimelineAudioFade(segment.audioFadeIn, segment.duration) > 0
+    || normalizeTimelineAudioFade(segment.audioFadeOut, segment.duration) > 0
+    || normalizeTimelineAudioVolumeCurve(segment.volumeCurve) !== 'flat';
+}
+
+function sourceAudioEnvelopeFilterChain(envelope, duration) {
+  const safeDuration = Math.max(0.05, safeRenderPlanNumber(duration, 0.05));
+  if (!hasAudibleEnvelopeControls({ ...(envelope || {}), duration: safeDuration })) return '';
+  return buildTimelineAudioEnvelopeFilters({ ...(envelope || {}), duration: safeDuration }).join(',');
+}
+
+async function makeSegment({ source, clip, index, probe, settings, width, height, targetDir, job, forceMuteAudio = false, audioEnvelope = null }) {
   const start = Math.max(0, Number(clip.trimStart) || 0);
   const rawEnd = Number(clip.trimEnd);
   const sourceDuration = Number(probe.duration) || 0;
@@ -658,6 +672,8 @@ async function makeSegment({ source, clip, index, probe, settings, width, height
   args.push('-map', keepAudio ? '0:a:0' : '1:a:0');
   args.push('-vf', isTimelineOverlay ? overlayContentFilterChain(settings) : filterChain(settings, width, height, duration));
   args.push('-r', '30', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20');
+  const audioFilter = keepAudio ? sourceAudioEnvelopeFilterChain(audioEnvelope, duration) : '';
+  if (audioFilter) args.push('-af', audioFilter);
   args.push('-c:a', 'aac', '-b:a', '160k', '-ar', '44100', '-ac', '2');
   args.push('-shortest', '-movflags', '+faststart', output);
   await runFfmpeg(args, job);
@@ -1041,6 +1057,25 @@ function normalizeTimelineAudioSegments(renderPlan, settings) {
   return segments;
 }
 
+function isLinkedVideoAudioSegment(segment) {
+  return typeof segment?.linkedVideoItemId === 'string' && segment.linkedVideoItemId.trim().length > 0;
+}
+
+function independentTimelineAudioSegments(renderPlan, settings) {
+  return normalizeTimelineAudioSegments(renderPlan, settings)
+    .filter((segment) => !isLinkedVideoAudioSegment(segment));
+}
+
+function sourceAudioEnvelopeByVideoItemId(renderPlan, settings) {
+  const map = new Map();
+  if (settings?.audio === 'mute') return map;
+  for (const segment of normalizeTimelineAudioSegments(renderPlan, { ...(settings || {}), audio: 'keep' })) {
+    if (!isLinkedVideoAudioSegment(segment)) continue;
+    map.set(segment.linkedVideoItemId, segment);
+  }
+  return map;
+}
+
 function normalizeTimelineAudioVolumeCurve(value) {
   return AUDIO_VOLUME_CURVES.has(value) ? value : 'flat';
 }
@@ -1077,7 +1112,7 @@ function buildTimelineAudioEnvelopeFilters(segment) {
 }
 
 async function mixTimelineAudioIntoVideo(input, output, renderPlan, settings, workDir, job) {
-  const audioSegments = normalizeTimelineAudioSegments(renderPlan, settings);
+  const audioSegments = independentTimelineAudioSegments(renderPlan, settings);
   if (!audioSegments.length) return { timelineAudioMixed: false, timelineAudioCount: 0 };
 
   const videoProbe = await probeFile(input, job);
@@ -1107,10 +1142,19 @@ async function mixTimelineAudioIntoVideo(input, output, renderPlan, settings, wo
   }
   if (!audioInputs.length) return { timelineAudioMixed: false, timelineAudioCount: 0 };
 
-  const filters = audioInputs.map((segment, index) => {
+  const filters = [];
+  const mixLabels = [];
+  if (videoProbe.hasAudio) {
+    filters.push(
+      `[0:a:0]apad=whole_dur=${targetDuration.toFixed(3)},` +
+      `atrim=0:${targetDuration.toFixed(3)},asetpts=PTS-STARTPTS[baseaud]`,
+    );
+    mixLabels.push('baseaud');
+  }
+  audioInputs.forEach((segment, index) => {
     const inputIndex = index + 1;
     const delayMs = Math.max(0, Math.round(segment.timelineStart * 1000));
-    return [
+    filters.push([
       `[${inputIndex}:a:0]atrim=start=${segment.trimStart.toFixed(3)}:end=${segment.trimEnd.toFixed(3)}`,
       'asetpts=PTS-STARTPTS',
       ...buildTimelineAudioEnvelopeFilters(segment),
@@ -1118,10 +1162,11 @@ async function mixTimelineAudioIntoVideo(input, output, renderPlan, settings, wo
       `apad=whole_dur=${targetDuration.toFixed(3)}`,
       `atrim=0:${targetDuration.toFixed(3)}`,
       `asetpts=PTS-STARTPTS[aud${index}]`,
-    ].join(',');
+    ].join(','));
+    mixLabels.push(`aud${index}`);
   });
   filters.push(
-    `${audioInputs.map((_, index) => `[aud${index}]`).join('')}amix=inputs=${audioInputs.length}:duration=longest:dropout_transition=0,` +
+    `${mixLabels.map((label) => `[${label}]`).join('')}amix=inputs=${mixLabels.length}:duration=longest:dropout_transition=0,` +
     `apad=whole_dur=${targetDuration.toFixed(3)},atrim=0:${targetDuration.toFixed(3)},asetpts=PTS-STARTPTS[aout]`,
   );
 
@@ -1494,8 +1539,7 @@ async function composeVideoEdit(clips, settings, job = makeJob('compose'), optio
     .slice(0, MAX_CLIPS);
   if (normalizedClips.length === 0) throw new Error('没有可用的视频片段');
   assertRenderPlanSupported(options?.renderPlan);
-  const timelineAudioSegments = normalizeTimelineAudioSegments(options?.renderPlan, settings);
-  const forceRenderPlanAudioMix = timelineAudioSegments.length > 0;
+  const linkedSourceAudioEnvelopes = sourceAudioEnvelopeByVideoItemId(options?.renderPlan, settings);
 
   const workDir = ensureDir(path.join(os.tmpdir(), `t8-video-compose-${job.id}`));
   let outputToCleanOnFailure = '';
@@ -1528,7 +1572,7 @@ async function composeVideoEdit(clips, settings, job = makeJob('compose'), optio
         height: size.height,
         targetDir: workDir,
         job,
-        forceMuteAudio: forceRenderPlanAudioMix,
+        audioEnvelope: linkedSourceAudioEnvelopes.get(sources[i].clip?.sourceItemId) || null,
       });
       segmentInfos.push(segment);
     }

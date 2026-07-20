@@ -27,7 +27,8 @@ test('external provider generation routes run enabled OpenAI compatible LLM and 
   const upstreamCalls: any[] = [];
   upstreamApp.post('/v1/chat/completions', (req, res) => {
     upstreamCalls.push({ path: req.path, body: req.body, auth: req.header('authorization') });
-    res.json({ choices: [{ message: { content: 'external hello' } }] });
+    res.set('x-request-id', 'req-route-chat');
+    res.json({ choices: [{ message: { content: 'external hello' } }], usage: { prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 } });
   });
   upstreamApp.post('/v1/images/generations', (req, res) => {
     upstreamCalls.push({ path: req.path, body: req.body, auth: req.header('authorization') });
@@ -106,6 +107,10 @@ test('external provider generation routes run enabled OpenAI compatible LLM and 
 
   assert.equal(llm.success, true);
   assert.equal(llm.data.text, 'external hello');
+  assert.equal(llm.data.requestId, 'req-route-chat');
+  assert.equal(llm.data.upstreamHttpStatus, 200);
+  assert.equal(llm.data.pollCount, 0);
+  assert.deepEqual(llm.data.usage, { prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 });
   assert.equal(JSON.stringify(llm).includes('sk-route-secret'), false);
 
   const image = await fetch(`${base}/api/proxy/external/image`, {
@@ -257,4 +262,104 @@ test('external Agnes image route sends image edit aliases through generations JS
       response_format: 'url',
     },
   });
+});
+
+test('ComfyUI external image route persists mixed image video and audio outputs', async (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 't8-comfyui-mixed-route-'));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+
+  const upstreamApp = express();
+  upstreamApp.use(express.json({ limit: '2mb' }));
+  upstreamApp.post('/prompt', (_req, res) => res.json({ prompt_id: 'mixed-route-1' }));
+  upstreamApp.get('/history/mixed-route-1', (_req, res) => res.json({
+    'mixed-route-1': {
+      status: { status_str: 'success' },
+      outputs: {
+        '10': { images: [{ filename: 'mixed.png', type: 'output' }] },
+        '11': { videos: [{ filename: 'mixed.mp4', type: 'output' }] },
+        '12': { audio: [{ filename: 'mixed.wav', type: 'output' }] },
+        '13': { text: 'mixed caption' },
+      },
+    },
+  }));
+  upstreamApp.get('/view', (req, res) => {
+    const filename = String(req.query.filename || '');
+    if (filename.endsWith('.mp4')) return res.type('video/mp4').send(Buffer.from('MP4DATA'));
+    if (filename.endsWith('.wav')) return res.type('audio/wav').send(Buffer.from('WAVDATA'));
+    return res.type('image/png').send(Buffer.from('PNGDATA'));
+  });
+  const upstreamServer = await listen(upstreamApp);
+  t.after(() => upstreamServer.close());
+
+  const config = require('../backend/src/config.js');
+  const oldConfig = {
+    SETTINGS_FILE: config.SETTINGS_FILE,
+    OUTPUT_DIR: config.OUTPUT_DIR,
+    DEFAULT_LOCAL_SAVE_DIR: config.DEFAULT_LOCAL_SAVE_DIR,
+    DEFAULT_CANVAS_AUTO_SAVE_DIR: config.DEFAULT_CANVAS_AUTO_SAVE_DIR,
+    DEFAULT_RESOURCE_LIBRARY_DIR: config.DEFAULT_RESOURCE_LIBRARY_DIR,
+    DEFAULT_THEME_TEMPLATE_DIR: config.DEFAULT_THEME_TEMPLATE_DIR,
+  };
+  t.after(() => Object.assign(config, oldConfig));
+  config.SETTINGS_FILE = path.join(tmpDir, 'settings.json');
+  config.OUTPUT_DIR = path.join(tmpDir, 'output');
+  config.DEFAULT_LOCAL_SAVE_DIR = path.join(tmpDir, 'save');
+  config.DEFAULT_CANVAS_AUTO_SAVE_DIR = path.join(tmpDir, 'canvas');
+  config.DEFAULT_RESOURCE_LIBRARY_DIR = path.join(tmpDir, 'resources');
+  config.DEFAULT_THEME_TEMPLATE_DIR = path.join(tmpDir, 'themes');
+  fs.mkdirSync(config.OUTPUT_DIR, { recursive: true });
+
+  const settingsRouter = require('../backend/src/routes/settings.js');
+  const externalProvidersRouter = require('../backend/src/routes/externalProviders.js');
+  const app = express();
+  app.use(express.json({ limit: '4mb' }));
+  app.use('/api/settings', settingsRouter);
+  app.use('/api/proxy/external', externalProvidersRouter);
+  const server = await listen(app);
+  t.after(() => server.close());
+
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const comfyBase = `http://127.0.0.1:${upstreamServer.address().port}`;
+  await fetch(`${base}/api/settings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      advancedProviders: [{
+        id: 'comfyui-mixed',
+        protocol: 'comfyui',
+        enabled: true,
+        baseUrl: comfyBase,
+        comfyuiConfig: {
+          instances: [comfyBase],
+          workflows: [{
+            id: 'mixed-workflow',
+            name: 'Mixed workflow',
+            workflowJson: { '1': { class_type: 'T8Fixture', inputs: { value: 1 } } },
+          }],
+        },
+      }],
+    }),
+  }).then((res) => res.json());
+
+  const result = await fetch(`${base}/api/proxy/external/image`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ providerId: 'comfyui-mixed', providerModel: 'mixed-workflow' }),
+  }).then((res) => res.json());
+
+  assert.equal(result.success, true);
+  assert.deepEqual(result.data.outputKinds, ['image', 'video', 'audio', 'text']);
+  assert.equal(result.data.primaryKind, 'image');
+  assert.equal(result.data.text, 'mixed caption');
+  assert.equal(result.data.imageUrls.length, 1);
+  assert.equal(result.data.videoUrls.length, 1);
+  assert.equal(result.data.audioUrls.length, 1);
+  assert.equal(result.data.outputSaveErrors.length, 0);
+  for (const url of [...result.data.imageUrls, ...result.data.videoUrls, ...result.data.audioUrls]) {
+    assert.match(url, /^\/files\/output\/external_/);
+    assert.equal(fs.existsSync(path.join(config.OUTPUT_DIR, path.basename(url))), true);
+  }
+  assert.match(result.data.remoteImageUrls[0], new RegExp(`^${comfyBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/view`));
+  assert.match(result.data.remoteVideoUrls[0], /filename=mixed\.mp4/);
+  assert.match(result.data.remoteAudioUrls[0], /filename=mixed\.wav/);
 });

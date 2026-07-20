@@ -50,6 +50,34 @@ function cleanUrl(value) {
   return '';
 }
 
+function trimTrailingSlash(value) {
+  return String(value || '').trim().replace(/\/+$/, '');
+}
+
+function requestHost(req) {
+  const headerHost = cleanText(typeof req.get === 'function' ? req.get('host') : '', 200);
+  return headerHost || `${config.HOST || '127.0.0.1'}:${config.PORT}`;
+}
+
+function requestHostname(req) {
+  const host = requestHost(req);
+  const ipv6 = host.match(/^\[([^\]]+)\]/);
+  if (ipv6) return ipv6[1];
+  return host.split(':')[0] || '127.0.0.1';
+}
+
+function backendUrlForRequest(req) {
+  return `http://${requestHost(req)}`;
+}
+
+function frontendUrlForRequest(req) {
+  const explicit = trimTrailingSlash(process.env.T8PC_FRONTEND_URL || process.env.T8_FRONTEND_URL);
+  if (/^https?:\/\/[^/]+/i.test(explicit)) return explicit;
+  if (config.IS_PACKAGED) return backendUrlForRequest(req);
+  const port = Number(process.env.T8_DEV_FRONTEND_PORT || process.env.VITE_PORT || 11422) || 11422;
+  return `http://${requestHostname(req)}:${port}`;
+}
+
 function cleanMetadata(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const out = {};
@@ -444,12 +472,16 @@ function generationTimeoutMs(value) {
   return Math.max(60 * 60 * 1000, Math.round(n));
 }
 
-router.get('/status', (_req, res) => {
+router.get('/status', (req, res) => {
+  const frontendUrl = frontendUrlForRequest(req);
   res.json({
     success: true,
     data: {
       ok: true,
       service: 't8-photoshop-bridge',
+      backendUrl: backendUrlForRequest(req),
+      frontendUrl,
+      canvasUrl: frontendUrl,
       messageType: PHOTOSHOP_MESSAGE_TYPE,
       messageSource: PHOTOSHOP_MESSAGE_SOURCE,
       queueSize: queue.length,

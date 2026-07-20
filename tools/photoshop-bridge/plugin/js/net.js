@@ -53,6 +53,11 @@
     return `${base}${String(url).startsWith('/') ? '' : '/'}${url}`;
   }
 
+  function normalizeFrontendUrl(value) {
+    const text = String(value || '').trim().replace(/\/+$/, '');
+    return /^https?:\/\/[^/]+/i.test(text) ? text : '';
+  }
+
   async function request(path, options) {
     const res = await fetch(`${httpBase()}${path}`, {
       cache: 'no-store',
@@ -95,6 +100,11 @@
         const json = await apiGet('/api/photoshop-bridge/status');
         if (json && json.data && json.data.service === 't8-photoshop-bridge') {
           state.connected = true;
+          const frontendUrl = normalizeFrontendUrl(json.data.frontendUrl || json.data.canvasUrl);
+          if (frontendUrl) {
+            state.frontendUrl = frontendUrl;
+            localStorage.setItem('t8.ps.frontendUrl', frontendUrl);
+          }
           localStorage.setItem('t8.ps.host', state.host);
           return json.data;
         }
@@ -133,6 +143,28 @@
     return out;
   }
 
+  function mimeFromUrl(url) {
+    const clean = String(url || '').split(/[?#]/)[0].toLowerCase();
+    if (clean.endsWith('.jpg') || clean.endsWith('.jpeg')) return 'image/jpeg';
+    if (clean.endsWith('.webp')) return 'image/webp';
+    if (clean.endsWith('.gif')) return 'image/gif';
+    if (clean.endsWith('.bmp')) return 'image/bmp';
+    if (clean.endsWith('.avif')) return 'image/avif';
+    return 'image/png';
+  }
+
+  async function imageDataUrl(url) {
+    const text = String(url || '').trim();
+    if (!text) return '';
+    if (/^data:image\//i.test(text)) return text;
+    const res = await fetch(absUrl(text), { cache: 'no-store' });
+    if (!res.ok) throw new Error(`下载预览失败 HTTP ${res.status}`);
+    const contentType = res.headers && typeof res.headers.get === 'function' ? String(res.headers.get('content-type') || '') : '';
+    const mime = /^image\//i.test(contentType) ? contentType.split(';')[0].toLowerCase() : mimeFromUrl(text);
+    const buffer = await res.arrayBuffer();
+    return `data:${mime};base64,${toBase64(buffer)}`;
+  }
+
   async function uploadPng(buffer, options) {
     return apiPost('/api/photoshop-bridge/upload-base64', {
       data: `data:image/png;base64,${toBase64(buffer)}`,
@@ -140,5 +172,18 @@
     });
   }
 
-  T8PS.net = { parseHost, bridgeHostCandidates, httpBase, absUrl, apiGet, apiPost, connect, fetchBytes, toBase64, uploadPng };
+  T8PS.net = {
+    parseHost,
+    bridgeHostCandidates,
+    httpBase,
+    absUrl,
+    normalizeFrontendUrl,
+    apiGet,
+    apiPost,
+    connect,
+    fetchBytes,
+    toBase64,
+    imageDataUrl,
+    uploadPng,
+  };
 })();

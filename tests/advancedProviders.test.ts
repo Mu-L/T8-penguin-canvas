@@ -108,12 +108,16 @@ test('normalizeAdvancedProviders merges built-in provider model defaults into ol
   assert.equal(volcengine?.imageModels[0], 'doubao-seedream-4-0-250828');
   assert.equal(volcengine?.videoModels[1], 'doubao-seedance-2-0-fast-260128');
   assert.equal(volcengine?.chatModels[0], 'doubao-seed-1-6-250615');
-  assert.deepEqual(jimeng?.videoModels.slice(0, 4), [
+  assert.deepEqual(jimeng?.videoModels.slice(0, 5), [
     'seedance2.0fast_vip',
     'seedance2.0_vip',
+    'seedance2.0mini',
     'seedance2.0fast',
     'seedance2.0',
   ]);
+  assert.ok(jimeng?.videoModels.includes('seedance1.5pro'));
+  assert.ok(jimeng?.videoModels.includes('seedance1.0fast'));
+  assert.ok(jimeng?.videoModels.includes('seedance1.0'));
   assert.deepEqual(jimeng?.imageModels.slice(0, 4), [
     'seedream-4.7',
     'seedream-4.6',

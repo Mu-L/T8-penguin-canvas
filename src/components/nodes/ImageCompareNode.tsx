@@ -3,6 +3,7 @@ import { Handle, Position, useNodeConnections, useNodesData, type NodeProps } fr
 import { AlertCircle, GitCompare, Loader2, Sparkles } from 'lucide-react';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { useHasAutoOutput } from './useHasAutoOutput';
 import { opCompare, uploadDataUrl } from '../../services/imageOps';
 import ImageCompareStage from '../ImageCompareStage';
@@ -301,7 +302,7 @@ const ImageCompareNode = (p: NodeProps) => {
 
           <button
             type="button"
-            onClick={handleRun}
+            onClick={() => requestCanvasNodeRun(p.id)}
             disabled={status === 'running' || !hasPair}
             className="t8-btn t8-btn-primary w-full px-3 py-2 text-xs disabled:opacity-50"
           >

@@ -5,10 +5,14 @@ export const RANDOM_ROUTE_MIN_OUTPUTS = 1;
 export const RANDOM_ROUTE_MAX_OUTPUTS = 100;
 export const RANDOM_ROUTE_DEFAULT_OUTPUTS = 10;
 export const RANDOM_ROUTE_DEFAULT_PASS_COUNT = 1;
+export const RANDOM_ROUTE_DEFAULT_EXECUTION_MODE = 'parallel';
+
+export type RandomRouteExecutionMode = 'parallel' | 'serial';
 
 export interface RandomRouteSettings {
   totalOutputs: number;
   randomPassCount: number;
+  executionMode: RandomRouteExecutionMode;
 }
 
 export interface RandomRouteBranchArgs {
@@ -39,6 +43,12 @@ function firstPresent(...values: unknown[]) {
     if (value !== undefined && value !== null && value !== '') return value;
   }
   return undefined;
+}
+
+function normalizeExecutionMode(value: unknown): RandomRouteExecutionMode {
+  const text = String(value || '').trim().toLowerCase();
+  if (['serial', 'sequential', 'sequence', 'single', '顺序', '顺序生成'].includes(text)) return 'serial';
+  return 'parallel';
 }
 
 export function randomRouteOutputHandle(index: number): string {
@@ -77,7 +87,13 @@ export function normalizeRandomRouteSettings(data: Record<string, any> = {}): Ra
     1,
     totalOutputs,
   );
-  return { totalOutputs, randomPassCount };
+  const executionMode = normalizeExecutionMode(firstPresent(
+    data.randomRouteExecutionMode,
+    data.executionMode,
+    data.execution_mode,
+    data.random_route_execution_mode,
+  ));
+  return { totalOutputs, randomPassCount, executionMode };
 }
 
 export function selectRandomRouteHandles(

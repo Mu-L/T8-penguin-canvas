@@ -128,9 +128,51 @@ test('local browser bridge also queues web image reverse payloads for Electron c
   assert.equal(JSON.stringify(pending).includes('should-not-survive'), false);
 });
 
+test('local browser bridge preserves web asset metadata for Electron reference imports', async (t) => {
+  const route = require('../backend/src/routes/vibexBridge.js');
+  const app = express();
+  app.use(express.json({ limit: '2mb' }));
+  app.use('/api/vibex-bridge', route);
+  const server = await listen(app);
+  t.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  await fetch(`${base}/api/vibex-bridge/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      type: 't8:web-image-result',
+      source: 't8-web-image-extension',
+      payload: {
+        messageId: 'web-assets-reference-1',
+        mode: 'reference',
+        pageUrl: 'https://example.com/gallery',
+        images: [{
+          url: '/files/input/web_local.png',
+          name: 'original-name.png',
+          mime: 'image/png',
+          size: 1234,
+          width: 640,
+          height: 480,
+          sourceUrl: 'https://cdn.example.com/original.png',
+        }],
+      },
+    }),
+  });
+
+  const pending = await fetch(`${base}/api/vibex-bridge/pending?limit=10`).then((res) => res.json());
+  const payload = pending.data.messages[0].payload;
+  assert.equal(payload.mode, 'reference');
+  assert.equal(payload.source, 'web-asset-importer');
+  assert.equal(payload.webAssetItems[0].name, 'original-name.png');
+  assert.equal(payload.webAssetItems[0].mime, 'image/png');
+  assert.equal(payload.webAssetItems[0].width, 640);
+  assert.equal(payload.webAssetItems[0].sourceUrl, 'https://cdn.example.com/original.png');
+});
+
 test('Chrome extension exposes a RunningHub VibeX bridge content script and backend fallback', () => {
   const manifest = JSON.parse(read('extension/manifest.json'));
-  assert.equal(manifest.version, '1.1.0');
+  assert.equal(manifest.version, '1.2.0');
   assert.ok(
     manifest.content_scripts.some((entry: any) =>
       entry.js?.includes('scripts/runninghub-bridge.js') &&

@@ -1,11 +1,22 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { AlertCircle, Loader2, Music, Sparkles, Square, Upload, X } from 'lucide-react';
-import { submitAudio, queryAudio, uploadAudioForSuno, type AudioMode } from '../../services/generation';
+import {
+  submitAudio,
+  queryAudio,
+  submitSeedAudio,
+  querySeedAudio,
+  uploadAudioForSuno,
+  uploadFile as uploadLocalFile,
+  type AudioMode,
+  type AudioProviderMode,
+} from '../../services/generation';
 import { SUNO_VERSIONS, DEFAULT_SUNO_VERSION } from '../../providers/models';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useHasAutoOutput } from './useHasAutoOutput';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
+import type { RunNodeLifecycleReporter } from '../../types/project';
 import { logBus } from '../../stores/logs';
 import { PORT_COLOR } from '../../config/portTypes';
 import { useThemeStore } from '../../stores/theme';
@@ -57,6 +68,8 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
 
   const d = data as any;
   const providerParams = (d?.providerParams && typeof d.providerParams === 'object') ? d.providerParams : {};
+  const audioProviderMode: AudioProviderMode = d?.audioProviderMode === 'seed-audio' ? 'seed-audio' : 'suno';
+  const isSeedAudio = audioProviderMode === 'seed-audio';
   const mode: AudioMode = d?.mode || 'generate';
   const version: string = d?.version || DEFAULT_SUNO_VERSION;
   const title: string = d?.title || '';
@@ -65,6 +78,12 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
   const promptMentions: MediaMention[] = Array.isArray(d?.promptMentions) ? d.promptMentions : [];
   const seed: number = typeof d?.seed === 'number' ? d.seed : 0;
   const continueAt: number = d?.continueAt ?? 28;
+  const seedAudioSpeaker: string = d?.seedAudioSpeaker || '';
+  const seedAudioFormat: 'wav' | 'mp3' | 'pcm' | 'ogg_opus' = ['wav', 'mp3', 'pcm', 'ogg_opus'].includes(d?.seedAudioFormat) ? d.seedAudioFormat : 'wav';
+  const seedAudioSampleRate: '8000' | '16000' | '24000' | '32000' | '44100' = ['8000', '16000', '24000', '32000', '44100'].includes(String(d?.seedAudioSampleRate)) ? String(d.seedAudioSampleRate) as any : '24000';
+  const seedAudioSpeechRate: number = Number.isInteger(d?.seedAudioSpeechRate) ? d.seedAudioSpeechRate : 0;
+  const seedAudioLoudnessRate: number = Number.isInteger(d?.seedAudioLoudnessRate) ? d.seedAudioLoudnessRate : 0;
+  const seedAudioPitchRate: number = Number.isInteger(d?.seedAudioPitchRate) ? d.seedAudioPitchRate : 0;
   // 预传 clipId(手动调起 _sunoUploadAudio 后保存)
   const uploadedClipId: string = d?.uploadedClipId || '';
   const uploadedFilename: string = d?.uploadedFilename || '';
@@ -93,16 +112,21 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     () => filterExcludedMaterials(upstream.texts, excludedMaterialIds),
     [upstream.texts, excludedMaterialIds],
   );
+  const visibleUpstreamImages = useMemo(
+    () => filterExcludedMaterials(upstream.images, excludedMaterialIds),
+    [upstream.images, excludedMaterialIds],
+  );
   const visibleUpstreamAudios = useMemo(
     () => filterExcludedMaterials(upstream.audios, excludedMaterialIds),
     [upstream.audios, excludedMaterialIds],
   );
   const excludedUpstreamCount = useMemo(
-    () => countExcludedMaterials(excludedMaterialIds, [...upstream.texts, ...upstream.audios]),
-    [excludedMaterialIds, upstream.texts, upstream.audios],
+    () => countExcludedMaterials(excludedMaterialIds, [...upstream.texts, ...upstream.images, ...upstream.audios]),
+    [excludedMaterialIds, upstream.texts, upstream.images, upstream.audios],
   );
   const materialOrder: string[] = Array.isArray(d?.materialOrder) ? d.materialOrder : [];
   const orderedTexts = useOrderedMaterials(visibleUpstreamTexts, materialOrder);
+  const orderedImages = useOrderedMaterials(visibleUpstreamImages, materialOrder);
   const orderedAudios = useOrderedMaterials(visibleUpstreamAudios, materialOrder);
   const setMaterialOrder = (newOrder: string[]) => update({ materialOrder: newOrder });
   const handleExcludeUpstreamMaterial = (m: Material) => {
@@ -116,6 +140,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
 
   // === 本地拖入参考音频 (跨节点 Ctrl 拖拽) ===
   const localRefAudio: string = typeof d?.localRefAudio === 'string' ? d.localRefAudio : '';
+  const localRefImage: string = typeof d?.localRefImage === 'string' ? d.localRefImage : '';
   const localRefAudioMaterials: Material[] = useMemo(
     () =>
       localRefAudio
@@ -131,21 +156,25 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     [localRefAudio, id],
   );
   const mentionMaterials = useMemo(
-    () => [...orderedAudios, ...localRefAudioMaterials],
-    [orderedAudios, localRefAudioMaterials],
+    () => isSeedAudio
+      ? [...orderedImages.slice(0, 1), ...orderedAudios.slice(0, 3), ...localRefAudioMaterials]
+      : [...orderedAudios, ...localRefAudioMaterials],
+    [isSeedAudio, orderedImages, orderedAudios, localRefAudioMaterials],
   );
   
   // 分组动态跟随模式: generate 只要文本, cover/extend 需要参考音频
   const previewGroups = useMemo<ReadonlyArray<'text' | 'image' | 'video' | 'audio'>>(
-    () => (mode === 'generate' ? ['text'] : ['text', 'audio']),
-    [mode],
+    () => isSeedAudio ? ['text', 'image', 'audio'] : (mode === 'generate' ? ['text'] : ['text', 'audio']),
+    [isSeedAudio, mode],
   );
   
   // 收集上游: prompt + audioUrl(cover/extend 兼底, 取 ordered 首个, 后补本地拖入)
-  const collectUpstream = (): { prompt: string; audioUrl: string } => {
+  const collectUpstream = (): { prompt: string; audioUrl: string; imageUrls: string[]; audioUrls: string[] } => {
     const prompt = orderedTexts.map((t) => t.url).filter((s) => !!s).join('\n').trim();
     const audioUrl = orderedAudios[0]?.url || localRefAudio || '';
-    return { prompt, audioUrl };
+    const imageUrls = [...orderedImages.map((item) => item.url), localRefImage].filter(Boolean).slice(0, 1);
+    const audioUrls = [...orderedAudios.map((item) => item.url), localRefAudio].filter((value, index, values) => !!value && values.indexOf(value) === index).slice(0, 3);
+    return { prompt, audioUrl, imageUrls, audioUrls };
   };
 
   // 上传本地音频 → 获取 clipId
@@ -177,11 +206,19 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     if (!f) return;
     setError(null);
     try {
-      await uploadFile(f);
+      if (isSeedAudio) {
+        setUploading(true);
+        const uploaded = await uploadLocalFile(f);
+        update({ localRefAudio: uploaded.url, uploadedClipId: '', uploadedFilename: f.name });
+        logBus.success(`Seed Audio 参考音频已加入: ${f.name}`, src);
+      } else {
+        await uploadFile(f);
+      }
     } catch (err: any) {
       setError(err?.message || '上传失败');
       logBus.error(err?.message || '上传失败', src);
     } finally {
+      setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
@@ -194,7 +231,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
   //   useRunTrigger 认为 runFn 完成 markDone(true)。 但实际任务 audioUrl 还未赋值 → LoopNode awaitNode
   //   立即继续 → extractFromNode 读不到 audioUrl → result=null → failCount++。
   //   修复后: 轮询完成才 resolve，handleGenerate await 它，什么时候 markDone 什么时候任务真正结束。
-  const startPolling = (clipIds: string[]): Promise<void> => {
+  const startPolling = (clipIds: string[], reporter?: RunNodeLifecycleReporter): Promise<void> => {
     stopPoll();
     return new Promise<void>((resolve, reject) => {
       let elapsed = 0;
@@ -212,6 +249,21 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
         }
         try {
           const r = await queryAudio(clipIds, true);
+          await reporter?.polling({
+            provider: 'suno',
+            model: version,
+            taskIds: clipIds,
+            requestId: r.requestId,
+            transportHttpStatus: r.transportHttpStatus,
+            upstreamHttpStatus: r.upstreamHttpStatus,
+            usage: r.usage,
+            httpStatusSource: 'local-backend',
+            pollCount: elapsed,
+            pollLimit: MAX,
+            status: r.status,
+            completed: r.completed,
+            total: r.total,
+          });
           if (r.status === 'SUCCESS' && r.tracks.length > 0) {
             stopPoll();
             // 双输出口: audioUrl=轨1, audioUrl_1=轨2
@@ -221,6 +273,24 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
               audioUrl: r.tracks[0]?.audioUrl || '',
               audioUrl_1: r.tracks[1]?.audioUrl || '',
               progress: `${r.completed}/${r.total}`,
+              provider: 'suno',
+              model: version,
+              requestId: r.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+            });
+            await reporter?.providerResponse({
+              provider: 'suno',
+              model: version,
+              requestId: r.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+              status: 'succeeded',
+              httpStatusSource: 'local-backend',
             });
             logBus.success(`完成 ${r.tracks.length} 轨: ${r.tracks.map((t) => t.audioUrl).join(' | ')}`, src);
             taskCompletionSound.notifyComplete(id, 'audio');
@@ -236,18 +306,163 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     });
   };
 
-  const handleGenerate = async () => {
+  const startSeedAudioPolling = (tid: string, reporter?: RunNodeLifecycleReporter): Promise<void> => {
+    stopPoll();
+    return new Promise<void>((resolve, reject) => {
+      let elapsed = 0;
+      pollTimer.current = window.setInterval(async () => {
+        elapsed += 1;
+        if (elapsed > SUNO_MAX_POLL) {
+          stopPoll();
+          const message = 'Seed Audio 轮询超时 (60min)';
+          setError(message);
+          update({ status: 'error', error: message });
+          reject(new Error(message));
+          return;
+        }
+        try {
+          const result = await querySeedAudio(tid);
+          const normalizedStatus = String(result.status || '').trim().toLowerCase();
+          const currentProgress = String(result.progress ?? '');
+          await reporter?.polling({
+            provider: 'seedance-nz',
+            model: 'doubao-seed-audio-1.0',
+            taskId: tid,
+            requestId: result.requestId,
+            transportHttpStatus: result.transportHttpStatus,
+            upstreamHttpStatus: result.upstreamHttpStatus,
+            usage: result.usage,
+            httpStatusSource: 'local-backend',
+            pollCount: elapsed,
+            pollLimit: SUNO_MAX_POLL,
+            status: normalizedStatus,
+            progress: currentProgress,
+          });
+          if (normalizedStatus === 'succeeded' && result.audioUrl) {
+            stopPoll();
+            const seedTrack = {
+              id: tid,
+              clipId: tid,
+              audioUrl: result.audioUrl,
+              remoteUrl: result.remoteAudioUrl || undefined,
+              title: 'Seed Audio',
+            };
+            update({
+              status: 'success',
+              tracks: [seedTrack],
+              audioUrl: result.audioUrl,
+              audioUrl_1: '',
+              progress: '100%',
+              provider: 'seedance-nz',
+              model: 'doubao-seed-audio-1.0',
+              taskId: tid,
+              requestId: result.requestId,
+              transportHttpStatus: result.transportHttpStatus,
+              upstreamHttpStatus: result.upstreamHttpStatus,
+              usage: result.usage,
+              pollCount: elapsed,
+            });
+            await reporter?.providerResponse({
+              provider: 'seedance-nz',
+              model: 'doubao-seed-audio-1.0',
+              upstreamTaskId: tid,
+              requestId: result.requestId,
+              transportHttpStatus: result.transportHttpStatus,
+              upstreamHttpStatus: result.upstreamHttpStatus,
+              usage: result.usage,
+              pollCount: elapsed,
+              status: 'succeeded',
+              httpStatusSource: 'local-backend',
+            });
+            logBus.success(`Seed Audio 完成 → ${result.audioUrl}`, src);
+            taskCompletionSound.notifyComplete(id, 'audio');
+            resolve();
+          } else if (normalizedStatus === 'failed') {
+            stopPoll();
+            const message = result.failReason || 'Seed Audio 生成失败';
+            await reporter?.providerResponse({
+              provider: 'seedance-nz',
+              model: 'doubao-seed-audio-1.0',
+              upstreamTaskId: tid,
+              requestId: result.requestId,
+              transportHttpStatus: result.transportHttpStatus,
+              upstreamHttpStatus: result.upstreamHttpStatus,
+              usage: result.usage,
+              pollCount: elapsed,
+              status: 'failed',
+              error: { message },
+              httpStatusSource: 'local-backend',
+            });
+            setError(message);
+            update({ status: 'error', error: message });
+            reject(new Error(message));
+          } else {
+            update({ status: 'polling', progress: currentProgress || `#${elapsed}` });
+          }
+        } catch (pollError: any) {
+          logBus.warn(`Seed Audio 轮询出错: ${pollError?.message || pollError}`, src);
+        }
+      }, 4000);
+    });
+  };
+
+  const handleGenerate = async (reporter?: RunNodeLifecycleReporter) => {
     setError(null);
     const upstream = collectUpstream();
     const resolvedLocalPrompt = resolveMediaMentions(localPrompt, promptMentions, mentionMaterials);
     const finalPrompt = (upstream.prompt || resolvedLocalPrompt || '').trim();
     if (!finalPrompt) {
-      setError('请填写歌词 / 提示词');
+      setError(isSeedAudio ? '请填写音频提示词' : '请填写歌词 / 提示词');
       return;
     }
+    if (isSeedAudio && (finalPrompt.length < 5 || finalPrompt.length > 2048)) {
+      setError('Seed Audio 提示词长度必须为 5-2048 字符');
+      return;
+    }
+    const traceProvider = isSeedAudio ? 'seedance-nz' : 'suno';
+    const traceModel = isSeedAudio ? 'doubao-seed-audio-1.0' : version;
+    await reporter?.providerRequest({ provider: traceProvider, model: traceModel });
     taskCompletionSound.primeAudio();
     update({ status: 'submitting', error: null, tracks: [], audioUrl: undefined });
     try {
+      if (isSeedAudio) {
+        const hasSpeaker = !!seedAudioSpeaker.trim();
+        const hasImage = upstream.imageUrls.length > 0;
+        const hasAudio = upstream.audioUrls.length > 0;
+        if ([hasSpeaker, hasImage, hasAudio].filter(Boolean).length > 1) {
+          throw new Error('Seed Audio 的音色 ID、参考图和参考音频只能选择一种；请移除多余素材或清空音色 ID');
+        }
+        logBus.info(
+          `提交 Seed Audio: doubao-seed-audio-1.0 · ${seedAudioFormat}/${seedAudioSampleRate} · 图${upstream.imageUrls.length}/音${upstream.audioUrls.length}`,
+          src,
+        );
+        const result = await submitSeedAudio({
+          model: 'doubao-seed-audio-1.0',
+          prompt: finalPrompt,
+          speaker: seedAudioSpeaker.trim() || undefined,
+          outputFormat: seedAudioFormat,
+          sampleRate: seedAudioSampleRate,
+          speechRate: seedAudioSpeechRate,
+          loudnessRate: seedAudioLoudnessRate,
+          pitchRate: seedAudioPitchRate,
+          images: upstream.imageUrls.length ? upstream.imageUrls : undefined,
+          audioUrls: upstream.audioUrls.length ? upstream.audioUrls : undefined,
+        });
+        await reporter?.providerSubmitted({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: result.taskId,
+          requestId: result.requestId,
+          transportHttpStatus: result.transportHttpStatus,
+          upstreamHttpStatus: result.upstreamHttpStatus,
+          usage: result.usage,
+          httpStatusSource: 'local-backend',
+        });
+        update({ status: 'polling', taskId: result.taskId, lastPrompt: finalPrompt, progress: '0%' });
+        logBus.info(`Seed Audio 任务 ${result.taskId} 已提交，开始轮询`, src);
+        await startSeedAudioPolling(result.taskId, reporter);
+        return;
+      }
       // cover/extend: 如预传 clipId 为空但上游有 audioUrl, 则自动上传
       let clipIdForRef = uploadedClipId;
       if ((mode === 'cover' || mode === 'extend') && !clipIdForRef && upstream.audioUrl) {
@@ -271,13 +486,33 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
         continue_at: mode === 'extend' ? continueAt : undefined,
         providerParams,
       });
+      await reporter?.providerSubmitted({
+        provider: traceProvider,
+        model: traceModel,
+        upstreamTaskId: r.taskId,
+        requestId: r.requestId,
+        transportHttpStatus: r.transportHttpStatus,
+        upstreamHttpStatus: r.upstreamHttpStatus,
+        usage: r.usage,
+        httpStatusSource: 'local-backend',
+      });
       logBus.success(`taskId=${r.taskId} clips=${(r.clipIds || []).join(',') || '?'}`, src);
       update({ status: 'polling', taskId: r.taskId, clipIds: r.clipIds, lastPrompt: finalPrompt, progress: '0/?' });
       const idsToPoll = r.clipIds && r.clipIds.length > 0 ? r.clipIds : [r.taskId];
       // v1.2.9.11: await 轮询 —— 让 useRunTrigger 等到任务真正完成才 markDone，LoopNode awaitNode 才能拿到 audioUrl
-      await startPolling(idsToPoll);
+      await startPolling(idsToPoll, reporter);
     } catch (e: any) {
       const msg = e?.message || '提交失败';
+      await reporter?.providerResponse({
+        provider: traceProvider,
+        model: traceModel,
+        requestId: e?.requestId,
+        transportHttpStatus: e?.transportHttpStatus,
+        upstreamHttpStatus: e?.upstreamHttpStatus,
+        status: 'failed',
+        error: { message: msg, code: e?.code },
+        httpStatusSource: 'local-backend',
+      });
       setError(msg);
       logBus.error(msg, src);
       update({ status: 'error', error: msg });
@@ -290,10 +525,10 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
   };
 
   // 接入运行总线
-  useRunTrigger(id, async () => {
+  useRunTrigger(id, async (reporter) => {
     if (status === 'submitting' || status === 'polling') return;
-    await handleGenerate();
-  }, 'audio');
+    await handleGenerate(reporter);
+  }, 'audio', { lifecycleAware: true });
 
   // === 跨节点拖拽: source (输出 tracks 可拖出) ===
   const startDrag = useDragMaterialStore((s) => s.start);
@@ -304,23 +539,26 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     startDrag(payload, e.clientX, e.clientY);
   };
 
-  // === 跨节点拖拽: target (接收 audio → localRefAudio, text → prompt) ===
+  // === 跨节点拖拽: target (Seed Audio additionally accepts one reference image) ===
   const handleDrop = (payload: MaterialPayload) => {
     if (payload.kind === 'audio' && payload.url) {
       update({ localRefAudio: payload.url, uploadedClipId: '', uploadedFilename: '' });
       logBus.info('已接受拖入参考音频, 生成时将自动上传', src);
+    } else if (isSeedAudio && payload.kind === 'image' && payload.url) {
+      update({ localRefImage: payload.url });
+      logBus.info('已接受 Seed Audio 参考图', src);
     } else if (payload.kind === 'text' && typeof payload.text === 'string') {
       update({ prompt: payload.text });
     }
   };
   const { dropProps, isAccepting } = useMaterialDropTarget({
     id,
-    accepts: ['audio', 'text'],
+    accepts: isSeedAudio ? ['image', 'audio', 'text'] : ['audio', 'text'],
     onDrop: handleDrop,
   });
 
   const isBusy = status === 'submitting' || status === 'polling';
-  const showRefArea = mode === 'cover' || mode === 'extend';
+  const showRefArea = !isSeedAudio && (mode === 'cover' || mode === 'extend');
   const audioColor = PORT_COLOR.audio;
 
   return (
@@ -351,14 +589,31 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           <Music size={13} />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold text-white">音频 Suno</div>
+          <div className="text-sm font-semibold text-white">音频 · {isSeedAudio ? 'Seed Audio' : 'Suno'}</div>
           <div className="text-[10px] text-white/40 truncate">
-            {version} · {MODES.find((m) => m.id === mode)?.label}
+            {isSeedAudio ? 'doubao-seed-audio-1.0 · 国内平价工坊' : `${version} · ${MODES.find((m) => m.id === mode)?.label}`}
           </div>
         </div>
       </div>
 
       <div className="p-2.5 space-y-2" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="grid grid-cols-2 gap-1 rounded border border-white/10 bg-black/15 p-1">
+          {([
+            { value: 'suno', label: 'Suno' },
+            { value: 'seed-audio', label: 'Seed Audio' },
+          ] as const).map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              onClick={() => update({ audioProviderMode: item.value, status: 'idle', error: null })}
+              className={`rounded px-2 py-1 text-[11px] font-semibold transition-colors ${audioProviderMode === item.value ? 'bg-violet-400/25 text-violet-100 ring-1 ring-violet-300/50' : 'text-white/45 hover:bg-white/5 hover:text-white/75'}`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        {!isSeedAudio && (
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="text-[10px] text-white/50 block mb-1">模式</label>
@@ -389,6 +644,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
             </select>
           </div>
         </div>
+        )}
 
         <LocalNodeAddonSlot
           nodeId={id}
@@ -396,13 +652,15 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           data={d}
           update={update}
           context={{
-            providerSource: 'zhenzhen',
-            model: version,
-            apiModel: `suno-${version}`,
-            providerKind: 'suno',
+            providerSource: isSeedAudio ? 'seedance-nz' : 'zhenzhen',
+            model: isSeedAudio ? 'doubao-seed-audio-1.0' : version,
+            apiModel: isSeedAudio ? 'doubao-seed-audio-1.0' : `suno-${version}`,
+            providerKind: isSeedAudio ? 'seed-audio' : 'suno',
           }}
         />
 
+        {!isSeedAudio && (
+        <>
         <div>
           <label className="text-[10px] text-white/50 block mb-1">标题</label>
           <input
@@ -423,15 +681,17 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
             className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-white/30 placeholder:text-white/30"
           />
         </div>
+        </>
+        )}
         <div>
-          <label className="text-[10px] text-white/50 block mb-1">歌词 / 提示词</label>
+          <label className="text-[10px] text-white/50 block mb-1">{isSeedAudio ? '音频提示词' : '歌词 / 提示词'}</label>
           <MentionPromptInput
             title="音频歌词 / 提示词"
             value={localPrompt}
             mentions={promptMentions}
             materials={mentionMaterials}
             onChange={(value, mentions) => update({ prompt: value, promptMentions: mentions })}
-            placeholder="[Verse]..."
+            placeholder={isSeedAudio ? '例如：雨夜城市街道，轻柔雨声与远处车流，无人声' : '[Verse]...'}
             isDark={isDark}
             isPixel={isPixel}
             promptTemplateKind="video"
@@ -439,6 +699,50 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           />
         </div>
 
+        {isSeedAudio && (
+          <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.05] p-2 space-y-2">
+            <div>
+              <label className="text-[10px] text-white/50 block mb-1">音色 ID（可选）</label>
+              <input
+                value={seedAudioSpeaker}
+                onChange={(e) => update({ seedAudioSpeaker: e.target.value })}
+                placeholder="与参考图 / 参考音频互斥"
+                className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-cyan-300/40 placeholder:text-white/25"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">格式</label>
+                <select value={seedAudioFormat} onChange={(e) => update({ seedAudioFormat: e.target.value })} className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none">
+                  {['wav', 'mp3', 'pcm', 'ogg_opus'].map((item) => <option key={item} value={item} className="bg-zinc-900">{item}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">采样率</label>
+                <select value={seedAudioSampleRate} onChange={(e) => update({ seedAudioSampleRate: e.target.value })} className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none">
+                  {['8000', '16000', '24000', '32000', '44100'].map((item) => <option key={item} value={item} className="bg-zinc-900">{item} Hz</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              {[
+                { label: '语速', field: 'seedAudioSpeechRate', value: seedAudioSpeechRate, min: -50, max: 100 },
+                { label: '音量', field: 'seedAudioLoudnessRate', value: seedAudioLoudnessRate, min: -50, max: 100 },
+                { label: '音高', field: 'seedAudioPitchRate', value: seedAudioPitchRate, min: -12, max: 12 },
+              ].map((item) => (
+                <div key={item.field}>
+                  <label className="text-[10px] text-white/50 block mb-1">{item.label}</label>
+                  <input type="number" min={item.min} max={item.max} value={item.value} onChange={(e) => update({ [item.field]: Number(e.target.value) || 0 })} className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none" />
+                </div>
+              ))}
+            </div>
+            <div className="text-[10px] leading-relaxed text-white/40">
+              参考方式三选一：音色 ID、1 张参考图或最多 3 段参考音频；混用时会在提交前阻止。
+            </div>
+          </div>
+        )}
+
+        {!isSeedAudio && (
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="text-[10px] text-white/50 block mb-1">Seed (0=随机)</label>
@@ -461,10 +765,12 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
             </div>
           )}
         </div>
+        )}
 
         {/* 上游素材聚合预览区 (generate=仅文本, cover/extend=文本+音频) */}
         <MaterialPreviewSection
           texts={orderedTexts}
+          images={orderedImages}
           audios={orderedAudios}
           order={materialOrder}
           onReorder={setMaterialOrder}
@@ -475,8 +781,29 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           isDark={isDark}
           isPixel={isPixel}
           groups={previewGroups}
-          title={mode === 'generate' ? '上游素材 · 歌词提示' : '上游素材 · 参考音频'}
+          title={isSeedAudio ? '上游素材 · Seed Audio 参考' : mode === 'generate' ? '上游素材 · 歌词提示' : '上游素材 · 参考音频'}
         />
+
+        {isSeedAudio && (localRefImage || localRefAudio) && (
+          <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.05] p-2 space-y-1">
+            <div className="flex items-center justify-between gap-2 text-[10px] text-cyan-100/75">
+              <span>本地参考素材</span>
+              <button type="button" onClick={() => update({ localRefImage: '', localRefAudio: '' })} className="text-white/40 hover:text-white" title="清除本地参考素材"><X size={11} /></button>
+            </div>
+            {localRefImage && <div className="truncate text-[10px] text-white/50">参考图：{localRefImage.split('/').pop()}</div>}
+            {localRefAudio && <div className="truncate text-[10px] text-white/50">参考音频：{localRefAudio.split('/').pop()}</div>}
+          </div>
+        )}
+
+        {isSeedAudio && (
+          <div className="flex gap-1.5">
+            <input ref={fileInputRef} type="file" accept="audio/*,.mp3,.wav,.flac,.ogg" className="hidden" onChange={onSelectFile} />
+            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading} className="flex-1 flex items-center justify-center gap-1 rounded bg-white/5 py-1 text-[10px] text-cyan-100 hover:bg-white/10 disabled:opacity-50">
+              {uploading ? <Loader2 size={10} className="animate-spin" /> : <Upload size={10} />}
+              {uploading ? '导入中…' : '导入参考音频'}
+            </button>
+          </div>
+        )}
 
         {showRefArea && (
           <div className="rounded border border-violet-400/30 bg-violet-500/5 p-2 space-y-1.5">
@@ -532,7 +859,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
 
         {!isBusy ? (
           <button
-            onClick={handleGenerate}
+            onClick={() => requestCanvasNodeRun(id)}
             className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded bg-violet-500/20 hover:bg-violet-500/30 text-violet-200 text-xs font-medium transition-colors"
           >
             <Sparkles size={12} /> 生成音频

@@ -73,6 +73,31 @@ function rgbPixelAtPoint(file, x, y, at = 0.4) {
   return { r: result.stdout[0], g: result.stdout[1], b: result.stdout[2] };
 }
 
+function audioRmsAt(file, at = 0.4, duration = 0.12) {
+  const ffmpeg = resolveBundledFfmpeg();
+  const result = spawnSync(ffmpeg, [
+    '-hide_banner',
+    '-loglevel', 'error',
+    '-ss', String(at),
+    '-t', String(duration),
+    '-i', file,
+    '-vn',
+    '-ac', '1',
+    '-ar', '8000',
+    '-f', 'f32le',
+    'pipe:1',
+  ], { encoding: 'buffer', maxBuffer: 10 * 1024 * 1024 });
+  assert.equal(result.status, 0, result.stderr?.toString() || result.stdout?.toString());
+  const sampleCount = Math.floor(result.stdout.length / 4);
+  assert.ok(sampleCount > 0, 'expected audio samples from ffmpeg');
+  let sum = 0;
+  for (let offset = 0; offset + 4 <= result.stdout.length; offset += 4) {
+    const sample = result.stdout.readFloatLE(offset);
+    sum += sample * sample;
+  }
+  return Math.sqrt(sum / sampleCount);
+}
+
 function listenVideoOps() {
   const app = express();
   app.use(express.json({ limit: '20mb' }));
@@ -85,12 +110,15 @@ function listenVideoOps() {
   });
 }
 
-test('videoOps treats timeline render plan audio as authoritative during segment normalization', () => {
+test('videoOps keeps linked source audio in-band and mixes only independent timeline audio', () => {
   const routeSource = fs.readFileSync(path.join(__dirname, '..', 'backend', 'src', 'routes', 'videoOps.js'), 'utf8');
-  assert.match(routeSource, /const timelineAudioSegments = normalizeTimelineAudioSegments\(options\?\.renderPlan, settings\);/);
-  assert.match(routeSource, /const forceRenderPlanAudioMix = timelineAudioSegments\.length > 0;/);
+  assert.match(routeSource, /const linkedSourceAudioEnvelopes = sourceAudioEnvelopeByVideoItemId\(options\?\.renderPlan, settings\);/);
+  assert.match(routeSource, /audioEnvelope: linkedSourceAudioEnvelopes\.get\(sources\[i\]\.clip\?\.sourceItemId\) \|\| null,/);
   assert.match(routeSource, /const keepAudio = !forceMuteAudio && shouldKeepAudio\(settings, clip, index, probe\);/);
-  assert.match(routeSource, /forceMuteAudio: forceRenderPlanAudioMix,/);
+  assert.match(routeSource, /const audioSegments = independentTimelineAudioSegments\(renderPlan, settings\);/);
+  assert.match(routeSource, /\[0:a:0\]apad=whole_dur=\$\{targetDuration\.toFixed\(3\)\}/);
+  assert.match(routeSource, /mixLabels\.push\('baseaud'\);/);
+  assert.doesNotMatch(routeSource, /forceRenderPlanAudioMix/);
 });
 
 test('videoOps builds audio fades and volume curves for timeline render plan audio', () => {
@@ -905,6 +933,151 @@ test('videoOps keeps native xfade duration when mixing timeline render plan audi
     assert.ok(probe.duration >= 1.55 && probe.duration <= 1.85, `expected mixed xfade output around 1.7s, got ${probe.duration}`);
   } finally {
     for (const file of [redClip, blueClip, audio, outputFile]) {
+      if (file) {
+        try { fs.unlinkSync(file); } catch (_) {}
+      }
+    }
+  }
+});
+
+test('videoOps keeps linked source audio aligned through native xfade transitions', async () => {
+  fs.mkdirSync(config.INPUT_DIR, { recursive: true });
+  fs.mkdirSync(config.OUTPUT_DIR, { recursive: true });
+
+  const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const firstClip = path.join(config.INPUT_DIR, `video_edit_xfade_linked_audio_first_${stamp}.mp4`);
+  const secondClip = path.join(config.INPUT_DIR, `video_edit_xfade_linked_audio_second_${stamp}.mp4`);
+
+  runFfmpeg([
+    '-y',
+    '-f', 'lavfi', '-i', 'color=c=red:s=160x90:r=30:d=1.0',
+    '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1.0',
+    '-shortest',
+    '-c:v', 'libx264',
+    '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac',
+    firstClip,
+  ]);
+  runFfmpeg([
+    '-y',
+    '-f', 'lavfi', '-i', 'color=c=blue:s=160x90:r=30:d=1.0',
+    '-f', 'lavfi', '-i', 'sine=frequency=880:duration=1.0',
+    '-shortest',
+    '-c:v', 'libx264',
+    '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac',
+    secondClip,
+  ]);
+
+  const clips = [
+    {
+      id: 'render-item-first-video',
+      sourceItemId: 'item-first-video',
+      assetId: 'asset-first',
+      trackId: 'track-video-main',
+      kind: 'video',
+      layerIndex: 0,
+      trackOrder: 0,
+      timelineStart: 0,
+      timelineEnd: 1,
+      trimStart: 0,
+      trimEnd: 1,
+      muted: false,
+      hasAudio: true,
+      name: 'first.mp4',
+      url: `/files/input/${path.basename(firstClip)}`,
+    },
+    {
+      id: 'render-item-second-video',
+      sourceItemId: 'item-second-video',
+      assetId: 'asset-second',
+      trackId: 'track-video-main',
+      kind: 'video',
+      layerIndex: 0,
+      trackOrder: 0,
+      timelineStart: 1,
+      timelineEnd: 2,
+      trimStart: 0,
+      trimEnd: 1,
+      muted: false,
+      hasAudio: true,
+      name: 'second.mp4',
+      url: `/files/input/${path.basename(secondClip)}`,
+    },
+  ];
+  const renderPlan = {
+    version: 1,
+    duration: 2,
+    capabilities: { timelineLayerCompose: false, timelineLayerCount: 1, sourceAudioMix: true, timelineAudioMix: true },
+    tracks: [],
+    clips,
+    audio: [
+      {
+        id: 'render-item-first-audio',
+        sourceItemId: 'item-first-audio',
+        linkedVideoItemId: 'item-first-video',
+        assetId: 'asset-first',
+        trackId: 'track-audio-main',
+        kind: 'audio',
+        trackOrder: 1,
+        timelineStart: 0,
+        timelineEnd: 1,
+        trimStart: 0,
+        trimEnd: 1,
+        muted: false,
+        volume: 1,
+        name: 'first audio',
+        url: `/files/input/${path.basename(firstClip)}`,
+      },
+      {
+        id: 'render-item-second-audio',
+        sourceItemId: 'item-second-audio',
+        linkedVideoItemId: 'item-second-video',
+        assetId: 'asset-second',
+        trackId: 'track-audio-main',
+        kind: 'audio',
+        trackOrder: 1,
+        timelineStart: 1,
+        timelineEnd: 2,
+        trimStart: 0,
+        trimEnd: 1,
+        muted: false,
+        volume: 1,
+        name: 'second audio',
+        url: `/files/input/${path.basename(secondClip)}`,
+      },
+    ],
+    text: [],
+    unsupported: [],
+    warnings: [],
+  };
+
+  let outputFile = '';
+  try {
+    const result = await videoOpsRouter._test.composeVideoEdit(
+      clips,
+      {
+        aspect: '16:9',
+        resolution: 'first',
+        transition: 'fade',
+        transitionDuration: 0.3,
+        filter: 'none',
+        audio: 'keep',
+      },
+      undefined,
+      { renderPlan },
+    );
+
+    outputFile = path.join(config.OUTPUT_DIR, path.basename(result.videoUrl));
+    assert.equal(result.transitionEngine, 'ffmpeg-xfade');
+    assert.equal(result.timelineAudioMixed, false);
+    assert.equal(result.timelineAudioCount, 0);
+    const probe = await videoOpsRouter._test.probeFile(outputFile, null);
+    assert.equal(probe.hasAudio, true);
+    assert.ok(probe.duration >= 1.55 && probe.duration <= 1.85, `expected linked-audio xfade output around 1.7s, got ${probe.duration}`);
+    assert.ok(audioRmsAt(outputFile, 1.48, 0.12) > 0.01, 'tail of the second clip should keep audible source audio after transition compaction');
+  } finally {
+    for (const file of [firstClip, secondClip, outputFile]) {
       if (file) {
         try { fs.unlinkSync(file); } catch (_) {}
       }

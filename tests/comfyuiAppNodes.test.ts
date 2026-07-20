@@ -46,3 +46,19 @@ test('ComfyUI maker and store controls stop canvas and parent-card gesture hijac
   assert.match(store, /onKeyDown=\{\(event\) => \{[\s\S]*event\.preventDefault\(\);[\s\S]*selectApp\(app\);[\s\S]*\}\}/);
   assert.match(store, /type="checkbox"[\s\S]*className="nodrag nopan nowheel"/);
 });
+
+test('ComfyUI store renders and propagates all output kinds through one aggregate output', () => {
+  assert.match(store, /videoUrls/);
+  assert.match(store, /audioUrls/);
+  assert.match(store, /outputKinds/);
+  assert.match(store, /primaryKind/);
+  assert.match(store, /<video[\s\S]*controls/);
+  assert.match(store, /<audio[\s\S]*controls/);
+  assert.match(store, /ComfyUI 应用完成:[\s\S]*视频/);
+
+  const canvas = fs.readFileSync('src/components/Canvas.tsx', 'utf8');
+  assert.match(canvas, /t === ['"]comfyui-store['"]/);
+  assert.match(canvas, /aggregateSource:\s*['"]comfyui-store['"]/);
+  assert.match(canvas, /placement:auto-comfyui-output/);
+  assert.match(canvas, /output-auto-\$\{n\.id\}[^\n]*aggregate/);
+});

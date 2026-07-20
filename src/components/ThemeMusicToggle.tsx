@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Disc3, VolumeX } from 'lucide-react';
-import type { ThemeMusicPreset, ThemeMusicSource, ThemeTemplate } from '../theme/types';
+import type { ThemeMusic, ThemeMusicPreset, ThemeMusicSource, ThemeTemplate } from '../theme/types';
 import { rhHiddenThemeMusicUrl } from '../theme/defaultTemplates';
+import {
+  GARDEN_THEME_MUSIC_AUTOPLAY_EVENT,
+  type GardenThemeMusicAutoplayDetail,
+} from '../theme/musicAutoplay';
 import { useHiddenFeatureStore } from '../stores/hiddenFeatures';
 import { useDragonBallRadarStore } from '../stores/dragonBallRadar';
 import { useSaintSeiyaSanctuaryStore } from '../stores/saintSeiyaSanctuary';
@@ -181,6 +185,17 @@ const PRESET_NOTES: Record<ThemeMusicPreset, Note[]> = {
     { freq: 523, at: 1.82, len: 0.2, type: 'triangle' },
     { freq: 392, at: 2.18, len: 0.18, type: 'sine' },
   ],
+  'garden-march': [
+    { freq: 196, at: 0, len: 0.12, type: 'triangle' },
+    { freq: 262, at: 0.18, len: 0.1, type: 'sine' },
+    { freq: 330, at: 0.36, len: 0.12, type: 'triangle' },
+    { freq: 392, at: 0.58, len: 0.14, type: 'sine' },
+    { freq: 330, at: 0.86, len: 0.1, type: 'triangle' },
+    { freq: 494, at: 1.08, len: 0.16, type: 'sine' },
+    { freq: 523, at: 1.42, len: 0.14, type: 'triangle' },
+    { freq: 659, at: 1.72, len: 0.2, type: 'sine' },
+    { freq: 392, at: 2.08, len: 0.16, type: 'triangle' },
+  ],
 };
 
 const PRESET_LOOP_SECONDS: Record<ThemeMusicPreset, number> = {
@@ -199,6 +214,7 @@ const PRESET_LOOP_SECONDS: Record<ThemeMusicPreset, number> = {
   'hades-eclipse': 2.78,
   'block-drop': 1.32,
   'farm-breeze': 2.48,
+  'garden-march': 2.46,
 };
 
 function clampVolume(value?: number) {
@@ -456,6 +472,9 @@ export default function ThemeMusicToggle({ template }: ThemeMusicToggleProps) {
   const masterGainRef = useRef<GainNode | null>(null);
   const timerRef = useRef<number | null>(null);
   const autoHiddenMusicRef = useRef(false);
+  const autoGardenMusicRef = useRef(false);
+  const gestureGardenTemplateRef = useRef<string | null>(null);
+  const pendingGardenResumeRef = useRef(false);
   const enabledRef = useRef(false);
 
   const rhHiddenMusicActive = template.visuals?.style === 'rh' && rhDuckUploadIds.length > 0;
@@ -463,6 +482,7 @@ export default function ThemeMusicToggle({ template }: ThemeMusicToggleProps) {
   const shenronHiddenMusicActive = template.visuals?.style === 'dragon-ball' && shenronModeActive;
   const hadesHiddenMusicActive = template.visuals?.style === 'saint-seiya' && hadesModeActive;
   const hiddenMusicActive = rhHiddenMusicActive || yyhHiddenMusicActive || shenronHiddenMusicActive || hadesHiddenMusicActive;
+  const gardenAutoPlayActive = template.visuals?.style === 'garden-defense';
   const music = useMemo(() => {
     const base = template.music;
     if (!hiddenMusicActive) return base;
@@ -527,7 +547,6 @@ export default function ThemeMusicToggle({ template }: ThemeMusicToggleProps) {
   ]);
 
   const title = music?.title || 'Theme Music';
-  const preset = music?.preset || 'tech-pulse';
   const volume = clampVolume(music?.volume);
   const musicKey = `${template.id}|${rhHiddenMusicActive ? 'rh-hidden' : yyhHiddenMusicActive ? 'yyh-hidden' : shenronHiddenMusicActive ? 'shenron-hidden' : hadesHiddenMusicActive ? 'hades-hidden' : 'normal'}|${music?.preset || ''}|${music?.source || ''}|${music?.url || ''}|${volume}`;
 
@@ -555,15 +574,15 @@ export default function ThemeMusicToggle({ template }: ThemeMusicToggleProps) {
     }
   };
 
-  const playUrl = async (url: string) => {
+  const playUrl = async (url: string, playbackVolume: number) => {
     const audio = new Audio(url);
     audio.loop = true;
-    audio.volume = volume;
+    audio.volume = playbackVolume;
     audioRef.current = audio;
     await audio.play();
   };
 
-  const playMidiUrl = async (url: string) => {
+  const playMidiUrl = async (url: string, playbackVolume: number) => {
     const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioContextCtor) return;
     const ctx = new AudioContextCtor() as AudioContext;
@@ -578,14 +597,14 @@ export default function ThemeMusicToggle({ template }: ThemeMusicToggleProps) {
     const playLoop = () => {
       if (audioCtxRef.current !== ctx) return;
       const startAt = ctx.currentTime + 0.04;
-      sequence.notes.forEach((note) => scheduleMidiNote(ctx, master, note, startAt, volume));
+      sequence.notes.forEach((note) => scheduleMidiNote(ctx, master, note, startAt, playbackVolume));
     };
 
     playLoop();
     timerRef.current = window.setInterval(playLoop, Math.max(2, sequence.duration) * 1000);
   };
 
-  const playSynth = async () => {
+  const playSynth = async (playbackPreset: ThemeMusicPreset, playbackVolume: number) => {
     const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioContextCtor) return;
     const ctx = new AudioContextCtor() as AudioContext;
@@ -596,42 +615,72 @@ export default function ThemeMusicToggle({ template }: ThemeMusicToggleProps) {
     masterGainRef.current = master;
     if (ctx.state === 'suspended') await ctx.resume();
 
-    const notes = PRESET_NOTES[preset] || PRESET_NOTES['tech-pulse'];
-    const loopSeconds = PRESET_LOOP_SECONDS[preset] || PRESET_LOOP_SECONDS['tech-pulse'];
+    const notes = PRESET_NOTES[playbackPreset] || PRESET_NOTES['tech-pulse'];
+    const loopSeconds = PRESET_LOOP_SECONDS[playbackPreset] || PRESET_LOOP_SECONDS['tech-pulse'];
     const playLoop = () => {
       const startAt = ctx.currentTime + 0.015;
-      notes.forEach((note) => scheduleNote(ctx, master, note, startAt, volume));
+      notes.forEach((note) => scheduleNote(ctx, master, note, startAt, playbackVolume));
     };
 
     playLoop();
     timerRef.current = window.setInterval(playLoop, loopSeconds * 1000);
   };
 
-  const playCurrentMusic = async () => {
+  const playThemeMusic = async (targetMusic?: ThemeMusic): Promise<boolean> => {
     stop();
+    const playbackVolume = clampVolume(targetMusic?.volume);
+    const playbackPreset = targetMusic?.preset || 'tech-pulse';
     try {
-      if ((music?.source === 'url' || music?.source === 'upload') && music.url?.trim()) {
-        const url = music.url.trim();
+      if ((targetMusic?.source === 'url' || targetMusic?.source === 'upload') && targetMusic.url?.trim()) {
+        const url = targetMusic.url.trim();
         if (isMidiUrl(url)) {
-          await playMidiUrl(url);
+          await playMidiUrl(url, playbackVolume);
         } else {
-          await playUrl(url);
+          await playUrl(url, playbackVolume);
         }
       } else {
-        await playSynth();
+        await playSynth(playbackPreset, playbackVolume);
       }
       setEnabled(true);
       enabledRef.current = true;
+      return true;
     } catch (error) {
       stop();
       setEnabled(false);
       enabledRef.current = false;
       console.warn('[theme-music] unable to start theme music', error);
+      return false;
     }
   };
 
+  const playCurrentMusic = () => playThemeMusic(music);
+
+  useEffect(() => {
+    const handleGardenAutoplay = (event: Event) => {
+      const detail = (event as CustomEvent<GardenThemeMusicAutoplayDetail>).detail;
+      if (!detail?.templateId) return;
+
+      const wasPlaying = enabledRef.current;
+      autoGardenMusicRef.current = !wasPlaying;
+      pendingGardenResumeRef.current = false;
+      gestureGardenTemplateRef.current = detail.templateId;
+      void playThemeMusic(detail.music).then((started) => {
+        pendingGardenResumeRef.current = !started;
+        if (!started && gestureGardenTemplateRef.current === detail.templateId) {
+          gestureGardenTemplateRef.current = null;
+        }
+      });
+    };
+
+    window.addEventListener(GARDEN_THEME_MUSIC_AUTOPLAY_EVENT, handleGardenAutoplay);
+    return () => window.removeEventListener(GARDEN_THEME_MUSIC_AUTOPLAY_EVENT, handleGardenAutoplay);
+  }, [musicKey]);
+
   const toggle = async () => {
     autoHiddenMusicRef.current = false;
+    autoGardenMusicRef.current = false;
+    gestureGardenTemplateRef.current = null;
+    pendingGardenResumeRef.current = false;
     if (enabled) {
       stop();
       setEnabled(false);
@@ -643,22 +692,66 @@ export default function ThemeMusicToggle({ template }: ThemeMusicToggleProps) {
 
   useEffect(() => {
     const wasPlaying = enabledRef.current;
+    const gesturePlaybackActive = gardenAutoPlayActive
+      && gestureGardenTemplateRef.current === template.id
+      && Boolean(audioRef.current || audioCtxRef.current);
+    if (gesturePlaybackActive) {
+      gestureGardenTemplateRef.current = null;
+      pendingGardenResumeRef.current = false;
+      return stop;
+    }
+
     stop();
+    pendingGardenResumeRef.current = false;
     if (hiddenMusicActive) {
       autoHiddenMusicRef.current = !wasPlaying;
       void playCurrentMusic();
       return stop;
     }
 
-    if (wasPlaying && !autoHiddenMusicRef.current) {
+    if (gardenAutoPlayActive) {
+      autoGardenMusicRef.current = !wasPlaying;
+      pendingGardenResumeRef.current = true;
+      void playCurrentMusic().then((started) => {
+        pendingGardenResumeRef.current = !started;
+      });
+      return stop;
+    }
+
+    if (wasPlaying && !autoHiddenMusicRef.current && !autoGardenMusicRef.current) {
       void playCurrentMusic();
     } else {
       setEnabled(false);
       enabledRef.current = false;
     }
     autoHiddenMusicRef.current = false;
+    autoGardenMusicRef.current = false;
     return stop;
   }, [musicKey]);
+
+  useEffect(() => {
+    if (!gardenAutoPlayActive) {
+      pendingGardenResumeRef.current = false;
+      return;
+    }
+
+    const resumeGardenMusic = (event: Event) => {
+      if (!pendingGardenResumeRef.current || enabledRef.current) return;
+      if (event.target instanceof Element && event.target.closest('.t8-theme-music-toggle')) return;
+
+      pendingGardenResumeRef.current = false;
+      void playCurrentMusic().then((started) => {
+        pendingGardenResumeRef.current = !started;
+      });
+    };
+
+    document.addEventListener('pointerdown', resumeGardenMusic, true);
+    document.addEventListener('keydown', resumeGardenMusic, true);
+    return () => {
+      document.removeEventListener('pointerdown', resumeGardenMusic, true);
+      document.removeEventListener('keydown', resumeGardenMusic, true);
+    };
+  }, [gardenAutoPlayActive, musicKey]);
 
   return (
     <button

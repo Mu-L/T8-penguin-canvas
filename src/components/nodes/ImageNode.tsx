@@ -27,6 +27,8 @@ import {
 import {
   submitImageAsync,
   queryImageStatus,
+  submitSeedreamNz,
+  querySeedreamNz,
   submitImageFal,
   queryImageFal,
   uploadFile,
@@ -40,6 +42,7 @@ import {
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useHasAutoOutput } from './useHasAutoOutput';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { useThemeStore } from '../../stores/theme';
 import { logBus } from '../../stores/logs';
 import { useDragMaterialStore, type MaterialPayload } from '../../stores/dragMaterial';
@@ -70,10 +73,11 @@ import {
 import { COMFY_APP_SOURCE_LABELS } from '../../utils/comfyuiApps';
 import { canonicalizeComfyFieldsByWorkflow, comfyFieldInputValue } from '../../utils/comfyuiWorkflow';
 import { LocalNodeAddonSlot } from 'virtual:t8-local-extensions';
+import type { RunNodeLifecycleReporter } from '../../types/project';
 
 /**
  * ImageNode - 图像生成(ZhenzhenMagic)
- * 多 TAB 切换:GPT2 / 香蕉2 / 香蕉Pro / Grok / MJ,参数与主项目 gpt-image-2-web 对齐
+ * 多 TAB 切换:GPT2 / 香蕉2 / 香蕉Pro / Grok / Seedream / MJ
  * 参数:模型 TAB / 比例 / 尺寸 / 多张参考图 / 本地 prompt
  * 上游 text 节点 → prompt(优先);上游 image 节点 → 参考图(并入 references)
  */
@@ -172,6 +176,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   const model = d?.model || IMAGE_MODELS[0].id;
   const modelDef = useMemo(() => IMAGE_MODELS.find((m) => m.id === model) || IMAGE_MODELS[0], [model]);
   const advancedProviders = useApiKeysStore((s) => s.settings.advancedProviders);
+  const zhenzhenSd2ApiKey = useApiKeysStore((s) => s.settings.zhenzhenSd2ApiKey);
   const imageAdvancedProviders = useMemo(
     () => advancedProvidersForNode(advancedProviders, 'image'),
     [advancedProviders],
@@ -193,6 +198,8 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   const providerParams = (d?.providerParams && typeof d.providerParams === 'object') ? d.providerParams : {};
   const isModelScopeExternal = isExternalSelected && providerSelection.provider?.protocol === 'modelscope';
   const isComfyExternal = isExternalSelected && providerSelection.provider?.protocol === 'comfyui';
+  const isJimengCliImageSelected = isExternalSelected && providerSelection.provider?.protocol === 'jimeng-cli';
+  const externalImageCountLimit = isJimengCliImageSelected ? 10 : 4;
   const comfyWorkflow = isComfyExternal
     ? providerSelection.provider?.comfyuiConfig?.workflows?.find((workflow) => workflow.id === externalProviderModel || workflow.name === externalProviderModel)
     : undefined;
@@ -391,6 +398,23 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   // ========== MJ 渠道识别及参数(完全对齐 gpt-image-2-web mj_* 控件 L1552~L1580) ==========
   const isMj = modelDef.paramKind === 'mj';
   const isGrokImage = modelDef.paramKind === 'grok-image';
+  const isSeedream = modelDef.paramKind === 'seedream-v5';
+  const seedreamApiSource: 'zhenzhen' | 'seedance-nz' = d?.seedreamApiSource === 'seedance-nz' ? 'seedance-nz' : 'zhenzhen';
+  const isSeedreamNz = isSeedream && seedreamApiSource === 'seedance-nz';
+  const seedreamNzModelFamily: 'domestic' | 'overseas' = d?.seedreamNzModelFamily === 'overseas'
+    ? 'overseas'
+    : 'domestic';
+  const seedreamNzResolution: '1k' | '2k' | 'custom' = ['1k', '2k', 'custom'].includes(d?.seedreamNzResolution)
+    ? d.seedreamNzResolution
+    : '2k';
+  const seedreamNzCustomSize = typeof d?.seedreamNzCustomSize === 'string' ? d.seedreamNzCustomSize : '2048x2048';
+  const seedreamNzResolvedSize = seedreamNzCustomSize.trim().replace(/\s+/g, '').replace(/[X×]/g, 'x');
+  const seedreamOutputFormat: 'png' | 'jpeg' = d?.seedreamOutputFormat === 'jpeg' ? 'jpeg' : 'png';
+  const seedreamCustomSize = typeof d?.seedreamCustomSize === 'string' ? d.seedreamCustomSize : '2048x2048';
+  const seedreamResolvedSize = (sizeLevel === 'custom' ? seedreamCustomSize : sizeLevel)
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/[X×]/g, 'x');
   const mjVersion: string = d?.mjVersion || DEFAULT_MJ_VERSION;
   const mjAr: string = d?.mjAr || DEFAULT_MJ_RATIO;
   const mjSpeed: MjSpeed = (d?.mjSpeed as MjSpeed) || DEFAULT_MJ_SPEED;
@@ -453,6 +477,10 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   const materialOrder: string[] = Array.isArray(d?.materialOrder) ? d.materialOrder : [];
   const orderedImages = useOrderedMaterials(allImagesUnordered, materialOrder);
   const orderedTexts = useOrderedMaterials(visibleUpstreamTexts, materialOrder);
+  const seedreamNzUiModel = seedreamNzModelFamily === 'overseas'
+    ? (orderedImages.length > 0 ? 'dola-seedream-5.0-pro-i2i' : 'dola-seedream-5.0-pro-t2i')
+    : (orderedImages.length > 0 ? 'seedream-v5-pro-i2i' : 'seedream-v5-pro-t2i');
+  const seedreamNzModelRegion = seedreamNzModelFamily === 'overseas' ? '海外模型' : '国内模型';
   const mentionMaterials = useMemo(
     () => orderedImages.slice(0, maxRefs),
     [orderedImages, maxRefs],
@@ -515,7 +543,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
     if (!files.length) return;
     setError(null);
     try {
-      const remain = maxRefs - refImages.length;
+      const remain = maxRefs - orderedImages.length;
       const accepted = files.slice(0, Math.max(0, remain));
       const uploaded: string[] = [];
       for (const f of accepted) {
@@ -562,7 +590,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
     else update({ mjOrefImages: mjOrefImages.filter((_, i) => i !== idx) });
   };
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (reporter?: RunNodeLifecycleReporter) => {
     setError(null);
     const { prompt: upstreamPrompt, images: upstreamImages } = collectUpstream();
     const resolvedLocalPrompt = resolveMediaMentions(localPrompt, promptMentions, mentionMaterials);
@@ -579,7 +607,39 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
       logBus.error('生成中止: 缺少 prompt', src);
       return;
     }
+    if (isSeedream && !isSeedreamNz && !/^\d+x\d+$/.test(seedreamResolvedSize)) {
+      setError('Seedream 自定义尺寸格式应为 宽x高，例如 2048x1536');
+      logBus.error(`生成中止: Seedream 尺寸格式无效 ${seedreamResolvedSize || '(空)'}`, src);
+      return;
+    }
+    if (isSeedreamNz && seedreamNzResolution === 'custom') {
+      const match = seedreamNzResolvedSize.match(/^(\d+)x(\d+)$/);
+      const width = Number(match?.[1]);
+      const height = Number(match?.[2]);
+      if (!match || width < 240 || width > 8192 || height < 240 || height > 8192) {
+        setError('贞贞的平价AI工坊（国内） Seedream 自定义宽高必须为 240-8192，例如 2048x1536');
+        logBus.error(`生成中止: Seedream NZ 尺寸格式无效 ${seedreamNzResolvedSize || '(空)'}`, src);
+        return;
+      }
+    }
     const runId = nextGenerationRun();
+    const traceProvider = isExternalSelected && providerSelection.provider
+      ? providerSelection.provider.id
+      : isFal
+        ? 'fal'
+        : isSeedreamNz
+          ? 'seedance-nz'
+          : isMj
+            ? 'zhenzhen-mj'
+            : 'zhenzhen';
+    const traceModel = isExternalSelected
+      ? externalProviderModel
+      : isSeedreamNz
+        ? seedreamNzUiModel
+        : isMj
+          ? mjVersion
+          : apiModel;
+    await reporter?.providerRequest({ provider: traceProvider, model: traceModel });
     taskCompletionSound.primeAudio();
     update({ status: 'generating', progress: '0%', error: null });
     try {
@@ -636,12 +696,33 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           images: allRefs,
           negativePrompt: externalNegativePrompt || undefined,
           negative: externalNegativePrompt || undefined,
-          n: Math.max(1, Math.min(4, Number(d?.providerParams?.n || 1))),
+          n: Math.max(1, Math.min(externalImageCountLimit, Number(d?.providerParams?.n || 1))),
           providerParams: externalProviderParams,
         });
         if (!isCurrentGenerationRun(runId)) return;
         const urls = res.imageUrls || [];
         if (!urls.length) throw new Error('扩展平台完成但未返回图片');
+        if (res.taskId || res.requestId) await reporter?.providerSubmitted({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: res.taskId,
+          requestId: res.requestId,
+          transportHttpStatus: res.transportHttpStatus,
+          upstreamHttpStatus: res.upstreamHttpStatus,
+          usage: res.usage,
+          httpStatusSource: 'local-backend',
+        });
+        await reporter?.providerResponse({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: res.taskId,
+          requestId: res.requestId,
+          transportHttpStatus: res.transportHttpStatus,
+          upstreamHttpStatus: res.upstreamHttpStatus,
+          usage: res.usage,
+          status: 'succeeded',
+          httpStatusSource: 'local-backend',
+        });
         update({
           status: 'success',
           progress: '100%',
@@ -651,6 +732,10 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           lastPrompt: finalPrompt,
           usedI2I: allRefs.length > 0,
           taskId: res.taskId || d?.taskId,
+          requestId: res.requestId,
+          transportHttpStatus: res.transportHttpStatus,
+          upstreamHttpStatus: res.upstreamHttpStatus,
+          usage: res.usage,
         });
         logBus.success(`扩展平台完成 → ${urls[0]}`, src);
         taskCompletionSound.notifyComplete(id, 'image');
@@ -713,6 +798,16 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         });
         if (!isCurrentGenerationRun(runId)) return;
         const taskId = submit.taskId;
+        await reporter?.providerSubmitted({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: taskId,
+          requestId: submit.requestId,
+          transportHttpStatus: submit.transportHttpStatus,
+          upstreamHttpStatus: submit.upstreamHttpStatus,
+          usage: submit.usage,
+          httpStatusSource: 'local-backend',
+        });
         logBus.info(`MJ 任务已提交 taskId=${taskId} fullPrompt="${fullPrompt.slice(0, 120)}${fullPrompt.length > 120 ? '…' : ''}"`, src);
         update({ progress: '15%', taskId });
         const interval = Math.max(1, Math.min(30, mjPollInt || 3)) * 1000;
@@ -726,6 +821,21 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           if (!isCurrentGenerationRun(runId)) return;
           const q = await queryMjTask(taskId, mjSpeed);
           if (!isCurrentGenerationRun(runId)) return;
+          await reporter?.polling({
+            provider: traceProvider,
+            model: traceModel,
+            taskId,
+            recovery: { kind: 'mj', taskId, model: traceModel, speed: mjSpeed, pollIntervalMs: interval, maxPolls: maxPoll },
+            requestId: q.requestId,
+            transportHttpStatus: q.transportHttpStatus,
+            upstreamHttpStatus: q.upstreamHttpStatus,
+            usage: q.usage,
+            httpStatusSource: 'local-backend',
+            pollCount: i + 1,
+            pollLimit: maxPoll,
+            status: q.status,
+            progress: q.progress,
+          });
           if (q.status === 'FAILURE') {
             throw new Error(`MJ 失败: ${q.failReason || '未知错误'}`);
           }
@@ -756,8 +866,25 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
               imageUrls: all,
               lastPrompt: finalPrompt,
               usedI2I: allRefs.length > 0 || mjSrefImages.length > 0 || mjOrefImages.length > 0,
+              requestId: q.requestId,
+              transportHttpStatus: q.transportHttpStatus,
+              upstreamHttpStatus: q.upstreamHttpStatus,
+              usage: q.usage,
+              pollCount: i + 1,
             });
             taskCompletionSound.notifyComplete(id, 'image');
+            await reporter?.providerResponse({
+              provider: traceProvider,
+              model: traceModel,
+              upstreamTaskId: taskId,
+              requestId: q.requestId || submit.requestId,
+              transportHttpStatus: q.transportHttpStatus,
+              upstreamHttpStatus: q.upstreamHttpStatus,
+              usage: q.usage,
+              pollCount: i + 1,
+              status: 'succeeded',
+              httpStatusSource: 'local-backend',
+            });
             return;
           }
         }
@@ -800,6 +927,16 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
 
         // 同步完成
         if (submit.sync && submit.urls && submit.urls.length) {
+          await reporter?.providerResponse({
+            provider: traceProvider,
+            model: traceModel,
+            requestId: submit.requestId,
+            transportHttpStatus: submit.transportHttpStatus,
+            upstreamHttpStatus: submit.upstreamHttpStatus,
+            usage: submit.usage,
+            status: 'succeeded',
+            httpStatusSource: 'local-backend',
+          });
           logBus.success(`FAL同步返回 → ${submit.urls[0]}`, src);
           update({
             status: 'success',
@@ -807,6 +944,10 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             imageUrl: submit.urls[0],
             lastPrompt: finalPrompt,
             usedI2I: allRefs.length > 0,
+            requestId: submit.requestId,
+            transportHttpStatus: submit.transportHttpStatus,
+            upstreamHttpStatus: submit.upstreamHttpStatus,
+            usage: submit.usage,
           });
           taskCompletionSound.notifyComplete(id, 'image');
           return;
@@ -815,6 +956,15 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         // 异步轮询: 1200×3s = 3600s，避免 FAL 图像长队列 30min 提前超时。
         const { requestId, responseUrl, endpoint } = submit;
         if (!requestId || !responseUrl) throw new Error('FAL 提交后未获得 request_id/response_url');
+        await reporter?.providerSubmitted({
+          provider: traceProvider,
+          model: traceModel,
+          requestId,
+          transportHttpStatus: submit.transportHttpStatus,
+          upstreamHttpStatus: submit.upstreamHttpStatus,
+          usage: submit.usage,
+          httpStatusSource: 'local-backend',
+        });
         logBus.info(`FAL异步任务已提交 requestId=${requestId}`, src);
         update({
           progress: '5%',
@@ -830,6 +980,23 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           const q = await queryImageFal({ responseUrl, endpoint, requestId });
           if (!isCurrentGenerationRun(runId)) return;
           const st = String(q.status || '').toLowerCase();
+          await reporter?.polling({
+            provider: traceProvider,
+            model: traceModel,
+            requestId,
+            recovery: {
+              kind: 'image-fal', requestId, responseUrl, endpoint, model: traceModel,
+              pollIntervalMs: interval, maxPolls: maxPoll,
+            },
+            transportHttpStatus: q.transportHttpStatus,
+            upstreamHttpStatus: q.upstreamHttpStatus,
+            usage: q.usage,
+            httpStatusSource: 'local-backend',
+            pollCount: i + 1,
+            pollLimit: maxPoll,
+            status: st,
+            providerStatus: q.falStatus,
+          });
           if (st === 'completed') {
             const url = q.urls?.[0];
             if (!url) throw new Error('FAL 任务完成但未返回图片');
@@ -840,8 +1007,24 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
               imageUrl: url,
               lastPrompt: finalPrompt,
               usedI2I: allRefs.length > 0,
+              requestId: q.requestId || requestId,
+              transportHttpStatus: q.transportHttpStatus,
+              upstreamHttpStatus: q.upstreamHttpStatus,
+              usage: q.usage,
+              pollCount: i + 1,
             });
             taskCompletionSound.notifyComplete(id, 'image');
+            await reporter?.providerResponse({
+              provider: traceProvider,
+              model: traceModel,
+              requestId: q.requestId || requestId,
+              transportHttpStatus: q.transportHttpStatus,
+              upstreamHttpStatus: q.upstreamHttpStatus,
+              usage: q.usage,
+              pollCount: i + 1,
+              status: 'succeeded',
+              httpStatusSource: 'local-backend',
+            });
             return;
           }
           if (st === 'failed') {
@@ -857,6 +1040,105 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         throw new Error(`FAL 超时: ${(maxPoll * interval) / 1000}s 未完成`);
       }
 
+      // seedance.nz has a separate asynchronous Seedream API. This branch is
+      // deliberately isolated so the existing zhenzhen Seedream call remains unchanged.
+      if (isSeedreamNz) {
+        if (!zhenzhenSd2ApiKey) throw new Error('请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”');
+        const expectedModel = seedreamNzModelFamily === 'overseas'
+          ? (allRefs.length ? 'dola-seedream-5.0-pro-i2i' : 'dola-seedream-5.0-pro-t2i')
+          : (allRefs.length ? 'seedream-v5-pro-i2i' : 'seedream-v5-pro-t2i');
+        logBus.info(
+          `贞贞的平价AI工坊 Seedream 提交: model=${expectedModel} ${seedreamNzModelRegion} 参考图=${allRefs.length} 尺寸=${seedreamNzResolution === 'custom' ? seedreamNzResolvedSize : seedreamNzResolution}`,
+          src,
+        );
+        const submit = await submitSeedreamNz({
+          prompt: finalPrompt,
+          images: allRefs,
+          modelFamily: seedreamNzModelFamily,
+          resolution: seedreamNzResolution === 'custom' ? undefined : seedreamNzResolution,
+          size: seedreamNzResolution === 'custom' ? seedreamNzResolvedSize : undefined,
+          output_format: seedreamOutputFormat,
+        });
+        if (!isCurrentGenerationRun(runId)) return;
+        const taskId = submit.taskId;
+        if (!taskId) throw new Error('贞贞的平价AI工坊（国内） Seedream 未返回任务 ID');
+        await reporter?.providerSubmitted({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: taskId,
+          requestId: submit.requestId,
+          transportHttpStatus: submit.transportHttpStatus,
+          upstreamHttpStatus: submit.upstreamHttpStatus,
+          usage: submit.usage,
+          httpStatusSource: 'local-backend',
+        });
+        update({ progress: submit.progress || '0%', taskId });
+        const interval = 3000;
+        const maxPoll = minPollCountForTimeout(interval);
+        let lastProgress = submit.progress || '0%';
+        for (let i = 0; i < maxPoll; i++) {
+          await new Promise((resolve) => setTimeout(resolve, interval));
+          if (!isCurrentGenerationRun(runId)) return;
+          const query = await querySeedreamNz(taskId);
+          if (!isCurrentGenerationRun(runId)) return;
+          await reporter?.polling({
+            provider: traceProvider,
+            model: traceModel,
+            taskId,
+            requestId: query.requestId,
+            transportHttpStatus: query.transportHttpStatus,
+            upstreamHttpStatus: query.upstreamHttpStatus,
+            usage: query.usage,
+            httpStatusSource: 'local-backend',
+            pollCount: i + 1,
+            pollLimit: maxPoll,
+            status: query.status,
+            progress: query.progress,
+          });
+          if (query.progress && query.progress !== lastProgress) {
+            lastProgress = query.progress;
+            update({ progress: query.progress });
+          }
+          const queryStatus = String(query.status || '').toLowerCase();
+          if (queryStatus === 'completed' || queryStatus === 'success' || queryStatus === 'done') {
+            const url = query.urls?.[0];
+            if (!url) throw new Error('贞贞的平价AI工坊（国内） Seedream 任务完成但未返回图片');
+            logBus.success(`贞贞的平价AI工坊（国内） Seedream 完成 → ${url}`, src);
+            update({
+              status: 'success',
+              progress: '100%',
+              imageUrl: url,
+              imageUrls: query.urls,
+              lastPrompt: finalPrompt,
+              usedI2I: allRefs.length > 0,
+              requestId: query.requestId,
+              transportHttpStatus: query.transportHttpStatus,
+              upstreamHttpStatus: query.upstreamHttpStatus,
+              usage: query.usage,
+              pollCount: i + 1,
+            });
+            taskCompletionSound.notifyComplete(id, 'image');
+            await reporter?.providerResponse({
+              provider: traceProvider,
+              model: traceModel,
+              upstreamTaskId: taskId,
+              requestId: query.requestId || submit.requestId,
+              transportHttpStatus: query.transportHttpStatus,
+              upstreamHttpStatus: query.upstreamHttpStatus,
+              usage: query.usage,
+              pollCount: i + 1,
+              status: 'succeeded',
+              httpStatusSource: 'local-backend',
+            });
+            return;
+          }
+          if (queryStatus === 'failed' || queryStatus === 'failure' || queryStatus === 'error') {
+            throw new Error(query.error || '贞贞的平价AI工坊（国内） Seedream 任务失败');
+          }
+        }
+        throw new Error(`贞贞的平价AI工坊（国内） Seedream 超时: ${(maxPoll * interval) / 1000}s 未完成`);
+      }
+
       // ============ 原有标准路径(GPT2 standard / nano-banana / nano-banana-pro 未动) ============
       logBus.info(
         `提交任务: model=${apiModel} 比例=${aspectRatio} 尺寸=${sizeLevel} 参考图=${allRefs.length} prompt="${finalPrompt.slice(0, 60)}${finalPrompt.length > 60 ? '…' : ''}"`,
@@ -867,8 +1149,11 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         apiModel: apiModel,
         paramKind: modelDef.paramKind,
         prompt: finalPrompt,
-        aspect_ratio: aspectRatio,
-        image_size: sizeLevel,
+        aspect_ratio: isSeedream ? undefined : aspectRatio,
+        image_size: isSeedream ? undefined : sizeLevel,
+        size: isSeedream ? seedreamResolvedSize : undefined,
+        response_format: isSeedream ? 'url' : undefined,
+        output_format: isSeedream ? seedreamOutputFormat : undefined,
         images: allRefs,
         n: 1,
         providerParams,
@@ -885,14 +1170,38 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           imageUrls: submit.urls,
           lastPrompt: finalPrompt,
           usedI2I: allRefs.length > 0,
+          requestId: submit.requestId,
+          transportHttpStatus: submit.transportHttpStatus,
+          upstreamHttpStatus: submit.upstreamHttpStatus,
+          usage: submit.usage,
         });
         taskCompletionSound.notifyComplete(id, 'image');
+        await reporter?.providerResponse({
+          provider: traceProvider,
+          model: traceModel,
+          requestId: submit.requestId,
+          transportHttpStatus: submit.transportHttpStatus,
+          upstreamHttpStatus: submit.upstreamHttpStatus,
+          usage: submit.usage,
+          status: 'succeeded',
+          httpStatusSource: 'local-backend',
+        });
         return;
       }
 
       // 分支二:异步任务 → 轮询状态(对齐主项目 gpt-image-2-web pollTask)
       const taskId = submit.taskId;
       if (!taskId) throw new Error('未获取到 taskId 且无同步结果');
+      await reporter?.providerSubmitted({
+        provider: traceProvider,
+        model: traceModel,
+        upstreamTaskId: taskId,
+        requestId: submit.requestId,
+        transportHttpStatus: submit.transportHttpStatus,
+        upstreamHttpStatus: submit.upstreamHttpStatus,
+        usage: submit.usage,
+        httpStatusSource: 'local-backend',
+      });
       logBus.info(`异步任务已提交 taskId=${taskId} 进入轮询…`, src);
       update({ progress: submit.progress || '5%', taskId });
       // GPT2 / nano-banana / nano-banana-pro 标准路径轮询上限:
@@ -905,6 +1214,21 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         if (!isCurrentGenerationRun(runId)) return;
         const q = await queryImageStatus(taskId, apiModel);
         if (!isCurrentGenerationRun(runId)) return;
+        await reporter?.polling({
+          provider: traceProvider,
+          model: traceModel,
+          taskId,
+          recovery: { kind: 'image', taskId, model: apiModel || traceModel, pollIntervalMs: interval, maxPolls: maxPoll },
+          requestId: q.requestId,
+          transportHttpStatus: q.transportHttpStatus,
+          upstreamHttpStatus: q.upstreamHttpStatus,
+          usage: q.usage,
+          httpStatusSource: 'local-backend',
+          pollCount: i + 1,
+          pollLimit: maxPoll,
+          status: q.status,
+          progress: q.progress,
+        });
         if (q.progress && q.progress !== lastProg) {
           lastProg = q.progress;
           update({ progress: q.progress });
@@ -922,8 +1246,25 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             imageUrls: q.urls,
             lastPrompt: finalPrompt,
             usedI2I: allRefs.length > 0,
+            requestId: q.requestId,
+            transportHttpStatus: q.transportHttpStatus,
+            upstreamHttpStatus: q.upstreamHttpStatus,
+            usage: q.usage,
+            pollCount: i + 1,
           });
           taskCompletionSound.notifyComplete(id, 'image');
+          await reporter?.providerResponse({
+            provider: traceProvider,
+            model: traceModel,
+            upstreamTaskId: taskId,
+            requestId: q.requestId || submit.requestId,
+            transportHttpStatus: q.transportHttpStatus,
+            upstreamHttpStatus: q.upstreamHttpStatus,
+            usage: q.usage,
+            pollCount: i + 1,
+            status: 'succeeded',
+            httpStatusSource: 'local-backend',
+          });
           return;
         }
         if (st === 'failed' || st === 'failure' || st === 'error') {
@@ -934,6 +1275,16 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
     } catch (e: any) {
       if (!isCurrentGenerationRun(runId)) return;
       const msg = e?.message || '生成失败';
+      await reporter?.providerResponse({
+        provider: traceProvider,
+        model: traceModel,
+        requestId: e?.requestId,
+        transportHttpStatus: e?.transportHttpStatus,
+        upstreamHttpStatus: e?.upstreamHttpStatus,
+        status: 'failed',
+        error: { message: msg, code: e?.code },
+        httpStatusSource: 'local-backend',
+      });
       setError(msg);
       logBus.error(`生成失败: ${msg}`, src);
       update({ status: 'error', error: msg });
@@ -948,7 +1299,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   };
 
   // 接入运行总线,供批量运行调起
-  useRunTrigger(id, handleGenerate, 'image');
+  useRunTrigger(id, handleGenerate, 'image', { lifecycleAware: true });
 
   // === 跨节点拖拽: source (从输出图 Ctrl+拖出) ===
   const startDrag = useDragMaterialStore((s) => s.start);
@@ -1005,7 +1356,9 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           <div className="text-[10px] text-white/40">
             {isExternalSelected && providerSelection.provider
               ? `${providerSelection.provider.label || providerSelection.provider.id} · ${externalProviderModel || '未选模型'}`
-              : `${modelDef.label} · ${modelDef.description}`}
+              : isSeedreamNz
+                ? `贞贞的平价AI工坊（国内） · ${seedreamNzUiModel}`
+                : `${modelDef.label} · ${modelDef.description}`}
           </div>
         </div>
       </div>
@@ -1069,6 +1422,21 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
                       ))}
                     </select>
                   </div>
+                )}
+                {isJimengCliImageSelected && (
+                  <label className="block space-y-1">
+                    <span className="text-[10px] text-white/50">生成数量</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={String(providerParams.n ?? 1)}
+                      onChange={(e) => patchProviderParams({ n: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })}
+                      style={{ background: '#18181b', color: '#ffffff' }}
+                      className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
+                    />
+                    <span className="block text-[10px] text-white/40">即梦 CLI v1.4.10 起支持 text2image / image2image 一次生成 1-10 张。</span>
+                  </label>
                 )}
                 {isModelScopeExternal && (
                   <div className="rounded border border-white/10 bg-white/[0.03] p-2 space-y-2">
@@ -1438,8 +1806,45 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           </div>
         </div>}
 
+        {isSeedream && !isExternalSelected && (
+          <div className="rounded border border-cyan-400/25 bg-cyan-500/5 p-2 space-y-2">
+            <div>
+              <label className="text-[10px] text-white/50 block mb-1">API 来源</label>
+              <select
+                value={seedreamApiSource}
+                onChange={(e) => update({ seedreamApiSource: e.target.value })}
+                style={{ background: '#18181b', color: '#ffffff' }}
+                className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-cyan-400/60"
+              >
+                <option value="zhenzhen" style={{ background: '#18181b', color: '#ffffff' }}>贞贞的AI工坊（海外） · 原 Seedream</option>
+                <option value="seedance-nz" style={{ background: '#18181b', color: '#ffffff' }}>贞贞的平价AI工坊（国内） · api.seedance.nz</option>
+              </select>
+            </div>
+            {isSeedreamNz && (
+              <div className="space-y-2">
+                <div>
+                  <label className="text-[10px] text-white/50 block mb-1">模型地区</label>
+                  <select
+                    value={seedreamNzModelFamily}
+                    onChange={(e) => update({ seedreamNzModelFamily: e.target.value })}
+                    style={{ background: '#18181b', color: '#ffffff' }}
+                    className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-cyan-400/60"
+                  >
+                    <option value="domestic" style={{ background: '#18181b', color: '#ffffff' }}>Seedream v5 Pro（国内模型）</option>
+                    <option value="overseas" style={{ background: '#18181b', color: '#ffffff' }}>Dola Seedream 5.0 Pro（海外模型）</option>
+                  </select>
+                </div>
+                <div className="text-[10px] leading-4 text-cyan-100/75">
+                  实际模型：{seedreamNzUiModel}（{seedreamNzModelRegion}，按参考图自动切换）
+                  {!zhenzhenSd2ApiKey && <div className="mt-1 text-amber-300">尚未配置“贞贞的平价AI工坊（国内） API Key”</div>}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* 子模型选择(对齐主项目 Tab 内的 model 下拉) - MJ 模式隐藏(用下面专属版本选择) */}
-        {!isExternalSelected && !isMj && (
+        {!isExternalSelected && !isMj && !isSeedreamNz && (
           <div>
             <label className="text-[10px] text-white/50 block mb-1">具体模型</label>
             <select
@@ -1461,19 +1866,19 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           data={d}
           update={update}
           context={{
-            providerSource: isExternalSelected ? providerSelection.providerSource : 'zhenzhen',
+            providerSource: isExternalSelected ? providerSelection.providerSource : (isSeedreamNz ? 'seedance-nz' : 'zhenzhen'),
             providerId: providerSelection.providerId,
-            providerModel: isExternalSelected ? externalProviderModel : apiModel,
+            providerModel: isExternalSelected ? externalProviderModel : (isSeedreamNz ? seedreamNzUiModel : apiModel),
             model: modelDef.id,
             apiModel,
             providerKind: isFal ? 'fal' : modelDef.paramKind,
           }}
         />
 
-        {/* 比例 + 尺寸 并排(非 FAL 且非 MJ 模型);Grok Image 只需要比例 */}
+        {/* 比例 + 尺寸;Seedream 使用像素尺寸 + 输出格式,Grok Image 只需要比例 */}
         {(!isFal && !isMj && !isComfyExternal) && (
-          <div className={`grid gap-2 ${isGrokImage || !modelDef.sizes.length ? 'grid-cols-1' : 'grid-cols-2'}`}>
-            <div>
+          <div className={`grid gap-2 ${isSeedream || (!isGrokImage && modelDef.sizes.length) ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            {modelDef.aspectRatios.length > 0 && <div>
               <label className="text-[10px] text-white/50 block mb-1">比例</label>
               <select
                 value={aspectRatio}
@@ -1485,8 +1890,8 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
                   <option key={r} value={r} style={{ background: '#18181b', color: '#ffffff' }}>{r}</option>
                 ))}
               </select>
-            </div>
-            {!isGrokImage && modelDef.sizes.length > 0 && (
+            </div>}
+            {!isGrokImage && !isSeedreamNz && modelDef.sizes.length > 0 && (
               <div>
                 <label className="text-[10px] text-white/50 block mb-1">尺寸</label>
                 <select
@@ -1501,6 +1906,69 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
                 </select>
               </div>
             )}
+            {isSeedreamNz && (
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">分辨率</label>
+                <select
+                  value={seedreamNzResolution}
+                  onChange={(e) => update({ seedreamNzResolution: e.target.value })}
+                  style={{ background: '#18181b', color: '#ffffff' }}
+                  className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
+                >
+                  <option value="1k" style={{ background: '#18181b', color: '#ffffff' }}>1K</option>
+                  <option value="2k" style={{ background: '#18181b', color: '#ffffff' }}>2K</option>
+                  <option value="custom" style={{ background: '#18181b', color: '#ffffff' }}>Custom</option>
+                </select>
+              </div>
+            )}
+            {isSeedream && (
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">格式</label>
+                <select
+                  value={seedreamOutputFormat}
+                  onChange={(e) => update({ seedreamOutputFormat: e.target.value })}
+                  style={{ background: '#18181b', color: '#ffffff' }}
+                  className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
+                >
+                  <option value="png" style={{ background: '#18181b', color: '#ffffff' }}>PNG</option>
+                  <option value="jpeg" style={{ background: '#18181b', color: '#ffffff' }}>JPEG</option>
+                </select>
+              </div>
+            )}
+            {isSeedream && !isSeedreamNz && sizeLevel === 'custom' && (
+              <div className="col-span-2">
+                <label className="text-[10px] text-white/50 block mb-1">自定义尺寸</label>
+                <input
+                  value={seedreamCustomSize}
+                  onChange={(e) => update({ seedreamCustomSize: e.target.value })}
+                  placeholder="2048x1536"
+                  inputMode="text"
+                  style={{ background: '#18181b', color: '#ffffff' }}
+                  className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
+                />
+              </div>
+            )}
+            {isSeedreamNz && seedreamNzResolution === 'custom' && (
+              <div className="col-span-2">
+                <label className="text-[10px] text-white/50 block mb-1">自定义尺寸（240-8192）</label>
+                <input
+                  value={seedreamNzCustomSize}
+                  onChange={(e) => update({ seedreamNzCustomSize: e.target.value })}
+                  placeholder="2048x1536"
+                  inputMode="text"
+                  style={{ background: '#18181b', color: '#ffffff' }}
+                  className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
+                />
+              </div>
+            )}
+          </div>
+        )}
+        {isSeedreamNz && !isExternalSelected && (
+          <div>
+            <label className="text-[10px] text-white/50 block mb-1">具体模型</label>
+            <div className="w-full rounded border border-white/10 bg-black/20 px-2 py-1 text-xs text-white/80">
+              {seedreamNzUiModel}
+            </div>
           </div>
         )}
 
@@ -1954,11 +2422,11 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             groups={['text', 'image']}
             title={isMj ? '主参考图 · 上游+本地' : '参考图 · 上游+本地'}
             imageUploadAction={
-              refImages.length < maxRefs
+              orderedImages.length < maxRefs
                 ? {
                     onClick: handlePickFile,
                     title: '上传本地参考图',
-                    remaining: maxRefs - refImages.length,
+                    remaining: maxRefs - orderedImages.length,
                   }
                 : undefined
             }
@@ -2010,7 +2478,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           </button>
         ) : (
           <button
-            onClick={handleGenerate}
+            onClick={() => requestCanvasNodeRun(id)}
             className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-medium transition-colors"
           >
             <Sparkles size={12} /> 生成

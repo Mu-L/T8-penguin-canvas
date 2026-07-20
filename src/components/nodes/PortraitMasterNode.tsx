@@ -68,6 +68,7 @@ import {
   summarizePortraitAdvancedSelection,
 } from '../../data/portraitMasterAdvancedOptions';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { useThemeStore } from '../../stores/theme';
 import { trackAchievementEvent } from '../../stores/achievements';
 import { useHiddenFeatureStore, isYyhPortraitEnabled } from '../../stores/hiddenFeatures';
@@ -1528,7 +1529,7 @@ const PortraitMasterNode = ({ id, data, selected }: NodeProps) => {
           <button type="button" className="t8-btn min-h-8 px-2 text-[11px]" onClick={handleCopy} disabled={!prompt.trim()}>
             <Copy size={13} /> {copied ? '已复制' : '复制'}
           </button>
-          <button type="button" className="t8-btn t8-btn-primary min-h-8 px-2 text-[11px]" onClick={handleRun}>
+          <button type="button" className="t8-btn t8-btn-primary min-h-8 px-2 text-[11px]" onClick={() => requestCanvasNodeRun(id)}>
             <Play size={13} fill="currentColor" /> 运行
           </button>
         </div>
@@ -1899,7 +1900,7 @@ const PortraitMasterNode = ({ id, data, selected }: NodeProps) => {
                   <button type="button" className="t8-btn min-h-8 px-2 text-[11px]" onClick={handleRandom}>
                     <Sparkles size={13} /> 随机
                   </button>
-                  <button type="button" className="t8-btn t8-btn-primary min-h-8 px-2 text-[11px]" onClick={handleRun}>
+                  <button type="button" className="t8-btn t8-btn-primary min-h-8 px-2 text-[11px]" onClick={() => requestCanvasNodeRun(id)}>
                     <Play size={13} fill="currentColor" /> 输出
                   </button>
                 </div>

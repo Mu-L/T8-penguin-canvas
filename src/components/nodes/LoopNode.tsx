@@ -3,11 +3,18 @@ import { Handle, Position, useReactFlow, type NodeProps, type Node, type Edge } 
 import { Repeat, Play, Square, Loader2, AlertCircle, GitBranch, Layers } from 'lucide-react';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { useThemeStore } from '../../stores/theme';
-import { useRunBusStore } from '../../stores/runBus';
+import { matchesRunCompletion, useRunBusStore } from '../../stores/runBus';
 import { useUpstreamMaterials, type MaterialKind, type Material } from './useUpstreamMaterials';
 import { topologicalSort } from '../../utils/topologicalSort';
 import { excludeRandomRouteBranchDescendants } from '../../utils/randomRoute';
+import { EXECUTABLE_NODE_TYPES } from '../../config/executableNodeTypes';
+import {
+  buildLoopParallelCloneGraph,
+  isLoopRunRequestId,
+  loopParallelCloneNodeId,
+} from '../../utils/loopDerivedExecution';
 import { PORT_COLOR } from '../../config/portTypes';
 import LoopingVideo from '../LoopingVideo';
 import SmartImage from '../SmartImage';
@@ -30,24 +37,6 @@ import { placeBatchNodes, rectOf, type Rect as PlacementRect } from '../../utils
  *   - 不修改 useUpstreamMaterials / topologicalSort
  *   - 仅利用 v1.2.8 扩展的 runBus.runningIds + triggerRunMany
  */
-
-// 循环器自身可被批量运行调起（在外面 EXECUTABLE_NODE_TYPES 集合里注册），
-// 但循环器执行时调度的下游子图不能反过来再次包含自己——下面执行逻辑已用直接下游 BFS 限定子图。
-const EXEC_TYPES = new Set<string>([
-  'image', 'edit',
-  'multi-angle-3d', 'panorama-720', 'penguin-portrait',
-  'video', 'seedance', 'audio', 'llm', 'runninghub', 'runninghub-wallet',
-    // v1.2.10.1: RH 工具节点 (循环器中作为 EXEC 使用)
-    'rh-tools', 'rh-toolbox', 'fal-toolbox', 'comfyui-store',
-  'grok-oauth-agent', 'codex-cli-agent',
-  'resize', 'upscale', 'grid-crop', 'grid-editor', 'remove-bg', 'combine',
-  'panorama-3d',
-  'frame-extractor', 'frame-pair',
-  'upload',
-  'random-route',
-  'aggregate-parser', 'batch-processor', 'batch-tagger',
-  'topaz-image-upscale', 'topaz-video-upscale',
-]);
 
 // 自动计算型下游节点：没有 useRunTrigger，不应放入 EXEC_TYPES 等待 runBus，
 // 但循环器每轮注入素材后，这些节点会通过 useUpstreamMaterials/useEffect 自行刷新 data。
@@ -135,16 +124,14 @@ function hasPassiveLoopNode(nodes: Node[]): boolean {
   return nodes.some((node) => node.type && PASSIVE_LOOP_TYPES.has(node.type));
 }
 
-// ===== helper: 等待某节点 lastDone =====
+// ===== helper: 触发节点并只等待本次 execution token =====
 const LOOP_NODE_WAIT_TIMEOUT_MS = 60 * 60 * 1000;
 
-// 重要 BUGFIX: 必须用 startTs 过滤上一轮遗留的 lastDone, 否则同一 nodeId 被循环复用时,
-// subscribe 在 triggerRunMany() 触发的 set 第一次回调会看到 lastDone.id === nodeId (上轮的) 立刻 finish,
-// 导致本轮根本没跑。
-function awaitNode(nodeId: string, cancelRef: React.MutableRefObject<boolean>, timeoutMs = LOOP_NODE_WAIT_TIMEOUT_MS): Promise<boolean> {
+function awaitTriggeredNode(nodeId: string, cancelRef: React.MutableRefObject<boolean>, timeoutMs = LOOP_NODE_WAIT_TIMEOUT_MS): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     let resolved = false;
-    const startTs = Date.now();
+    const startCancelSeq = useRunBusStore.getState().cancelSeq;
+    let executionToken: string | null = null;
     const finish = (ok: boolean) => {
       if (resolved) return;
       resolved = true;
@@ -153,34 +140,28 @@ function awaitNode(nodeId: string, cancelRef: React.MutableRefObject<boolean>, t
       resolve(ok);
     };
     const off = useRunBusStore.subscribe((state) => {
-      if (state.lastDone && state.lastDone.id === nodeId && state.lastDone.ts >= startTs) finish(state.lastDone.ok);
-      if (cancelRef.current) finish(false);
+      if (cancelRef.current || state.cancelSeq !== startCancelSeq) finish(false);
+      else if (matchesRunCompletion(state.lastDone, nodeId, executionToken)) finish(state.lastDone.ok);
+      else if (executionToken && state.executionTokens[nodeId] !== executionToken) finish(false);
     });
     const timer = window.setTimeout(() => finish(false), timeoutMs);
     // 用 triggerRunMany([id]) 而非 triggerRun(id) 触发——这样并联多链时 currentRunId 不会互相覆盖
-    useRunBusStore.getState().triggerRunMany([nodeId]);
+    const tokens = useRunBusStore.getState().triggerRunMany([nodeId]);
+    executionToken = tokens[nodeId] || null;
+    const current = useRunBusStore.getState();
+    if (cancelRef.current || current.cancelSeq !== startCancelSeq) finish(false);
+    else if (matchesRunCompletion(current.lastDone, nodeId, executionToken)) finish(current.lastDone.ok);
+    else if (!executionToken || current.executionTokens[nodeId] !== executionToken) finish(false);
   });
 }
 
-// ===== helper: 等待某节点 lastDone, 但不发起触发 (并联模式各链内部已自行 trigger) =====
+function awaitNode(nodeId: string, cancelRef: React.MutableRefObject<boolean>, timeoutMs = LOOP_NODE_WAIT_TIMEOUT_MS): Promise<boolean> {
+  return awaitTriggeredNode(nodeId, cancelRef, timeoutMs);
+}
+
+// 并联模式每条克隆链仍逐节点独立触发，但不同链可同时等待各自的 token。
 function awaitOnly(nodeId: string, cancelRef: React.MutableRefObject<boolean>, timeoutMs = LOOP_NODE_WAIT_TIMEOUT_MS): Promise<boolean> {
-  return new Promise<boolean>((resolve) => {
-    let resolved = false;
-    const startTs = Date.now();
-    const finish = (ok: boolean) => {
-      if (resolved) return;
-      resolved = true;
-      off();
-      window.clearTimeout(timer);
-      resolve(ok);
-    };
-    const off = useRunBusStore.subscribe((state) => {
-      if (state.lastDone && state.lastDone.id === nodeId && state.lastDone.ts >= startTs) finish(state.lastDone.ok);
-      if (cancelRef.current) finish(false);
-    });
-    const timer = window.setTimeout(() => finish(false), timeoutMs);
-    useRunBusStore.getState().triggerRunMany([nodeId]);
-  });
+  return awaitTriggeredNode(nodeId, cancelRef, timeoutMs);
 }
 
 const LoopNode = (p: NodeProps) => {
@@ -242,16 +223,17 @@ const LoopNode = (p: NodeProps) => {
       }
     }
 
-    const directs = allEdges
+    const directEdges = allEdges
       .filter((e) => e.source === id && !removeEdgeIds.has(e.id))
-      .map((e) => e.target);
+      .sort((left, right) => left.id.localeCompare(right.id) || left.target.localeCompare(right.target));
+    const directs = directEdges.map((e) => e.target);
     if (directs.length === 0) { setError('请先把循环器输出端连到下游执行节点'); update({ status: 'error', error: '未连接下游' }); return; }
 
     const reachable = bfsForward(allEdges, directs);
     const subNodes = allNodes.filter((n) => reachable.has(n.id));
     const subEdges = allEdges.filter((e) => reachable.has(e.source) && reachable.has(e.target));
     const routePlanned = excludeRandomRouteBranchDescendants(subNodes, subEdges);
-    const order = topologicalSort(routePlanned.nodes, routePlanned.edges, EXEC_TYPES);
+    const order = topologicalSort(routePlanned.nodes, routePlanned.edges, EXECUTABLE_NODE_TYPES);
     const passiveOnly = order.length === 0 && hasPassiveLoopNode(subNodes);
     if (order.length === 0 && !passiveOnly) { setError('下游链路上没有可执行节点'); update({ status: 'error', error: '无可执行节点' }); return; }
 
@@ -263,7 +245,7 @@ const LoopNode = (p: NodeProps) => {
     // v1.2.9.5: 回滚 v1.2.9.4 的「给 LoopNode 自身注入 __loopAccumulate」——循环器不输出任何结果到下游,
     //          也不让「直接接 LoopNode 的 OutputNode」变成「累积循环输入素材」 (与下游 EXEC→OutputNode 累积重复)。
     //          直接接的 OutputNode 渲染侧会显示「循环器无输出」提示代替 0 项空白。
-    const execSubIds = new Set<string>(subNodes.filter((n) => EXEC_TYPES.has(n.type as string)).map((n) => n.id));
+    const execSubIds = new Set<string>(subNodes.filter((n) => EXECUTABLE_NODE_TYPES.has(n.type as string)).map((n) => n.id));
     // v1.2.9.9: outputNodeIds 改为「动态发现」——原因: 循环中 FramePair 等 EXEC 节点首次产生 firstFrameUrl/lastFrameUrl 后,
     //          Canvas autoOutput 会动态创建 OutputNode 接到它们身后。若 outputNodeIds 在 runSerial 开始时固化,
     //          这些运行中创建的 OutputNode 不会被 writeFreshToOutputs 写入 → 只显示最后一轮 (fresh 路由)。
@@ -568,6 +550,10 @@ const LoopNode = (p: NodeProps) => {
 
     const allNodes = rf.getNodes();
     const allEdges = rf.getEdges();
+    const requestId = useRunBusStore.getState().activeRunContext?.requestId;
+    if (!isLoopRunRequestId(requestId)) {
+      throw new Error('并联循环缺少最终体检绑定的 Run requestId');
+    }
 
     // v1.2.9.6: 同 runSerial —— 自动清理「循环器 → 输出素材」连线与孤儿 OutputNode
     const removeEdgeIds = new Set<string>();
@@ -587,16 +573,17 @@ const LoopNode = (p: NodeProps) => {
       }
     }
 
-    const directs = allEdges
+    const directEdges = allEdges
       .filter((e) => e.source === id && !removeEdgeIds.has(e.id))
-      .map((e) => e.target);
+      .sort((left, right) => left.id.localeCompare(right.id) || left.target.localeCompare(right.target));
+    const directs = directEdges.map((e) => e.target);
     if (directs.length === 0) { setError('请先把循环器输出端连到下游执行节点'); update({ status: 'error', error: '未连接下游' }); return; }
 
     const reachable = bfsForward(allEdges, directs);
     const subNodes = allNodes.filter((n) => reachable.has(n.id));
     const subEdges = allEdges.filter((e) => reachable.has(e.source) && reachable.has(e.target));
     const routePlanned = excludeRandomRouteBranchDescendants(subNodes, subEdges);
-    const originalOrder = topologicalSort(routePlanned.nodes, routePlanned.edges, EXEC_TYPES);
+    const originalOrder = topologicalSort(routePlanned.nodes, routePlanned.edges, EXECUTABLE_NODE_TYPES);
     const passiveOnly = originalOrder.length === 0 && hasPassiveLoopNode(subNodes);
     if (originalOrder.length === 0 && !passiveOnly) { setError('下游链路上没有可执行节点'); update({ status: 'error', error: '无可执行节点' }); return; }
 
@@ -605,9 +592,6 @@ const LoopNode = (p: NodeProps) => {
     const maxY = Math.max(...subNodes.map((n) => n.position.y + ((n as any).measured?.height || (n as any).height || 200)));
     const blockH = (maxY - minY) + 30;
 
-    const ts = Date.now();
-    const allNewNodes: Node[] = [];
-    const allNewEdges: Edge[] = [];
     const cloneIdMaps: Array<Map<string, string>> = [];
 
     // v1.2.10.5: 预算克隆链期望矩形 —— 全部克隆节点 (i=1..N-1) 作为一组防重叠
@@ -628,39 +612,38 @@ const LoopNode = (p: NodeProps) => {
         })
       : { dx: 0, dy: 0 };
 
-    // v1.2.8.1: 为 i=1..N-1 克隆完整下游子图, 克隆链入口节点 直接连接到 items[i].sourceNodeId (原始上游素材节点)
-    // 不再创建 supplier output 节点, 避免克隆出一堆中转节点。
+    const cloneGraph = buildLoopParallelCloneGraph({
+      loopId: id,
+      requestId,
+      sourceNodes: subNodes,
+      sourceEdges: subEdges,
+      entryEdge: directEdges[0],
+      items,
+    });
+    const sourceNodesById = new Map(subNodes.map((node) => [node.id, node]));
+    const allNewNodes = cloneGraph.nodes.map((clone) => {
+      const cloneData = (clone.data || {}) as Record<string, any>;
+      const source = sourceNodesById.get(String(cloneData.__loopCloneSourceNodeId));
+      const iteration = Math.max(1, Number(cloneData.__loopCloneIteration) || 1);
+      return {
+        ...clone,
+        position: source
+          ? {
+              x: source.position.x + _offClone.dx,
+              y: source.position.y + iteration * blockH + _offClone.dy,
+            }
+          : clone.position,
+      } as Node;
+    });
+    const allNewEdges = cloneGraph.edges;
+
+    // 为 i=1..N-1 建立与预检完全同源的 requestId 派生 ID 映射。
     for (let i = 1; i < items.length; i++) {
-      const item = items[i];
       const idMap = new Map<string, string>();
-      subNodes.forEach((n, idx) => idMap.set(n.id, `loop-${id}-${ts}-${i}-n${idx}`));
-      const yOffset = i * blockH;
-      const clonedNodes: Node[] = subNodes.map((n) => ({
-        ...n,
-        id: idMap.get(n.id)!,
-        position: { x: n.position.x + _offClone.dx, y: n.position.y + yOffset + _offClone.dy },
-        data: { ...(n.data as any), status: 'idle', error: null, __loopClone: id },
-        selected: false,
-      } as Node));
-      const clonedEdges: Edge[] = subEdges.map((e, idx) => ({
-        ...e,
-        id: `loop-${id}-${ts}-${i}-e${idx}`,
-        source: idMap.get(e.source)!,
-        target: idMap.get(e.target)!,
-      } as Edge));
-
-      // 克隆链入口节点 → 直接连原始上游 sourceNodeId (不再克隆中转节点)
-      const entryCloneId = idMap.get(directs[0])!;
-      const directEdge: Edge = {
-        id: `loop-supe-${id}-${ts}-${i}`,
-        source: item.sourceNodeId,
-        target: entryCloneId,
-        type: 'deletable',
-      } as Edge;
-
+      subNodes.forEach((node, nodeIndex) => {
+        idMap.set(node.id, loopParallelCloneNodeId(id, requestId, i, nodeIndex));
+      });
       cloneIdMaps.push(idMap);
-      allNewNodes.push(...clonedNodes);
-      allNewEdges.push(...clonedEdges, directEdge);
     }
 
     // 写入画布
@@ -893,7 +876,7 @@ const LoopNode = (p: NodeProps) => {
               <Square size={11} /> 取消
             </button>
           ) : (
-            <button type="button" style={primaryBtn} onClick={handleRun} disabled={items.length === 0}>
+            <button type="button" style={primaryBtn} onClick={() => requestCanvasNodeRun(id)} disabled={items.length === 0}>
               <Play size={11} />
               {mode === 'serial' ? '串联运行' : '并联运行'}
             </button>

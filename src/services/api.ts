@@ -6,23 +6,113 @@ import type { AdvancedProviderConfig, ApiSettings, CanvasData, CanvasListItem, C
 import type { ThemeTemplate } from '../theme/types';
 import type { MediaKind } from '../utils/mediaCollection';
 import type { RhToolboxManifest } from '../utils/rhToolbox';
+import type {
+  AssetIndexResult,
+  AssetPipelineStatus,
+  AssetRef,
+  AssetCollection,
+  AssetBatchMutationSet,
+  AssetBatchResult,
+  AssetBatchTarget,
+  AssetCatalogPage,
+  AssetDuplicateCandidate,
+  AssetDuplicateDecision,
+  AssetDuplicateKind,
+  AssetDuplicatePage,
+  AssetExactDuplicateGroup,
+  AssetExactDuplicateGroupPage,
+  AssetLineagePage,
+  AssetLineageRecord,
+  AssetPermissionRecord,
+  AssetRevision,
+  AssetSemanticCapability,
+  AssetSemanticCapabilityCounts,
+  AssetSemanticDocument,
+  AssetSemanticEvidence,
+  AssetSemanticGenerationCounts,
+  AssetSemanticGenerationState,
+  AssetSemanticGenerationSummary,
+  AssetSemanticIndexState,
+  AssetSemanticInstallState,
+  AssetSemanticJobRetryInput,
+  AssetSemanticJobState,
+  AssetSemanticJobSummary,
+  AssetSemanticModelDeleteInput,
+  AssetSemanticModelMutationInput,
+  AssetSemanticModelStatus,
+  AssetSemanticProfileUpdateInput,
+  AssetSemanticProjectStatus,
+  AssetSemanticRebuildInput,
+  AssetSemanticSearchHit,
+  AssetSemanticSearchInput,
+  AssetSemanticSearchPage,
+  AssetSemanticStatus,
+  AssetSourceTree,
+  CanvasPatch,
+  CanvasPatchApplyResult,
+  CanvasPatchChange,
+  CanvasPatchPreview,
+  CanvasPatchRecord,
+  CanvasPatchRevertResult,
+  CanvasOperation,
+  CanvasSyncData,
+  CollaborationInvite,
+  CollaborationExecutionPolicySnapshot,
+  CollaborationStatus,
+  NodeRunSummary,
+  RunAttemptSummary,
+  RunDetail,
+  RunEventRecord,
+  RunIntent,
+  RunRecoveryOverview,
+  RunSummary,
+  RunRetentionPolicy,
+  RunRetentionResult,
+  VersionedCanvasData,
+  WorkspaceRole,
+} from '../types/project';
+import type { SubflowDefinition } from '../utils/subflows';
+import {
+  parseCanvasAgentToolResult,
+  type CanvasAgentToolName,
+  type CanvasAgentToolRequest,
+  type CanvasAgentToolResult,
+} from '../utils/canvasAgent.ts';
 
 const BASE = '/api';
 
+export class ApiRequestError extends Error {
+  status: number;
+  data: unknown;
+
+  constructor(message: string, status: number, data: unknown) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = status;
+    this.data = data;
+  }
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const isFormData = typeof FormData !== 'undefined' && init?.body instanceof FormData;
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
     ...init,
+    headers: {
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+      ...(init?.headers || {}),
+    },
   });
   if (!res.ok) {
     let errMsg = `HTTP ${res.status}`;
+    let responseData: unknown = null;
     try {
       const data = await res.json();
+      responseData = data;
       errMsg = data.error || data.message || errMsg;
     } catch {
       /* ignore */
     }
-    throw new Error(errMsg);
+    throw new ApiRequestError(errMsg, res.status, responseData);
   }
   return res.json();
 }
@@ -56,12 +146,589 @@ export async function getCanvasData(id: string): Promise<CanvasData> {
   return res.data;
 }
 
-export async function saveCanvasData(id: string, data: CanvasData, options?: { allowEmpty?: boolean }): Promise<void> {
+export async function saveCanvasData(
+  id: string,
+  data: CanvasData,
+  options?: { allowEmpty?: boolean; baseRevision?: number; actorId?: string; sessionId?: string; clientSeq?: number },
+): Promise<{ revision?: number; updatedAt?: number }> {
   const query = options?.allowEmpty ? '?allowEmpty=1' : '';
-  await request(`${BASE}/canvas/${id}${query}`, {
+  const res = await request<{ success: boolean; data?: { revision?: number; updatedAt?: number } }>(`${BASE}/canvas/${id}${query}`, {
     method: 'PUT',
-    body: JSON.stringify(data),
+    body: JSON.stringify({
+      ...data,
+      ...(options?.baseRevision != null ? { baseRevision: options.baseRevision } : {}),
+      ...(options?.actorId ? { actorId: options.actorId } : {}),
+      ...(options?.sessionId ? { sessionId: options.sessionId } : {}),
+      ...(options?.clientSeq != null ? { clientSeq: options.clientSeq } : {}),
+    }),
   });
+  return res.data || {};
+}
+
+export async function executeCanvasAgentTool<K extends CanvasAgentToolName>(
+  body: CanvasAgentToolRequest<K>,
+  options: { signal?: AbortSignal } = {},
+): Promise<CanvasAgentToolResult<K>> {
+  const serialized = JSON.stringify(body);
+  if (new TextEncoder().encode(serialized).byteLength > 64 * 1024) throw new Error('Agent 工具请求超过 64 KiB');
+  const res = await request<{ success: boolean; data: unknown }>(`${BASE}/canvas-agent/tools`, {
+    method: 'POST',
+    body: serialized,
+    signal: options.signal,
+  });
+  if (res.success !== true) throw new Error('Agent 工具响应失败');
+  return parseCanvasAgentToolResult(res.data, body);
+}
+
+export async function syncCanvasData(id: string, afterRevision = 0): Promise<CanvasSyncData> {
+  const res = await request<{ success: boolean; data: CanvasSyncData }>(
+    `${BASE}/canvas/${encodeURIComponent(id)}/sync?afterRevision=${Math.max(0, Math.trunc(afterRevision))}`,
+  );
+  return res.data;
+}
+
+export async function applyCanvasOperations(
+  id: string,
+  operations: CanvasOperation[],
+  baseRevision: number,
+): Promise<{ document: CanvasData; acknowledgements: Array<{ opId: string; revision: number; duplicate: boolean }> }> {
+  const res = await request<{
+    success: boolean;
+    data: { document: CanvasData; acknowledgements: Array<{ opId: string; revision: number; duplicate: boolean }> };
+  }>(`${BASE}/canvas/${encodeURIComponent(id)}/operations`, {
+    method: 'POST',
+    body: JSON.stringify({ baseRevision, operations }),
+  });
+  return res.data;
+}
+
+type CanvasPatchResponseRecord = Record<string, unknown>;
+
+const CANVAS_PATCH_RESPONSE_OPERATION_LIMIT = 100;
+const CANVAS_PATCH_RESPONSE_AFFECTED_ID_LIMIT = 1000;
+const CANVAS_PATCH_RESPONSE_FIELD_LIMIT = 500;
+const CANVAS_PATCH_RESPONSE_JSON_NODE_LIMIT = 10_000;
+const CANVAS_PATCH_RESPONSE_JSON_STRING_LIMIT = 512 * 1024;
+const CANVAS_PATCH_RESPONSE_DOCUMENT_ENTITY_LIMIT = 100_000;
+const CANVAS_PATCH_RESPONSE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
+const CANVAS_PATCH_RESPONSE_DIAGNOSTIC_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
+const CANVAS_PATCH_RESPONSE_DIGEST_PATTERN = /^[a-f0-9]{64}$/i;
+const CANVAS_PATCH_RESPONSE_CHANGE_TYPES = new Set([
+  'node.add',
+  'node.patch',
+  'node.move',
+  'node.delete',
+  'node.restore',
+  'edge.add',
+  'edge.delete',
+  'edge.restore',
+  'viewport.set',
+]);
+const CANVAS_PATCH_RESPONSE_TARGET_TYPES = new Set(['node', 'edge', 'canvas']);
+const CANVAS_PATCH_PREVIEW_KEYS = new Set([
+  'patchId', 'baseRevision', 'currentRevision', 'previewDigest', 'summary',
+  'diagnosticsResolved', 'affectedNodeIds', 'affectedEdgeIds', 'changes', 'warnings',
+]);
+const CANVAS_PATCH_CHANGE_KEYS = new Set([
+  'operationIndex', 'type', 'targetType', 'targetId', 'fields', 'before', 'after',
+  'relatedNodeIds', 'relatedEdgeIds',
+]);
+const CANVAS_PATCH_APPLY_KEYS = new Set([
+  'patchId', 'status', 'duplicate', 'baseRevision', 'revision', 'document', 'acknowledgements',
+]);
+const CANVAS_PATCH_REVERT_KEYS = new Set([
+  'patchId', 'status', 'duplicate', 'revision', 'document',
+]);
+const CANVAS_PATCH_ACKNOWLEDGEMENT_KEYS = new Set(['opId', 'revision', 'duplicate']);
+const CANVAS_PATCH_RECORD_KEYS = new Set([
+  'patchId', 'summary', 'diagnosticsResolved', 'baseRevision', 'appliedRevision',
+  'revertedRevision', 'actorId', 'status', 'operationCount', 'createdAt',
+  'revertedAt', 'canRevert',
+]);
+
+function invalidCanvasPatchResponse(kind: '预览' | '应用' | '记录' | '撤回'): never {
+  throw new ApiRequestError(`CanvasPatch ${kind}响应无效`, 502, null);
+}
+
+function invalidCanvasPatchRequest(kind: '应用' | '撤回'): never {
+  throw new ApiRequestError(`CanvasPatch ${kind}请求无效`, 400, null);
+}
+
+function canvasPatchResponseRecord(
+  value: unknown,
+  kind: '预览' | '应用' | '记录' | '撤回',
+): CanvasPatchResponseRecord {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) invalidCanvasPatchResponse(kind);
+  return value as CanvasPatchResponseRecord;
+}
+
+function canvasPatchResponseHasOwn(value: CanvasPatchResponseRecord, key: string) {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function assertCanvasPatchResponseKeys(
+  value: CanvasPatchResponseRecord,
+  allowed: ReadonlySet<string>,
+  kind: '预览' | '应用' | '记录' | '撤回',
+) {
+  if (Object.keys(value).some((key) => !allowed.has(key))) invalidCanvasPatchResponse(kind);
+}
+
+function canvasPatchResponseString(
+  value: unknown,
+  maximumLength: number,
+  kind: '预览' | '应用' | '记录' | '撤回',
+  options: { allowEmpty?: boolean; pattern?: RegExp } = {},
+) {
+  if (typeof value !== 'string'
+    || (!options.allowEmpty && value.length === 0)
+    || value.length > maximumLength
+    || value.trim() !== value
+    || value.normalize('NFKC') !== value
+    || /[\u0000-\u001f\u007f]/.test(value)
+    || (options.pattern && !options.pattern.test(value))) {
+    invalidCanvasPatchResponse(kind);
+  }
+  return value;
+}
+
+function canvasPatchResponsePositiveInteger(
+  value: unknown,
+  kind: '预览' | '应用' | '记录' | '撤回',
+) {
+  if (!Number.isSafeInteger(value) || Number(value) < 1) invalidCanvasPatchResponse(kind);
+  return Number(value);
+}
+
+function canvasPatchResponseNonNegativeInteger(
+  value: unknown,
+  kind: '预览' | '应用' | '记录' | '撤回',
+) {
+  if (!Number.isSafeInteger(value) || Number(value) < 0) invalidCanvasPatchResponse(kind);
+  return Number(value);
+}
+
+function canvasPatchResponseStringArray(
+  value: unknown,
+  maximumItems: number,
+  maximumItemLength: number,
+  kind: '预览' | '应用' | '记录' | '撤回',
+  options: { pattern?: RegExp; unique?: boolean } = {},
+) {
+  if (!Array.isArray(value) || value.length > maximumItems) invalidCanvasPatchResponse(kind);
+  const parsed = value.map((item) => canvasPatchResponseString(item, maximumItemLength, kind, {
+    pattern: options.pattern,
+  }));
+  if (options.unique && new Set(parsed).size !== parsed.length) invalidCanvasPatchResponse(kind);
+  return parsed;
+}
+
+interface CanvasPatchResponseJsonBudget {
+  nodes: number;
+  stringCharacters: number;
+}
+
+function assertBoundedCanvasPatchResponseJson(
+  value: unknown,
+  budget: CanvasPatchResponseJsonBudget,
+  depth = 0,
+) {
+  budget.nodes += 1;
+  if (budget.nodes > CANVAS_PATCH_RESPONSE_JSON_NODE_LIMIT || depth > 16) invalidCanvasPatchResponse('预览');
+  if (value === null || typeof value === 'boolean') return;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) invalidCanvasPatchResponse('预览');
+    return;
+  }
+  if (typeof value === 'string') {
+    budget.stringCharacters += value.length;
+    if (value.length > 64 * 1024 || budget.stringCharacters > CANVAS_PATCH_RESPONSE_JSON_STRING_LIMIT) {
+      invalidCanvasPatchResponse('预览');
+    }
+    return;
+  }
+  if (!value || typeof value !== 'object') invalidCanvasPatchResponse('预览');
+  if (Array.isArray(value)) {
+    if (value.length > 1000) invalidCanvasPatchResponse('预览');
+    value.forEach((item) => assertBoundedCanvasPatchResponseJson(item, budget, depth + 1));
+    return;
+  }
+  const record = value as CanvasPatchResponseRecord;
+  const keys = Object.keys(record);
+  if (keys.length > CANVAS_PATCH_RESPONSE_FIELD_LIMIT
+    || keys.some((key) => key === '__proto__' || key === 'prototype' || key === 'constructor')) {
+    invalidCanvasPatchResponse('预览');
+  }
+  keys.forEach((key) => assertBoundedCanvasPatchResponseJson(record[key], budget, depth + 1));
+}
+
+function parseCanvasPatchChange(
+  value: unknown,
+  expectedOperations: readonly CanvasOperation[],
+  budget: CanvasPatchResponseJsonBudget,
+): CanvasPatchChange {
+  const record = canvasPatchResponseRecord(value, '预览');
+  assertCanvasPatchResponseKeys(record, CANVAS_PATCH_CHANGE_KEYS, '预览');
+  for (const key of ['operationIndex', 'type', 'targetType', 'targetId', 'fields', 'before', 'after']) {
+    if (!canvasPatchResponseHasOwn(record, key)) invalidCanvasPatchResponse('预览');
+  }
+  const operationIndex = canvasPatchResponseNonNegativeInteger(record.operationIndex, '预览');
+  if (operationIndex >= expectedOperations.length || operationIndex >= CANVAS_PATCH_RESPONSE_OPERATION_LIMIT) {
+    invalidCanvasPatchResponse('预览');
+  }
+  const type = canvasPatchResponseString(record.type, 40, '预览');
+  if (!CANVAS_PATCH_RESPONSE_CHANGE_TYPES.has(type)) invalidCanvasPatchResponse('预览');
+  if (type !== expectedOperations[operationIndex]?.type) invalidCanvasPatchResponse('预览');
+  const targetType = canvasPatchResponseString(record.targetType, 20, '预览');
+  if (!CANVAS_PATCH_RESPONSE_TARGET_TYPES.has(targetType)) invalidCanvasPatchResponse('预览');
+  const expectedTargetType = type.startsWith('node.')
+    ? 'node'
+    : type.startsWith('edge.')
+      ? 'edge'
+      : 'canvas';
+  if (targetType !== expectedTargetType) invalidCanvasPatchResponse('预览');
+  const targetId = canvasPatchResponseString(record.targetId, 240, '预览');
+  const fields = canvasPatchResponseStringArray(
+    record.fields,
+    CANVAS_PATCH_RESPONSE_FIELD_LIMIT,
+    160,
+    '预览',
+    { unique: true },
+  );
+  assertBoundedCanvasPatchResponseJson(record.before, budget);
+  assertBoundedCanvasPatchResponseJson(record.after, budget);
+  const relatedNodeIds = canvasPatchResponseHasOwn(record, 'relatedNodeIds')
+    ? canvasPatchResponseStringArray(record.relatedNodeIds, CANVAS_PATCH_RESPONSE_AFFECTED_ID_LIMIT, 240, '预览', { unique: true })
+    : undefined;
+  const relatedEdgeIds = canvasPatchResponseHasOwn(record, 'relatedEdgeIds')
+    ? canvasPatchResponseStringArray(record.relatedEdgeIds, CANVAS_PATCH_RESPONSE_AFFECTED_ID_LIMIT, 240, '预览', { unique: true })
+    : undefined;
+  return {
+    operationIndex,
+    type: type as CanvasPatchChange['type'],
+    targetType: targetType as CanvasPatchChange['targetType'],
+    targetId,
+    fields,
+    before: record.before,
+    after: record.after,
+    ...(relatedNodeIds ? { relatedNodeIds } : {}),
+    ...(relatedEdgeIds ? { relatedEdgeIds } : {}),
+  };
+}
+
+function parseCanvasPatchPreviewResponse(value: unknown, expectedPatch: CanvasPatch): CanvasPatchPreview {
+  const record = canvasPatchResponseRecord(value, '预览');
+  assertCanvasPatchResponseKeys(record, CANVAS_PATCH_PREVIEW_KEYS, '预览');
+  for (const key of [
+    'patchId', 'baseRevision', 'currentRevision', 'previewDigest', 'summary',
+    'diagnosticsResolved', 'affectedNodeIds', 'affectedEdgeIds', 'changes',
+  ]) {
+    if (!canvasPatchResponseHasOwn(record, key)) invalidCanvasPatchResponse('预览');
+  }
+  const patchId = canvasPatchResponseString(record.patchId, 160, '预览', {
+    pattern: CANVAS_PATCH_RESPONSE_ID_PATTERN,
+  });
+  const baseRevision = canvasPatchResponsePositiveInteger(record.baseRevision, '预览');
+  const currentRevision = canvasPatchResponsePositiveInteger(record.currentRevision, '预览');
+  if (patchId !== expectedPatch.id
+    || baseRevision !== expectedPatch.baseRevision
+    || currentRevision !== expectedPatch.baseRevision) {
+    invalidCanvasPatchResponse('预览');
+  }
+  const previewDigest = canvasPatchResponseString(record.previewDigest, 64, '预览', {
+    pattern: CANVAS_PATCH_RESPONSE_DIGEST_PATTERN,
+  }).toLowerCase();
+  const summary = canvasPatchResponseString(record.summary, 500, '预览');
+  const diagnosticsResolved = canvasPatchResponseStringArray(
+    record.diagnosticsResolved,
+    CANVAS_PATCH_RESPONSE_OPERATION_LIMIT,
+    160,
+    '预览',
+    { pattern: CANVAS_PATCH_RESPONSE_DIAGNOSTIC_PATTERN, unique: true },
+  );
+  const affectedNodeIds = canvasPatchResponseStringArray(
+    record.affectedNodeIds,
+    CANVAS_PATCH_RESPONSE_AFFECTED_ID_LIMIT,
+    240,
+    '预览',
+    { unique: true },
+  );
+  const affectedEdgeIds = canvasPatchResponseStringArray(
+    record.affectedEdgeIds,
+    CANVAS_PATCH_RESPONSE_AFFECTED_ID_LIMIT,
+    240,
+    '预览',
+    { unique: true },
+  );
+  if (!Array.isArray(record.changes)
+    || record.changes.length > CANVAS_PATCH_RESPONSE_OPERATION_LIMIT
+    || record.changes.length > expectedPatch.operations.length) {
+    invalidCanvasPatchResponse('预览');
+  }
+  const budget = { nodes: 0, stringCharacters: 0 };
+  const changes = record.changes.map((change) => parseCanvasPatchChange(change, expectedPatch.operations, budget));
+  if (new Set(changes.map((change) => change.operationIndex)).size !== changes.length) invalidCanvasPatchResponse('预览');
+  const warnings = canvasPatchResponseHasOwn(record, 'warnings')
+    ? canvasPatchResponseStringArray(record.warnings, CANVAS_PATCH_RESPONSE_OPERATION_LIMIT, 500, '预览')
+    : undefined;
+  return {
+    patchId,
+    baseRevision,
+    currentRevision,
+    previewDigest,
+    summary,
+    diagnosticsResolved,
+    affectedNodeIds,
+    affectedEdgeIds,
+    changes,
+    ...(warnings ? { warnings } : {}),
+  };
+}
+
+function parseCanvasPatchDocument(
+  value: unknown,
+  expectedCanvasId: string,
+  expectedRevision: number,
+  kind: '应用' | '撤回',
+): VersionedCanvasData {
+  const record = canvasPatchResponseRecord(value, kind);
+  if (record.schema !== 't8-canvas-document'
+    || record.schemaVersion !== 2
+    || canvasPatchResponseString(record.canvasId, 240, kind) !== expectedCanvasId
+    || canvasPatchResponsePositiveInteger(record.revision, kind) !== expectedRevision) {
+    invalidCanvasPatchResponse(kind);
+  }
+  canvasPatchResponseString(record.projectId, 240, kind);
+  canvasPatchResponseString(record.entityUid, 240, kind);
+  if (!Array.isArray(record.nodes)
+    || record.nodes.length > CANVAS_PATCH_RESPONSE_DOCUMENT_ENTITY_LIMIT
+    || record.nodes.some((node) => !node || typeof node !== 'object' || Array.isArray(node))
+    || !Array.isArray(record.edges)
+    || record.edges.length > CANVAS_PATCH_RESPONSE_DOCUMENT_ENTITY_LIMIT
+    || record.edges.some((edge) => !edge || typeof edge !== 'object' || Array.isArray(edge))) {
+    invalidCanvasPatchResponse(kind);
+  }
+  const viewport = canvasPatchResponseRecord(record.viewport, kind);
+  if (typeof viewport.x !== 'number' || !Number.isFinite(viewport.x)
+    || typeof viewport.y !== 'number' || !Number.isFinite(viewport.y)
+    || typeof viewport.zoom !== 'number' || !Number.isFinite(viewport.zoom) || viewport.zoom <= 0) {
+    invalidCanvasPatchResponse(kind);
+  }
+  if (!Array.isArray(record.subflowInstances)
+    || record.subflowInstances.length > CANVAS_PATCH_RESPONSE_DOCUMENT_ENTITY_LIMIT
+    || record.subflowInstances.some((instance) => !instance || typeof instance !== 'object' || Array.isArray(instance))) {
+    invalidCanvasPatchResponse(kind);
+  }
+  const tombstones = canvasPatchResponseRecord(record.tombstones, kind);
+  const nodeTombstones = canvasPatchResponseRecord(tombstones.nodes, kind);
+  const edgeTombstones = canvasPatchResponseRecord(tombstones.edges, kind);
+  if (Object.keys(nodeTombstones).length > CANVAS_PATCH_RESPONSE_DOCUMENT_ENTITY_LIMIT
+    || Object.keys(edgeTombstones).length > CANVAS_PATCH_RESPONSE_DOCUMENT_ENTITY_LIMIT) {
+    invalidCanvasPatchResponse(kind);
+  }
+  canvasPatchResponsePositiveInteger(record.updatedAt, kind);
+  if (canvasPatchResponseHasOwn(record, 'nextNodeSerialId')) {
+    canvasPatchResponsePositiveInteger(record.nextNodeSerialId, kind);
+  }
+  return record as unknown as VersionedCanvasData;
+}
+
+function parseCanvasPatchApplyResponse(
+  value: unknown,
+  expectedCanvasId: string,
+  expectedPatch: CanvasPatch,
+): CanvasPatchApplyResult {
+  const record = canvasPatchResponseRecord(value, '应用');
+  assertCanvasPatchResponseKeys(record, CANVAS_PATCH_APPLY_KEYS, '应用');
+  for (const key of ['patchId', 'status', 'duplicate', 'baseRevision', 'revision', 'document']) {
+    if (!canvasPatchResponseHasOwn(record, key)) invalidCanvasPatchResponse('应用');
+  }
+  const patchId = canvasPatchResponseString(record.patchId, 160, '应用', {
+    pattern: CANVAS_PATCH_RESPONSE_ID_PATTERN,
+  });
+  const baseRevision = canvasPatchResponsePositiveInteger(record.baseRevision, '应用');
+  const revision = canvasPatchResponsePositiveInteger(record.revision, '应用');
+  if (patchId !== expectedPatch.id
+    || record.status !== 'applied'
+    || typeof record.duplicate !== 'boolean'
+    || baseRevision !== expectedPatch.baseRevision
+    || revision < baseRevision) {
+    invalidCanvasPatchResponse('应用');
+  }
+  const document = parseCanvasPatchDocument(record.document, expectedCanvasId, revision, '应用');
+  let acknowledgements: CanvasPatchApplyResult['acknowledgements'];
+  if (canvasPatchResponseHasOwn(record, 'acknowledgements')) {
+    if (!Array.isArray(record.acknowledgements)
+      || record.acknowledgements.length > CANVAS_PATCH_RESPONSE_OPERATION_LIMIT) {
+      invalidCanvasPatchResponse('应用');
+    }
+    acknowledgements = record.acknowledgements.map((item) => {
+      const acknowledgement = canvasPatchResponseRecord(item, '应用');
+      assertCanvasPatchResponseKeys(acknowledgement, CANVAS_PATCH_ACKNOWLEDGEMENT_KEYS, '应用');
+      if (!canvasPatchResponseHasOwn(acknowledgement, 'opId')
+        || !canvasPatchResponseHasOwn(acknowledgement, 'revision')
+        || typeof acknowledgement.duplicate !== 'boolean') {
+        invalidCanvasPatchResponse('应用');
+      }
+      const acknowledgementRevision = canvasPatchResponsePositiveInteger(acknowledgement.revision, '应用');
+      if (acknowledgementRevision > revision) invalidCanvasPatchResponse('应用');
+      return {
+        opId: canvasPatchResponseString(acknowledgement.opId, 240, '应用'),
+        revision: acknowledgementRevision,
+        duplicate: acknowledgement.duplicate,
+      };
+    });
+  }
+  return {
+    patchId,
+    status: 'applied',
+    duplicate: record.duplicate,
+    baseRevision,
+    revision,
+    document,
+    ...(acknowledgements ? { acknowledgements } : {}),
+  };
+}
+
+function parseCanvasPatchRecord(value: unknown): CanvasPatchRecord {
+  const record = canvasPatchResponseRecord(value, '记录');
+  assertCanvasPatchResponseKeys(record, CANVAS_PATCH_RECORD_KEYS, '记录');
+  for (const key of CANVAS_PATCH_RECORD_KEYS) {
+    if (!canvasPatchResponseHasOwn(record, key)) invalidCanvasPatchResponse('记录');
+  }
+  const patchId = canvasPatchResponseString(record.patchId, 160, '记录', {
+    pattern: CANVAS_PATCH_RESPONSE_ID_PATTERN,
+  });
+  const summary = canvasPatchResponseString(record.summary, 500, '记录');
+  const diagnosticsResolved = canvasPatchResponseStringArray(
+    record.diagnosticsResolved,
+    CANVAS_PATCH_RESPONSE_OPERATION_LIMIT,
+    160,
+    '记录',
+    { pattern: CANVAS_PATCH_RESPONSE_DIAGNOSTIC_PATTERN, unique: true },
+  );
+  const baseRevision = canvasPatchResponsePositiveInteger(record.baseRevision, '记录');
+  const appliedRevision = canvasPatchResponsePositiveInteger(record.appliedRevision, '记录');
+  const operationCount = canvasPatchResponsePositiveInteger(record.operationCount, '记录');
+  if (appliedRevision < baseRevision || operationCount > CANVAS_PATCH_RESPONSE_OPERATION_LIMIT) {
+    invalidCanvasPatchResponse('记录');
+  }
+  const actorId = canvasPatchResponseString(record.actorId, 240, '记录');
+  if (record.status !== 'applied' && record.status !== 'reverted') invalidCanvasPatchResponse('记录');
+  if (typeof record.canRevert !== 'boolean') invalidCanvasPatchResponse('记录');
+  const createdAt = canvasPatchResponsePositiveInteger(record.createdAt, '记录');
+  const revertedRevision = record.revertedRevision === null
+    ? null
+    : canvasPatchResponsePositiveInteger(record.revertedRevision, '记录');
+  const revertedAt = record.revertedAt === null
+    ? null
+    : canvasPatchResponsePositiveInteger(record.revertedAt, '记录');
+  if (record.status === 'applied' && (revertedRevision !== null || revertedAt !== null)) {
+    invalidCanvasPatchResponse('记录');
+  }
+  if (record.status === 'reverted'
+    && (revertedRevision === null || revertedRevision < appliedRevision || revertedAt === null)) {
+    invalidCanvasPatchResponse('记录');
+  }
+  return {
+    patchId,
+    summary,
+    diagnosticsResolved,
+    baseRevision,
+    appliedRevision,
+    revertedRevision,
+    actorId,
+    status: record.status,
+    operationCount,
+    createdAt,
+    revertedAt,
+    canRevert: record.canRevert,
+  };
+}
+
+function parseCanvasPatchRevertResponse(
+  value: unknown,
+  expectedCanvasId: string,
+  expectedPatchId: string,
+): CanvasPatchRevertResult {
+  const record = canvasPatchResponseRecord(value, '撤回');
+  assertCanvasPatchResponseKeys(record, CANVAS_PATCH_REVERT_KEYS, '撤回');
+  for (const key of ['patchId', 'status', 'revision', 'document']) {
+    if (!canvasPatchResponseHasOwn(record, key)) invalidCanvasPatchResponse('撤回');
+  }
+  const patchId = canvasPatchResponseString(record.patchId, 160, '撤回', {
+    pattern: CANVAS_PATCH_RESPONSE_ID_PATTERN,
+  });
+  const revision = canvasPatchResponsePositiveInteger(record.revision, '撤回');
+  if (patchId !== expectedPatchId
+    || record.status !== 'reverted'
+    || (canvasPatchResponseHasOwn(record, 'duplicate') && typeof record.duplicate !== 'boolean')) {
+    invalidCanvasPatchResponse('撤回');
+  }
+  const document = parseCanvasPatchDocument(record.document, expectedCanvasId, revision, '撤回');
+  return {
+    patchId,
+    status: 'reverted',
+    ...(canvasPatchResponseHasOwn(record, 'duplicate') ? { duplicate: record.duplicate as boolean } : {}),
+    revision,
+    document,
+  };
+}
+
+export async function previewCanvasPatch(id: string, patch: CanvasPatch): Promise<CanvasPatchPreview> {
+  const res = await request<{ success: boolean; data: CanvasPatchPreview }>(
+    `${BASE}/canvas/${encodeURIComponent(id)}/patches/preview`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ patch }),
+    },
+  );
+  return parseCanvasPatchPreviewResponse(res.data, patch);
+}
+
+export async function applyCanvasPatch(
+  id: string,
+  patch: CanvasPatch,
+  previewDigest: string,
+): Promise<CanvasPatchApplyResult> {
+  if (typeof previewDigest !== 'string' || !CANVAS_PATCH_RESPONSE_DIGEST_PATTERN.test(previewDigest)) {
+    invalidCanvasPatchRequest('应用');
+  }
+  const res = await request<{ success: boolean; data: CanvasPatchApplyResult }>(
+    `${BASE}/canvas/${encodeURIComponent(id)}/patches`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ patch, previewDigest, confirmed: true }),
+    },
+  );
+  return parseCanvasPatchApplyResponse(res.data, id, patch);
+}
+
+export async function listCanvasPatches(id: string, limit = 50): Promise<CanvasPatchRecord[]> {
+  const safeLimit = Math.max(1, Math.min(100, Math.trunc(Number(limit) || 50)));
+  const res = await request<{ success: boolean; data: CanvasPatchRecord[] }>(
+    `${BASE}/canvas/${encodeURIComponent(id)}/patches?limit=${safeLimit}`,
+  );
+  if (!Array.isArray(res.data) || res.data.length > safeLimit) invalidCanvasPatchResponse('记录');
+  const records = res.data.map((record) => parseCanvasPatchRecord(record));
+  if (new Set(records.map((record) => record.patchId)).size !== records.length) invalidCanvasPatchResponse('记录');
+  return records;
+}
+
+export async function revertCanvasPatch(
+  id: string,
+  patchId: string,
+  baseRevision: number,
+): Promise<CanvasPatchRevertResult> {
+  if (!Number.isSafeInteger(baseRevision) || baseRevision < 1) invalidCanvasPatchRequest('撤回');
+  const res = await request<{ success: boolean; data: CanvasPatchRevertResult }>(
+    `${BASE}/canvas/${encodeURIComponent(id)}/patches/${encodeURIComponent(patchId)}/revert`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ baseRevision }),
+    },
+  );
+  return parseCanvasPatchRevertResponse(res.data, id, patchId);
 }
 
 export async function autoSaveCanvasData(
@@ -94,8 +761,10 @@ export async function renameCanvas(id: string, name: string): Promise<CanvasList
 }
 
 // ========== 设置(三套通用 Key + 分类 Key) ==========
-export async function getSettings(): Promise<ApiSettings> {
-  const res = await request<{ success: boolean; data: ApiSettings }>(`${BASE}/settings`);
+export async function getSettings(options: { signal?: AbortSignal } = {}): Promise<ApiSettings> {
+  const res = await request<{ success: boolean; data: ApiSettings }>(`${BASE}/settings`, {
+    signal: options.signal,
+  });
   return res.data;
 }
 
@@ -110,6 +779,1329 @@ export async function updateSettings(patch: Partial<ApiSettings>): Promise<void>
     method: 'POST',
     body: JSON.stringify(patch),
   });
+}
+
+// ========== 运行中心 ==========
+export async function listProjectRuns(filters: { projectId?: string; canvasId?: string; status?: string; initiatorId?: string; provider?: string; model?: string; limit?: number } = {}, options: { signal?: AbortSignal } = {}): Promise<RunSummary[]> {
+  const query = new URLSearchParams();
+  if (filters.projectId) query.set('projectId', filters.projectId);
+  if (filters.canvasId) query.set('canvasId', filters.canvasId);
+  if (filters.status) query.set('status', filters.status);
+  if (filters.initiatorId) query.set('initiatorId', filters.initiatorId);
+  if (filters.provider) query.set('provider', filters.provider);
+  if (filters.model) query.set('model', filters.model);
+  if (filters.limit) query.set('limit', String(filters.limit));
+  const suffix = query.size ? `?${query.toString()}` : '';
+  const res = await request<{ success: boolean; data: RunSummary[] }>(`${BASE}/project-runs${suffix}`, { signal: options.signal });
+  return res.data || [];
+}
+
+export async function createProjectRun(input: {
+  canvasId: string;
+  canvasRevision?: number;
+  initiatorId?: string;
+  status?: RunSummary['status'];
+  summary?: Record<string, unknown>;
+  parentRunId?: string;
+}): Promise<RunSummary> {
+  const res = await request<{ success: boolean; data: RunSummary }>(`${BASE}/project-runs`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return res.data;
+}
+
+export async function updateProjectRun(runId: string, patch: Partial<Pick<RunSummary, 'status' | 'startedAt' | 'finishedAt' | 'summary'>>): Promise<RunSummary> {
+  const res = await request<{ success: boolean; data: RunSummary }>(`${BASE}/project-runs/${encodeURIComponent(runId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+  return res.data;
+}
+
+export async function getProjectRun(runId: string): Promise<RunDetail> {
+  const res = await request<{ success: boolean; data: RunDetail }>(
+    `${BASE}/project-runs/${encodeURIComponent(runId)}`,
+  );
+  return res.data;
+}
+
+export async function getProjectRunRetention(projectId?: string): Promise<RunRetentionPolicy> {
+  const suffix = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+  const res = await request<{ success: boolean; data: RunRetentionPolicy }>(`${BASE}/project-runs/retention${suffix}`);
+  return res.data;
+}
+
+export async function getProjectRunRecovery(): Promise<RunRecoveryOverview> {
+  const res = await request<{ success: boolean; data: RunRecoveryOverview }>(`${BASE}/project-runs/recovery`);
+  return res.data;
+}
+
+export async function updateProjectRunRetention(patch: Partial<RunRetentionPolicy> & { projectId?: string }): Promise<RunRetentionPolicy> {
+  const res = await request<{ success: boolean; data: RunRetentionPolicy }>(`${BASE}/project-runs/retention`, {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  });
+  return res.data;
+}
+
+export async function pruneProjectRuns(projectId?: string): Promise<RunRetentionResult> {
+  const res = await request<{ success: boolean; data: RunRetentionResult }>(`${BASE}/project-runs/retention/prune`, {
+    method: 'POST',
+    body: JSON.stringify({ projectId }),
+  });
+  return res.data;
+}
+
+// ========== 智能资产索引 ==========
+export async function listProjectAssets(filters: {
+  projectId?: string;
+  kind?: string;
+  query?: string;
+  limit?: number;
+  offset?: number;
+  tag?: string;
+  collectionId?: string;
+  storageMode?: AssetRef['storageMode'];
+  availability?: AssetRef['availability'];
+  source?: string;
+  sort?: 'created-desc' | 'created-asc' | 'updated-desc' | 'updated-asc' | 'name-asc' | 'name-desc' | 'size-desc' | 'size-asc';
+} = {}, options: { signal?: AbortSignal } = {}): Promise<AssetCatalogPage> {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') params.set(key, String(value));
+  });
+  const suffix = params.size ? `?${params.toString()}` : '';
+  const res = await request<{
+    success: boolean;
+    data: AssetRef[];
+    meta?: {
+      total?: number;
+      offset?: number;
+      catalogRevision?: AssetRevision;
+      tags?: Array<string | { tag?: string; count?: number }>;
+    };
+  }>(`${BASE}/project-assets${suffix}`, { signal: options.signal });
+  const tags = (res.meta?.tags || []).map((entry) => typeof entry === 'string' ? entry : String(entry?.tag || '')).filter(Boolean);
+  return {
+    items: res.data || [],
+    total: Number(res.meta?.total || 0),
+    offset: Number(res.meta?.offset || 0),
+    catalogRevision: res.meta?.catalogRevision ?? 0,
+    tags,
+  };
+}
+
+export async function scanProjectAssets(projectId?: string): Promise<AssetIndexResult> {
+  const res = await request<{ success: boolean; data: AssetIndexResult }>(`${BASE}/project-assets/scan`, {
+    method: 'POST',
+    body: JSON.stringify({ projectId }),
+  });
+  return res.data;
+}
+
+export async function getProjectAssetPipelineStatus(options: { signal?: AbortSignal } = {}): Promise<AssetPipelineStatus> {
+  const res = await request<{ success: boolean; data: AssetPipelineStatus }>(`${BASE}/project-assets/status`, { signal: options.signal });
+  return res.data;
+}
+
+export async function retryProjectAssetPreview(assetId: string): Promise<unknown> {
+  const res = await request<{ success: boolean; data: unknown }>(
+    `${BASE}/project-assets/${encodeURIComponent(assetId)}/preview/retry`,
+    { method: 'POST' },
+  );
+  return res.data;
+}
+
+export async function linkProjectAssets(input: {
+  paths: string[];
+  projectId?: string;
+  canvasId?: string;
+  sourceNodeId?: string;
+  sourceNodeType?: string;
+}): Promise<AssetRef[]> {
+  const res = await request<{ success: boolean; data: AssetRef[] }>(`${BASE}/project-assets/link`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return res.data || [];
+}
+
+export async function getProjectAsset(assetId: string, options: { signal?: AbortSignal } = {}): Promise<AssetRef> {
+  const res = await request<{ success: boolean; data: AssetRef }>(`${BASE}/project-assets/${encodeURIComponent(assetId)}`, { signal: options.signal });
+  return res.data;
+}
+
+export async function listAssetCollections(projectId?: string): Promise<AssetCollection[]> {
+  const suffix = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+  const res = await request<{ success: boolean; data: AssetCollection[] }>(`${BASE}/project-assets/collections${suffix}`);
+  return res.data || [];
+}
+
+export async function createAssetCollection(input: { projectId?: string; name: string; description?: string }): Promise<AssetCollection> {
+  const res = await request<{ success: boolean; data: AssetCollection }>(`${BASE}/project-assets/collections`, { method: 'POST', body: JSON.stringify(input) });
+  return res.data;
+}
+
+export async function updateAssetCollection(
+  collectionId: string,
+  patch: { projectId?: string; name?: string; description?: string; expectedRevision: AssetRevision },
+): Promise<AssetCollection> {
+  const res = await request<{ success: boolean; data: AssetCollection }>(
+    `${BASE}/project-assets/collections/${encodeURIComponent(collectionId)}`,
+    { method: 'PATCH', body: JSON.stringify(patch) },
+  );
+  return res.data;
+}
+
+export async function deleteAssetCollection(collectionId: string, expectedRevision: AssetRevision, projectId?: string): Promise<void> {
+  await request(`${BASE}/project-assets/collections/${encodeURIComponent(collectionId)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ expectedRevision, projectId }),
+  });
+}
+
+export async function setAssetCollectionMembers(
+  collectionId: string,
+  assetIds: string[],
+  expectedRevision: AssetRevision,
+): Promise<AssetRef[]> {
+  const res = await request<{ success: boolean; data: AssetRef[] }>(`${BASE}/project-assets/collections/${encodeURIComponent(collectionId)}/members`, {
+    method: 'PUT',
+    body: JSON.stringify({ assetIds, expectedRevision }),
+  });
+  return res.data || [];
+}
+
+export async function addAssetToCollection(collectionId: string, assetId: string, expectedRevision: AssetRevision): Promise<AssetRef> {
+  const res = await request<{ success: boolean; data: AssetRef }>(`${BASE}/project-assets/collections/${encodeURIComponent(collectionId)}/members/${encodeURIComponent(assetId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ expectedRevision }),
+  });
+  return res.data;
+}
+
+export async function removeAssetFromCollection(collectionId: string, assetId: string, expectedRevision: AssetRevision): Promise<AssetRef> {
+  const res = await request<{ success: boolean; data: AssetRef }>(`${BASE}/project-assets/collections/${encodeURIComponent(collectionId)}/members/${encodeURIComponent(assetId)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ expectedRevision }),
+  });
+  return res.data;
+}
+
+export async function setProjectAssetTags(assetId: string, tags: string[], expectedRevision: AssetRevision): Promise<AssetRef> {
+  const res = await request<{ success: boolean; data: AssetRef }>(`${BASE}/project-assets/${encodeURIComponent(assetId)}/tags`, {
+    method: 'PUT',
+    body: JSON.stringify({ tags, expectedRevision }),
+  });
+  return res.data;
+}
+
+type AssetBatchWireResult = {
+  idempotent?: boolean;
+  selectionMode?: string;
+  affectedCount?: number;
+  assetIds?: string[];
+  organizationRevisions?: Record<string, AssetRevision>;
+  catalogRevision?: AssetRevision;
+};
+
+function assetBatchWireSelection(target: AssetBatchTarget) {
+  if (target.mode === 'ids') {
+    return { selection: { assetIds: target.assetIds }, expectedRevisions: target.expectedRevisions };
+  }
+  return {
+    selection: {
+      query: { ...target.query },
+      catalogRevision: target.catalogRevision,
+      exclusions: target.exclusions,
+    },
+  };
+}
+
+function rolePermissions(role: 'owner' | 'editor' | 'viewer'): string[] {
+  if (role === 'owner') return ['view', 'preview', 'original', 'organize', 'manage_acl'];
+  if (role === 'editor') return ['view', 'preview', 'original', 'organize'];
+  return ['view', 'preview'];
+}
+
+function assetBatchOperations(mutations: AssetBatchMutationSet): Array<Record<string, unknown>> {
+  const operations: Array<Record<string, unknown>> = [];
+  if (mutations.tags) operations.push({ type: `tags.${mutations.tags.mode}`, tags: mutations.tags.values });
+  if (mutations.collections) {
+    if (mutations.collections.mode === 'move') {
+      const fromCollectionIds = [...new Set(mutations.collections.fromCollectionIds.map((value) => String(value || '').trim()).filter(Boolean))];
+      const toCollectionId = String(mutations.collections.toCollectionId || '').trim();
+      if (!fromCollectionIds.length || !toCollectionId) throw new Error('移动集合必须同时指定来源集合和目标集合');
+      if (fromCollectionIds.includes(toCollectionId)) throw new Error('移动集合的来源和目标不能相同');
+      operations.push({
+        type: 'collection.move',
+        fromCollectionIds,
+        toCollectionId,
+      });
+    } else {
+      operations.push({
+        type: `collection.${mutations.collections.mode}`,
+        collectionIds: mutations.collections.values,
+        collectionId: mutations.collections.values[0],
+      });
+    }
+  }
+  if (mutations.access) {
+    operations.push({
+      type: 'access.replace',
+      scope: mutations.access.visibility,
+      grants: mutations.access.grants.map((grant) => ({
+        principalType: grant.principalType,
+        principalId: grant.principalId,
+        permissions: rolePermissions(grant.role),
+      })),
+    });
+  }
+  return operations;
+}
+
+export async function applyProjectAssetBatch(input: {
+  projectId?: string;
+  target: AssetBatchTarget;
+  mutations: AssetBatchMutationSet;
+  idempotencyKey: string;
+}): Promise<AssetBatchResult> {
+  const operations = assetBatchOperations(input.mutations);
+  if (!operations.length) throw new Error('批量操作不能为空');
+  if (operations.length !== 1) throw new Error('每次批量请求只能提交一种操作，以保证筛选选集在单一事务内保持不变');
+  const wireTarget = assetBatchWireSelection(input.target);
+  const res = await request<{ success: boolean; data: AssetBatchWireResult }>(`${BASE}/project-assets/batch`, {
+    method: 'POST',
+    body: JSON.stringify({
+      projectId: input.projectId,
+      ...wireTarget,
+      idempotencyKey: input.idempotencyKey,
+      operation: operations[0],
+    }),
+  });
+  return {
+    idempotent: Boolean(res.data?.idempotent),
+    affected: Number(res.data?.affectedCount || 0),
+    assetIds: res.data?.assetIds || [],
+    organizationRevisions: res.data?.organizationRevisions || {},
+    catalogRevision: res.data?.catalogRevision ?? (input.target.mode === 'query' ? input.target.catalogRevision : 0),
+  };
+}
+
+function normalizeDuplicateCandidate(raw: Record<string, unknown>): AssetDuplicateCandidate {
+  const asset = (raw.asset || {}) as AssetRef;
+  const evidence = raw.evidence && typeof raw.evidence === 'object' && !Array.isArray(raw.evidence) ? raw.evidence as Record<string, unknown> : {};
+  const rawFrames = Array.isArray(raw.evidence)
+    ? raw.evidence
+    : Array.isArray(evidence.frameMatches)
+    ? evidence.frameMatches
+    : Array.isArray(evidence.matches)
+      ? evidence.matches
+      : evidence.sourceFrameIndex != null || evidence.targetFrameIndex != null ? [evidence] : [];
+  const frameMatches = rawFrames.slice(0, 12).map((entry, index) => {
+    const frame = entry && typeof entry === 'object' ? entry as Record<string, unknown> : {};
+    return {
+      sourceIndex: Number(frame.sourceIndex ?? frame.sourceFrameIndex ?? frame.leftIndex ?? index),
+      targetIndex: Number(frame.targetIndex ?? frame.targetFrameIndex ?? frame.rightIndex ?? index),
+      sourceTime: frame.sourceTime != null
+        ? Number(frame.sourceTime)
+        : frame.sourceTimestampMs == null ? undefined : Number(frame.sourceTimestampMs) / 1000,
+      targetTime: frame.targetTime != null
+        ? Number(frame.targetTime)
+        : frame.targetTimestampMs == null ? undefined : Number(frame.targetTimestampMs) / 1000,
+      distance: Number(frame.distance ?? raw.distance ?? 0),
+      algorithm: String(frame.algorithm || raw.algorithm || ''),
+    };
+  });
+  const kind: AssetDuplicateKind = raw.type === 'exact' || raw.match === 'exact' ? 'exact' : 'near';
+  return {
+    id: String(raw.id || `${kind}:${asset.id}`),
+    asset,
+    kind,
+    algorithm: String(raw.algorithm || evidence.algorithm || (kind === 'exact' ? 'sha256' : 'unknown')),
+    distance: Number(raw.distance || 0),
+    frameMatches,
+    decision: raw.decision === 'confirmed' || raw.decision === 'dismissed' ? raw.decision : 'pending',
+    revision: (raw.decisionRevision ?? raw.revision) as AssetRevision | undefined,
+    updatedAt: raw.updatedAt == null ? undefined : Number(raw.updatedAt),
+    confidence: raw.confidence === 'low' || raw.confidence === 'medium' || raw.confidence === 'high' ? raw.confidence : undefined,
+    evidenceCount: raw.evidenceCount == null ? undefined : Number(raw.evidenceCount),
+    coverage: raw.coverage == null ? undefined : Number(raw.coverage),
+    aggregateDistance: raw.aggregateDistance == null ? undefined : Number(raw.aggregateDistance),
+  };
+}
+
+export async function listProjectAssetDuplicates(
+  assetId: string,
+  options: { mode?: 'all' | AssetDuplicateKind; maxDistance?: number; limit?: number; cursor?: string; signal?: AbortSignal } = {},
+): Promise<AssetDuplicatePage> {
+  const params = new URLSearchParams({
+    mode: options.mode || 'all',
+    maxDistance: String(Math.max(0, Math.min(8, Math.trunc(options.maxDistance ?? 8)))),
+    limit: String(Math.max(1, Math.min(100, Math.trunc(options.limit ?? 50)))),
+  });
+  if (options.cursor) params.set('cursor', options.cursor);
+  const res = await request<{
+    success: boolean;
+    data: Array<Record<string, unknown>>;
+    meta?: { nextCursor?: string | null; hasMore?: boolean };
+  }>(`${BASE}/project-assets/${encodeURIComponent(assetId)}/duplicates?${params}`, { signal: options.signal });
+  return {
+    items: (res.data || []).map(normalizeDuplicateCandidate),
+    cursor: res.meta?.nextCursor || null,
+    hasMore: Boolean(res.meta?.hasMore),
+    limit: Number(params.get('limit')),
+  };
+}
+
+export async function decideProjectAssetDuplicate(
+  candidateId: string,
+  decision: AssetDuplicateDecision,
+  expectedRevision: AssetRevision = 0,
+  projectId?: string,
+): Promise<Pick<AssetDuplicateCandidate, 'id' | 'decision' | 'revision' | 'updatedAt'>> {
+  const res = await request<{ success: boolean; data: Record<string, unknown> }>(
+    `${BASE}/project-assets/duplicate-candidates/${encodeURIComponent(candidateId)}/decision`,
+    { method: 'PUT', body: JSON.stringify({ decision, expectedRevision, projectId }) },
+  );
+  const data = res.data || {};
+  return {
+    id: String(data.id || candidateId),
+    decision: data.decision === 'confirmed' || data.decision === 'dismissed' ? data.decision : 'pending',
+    revision: (data.decisionRevision ?? data.revision) as AssetRevision | undefined,
+    updatedAt: data.updatedAt == null ? undefined : Number(data.updatedAt),
+  };
+}
+
+function normalizeExactDuplicateGroup(raw: Record<string, unknown>): AssetExactDuplicateGroup {
+  return {
+    id: String(raw.id || ''),
+    kind: 'exact',
+    contentHash: String(raw.contentHash || ''),
+    memberCount: Math.max(0, Number(raw.memberCount || 0)),
+    members: Array.isArray(raw.members) ? raw.members.slice(0, 20) as AssetRef[] : [],
+    membersTruncated: Boolean(raw.membersTruncated),
+  };
+}
+
+export async function listProjectAssetDuplicateGroups(options: {
+  projectId?: string;
+  limit?: number;
+  cursor?: string;
+  signal?: AbortSignal;
+} = {}): Promise<AssetExactDuplicateGroupPage> {
+  const params = new URLSearchParams({ limit: String(Math.max(1, Math.min(100, Math.trunc(options.limit ?? 25)))) });
+  if (options.projectId) params.set('projectId', options.projectId);
+  if (options.cursor) params.set('cursor', options.cursor);
+  const res = await request<{
+    success: boolean;
+    data: Array<Record<string, unknown>>;
+    meta?: { nextCursor?: string | null; hasMore?: boolean };
+  }>(`${BASE}/project-assets/duplicate-groups?${params}`, { signal: options.signal });
+  return {
+    items: (res.data || []).map(normalizeExactDuplicateGroup),
+    cursor: res.meta?.nextCursor || null,
+    hasMore: Boolean(res.meta?.hasMore),
+  };
+}
+
+export async function listProjectAssetDuplicateGroupMembers(
+  groupId: string,
+  options: { projectId?: string; limit?: number; cursor?: string; signal?: AbortSignal } = {},
+): Promise<{ items: AssetRef[]; cursor: string | null; hasMore: boolean }> {
+  const params = new URLSearchParams({ limit: String(Math.max(1, Math.min(200, Math.trunc(options.limit ?? 100)))) });
+  if (options.projectId) params.set('projectId', options.projectId);
+  if (options.cursor) params.set('cursor', options.cursor);
+  const res = await request<{
+    success: boolean;
+    data: AssetRef[] | { members?: AssetRef[] };
+    meta?: { nextCursor?: string | null; hasMore?: boolean };
+  }>(`${BASE}/project-assets/duplicate-groups/${encodeURIComponent(groupId)}?${params}`, { signal: options.signal });
+  return {
+    items: Array.isArray(res.data) ? res.data : res.data?.members || [],
+    cursor: res.meta?.nextCursor || null,
+    hasMore: Boolean(res.meta?.hasMore),
+  };
+}
+
+function reachableAssetIds(start: string, adjacency: Map<string, string[]>): Set<string> {
+  const visited = new Set<string>([start]);
+  const queue = [start];
+  while (queue.length) {
+    const current = queue.shift()!;
+    (adjacency.get(current) || []).forEach((next) => {
+      if (visited.has(next)) return;
+      visited.add(next);
+      queue.push(next);
+    });
+  }
+  return visited;
+}
+
+export async function getProjectAssetSourceTree(
+  assetId: string,
+  options: { direction?: 'ancestors' | 'descendants' | 'both'; maxDepth?: number; maxNodes?: number; cursor?: string; signal?: AbortSignal } = {},
+): Promise<AssetSourceTree> {
+  const params = new URLSearchParams({
+    direction: options.direction || 'both',
+    maxDepth: String(Math.max(1, Math.min(16, Math.trunc(options.maxDepth ?? 8)))),
+    maxNodes: String(Math.max(1, Math.min(120, Math.trunc(options.maxNodes ?? 120)))),
+  });
+  if (options.cursor) params.set('cursor', options.cursor);
+  const res = await request<{ success: boolean; data: Record<string, unknown> }>(
+    `${BASE}/project-assets/${encodeURIComponent(assetId)}/source-tree?${params}`,
+    { signal: options.signal },
+  );
+  const data = res.data || {};
+  const rootAssetId = String(data.rootAssetId || assetId);
+  const rawEdges = Array.isArray(data.edges) ? data.edges as Array<Record<string, unknown>> : [];
+  const forward = new Map<string, string[]>();
+  const reverse = new Map<string, string[]>();
+  rawEdges.forEach((edge) => {
+    const source = String(edge.sourceAssetId || '');
+    const target = String(edge.targetAssetId || '');
+    if (!source || !target) return;
+    forward.set(source, [...(forward.get(source) || []), target]);
+    reverse.set(target, [...(reverse.get(target) || []), source]);
+  });
+  const descendants = reachableAssetIds(rootAssetId, forward);
+  const ancestors = reachableAssetIds(rootAssetId, reverse);
+  const nodes = (Array.isArray(data.nodes) ? data.nodes as Array<Record<string, unknown>> : []).map((node) => {
+    const asset = node.asset && typeof node.asset === 'object' ? node.asset as AssetRef : undefined;
+    const tombstone = node.tombstone && typeof node.tombstone === 'object' ? node.tombstone as Record<string, unknown> : undefined;
+    const nodeAssetId = String(asset?.id || tombstone?.id || node.id || '');
+    const wireDirection = String(node.direction || '');
+    return {
+      assetId: nodeAssetId,
+      direction: nodeAssetId === rootAssetId
+        ? 'root' as const
+        : wireDirection === 'ancestors' || wireDirection === 'ancestor' ? 'ancestor' as const
+        : wireDirection === 'descendants' || wireDirection === 'descendant' ? 'descendant' as const
+        : ancestors.has(nodeAssetId) ? 'ancestor' as const : descendants.has(nodeAssetId) ? 'descendant' as const : 'descendant' as const,
+      depth: Math.max(0, Math.trunc(Number(node.depth) || 0)),
+      asset,
+      filename: asset?.filename || (tombstone?.filename ? String(tombstone.filename) : undefined),
+      tombstone: Boolean(tombstone),
+    };
+  });
+  const edges = rawEdges.map((edge) => ({
+    id: String(edge.id || ''),
+    fromAssetId: String(edge.sourceAssetId || ''),
+    toAssetId: String(edge.targetAssetId || ''),
+    relation: String(edge.derivedOperation || edge.sourceType || 'derived'),
+  }));
+  return {
+    rootAssetId,
+    nodes,
+    edges,
+    cursor: typeof data.nextCursor === 'string' && data.nextCursor ? data.nextCursor : null,
+    hasMore: Boolean(data.nextCursor),
+    truncated: Boolean(data.truncated),
+    cycleDetected: Boolean(data.cycleDetected),
+    totalNodes: data.totalNodes == null ? undefined : Math.max(0, Number(data.totalNodes) || 0),
+    totalEdges: data.totalEdges == null ? undefined : Math.max(0, Number(data.totalEdges) || 0),
+  };
+}
+
+export async function getProjectAssetPermissions(assetId: string, options: { signal?: AbortSignal } = {}): Promise<AssetPermissionRecord> {
+  const res = await request<{ success: boolean; data: AssetPermissionRecord }>(
+    `${BASE}/project-assets/${encodeURIComponent(assetId)}/permissions`,
+    { signal: options.signal },
+  );
+  return res.data;
+}
+
+export async function setProjectAssetPermissions(
+  assetId: string,
+  input: Pick<AssetPermissionRecord, 'scope' | 'grants'> & { expectedRevision: AssetRevision },
+): Promise<AssetPermissionRecord> {
+  const res = await request<{ success: boolean; data: AssetPermissionRecord }>(
+    `${BASE}/project-assets/${encodeURIComponent(assetId)}/permissions`,
+    { method: 'PUT', body: JSON.stringify(input) },
+  );
+  return res.data;
+}
+
+export async function findProjectAssetDuplicates(assetId: string, maxDistance = 8): Promise<Array<{ asset: AssetRef; match: 'exact' | 'perceptual'; distance: number }>> {
+  const page = await listProjectAssetDuplicates(assetId, { maxDistance, limit: 100 });
+  return page.items.map((candidate) => ({
+    asset: candidate.asset,
+    match: candidate.kind === 'exact' ? 'exact' : 'perceptual',
+    distance: candidate.distance,
+  }));
+}
+
+export async function listProjectAssetLineage(assetId: string, options: {
+  limit?: number;
+  cursor?: string;
+  signal?: AbortSignal;
+} = {}): Promise<AssetLineagePage> {
+  const query = new URLSearchParams();
+  if (options.limit != null) query.set('limit', String(options.limit));
+  if (options.cursor) query.set('cursor', options.cursor);
+  const suffix = query.size ? `?${query.toString()}` : '';
+  const res = await request<{
+    success: boolean;
+    data: AssetLineageRecord[];
+    meta?: {
+      total?: number;
+      limit?: number;
+      nextCursor?: string | null;
+      hasMore?: boolean;
+      lineageRevision?: string;
+    };
+  }>(`${BASE}/project-assets/${encodeURIComponent(assetId)}/lineage${suffix}`, { signal: options.signal });
+  return {
+    items: res.data || [],
+    total: Math.max(0, Number(res.meta?.total) || 0),
+    limit: Math.max(1, Math.min(100, Number(res.meta?.limit) || Number(options.limit) || 50)),
+    cursor: res.meta?.nextCursor || null,
+    hasMore: Boolean(res.meta?.hasMore),
+    lineageRevision: String(res.meta?.lineageRevision || ''),
+  };
+}
+
+export async function getProjectAssetLineage(assetId: string, options: { signal?: AbortSignal } = {}): Promise<AssetLineageRecord[]> {
+  return (await listProjectAssetLineage(assetId, { limit: 100, signal: options.signal })).items;
+}
+
+export async function removeProjectAssetIndex(assetId: string): Promise<void> {
+  await request(`${BASE}/project-assets/${encodeURIComponent(assetId)}/index`, { method: 'DELETE' });
+}
+
+export async function deleteProjectAssetFile(assetId: string, confirmFilename: string): Promise<void> {
+  await request(`${BASE}/project-assets/${encodeURIComponent(assetId)}/file`, { method: 'DELETE', body: JSON.stringify({ deleteFile: true, confirmFilename }) });
+}
+
+// ========== 智能素材：Caption / OCR / Embedding ==========
+type SemanticWireRecord = Record<string, unknown>;
+
+function semanticWireRecord(value: unknown): SemanticWireRecord {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as SemanticWireRecord : {};
+}
+
+function semanticWireNumber(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function semanticWireOptionalNumber(value: unknown): number | undefined {
+  const parsed = Number(value);
+  return value != null && Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function semanticWireNullableNumber(value: unknown): number | null {
+  return value == null ? null : semanticWireNumber(value);
+}
+
+function semanticWireRevision(value: unknown, fallback: AssetRevision = 0): AssetRevision {
+  return typeof value === 'string' || typeof value === 'number' ? value : fallback;
+}
+
+function semanticWireError(value: unknown): string | null {
+  if (typeof value === 'string') return value;
+  const record = semanticWireRecord(value);
+  return typeof record.message === 'string' ? record.message : null;
+}
+
+function semanticCapability(value: unknown): AssetSemanticCapability | null {
+  return value === 'caption' || value === 'ocr' || value === 'embedding' ? value : null;
+}
+
+function semanticInstallState(value: unknown, installed = false): AssetSemanticInstallState {
+  const normalized = String(value || '').toLowerCase().replace(/_/g, '-');
+  if (normalized === 'failed' || normalized === 'error') return 'error';
+  if (normalized === 'absent' || normalized === 'missing' || normalized === 'not-installed') return 'not-installed';
+  if (normalized === 'downloading' || normalized === 'verifying' || normalized === 'installed'
+    || normalized === 'disabled' || normalized === 'deleting') return normalized;
+  return installed ? 'installed' : 'not-installed';
+}
+
+function normalizeSemanticModelStatus(value: unknown): AssetSemanticModelStatus | null {
+  const raw = semanticWireRecord(value);
+  const key = String(raw.key || raw.modelKey || raw.modelId || '');
+  const capability = semanticCapability(raw.capability || raw.task);
+  if (!key || !capability) return null;
+  const installed = typeof raw.installed === 'boolean' ? raw.installed : String(raw.installState || raw.status || raw.state) === 'installed';
+  const installState = semanticInstallState(raw.installState || raw.status || raw.state, installed);
+  return {
+    key,
+    capability,
+    label: String(raw.label || raw.displayName || key),
+    version: String(raw.version || raw.modelVersion || ''),
+    revision: Math.max(0, Math.trunc(semanticWireNumber(raw.revision))),
+    installState,
+    installed: installed || installState === 'installed',
+    downloadedBytes: Math.max(0, semanticWireNumber(raw.downloadedBytes)),
+    totalBytes: raw.totalBytes == null && raw.downloadBytes == null
+      ? null
+      : Math.max(0, semanticWireNumber(raw.totalBytes ?? raw.downloadBytes)),
+    error: semanticWireError(raw.error),
+  };
+}
+
+function semanticCapabilityCounts(value: unknown): AssetSemanticCapabilityCounts {
+  const raw = semanticWireRecord(value);
+  return {
+    eligible: Math.max(0, Math.trunc(semanticWireNumber(raw.eligible))),
+    queued: Math.max(0, Math.trunc(semanticWireNumber(raw.queued))),
+    running: Math.max(0, Math.trunc(semanticWireNumber(raw.running))),
+    succeeded: Math.max(0, Math.trunc(semanticWireNumber(raw.succeeded))),
+    skipped: Math.max(0, Math.trunc(semanticWireNumber(raw.skipped))),
+    failed: Math.max(0, Math.trunc(semanticWireNumber(raw.failed))),
+  };
+}
+
+function semanticIndexState(value: unknown): AssetSemanticIndexState {
+  return value === 'disabled' || value === 'empty' || value === 'queued' || value === 'building'
+    || value === 'ready' || value === 'stale' || value === 'degraded' || value === 'error'
+    ? value
+    : 'empty';
+}
+
+function normalizeSemanticProjectStatus(value: unknown, models: AssetSemanticModelStatus[]): AssetSemanticProjectStatus {
+  const raw = semanticWireRecord(value);
+  const rawCapabilities = semanticWireRecord(raw.capabilities);
+  const normalizeCapability = (capability: AssetSemanticCapability) => {
+    const configured = semanticWireRecord(rawCapabilities[capability]);
+    const nestedModel = normalizeSemanticModelStatus(configured.model);
+    const modelKey = String(configured.modelKey || nestedModel?.key || '');
+    const model = nestedModel || models.find((entry) => entry.key === modelKey) || null;
+    return {
+      capability,
+      enabled: Boolean(configured.enabled),
+      modelKey,
+      modelVersion: String(configured.modelVersion || model?.version || ''),
+      model,
+      ...semanticCapabilityCounts(configured),
+    };
+  };
+  return {
+    projectId: String(raw.projectId || ''),
+    revision: semanticWireRevision(raw.revision),
+    enabled: Boolean(raw.enabled),
+    activeGeneration: Math.max(0, Math.trunc(semanticWireNumber(raw.activeGeneration))),
+    activeIndexRevision: semanticWireRevision(raw.activeIndexRevision, ''),
+    activeCatalogRevision: semanticWireRevision(raw.activeCatalogRevision),
+    currentCatalogRevision: semanticWireRevision(raw.currentCatalogRevision),
+    buildingGeneration: semanticWireNullableNumber(raw.buildingGeneration),
+    indexState: semanticIndexState(raw.indexState),
+    indexStale: Boolean(raw.indexStale),
+    capabilities: {
+      caption: normalizeCapability('caption'),
+      ocr: normalizeCapability('ocr'),
+      embedding: normalizeCapability('embedding'),
+    },
+    updatedAt: raw.updatedAt == null ? null : semanticWireNumber(raw.updatedAt),
+  };
+}
+
+function semanticGenerationState(value: unknown): AssetSemanticGenerationState {
+  return value === 'ready' || value === 'active' || value === 'failed' || value === 'superseded' ? value : 'building';
+}
+
+function semanticGenerationCounts(value: unknown): AssetSemanticGenerationCounts {
+  const raw = semanticWireRecord(value);
+  return {
+    queued: Math.max(0, Math.trunc(semanticWireNumber(raw.queued))),
+    running: Math.max(0, Math.trunc(semanticWireNumber(raw.running))),
+    retrying: Math.max(0, Math.trunc(semanticWireNumber(raw.retrying))),
+    succeeded: Math.max(0, Math.trunc(semanticWireNumber(raw.succeeded))),
+    skipped: Math.max(0, Math.trunc(semanticWireNumber(raw.skipped))),
+    failed: Math.max(0, Math.trunc(semanticWireNumber(raw.failed))),
+    superseded: Math.max(0, Math.trunc(semanticWireNumber(raw.superseded))),
+    total: Math.max(0, Math.trunc(semanticWireNumber(raw.total))),
+  };
+}
+
+function normalizeSemanticGeneration(value: unknown, fallbackProjectId = ''): AssetSemanticGenerationSummary {
+  const raw = semanticWireRecord(value);
+  return {
+    projectId: String(raw.projectId || fallbackProjectId),
+    generation: Math.max(0, Math.trunc(semanticWireNumber(raw.generation))),
+    revision: Math.max(0, Math.trunc(semanticWireNumber(raw.revision))),
+    profileRevision: Math.max(0, Math.trunc(semanticWireNumber(raw.profileRevision))),
+    catalogRevision: Math.max(0, Math.trunc(semanticWireNumber(raw.catalogRevision))),
+    jobsSealed: Boolean(raw.jobsSealed),
+    expectedJobCount: Math.max(0, Math.trunc(semanticWireNumber(raw.expectedJobCount))),
+    eligibleAssetCount: Math.max(0, Math.trunc(semanticWireNumber(raw.eligibleAssetCount))),
+    excludedAssetCount: Math.max(0, Math.trunc(semanticWireNumber(raw.excludedAssetCount))),
+    payloadPrunedAt: raw.payloadPrunedAt == null ? null : semanticWireNumber(raw.payloadPrunedAt),
+    status: semanticGenerationState(raw.status),
+    counts: semanticGenerationCounts(raw.counts),
+    error: semanticWireError(raw.error) || (typeof raw.errorMessage === 'string' ? raw.errorMessage : null),
+    createdBy: typeof raw.createdBy === 'string' ? raw.createdBy : null,
+    createdAt: raw.createdAt == null ? null : semanticWireNumber(raw.createdAt),
+    updatedAt: raw.updatedAt == null ? null : semanticWireNumber(raw.updatedAt),
+    finishedAt: raw.finishedAt == null ? null : semanticWireNumber(raw.finishedAt),
+  };
+}
+
+function normalizeSemanticStatus(value: unknown): AssetSemanticStatus {
+  const raw = semanticWireRecord(value);
+  const models = (Array.isArray(raw.models) ? raw.models : [])
+    .map(normalizeSemanticModelStatus)
+    .filter((entry): entry is AssetSemanticModelStatus => Boolean(entry));
+  const project = normalizeSemanticProjectStatus(raw.project, models);
+  return {
+    project,
+    models,
+    rebuild: raw.rebuild == null ? null : normalizeSemanticGeneration(raw.rebuild, project.projectId),
+  };
+}
+
+function semanticCapabilityPatch(value: unknown): SemanticWireRecord | undefined {
+  const raw = semanticWireRecord(value);
+  if (!Object.keys(raw).length) return undefined;
+  return {
+    ...(Object.hasOwn(raw, 'enabled') ? { enabled: Boolean(raw.enabled) } : {}),
+    ...(Object.hasOwn(raw, 'modelKey') ? { modelKey: String(raw.modelKey || '') } : {}),
+    ...(Object.hasOwn(raw, 'modelVersion') ? { modelVersion: String(raw.modelVersion || '') } : {}),
+  };
+}
+
+function requireSemanticModelStatus(value: unknown): AssetSemanticModelStatus {
+  const model = normalizeSemanticModelStatus(value);
+  if (!model) throw new ApiRequestError('语义模型响应缺少公开身份字段', 502, value);
+  return model;
+}
+
+export async function getProjectAssetSemanticStatus(
+  projectId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<AssetSemanticStatus> {
+  const res = await request<{ success: boolean; data: unknown }>(
+    `${BASE}/project-assets/semantic/status?projectId=${encodeURIComponent(projectId)}`,
+    { signal: options.signal },
+  );
+  return normalizeSemanticStatus(res.data);
+}
+
+export async function updateProjectAssetSemanticProfile(
+  input: AssetSemanticProfileUpdateInput,
+  options: { signal?: AbortSignal } = {},
+): Promise<AssetSemanticStatus> {
+  const body = {
+    projectId: input.projectId,
+    expectedRevision: input.expectedRevision,
+    ...(Object.hasOwn(input, 'enabled') ? { enabled: Boolean(input.enabled) } : {}),
+    ...(input.caption ? { caption: semanticCapabilityPatch(input.caption) } : {}),
+    ...(input.ocr ? { ocr: semanticCapabilityPatch(input.ocr) } : {}),
+    ...(input.embedding ? { embedding: semanticCapabilityPatch(input.embedding) } : {}),
+    updatedBy: input.updatedBy,
+  };
+  const res = await request<{ success: boolean; data: unknown }>(`${BASE}/project-assets/semantic/profile`, {
+    method: 'PUT',
+    signal: options.signal,
+    body: JSON.stringify(body),
+  });
+  return normalizeSemanticStatus(res.data);
+}
+
+export async function downloadProjectAssetSemanticModel(
+  modelKey: string,
+  input: AssetSemanticModelMutationInput,
+  options: { signal?: AbortSignal } = {},
+): Promise<AssetSemanticModelStatus> {
+  const res = await request<{ success: boolean; data: unknown }>(
+    `${BASE}/project-assets/semantic/models/${encodeURIComponent(modelKey)}/download`,
+    {
+      method: 'POST',
+      signal: options.signal,
+      body: JSON.stringify({ expectedRevision: input.expectedRevision, idempotencyKey: input.idempotencyKey }),
+    },
+  );
+  return requireSemanticModelStatus(res.data);
+}
+
+export async function deleteProjectAssetSemanticModel(
+  modelKey: string,
+  input: AssetSemanticModelDeleteInput,
+  options: { signal?: AbortSignal } = {},
+): Promise<AssetSemanticModelStatus> {
+  const res = await request<{ success: boolean; data: unknown }>(
+    `${BASE}/project-assets/semantic/models/${encodeURIComponent(modelKey)}`,
+    {
+      method: 'DELETE',
+      signal: options.signal,
+      body: JSON.stringify({ expectedRevision: input.expectedRevision }),
+    },
+  );
+  return requireSemanticModelStatus(res.data);
+}
+
+export async function rebuildProjectAssetSemanticIndex(
+  input: AssetSemanticRebuildInput,
+  options: { signal?: AbortSignal } = {},
+): Promise<AssetSemanticGenerationSummary> {
+  const res = await request<{ success: boolean; data: unknown }>(`${BASE}/project-assets/semantic/rebuild`, {
+    method: 'POST',
+    signal: options.signal,
+    body: JSON.stringify({
+      projectId: input.projectId,
+      expectedRevision: input.expectedRevision,
+      idempotencyKey: input.idempotencyKey,
+    }),
+  });
+  return normalizeSemanticGeneration(res.data, input.projectId);
+}
+
+function normalizeSemanticEvidence(value: unknown): AssetSemanticEvidence | null {
+  const raw = semanticWireRecord(value);
+  const sourceValue = raw.source || raw.kind;
+  const source = sourceValue === 'filename' || sourceValue === 'tag' || sourceValue === 'metadata'
+    || sourceValue === 'caption' || sourceValue === 'ocr' || sourceValue === 'text'
+    ? sourceValue
+    : null;
+  const snippet = String(raw.snippet ?? raw.text ?? '').trim();
+  if (!source || !snippet) return null;
+  const bboxValues = Array.isArray(raw.bbox) ? raw.bbox.map(Number) : [];
+  const bbox = bboxValues.length === 4 && bboxValues.every(Number.isFinite)
+    ? bboxValues as [number, number, number, number]
+    : undefined;
+  return {
+    source,
+    snippet,
+    language: typeof raw.language === 'string' ? raw.language : null,
+    modelKey: typeof raw.modelKey === 'string' ? raw.modelKey : undefined,
+    modelVersion: typeof raw.modelVersion === 'string' ? raw.modelVersion : undefined,
+    frameIndex: semanticWireOptionalNumber(raw.frameIndex),
+    time: semanticWireOptionalNumber(raw.time),
+    page: semanticWireOptionalNumber(raw.page),
+    bbox,
+  };
+}
+
+function semanticHitMetric(value: unknown, raw: SemanticWireRecord): AssetSemanticSearchHit['metric'] {
+  if (value === 'cosine' || value === 'rrf' || value === 'bm25' || value === 'keyword') return value;
+  if (raw.mode === 'hybrid') return 'rrf';
+  if (raw.mode === 'vector' || semanticWireNumber(raw.vectorScore) !== 0) return 'cosine';
+  return raw.mode === 'keyword' ? 'keyword' : 'bm25';
+}
+
+function normalizeSemanticSearchHit(value: unknown, index: number, offset: number): AssetSemanticSearchHit | null {
+  const raw = semanticWireRecord(value);
+  const asset = semanticWireRecord(raw.asset) as unknown as AssetRef;
+  if (!asset.id) return null;
+  const evidenceInput = Array.isArray(raw.evidence) ? raw.evidence : Array.isArray(raw.matches) ? raw.matches : [];
+  return {
+    asset,
+    rank: Math.max(1, Math.trunc(semanticWireNumber(raw.rank, offset + index + 1))),
+    score: semanticWireNumber(raw.score),
+    metric: semanticHitMetric(raw.metric, raw),
+    evidence: evidenceInput
+      .map(normalizeSemanticEvidence)
+      .filter((entry): entry is AssetSemanticEvidence => Boolean(entry)),
+  };
+}
+
+export async function searchProjectAssetsSemantic(
+  input: AssetSemanticSearchInput,
+  options: { signal?: AbortSignal } = {},
+): Promise<AssetSemanticSearchPage> {
+  const requestedLimit = Number(input.limit ?? 120);
+  const limit = Math.max(1, Math.min(120, Math.trunc(Number.isFinite(requestedLimit) ? requestedLimit : 120)));
+  const requestedOffset = Number(input.offset ?? 0);
+  const offset = Math.max(0, Math.trunc(Number.isFinite(requestedOffset) ? requestedOffset : 0));
+  const body = {
+    projectId: input.projectId,
+    query: input.query,
+    filters: input.filters || {},
+    limit,
+    offset,
+    ...(input.expectedCatalogRevision != null ? { expectedCatalogRevision: input.expectedCatalogRevision } : {}),
+    ...(input.expectedProfileRevision != null ? { expectedProfileRevision: input.expectedProfileRevision } : {}),
+    ...(input.expectedGeneration != null ? { expectedGeneration: input.expectedGeneration } : {}),
+  };
+  const res = await request<{ success: boolean; data: unknown; meta?: SemanticWireRecord }>(
+    `${BASE}/project-assets/semantic/search`,
+    { method: 'POST', signal: options.signal, body: JSON.stringify(body) },
+  );
+  const dataRecord = semanticWireRecord(res.data);
+  const wireHits = Array.isArray(res.data) ? res.data : Array.isArray(dataRecord.items) ? dataRecord.items : [];
+  const meta = { ...dataRecord, ...semanticWireRecord(res.meta) };
+  const pageOffset = Math.max(0, Math.trunc(semanticWireNumber(meta.offset, offset)));
+  const pageLimit = Math.max(1, Math.min(120, Math.trunc(semanticWireNumber(meta.limit, limit))));
+  return {
+    hits: wireHits
+      .map((entry, index) => normalizeSemanticSearchHit(entry, index, pageOffset))
+      .filter((entry): entry is AssetSemanticSearchHit => Boolean(entry)),
+    total: Math.max(0, Math.trunc(semanticWireNumber(meta.total))),
+    offset: pageOffset,
+    limit: pageLimit,
+    identity: {
+      projectId: String(meta.projectId || input.projectId),
+      queryDigest: String(meta.queryDigest || ''),
+      catalogRevision: semanticWireRevision(meta.catalogRevision, input.expectedCatalogRevision ?? 0),
+      semanticIndexRevision: semanticWireRevision(meta.semanticIndexRevision, ''),
+      activeGeneration: Math.max(0, Math.trunc(semanticWireNumber(meta.activeGeneration, input.expectedGeneration ?? 0))),
+      modelKey: String(meta.modelKey || ''),
+      modelVersion: String(meta.modelVersion || ''),
+    },
+    stale: Boolean(meta.stale),
+  };
+}
+
+export const searchProjectAssetSemantics = searchProjectAssetsSemantic;
+
+function normalizeSemanticDocument(value: unknown): AssetSemanticDocument | null {
+  const raw = semanticWireRecord(value);
+  const sourceValue = raw.source || raw.kind || raw.documentKind;
+  const source = sourceValue === 'caption' || sourceValue === 'ocr' ? sourceValue : null;
+  if (!source || raw.id == null || !raw.assetId) return null;
+  return {
+    id: typeof raw.id === 'number' ? raw.id : String(raw.id),
+    assetId: String(raw.assetId),
+    source,
+    modelKey: String(raw.modelKey || ''),
+    modelVersion: String(raw.modelVersion || ''),
+    text: String(raw.text || ''),
+    language: typeof raw.language === 'string' ? raw.language : null,
+    metadata: semanticWireRecord(raw.metadata),
+    indexedAt: raw.indexedAt == null ? null : semanticWireNumber(raw.indexedAt),
+  };
+}
+
+export async function getProjectAssetSemanticDocuments(
+  assetId: string,
+  projectId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<AssetSemanticDocument[]> {
+  const res = await request<{ success: boolean; data: unknown }>(
+    `${BASE}/project-assets/semantic/assets/${encodeURIComponent(assetId)}?projectId=${encodeURIComponent(projectId)}`,
+    { signal: options.signal },
+  );
+  const record = semanticWireRecord(res.data);
+  const documents = Array.isArray(res.data) ? res.data : Array.isArray(record.documents) ? record.documents : [];
+  return documents.map(normalizeSemanticDocument).filter((entry): entry is AssetSemanticDocument => Boolean(entry));
+}
+
+function semanticJobState(value: unknown): AssetSemanticJobState | null {
+  return value === 'queued' || value === 'running' || value === 'retrying' || value === 'succeeded'
+    || value === 'skipped' || value === 'failed' || value === 'superseded'
+    ? value
+    : null;
+}
+
+function normalizeSemanticJob(value: unknown): AssetSemanticJobSummary | null {
+  const raw = semanticWireRecord(value);
+  const jobKind = semanticCapability(raw.jobKind || raw.capability);
+  const status = semanticJobState(raw.status);
+  if (!raw.id || !raw.assetId || !jobKind || !status) return null;
+  return {
+    id: String(raw.id),
+    projectId: String(raw.projectId || ''),
+    assetId: String(raw.assetId),
+    generation: Math.max(0, Math.trunc(semanticWireNumber(raw.generation))),
+    jobKind,
+    modelKey: String(raw.modelKey || ''),
+    modelVersion: String(raw.modelVersion || ''),
+    status,
+    revision: Math.max(0, Math.trunc(semanticWireNumber(raw.revision))),
+    attemptCount: Math.max(0, Math.trunc(semanticWireNumber(raw.attemptCount))),
+    maxAttempts: Math.max(1, Math.trunc(semanticWireNumber(raw.maxAttempts, 1))),
+    nextAttemptAt: raw.nextAttemptAt == null ? null : semanticWireNumber(raw.nextAttemptAt),
+    error: semanticWireError(raw.error) || (typeof raw.errorMessage === 'string' ? raw.errorMessage : null),
+    createdAt: raw.createdAt == null ? null : semanticWireNumber(raw.createdAt),
+    startedAt: raw.startedAt == null ? null : semanticWireNumber(raw.startedAt),
+    updatedAt: raw.updatedAt == null ? null : semanticWireNumber(raw.updatedAt),
+    finishedAt: raw.finishedAt == null ? null : semanticWireNumber(raw.finishedAt),
+  };
+}
+
+export async function retryProjectAssetSemanticJob(
+  jobId: string,
+  input: AssetSemanticJobRetryInput,
+  options: { signal?: AbortSignal } = {},
+): Promise<AssetSemanticJobSummary[]> {
+  const res = await request<{ success: boolean; data: unknown }>(
+    `${BASE}/project-assets/semantic/jobs/${encodeURIComponent(jobId)}/retry`,
+    {
+      method: 'POST',
+      signal: options.signal,
+      body: JSON.stringify({ projectId: input.projectId, expectedRevision: input.expectedRevision }),
+    },
+  );
+  const record = semanticWireRecord(res.data);
+  const jobs = Array.isArray(res.data) ? res.data : Array.isArray(record.jobs) ? record.jobs : [];
+  return jobs.map(normalizeSemanticJob).filter((entry): entry is AssetSemanticJobSummary => Boolean(entry));
+}
+
+// ========== 本机协作网关管理 ==========
+export async function getCollaborationStatus(): Promise<CollaborationStatus> {
+  const res = await request<{ success: boolean; data: CollaborationStatus }>(`${BASE}/collaboration/status`);
+  return res.data;
+}
+
+export async function startCollaborationGateway(input: { host?: string; port?: number } = {}): Promise<CollaborationStatus> {
+  const res = await request<{ success: boolean; data: CollaborationStatus }>(`${BASE}/collaboration/start`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return res.data;
+}
+
+export async function stopCollaborationGateway(): Promise<CollaborationStatus> {
+  const res = await request<{ success: boolean; data: CollaborationStatus }>(`${BASE}/collaboration/stop`, { method: 'POST' });
+  return res.data;
+}
+
+export async function getCollaborationExecutionPolicy(
+  projectId?: string,
+  options: { signal?: AbortSignal; excludeIntentId?: string } = {},
+): Promise<CollaborationExecutionPolicySnapshot> {
+  const params = new URLSearchParams();
+  if (projectId) params.set('projectId', projectId);
+  if (options.excludeIntentId) params.set('excludeIntentId', options.excludeIntentId);
+  const suffix = params.size ? `?${params.toString()}` : '';
+  const res = await request<{ success: boolean; data: CollaborationExecutionPolicySnapshot }>(
+    `${BASE}/collaboration/execution-policy${suffix}`,
+    { signal: options.signal },
+  );
+  return res.data;
+}
+
+export async function createCollaborationInvite(input: {
+  projectId?: string;
+  role: WorkspaceRole;
+  expiresInMs?: number;
+  maxUses?: number;
+}): Promise<CollaborationInvite> {
+  const res = await request<{ success: boolean; data: CollaborationInvite }>(`${BASE}/collaboration/invites`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return res.data;
+}
+
+export async function listCollaborationRunIntents(
+  status?: string,
+  projectId?: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<RunIntent[]> {
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+  if (projectId) params.set('projectId', projectId);
+  const suffix = params.size ? `?${params.toString()}` : '';
+  const res = await request<{ success: boolean; data: RunIntent[] }>(
+    `${BASE}/collaboration/run-intents${suffix}`,
+    { signal: options.signal },
+  );
+  return res.data || [];
+}
+
+export async function updateCollaborationRunIntent(intentId: string, patch: { status: 'rejected' | 'stale' | 'failed' }): Promise<RunIntent> {
+  const res = await request<{ success: boolean; data: RunIntent }>(`${BASE}/collaboration/run-intents/${encodeURIComponent(intentId)}`, {
+    method: 'PATCH', body: JSON.stringify(patch),
+  });
+  return res.data;
+}
+
+export async function appendProjectRunEvent(runId: string, event: {
+  nodeRunId?: string;
+  type: string;
+  payload?: Record<string, unknown>;
+  createdAt?: number;
+}): Promise<RunEventRecord> {
+  const res = await request<{ success: boolean; data: RunEventRecord }>(
+    `${BASE}/project-runs/${encodeURIComponent(runId)}/events`,
+    { method: 'POST', body: JSON.stringify(event) },
+  );
+  return res.data;
+}
+
+export async function listProjectRunEvents(runId: string, afterId = 0): Promise<RunEventRecord[]> {
+  const res = await request<{ success: boolean; data: RunEventRecord[] }>(
+    `${BASE}/project-runs/${encodeURIComponent(runId)}/events?afterId=${Math.max(0, Math.trunc(afterId))}`,
+  );
+  return res.data || [];
+}
+
+export async function createProjectNodeRun(runId: string, input: {
+  nodeId: string;
+  parentNodeRunId?: string;
+  originalNodeId?: string;
+  definitionId?: string;
+  definitionVersion?: number;
+  subflowPath?: string[];
+  status?: string;
+  inputSnapshot?: Record<string, unknown>;
+}): Promise<NodeRunSummary> {
+  const res = await request<{ success: boolean; data: NodeRunSummary }>(
+    `${BASE}/project-runs/${encodeURIComponent(runId)}/nodes`,
+    { method: 'POST', body: JSON.stringify(input) },
+  );
+  return res.data;
+}
+
+export async function updateProjectNodeRun(runId: string, nodeRunId: string, patch: {
+  status?: string;
+  outputRefs?: string[];
+  eventPayload?: Record<string, unknown>;
+}): Promise<NodeRunSummary> {
+  const res = await request<{ success: boolean; data: NodeRunSummary }>(
+    `${BASE}/project-runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeRunId)}`,
+    { method: 'PATCH', body: JSON.stringify(patch) },
+  );
+  return res.data;
+}
+
+export async function createProjectRunAttempt(runId: string, nodeRunId: string, input: {
+  provider?: string;
+  model?: string;
+  upstreamTaskId?: string;
+  requestId?: string;
+  httpStatus?: number;
+  pollCount?: number;
+  status?: string;
+  timestamps?: Record<string, number>;
+  usage?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  error?: Record<string, unknown> | null;
+}): Promise<RunAttemptSummary> {
+  const res = await request<{ success: boolean; data: RunAttemptSummary }>(`${BASE}/project-runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeRunId)}/attempts`, { method: 'POST', body: JSON.stringify(input) });
+  return res.data;
+}
+
+export async function updateProjectRunAttempt(runId: string, nodeRunId: string, attemptId: string, patch: {
+  provider?: string;
+  model?: string;
+  upstreamTaskId?: string;
+  requestId?: string;
+  httpStatus?: number;
+  pollCount?: number;
+  status?: string;
+  timestamps?: Record<string, number>;
+  usage?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  error?: Record<string, unknown> | null;
+}): Promise<RunAttemptSummary> {
+  const res = await request<{ success: boolean; data: RunAttemptSummary }>(`${BASE}/project-runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeRunId)}/attempts/${encodeURIComponent(attemptId)}`, { method: 'PATCH', body: JSON.stringify(patch) });
+  return res.data;
+}
+
+export async function finalizeProjectNodeRunAttempt(
+  runId: string,
+  nodeRunId: string,
+  attemptId: string,
+  input: {
+    status: 'succeeded' | 'failed' | 'stopped' | 'interrupted';
+    timestamps?: Record<string, number>;
+    error?: Record<string, unknown> | null;
+    eventPayload?: Record<string, unknown>;
+  },
+): Promise<{ nodeRun: NodeRunSummary; attempt: RunAttemptSummary; event: RunEventRecord }> {
+  const res = await request<{
+    success: boolean;
+    data: { nodeRun: NodeRunSummary; attempt: RunAttemptSummary; event: RunEventRecord };
+  }>(
+    `${BASE}/project-runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeRunId)}/attempts/${encodeURIComponent(attemptId)}/terminal`,
+    { method: 'PATCH', body: JSON.stringify(input) },
+  );
+  return res.data;
+}
+
+export async function persistProjectRunOutputAssets(runId: string, nodeRunId: string, input: {
+  attemptId?: string;
+  outputs: Array<{
+    kind: 'image' | 'video' | 'audio' | 'model3d' | 'text' | 'other';
+    sourceUrl?: string;
+    text?: string;
+    filename: string;
+    mimeType?: string;
+    metadata?: Record<string, unknown>;
+  }>;
+  eventPayload?: Record<string, unknown>;
+}): Promise<{ nodeRun: NodeRunSummary; assets: AssetRef[] }> {
+  const res = await request<{ success: boolean; data: { nodeRun: NodeRunSummary; assets: AssetRef[] } }>(
+    `${BASE}/project-runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeRunId)}/outputs`,
+    { method: 'POST', body: JSON.stringify(input) },
+  );
+  return res.data;
+}
+
+// ========== 可复用子工作流 ==========
+export async function listSubflows(query = '', projectId?: string, options: { signal?: AbortSignal } = {}): Promise<SubflowDefinition[]> {
+  const params = new URLSearchParams();
+  if (query) params.set('query', query);
+  if (projectId) params.set('projectId', projectId);
+  const suffix = params.size ? `?${params.toString()}` : '';
+  const res = await request<{ success: boolean; data: SubflowDefinition[] }>(`${BASE}/subflows${suffix}`, { signal: options.signal });
+  return res.data || [];
+}
+
+export async function saveSubflow(definition: Omit<SubflowDefinition, 'version'> & {
+  version?: number;
+  baseRevision: number;
+  changeSummary: string;
+}): Promise<SubflowDefinition> {
+  const res = await request<{ success: boolean; data: SubflowDefinition }>(`${BASE}/subflows`, {
+    method: 'POST',
+    body: JSON.stringify(definition),
+  });
+  return res.data;
+}
+
+export async function getSubflow(id: string, version?: number, projectId?: string, options: { signal?: AbortSignal } = {}): Promise<SubflowDefinition> {
+  const suffix = version ? `/${Math.max(1, Math.trunc(version))}` : '';
+  const projectSuffix = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+  const res = await request<{ success: boolean; data: SubflowDefinition }>(
+    `${BASE}/subflows/${encodeURIComponent(id)}${suffix}${projectSuffix}`,
+    { signal: options.signal },
+  );
+  return res.data;
+}
+
+export async function listSubflowVersions(id: string, projectId?: string, options: { signal?: AbortSignal } = {}): Promise<SubflowDefinition[]> {
+  const suffix = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+  const res = await request<{ success: boolean; data: SubflowDefinition[] }>(
+    `${BASE}/subflows/${encodeURIComponent(id)}/versions${suffix}`,
+    { signal: options.signal },
+  );
+  return res.data || [];
+}
+
+export interface SubflowPackageInspection {
+  archiveSha256: string;
+  manifest: { schema: string; version: number; definitionId?: string; definitionVersion?: number; files: Array<{ path: string; size: number; sha256: string; license?: string; redistributable?: boolean }> };
+  definition: SubflowDefinition;
+  entryCount: number;
+  totalBytes: number;
+  files: Array<{ path: string; size: number; sha256: string }>;
+}
+
+export async function inspectSubflowPackage(file: File): Promise<SubflowPackageInspection> {
+  const form = new FormData();
+  form.append('file', file, file.name);
+  const res = await request<{ success: boolean; data: SubflowPackageInspection }>(`${BASE}/subflows/package/inspect`, { method: 'POST', body: form });
+  return res.data;
+}
+
+export async function importSubflowPackage(file: File, archiveSha256: string, projectId?: string): Promise<SubflowDefinition> {
+  const form = new FormData();
+  form.append('file', file, file.name);
+  form.append('archiveSha256', archiveSha256);
+  if (projectId) form.append('projectId', projectId);
+  const res = await request<{ success: boolean; data: { definition: SubflowDefinition } }>(`${BASE}/subflows/package/import`, { method: 'POST', body: form });
+  return res.data.definition;
+}
+
+export async function downloadSubflowPackage(definition: Pick<SubflowDefinition, 'id' | 'version' | 'projectId' | 'name'>): Promise<void> {
+  const projectId = definition.projectId ? `?projectId=${encodeURIComponent(definition.projectId)}` : '';
+  const response = await fetch(`${BASE}/subflows/${encodeURIComponent(definition.id)}/${definition.version}/package${projectId}`);
+  if (!response.ok) {
+    let message = `HTTP ${response.status}`;
+    try { message = (await response.json()).error || message; } catch (_) { /* ignore */ }
+    throw new ApiRequestError(message, response.status, null);
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `${definition.name || definition.id}-v${definition.version}.t8flow`;
+  anchor.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export type TaskCompletionSoundSettings = NonNullable<ApiSettings['taskCompletionSound']>;
@@ -130,13 +2122,15 @@ export async function uploadTaskCompletionSound(file: File): Promise<TaskComplet
   });
   if (!res.ok) {
     let errMsg = `HTTP ${res.status}`;
+    let responseData: unknown = null;
     try {
       const data = await res.json();
+      responseData = data;
       errMsg = data.error || data.message || errMsg;
     } catch {
       /* ignore */
     }
-    throw new Error(errMsg);
+    throw new ApiRequestError(errMsg, res.status, responseData);
   }
   const data = await res.json();
   return data.data || { mode: 'default', url: '' };
@@ -321,6 +2315,7 @@ export interface RHToolCategory {
 export interface RHTool {
   id: string;
   webappId: string;
+  rhSite?: 'cn' | 'intl';
   title: string;
   description: string;
   categoryId: string;
@@ -339,6 +2334,7 @@ export interface RHToolsBackup {
 
 export interface AddRHToolPayload {
   webappId: string;
+  rhSite?: 'cn' | 'intl';
   title: string;
   description?: string;
   categoryId?: string;
@@ -362,6 +2358,117 @@ async function safeRequest<T>(url: string, init?: RequestInit): Promise<Result<T
   } catch (e: any) {
     return { success: false, error: e?.message || '网络错误' };
   }
+}
+
+export interface FeishuBitableSettingsStatus {
+  apiBase: string;
+  appId?: string;
+  appSecret?: string;
+  hasAppId: boolean;
+  hasAppSecret: boolean;
+  tokenPreview?: string;
+}
+
+export interface FeishuBitableField {
+  field_id?: string;
+  field_name?: string;
+  id?: string;
+  name?: string;
+  type?: string | number;
+  is_primary?: boolean;
+  property?: Record<string, any>;
+}
+
+export interface FeishuBitableRecord {
+  record_id?: string;
+  recordId?: string;
+  id?: string;
+  fields?: Record<string, any>;
+  created_time?: number;
+  last_modified_time?: number;
+}
+
+export function getFeishuBitableStatus() {
+  return safeRequest<FeishuBitableSettingsStatus>(`${BASE}/feishu-bitable/status`);
+}
+
+export function saveFeishuBitableSettings(payload: {
+  apiBase?: string;
+  appId?: string;
+  appSecret?: string;
+}) {
+  return safeRequest<FeishuBitableSettingsStatus>(`${BASE}/feishu-bitable/settings`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function testFeishuBitableConnection(payload: {
+  apiBase?: string;
+  appId?: string;
+  appSecret?: string;
+} = {}) {
+  return safeRequest<FeishuBitableSettingsStatus>(`${BASE}/feishu-bitable/test`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getFeishuBitableFields(payload: {
+  appToken: string;
+  tableId: string;
+  apiBase?: string;
+}) {
+  return safeRequest<{ items: FeishuBitableField[] }>(`${BASE}/feishu-bitable/fields`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function searchFeishuBitableRecords(payload: {
+  appToken: string;
+  tableId: string;
+  viewId?: string;
+  fieldNames?: string[];
+  pageSize?: number;
+  limit?: number;
+  filter?: Record<string, any>;
+  sort?: any[];
+  apiBase?: string;
+}) {
+  return safeRequest<{ items: FeishuBitableRecord[] }>(`${BASE}/feishu-bitable/records/search`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function downloadFeishuBitableMedia(payload: {
+  fileToken: string;
+  name?: string;
+  apiBase?: string;
+}) {
+  return safeRequest<{ name: string; path: string; url: string; size: number; contentType?: string }>(
+    `${BASE}/feishu-bitable/media/download`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function writeFeishuBitableRecords(payload: {
+  appToken: string;
+  tableId: string;
+  mode?: 'create' | 'update';
+  recordId?: string;
+  records?: Array<{ recordId?: string; fields: Record<string, any> }>;
+  fields?: Record<string, any>;
+  apiBase?: string;
+}) {
+  return safeRequest<{ items: FeishuBitableRecord[] }>(`${BASE}/feishu-bitable/records/write`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }
 
 export interface RhToolboxManifestPersistenceResult {

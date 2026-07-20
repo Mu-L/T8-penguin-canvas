@@ -17,6 +17,7 @@ export const dragonBallShenronHiddenMusicUrl = new URL('../assets/theme-music/dr
 export const saintSeiyaThemeMusicUrl = new URL('../assets/theme-music/saint-seiya-pegasus-fantasy.mp3', import.meta.url).href;
 export const saintSeiyaHadesThemeMusicUrl = new URL('../assets/theme-music/saint-seiya-hades-last-holy-war.mp3', import.meta.url).href;
 export const tetrisThemeMusicUrl = new URL('../assets/theme-music/tetris-korobeiniki.mp3', import.meta.url).href;
+export const gardenDefenseThemeMusicUrl = new URL('../assets/theme-music/garden-defense-grasswalk.mp3', import.meta.url).href;
 
 export const DEFAULT_THEME_TEMPLATE_ID = 'pixel-candy';
 export const TECH_TEMPLATE_ID = 'tech-default';
@@ -32,6 +33,7 @@ export const DRAGON_BALL_TEMPLATE_ID = 'dragon-ball-style';
 export const SAINT_SEIYA_TEMPLATE_ID = 'saint-seiya-style';
 export const TETRIS_TEMPLATE_ID = 'tetris-style';
 export const FARM_STORY_TEMPLATE_ID = 'farm-story-style';
+export const GARDEN_DEFENSE_TEMPLATE_ID = 'garden-defense-style';
 
 const techDark: ThemeTokens = {
   appBg: '#09090b',
@@ -987,6 +989,80 @@ const farmStoryDark: ThemeTokens = {
   portAudio: '#c7a5ff',
 };
 
+const gardenDefenseLight: ThemeTokens = {
+  appBg: '#d1ddb0',
+  canvasBg: '#b9ce89',
+  panelBg: '#fff8dc',
+  panelBgElevated: '#fffdf0',
+  panelBgMuted: '#e8d49a',
+  nodeBg: '#fff9e5',
+  nodeHeaderBg: '#78bb45',
+  textMain: '#243316',
+  textMuted: '#52633a',
+  textDim: '#7a805d',
+  border: '#6e4a24',
+  borderStrong: '#3d2b18',
+  accent: '#79bd42',
+  accentHover: '#98d45c',
+  accentText: '#17220d',
+  secondary: '#f3b83f',
+  warning: '#f0c64a',
+  danger: '#c84d3d',
+  success: '#4f9e53',
+  shadowPanel: '0 16px 38px rgba(63,55,22,0.2), 4px 4px 0 #6e4a24',
+  shadowButton: '3px 3px 0 #6e4a24',
+  shadowStrong: '0 24px 64px rgba(47,36,16,0.28), 6px 6px 0 #3d2b18',
+  radiusPanel: '12px',
+  radiusButton: '10px',
+  radiusNode: '10px',
+  gridDot: '#78965d',
+  edge: '#5c7c3e',
+  edgeSelected: '#f0b72f',
+  selectionBg: 'rgba(121,189,66,0.2)',
+  selectionBorder: '#5b8e35',
+  portText: '#46a8d8',
+  portImage: '#e9ae31',
+  portVideo: '#cf5c54',
+  portAudio: '#8d69c7',
+  fontFamily: "'M PLUS Rounded 1c', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif",
+  displayFont: "'M PLUS Rounded 1c', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif",
+};
+
+const gardenDefenseDark: ThemeTokens = {
+  ...gardenDefenseLight,
+  appBg: '#102219',
+  canvasBg: '#172d21',
+  panelBg: '#26331f',
+  panelBgElevated: '#314129',
+  panelBgMuted: '#1d2b1b',
+  nodeBg: '#2b3823',
+  nodeHeaderBg: '#456c2c',
+  textMain: '#fff5ce',
+  textMuted: '#d7c895',
+  textDim: '#a69b70',
+  border: '#c08b4a',
+  borderStrong: '#efd16a',
+  accent: '#9bd75c',
+  accentHover: '#c1ef79',
+  accentText: '#14200d',
+  secondary: '#e4a845',
+  warning: '#efd16a',
+  danger: '#f06b55',
+  success: '#88dc82',
+  shadowPanel: '0 18px 48px rgba(0,0,0,0.52), 4px 4px 0 #0a120c',
+  shadowButton: '3px 3px 0 #0a120c',
+  shadowStrong: '0 28px 78px rgba(0,0,0,0.7), 6px 6px 0 #0a120c',
+  gridDot: '#55784a',
+  edge: '#a6c080',
+  edgeSelected: '#efd16a',
+  selectionBg: 'rgba(155,215,92,0.18)',
+  selectionBorder: '#efd16a',
+  portText: '#7fd9ff',
+  portImage: '#efd16a',
+  portVideo: '#ff7c69',
+  portAudio: '#c5a1ff',
+};
+
 export const BUILT_IN_THEME_TEMPLATES: ThemeTemplate[] = [
   {
     schema: 't8-theme-template',
@@ -1307,6 +1383,34 @@ export const BUILT_IN_THEME_TEMPLATES: ThemeTemplate[] = [
       copyrightNote: '圣域篇默认使用天马幻想；冥界篇开启后切换最后的圣战，可在主题模板中上传替换为已授权音乐。',
     },
     modes: { dark: { tokens: saintSeiyaDark }, light: { tokens: saintSeiyaLight } },
+  },
+  {
+    schema: 't8-theme-template',
+    version: THEME_TEMPLATE_VERSION,
+    id: GARDEN_DEFENSE_TEMPLATE_ID,
+    name: '植物大战僵尸主题 · 庭院守卫',
+    description: '原创庭院塔防视觉：木质藤蔓 UI、草坪路径、种子卡牌节点，并在无限画布上内置完整庭院守卫小游戏。',
+    author: 'T8',
+    builtIn: true,
+    legacyStyle: 'pixel',
+    visuals: {
+      style: 'garden-defense',
+      intensity: 'strong',
+      iconPack: 'garden-guard',
+      canvasPattern: 'defense-lawn',
+      nodeFrame: 'garden-card',
+      headerMark: 'GARDEN GUARD',
+    },
+    music: {
+      title: '植物大战僵尸白天（Grasswalk）',
+      preset: 'garden-march',
+      source: 'url',
+      url: gardenDefenseThemeMusicUrl,
+      volume: 0.16,
+      bpm: 112,
+      copyrightNote: '庭院守卫主题默认音乐文件；garden-march 保留为主题编辑器中的合成备选。公开分发前请确认音乐授权边界。',
+    },
+    modes: { dark: { tokens: gardenDefenseDark }, light: { tokens: gardenDefenseLight } },
   },
   {
     schema: 't8-theme-template',

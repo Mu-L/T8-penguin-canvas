@@ -21,27 +21,7 @@ import { trackAchievementEvent } from '../stores/achievements';
 import { useHiddenFeatureStore, isRhDuckUploadEnabled, isYyhPortraitEnabled } from '../stores/hiddenFeatures';
 import { resolveThemeTemplate } from '../theme/defaultTemplates';
 import { getMediaItemsFromData } from '../utils/mediaCollection';
-
-// 与 Canvas.tsx 一致 (需要保持同步; 后续可考虑抽到 config/constants)
-const EXECUTABLE_NODE_TYPES = new Set<string>([
-  'image', 'edit',
-  'multi-angle-3d', 'panorama-720', 'penguin-portrait',
-  'video', 'seedance', 'audio', 'llm', 'runninghub', 'runninghub-wallet',
-    // v1.2.10.1: RH 工具节点
-    'rh-tools', 'rh-toolbox', 'fal-toolbox', 'comfyui-store',
-  'grok-oauth-agent', 'codex-cli-agent',
-  'resize', 'upscale', 'grid-crop', 'grid-editor', 'remove-bg', 'combine', 'image-compare', 'drawing-board',
-  'panorama-3d',
-  'frame-extractor', 'frame-pair',
-  'upload',
-  // v1.2.8 循环器 / 从合集获取
-  'loop', 'random-route', 'pick-from-set',
-  // v1.4.6: 工具箱文本节点也可点击 RUN 直接外挂 OutputNode
-  'cinematic', 'video-motion',
-  'portrait-master', 'pose-master', 'aggregate-parser', 'batch-processor', 'batch-tagger',
-  'topaz-image-upscale', 'topaz-video-upscale',
-  'remove-ai-watermark',
-]);
+import { EXECUTABLE_NODE_TYPES } from '../config/executableNodeTypes';
 
 const BAR_GAP_PX = 8; // 与节点顶部的世界坐标系间距
 
@@ -58,7 +38,12 @@ const ACTION_COLORS: Record<string, { run: string; stop: string; close: string }
   'saint-seiya': { run: '#f8c84a', stop: '#2dd4bf', close: '#b4232f' },
 };
 
-const NodeActionBar = () => {
+interface NodeActionBarProps {
+  onRunNode: (nodeId: string) => void | Promise<void>;
+  onStopRun: () => void;
+}
+
+const NodeActionBar = ({ onRunNode, onStopRun }: NodeActionBarProps) => {
   const nodes = useNodes();
   const { x: vx, y: vy, zoom } = useViewport();
   const { setNodes } = useReactFlow();
@@ -80,8 +65,6 @@ const NodeActionBar = () => {
 
   const currentRunId = useRunBusStore((s) => s.currentRunId);
   const runningIds = useRunBusStore((s) => s.runningIds);
-  const triggerRun = useRunBusStore((s) => s.triggerRun);
-  const cancelAll = useRunBusStore((s) => s.cancelAll);
   const rhDuckUploadIds = useHiddenFeatureStore((s) => s.rhDuckUploadIds);
   const yyhPortraitIds = useHiddenFeatureStore((s) => s.yyhPortraitIds);
   const toggleRhDuckUpload = useHiddenFeatureStore((s) => s.toggleRhDuckUpload);
@@ -191,7 +174,7 @@ const NodeActionBar = () => {
       return;
     }
     if (isRunning) return;
-    triggerRun(selectedExe.id, 'single');
+    void onRunNode(selectedExe.id);
   };
   const onRunPointerDown = (e: React.PointerEvent) => {
     e.stopPropagation();
@@ -243,7 +226,7 @@ const NodeActionBar = () => {
   };
   const onStop = (e: React.MouseEvent) => {
     e.stopPropagation();
-    cancelAll();
+    onStopRun();
   };
   const onClose = (e: React.MouseEvent) => {
     e.stopPropagation();

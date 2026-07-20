@@ -558,7 +558,7 @@ export default function MaterialContextMenu() {
     if (r.success) {
       const sent = r.data.sent || 1;
       const skipped = r.data.skipped ? `，跳过 ${r.data.skipped} 项` : '';
-      setMessage(`已发送到 Photoshop：${sent} 张${skipped}`);
+      setMessage(`已发送到 Photoshop 面板队列：${sent} 张${skipped}，请查看 PS 面板置入状态`);
     } else {
       setMessage(r.error || '发送到 Photoshop 失败，请确认 T8 Photoshop Link 面板已连接。');
     }

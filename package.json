@@ -1,7 +1,7 @@
 {
   "name": "t8-penguin-canvas",
   "private": false,
-  "version": "2.4.8",
+  "version": "2.5.5",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "T8-penguin-canvas — AI 节点画布工作流工具（Web + Electron 桌面端）",
@@ -35,17 +35,19 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "type-check": "tsc --noEmit",
     "electron:dev": "cross-env T8PC_PACKAGED=0 electron electron/main.cjs",
-    "encrypt": "cross-env ELECTRON_RUN_AS_NODE=1 electron electron/encrypt.cjs",
+    "encrypt": "cross-env ELECTRON_RUN_AS_NODE=1 node node_modules/electron/cli.js electron/encrypt.cjs",
     "prepack:enc": "npm run rh-toolbox:check && npm run build && npm run encrypt",
     "prepack:runtimes": "node scripts/prepare-runtime-archives.cjs",
-    "dist:dir": "npm run prepack:enc && npm run prepack:runtimes && electron-builder --win --x64 --dir && node electron/_post_build.cjs",
-    "dist": "npm run prepack:enc && npm run prepack:runtimes && electron-builder --win --x64 && node electron/_post_build.cjs",
+    "rebuild:electron": "electron-rebuild -f -w better-sqlite3 --arch x64",
+    "dist:dir": "npm run prepack:enc && npm run prepack:runtimes && npm run rebuild:electron && electron-builder --win --x64 --dir --config.npmRebuild=false && cross-env T8_DIRECTORY_BUILD=1 node electron/_post_build.cjs",
+    "dist": "npm run prepack:enc && npm run prepack:runtimes && npm run rebuild:electron && electron-builder --win --x64 --config.npmRebuild=false && node electron/_post_build.cjs",
     "dist:release": "node scripts/dist-release.cjs",
     "release:github": "node scripts/release-github.cjs",
     "release:verify": "node scripts/verify-github-release.cjs",
     "rh-toolbox:check": "node scripts/check-rh-toolbox-release.cjs",
     "public:check": "node scripts/check-public-clean.cjs",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "face-model:build": "node scripts/build-ict-face-glb.cjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -54,6 +56,7 @@
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@mediapipe/tasks-vision": "^0.10.35",
     "@xyflow/react": "^12.10.0",
+    "better-sqlite3": "^12.11.1",
     "bytenode": "^1.5.7",
     "cors": "^2.8.5",
     "electron-log": "^5.4.4",
@@ -62,10 +65,16 @@
     "extract-zip": "^2.0.1",
     "lucide-react": "^0.468.0",
     "multer": "^2.0.2",
+    "phaser": "^3.90.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "sharp": "^0.34.5",
     "three": "^0.184.0",
+    "undici": "^6.21.3",
+    "ws": "^8.21.0",
+    "yauzl": "^2.10.0",
+    "yazl": "^3.3.1",
+    "yjs": "^13.6.27",
     "zustand": "^5.0.0"
   },
   "devDependencies": {
@@ -94,7 +103,10 @@
     "asar": true,
     "asarUnpack": [
       "node_modules/sharp/**/*",
-      "node_modules/@img/**/*"
+      "node_modules/@img/**/*",
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/bindings/**/*",
+      "node_modules/file-uri-to-path/**/*"
     ],
     "files": [
       "electron/main.cjs",
@@ -175,6 +187,13 @@
           "remove-ai-watermarks-runtime.zip",
           "parsehub-pythonlibs.zip",
           "runtime-archives-manifest.json"
+        ]
+      },
+      {
+        "from": "tools/asset-semantic",
+        "to": "tools/asset-semantic",
+        "filter": [
+          "semantic_runner.py"
         ]
       },
       {

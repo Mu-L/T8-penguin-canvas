@@ -94,6 +94,82 @@ function fixedNoPromptWorkflow() {
   };
 }
 
+function minimalOutputWorkflow() {
+  return {
+    '1': {
+      class_type: 'T8OutputFixture',
+      inputs: { text: 'fixture' },
+    },
+  };
+}
+
+async function runComfyOutputFixture(outputs: Record<string, any>) {
+  const provider = {
+    id: 'comfyui',
+    protocol: 'comfyui',
+    baseUrl: 'http://127.0.0.1:8188',
+    enabled: true,
+    comfyuiConfig: {
+      workflows: [{ id: 'multi-output-fixture', name: 'Multi output fixture', workflowJson: minimalOutputWorkflow() }],
+    },
+  };
+  return comfyui.generateImage(provider, { providerModel: 'multi-output-fixture' }, {
+    pollIntervalMs: 1,
+    fetchImpl: async (url: string) => {
+      if (String(url).endsWith('/prompt')) return jsonResponse({ prompt_id: 'multi-output-1' });
+      return jsonResponse({
+        'multi-output-1': {
+          status: { status_str: 'success' },
+          outputs,
+        },
+      });
+    },
+  });
+}
+
+test('ComfyUI accepts video-only, audio-only and text-only workflow outputs', async () => {
+  const video = await runComfyOutputFixture({
+    '10': { gifs: [{ filename: 'clip.mp4', type: 'output', subfolder: 'video', format: 'video/h264-mp4' }] },
+  });
+  const audio = await runComfyOutputFixture({
+    '11': { audios: [{ filename: 'voice.wav', type: 'output', subfolder: 'audio' }] },
+  });
+  const textOnly = await runComfyOutputFixture({
+    '12': { text: 'caption result' },
+  });
+
+  assert.equal(video.ok, true);
+  assert.equal(video.kind, 'video');
+  assert.deepEqual(video.outputKinds, ['video']);
+  assert.match(video.videoUrls[0], /filename=clip\.mp4/);
+  assert.equal(audio.ok, true);
+  assert.equal(audio.primaryKind, 'audio');
+  assert.deepEqual(audio.outputKinds, ['audio']);
+  assert.match(audio.audioUrls[0], /filename=voice\.wav/);
+  assert.equal(textOnly.ok, true);
+  assert.equal(textOnly.primaryKind, 'text');
+  assert.deepEqual(textOnly.outputKinds, ['text']);
+  assert.equal(textOnly.text, 'caption result');
+});
+
+test('ComfyUI reports all mixed output kinds and rejects a completed empty workflow', async () => {
+  const mixed = await runComfyOutputFixture({
+    '10': { images: [{ filename: 'image.png', type: 'output' }] },
+    '11': { videos: [{ filename: 'clip.mp4', type: 'output' }] },
+    '12': { audio: [{ filename: 'voice.mp3', type: 'output' }] },
+    '13': { texts: ['line one', 'line two'] },
+  });
+  const empty = await runComfyOutputFixture({});
+
+  assert.equal(mixed.ok, true);
+  assert.equal(mixed.primaryKind, 'image');
+  assert.deepEqual(mixed.outputKinds, ['image', 'video', 'audio', 'text']);
+  assert.equal(mixed.text, 'line one\nline two');
+  assert.equal(empty.ok, false);
+  assert.equal(empty.code, 'empty_output');
+  assert.match(empty.error, /没有返回图片、视频、音频或文本/);
+});
+
 test('ComfyUI testProvider rejects remote base url by default', async () => {
   const previousRemote = process.env.T8_COMFYUI_ALLOW_REMOTE;
   const previousPrivate = process.env.T8_COMFYUI_ALLOW_PRIVATE;

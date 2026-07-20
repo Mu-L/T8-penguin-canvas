@@ -14,8 +14,16 @@ import {
 } from '../utils/rhToolboxCapabilities';
 import { fileNameFromUrl, type MediaItem } from '../utils/mediaCollection';
 import type { VideoEditClip } from '../utils/videoEdit';
+import {
+  registerSecondaryProviderActionExecutor,
+  type QueueSecondaryProviderAction,
+  type SecondaryProviderActionExecution,
+} from '../utils/secondaryProviderAction';
+import { extractRunProviderTrace } from '../utils/runProviderTrace';
 
 interface RhVideoCapabilityRailProps {
+  secondaryActionNodeId: string;
+  queueSecondaryAction: QueueSecondaryProviderAction;
   sourceItems?: MediaItem[];
   sourceUrls?: string[];
   accent: string;
@@ -85,6 +93,8 @@ function makeClip(item: MediaItem, index: number, probe: Awaited<ReturnType<type
 }
 
 export default function RhVideoCapabilityRail({
+  secondaryActionNodeId,
+  queueSecondaryAction,
   sourceItems,
   sourceUrls,
   accent,
@@ -162,18 +172,22 @@ export default function RhVideoCapabilityRail({
     logBus.info(`${label}: ${text}${taskText}`, `rh-video:${label}`);
   };
 
-  const runFrameExtraction = async (controller: AbortController) => {
+  const runFrameExtraction = async (
+    sourceItemsForRun: MediaItem[],
+    controller: AbortController,
+    execution: SecondaryProviderActionExecution,
+  ) => {
     const imageUrls: string[] = [];
-    logBus.info(`首尾帧获取: 开始处理 ${cleanSourceItems.length} 个视频`, 'rh-video:frames');
-    for (let index = 0; index < cleanSourceItems.length; index += 1) {
+    logBus.info(`首尾帧获取: 开始处理 ${sourceItemsForRun.length} 个视频`, 'rh-video:frames');
+    for (let index = 0; index < sourceItemsForRun.length; index += 1) {
       if (controller.signal.aborted) throw new Error('已取消');
-      const item = cleanSourceItems[index];
+      const item = sourceItemsForRun[index];
       const probe = await probeVideo(item.url);
       if (controller.signal.aborted) throw new Error('已取消');
       const clip = makeClip(item, index, probe);
       const duration = Number(clip.duration || probe.duration || 0);
       const lastTime = duration > 0.12 ? Math.max(0, duration - 0.05) : Math.max(0, duration);
-      setMessage(`首尾帧获取 ${index + 1}/${cleanSourceItems.length}`);
+      setMessage(`首尾帧获取 ${index + 1}/${sourceItemsForRun.length}`);
       const first = await snapshotVideoFrameAsync(clip, 0, {
         format: 'png',
         sourceLabel: `${clip.name} 首帧`,
@@ -188,61 +202,118 @@ export default function RhVideoCapabilityRail({
     }
     if (imageUrls.length === 0) throw new Error('首尾帧获取未返回图片');
     onFramesComplete(imageUrls);
+    await execution.reporter.output({
+      status: 'succeeded',
+      assets: imageUrls.map((url) => ({ kind: 'image', sourceUrl: url })),
+    });
     setMessage(`已输出 ${imageUrls.length} 张首尾帧`);
     logBus.success(`首尾帧获取: 已输出 ${imageUrls.length} 张图片`, 'rh-video:frames');
   };
 
-  const runRhUpscale = async (presetId: RhVideoCapabilityPresetId, controller: AbortController) => {
+  const runRhUpscale = async (
+    presetId: RhVideoCapabilityPresetId,
+    params: Extract<SecondaryProviderActionExecution['action'], { actionId: 'rh-video.capability' }>['params'],
+    controller: AbortController,
+    execution: SecondaryProviderActionExecution,
+  ) => {
     const preset = resolveRhVideoCapabilityPreset(presetId);
+    let providerRequested = false;
+    let providerResponded = false;
     activeTaskIdsRef.current.clear();
     lastPollLogRef.current = 0;
     logBus.info(
-      `${preset.label}: 开始处理 ${cleanVideoUrls.length} 个视频${preset.preferredToolId ? ` · tool=${preset.preferredToolId}` : ''}`,
+      `${preset.label}: 开始处理 ${params.videoUrls.length} 个视频${params.preferredToolId ? ` · tool=${params.preferredToolId}` : ''}`,
       `rh-video:${preset.shortLabel || preset.label}`,
     );
-    setMessage(cleanVideoUrls.length > 1 ? `准备批量${preset.label} 1/${cleanVideoUrls.length}` : `提交 RH ${preset.label}`);
-    const result = await runRhVideoCapabilityBatch({
-      capability: preset.capability,
-      preferredToolId: preset.preferredToolId,
-      videoUrls: cleanVideoUrls,
-      signal: controller.signal,
-      retryCount: 2,
-      retryDelayMs: 1200,
-      continueOnError: true,
-      onProgress: (progress) => {
-        if (progress.taskId) activeTaskIdsRef.current.add(progress.taskId);
-        setMessage(progress.message);
-        logProgress(preset.label, progress);
-      },
-      onItemProgress: ({ index, total, attempt, maxAttempts, status, error: itemError }) => {
-        const retryText = maxAttempts > 1 ? ` · 第 ${attempt}/${maxAttempts} 次` : '';
-        if (status === 'retry') {
-          setMessage(`第 ${index + 1}/${total} 个视频重试中${retryText}`);
-          logBus.warn(`${preset.label}: 第 ${index + 1}/${total} 个视频失败后重试${retryText} · ${itemError || '未知错误'}`, `rh-video:${preset.label}`);
-        } else if (status === 'error') {
-          setMessage(`第 ${index + 1}/${total} 个视频失败：${itemError || '未知错误'}`);
-          logBus.error(`${preset.label}: 第 ${index + 1}/${total} 个视频失败 · ${itemError || '未知错误'}`, `rh-video:${preset.label}`);
-        } else if (status === 'success') {
-          setMessage(`第 ${index + 1}/${total} 个视频完成`);
-          logBus.success(`${preset.label}: 第 ${index + 1}/${total} 个视频完成`, `rh-video:${preset.label}`);
-        } else {
-          setMessage(`准备第 ${index + 1}/${total} 个视频${retryText}`);
-        }
-      },
-    });
-    onVideosComplete(result);
-    if (result.failedItems.length > 0) {
-      const warning = `${result.failedItems.length} 个视频失败，已输出 ${result.videoUrls.length} 个结果`;
-      setError(warning);
-      setMessage(warning);
-      onError?.(warning);
-      logBus.warn(`${preset.label}: ${warning}`, `rh-video:${preset.label}`);
-    } else {
-      setMessage(result.videoUrls.length > 1 ? `已输出 ${result.videoUrls.length} 个视频` : '已输出');
-      logBus.success(
-        `${preset.label}: 已输出 ${result.videoUrls.length} 个视频${result.taskIds.length ? ` · taskId=${result.taskIds.join(',')}` : ''}`,
-        `rh-video:${preset.label}`,
-      );
+    setMessage(params.videoUrls.length > 1 ? `准备批量${preset.label} 1/${params.videoUrls.length}` : `提交 RH ${preset.label}`);
+    try {
+      await execution.reporter.providerRequest({
+        provider: 'runninghub',
+        model: params.preferredToolId || params.capability,
+        actionId: execution.action.actionId,
+        actionTarget: execution.action.target,
+        itemCount: params.videoUrls.length,
+      });
+      providerRequested = true;
+      const result = await runRhVideoCapabilityBatch({
+        capability: params.capability,
+        preferredToolId: params.preferredToolId,
+        videoUrls: params.videoUrls,
+        signal: controller.signal,
+        retryCount: params.retryCount,
+        retryDelayMs: params.retryDelayMs,
+        continueOnError: params.continueOnError,
+        onProgress: (progress) => {
+          if (progress.taskId) activeTaskIdsRef.current.add(progress.taskId);
+          setMessage(progress.message);
+          logProgress(preset.label, progress);
+          if (progress.taskId) {
+            void execution.reporter.providerPolling({
+              provider: 'runninghub',
+              model: params.preferredToolId || params.capability,
+              upstreamTaskId: progress.taskId,
+              pollCount: progress.pollCount,
+            });
+          }
+        },
+        onItemProgress: ({ index, total, attempt, maxAttempts, status, error: itemError }) => {
+          const retryText = maxAttempts > 1 ? ` · 第 ${attempt}/${maxAttempts} 次` : '';
+          if (status === 'retry') {
+            setMessage(`第 ${index + 1}/${total} 个视频重试中${retryText}`);
+            logBus.warn(`${preset.label}: 第 ${index + 1}/${total} 个视频失败后重试${retryText} · ${itemError || '未知错误'}`, `rh-video:${preset.label}`);
+          } else if (status === 'error') {
+            setMessage(`第 ${index + 1}/${total} 个视频失败：${itemError || '未知错误'}`);
+            logBus.error(`${preset.label}: 第 ${index + 1}/${total} 个视频失败 · ${itemError || '未知错误'}`, `rh-video:${preset.label}`);
+          } else if (status === 'success') {
+            setMessage(`第 ${index + 1}/${total} 个视频完成`);
+            logBus.success(`${preset.label}: 第 ${index + 1}/${total} 个视频完成`, `rh-video:${preset.label}`);
+          } else {
+            setMessage(`准备第 ${index + 1}/${total} 个视频${retryText}`);
+          }
+        },
+      });
+      const trace = extractRunProviderTrace(result.results[0]?.result || result.results[0] || {});
+      await execution.reporter.providerResponse({
+        provider: 'runninghub',
+        model: params.preferredToolId || params.capability,
+        upstreamTaskId: result.taskIds[0],
+        ...trace,
+        status: result.cancelled ? 'stopped' : result.failedItems.length > 0 ? 'partial' : 'succeeded',
+      });
+      providerResponded = true;
+      onVideosComplete(result);
+      await execution.reporter.output({
+        status: result.cancelled ? 'stopped' : result.failedItems.length > 0 ? 'partial' : 'succeeded',
+        assets: result.videoUrls.map((url) => ({ kind: 'video', sourceUrl: url })),
+      });
+      if (result.cancelled) {
+        setMessage(`已取消，保留 ${result.videoUrls.length} 个结果`);
+        logBus.warn(`${preset.label}: 已取消，保留 ${result.videoUrls.length} 个结果`, `rh-video:${preset.label}`);
+        throw new Error('RH 视频 action 已取消');
+      }
+      if (result.failedItems.length > 0) {
+        const warning = `${result.failedItems.length} 个视频失败，已输出 ${result.videoUrls.length} 个结果`;
+        setError(warning);
+        setMessage(warning);
+        onError?.(warning);
+        logBus.warn(`${preset.label}: ${warning}`, `rh-video:${preset.label}`);
+        throw new Error(warning);
+      } else {
+        setMessage(result.videoUrls.length > 1 ? `已输出 ${result.videoUrls.length} 个视频` : '已输出');
+        logBus.success(
+          `${preset.label}: 已输出 ${result.videoUrls.length} 个视频${result.taskIds.length ? ` · taskId=${result.taskIds.join(',')}` : ''}`,
+          `rh-video:${preset.label}`,
+        );
+      }
+    } catch (error) {
+      if (providerRequested && !providerResponded) {
+        await execution.reporter.providerResponse({
+          provider: 'runninghub',
+          model: params.preferredToolId || params.capability,
+          status: controller.signal.aborted ? 'stopped' : 'failed',
+        });
+      }
+      throw error;
     }
   };
 
@@ -255,6 +326,68 @@ export default function RhVideoCapabilityRail({
     }
     abortRef.current?.abort();
   };
+
+  const executeAuthorizedActionRef = useRef<(execution: SecondaryProviderActionExecution) => Promise<void>>(async () => undefined);
+  executeAuthorizedActionRef.current = async (execution) => {
+    const { action } = execution;
+    const actionId: VideoRailActionId = action.actionId === 'rh-video.frames'
+      ? 'frames'
+      : action.actionId === 'rh-video.capability'
+        ? action.target
+        : (() => { throw new Error('RH 视频 action 类型不匹配'); })();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    activeTaskIdsRef.current.clear();
+    setRunningActionId(actionId);
+    setError('');
+    onRunningChange?.(true);
+    try {
+      if (action.actionId === 'rh-video.frames') {
+        const boundItems: MediaItem[] = action.params.sourceItems.map((item) => ({
+          kind: 'video',
+          ...item,
+        }));
+        await runFrameExtraction(boundItems, controller, execution);
+      } else {
+        await runRhUpscale(action.target, action.params, controller, execution);
+      }
+    } catch (err) {
+      const nextError = formatError(err);
+      if (controller.signal.aborted || /action 已取消/.test(nextError)) {
+        setMessage('已取消');
+        logBus.warn(`${actionId === 'frames' ? '首尾帧获取' : resolveRhVideoCapabilityPreset(actionId).label}: 已取消`, 'rh-video');
+        throw err;
+      }
+      setError(nextError);
+      setMessage(nextError);
+      logBus.error(`${actionId === 'frames' ? '首尾帧获取' : resolveRhVideoCapabilityPreset(actionId).label}: ${nextError}`, 'rh-video');
+      onError?.(nextError);
+      throw err;
+    } finally {
+      abortRef.current = null;
+      activeTaskIdsRef.current.clear();
+      setRunningActionId(null);
+      onRunningChange?.(false);
+    }
+  };
+
+  useEffect(() => {
+    const unregister = [
+      registerSecondaryProviderActionExecutor(
+        secondaryActionNodeId,
+        'rh-video.frames',
+        'frames',
+        (execution) => executeAuthorizedActionRef.current(execution),
+      ),
+      ...presets.map((presetId) => registerSecondaryProviderActionExecutor(
+        secondaryActionNodeId,
+        'rh-video.capability',
+        presetId,
+        (execution) => executeAuthorizedActionRef.current(execution),
+      )),
+    ];
+    return () => unregister.reverse().forEach((dispose) => dispose());
+  }, [presets, secondaryActionNodeId]);
 
   const runAction = async (actionId: VideoRailActionId, e: MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
@@ -274,35 +407,41 @@ export default function RhVideoCapabilityRail({
       return;
     }
     if (cleanSourceItems.length === 0) return;
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-    activeTaskIdsRef.current.clear();
-    setRunningActionId(actionId);
-    setError('');
-    onRunningChange?.(true);
     try {
       if (actionId === 'frames') {
-        await runFrameExtraction(controller);
+        queueSecondaryAction({
+          actionId: 'rh-video.frames',
+          target: 'frames',
+          params: {
+            sourceItems: cleanSourceItems.map((item) => ({
+              url: item.url,
+              name: item.name,
+              size: item.size,
+              mime: item.mime,
+            })),
+          },
+        });
       } else {
-        await runRhUpscale(actionId, controller);
+        const preset = resolveRhVideoCapabilityPreset(actionId);
+        queueSecondaryAction({
+          actionId: 'rh-video.capability',
+          target: actionId,
+          params: {
+            capability: preset.capability,
+            preferredToolId: preset.preferredToolId,
+            videoUrls: cleanVideoUrls,
+            retryCount: 2,
+            retryDelayMs: 1200,
+            continueOnError: true,
+          },
+        });
       }
+      setMessage('等待运行体检确认');
     } catch (err) {
       const nextError = formatError(err);
-      if (controller.signal.aborted) {
-        setMessage('已取消');
-        logBus.warn(`${actionId === 'frames' ? '首尾帧获取' : resolveRhVideoCapabilityPreset(actionId).label}: 已取消`, 'rh-video');
-        return;
-      }
       setError(nextError);
       setMessage(nextError);
-      logBus.error(`${actionId === 'frames' ? '首尾帧获取' : resolveRhVideoCapabilityPreset(actionId).label}: ${nextError}`, 'rh-video');
       onError?.(nextError);
-    } finally {
-      abortRef.current = null;
-      activeTaskIdsRef.current.clear();
-      setRunningActionId(null);
-      onRunningChange?.(false);
     }
   };
 

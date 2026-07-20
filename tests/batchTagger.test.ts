@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, parse } from 'node:path';
 import {
   buildBatchTagPrompt,
   buildBatchTagSidecarNames,
@@ -14,6 +14,7 @@ import {
   type BatchTagMode,
   type BatchTagMediaKind,
 } from '../src/utils/batchTagger.ts';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 const require = createRequire(import.meta.url);
 
@@ -193,11 +194,8 @@ test('batch tagger recommends ModelScope Qwen3-VL 235B for visual tagging', () =
 });
 
 test('batch tagger node is registered as an image/video toolbox node with UI and feature metadata', () => {
-  const registry = read('src/config/nodeRegistry.ts');
-  const ports = read('src/config/portTypes.ts');
   const types = read('src/types/canvas.ts');
   const canvas = read('src/components/Canvas.tsx');
-  const actionBar = read('src/components/NodeActionBar.tsx');
   const loop = read('src/components/nodes/LoopNode.tsx');
   const placement = read('src/utils/nodePlacement.ts');
   const server = read('backend/src/server.js');
@@ -209,20 +207,40 @@ test('batch tagger node is registered as an image/video toolbox node with UI and
   const filesRoute = read('backend/src/routes/files.js');
   const imageOps = read('src/services/imageOps.ts');
   const viteEnv = read('src/vite-env.d.ts');
+  const styles = read('src/styles/index.css');
 
-  assert.match(registry, /type:\s*'batch-tagger'[\s\S]*label:\s*'批量打标'[\s\S]*category:\s*'toolbox'/);
-  assert.match(ports, /'batch-tagger':\s*\{\s*inputs:\s*\['image',\s*'video',\s*'text'\],\s*outputs:\s*\['text',\s*'metadata'\]\s*\}/);
+  assertProductionNodeSchema('batch-tagger', {
+    label: '批量打标',
+    category: 'toolbox',
+    inputs: ['image', 'video', 'text'],
+    outputs: ['text', 'metadata'],
+    executable: true,
+  });
   assert.match(types, /\|\s*'batch-tagger'/);
   assert.match(canvas, /const BatchTaggerNode = lazyCanvasNode\(\(\) => import\('\.\/nodes\/BatchTaggerNode'\)/);
   assert.match(canvas, /'batch-tagger':\s*BatchTaggerNode/);
   assert.match(canvas, /'batch-tagger':\s*\{[\s\S]*batchTagMode:\s*'tags'[\s\S]*batchTagFormats:\s*\['txt'\]/);
-  assert.match(actionBar, /'batch-tagger'/);
-  assert.match(loop, /'aggregate-parser',\s*'batch-processor',\s*'batch-tagger'/);
+  assert.match(loop, /EXECUTABLE_NODE_TYPES\.has\(n\.type as string\)/);
   assert.match(placement, /'batch-tagger':\s*\{\s*w:\s*720,\s*h:\s*620\s*\}/);
   assert.match(server, /batchTagsRouter/);
   assert.match(postBuild, /routes',\s*'batchTags\.t8c'/);
   assert.match(features, /"nodeType":\s*"batch-tagger"/);
   assert.match(node, /Qwen\/Qwen3-VL-235B-A22B-Instruct/);
+  assert.match(node, /BATCH_TAGGER_EXTERNAL_TOOL_URL = 'https:\/\/zhaotutu\.xyz'/);
+  assert.match(node, /最好的打标工具-图图打标器：点击获取/);
+  assert.match(node, /t8-batch-tagger-tool-link/);
+  assert.match(node, /background:\s*'#f8fafc'/);
+  assert.match(node, /color:\s*'#0f172a'/);
+  assert.match(node, /border:\s*'1px solid rgba\(15,\s*23,\s*42,\s*0\.45\)'/);
+  assert.match(styles, /button\.t8-batch-tagger-tool-link/);
+  assert.match(styles, /button\.t8-batch-tagger-tool-link \*/);
+  assert.match(styles, /color:\s*#0f172a\s*!important/);
+  assert.match(styles, /text-shadow:\s*none\s*!important/);
+  assert.match(styles, /opacity:\s*1\s*!important/);
+  assert.match(node, /openBatchTaggerExternalTool/);
+  assert.match(node, /window\.t8pc\?\.openExternal/);
+  assert.match(node, /result\?\.success === true/);
+  assert.match(node, /window\.open\(BATCH_TAGGER_EXTERNAL_TOOL_URL,\s*'_blank',\s*'noopener,noreferrer'\)/);
   assert.match(node, /webkitdirectory/);
   assert.match(node, /停止/);
   assert.match(node, /output\/batch-tags/);
@@ -246,9 +264,17 @@ test('batch tagger node is registered as an image/video toolbox node with UI and
   assert.match(node, /summarizeBatchTagSidecarDestination\(nextItems\)/);
   assert.match(node, /createWritable/);
   assert.match(node, /latestOutputDir/);
+  assert.match(node, /latestOutputPath/);
+  assert.match(node, /allOutputFiles/);
+  assert.match(node, /showAllOutputPaths/);
+  assert.match(node, /查看全部路径/);
+  assert.match(node, /data-batch-tag-output-paths/);
+  assert.match(node, /openLocalPath\(latestOutputPath \|\| latestOutputDir,\s*\{ selectFile: Boolean\(latestOutputPath\) \}\)/);
   assert.match(filesRoute, /router\.post\('\/import-local'/);
   assert.match(filesRoute, /router\.post\('\/open-local-path'/);
+  assert.match(filesRoute, /selectFile/);
   assert.match(imageOps, /export async function openLocalPath/);
+  assert.match(imageOps, /selectFile\?: boolean/);
   assert.match(electronMain, /dialog/);
   assert.match(electronMain, /ipcMain\.handle\('t8pc:pick-media-files'/);
   assert.match(preload, /pickMediaFiles:\s*\(options\)/);
@@ -514,22 +540,105 @@ test('batch tagger defaults to txt sidecars and saves local file tags beside the
   }
 });
 
+test('batch tagger saves sidecars beside source files placed at a drive root without mkdiring the root', () => {
+  const route = require('../backend/src/routes/batchTags.js');
+  const fsModule = require('node:fs');
+  const rootDir = parse(process.cwd()).root;
+  const sourcePath = join(rootDir, 'ComfyUI_00001_root_source.png');
+  const targetPath = join(rootDir, 'ComfyUI_00001_root_source.txt');
+  const original = {
+    statSync: fsModule.statSync,
+    existsSync: fsModule.existsSync,
+    mkdirSync: fsModule.mkdirSync,
+    writeFileSync: fsModule.writeFileSync,
+  };
+  const mkdirCalls: string[] = [];
+  const writes: Array<{ path: string; text: string }> = [];
+  try {
+    fsModule.statSync = (target: string) => {
+      if (target === sourcePath) return { isFile: () => true, isDirectory: () => false };
+      return original.statSync(target);
+    };
+    fsModule.existsSync = (target: string) => {
+      if (target === rootDir) return true;
+      if (target === targetPath) return false;
+      return original.existsSync(target);
+    };
+    fsModule.mkdirSync = (target: string, options?: unknown) => {
+      mkdirCalls.push(target);
+      if (target === rootDir || target === dirname(targetPath)) {
+        throw new Error(`mkdir should not be called for root: ${target}`);
+      }
+      return original.mkdirSync(target, options as any);
+    };
+    fsModule.writeFileSync = (target: string, text: string, options?: unknown) => {
+      if (target === targetPath) {
+        writes.push({ path: target, text });
+        return;
+      }
+      return original.writeFileSync(target, text, options as any);
+    };
+
+    const saved = route.writeBatchTagSidecars({
+      item: {
+        kind: 'image',
+        name: 'ComfyUI_00001_root_source.png',
+        url: '/files/input/up_root_source.png',
+        sourcePath,
+      },
+      parsed: {
+        text: 'root source, sidecar',
+        tags: ['root source', 'sidecar'],
+        caption: '',
+        shortCaption: '',
+        metadata: null,
+        rawText: 'root source, sidecar',
+      },
+      formats: ['txt'],
+      overwrite: false,
+    });
+
+    assert.equal(saved.length, 1);
+    assert.equal(saved[0].path, targetPath);
+    assert.equal(saved[0].directory, rootDir);
+    assert.deepEqual(mkdirCalls, []);
+    assert.deepEqual(writes, [{ path: targetPath, text: 'root source, sidecar\n' }]);
+  } finally {
+    fsModule.statSync = original.statSync;
+    fsModule.existsSync = original.existsSync;
+    fsModule.mkdirSync = original.mkdirSync;
+    fsModule.writeFileSync = original.writeFileSync;
+  }
+});
+
 test('batch tagger local import preserves native source path and opens the actual saved directory', async () => {
   const express = require('express');
   const batchTagsRoute = require('../backend/src/routes/batchTags.js');
-  const filesRouter = require('../backend/src/routes/files.js');
   const config = require('../backend/src/config.js');
   const oldConfig = {
+    DATA_DIR: config.DATA_DIR,
     INPUT_DIR: config.INPUT_DIR,
     OUTPUT_DIR: config.OUTPUT_DIR,
+    THUMBNAILS_DIR: config.THUMBNAILS_DIR,
+    PROJECT_DB_FILE: config.PROJECT_DB_FILE,
+    PROJECT_DB_BACKUP_FILE: config.PROJECT_DB_BACKUP_FILE,
   };
   const root = mkdtempSync(join(tmpdir(), 't8-batch-tags-import-'));
+  let projectDatabase: any = null;
   try {
+    config.DATA_DIR = join(root, 'data');
     config.INPUT_DIR = join(root, 'input');
     config.OUTPUT_DIR = join(root, 'output');
+    config.THUMBNAILS_DIR = join(root, 'thumbnails');
+    config.PROJECT_DB_FILE = join(config.DATA_DIR, 't8-projects.sqlite3');
+    config.PROJECT_DB_BACKUP_FILE = join(config.DATA_DIR, 't8-projects.sqlite3.backup');
+    const filesRouter = require('../backend/src/routes/files.js');
+    projectDatabase = require('../backend/src/services/projectDatabase.js').getProjectDatabase(config);
     const sourceDir = join(root, '工作流(2)');
+    mkdirSync(config.DATA_DIR, { recursive: true });
     mkdirSync(config.INPUT_DIR, { recursive: true });
     mkdirSync(config.OUTPUT_DIR, { recursive: true });
+    mkdirSync(config.THUMBNAILS_DIR, { recursive: true });
     mkdirSync(sourceDir, { recursive: true });
     const sourcePath = join(sourceDir, 'ComfyUI_00006_fhrxf_1782377039.png');
     writeFileSync(sourcePath, 'fake image bytes');
@@ -582,20 +691,104 @@ test('batch tagger local import preserves native source path and opens the actua
       const openRes = await fetch(`${base}/api/files/open-local-path`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: saved[0].directory, dryRun: true }),
+        body: JSON.stringify({ path: saved[0].path, selectFile: true, dryRun: true }),
       });
       const opened = await openRes.json();
       assert.equal(openRes.ok, true, JSON.stringify(opened));
       assert.equal(opened.success, true);
       assert.equal(opened.data.path, sourceDir);
+      assert.equal(opened.data.targetPath, saved[0].path);
+      assert.equal(opened.data.selectFile, true);
       assert.equal(opened.data.opened, false);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   } finally {
+    if (projectDatabase) {
+      try { await projectDatabase.createBackup(); } catch {}
+      try { projectDatabase.close(); } catch {}
+    }
+    config.DATA_DIR = oldConfig.DATA_DIR;
     config.INPUT_DIR = oldConfig.INPUT_DIR;
     config.OUTPUT_DIR = oldConfig.OUTPUT_DIR;
+    config.THUMBNAILS_DIR = oldConfig.THUMBNAILS_DIR;
+    config.PROJECT_DB_FILE = oldConfig.PROJECT_DB_FILE;
+    config.PROJECT_DB_BACKUP_FILE = oldConfig.PROJECT_DB_BACKUP_FILE;
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('batch tagger infers browser development sources from configured external source roots', async () => {
+  const route = require('../backend/src/routes/batchTags.js');
+  const config = require('../backend/src/config.js');
+  const oldConfig = {
+    BASE_DIR: config.BASE_DIR,
+    INPUT_DIR: config.INPUT_DIR,
+    OUTPUT_DIR: config.OUTPUT_DIR,
+    DATA_DIR: config.DATA_DIR,
+    THUMBNAILS_DIR: config.THUMBNAILS_DIR,
+    IS_PACKAGED: config.IS_PACKAGED,
+  };
+  const oldEnv = process.env.T8PC_BATCH_TAG_SOURCE_ROOTS;
+  const root = mkdtempSync(join(tmpdir(), 't8-batch-tags-external-dev-'));
+  const externalRoot = mkdtempSync(join(tmpdir(), 't8-batch-tags-external-root-'));
+  try {
+    const projectDir = join(root, 'T8-penguin-canvas');
+    const sourceDir = join(externalRoot, '工作流(2)');
+    config.BASE_DIR = projectDir;
+    config.INPUT_DIR = join(projectDir, 'input');
+    config.OUTPUT_DIR = join(projectDir, 'output');
+    config.DATA_DIR = join(projectDir, 'data');
+    config.THUMBNAILS_DIR = join(projectDir, 'thumbnails');
+    config.IS_PACKAGED = false;
+    process.env.T8PC_BATCH_TAG_SOURCE_ROOTS = externalRoot;
+    mkdirSync(config.INPUT_DIR, { recursive: true });
+    mkdirSync(config.OUTPUT_DIR, { recursive: true });
+    mkdirSync(sourceDir, { recursive: true });
+
+    const sourceName = 'ComfyUI_00001_ambrx_1783572999.png';
+    const sourcePath = join(sourceDir, sourceName);
+    const bytes = Buffer.alloc(212400, 8);
+    writeFileSync(sourcePath, bytes);
+    writeFileSync(join(config.INPUT_DIR, 'up_external_copy.png'), bytes);
+
+    const saved = route.writeBatchTagSidecars({
+      item: {
+        kind: 'image',
+        name: sourceName,
+        relativePath: sourceName,
+        url: '/files/input/up_external_copy.png',
+        sourcePath: '',
+        size: bytes.length,
+      },
+      parsed: {
+        text: 'sports field, young woman',
+        tags: ['sports field', 'young woman'],
+        caption: '',
+        shortCaption: '',
+        metadata: null,
+        rawText: 'sports field, young woman',
+      },
+      formats: ['txt'],
+      overwrite: false,
+    });
+
+    assert.equal(saved.length, 1);
+    assert.equal(saved[0].directory, sourceDir);
+    assert.equal(saved[0].path, join(sourceDir, 'ComfyUI_00001_ambrx_1783572999.txt'));
+    assert.equal(existsSync(saved[0].path), true);
+    assert.equal(existsSync(join(config.INPUT_DIR, 'ComfyUI_00001_ambrx_1783572999.txt')), false);
+  } finally {
+    config.BASE_DIR = oldConfig.BASE_DIR;
+    config.INPUT_DIR = oldConfig.INPUT_DIR;
+    config.OUTPUT_DIR = oldConfig.OUTPUT_DIR;
+    config.DATA_DIR = oldConfig.DATA_DIR;
+    config.THUMBNAILS_DIR = oldConfig.THUMBNAILS_DIR;
+    config.IS_PACKAGED = oldConfig.IS_PACKAGED;
+    if (oldEnv == null) delete process.env.T8PC_BATCH_TAG_SOURCE_ROOTS;
+    else process.env.T8PC_BATCH_TAG_SOURCE_ROOTS = oldEnv;
+    rmSync(root, { recursive: true, force: true });
+    rmSync(externalRoot, { recursive: true, force: true });
   }
 });
 

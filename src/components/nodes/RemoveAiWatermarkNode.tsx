@@ -14,6 +14,7 @@ import {
 import { getAiWatermarkStatus, processAiWatermark, type AiWatermarkMode, type AiWatermarkOptions, type AiWatermarkRegion, type AiWatermarkStatus } from '../../services/aiWatermark';
 import { getMediaItemsFromData, type MediaItem, type MediaKind } from '../../utils/mediaCollection';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useHasAutoOutput } from './useHasAutoOutput';
 import SmartImage from '../SmartImage';
@@ -660,7 +661,7 @@ function RemoveAiWatermarkNode({ id, data, selected }: { id: string; data: any; 
         <button
           type="button"
           className={`t8-btn w-full px-3 py-2 text-sm ${isRunning ? '' : 't8-btn-primary'}`}
-          onClick={isRunning ? () => stopProcessing() : handleRun}
+          onClick={isRunning ? () => stopProcessing() : () => requestCanvasNodeRun(id)}
         >
           {isRunning ? <Square size={14} /> : mode === 'erase' ? <Eraser size={14} /> : mode.includes('metadata') || mode === 'identify' ? <FileText size={14} /> : <Sparkles size={14} />}
           {isRunning ? '停止' : '运行'}

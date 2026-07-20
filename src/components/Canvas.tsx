@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type RefObject } from 'react';
+import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type RefObject, type SetStateAction } from 'react';
 import {
   ReactFlow,
   Background,
@@ -19,6 +19,7 @@ import {
   type ConnectionLineComponentProps,
   type Edge,
   type Node,
+  type NodeProps,
   type NodeChange,
   type EdgeChange,
 } from '@xyflow/react';
@@ -26,11 +27,12 @@ import '@xyflow/react/dist/style.css';
 import { Play, Copy, CopyPlus, Trash2, FolderPlus, PackagePlus, Library, Download, Workflow, Send as SendIcon, Sparkles } from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
 import { useCanvasStore } from '../stores/canvas';
+import { useApiKeysStore } from '../stores/apiKeys';
 import { useThemeStore } from '../stores/theme';
 import { useShortcutStore } from '../stores/shortcuts';
 import { trackAchievementEvent, useAchievementStore } from '../stores/achievements';
 import { getTemplateMode, resolveThemeTemplate } from '../theme/defaultTemplates';
-import { useRunBusStore } from '../stores/runBus';
+import { matchesRunCompletion, registerRunNodeExecutionContexts, useRunBusStore, type RunNodeExecutionContext } from '../stores/runBus';
 import { useGroupBusStore, GROUP_COLORS, DEFAULT_GROUP_NAME } from '../stores/groupBus';
 import { useRadialMenuStore } from '../stores/radialMenu';
 import { topologicalSort } from '../utils/topologicalSort';
@@ -128,7 +130,28 @@ import {
   type VideoEditClip,
 } from '../utils/videoEdit';
 import { buildGenerationHistoryDataKey, collectGenerationHistory, countGenerationHistoryItems } from '../utils/generationHistory';
+import {
+  analyzeSubflowBoundary,
+  detachSubflowInstance,
+  isPrivateSubflowDataKey,
+  loadSubflowDependencyDefinitions,
+  subflowDependencyMapKey,
+  upgradeSubflowInstances,
+  type SubflowBoundaryAnalysis,
+  type SubflowDependencyRef,
+  type SubflowDefinition,
+  type SubflowParameter,
+  type SubflowValueSchema,
+} from '../utils/subflows';
+import {
+  commitSubflowDraftHistory,
+  createSubflowDraftHistory,
+  redoSubflowDraftHistory,
+  undoSubflowDraftHistory,
+} from '../utils/subflowDraftHistory';
+import { buildSubflowInspectorViewportKey } from '../utils/subflowInspectorViewport';
 import { validateUploadMediaFile } from '../utils/uploadMediaValidation';
+import { defaultFaceExpressionState } from '../utils/faceExpression3D';
 import {
   CREATIVE_TARGET_NODE_TYPE,
   buildCreativeTargetResult,
@@ -150,6 +173,7 @@ import {
 import * as api from '../services/api';
 import { logBus } from '../stores/logs';
 import CanvasToolbar from './CanvasToolbar';
+import ProjectWorkbench from './ProjectWorkbench';
 import GenerationHistoryPanel from './GenerationHistoryPanel';
 import TerminalPanel from './TerminalPanel';
 import NodeActionBar from './NodeActionBar';
@@ -159,17 +183,72 @@ import MaterialDragOverlay from './MaterialDragOverlay';
 import ThemeMusicToggle from './ThemeMusicToggle';
 import CreativeDeskLayer from './CreativeDeskLayer';
 import FarmCanvasLayer, { type FarmCanvasFloatingFeedback } from './FarmCanvasLayer';
+import GardenDefenseExperience from '../features/garden-defense/GardenDefenseExperience.tsx';
 import DragonBallRadar from './DragonBallRadar';
 import SaintSeiyaSanctuary from './SaintSeiyaSanctuary';
 import TetrisPanel from './TetrisPanel';
 import FarmStoryPanel, { T8_FARM_STORY_PANEL_COLLAPSED_STORAGE_KEY, type FarmStoryPanelCanvasHint } from './FarmStoryPanel';
 import SendMaterialsModal from './SendMaterialsModal';
+import RunPreflightModal from './RunPreflightModal';
 import SmartImage from './SmartImage';
 import { useCanvasHistory } from '../hooks/useCanvasHistory';
+import { materializeCanvasPatchDraft, type CanvasPatchDraft, type WorkflowDoctorCanvasHighlight } from '../utils/workflowDoctor';
+import {
+  activateCanvasPatchPending,
+  advanceCanvasPatchMutation,
+  canvasPatchHistoryBarrier,
+  mergeCanvasPatchGraph,
+  mergeCanvasPatchValueWithConflicts,
+  reconcileCanvasPatchAutosavePending,
+  reconcileCanvasPatchAutosaveResponse,
+  type CanvasPatchAutosaveToken,
+  type CanvasPatchMergeConflict,
+  type CanvasPatchPendingEnvelope,
+} from '../utils/canvasPatchMerge';
+import { collectFailedDownstreamNodeIds, getRunPlannedEdges, getRunPlannedNodeIds } from '../utils/runCenter';
+import { buildRunAttemptOriginalReplayRuntime, buildRunOriginalReplayRuntime, buildSubflowNodeRunOriginalReplayRuntime } from '../utils/runReplay';
+import {
+  prepareRunAction,
+  type RunActionKind,
+  type RunActionPreview,
+  type RunCostEstimateInput,
+  type RunEvidenceRefInput,
+  type RunPreflightDiagnosticsInput,
+} from '../utils/runPreflight';
+import {
+  RUN_PREFLIGHT_ASSET_CONCURRENCY,
+  RUN_PREFLIGHT_ASSET_LIMIT,
+  buildRunPreflightDiagnosticScope,
+  buildRunPreflightDiagnostics,
+  collectRunPreflightAssetIds,
+  type RunPreflightDiagnosticScopeMode,
+  workflowAssetsFromRecords,
+} from '../utils/runPreflightContext';
+import {
+  authorizeRunPreflight,
+  isSameRunPreflightExecutionSnapshot,
+  type RunPreflightExecutionSnapshot,
+} from '../utils/runPreflightExecution';
+import { createRunPreflightHostContextDigest } from '../utils/runPreflightHostContext';
+import {
+  buildPossibleDerivedExecutionScope,
+  type PossibleDerivedExecutionScope,
+} from '../utils/derivedExecutionScope';
+import { CANVAS_NODE_RUN_REQUEST_EVENT, createCanvasNodeRunRequestId, type CanvasNodeRunRequestDetail } from '../utils/canvasRunRequest';
+import {
+  CANVAS_SECONDARY_PROVIDER_ACTION_REQUEST_EVENT,
+  secondaryProviderActionFromNodeData,
+  secondaryProviderActionNodePatch,
+  validateSecondaryProviderAction,
+  type CanvasSecondaryProviderActionRequestDetail,
+  type SecondaryProviderActionEnvelope,
+} from '../utils/secondaryProviderAction';
 import type { CanvasTemplate } from '../config/canvasTemplates';
+import type { CanvasPatch, CanvasPatchPreview, CanvasPatchRecord, VersionedCanvasData, RunContext, RunIntent } from '../types/project';
 import PlaceholderNode from './nodes/PlaceholderNode';
 import DeletableEdge from './edges/DeletableEdge';
 import { NODE_REGISTRY } from '../config/nodeRegistry';
+import { EXECUTABLE_NODE_TYPES } from '../config/executableNodeTypes';
 import type { CreativeDeskState, FarmAnimalProductId, FarmCanvasState, FarmCropId, FarmDecorObjectType, FarmEventLogItem, FarmTool, NodeType, NodeMeta } from '../types/canvas';
 import {
   appendCreativeDeskItem,
@@ -210,6 +289,7 @@ import { farmSoundCueForEvent, farmSoundCueForTool, playFarmActionSound, type Fa
 import { readImageNaturalSize } from '../utils/imageNaturalSize';
 import {
   isConnectionValid,
+  getConnectionPortType,
   getNodeOutputs,
   getNodeInputs,
   arePortsCompatible,
@@ -218,6 +298,42 @@ import {
   NODE_PORTS,
   type PortType,
 } from '../config/portTypes';
+
+type ProjectRunReplayMode = 'full-current' | 'failed-original' | 'full-original' | 'subflow-node-original' | 'attempt-original';
+
+type ProjectRunTerminalStatus = 'succeeded' | 'failed' | 'stopped';
+
+interface PreparedRunExecution {
+  executionContexts: Record<string, RunNodeExecutionContext>;
+  finalize: (status: ProjectRunTerminalStatus) => Promise<void> | void;
+}
+
+interface RunNodesByOrderOptions {
+  parentRunId?: string;
+  replayMode?: ProjectRunReplayMode;
+  replaySourceRunId?: string;
+  replaySourceAttemptId?: string;
+  runIntentId?: string;
+  executionOrder?: string[];
+  originalNodeIdByRuntimeId?: Record<string, string>;
+  executionContexts?: Record<string, RunNodeExecutionContext>;
+  prepareRunExecution?: (runId: string) => Promise<PreparedRunExecution>;
+  actionKind?: RunActionKind;
+  evidenceRefs?: RunEvidenceRefInput[];
+  requestId?: string;
+  runIntentSnapshot?: RunIntent | null;
+  expectedRevision?: number;
+  cost?: RunCostEstimateInput;
+  preflightContextNodes?: Node[];
+  preflightContextEdges?: Edge[];
+  preflightScopeMode?: RunPreflightDiagnosticScopeMode;
+  secondaryProviderAction?: SecondaryProviderActionEnvelope | null;
+}
+
+function isSecondaryProviderActionRun(run: { summary?: Record<string, unknown> | null }) {
+  return typeof run.summary?.secondaryProviderActionId === 'string'
+    && run.summary.secondaryProviderActionId.trim().length > 0;
+}
 
 const CANVAS_MIN_ZOOM = 0.02;
 const CANVAS_OVERVIEW_FIT_OPTIONS = {
@@ -260,6 +376,127 @@ type NodeIdDialogState =
       description: string;
       placeholder: string;
     };
+
+type SubflowDraftState = {
+  analysis: SubflowBoundaryAnalysis;
+  selectedIds: string[];
+  name: string;
+  description: string;
+  saving: boolean;
+};
+
+type SubflowInspectorState = {
+  instanceNodeId: string;
+  stack: SubflowDefinition[];
+  pathNodeIds: string[];
+  error?: string;
+  detaching?: boolean;
+  edit?: {
+    depth: number;
+    baseRevision: number;
+    changeSummary: string;
+    draft: SubflowDefinition;
+    undoStack: SubflowDefinition[];
+    redoStack: SubflowDefinition[];
+    selectedNodeId: string | null;
+    nodeDataText: string;
+    nodeDataError: string;
+    saving: boolean;
+    conflict?: {
+      revision: number;
+      latestVersion: number;
+      definition: SubflowDefinition;
+    };
+  };
+};
+
+type SubflowInspectorNodeData = {
+  label: string;
+  sourceHandles: string[];
+  targetHandles: string[];
+  onOpenNested?: () => void;
+};
+
+const SUBFLOW_INSPECTOR_DEFAULT_SOURCE_HANDLE = '__t8_subflow_source__';
+const SUBFLOW_INSPECTOR_DEFAULT_TARGET_HANDLE = '__t8_subflow_target__';
+
+function SubflowInspectorNode({ data, selected }: NodeProps<Node<SubflowInspectorNodeData>>) {
+  const targetHandles = data.targetHandles.length ? data.targetHandles : [SUBFLOW_INSPECTOR_DEFAULT_TARGET_HANDLE];
+  const sourceHandles = data.sourceHandles.length ? data.sourceHandles : [SUBFLOW_INSPECTOR_DEFAULT_SOURCE_HANDLE];
+  return (
+    <div
+      className={`min-w-[150px] max-w-[260px] rounded border bg-[var(--bg-tertiary)] px-3 py-3 text-xs font-bold text-[var(--text-primary)] shadow-sm ${selected ? 'border-[var(--accent-primary)] ring-2 ring-[var(--accent-primary)]/30' : 'border-[var(--border-primary)]'}`}
+      onDoubleClick={(event) => {
+        if (!data.onOpenNested) return;
+        event.stopPropagation();
+        data.onOpenNested();
+      }}
+    >
+      {targetHandles.map((handle, index) => (
+        <Handle
+          key={`target-${handle}`}
+          id={handle}
+          type="target"
+          position={Position.Left}
+          style={{ top: `${((index + 1) / (targetHandles.length + 1)) * 100}%` }}
+        />
+      ))}
+      <div className="truncate">{data.label}</div>
+      {data.onOpenNested && <button type="button" className="nodrag mt-1 text-[9px] font-semibold text-[var(--accent-primary)] underline-offset-2 hover:underline" onClick={(event) => { event.stopPropagation(); data.onOpenNested?.(); }}>进入子流程</button>}
+      {sourceHandles.map((handle, index) => (
+        <Handle
+          key={`source-${handle}`}
+          id={handle}
+          type="source"
+          position={Position.Right}
+          style={{ top: `${((index + 1) / (sourceHandles.length + 1)) * 100}%` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+const subflowInspectorNodeTypes = { subflowInspector: SubflowInspectorNode };
+
+function cloneSubflowDefinition(definition: SubflowDefinition): SubflowDefinition {
+  if (typeof structuredClone === 'function') return structuredClone(definition);
+  return JSON.parse(JSON.stringify(definition)) as SubflowDefinition;
+}
+
+function parseSubflowPortDefault(raw: string, kind: string) {
+  const value = raw.trim();
+  if (!value) return undefined;
+  if (kind === 'config' || kind === 'metadata') {
+    try { return JSON.parse(value); } catch (_) { return value; }
+  }
+  return value;
+}
+
+const SUBFLOW_NON_CONFIG_DATA_KEY = /^(nodeSerialId|lastRunAt|lastRunStatus|lastRunError|progress|status|error|taskId|requestId|result|results|output|outputs|imageUrl|imageUrls|videoUrl|videoUrls|audioUrl|audioUrls|modelUrl|modelUrls|createdAt|updatedAt)$/i;
+
+function inferSubflowValueSchema(value: unknown): SubflowValueSchema | undefined {
+  if (typeof value === 'string') return { type: 'string' };
+  if (typeof value === 'boolean') return { type: 'boolean' };
+  if (typeof value === 'number') return { type: Number.isInteger(value) ? 'integer' : 'number' };
+  return undefined;
+}
+
+function subflowParameterCandidates(definition: SubflowDefinition) {
+  return definition.nodes.flatMap((node) => {
+    const data = (node.data || {}) as Record<string, unknown>;
+    const nodeLabel = String(data.label || node.type || node.id);
+    return Object.entries(data)
+      .filter(([key, value]) => !key.startsWith('_') && !isPrivateSubflowDataKey(key) && !SUBFLOW_NON_CONFIG_DATA_KEY.test(key) && inferSubflowValueSchema(value))
+      .map(([key, value]) => ({
+        id: `param-${node.id}-${key}`.replace(/[^a-zA-Z0-9_-]+/g, '-').slice(0, 160),
+        name: `${nodeLabel} · ${key}`,
+        nodeId: node.id,
+        dataKey: key,
+        defaultValue: value,
+        schema: inferSubflowValueSchema(value),
+      } satisfies SubflowParameter));
+  });
+}
 const FARM_MINIMAP_HEAVY_OBJECT_COUNT = 500;
 const MAX_EDGE_CUT_FEEDBACKS = 4;
 const EDGE_CUT_FEEDBACK_MS = 1100;
@@ -827,6 +1064,15 @@ function withFarmNodeVisualState(node: Node): Node {
   return { ...node, className };
 }
 
+function withGardenDefenseNodeVisualState(node: Node): Node {
+  if (node.type === 'groupBox' || node.type === 'bulkPhantom') return node;
+  const visualState = farmNodeVisualStateFromData(node.data);
+  const currentClassName = typeof node.className === 'string' ? node.className : '';
+  const className = `${currentClassName} t8-garden-node-state is-garden-node-${visualState}`.trim();
+  if (className === currentClassName) return node;
+  return { ...node, className };
+}
+
 function normalizeEdgeCutKind(kind: unknown): EdgeCutFeedbackKind {
   if (kind === 'rope' || kind === 'water' || kind === 'path') return kind;
   return 'generic';
@@ -1053,6 +1299,7 @@ const RHToolsNode = lazyCanvasNode(() => import('./nodes/RHToolsNode'), 'RHTools
 const RHToolboxNode = lazyCanvasNode(() => import('./nodes/RHToolboxNode'), 'RHToolboxNode');
 const FalToolboxNode = lazyCanvasNode(() => import('./nodes/FalToolboxNode'), 'FalToolboxNode');
 const Model3DPreviewNode = lazyCanvasNode(() => import('./nodes/Model3DPreviewNode'), 'Model3DPreviewNode');
+const FaceExpression3DNode = lazyCanvasNode(() => import('./nodes/FaceExpression3DNode'), 'FaceExpression3DNode');
 const GrokOAuthAgentNode = lazyCanvasNode(() => import('./nodes/GrokOAuthAgentNode'), 'GrokOAuthAgentNode');
 const CodexCliAgentNode = lazyCanvasNode(() => import('./nodes/CodexCliAgentNode'), 'CodexCliAgentNode');
 const CodexImageConjureNode = lazyCanvasNode(() => import('./nodes/CodexImageConjureNode'), 'CodexImageConjureNode');
@@ -1090,6 +1337,7 @@ const FrameExtractorNode = lazyCanvasNode(() => import('./nodes/FrameExtractorNo
 const FramePairNode = lazyCanvasNode(() => import('./nodes/FramePairNode'), 'FramePairNode');
 const LoopNode = lazyCanvasNode(() => import('./nodes/LoopNode'), 'LoopNode');
 const RandomRouteNode = lazyCanvasNode(() => import('./nodes/RandomRouteNode'), 'RandomRouteNode');
+const SubflowNode = lazyCanvasNode(() => import('./nodes/SubflowNode'), 'SubflowNode');
 const PickFromSetNode = lazyCanvasNode(() => import('./nodes/PickFromSetNode'), 'PickFromSetNode');
 const TextSplitNode = lazyCanvasNode(() => import('./nodes/TextSplitNode'), 'TextSplitNode');
 const MaterialSetNode = lazyCanvasNode(() => import('./nodes/MaterialSetNode'), 'MaterialSetNode');
@@ -1097,6 +1345,8 @@ const GenerationTargetNode = lazyCanvasNode(() => import('./nodes/GenerationTarg
 const VibeXNode = lazyCanvasNode(() => import('./nodes/VibeXNode'), 'VibeXNode');
 const UploadNode = lazyCanvasNode(() => import('./nodes/UploadNode'), 'UploadNode');
 const OutputNode = lazyCanvasNode(() => import('./nodes/OutputNode'), 'OutputNode');
+const FeishuBitableInputNode = lazyCanvasNode(() => import('./nodes/FeishuBitableInputNode'), 'FeishuBitableInputNode');
+const FeishuBitableOutputNode = lazyCanvasNode(() => import('./nodes/FeishuBitableOutputNode'), 'FeishuBitableOutputNode');
 const GroupBoxNode = lazyCanvasNode(() => import('./nodes/GroupBoxNode'), 'GroupBoxNode');
 const RH_TOOLBOX_MAKER_MODULE = './nodes/RHToolboxMakerNode';
 const FAL_TOOLBOX_MAKER_MODULE = './nodes/FalToolboxMakerNode';
@@ -1129,6 +1379,7 @@ const SPECIFIC_NODES: Record<string, any> = {
   ...(import.meta.env?.DEV ? { 'rh-toolbox-maker': RHToolboxMakerNode } : {}),
   'fal-toolbox': FalToolboxNode,
   'model-3d-preview': Model3DPreviewNode,
+  'face-expression-3d': FaceExpression3DNode,
   'model-3d-upload': UploadNode,
   'grok-oauth-agent': GrokOAuthAgentNode,
   'codex-cli-agent': CodexCliAgentNode,
@@ -1152,6 +1403,7 @@ const SPECIFIC_NODES: Record<string, any> = {
   'frame-pair': FramePairNode,
   loop: LoopNode,
   'random-route': RandomRouteNode,
+  subflow: SubflowNode,
   'pick-from-set': PickFromSetNode,
   'text-split': TextSplitNode,
   'material-set': MaterialSetNode,
@@ -1185,10 +1437,13 @@ const SPECIFIC_NODES: Record<string, any> = {
   upload: UploadNode,
   // Output (1) - 输出素材(文本/图像/视频/音频 预览 + 文本双击编辑)
   output: OutputNode,
+  'feishu-bitable-input': FeishuBitableInputNode,
+  'feishu-bitable-output': FeishuBitableOutputNode,
 };
 
 const NODE_SERIAL_ANCHOR_LEFT = '--t8-node-serial-anchor-left';
 const NODE_SERIAL_ANCHOR_TOP = '--t8-node-serial-anchor-top';
+const WorkflowDoctorHighlightContext = createContext<ReadonlyMap<string, WorkflowDoctorCanvasHighlight>>(new Map());
 
 function findNodeSerialAnchorTarget(badgeEl: HTMLElement): HTMLElement | null {
   const parent = badgeEl.parentElement;
@@ -1198,6 +1453,7 @@ function findNodeSerialAnchorTarget(badgeEl: HTMLElement): HTMLElement | null {
     if (child === badgeEl) continue;
     if (child.classList.contains('react-flow__handle')) continue;
     if (child.classList.contains('t8-node-serial-badge')) continue;
+    if (child.classList.contains('t8-workflow-doctor-node-marker')) continue;
     return child;
   }
   return null;
@@ -1286,11 +1542,80 @@ function NodeSerialBadge({ data }: { data: unknown }) {
   );
 }
 
+function useWorkflowDoctorPortHighlights(
+  markerRef: RefObject<HTMLSpanElement | null>,
+  highlight: WorkflowDoctorCanvasHighlight | undefined,
+) {
+  useLayoutEffect(() => {
+    const marker = markerRef.current;
+    const parent = marker?.parentElement;
+    if (!marker || !parent || !highlight || typeof window === 'undefined') return;
+    let frame = 0;
+    let marked: HTMLElement[] = [];
+    const clear = () => {
+      marked.forEach((handle) => {
+        handle.classList.remove('t8-workflow-doctor-port-highlight');
+        delete handle.dataset.doctorSeverity;
+      });
+      marked = [];
+    };
+    const apply = () => {
+      frame = 0;
+      clear();
+      const inputIds = new Set(highlight.inputPortIds);
+      const outputIds = new Set(highlight.outputPortIds);
+      parent.querySelectorAll<HTMLElement>('.react-flow__handle').forEach((handle) => {
+        const rawHandleId = handle.getAttribute('data-handleid');
+        const handleId = rawHandleId == null || rawHandleId === '' ? null : rawHandleId;
+        const isInput = handle.classList.contains('target') || handle.classList.contains('react-flow__handle-left');
+        const isOutput = handle.classList.contains('source') || handle.classList.contains('react-flow__handle-right');
+        if ((!isInput || !inputIds.has(handleId)) && (!isOutput || !outputIds.has(handleId))) return;
+        handle.classList.add('t8-workflow-doctor-port-highlight');
+        handle.dataset.doctorSeverity = highlight.severity;
+        marked.push(handle);
+      });
+    };
+    const schedule = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(apply);
+    };
+    const observer = typeof MutationObserver === 'undefined'
+      ? null
+      : new MutationObserver(() => schedule());
+    observer?.observe(parent, { childList: true, subtree: true });
+    apply();
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      clear();
+    };
+  }, [highlight, markerRef]);
+}
+
+function WorkflowDoctorNodeMarker({ nodeId }: { nodeId: string }) {
+  const highlights = useContext(WorkflowDoctorHighlightContext);
+  const highlight = highlights.get(nodeId);
+  const markerRef = useRef<HTMLSpanElement | null>(null);
+  useWorkflowDoctorPortHighlights(markerRef, highlight);
+  if (!highlight) return null;
+  return (
+    <span
+      ref={markerRef}
+      className="t8-workflow-doctor-node-marker"
+      data-doctor-severity={highlight.severity}
+      title={`工作流医生：${highlight.issueCount} 项 · ${highlight.ruleIds.join('、')}`}
+    >
+      <span className="t8-workflow-doctor-node-marker__label" aria-hidden="true">! {highlight.issueCount}</span>
+    </span>
+  );
+}
+
 function withNodeSerialBadge(Component: ComponentType<any>): ComponentType<any> {
   const WrappedNode = (props: any) => (
     <>
       <Component {...props} />
       <NodeSerialBadge data={props?.data} />
+      <WorkflowDoctorNodeMarker nodeId={String(props?.id || '')} />
     </>
   );
   WrappedNode.displayName = `NodeSerialBadge(${Component.displayName || Component.name || 'Node'})`;
@@ -1303,6 +1628,8 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
   edit: { mode: 'edit', model: 'gpt-image-2', aspectRatio: '1:1', sizeLevel: '1K', referenceImages: [] },
   'video-edit': { ...DEFAULT_VIDEO_EDIT_DATA, clips: [], settings: { ...DEFAULT_VIDEO_EDIT_DATA.settings }, job: { ...DEFAULT_VIDEO_EDIT_DATA.job } },
   seedance: {
+    seedanceApiSource: 'auto',
+    seedanceNzModel: 'fast',
     model: 'doubao-seedance-2-0-fast-260128',
     duration: 5,
     ratio: '16:9',
@@ -1317,6 +1644,8 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     frameMode: 'auto',
   },
   'director-storyboard': {
+    seedanceApiSource: 'auto',
+    seedanceNzModel: 'fast',
     model: 'doubao-seedance-2-0-fast-260128',
     ratio: '16:9',
     resolution: '480p',
@@ -1694,6 +2023,16 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     error: '',
     size: { w: 520, h: 440 },
   },
+  'face-expression-3d': {
+    faceExpression3DState: defaultFaceExpressionState(),
+    imageUrl: '',
+    imageUrls: [],
+    urls: [],
+    metadata: null,
+    status: 'idle',
+    error: '',
+    size: { w: 520, h: 520 },
+  },
   'comfyui-store': {
     comfyuiStoreProviderId: '',
     comfyuiStoreCategoryId: 'all',
@@ -1706,9 +2045,14 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     taskId: '',
     imageUrl: '',
     imageUrls: [],
+    videoUrl: '',
     videoUrls: [],
+    audioUrl: '',
     audioUrls: [],
     outputText: '',
+    outputKinds: [],
+    primaryKind: '',
+    outputSaveErrors: [],
     error: '',
   },
   'comfyui-app-maker': {
@@ -1858,6 +2202,36 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     vibexNodeHeight: 820,
     label: 'VibeX工作台',
   },
+  'feishu-bitable-input': {
+    feishuApiBase: 'https://open.feishu.cn',
+    feishuLink: '',
+    feishuAppToken: '',
+    feishuTableId: '',
+    feishuViewId: '',
+    feishuTextField: '',
+    feishuRecordLimit: 20,
+    feishuFields: [],
+    feishuRows: [],
+    textSegments: [],
+    imageUrls: [],
+    videoUrls: [],
+    audioUrls: [],
+    status: 'idle',
+  },
+  'feishu-bitable-output': {
+    feishuApiBase: 'https://open.feishu.cn',
+    feishuOutputLink: '',
+    feishuOutputAppToken: '',
+    feishuOutputTableId: '',
+    feishuOutputRecordId: '',
+    feishuWriteMode: 'auto',
+    feishuWriteTextField: 'T8文本',
+    feishuWriteAttachmentField: 'T8附件',
+    feishuWriteStatusField: 'T8状态',
+    feishuWriteAttachments: true,
+    feishuWritePreview: null,
+    status: 'idle',
+  },
   'drawing-board': { boardRatio: '16:9', boardWidth: 960, boardHeight: 540, boardElements: [], boardColor: '#111827', boardStrokeSize: 5 },
   'grid-crop': { rows: 3, cols: 3, gap: 0 },
   'grid-editor': {
@@ -1909,27 +2283,6 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
   },
 };
 
-// 可被“批量运行”调起的节点类型集合
-// upload 亦被纳入: 点击 RUN 后会根据已上传素材创建下游 OutputNode (見 UploadNode.handleRun)
-const EXECUTABLE_NODE_TYPES = new Set<string>([
-  'image', 'edit',
-  'multi-angle-3d', 'panorama-720', 'penguin-portrait',
-  'video', 'seedance', 'audio', 'llm', 'runninghub', 'runninghub-wallet',
-  // v1.2.10.1: rh-tools 与 RunningHub 同质，同样可被批量运行调起
-  'rh-tools', 'rh-toolbox', 'fal-toolbox', 'comfyui-store',
-  'grok-oauth-agent', 'codex-cli-agent', 'codex-image-conjure',
-  'resize', 'upscale', 'grid-crop', 'grid-editor', 'remove-bg', 'combine', 'image-compare', 'drawing-board',
-  'panorama-3d',
-  'frame-extractor', 'frame-pair',
-  'upload',
-  // v1.2.8 工具节点 (循环器 / 从合集获取)
-  'loop', 'random-route', 'pick-from-set',
-  // v1.4.8: 工具箱文本节点也可点击 RUN 直接外挂 OutputNode
-  'cinematic', 'video-motion', 'multi-angle-visual', 'portrait-master', 'pose-master', 'aggregate-parser', 'batch-processor', 'batch-tagger',
-  'topaz-image-upscale', 'topaz-video-upscale',
-  'remove-ai-watermark',
-]);
-
 // 网格吸附步长 / 对齐阈值(世界坐标)
 const SNAP_GRID: [number, number] = [20, 20];
 const EDGE_MOTION_HEAVY_EDGE_COUNT = 36;
@@ -1946,25 +2299,26 @@ const WEB_IMAGE_EXTENSION_MESSAGE_CONTRACT = {
   source: 't8-web-image-extension',
 } as const;
 
-type WebImageExtensionSendMode = 'prompt' | 'image' | 'both';
+type WebImageExtensionSendMode = 'prompt' | 'image' | 'both' | 'reference';
 
 interface WebImageExtensionPayload {
   messageId?: string;
   mode?: WebImageExtensionSendMode | string;
   prompt?: string;
-  images?: Array<string | { url?: string; imageUrl?: string; name?: string; mime?: string; size?: number }>;
+  images?: Array<string | { url?: string; imageUrl?: string; name?: string; mime?: string; size?: number; width?: number; height?: number; sourceUrl?: string; pageUrl?: string }>;
   imageUrls?: string[];
   sourceImageUrl?: string;
   pageUrl?: string;
   pageTitle?: string;
   source?: string;
+  webAssetItems?: Array<{ url?: string; imageUrl?: string; name?: string; mime?: string; size?: number; width?: number; height?: number; sourceUrl?: string; pageUrl?: string }>;
 }
 
 type BasicMediaKind = Exclude<MediaKind, 'model3d'>;
 
 function normalizeWebImageSendMode(value: unknown): WebImageExtensionSendMode {
   const mode = String(value || '').trim();
-  return mode === 'prompt' || mode === 'image' || mode === 'both' ? mode : 'both';
+  return mode === 'prompt' || mode === 'image' || mode === 'both' || mode === 'reference' ? mode : 'both';
 }
 
 function cleanWebImageText(value: unknown, maxLen = 8000): string {
@@ -1972,7 +2326,7 @@ function cleanWebImageText(value: unknown, maxLen = 8000): string {
 }
 
 function webImagePayloadImages(payload: WebImageExtensionPayload): MediaItem[] {
-  const raw = Array.isArray(payload.images) ? payload.images : payload.imageUrls;
+  const raw = Array.isArray(payload.images) ? payload.images : Array.isArray(payload.webAssetItems) ? payload.webAssetItems : payload.imageUrls;
   const seen = new Set<string>();
   const out: MediaItem[] = [];
   for (const item of Array.isArray(raw) ? raw : []) {
@@ -1988,7 +2342,24 @@ function webImagePayloadImages(payload: WebImageExtensionPayload): MediaItem[] {
       size: typeof item === 'string' ? 0 : item.size || 0,
     });
   }
-  return out.slice(0, 12);
+  return out.slice(0, 50);
+}
+
+function webAssetPayloadMetadata(payload: WebImageExtensionPayload) {
+  const raw = Array.isArray(payload.webAssetItems) ? payload.webAssetItems : Array.isArray(payload.images) ? payload.images : [];
+  return raw
+    .filter((item) => !!item && typeof item === 'object')
+    .map((item: any) => ({
+      url: String(item.url || item.imageUrl || '').slice(0, 4096),
+      name: String(item.name || '').slice(0, 200),
+      mime: String(item.mime || '').slice(0, 120),
+      size: Math.max(0, Number(item.size) || 0),
+      width: Math.max(0, Number(item.width) || 0),
+      height: Math.max(0, Number(item.height) || 0),
+      sourceUrl: String(item.sourceUrl || '').slice(0, 4096),
+      pageUrl: String(item.pageUrl || payload.pageUrl || '').slice(0, 2048),
+    }))
+    .slice(0, 50);
 }
 
 function buildWebImageSendNodeSpecs(payload: WebImageExtensionPayload): SendNodeSpec[] {
@@ -1999,6 +2370,23 @@ function buildWebImageSendNodeSpecs(payload: WebImageExtensionPayload): SendNode
   const pageUrl = cleanWebImageText(payload.pageUrl, 2048);
   const pageTitle = cleanWebImageText(payload.pageTitle, 200);
   const specs: SendNodeSpec[] = [];
+  const imageItems = webImagePayloadImages(payload);
+  if (mode === 'reference' && imageItems.length > 0) {
+    specs.push({
+      type: 'upload',
+      data: {
+        ...createUploadDataFromItems('image', imageItems),
+        label: `网页采集 · ${imageItems.length} 张`,
+        sendSource: 'web-asset-importer',
+        source: 'web-asset-importer',
+        webAssetImporter: true,
+        webAssetItems: webAssetPayloadMetadata(payload),
+        webAssetPageUrl: pageUrl,
+        webAssetPageTitle: pageTitle,
+      },
+    });
+    return specs;
+  }
   if (mode === 'prompt' && prompt) {
     specs.push({
       type: 'text',
@@ -2014,7 +2402,6 @@ function buildWebImageSendNodeSpecs(payload: WebImageExtensionPayload): SendNode
       },
     });
   }
-  const imageItems = webImagePayloadImages(payload);
   if ((mode === 'image' || mode === 'both') && imageItems.length > 0) {
     specs.push({
       type: 'output',
@@ -3019,6 +3406,130 @@ interface CanvasInnerProps {
   onInsertWorkflowRef?: React.MutableRefObject<InsertWorkflowFn | null>;
 }
 
+type PersistableCanvasPatchState = {
+  nodes: Node[];
+  edges: Edge[];
+  creativeDesk: CreativeDeskState;
+  farmCanvas: FarmCanvasState;
+  nextNodeSerialId: number;
+  snapshot: string;
+};
+
+type PendingCanvasSave = PersistableCanvasPatchState & CanvasPatchPendingEnvelope;
+
+function pendingCanvasSaveFromState(
+  state: PersistableCanvasPatchState,
+  options: {
+    baseSnapshot: string;
+    baseRevision: number;
+    conflicts?: CanvasPatchMergeConflict[];
+    conflicted?: boolean;
+  },
+): PendingCanvasSave {
+  const conflicts = options.conflicts || [];
+  return {
+    ...state,
+    baseSnapshot: options.baseSnapshot,
+    baseRevision: options.baseRevision,
+    conflicted: options.conflicted ?? conflicts.length > 0,
+    conflicts,
+  };
+}
+
+function persistableCanvasPatchStateFromParts(
+  nodes: Node[],
+  edges: Edge[],
+  creativeDesk: CreativeDeskState,
+  farmCanvas: FarmCanvasState,
+  nextNodeSerialId: number,
+): PersistableCanvasPatchState {
+  const persistNodes = nodes.filter((node) => node.id !== BULK_PHANTOM_ID && !(node.data as any)?.__subflowRuntime);
+  const transientSubflowIds = new Set(nodes.filter((node) => (node.data as any)?.__subflowRuntime).map((node) => node.id));
+  const persistEdges = edges.filter((edge) => edge.source !== BULK_PHANTOM_ID
+    && edge.target !== BULK_PHANTOM_ID
+    && !transientSubflowIds.has(edge.source)
+    && !transientSubflowIds.has(edge.target)
+    && !(edge.data as any)?.__subflowRuntime);
+  return {
+    nodes: persistNodes,
+    edges: persistEdges,
+    creativeDesk,
+    farmCanvas,
+    nextNodeSerialId,
+    snapshot: JSON.stringify({ nodes: persistNodes, edges: persistEdges, creativeDesk, farmCanvas, nextNodeSerialId }),
+  };
+}
+
+function parsePersistableCanvasPatchSnapshot(snapshot: string): Omit<PersistableCanvasPatchState, 'snapshot'> | null {
+  try {
+    const value = JSON.parse(snapshot) as Partial<PersistableCanvasPatchState>;
+    if (!value || !Array.isArray(value.nodes) || !Array.isArray(value.edges)) return null;
+    return {
+      nodes: value.nodes as Node[],
+      edges: value.edges as Edge[],
+      creativeDesk: value.creativeDesk || createDefaultCreativeDeskState(),
+      farmCanvas: sanitizeFarmCanvasState(value.farmCanvas),
+      nextNodeSerialId: Math.max(1, Number(value.nextNodeSerialId) || 1),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function mergeConcurrentCanvasPatchState(
+  baselineSnapshot: string,
+  local: Omit<PersistableCanvasPatchState, 'snapshot'>,
+  authoritative: Omit<PersistableCanvasPatchState, 'snapshot'>,
+): { state: PersistableCanvasPatchState; conflicts: CanvasPatchMergeConflict[] } {
+  const baseline = parsePersistableCanvasPatchSnapshot(baselineSnapshot) || authoritative;
+  const graph = mergeCanvasPatchGraph<Node, Edge>({
+    baseNodes: baseline.nodes,
+    localNodes: local.nodes,
+    authoritativeNodes: authoritative.nodes,
+    baseEdges: baseline.edges,
+    localEdges: local.edges,
+    authoritativeEdges: authoritative.edges,
+  });
+  const creativeDeskResult = mergeCanvasPatchValueWithConflicts<CreativeDeskState>(
+    baseline.creativeDesk,
+    local.creativeDesk,
+    authoritative.creativeDesk,
+    'creativeDesk',
+  );
+  const farmCanvasResult = mergeCanvasPatchValueWithConflicts<FarmCanvasState>(
+    baseline.farmCanvas,
+    local.farmCanvas,
+    authoritative.farmCanvas,
+    'farmCanvas',
+  );
+  const creativeDesk = creativeDeskResult.value;
+  const farmCanvas = sanitizeFarmCanvasState(farmCanvasResult.value);
+  const nextNodeSerialId = Math.max(
+    1,
+    Number(local.nextNodeSerialId) || 1,
+    Number(authoritative.nextNodeSerialId) || 1,
+  );
+  const snapshot = JSON.stringify({ nodes: graph.nodes, edges: graph.edges, creativeDesk, farmCanvas, nextNodeSerialId });
+  return {
+    state: { nodes: graph.nodes, edges: graph.edges, creativeDesk, farmCanvas, nextNodeSerialId, snapshot },
+    conflicts: [...graph.conflicts, ...creativeDeskResult.conflicts, ...farmCanvasResult.conflicts],
+  };
+}
+
+function requireVersionedCanvasPatchDocument(value: unknown, canvasId: string): VersionedCanvasData {
+  const document = value as Partial<VersionedCanvasData> | null;
+  if (!document || document.schema !== 't8-canvas-document' || document.schemaVersion !== 2
+    || document.canvasId !== canvasId || typeof document.projectId !== 'string' || !document.projectId
+    || !Number.isSafeInteger(document.revision) || Number(document.revision) < 1
+    || !Array.isArray(document.nodes) || !Array.isArray(document.edges)
+    || !document.viewport || typeof document.viewport !== 'object'
+    || ![document.viewport.x, document.viewport.y, document.viewport.zoom].every((item) => typeof item === 'number' && Number.isFinite(item))
+    || typeof document.updatedAt !== 'number' || !Number.isFinite(document.updatedAt)) {
+    throw new Error('服务端返回的画布权威文档无效');
+  }
+  return document as VersionedCanvasData;
+}
+
 function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   const { activeId, canvases, loadCanvases, setActive } = useCanvasStore();
   const { theme, style, templateId, customTemplates } = useThemeStore();
@@ -3038,6 +3549,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   const isDragonBall = visualStyle === 'dragon-ball';
   const isTetris = visualStyle === 'tetris';
   const isFarmStory = visualStyle === 'farm-story';
+  const isGardenDefense = visualStyle === 'garden-defense';
   const farmDevToolsEnabled = isFarmStory && import.meta.env.DEV;
   const themeTokens = getTemplateMode(currentTemplate, theme).tokens;
   const { screenToFlowPosition, setCenter, getViewport, setViewport, fitView } = useReactFlow();
@@ -3052,17 +3564,57 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     () => new Map(radialNodeOptions.map((node) => [node.type, node])),
     [radialNodeOptions],
   );
-  const [nodes, setNodes] = useState<Node[]>([]);
-  const [edges, setEdges] = useState<Edge[]>([]);
+  const graphMutationEpochRef = useRef(0);
+  const [nodes, rawSetNodes] = useState<Node[]>([]);
+  const [edges, rawSetEdges] = useState<Edge[]>([]);
+  const nodesRef = useRef<Node[]>(nodes);
+  const edgesRef = useRef<Edge[]>(edges);
+  const setNodes = useCallback((action: SetStateAction<Node[]>) => {
+    const next = advanceCanvasPatchMutation({ value: nodesRef.current, epoch: graphMutationEpochRef.current }, action);
+    nodesRef.current = next.value;
+    graphMutationEpochRef.current = next.epoch;
+    rawSetNodes(next.value);
+  }, []);
+  const setEdges = useCallback((action: SetStateAction<Edge[]>) => {
+    const next = advanceCanvasPatchMutation({ value: edgesRef.current, epoch: graphMutationEpochRef.current }, action);
+    edgesRef.current = next.value;
+    graphMutationEpochRef.current = next.epoch;
+    rawSetEdges(next.value);
+  }, []);
+  const [runReplayRuntime, setRunReplayRuntime] = useState<{ nodes: Node[]; edges: Edge[] } | null>(null);
   const [generationHistoryOpen, setGenerationHistoryOpen] = useState(false);
+  const [projectWorkbenchOpen, setProjectWorkbenchOpen] = useState(false);
+  const [workflowDoctorHighlights, setWorkflowDoctorHighlights] = useState<WorkflowDoctorCanvasHighlight[]>([]);
+  const [canvasPatchConflictMessage, setCanvasPatchConflictMessage] = useState('');
+  const workflowDoctorHighlightMap = useMemo(
+    () => new Map(workflowDoctorHighlights.map((highlight) => [highlight.nodeId, highlight])),
+    [workflowDoctorHighlights],
+  );
+  const handleDoctorHighlightsChange = useCallback((highlights: WorkflowDoctorCanvasHighlight[]) => {
+    setWorkflowDoctorHighlights(highlights);
+  }, []);
   const generationHistoryDataKey = useMemo(() => buildGenerationHistoryDataKey(nodes), [nodes]);
   const generationHistoryCount = useMemo(() => countGenerationHistoryItems(nodes), [generationHistoryDataKey]);
   const generationHistoryItems = useMemo(
     () => (generationHistoryOpen ? collectGenerationHistory(nodes) : []),
     [generationHistoryDataKey, generationHistoryOpen],
   );
-  const [creativeDesk, setCreativeDesk] = useState<CreativeDeskState>(() => createDefaultCreativeDeskState());
-  const [farmCanvas, setFarmCanvas] = useState<FarmCanvasState>(() => createFarmState());
+  const [creativeDesk, rawSetCreativeDesk] = useState<CreativeDeskState>(() => createDefaultCreativeDeskState());
+  const [farmCanvas, rawSetFarmCanvas] = useState<FarmCanvasState>(() => createFarmState());
+  const creativeDeskRef = useRef(creativeDesk);
+  const farmCanvasRef = useRef(farmCanvas);
+  const setCreativeDesk = useCallback((action: SetStateAction<CreativeDeskState>) => {
+    const next = advanceCanvasPatchMutation({ value: creativeDeskRef.current, epoch: graphMutationEpochRef.current }, action);
+    creativeDeskRef.current = next.value;
+    graphMutationEpochRef.current = next.epoch;
+    rawSetCreativeDesk(next.value);
+  }, []);
+  const setFarmCanvas = useCallback((action: SetStateAction<FarmCanvasState>) => {
+    const next = advanceCanvasPatchMutation({ value: farmCanvasRef.current, epoch: graphMutationEpochRef.current }, action);
+    farmCanvasRef.current = next.value;
+    graphMutationEpochRef.current = next.epoch;
+    rawSetFarmCanvas(next.value);
+  }, []);
   const [farmCanvasEditing, setFarmCanvasEditing] = useState(false);
   const [farmStoryPanelOpen, setFarmStoryPanelOpen] = useState(() => {
     if (typeof window === 'undefined') return false;
@@ -3121,10 +3673,19 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   const placementShelfClearedCanvasIdsRef = useRef<Set<string>>(new Set());
   const [loaded, setLoaded] = useState(false);
   const [loadedCanvasId, setLoadedCanvasId] = useState<string | null>(null);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [activeCanvasRevision, setActiveCanvasRevision] = useState(0);
+  const activeProjectIdRef = useRef<string | null>(activeProjectId);
+  activeProjectIdRef.current = activeProjectId;
   const saveTimersByCanvasRef = useRef<Map<string, number>>(new Map());
-  const pendingSaveByCanvasRef = useRef<Map<string, { nodes: Node[]; edges: Edge[]; creativeDesk: CreativeDeskState; farmCanvas: FarmCanvasState; snapshot: string; nextNodeSerialId: number }>>(new Map());
+  const pendingSaveByCanvasRef = useRef<Map<string, PendingCanvasSave>>(new Map());
+  const latestPersistableByCanvasRef = useRef<Map<string, PersistableCanvasPatchState>>(new Map());
+  const autosaveGenerationByCanvasRef = useRef<Map<string, number>>(new Map());
   const lastSavedByCanvasRef = useRef<Map<string, string>>(new Map());
   const lastSavedNodeCountByCanvasRef = useRef<Map<string, number>>(new Map());
+  const canvasRevisionsRef = useRef<Map<string, number>>(new Map());
+  const canvasMutationQueuesRef = useRef<Map<string, Promise<void>>>(new Map());
+  const patchPreviewBaselinesRef = useRef<Map<string, { canvasId: string; revision: number; snapshot: string; mutationEpoch: number }>>(new Map());
   const nextNodeSerialIdRef = useRef(1);
   const radialMenuRef = useRef<RadialMenuSession | null>(null);
   const radialPressRef = useRef<RadialPressState | null>(null);
@@ -3136,6 +3697,10 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   const [viewportMoving, setViewportMoving] = useState(false);
   const [nodeDragging, setNodeDragging] = useState(false);
   const [dragSaveTick, setDragSaveTick] = useState(0);
+  const loadedRef = useRef(loaded);
+  const loadedCanvasIdRef = useRef<string | null>(loadedCanvasId);
+  loadedRef.current = loaded;
+  loadedCanvasIdRef.current = loadedCanvasId;
   const lastDone = useRunBusStore((s) => s.lastDone);
   const lastAchievementDoneTsRef = useRef(0);
   const achievementProfileLoaded = useAchievementStore((state) => Boolean(state.profile));
@@ -3551,21 +4116,15 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     edges: Edge[];
   } | null>(null);
 
-  // 跟踪最新 nodes/edges 供全局事件回调使用
-  const nodesRef = useRef<Node[]>([]);
-  const edgesRef = useRef<Edge[]>([]);
-  useEffect(() => {
-    nodesRef.current = nodes;
-  }, [nodes]);
-  useEffect(() => {
-    edgesRef.current = edges;
-  }, [edges]);
+  // nodes/edges refs are synchronously advanced by the wrapped setters above,
+  // so a Patch response cannot miss a same-batch local mutation.
   useEffect(() => {
     radialMenuRef.current = radialMenu;
   }, [radialMenu]);
 
-  const annotateFarmPortHandles = useCallback(() => {
-    if (!isFarmStory || typeof document === 'undefined') return;
+  const annotateThemedPortHandles = useCallback(() => {
+    if ((!isFarmStory && !isGardenDefense) || typeof document === 'undefined') return;
+    const ariaTheme = isGardenDefense ? 'garden-defense' : 'farm-story';
     const nodeById = new Map(nodesRef.current.map((node) => [node.id, node]));
     document.querySelectorAll<HTMLElement>('.react-flow__handle').forEach((handleEl) => {
       const nodeId =
@@ -3581,7 +4140,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       if (!portType) {
         handleEl.removeAttribute('data-t8-port-type');
         handleEl.removeAttribute('data-t8-port-label');
-        if (handleEl.getAttribute('data-t8-port-aria') === 'farm-story') {
+        if (['farm-story', 'garden-defense'].includes(handleEl.getAttribute('data-t8-port-aria') || '')) {
           handleEl.removeAttribute('aria-label');
           handleEl.removeAttribute('data-t8-port-aria');
         }
@@ -3589,35 +4148,35 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       }
       handleEl.setAttribute('data-t8-port-type', portType);
       handleEl.setAttribute('data-t8-port-label', PORT_LABEL[portType]);
-      handleEl.setAttribute('data-t8-port-aria', 'farm-story');
+      handleEl.setAttribute('data-t8-port-aria', ariaTheme);
       handleEl.setAttribute('aria-label', `${PORT_LABEL[portType]}${rawHandleType === 'source' ? '输出' : '输入'}端口`);
     });
-  }, [isFarmStory]);
+  }, [isFarmStory, isGardenDefense]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return undefined;
-    const clearFarmPortHandles = () => {
+    const clearThemedPortHandles = () => {
       document.querySelectorAll<HTMLElement>('.react-flow__handle[data-t8-port-type]').forEach((handleEl) => {
         handleEl.removeAttribute('data-t8-port-type');
         handleEl.removeAttribute('data-t8-port-label');
-        if (handleEl.getAttribute('data-t8-port-aria') === 'farm-story') {
+        if (['farm-story', 'garden-defense'].includes(handleEl.getAttribute('data-t8-port-aria') || '')) {
           handleEl.removeAttribute('aria-label');
           handleEl.removeAttribute('data-t8-port-aria');
         }
       });
     };
-    if (!isFarmStory) {
-      clearFarmPortHandles();
+    if (!isFarmStory && !isGardenDefense) {
+      clearThemedPortHandles();
       return undefined;
     }
-    annotateFarmPortHandles();
+    annotateThemedPortHandles();
     const root = document.querySelector('.react-flow') || document.body;
-    const observer = new MutationObserver(() => annotateFarmPortHandles());
+    const observer = new MutationObserver(() => annotateThemedPortHandles());
     observer.observe(root, { childList: true, subtree: true });
     return () => {
       observer.disconnect();
     };
-  }, [annotateFarmPortHandles, isFarmStory, nodes]);
+  }, [annotateThemedPortHandles, isFarmStory, isGardenDefense, nodes]);
 
   const suppressRadialContextMenu = useCallback(() => {
     radialContextMenuSuppressedUntilRef.current = Date.now() + RADIAL_MENU_CONTEXT_SUPPRESS_MS;
@@ -3819,6 +4378,19 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   // 批量运行状态
   const [isRunning, setIsRunning] = useState(false);
   const cancelRunRef = useRef(false);
+  const cancelPersistenceRef = useRef<Promise<void>>(Promise.resolve());
+  const [runPreflightModal, setRunPreflightModal] = useState<{
+    loading: boolean;
+    preview: RunActionPreview | null;
+  } | null>(null);
+  const runPreflightAbortRef = useRef<AbortController | null>(null);
+  const runPreflightPendingRef = useRef(false);
+  // One synchronous CAS spans preflight, Run persistence, Provider execution,
+  // and terminal writes. React state alone leaves an await window where a
+  // second click can create another Run and overwrite the active RunContext.
+  const runExecutionGateRef = useRef<symbol | null>(null);
+  const runPreflightDecisionRef = useRef<((confirmed: boolean) => void) | null>(null);
+  const runPreflightPresentedDigestRef = useRef<string | null>(null);
   const batchTotal = useRunBusStore((s) => s.batchTotal);
   const batchDone = useRunBusStore((s) => s.batchDoneCount);
 
@@ -3828,6 +4400,10 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     y: number;
     ids: string[];
   } | null>(null);
+  const [subflowDraft, setSubflowDraft] = useState<SubflowDraftState | null>(null);
+  const [subflowInspector, setSubflowInspector] = useState<SubflowInspectorState | null>(null);
+  const subflowEditDragStartRef = useRef<SubflowDefinition | null>(null);
+  const subflowInspectorViewportsRef = useRef<Record<string, { x: number; y: number; zoom: number }>>({});
   const [selectionContextSubmenu, setSelectionContextSubmenu] = useState<'align' | null>(null);
   const selectionContextSubmenuCloseTimerRef = useRef<number | null>(null);
   const [sendModal, setSendModal] = useState<{
@@ -3844,6 +4420,17 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   } | null>(null);
   const pendingSendFocusTimerRef = useRef<number | null>(null);
 
+  useEffect(() => {
+    const onOpenSubflow = (event: Event) => {
+      const detail = (event as CustomEvent<{ nodeId?: string; definition?: SubflowDefinition }>).detail;
+      if (detail?.definition && detail.nodeId) {
+        setSubflowInspector({ instanceNodeId: detail.nodeId, stack: [detail.definition], pathNodeIds: [detail.nodeId] });
+      }
+    };
+    window.addEventListener('penguin:subflow-open', onOpenSubflow);
+    return () => window.removeEventListener('penguin:subflow-open', onOpenSubflow);
+  }, []);
+
   // 画布空白区右键菜单(快速添加节点)
   const [paneMenu, setPaneMenu] = useState<{
     x: number;
@@ -3855,26 +4442,51 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     setNodes(snap.nodes);
     setEdges(snap.edges);
   }, []);
-  const { capture: histCapture, undo: histUndo, redo: histRedo, reset: histReset, canUndo, canRedo } =
+  const { capture: histCapture, captureTransition: histCaptureTransition, undo: histUndo, redo: histRedo, reset: histReset, canUndo, canRedo } =
     useCanvasHistory(applySnapshot);
   const captureTimer = useRef<number | null>(null);
   const isDraggingRef = useRef(false);
+
+  const setCanvasRevision = useCallback((canvasId: string, revision: unknown) => {
+    const numeric = Number(revision);
+    if (!Number.isSafeInteger(numeric) || numeric < 1) return;
+    canvasRevisionsRef.current.set(canvasId, numeric);
+    if (useCanvasStore.getState().activeId === canvasId) setActiveCanvasRevision(numeric);
+  }, []);
+
+  const enqueueCanvasMutation = useCallback(function enqueue<T>(canvasId: string, work: () => Promise<T>): Promise<T> {
+    const previous = canvasMutationQueuesRef.current.get(canvasId) || Promise.resolve();
+    const result = previous.catch(() => undefined).then(work);
+    const barrier = result.then(() => undefined, () => undefined);
+    canvasMutationQueuesRef.current.set(canvasId, barrier);
+    void barrier.finally(() => {
+      if (canvasMutationQueuesRef.current.get(canvasId) === barrier) canvasMutationQueuesRef.current.delete(canvasId);
+    });
+    return result;
+  }, []);
+
+  const cancelScheduledHistoryCapture = useCallback(() => {
+    if (captureTimer.current !== null) window.clearTimeout(captureTimer.current);
+    captureTimer.current = null;
+  }, []);
 
   // 节点/连线变更后,在拖拽结束 + 短暂防抖窗口内压栈一次
   const scheduleCapture = useCallback(
     (snap: { nodes: Node[]; edges: Edge[] }) => {
       if (isDraggingRef.current) return;
-      if (captureTimer.current) window.clearTimeout(captureTimer.current);
+      cancelScheduledHistoryCapture();
       captureTimer.current = window.setTimeout(() => {
+        captureTimer.current = null;
         histCapture(snap);
       }, 250);
     },
-    [histCapture]
+    [cancelScheduledHistoryCapture, histCapture]
   );
 
   // 加载画布数据
   useEffect(() => {
     if (!activeId) {
+      cancelScheduledHistoryCapture();
       nextNodeSerialIdRef.current = 1;
       setNodes([]);
       setEdges([]);
@@ -3888,10 +4500,19 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       setPlacementShelfOpen(false);
       setLoaded(false);
       setLoadedCanvasId(null);
+      setActiveProjectId(null);
+      setActiveCanvasRevision(0);
+      setCanvasPatchConflictMessage('');
+      patchPreviewBaselinesRef.current.clear();
       histReset();
       return;
     }
     const requestedCanvasId = activeId;
+    cancelScheduledHistoryCapture();
+    setActiveProjectId(null);
+    setActiveCanvasRevision(0);
+    setCanvasPatchConflictMessage('');
+    patchPreviewBaselinesRef.current.clear();
     setLoaded(false);
     setLoadedCanvasId(null);
     let cancelled = false;
@@ -3899,12 +4520,61 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       .getCanvasData(requestedCanvasId)
       .then((data) => {
         if (cancelled || useCanvasStore.getState().activeId !== requestedCanvasId) return;
-        const pendingSave = pendingSaveByCanvasRef.current.get(requestedCanvasId);
-        const ns = pendingSave?.nodes || data.nodes || [];
-        const es = pendingSave?.edges || data.edges || [];
-        const nextCreativeDesk = pendingSave?.creativeDesk || migrateCreativeDeskToViewportCoordinates(data.creativeDesk, data.viewport);
-        const nextFarmCanvas = pendingSave?.farmCanvas || sanitizeFarmCanvasState(data.farmCanvas);
-        const savedNextNodeSerialId = pendingSave?.nextNodeSerialId ?? data.nextNodeSerialId;
+        const projectId = String(data.projectId || 'project-local').trim() || 'project-local';
+        setActiveProjectId(projectId);
+        const revision = Number(data.revision);
+        if (Number.isSafeInteger(revision) && revision > 0) setCanvasRevision(requestedCanvasId, revision);
+        const authoritativeCreativeDesk = migrateCreativeDeskToViewportCoordinates(data.creativeDesk, data.viewport);
+        const authoritativeFarmCanvas = sanitizeFarmCanvasState(data.farmCanvas);
+        const authoritativeNextNodeSerialId = Math.max(1, Number(data.nextNodeSerialId) || 1);
+        const authoritativeState: PersistableCanvasPatchState = {
+          nodes: data.nodes || [],
+          edges: data.edges || [],
+          creativeDesk: authoritativeCreativeDesk,
+          farmCanvas: authoritativeFarmCanvas,
+          nextNodeSerialId: authoritativeNextNodeSerialId,
+          snapshot: JSON.stringify({
+            nodes: data.nodes || [],
+            edges: data.edges || [],
+            creativeDesk: authoritativeCreativeDesk,
+            farmCanvas: authoritativeFarmCanvas,
+            nextNodeSerialId: authoritativeNextNodeSerialId,
+          }),
+        };
+        const existingPending = pendingSaveByCanvasRef.current.get(requestedCanvasId) || null;
+        let renderedState = authoritativeState;
+        let activatedPending: PendingCanvasSave | null = null;
+        let shouldSchedulePendingCas = false;
+        if (existingPending) {
+          const reconciled = existingPending.conflicted
+            ? { state: existingPending as PersistableCanvasPatchState, conflicts: existingPending.conflicts }
+            : mergeConcurrentCanvasPatchState(existingPending.baseSnapshot, existingPending, authoritativeState);
+          const reconciliationBlocked = existingPending.conflicted || reconciled.conflicts.length > 0;
+          const reconciledPending = pendingCanvasSaveFromState(reconciled.state, {
+            baseSnapshot: reconciliationBlocked ? existingPending.baseSnapshot : authoritativeState.snapshot,
+            baseRevision: reconciliationBlocked ? existingPending.baseRevision : revision,
+            conflicts: existingPending.conflicted ? existingPending.conflicts : reconciled.conflicts,
+            conflicted: reconciliationBlocked,
+          });
+          const activation = activateCanvasPatchPending({
+            authoritativeSnapshot: authoritativeState.snapshot,
+            authoritativeRevision: revision,
+            pending: reconciledPending,
+          });
+          renderedState = reconciled.state;
+          activatedPending = activation.pending;
+          shouldSchedulePendingCas = activation.shouldScheduleCas;
+          if (activation.blocked) {
+            const conflictMessage = '本地画布与服务端存在未解决冲突；已保留本地内容并阻止自动覆盖，请先处理冲突。';
+            setCanvasPatchConflictMessage(conflictMessage);
+            logBus.warn(conflictMessage, '画布同步');
+          }
+        }
+        const ns = renderedState.nodes;
+        const es = renderedState.edges;
+        const nextCreativeDesk = renderedState.creativeDesk;
+        const nextFarmCanvas = renderedState.farmCanvas;
+        const savedNextNodeSerialId = renderedState.nextNodeSerialId;
         // ⚡ 兑底补丁: 历史画布中可能存在 connectable=false 的旧 groupBox 节点
         // (5656721 事故期间创建的 group), 加载时强制打开可连接以恢复右侧聚合输出口
         const fixedNsBeforeSerials = ns.map((n: any) =>
@@ -3915,6 +4585,37 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         const normalized = normalizeCanvasNodeSerials(fixedNsBeforeSerials, savedNextNodeSerialId);
         nextNodeSerialIdRef.current = normalized.nextNodeSerialId;
         const fixedNs = normalized.nodes;
+        const normalizedRenderedState: PersistableCanvasPatchState = {
+          nodes: fixedNs,
+          edges: es,
+          creativeDesk: nextCreativeDesk,
+          farmCanvas: nextFarmCanvas,
+          nextNodeSerialId: normalized.nextNodeSerialId,
+          snapshot: JSON.stringify({
+            nodes: fixedNs,
+            edges: es,
+            creativeDesk: nextCreativeDesk,
+            farmCanvas: nextFarmCanvas,
+            nextNodeSerialId: normalized.nextNodeSerialId,
+          }),
+        };
+        latestPersistableByCanvasRef.current.set(requestedCanvasId, normalizedRenderedState);
+        autosaveGenerationByCanvasRef.current.set(
+          requestedCanvasId,
+          (autosaveGenerationByCanvasRef.current.get(requestedCanvasId) || 0) + 1,
+        );
+        if (activatedPending) {
+          activatedPending = { ...activatedPending, ...normalizedRenderedState };
+          if (!activatedPending.conflicted && activatedPending.snapshot === authoritativeState.snapshot) {
+            activatedPending = null;
+            shouldSchedulePendingCas = false;
+            pendingSaveByCanvasRef.current.delete(requestedCanvasId);
+          } else {
+            pendingSaveByCanvasRef.current.set(requestedCanvasId, activatedPending);
+          }
+        } else {
+          pendingSaveByCanvasRef.current.delete(requestedCanvasId);
+        }
         setNodes(fixedNs);
         setEdges(es);
         setCreativeDesk(nextCreativeDesk);
@@ -3923,24 +4624,20 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         setFarmCanvasFeedback('点击工具后，在画布空白处开始经营。');
         setCreativeDeskEditing(false);
         setCreativeDeskActiveItemId(null);
-        const baselineNodes = normalized.changed ? fixedNsBeforeSerials : fixedNs;
-        const baselineNextNodeSerialId = normalized.changed
-          ? savedNextNodeSerialId || 1
-          : normalized.nextNodeSerialId;
         setPlacementShelfItems(placementShelfClearedCanvasIdsRef.current.has(requestedCanvasId) ? [] : placementShelfItemsFromCanvasNodes(fixedNs, '画布'));
         setPlacementShelfOpen(false);
-        lastSavedByCanvasRef.current.set(requestedCanvasId, JSON.stringify({
-          nodes: baselineNodes,
-          edges: es,
-          creativeDesk: nextCreativeDesk,
-          farmCanvas: nextFarmCanvas,
-          nextNodeSerialId: baselineNextNodeSerialId,
-        }));
-        lastSavedNodeCountByCanvasRef.current.set(requestedCanvasId, baselineNodes.length);
+        // GET authority is the only saved baseline. Pending local state must never
+        // be relabelled as durable merely because it is rendered after activation.
+        lastSavedByCanvasRef.current.set(requestedCanvasId, authoritativeState.snapshot);
+        lastSavedNodeCountByCanvasRef.current.set(requestedCanvasId, authoritativeState.nodes.length);
         allowEmptySaveCanvasIdsRef.current.delete(requestedCanvasId);
+        cancelScheduledHistoryCapture();
         histReset({ nodes: fixedNs, edges: es });
         setLoadedCanvasId(requestedCanvasId);
         setLoaded(true);
+        if (shouldSchedulePendingCas && activatedPending && !activatedPending.conflicted) {
+          setDragSaveTick((tick) => tick + 1);
+        }
       })
       .catch((e) => {
         if (cancelled || useCanvasStore.getState().activeId !== requestedCanvasId) return;
@@ -3956,6 +4653,9 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         setCreativeDeskActiveItemId(null);
         setPlacementShelfItems([]);
         setPlacementShelfOpen(false);
+        setActiveProjectId(null);
+        setActiveCanvasRevision(0);
+        cancelScheduledHistoryCapture();
         histReset();
         setLoadedCanvasId(requestedCanvasId);
         setLoaded(true);
@@ -3963,7 +4663,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     return () => {
       cancelled = true;
     };
-  }, [activeId, histReset]);
+  }, [activeId, cancelScheduledHistoryCapture, histReset, setCanvasRevision]);
 
   useEffect(() => {
     return () => {
@@ -3972,12 +4672,16 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       }
       saveTimersByCanvasRef.current.clear();
       pendingSaveByCanvasRef.current.clear();
+      latestPersistableByCanvasRef.current.clear();
+      autosaveGenerationByCanvasRef.current.clear();
+      patchPreviewBaselinesRef.current.clear();
+      cancelScheduledHistoryCapture();
       if (edgeMotionReleaseTimerRef.current) {
         window.clearTimeout(edgeMotionReleaseTimerRef.current);
         edgeMotionReleaseTimerRef.current = null;
       }
     };
-  }, [assignActiveNodeSerials, releaseEdgeMotionSoon]);
+  }, [assignActiveNodeSerials, cancelScheduledHistoryCapture, releaseEdgeMotionSoon]);
 
   useEffect(() => {
     if (!activeId || !loaded || loadedCanvasId !== activeId) return;
@@ -4021,16 +4725,43 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   useEffect(() => {
     if (!activeId || !loaded || loadedCanvasId !== activeId) return;
     if (isDraggingRef.current) return;
-    // 过滤 SHIFT 批量移线拖拽过程中的 phantom 节点与重定向边(不作为持久化快照)
-    const persistNodes = nodes.filter((n) => n.id !== BULK_PHANTOM_ID);
-    const persistEdges = edges.filter(
-      (ed) => ed.source !== BULK_PHANTOM_ID && ed.target !== BULK_PHANTOM_ID
-    );
     const nextNodeSerialId = nextNodeSerialIdRef.current;
-    const snapshot = JSON.stringify({ nodes: persistNodes, edges: persistEdges, creativeDesk, farmCanvas, nextNodeSerialId });
     const canvasIdForSave = activeId;
+    // 过滤 SHIFT 批量移线拖拽过程中的 phantom 节点与重定向边(不作为持久化快照)
+    const currentState = persistableCanvasPatchStateFromParts(
+      nodes,
+      edges,
+      creativeDesk,
+      farmCanvas,
+      nextNodeSerialId,
+    );
+    const { nodes: persistNodes, edges: persistEdges, snapshot } = currentState;
+    latestPersistableByCanvasRef.current.set(canvasIdForSave, currentState);
     const previousSnapshot = lastSavedByCanvasRef.current.get(canvasIdForSave) || '';
-    if (snapshot === previousSnapshot) return;
+    const existingPending = pendingSaveByCanvasRef.current.get(canvasIdForSave) || null;
+    const currentPending = pendingCanvasSaveFromState(currentState, {
+      baseSnapshot: existingPending?.baseSnapshot || previousSnapshot,
+      baseRevision: existingPending?.baseRevision ?? canvasRevisionsRef.current.get(canvasIdForSave) ?? 0,
+    });
+    const reconciliation = reconcileCanvasPatchAutosavePending({
+      authoritativeSnapshot: previousSnapshot,
+      current: currentPending,
+      pending: existingPending,
+    });
+    if (reconciliation.cancelTimer) {
+      autosaveGenerationByCanvasRef.current.set(
+        canvasIdForSave,
+        (autosaveGenerationByCanvasRef.current.get(canvasIdForSave) || 0) + 1,
+      );
+      const blockedTimer = saveTimersByCanvasRef.current.get(canvasIdForSave);
+      if (blockedTimer !== undefined) window.clearTimeout(blockedTimer);
+      saveTimersByCanvasRef.current.delete(canvasIdForSave);
+    }
+    if (reconciliation.shouldReturn) {
+      if (reconciliation.pending) pendingSaveByCanvasRef.current.set(canvasIdForSave, reconciliation.pending);
+      else pendingSaveByCanvasRef.current.delete(canvasIdForSave);
+      return;
+    }
     const previousNodeCount = lastSavedNodeCountByCanvasRef.current.get(canvasIdForSave) || 0;
     const allowEmptySave = allowEmptySaveCanvasIdsRef.current.has(canvasIdForSave);
     if (persistNodes.length === 0 && previousNodeCount > 0 && !allowEmptySave) {
@@ -4039,35 +4770,128 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     }
     const previousTimer = saveTimersByCanvasRef.current.get(canvasIdForSave);
     if (previousTimer) window.clearTimeout(previousTimer);
-    pendingSaveByCanvasRef.current.set(canvasIdForSave, {
-      nodes: persistNodes,
-      edges: persistEdges,
-      creativeDesk,
-      farmCanvas,
-      nextNodeSerialId,
+    pendingSaveByCanvasRef.current.set(canvasIdForSave, currentPending);
+    const generation = (autosaveGenerationByCanvasRef.current.get(canvasIdForSave) || 0) + 1;
+    autosaveGenerationByCanvasRef.current.set(canvasIdForSave, generation);
+    const token: CanvasPatchAutosaveToken<PendingCanvasSave> = {
+      generation,
       snapshot,
-    });
+      pendingIdentity: currentPending,
+    };
     const timer = window.setTimeout(async () => {
       const payload = { nodes: persistNodes, edges: persistEdges, viewport: getViewport(), nextNodeSerialId, creativeDesk, farmCanvas };
-      try {
-        await api.saveCanvasData(canvasIdForSave, payload, { allowEmpty: allowEmptySave });
-        api.autoSaveCanvasData(canvasIdForSave, payload).catch((e) => {
-          console.warn('画布自动保存到本地路径失败', e);
-        });
-        if (allowEmptySave) allowEmptySaveCanvasIdsRef.current.delete(canvasIdForSave);
-        lastSavedByCanvasRef.current.set(canvasIdForSave, snapshot);
-        lastSavedNodeCountByCanvasRef.current.set(canvasIdForSave, persistNodes.length);
-        if (pendingSaveByCanvasRef.current.get(canvasIdForSave)?.snapshot === snapshot) {
-          pendingSaveByCanvasRef.current.delete(canvasIdForSave);
+      const latestStateForResponse = () => {
+        const active = useCanvasStore.getState().activeId === canvasIdForSave
+          && loadedRef.current
+          && loadedCanvasIdRef.current === canvasIdForSave;
+        if (active) {
+          const state = persistableCanvasPatchStateFromParts(
+            nodesRef.current,
+            edgesRef.current,
+            creativeDeskRef.current,
+            farmCanvasRef.current,
+            nextNodeSerialIdRef.current,
+          );
+          latestPersistableByCanvasRef.current.set(canvasIdForSave, state);
+          return { active, state };
         }
-        useCanvasStore.setState((state) => ({
-          canvases: state.canvases.map((canvas) =>
-            canvas.id === canvasIdForSave
-              ? { ...canvas, nodeCount: persistNodes.length, updatedAt: Date.now() }
-              : canvas,
-          ),
-        }));
+        return {
+          active,
+          state: latestPersistableByCanvasRef.current.get(canvasIdForSave)
+            || pendingSaveByCanvasRef.current.get(canvasIdForSave)
+            || token.pendingIdentity,
+        };
+      };
+      const invalidateOutstandingAutosaves = () => {
+        autosaveGenerationByCanvasRef.current.set(
+          canvasIdForSave,
+          (autosaveGenerationByCanvasRef.current.get(canvasIdForSave) || 0) + 1,
+        );
+        const scheduledTimer = saveTimersByCanvasRef.current.get(canvasIdForSave);
+        if (scheduledTimer !== undefined) window.clearTimeout(scheduledTimer);
+        saveTimersByCanvasRef.current.delete(canvasIdForSave);
+      };
+      try {
+        await enqueueCanvasMutation(canvasIdForSave, async () => {
+          // 计时器等待其他 mutation 时，generation 或 pending 身份任一变化都使旧 PUT 失效。
+          if (autosaveGenerationByCanvasRef.current.get(canvasIdForSave) !== token.generation
+            || pendingSaveByCanvasRef.current.get(canvasIdForSave) !== token.pendingIdentity) return;
+          const saved = await api.saveCanvasData(canvasIdForSave, payload, {
+            allowEmpty: allowEmptySave,
+            baseRevision: canvasRevisionsRef.current.get(canvasIdForSave),
+          });
+          const savedRevision = Number(saved.revision);
+          if (!Number.isSafeInteger(savedRevision) || savedRevision < 1) {
+            throw new Error('画布自动保存未返回有效 revision');
+          }
+          const latest = latestStateForResponse();
+          const latestPending = pendingSaveByCanvasRef.current.get(canvasIdForSave) || null;
+          const response = reconcileCanvasPatchAutosaveResponse({
+            outcome: 'success',
+            savedRevision,
+            token,
+            currentGeneration: autosaveGenerationByCanvasRef.current.get(canvasIdForSave) || 0,
+            current: pendingCanvasSaveFromState(latest.state, {
+              baseSnapshot: latestPending?.baseSnapshot || token.pendingIdentity.baseSnapshot,
+              baseRevision: latestPending?.baseRevision ?? token.pendingIdentity.baseRevision,
+              conflicts: latestPending?.conflicts,
+              conflicted: latestPending?.conflicted,
+            }),
+            pending: latestPending,
+            active: latest.active,
+          });
+          invalidateOutstandingAutosaves();
+          setCanvasRevision(canvasIdForSave, savedRevision);
+          api.autoSaveCanvasData(canvasIdForSave, {
+            ...payload,
+            revision: savedRevision,
+            updatedAt: saved.updatedAt,
+          }).catch((e) => {
+            console.warn('画布自动保存到本地路径失败', e);
+          });
+          if (allowEmptySave) allowEmptySaveCanvasIdsRef.current.delete(canvasIdForSave);
+          lastSavedByCanvasRef.current.set(canvasIdForSave, response.acceptedSnapshot || snapshot);
+          lastSavedNodeCountByCanvasRef.current.set(canvasIdForSave, persistNodes.length);
+          if (response.pending) pendingSaveByCanvasRef.current.set(canvasIdForSave, response.pending);
+          else pendingSaveByCanvasRef.current.delete(canvasIdForSave);
+          if (response.shouldScheduleCas) setDragSaveTick((tick) => tick + 1);
+          useCanvasStore.setState((state) => ({
+            canvases: state.canvases.map((canvas) =>
+              canvas.id === canvasIdForSave
+                ? { ...canvas, nodeCount: persistNodes.length, updatedAt: Date.now() }
+                : canvas,
+            ),
+          }));
+        });
       } catch (e) {
+        if (e instanceof api.ApiRequestError && e.status === 409) {
+          const latest = latestStateForResponse();
+          const latestPending = pendingSaveByCanvasRef.current.get(canvasIdForSave) || null;
+          const response = reconcileCanvasPatchAutosaveResponse({
+            outcome: 'conflict',
+            token,
+            currentGeneration: autosaveGenerationByCanvasRef.current.get(canvasIdForSave) || 0,
+            current: pendingCanvasSaveFromState(latest.state, {
+              baseSnapshot: latestPending?.baseSnapshot || token.pendingIdentity.baseSnapshot,
+              baseRevision: latestPending?.baseRevision ?? token.pendingIdentity.baseRevision,
+              conflicts: latestPending?.conflicts,
+              conflicted: latestPending?.conflicted,
+            }),
+            pending: latestPending,
+            active: latest.active,
+          });
+          invalidateOutstandingAutosaves();
+          if (response.pending) pendingSaveByCanvasRef.current.set(canvasIdForSave, response.pending);
+          logBus.warn('画布 revision 冲突；本地修改已保留并阻止自动覆盖，请先处理冲突。', '画布同步');
+          if (latest.active) {
+            setCanvasPatchConflictMessage('画布 revision 冲突；本地修改已保留并阻止自动覆盖，请先处理冲突。');
+          }
+          console.warn('画布版本冲突，已停止旧快照覆盖；等待协作同步', e.data);
+        } else if (pendingSaveByCanvasRef.current.get(canvasIdForSave)?.snapshot === snapshot
+          && useCanvasStore.getState().activeId === canvasIdForSave) {
+          // 短暂网络故障保留同一快照，并重新进入防抖保存；409 必须先显式同步，不能盲重试覆盖。
+          setDragSaveTick((tick) => tick + 1);
+        }
         console.error('保存画布失败', e);
       } finally {
         if (saveTimersByCanvasRef.current.get(canvasIdForSave) === timer) {
@@ -4076,7 +4900,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       }
     }, 800);
     saveTimersByCanvasRef.current.set(canvasIdForSave, timer);
-  }, [nodes, edges, creativeDesk, farmCanvas, activeId, loaded, loadedCanvasId, getViewport, dragSaveTick]);
+  }, [nodes, edges, creativeDesk, farmCanvas, activeId, loaded, loadedCanvasId, getViewport, dragSaveTick, enqueueCanvasMutation, setCanvasRevision]);
 
   const getCreativeDeskCenter = useCallback(() => {
     const flowEl = document.querySelector('.react-flow') as HTMLElement | null;
@@ -4633,6 +5457,998 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     addNode('vibex' as NodeType);
   }, [addNode]);
 
+  const handleInsertSubflow = useCallback((definition: SubflowDefinition) => {
+    addNode('subflow', {
+      data: {
+        definitionId: definition.id,
+        definitionVersion: definition.version,
+        definition,
+        parameterOverrides: {},
+      },
+    });
+    logBus.success(`已插入“${definition.name}” v${definition.version}`, '子工作流');
+  }, [addNode]);
+
+  const handleUpgradeSubflowInstances = useCallback((fromDefinition: SubflowDefinition, toDefinition: SubflowDefinition) => {
+    try {
+      const current = { nodes: nodesRef.current, edges: edgesRef.current };
+      const result = upgradeSubflowInstances(current.nodes, current.edges, fromDefinition, toDefinition);
+      if (!result.upgradedNodeIds.length) {
+        logBus.warn(`画布中没有固定在 v${fromDefinition.version} 的实例`, '子工作流');
+        return;
+      }
+      const next = { nodes: result.nodes, edges: result.edges };
+      histCaptureTransition(current, next);
+      setNodes(next.nodes);
+      setEdges(next.edges);
+      logBus.success(`已升级 ${result.upgradedNodeIds.length} 个实例到 v${toDefinition.version}${result.disconnectedEdges.length ? `，断开 ${result.disconnectedEdges.length} 条不兼容连线` : ''}`, '子工作流');
+    } catch (error) {
+      logBus.warn(error instanceof Error ? error.message : '升级子工作流失败', '子工作流');
+    }
+  }, [histCaptureTransition]);
+
+  const handleInsertProjectAsset = useCallback((asset: import('../types/project').AssetRef) => {
+    if (!asset.sourceUrl) {
+      logBus.warn('该资产没有可用的受管访问地址', '资产中心');
+      return;
+    }
+    if (asset.kind === 'text') {
+      addNode('text', { data: { text: String((asset.metadata as any)?.preview || asset.filename), sourceAssetId: asset.id } });
+      return;
+    }
+    if (!['image', 'video', 'audio', 'model3d'].includes(asset.kind)) {
+      logBus.warn(`暂不支持把 ${asset.kind} 资产直接加入画布`, '资产中心');
+      return;
+    }
+    const kind = asset.kind as MediaKind;
+    addNode('upload', {
+      data: {
+        ...createUploadDataFromItems(kind, [{
+          kind,
+          url: asset.sourceUrl,
+          name: asset.filename,
+          size: Number((asset.metadata as any)?.size || 0),
+          mime: asset.mimeType,
+        }]),
+        sourceAssetId: asset.id,
+      },
+    });
+    logBus.success(`已把 ${asset.filename} 添加到画布`, '资产中心');
+  }, [addNode]);
+
+  const currentPersistableCanvas = useCallback(() => {
+    const persistNodes = nodesRef.current.filter((node) => node.id !== BULK_PHANTOM_ID && !(node.data as any)?.__subflowRuntime);
+    const transientSubflowIds = new Set(nodesRef.current.filter((node) => (node.data as any)?.__subflowRuntime).map((node) => node.id));
+    const persistEdges = edgesRef.current.filter((edge) => edge.source !== BULK_PHANTOM_ID
+      && edge.target !== BULK_PHANTOM_ID
+      && !transientSubflowIds.has(edge.source)
+      && !transientSubflowIds.has(edge.target)
+      && !(edge.data as any)?.__subflowRuntime);
+    const nextNodeSerialId = nextNodeSerialIdRef.current;
+    const currentCreativeDesk = creativeDeskRef.current;
+    const currentFarmCanvas = farmCanvasRef.current;
+    const snapshot = JSON.stringify({ nodes: persistNodes, edges: persistEdges, creativeDesk: currentCreativeDesk, farmCanvas: currentFarmCanvas, nextNodeSerialId });
+    return {
+      nodes: persistNodes,
+      edges: persistEdges,
+      creativeDesk: currentCreativeDesk,
+      farmCanvas: currentFarmCanvas,
+      nextNodeSerialId,
+      snapshot,
+      payload: { nodes: persistNodes, edges: persistEdges, viewport: getViewport(), nextNodeSerialId, creativeDesk: currentCreativeDesk, farmCanvas: currentFarmCanvas },
+    };
+  }, [getViewport]);
+
+  const ensureCanvasPatchBaseline = useCallback(async (canvasId: string) => {
+    if (useCanvasStore.getState().activeId !== canvasId || !loaded || loadedCanvasId !== canvasId) {
+      throw new Error('画布尚未完成加载，不能生成 Patch 预览');
+    }
+    const blockedPending = pendingSaveByCanvasRef.current.get(canvasId);
+    if (blockedPending?.conflicted) {
+      const conflict = new Error('本地画布与服务端存在未解决冲突；本地修改已保留，处理冲突前不能生成 Patch。') as Error & { code: string };
+      conflict.code = 'CANVAS_BASELINE_CONFLICT';
+      throw conflict;
+    }
+    const timer = saveTimersByCanvasRef.current.get(canvasId);
+    if (timer) window.clearTimeout(timer);
+    saveTimersByCanvasRef.current.delete(canvasId);
+
+    const current = currentPersistableCanvas();
+    const mutationEpoch = graphMutationEpochRef.current;
+    const previousNodeCount = lastSavedNodeCountByCanvasRef.current.get(canvasId) || 0;
+    const allowEmpty = allowEmptySaveCanvasIdsRef.current.has(canvasId);
+    if (!current.nodes.length && previousNodeCount > 0 && !allowEmpty) {
+      throw new Error('空画布保护尚未解除，不能用 Patch 基线覆盖已有节点');
+    }
+    let revision = canvasRevisionsRef.current.get(canvasId) || 0;
+    if (!Number.isSafeInteger(revision) || revision < 1) throw new Error('画布 revision 无效，请重新打开画布');
+    if (lastSavedByCanvasRef.current.get(canvasId) !== current.snapshot) {
+      const baseSnapshot = lastSavedByCanvasRef.current.get(canvasId) || '';
+      pendingSaveByCanvasRef.current.set(canvasId, pendingCanvasSaveFromState(current, {
+        baseSnapshot,
+        baseRevision: revision,
+      }));
+      const previousRevision = revision;
+      try {
+        const saved = await api.saveCanvasData(canvasId, current.payload, {
+          allowEmpty,
+          baseRevision: revision,
+        });
+        revision = Number(saved.revision);
+        if (!Number.isSafeInteger(revision) || revision <= previousRevision) {
+          throw new Error('保存 Patch 基线后未获得递增的有效 revision');
+        }
+        setCanvasRevision(canvasId, revision);
+        lastSavedByCanvasRef.current.set(canvasId, current.snapshot);
+        lastSavedNodeCountByCanvasRef.current.set(canvasId, current.nodes.length);
+        if (pendingSaveByCanvasRef.current.get(canvasId)?.snapshot === current.snapshot) {
+          pendingSaveByCanvasRef.current.delete(canvasId);
+        }
+        if (allowEmpty) allowEmptySaveCanvasIdsRef.current.delete(canvasId);
+        api.autoSaveCanvasData(canvasId, {
+          ...current.payload,
+          revision,
+          updatedAt: saved.updatedAt,
+        }).catch((error) => console.warn('Patch 基线自动保存镜像失败', error));
+        useCanvasStore.setState((state) => ({
+          canvases: state.canvases.map((canvas) => canvas.id === canvasId
+            ? { ...canvas, nodeCount: current.nodes.length, updatedAt: Date.now() }
+            : canvas),
+        }));
+      } catch (error) {
+        if (useCanvasStore.getState().activeId === canvasId && loadedCanvasId === canvasId) {
+          const latest = currentPersistableCanvas();
+          const existing = pendingSaveByCanvasRef.current.get(canvasId);
+          const revisionConflict = error instanceof api.ApiRequestError && error.status === 409;
+          pendingSaveByCanvasRef.current.set(canvasId, pendingCanvasSaveFromState(latest, {
+            baseSnapshot: existing?.baseSnapshot || baseSnapshot,
+            baseRevision: existing?.baseRevision || previousRevision,
+            conflicts: revisionConflict
+              ? [...(existing?.conflicts || []), { kind: 'same-field', path: 'revision' }]
+              : existing?.conflicts,
+            conflicted: revisionConflict || existing?.conflicted,
+          }));
+        }
+        if (error instanceof api.ApiRequestError && error.status === 409) {
+          setCanvasPatchConflictMessage('远端画布已更新；本地未保存修改已保留并阻止自动覆盖，请先处理版本冲突。');
+          const conflict = new Error('远端画布已更新，本地未保存修改已保留；为避免覆盖他人修改，请先处理版本冲突后再生成 Patch。') as Error & { code: string };
+          conflict.code = 'CANVAS_BASELINE_CONFLICT';
+          throw conflict;
+        }
+        setDragSaveTick((tick) => tick + 1);
+        throw error;
+      }
+    }
+
+    if (useCanvasStore.getState().activeId !== canvasId || loadedCanvasId !== canvasId
+      || graphMutationEpochRef.current !== mutationEpoch
+      || currentPersistableCanvas().snapshot !== current.snapshot) {
+      if (useCanvasStore.getState().activeId === canvasId && loadedCanvasId === canvasId) {
+        pendingSaveByCanvasRef.current.set(canvasId, pendingCanvasSaveFromState(currentPersistableCanvas(), {
+          baseSnapshot: current.snapshot,
+          baseRevision: revision,
+        }));
+        setDragSaveTick((tick) => tick + 1);
+      }
+      const stale = new Error('保存 Patch 基线期间画布已变化，请重新预览') as Error & { code: string };
+      stale.code = 'PATCH_PREVIEW_STALE';
+      throw stale;
+    }
+    return { ...current, revision, mutationEpoch };
+  }, [currentPersistableCanvas, loaded, loadedCanvasId, setCanvasRevision]);
+
+  const commitAuthoritativeCanvasPatchDocument = useCallback((
+    canvasId: string,
+    inputDocument: VersionedCanvasData,
+    options?: { expectedLocalSnapshot?: string; historyMode?: 'transition' | 'reset'; patchId?: string },
+  ) => {
+    const document = requireVersionedCanvasPatchDocument(inputDocument, canvasId);
+    const isActive = useCanvasStore.getState().activeId === canvasId
+      && loadedRef.current && loadedCanvasIdRef.current === canvasId;
+    const activeLocal = isActive ? currentPersistableCanvas() : null;
+    const pendingLocal = pendingSaveByCanvasRef.current.get(canvasId) || null;
+    const local = activeLocal || pendingLocal;
+    const baseline = options?.expectedLocalSnapshot
+      ? parsePersistableCanvasPatchSnapshot(options.expectedLocalSnapshot)
+      : null;
+    const authoritativeCreativeDesk = document.creativeDesk
+      ? migrateCreativeDeskToViewportCoordinates(document.creativeDesk, document.viewport)
+      : local?.creativeDesk || baseline?.creativeDesk || createDefaultCreativeDeskState();
+    const authoritativeFarmCanvas = document.farmCanvas
+      ? sanitizeFarmCanvasState(document.farmCanvas)
+      : local?.farmCanvas || baseline?.farmCanvas || createFarmState();
+    const authoritativeNodeSerialId = Math.max(
+      1,
+      Number(document.nextNodeSerialId) || Number(baseline?.nextNodeSerialId) || Number(local?.nextNodeSerialId) || 1,
+    );
+    const authoritativeState: PersistableCanvasPatchState = {
+      nodes: document.nodes as Node[],
+      edges: document.edges as Edge[],
+      creativeDesk: authoritativeCreativeDesk,
+      farmCanvas: authoritativeFarmCanvas,
+      nextNodeSerialId: authoritativeNodeSerialId,
+      snapshot: JSON.stringify({
+        nodes: document.nodes,
+        edges: document.edges,
+        creativeDesk: authoritativeCreativeDesk,
+        farmCanvas: authoritativeFarmCanvas,
+        nextNodeSerialId: authoritativeNodeSerialId,
+      }),
+    };
+    const hasConcurrentLocalChanges = Boolean(
+      options?.expectedLocalSnapshot && local
+      && local.snapshot !== options.expectedLocalSnapshot
+      && local.snapshot !== authoritativeState.snapshot,
+    );
+    const mergeResult = hasConcurrentLocalChanges && local
+      ? mergeConcurrentCanvasPatchState(options!.expectedLocalSnapshot!, local, authoritativeState)
+      : { state: authoritativeState, conflicts: [] as CanvasPatchMergeConflict[] };
+    const renderedState = mergeResult.state;
+    const timer = saveTimersByCanvasRef.current.get(canvasId);
+    if (timer) window.clearTimeout(timer);
+    saveTimersByCanvasRef.current.delete(canvasId);
+    lastSavedByCanvasRef.current.set(canvasId, authoritativeState.snapshot);
+    lastSavedNodeCountByCanvasRef.current.set(canvasId, authoritativeState.nodes.length);
+    if (hasConcurrentLocalChanges) {
+      pendingSaveByCanvasRef.current.set(canvasId, pendingCanvasSaveFromState(renderedState, {
+        baseSnapshot: authoritativeState.snapshot,
+        baseRevision: document.revision,
+        conflicts: mergeResult.conflicts,
+      }));
+    } else pendingSaveByCanvasRef.current.delete(canvasId);
+    setCanvasRevision(canvasId, document.revision);
+    useCanvasStore.setState((state) => ({
+      canvases: state.canvases.map((canvas) => canvas.id === canvasId
+        ? { ...canvas, nodeCount: renderedState.nodes.length, updatedAt: document.updatedAt || Date.now() }
+        : canvas),
+    }));
+    api.autoSaveCanvasData(canvasId, document).catch((error) => console.warn('Patch 权威快照自动保存镜像失败', error));
+    if (!isActive) {
+      return {
+        active: false,
+        concurrentLocalChanges: hasConcurrentLocalChanges,
+        conflicts: mergeResult.conflicts,
+        state: renderedState,
+      };
+    }
+
+    const current = { nodes: nodesRef.current, edges: edgesRef.current };
+    const next = { nodes: renderedState.nodes, edges: renderedState.edges };
+    cancelScheduledHistoryCapture();
+    nextNodeSerialIdRef.current = renderedState.nextNodeSerialId;
+    if (options?.patchId) {
+      const barrier = canvasPatchHistoryBarrier(next, options.patchId);
+      histReset(barrier.snapshot);
+    } else if (options?.historyMode === 'reset') histReset(next);
+    else histCaptureTransition(current, next);
+    setNodes(next.nodes);
+    setEdges(next.edges);
+    setCreativeDesk(renderedState.creativeDesk);
+    setFarmCanvas(renderedState.farmCanvas);
+    // CanvasPatch/撤回不回放服务端旧摄像机；用户当前平移和缩放保持不变。
+    if (mergeResult.conflicts.length > 0) {
+      const conflictMessage = `Patch 已提交；${mergeResult.conflicts.length} 处并发本地冲突已保留，并已阻止自动覆盖。请先处理冲突。`;
+      setCanvasPatchConflictMessage(conflictMessage);
+      logBus.warn(conflictMessage, '工作流医生');
+    } else if (hasConcurrentLocalChanges) {
+      setCanvasPatchConflictMessage('');
+      setDragSaveTick((tick) => tick + 1);
+      logBus.warn('Patch 已提交；请求期间产生的本地修改已合并，并将保存为后续 revision。', '工作流医生');
+    } else setCanvasPatchConflictMessage('');
+    return {
+      active: true,
+      concurrentLocalChanges: hasConcurrentLocalChanges,
+      conflicts: mergeResult.conflicts,
+      state: renderedState,
+    };
+  }, [cancelScheduledHistoryCapture, currentPersistableCanvas, histCaptureTransition, histReset, setCanvasRevision]);
+
+  const fetchAuthoritativeCanvasPatchDocument = useCallback(async (canvasId: string) => {
+    const document = requireVersionedCanvasPatchDocument(await api.getCanvasData(canvasId), canvasId);
+    const knownRevision = canvasRevisionsRef.current.get(canvasId) || 0;
+    if (document.revision < knownRevision) throw new Error('服务端返回了倒退的画布 revision');
+    return document;
+  }, []);
+
+  const refreshCleanCanvasPatchBaseline = useCallback(async (
+    canvasId: string,
+    expectedSnapshot: string,
+    expectedMutationEpoch: number,
+  ) => {
+    if (useCanvasStore.getState().activeId !== canvasId || !loaded || loadedCanvasId !== canvasId
+      || lastSavedByCanvasRef.current.get(canvasId) !== expectedSnapshot
+      || graphMutationEpochRef.current !== expectedMutationEpoch
+      || currentPersistableCanvas().snapshot !== expectedSnapshot) {
+      const conflict = new Error('本地画布含未保存修改，不能自动同步覆盖') as Error & { code: string };
+      conflict.code = 'CANVAS_BASELINE_CONFLICT';
+      throw conflict;
+    }
+    const document = await fetchAuthoritativeCanvasPatchDocument(canvasId);
+    if (useCanvasStore.getState().activeId !== canvasId || loadedCanvasId !== canvasId
+      || graphMutationEpochRef.current !== expectedMutationEpoch
+      || currentPersistableCanvas().snapshot !== expectedSnapshot) {
+      const stale = new Error('同步画布期间本地状态已变化，请重新预览') as Error & { code: string };
+      stale.code = 'PATCH_PREVIEW_STALE';
+      throw stale;
+    }
+    const committed = commitAuthoritativeCanvasPatchDocument(canvasId, document, {
+      expectedLocalSnapshot: expectedSnapshot,
+      historyMode: 'reset',
+    });
+    return { document, state: committed.state, mutationEpoch: graphMutationEpochRef.current };
+  }, [commitAuthoritativeCanvasPatchDocument, currentPersistableCanvas, fetchAuthoritativeCanvasPatchDocument, loaded, loadedCanvasId]);
+
+  const handlePreviewCanvasPatch = useCallback(async (draft: CanvasPatchDraft) => {
+    const canvasId = activeId;
+    const projectId = activeProjectId;
+    if (!canvasId || !projectId) throw new Error('当前画布缺少项目身份');
+    return enqueueCanvasMutation(canvasId, async () => {
+      let baseline = await ensureCanvasPatchBaseline(canvasId);
+      let patch = materializeCanvasPatchDraft(draft, {
+        projectId,
+        canvasId,
+        baseRevision: baseline.revision,
+      });
+      let preview: CanvasPatchPreview;
+      try {
+        preview = await api.previewCanvasPatch(canvasId, patch);
+      } catch (error) {
+        if (!(error instanceof api.ApiRequestError) || error.status !== 409) throw error;
+        const refreshed = await refreshCleanCanvasPatchBaseline(canvasId, baseline.snapshot, baseline.mutationEpoch);
+        baseline = {
+          ...refreshed.state,
+          revision: refreshed.document.revision,
+          payload: baseline.payload,
+          mutationEpoch: refreshed.mutationEpoch,
+        };
+        patch = materializeCanvasPatchDraft(draft, {
+          projectId: refreshed.document.projectId,
+          canvasId,
+          baseRevision: refreshed.document.revision,
+        });
+        preview = await api.previewCanvasPatch(canvasId, patch);
+      }
+      if (preview.patchId !== patch.id || preview.baseRevision !== patch.baseRevision || preview.currentRevision !== patch.baseRevision) {
+        throw new Error('服务端 Patch 预览身份或 revision 不一致');
+      }
+      if (useCanvasStore.getState().activeId === canvasId && loadedCanvasId === canvasId
+        && canvasRevisionsRef.current.get(canvasId) === patch.baseRevision
+        && graphMutationEpochRef.current === baseline.mutationEpoch
+        && currentPersistableCanvas().snapshot === baseline.snapshot) {
+        patchPreviewBaselinesRef.current.set(`${canvasId}\u001f${patch.id}\u001f${preview.previewDigest}`, {
+          canvasId,
+          revision: patch.baseRevision,
+          snapshot: baseline.snapshot,
+          mutationEpoch: baseline.mutationEpoch,
+        });
+      } else {
+        const stale = new Error('Patch 预览期间画布已变化，请重新预览') as Error & { code: string };
+        stale.code = 'PATCH_PREVIEW_STALE';
+        throw stale;
+      }
+      return { patch, preview };
+    });
+  }, [activeId, activeProjectId, enqueueCanvasMutation, ensureCanvasPatchBaseline, loadedCanvasId, refreshCleanCanvasPatchBaseline]);
+
+  const handleApplyCanvasPatch = useCallback(async (patch: CanvasPatch, preview: CanvasPatchPreview) => {
+    const canvasId = activeId;
+    if (!canvasId || patch.id !== preview.patchId) throw new Error('CanvasPatch 预览身份不一致');
+    await enqueueCanvasMutation(canvasId, async () => {
+      const previewKey = `${canvasId}\u001f${patch.id}\u001f${preview.previewDigest}`;
+      const baseline = patchPreviewBaselinesRef.current.get(previewKey);
+      const current = currentPersistableCanvas();
+      const revision = canvasRevisionsRef.current.get(canvasId) || 0;
+      if (!baseline || baseline.canvasId !== canvasId || baseline.revision !== revision
+        || baseline.revision !== patch.baseRevision || baseline.snapshot !== current.snapshot
+        || baseline.mutationEpoch !== graphMutationEpochRef.current) {
+        const staleError = new Error('Patch 预览后画布已变化，请重新预览并确认') as Error & { code: string };
+        staleError.code = 'PATCH_PREVIEW_STALE';
+        throw staleError;
+      }
+      const result = await api.applyCanvasPatch(canvasId, patch, preview.previewDigest);
+      const authoritativeDocument = result.duplicate
+        ? await fetchAuthoritativeCanvasPatchDocument(canvasId)
+        : result.document;
+      commitAuthoritativeCanvasPatchDocument(canvasId, authoritativeDocument, {
+        expectedLocalSnapshot: baseline.snapshot,
+        patchId: patch.id,
+      });
+      for (const key of patchPreviewBaselinesRef.current.keys()) {
+        if (key.startsWith(`${canvasId}\u001f`)) patchPreviewBaselinesRef.current.delete(key);
+      }
+      logBus.success(`${result.duplicate ? '已确认' : '已应用'}修复：${patch.summary}`, '工作流医生');
+    });
+  }, [activeId, commitAuthoritativeCanvasPatchDocument, currentPersistableCanvas, enqueueCanvasMutation, fetchAuthoritativeCanvasPatchDocument]);
+
+  const handleRevertCanvasPatch = useCallback(async (patchId: string, _baseRevision: number) => {
+    const canvasId = activeId;
+    if (!canvasId) throw new Error('当前没有可撤回 Patch 的画布');
+    await enqueueCanvasMutation(canvasId, async () => {
+      let baseline = await ensureCanvasPatchBaseline(canvasId);
+      let result: Awaited<ReturnType<typeof api.revertCanvasPatch>>;
+      try {
+        result = await api.revertCanvasPatch(canvasId, patchId, baseline.revision);
+      } catch (error) {
+        const code = error instanceof api.ApiRequestError && error.data && typeof error.data === 'object'
+          ? String((error.data as { code?: unknown }).code || '')
+          : '';
+        if (!(error instanceof api.ApiRequestError) || error.status !== 409 || code !== 'revision_conflict') throw error;
+        const refreshed = await refreshCleanCanvasPatchBaseline(canvasId, baseline.snapshot, baseline.mutationEpoch);
+        baseline = {
+          ...refreshed.state,
+          revision: refreshed.document.revision,
+          payload: baseline.payload,
+          mutationEpoch: refreshed.mutationEpoch,
+        };
+        result = await api.revertCanvasPatch(canvasId, patchId, refreshed.document.revision);
+      }
+      const authoritativeDocument = result.duplicate
+        ? await fetchAuthoritativeCanvasPatchDocument(canvasId)
+        : result.document;
+      commitAuthoritativeCanvasPatchDocument(canvasId, authoritativeDocument, {
+        expectedLocalSnapshot: baseline.snapshot,
+        patchId,
+      });
+      for (const key of patchPreviewBaselinesRef.current.keys()) {
+        if (key.startsWith(`${canvasId}\u001f`)) patchPreviewBaselinesRef.current.delete(key);
+      }
+      logBus.success(`已撤回我的 Patch：${patchId}`, '工作流医生');
+    });
+  }, [activeId, commitAuthoritativeCanvasPatchDocument, enqueueCanvasMutation, ensureCanvasPatchBaseline, fetchAuthoritativeCanvasPatchDocument, refreshCleanCanvasPatchBaseline]);
+
+  const handleResolveCanvasPatchConflict = useCallback(async (resolution: 'keep-local' | 'use-authoritative') => {
+    const canvasId = activeId;
+    if (!canvasId) throw new Error('当前没有可处理冲突的画布');
+    await enqueueCanvasMutation(canvasId, async () => {
+      const pending = pendingSaveByCanvasRef.current.get(canvasId);
+      if (!pending?.conflicted) {
+        setCanvasPatchConflictMessage('');
+        return;
+      }
+      if (useCanvasStore.getState().activeId !== canvasId
+        || !loadedRef.current || loadedCanvasIdRef.current !== canvasId) {
+        throw new Error('画布作用域已变化，请回到原画布后重试');
+      }
+      const localAtConfirmation = currentPersistableCanvas();
+      const authoritativeDocument = await fetchAuthoritativeCanvasPatchDocument(canvasId);
+      if (resolution === 'keep-local') {
+        const authoritativeCreativeDesk = authoritativeDocument.creativeDesk
+          ? migrateCreativeDeskToViewportCoordinates(authoritativeDocument.creativeDesk, authoritativeDocument.viewport)
+          : pending.creativeDesk;
+        const authoritativeFarmCanvas = authoritativeDocument.farmCanvas
+          ? sanitizeFarmCanvasState(authoritativeDocument.farmCanvas)
+          : pending.farmCanvas;
+        const authoritativeNextNodeSerialId = Math.max(
+          1,
+          Number(authoritativeDocument.nextNodeSerialId) || pending.nextNodeSerialId,
+        );
+        const authoritativeState: PersistableCanvasPatchState = {
+          nodes: authoritativeDocument.nodes as Node[],
+          edges: authoritativeDocument.edges as Edge[],
+          creativeDesk: authoritativeCreativeDesk,
+          farmCanvas: authoritativeFarmCanvas,
+          nextNodeSerialId: authoritativeNextNodeSerialId,
+          snapshot: JSON.stringify({
+            nodes: authoritativeDocument.nodes,
+            edges: authoritativeDocument.edges,
+            creativeDesk: authoritativeCreativeDesk,
+            farmCanvas: authoritativeFarmCanvas,
+            nextNodeSerialId: authoritativeNextNodeSerialId,
+          }),
+        };
+        // The user explicitly selected local-wins for existing conflicts. Remote
+        // disjoint changes are still merged, and graph repair prevents dangling edges.
+        const resolved = mergeConcurrentCanvasPatchState(
+          pending.baseSnapshot,
+          localAtConfirmation,
+          authoritativeState,
+        ).state;
+        const previousNodeCount = lastSavedNodeCountByCanvasRef.current.get(canvasId) || 0;
+        const allowEmpty = allowEmptySaveCanvasIdsRef.current.has(canvasId);
+        if (!resolved.nodes.length && previousNodeCount > 0 && !allowEmpty) {
+          throw new Error('空画布保护尚未解除，不能用本地冲突版本覆盖已有节点');
+        }
+        const saved = await api.saveCanvasData(canvasId, {
+          nodes: resolved.nodes,
+          edges: resolved.edges,
+          viewport: getViewport(),
+          nextNodeSerialId: resolved.nextNodeSerialId,
+          creativeDesk: resolved.creativeDesk,
+          farmCanvas: resolved.farmCanvas,
+        }, {
+          allowEmpty,
+          baseRevision: authoritativeDocument.revision,
+        });
+        const savedRevision = Number(saved.revision);
+        if (!Number.isSafeInteger(savedRevision) || savedRevision <= authoritativeDocument.revision) {
+          throw new Error('冲突合并保存后未获得递增的有效 revision');
+        }
+        setCanvasRevision(canvasId, savedRevision);
+        if (allowEmpty) allowEmptySaveCanvasIdsRef.current.delete(canvasId);
+        const savedDocument = await fetchAuthoritativeCanvasPatchDocument(canvasId);
+        commitAuthoritativeCanvasPatchDocument(canvasId, savedDocument, {
+          expectedLocalSnapshot: localAtConfirmation.snapshot,
+          historyMode: 'reset',
+        });
+        logBus.success('本地修改已与最新服务端版本合并，并保存为新的 revision。', '画布同步');
+        return;
+      }
+
+      commitAuthoritativeCanvasPatchDocument(canvasId, authoritativeDocument, {
+        expectedLocalSnapshot: localAtConfirmation.snapshot,
+        historyMode: 'reset',
+      });
+      logBus.success('已显式采用最新服务端版本；点击确认后的新增本地编辑仍会保留。', '画布同步');
+    });
+  }, [activeId, commitAuthoritativeCanvasPatchDocument, currentPersistableCanvas, enqueueCanvasMutation, fetchAuthoritativeCanvasPatchDocument, getViewport, setCanvasRevision]);
+
+  const handleOpenNestedSubflow = useCallback(async (node: Node) => {
+    if (node.type !== 'subflow') return;
+    const data = (node.data || {}) as Record<string, unknown>;
+    const definitionId = String(data.definitionId || (data.definition as SubflowDefinition | undefined)?.id || '').trim();
+    const version = Math.max(1, Number(data.definitionVersion || (data.definition as SubflowDefinition | undefined)?.version) || 1);
+    if (!definitionId) {
+      logBus.warn('嵌套子工作流缺少固定定义 ID', '子工作流');
+      return;
+    }
+    try {
+      const embedded = data.definition as SubflowDefinition | undefined;
+      const definition = embedded && embedded.id === definitionId && Number(embedded.version) === version
+        ? embedded
+        : await api.getSubflow(definitionId, version, String(data.definitionProjectId || activeId || '') || undefined);
+      setSubflowInspector((current) => current ? {
+        ...current,
+        stack: [...current.stack, definition],
+        pathNodeIds: [...current.pathNodeIds, node.id],
+        error: undefined,
+      } : current);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '无法打开嵌套子工作流';
+      setSubflowInspector((current) => current ? { ...current, error: message } : current);
+      logBus.warn(message, '子工作流');
+    }
+  }, [activeId]);
+
+  const handleStartSubflowRevisionEdit = useCallback(() => {
+    setSubflowInspector((current) => {
+      if (!current || current.edit) return current;
+      const depth = current.stack.length - 1;
+      return {
+        ...current,
+        error: undefined,
+        edit: {
+          depth,
+          baseRevision: Math.max(1, Number(current.stack[depth].revision || current.stack[depth].version) || 1),
+          changeSummary: '',
+          ...createSubflowDraftHistory(current.stack[depth]),
+          selectedNodeId: null,
+          nodeDataText: '',
+          nodeDataError: '',
+          saving: false,
+        },
+      };
+    });
+  }, []);
+
+  const handleCancelSubflowRevisionEdit = useCallback(() => {
+    setSubflowInspector((current) => current?.edit?.saving ? current : current ? { ...current, edit: undefined } : current);
+  }, []);
+
+  const handleSubflowRevisionNodesChange = useCallback((changes: NodeChange[]) => {
+    setSubflowInspector((current) => {
+      if (!current?.edit) return current;
+      const nodes = applyNodeChanges(changes, current.edit.draft.nodes);
+      const retainedIds = new Set(nodes.map((node) => node.id));
+      const selectedNodeId = current.edit.selectedNodeId && retainedIds.has(current.edit.selectedNodeId)
+        ? current.edit.selectedNodeId
+        : null;
+      const nextDraft = {
+        ...current.edit.draft,
+        nodes,
+        edges: current.edit.draft.edges.filter((edge) => retainedIds.has(edge.source) && retainedIds.has(edge.target)),
+      };
+      const recordsStructuralChange = changes.some((change) => change.type === 'add' || change.type === 'remove' || change.type === 'replace');
+      const history = recordsStructuralChange
+        ? commitSubflowDraftHistory(current.edit, nextDraft)
+        : { draft: nextDraft, undoStack: current.edit.undoStack, redoStack: current.edit.redoStack };
+      return {
+        ...current,
+        edit: {
+          ...current.edit,
+          ...history,
+          selectedNodeId,
+          nodeDataText: selectedNodeId ? current.edit.nodeDataText : '',
+          nodeDataError: selectedNodeId ? current.edit.nodeDataError : '',
+        },
+      };
+    });
+  }, []);
+
+  const handleSubflowRevisionEdgesChange = useCallback((changes: EdgeChange[]) => {
+    setSubflowInspector((current) => {
+      if (!current?.edit) return current;
+      const nextDraft = {
+        ...current.edit.draft,
+        edges: applyEdgeChanges(changes, current.edit.draft.edges),
+      };
+      const recordsStructuralChange = changes.some((change) => change.type === 'add' || change.type === 'remove' || change.type === 'replace');
+      const history = recordsStructuralChange
+        ? commitSubflowDraftHistory(current.edit, nextDraft)
+        : { draft: nextDraft, undoStack: current.edit.undoStack, redoStack: current.edit.redoStack };
+      return { ...current, edit: { ...current.edit, ...history } };
+    });
+  }, []);
+
+  const handleConnectSubflowRevision = useCallback((connection: Connection) => {
+    setSubflowInspector((current) => {
+      if (!current?.edit || !connection.source || !connection.target) return current;
+      const edge: Edge = {
+        id: `subflow-edge-${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`}`,
+        source: connection.source,
+        target: connection.target,
+        sourceHandle: connection.sourceHandle === SUBFLOW_INSPECTOR_DEFAULT_SOURCE_HANDLE ? null : connection.sourceHandle,
+        targetHandle: connection.targetHandle === SUBFLOW_INSPECTOR_DEFAULT_TARGET_HANDLE ? null : connection.targetHandle,
+      };
+      const nextDraft = {
+        ...current.edit.draft,
+        edges: addEdge(edge, current.edit.draft.edges),
+      };
+      return {
+        ...current,
+        edit: {
+          ...current.edit,
+          ...commitSubflowDraftHistory(current.edit, nextDraft),
+        },
+      };
+    });
+  }, []);
+
+  const handleSelectSubflowRevisionNode = useCallback((nodeId: string) => {
+    setSubflowInspector((current) => {
+      if (!current?.edit) return current;
+      const selected = current.edit.draft.nodes.find((node) => node.id === nodeId);
+      if (!selected) return current;
+      return {
+        ...current,
+        edit: {
+          ...current.edit,
+          selectedNodeId: nodeId,
+          nodeDataText: JSON.stringify(selected.data || {}, null, 2),
+          nodeDataError: '',
+          draft: {
+            ...current.edit.draft,
+            nodes: current.edit.draft.nodes.map((node) => ({ ...node, selected: node.id === nodeId })),
+            edges: current.edit.draft.edges.map((edge) => ({ ...edge, selected: false })),
+          },
+        },
+      };
+    });
+  }, []);
+
+  const handleSelectSubflowRevisionEdge = useCallback((edgeId: string) => {
+    setSubflowInspector((current) => current?.edit ? {
+      ...current,
+      edit: {
+        ...current.edit,
+        selectedNodeId: null,
+        nodeDataText: '',
+        nodeDataError: '',
+        draft: {
+          ...current.edit.draft,
+          nodes: current.edit.draft.nodes.map((node) => ({ ...node, selected: false })),
+          edges: current.edit.draft.edges.map((edge) => ({ ...edge, selected: edge.id === edgeId })),
+        },
+      },
+    } : current);
+  }, []);
+
+  const handleClearSubflowRevisionSelection = useCallback(() => {
+    setSubflowInspector((current) => current?.edit ? {
+      ...current,
+      edit: {
+        ...current.edit,
+        selectedNodeId: null,
+        nodeDataText: '',
+        nodeDataError: '',
+        draft: {
+          ...current.edit.draft,
+          nodes: current.edit.draft.nodes.map((node) => ({ ...node, selected: false })),
+          edges: current.edit.draft.edges.map((edge) => ({ ...edge, selected: false })),
+        },
+      },
+    } : current);
+  }, []);
+
+  const handleSubflowRevisionNodeDragStart = useCallback(() => {
+    setSubflowInspector((current) => {
+      if (current?.edit && !current.edit.saving) {
+        subflowEditDragStartRef.current = cloneSubflowDefinition(current.edit.draft);
+      }
+      return current;
+    });
+  }, []);
+
+  const handleSubflowRevisionNodeDragStop = useCallback(() => {
+    const dragStart = subflowEditDragStartRef.current;
+    subflowEditDragStartRef.current = null;
+    if (!dragStart) return;
+    setSubflowInspector((current) => {
+      if (!current?.edit || current.edit.saving) return current;
+      const history = commitSubflowDraftHistory(
+        { draft: dragStart, undoStack: current.edit.undoStack, redoStack: current.edit.redoStack },
+        current.edit.draft,
+      );
+      return { ...current, edit: { ...current.edit, ...history } };
+    });
+  }, []);
+
+  const handleUndoSubflowRevision = useCallback(() => {
+    setSubflowInspector((current) => {
+      if (!current?.edit || current.edit.saving || current.edit.undoStack.length === 0) return current;
+      const history = undoSubflowDraftHistory(current.edit);
+      return {
+        ...current,
+        edit: {
+          ...current.edit,
+          ...history,
+          selectedNodeId: null,
+          nodeDataText: '',
+          nodeDataError: '',
+        },
+      };
+    });
+  }, []);
+
+  const handleRedoSubflowRevision = useCallback(() => {
+    setSubflowInspector((current) => {
+      if (!current?.edit || current.edit.saving || current.edit.redoStack.length === 0) return current;
+      const history = redoSubflowDraftHistory(current.edit);
+      return {
+        ...current,
+        edit: {
+          ...current.edit,
+          ...history,
+          selectedNodeId: null,
+          nodeDataText: '',
+          nodeDataError: '',
+        },
+      };
+    });
+  }, []);
+
+  const handleUpdateSubflowRevisionNodeData = useCallback((text: string) => {
+    setSubflowInspector((current) => {
+      if (!current?.edit?.selectedNodeId) return current;
+      try {
+        const parsed = JSON.parse(text);
+        if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') throw new Error('节点配置必须是 JSON 对象');
+        const nextDraft = {
+          ...current.edit.draft,
+          nodes: current.edit.draft.nodes.map((node) => node.id === current.edit?.selectedNodeId ? { ...node, data: parsed } : node),
+        };
+        return {
+          ...current,
+          edit: {
+            ...current.edit,
+            ...commitSubflowDraftHistory(current.edit, nextDraft),
+            nodeDataText: text,
+            nodeDataError: '',
+          },
+        };
+      } catch (error) {
+        return {
+          ...current,
+          edit: {
+            ...current.edit,
+            nodeDataText: text,
+            nodeDataError: error instanceof Error ? error.message : 'JSON 格式无效',
+          },
+        };
+      }
+    });
+  }, []);
+
+  const handleUpdateSubflowRevisionMetadata = useCallback((field: 'name' | 'description', value: string) => {
+    setSubflowInspector((current) => {
+      if (!current?.edit) return current;
+      const nextDraft = { ...current.edit.draft, [field]: value };
+      return { ...current, edit: { ...current.edit, ...commitSubflowDraftHistory(current.edit, nextDraft) } };
+    });
+  }, []);
+
+  const handleUpdateSubflowRevisionChangeSummary = useCallback((value: string) => {
+    setSubflowInspector((current) => current?.edit ? {
+      ...current,
+      edit: { ...current.edit, changeSummary: value },
+    } : current);
+  }, []);
+
+  const handleLoadLatestSubflowRevision = useCallback(() => {
+    setSubflowInspector((current) => {
+      const conflict = current?.edit?.conflict;
+      if (!current?.edit || !conflict?.definition) return current;
+      const stack = [...current.stack];
+      stack[current.edit.depth] = conflict.definition;
+      return {
+        ...current,
+        stack,
+        error: undefined,
+        edit: {
+          depth: current.edit.depth,
+          baseRevision: conflict.revision,
+          changeSummary: '',
+          ...createSubflowDraftHistory(conflict.definition),
+          selectedNodeId: null,
+          nodeDataText: '',
+          nodeDataError: '',
+          saving: false,
+        },
+      };
+    });
+  }, []);
+
+  const handleDeleteSubflowRevisionSelection = useCallback(() => {
+    setSubflowInspector((current) => {
+      if (!current?.edit) return current;
+      const removedNodeIds = new Set(current.edit.draft.nodes.filter((node) => node.selected).map((node) => node.id));
+      const removedEdgeIds = new Set(current.edit.draft.edges.filter((edge) => edge.selected).map((edge) => edge.id));
+      if (removedNodeIds.size === 0 && removedEdgeIds.size === 0) return current;
+      const nextDraft = {
+        ...current.edit.draft,
+        nodes: current.edit.draft.nodes.filter((node) => !removedNodeIds.has(node.id)),
+        edges: current.edit.draft.edges.filter((edge) => !removedEdgeIds.has(edge.id) && !removedNodeIds.has(edge.source) && !removedNodeIds.has(edge.target)),
+      };
+      return {
+        ...current,
+        edit: {
+          ...current.edit,
+          ...commitSubflowDraftHistory(current.edit, nextDraft),
+          selectedNodeId: null,
+          nodeDataText: '',
+          nodeDataError: '',
+        },
+      };
+    });
+  }, []);
+
+  const handlePublishSubflowRevision = useCallback(async () => {
+    const edit = subflowInspector?.edit;
+    if (!edit || edit.saving) return;
+    if (!edit.draft.name.trim()) {
+      logBus.warn('子工作流名称不能为空', '子工作流');
+      return;
+    }
+    if (edit.nodeDataError) {
+      logBus.warn('请先修正节点配置 JSON', '子工作流');
+      return;
+    }
+    if (!edit.changeSummary.trim()) {
+      logBus.warn('发布新版本必须填写变更说明', '子工作流');
+      return;
+    }
+    setSubflowInspector((current) => current?.edit ? { ...current, edit: { ...current.edit, saving: true } } : current);
+    try {
+      const dependencies = new Map<string, NonNullable<SubflowDefinition['dependencies']>[number]>();
+      for (const node of edit.draft.nodes) {
+        if (node.type !== 'subflow') continue;
+        const data = (node.data || {}) as Record<string, unknown>;
+        const embedded = data.definition as SubflowDefinition | undefined;
+        const definitionId = String(data.definitionId || embedded?.id || '').trim();
+        const version = Math.max(0, Math.trunc(Number(data.definitionVersion || embedded?.version || 0)));
+        const projectId = String(data.definitionProjectId || embedded?.projectId || edit.draft.projectId || '').trim() || undefined;
+        if (!definitionId || version < 1) throw new Error(`嵌套节点 ${node.id} 缺少固定定义或版本`);
+        dependencies.set(`${projectId || ''}:${definitionId}:${version}`, { definitionId, version, projectId });
+      }
+      const cleanDraft: SubflowDefinition = {
+        ...edit.draft,
+        name: edit.draft.name.trim(),
+        description: edit.draft.description.trim(),
+        nodes: edit.draft.nodes.map(({ selected: _selected, ...node }) => node),
+        edges: edit.draft.edges.map(({ selected: _selected, ...edge }) => edge),
+        dependencies: [...dependencies.values()],
+      };
+      const { version: _version, revision: _revision, changeSummary: _changeSummary, publishedBy: _publishedBy, publishedAt: _publishedAt, createdAt: _createdAt, updatedAt: _updatedAt, ...publishable } = cleanDraft;
+      const saved = await api.saveSubflow({
+        ...publishable,
+        baseRevision: edit.baseRevision,
+        changeSummary: edit.changeSummary.trim(),
+      });
+      setSubflowInspector(null);
+      logBus.success(`已发布“${saved.name}” v${saved.version} / revision ${saved.revision}；现有实例仍固定旧版本，可在子工作流库预览差异后升级`, '子工作流');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '发布子工作流新版本失败';
+      const conflictData = error instanceof api.ApiRequestError && error.status === 409
+        ? (error.data as { data?: { revision?: unknown; latestVersion?: unknown; definition?: unknown } } | null)?.data
+        : null;
+      const conflict = conflictData?.definition && typeof conflictData.definition === 'object'
+        ? {
+            revision: Math.max(1, Number(conflictData.revision) || 1),
+            latestVersion: Math.max(1, Number(conflictData.latestVersion) || 1),
+            definition: conflictData.definition as SubflowDefinition,
+          }
+        : undefined;
+      setSubflowInspector((current) => current?.edit ? {
+        ...current,
+        error: message,
+        edit: { ...current.edit, saving: false, conflict },
+      } : current);
+      logBus.warn(message, '子工作流');
+    }
+  }, [subflowInspector]);
+
+  const handleReturnSubflowInspectorLevel = useCallback(() => {
+    setSubflowInspector((current) => {
+      if (!current || current.edit || current.stack.length <= 1) return current;
+      return {
+        ...current,
+        stack: current.stack.slice(0, -1),
+        pathNodeIds: current.pathNodeIds.slice(0, -1),
+      };
+    });
+  }, []);
+
+  const handleDetachSubflow = useCallback(async () => {
+    if (!subflowInspector || subflowInspector.edit || subflowInspector.detaching || subflowInspector.stack.length !== 1) return;
+    const inspectorSnapshot = subflowInspector;
+    const inspectedDefinition = inspectorSnapshot.stack[0];
+    setSubflowInspector((current) => current?.instanceNodeId === inspectorSnapshot.instanceNodeId
+      ? { ...current, detaching: true, error: undefined }
+      : current);
+    try {
+      const startingInstance = nodesRef.current.find((node) => node.id === inspectorSnapshot.instanceNodeId && node.type === 'subflow');
+      const startingData = (startingInstance?.data || {}) as Record<string, unknown>;
+      const embeddedDefinition = startingData.definition as SubflowDefinition | undefined;
+      if (!embeddedDefinition) throw new Error('子工作流定义缺失，无法脱离');
+      const rootProjectId = String(startingData.definitionProjectId || embeddedDefinition.projectId || inspectedDefinition.projectId || '').trim() || undefined;
+      const rootDefinition = embeddedDefinition.projectId || !rootProjectId
+        ? embeddedDefinition
+        : { ...embeddedDefinition, projectId: rootProjectId };
+      const inspectedKey = subflowDependencyMapKey({
+        definitionId: inspectedDefinition.id,
+        version: inspectedDefinition.version,
+        projectId: inspectedDefinition.projectId || rootProjectId,
+      });
+      const rootKey = subflowDependencyMapKey({ definitionId: rootDefinition.id, version: rootDefinition.version, projectId: rootDefinition.projectId });
+      if (rootKey !== inspectedKey) throw new Error('当前查看内容与主画布固定版本不一致，请重新打开后再脱离');
+      const dependencyDefinitions = await loadSubflowDependencyDefinitions(
+        rootDefinition,
+        (reference) => api.getSubflow(reference.definitionId, reference.version, reference.projectId),
+      );
+      const current = { nodes: nodesRef.current, edges: edgesRef.current };
+      const liveInstance = current.nodes.find((node) => node.id === inspectorSnapshot.instanceNodeId && node.type === 'subflow');
+      const liveData = (liveInstance?.data || {}) as Record<string, unknown>;
+      const liveDefinition = liveData.definition as SubflowDefinition | undefined;
+      if (!liveDefinition) throw new Error('子工作流定义缺失，无法脱离');
+      const liveKey = subflowDependencyMapKey({
+        definitionId: String(liveData.definitionId || liveDefinition.id),
+        version: Number(liveData.definitionVersion || liveDefinition.version),
+        projectId: String(liveData.definitionProjectId || liveDefinition.projectId || rootDefinition.projectId || '').trim() || undefined,
+      });
+      if (liveKey !== rootKey) throw new Error('加载依赖期间子工作流固定版本已变化，请重新打开后再脱离');
+      const result = detachSubflowInstance(current.nodes, current.edges, inspectorSnapshot.instanceNodeId, {
+        resolveDefinition: (reference) => dependencyDefinitions.get(subflowDependencyMapKey(reference))
+          || (!reference.projectId && rootDefinition.projectId
+            ? dependencyDefinitions.get(subflowDependencyMapKey({ ...reference, projectId: rootDefinition.projectId }))
+            : undefined),
+      });
+      const detachedIds = new Set(result.detachedNodeIds);
+      const retained = result.nodes.filter((node) => !detachedIds.has(node.id));
+      const detached = assignActiveNodeSerials(result.nodes.filter((node) => detachedIds.has(node.id)), retained);
+      const next = { nodes: [...retained, ...detached], edges: result.edges };
+      histCaptureTransition(current, next);
+      setNodes(next.nodes);
+      setEdges(next.edges);
+      setSubflowInspector(null);
+      logBus.success(`已脱离定义并展开 ${detached.length} 个节点，可使用撤销恢复`, '子工作流');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '脱离子工作流失败';
+      setSubflowInspector((current) => current?.instanceNodeId === inspectorSnapshot.instanceNodeId
+        ? { ...current, detaching: false, error: message }
+        : current);
+      logBus.warn(message, '子工作流');
+    }
+  }, [assignActiveNodeSerials, histCaptureTransition, subflowInspector]);
+
   const handleCreateImageFromSelection = useCallback((ids: string[]) => {
     const idSet = new Set(ids);
     const summaryNodes = nodesRef.current.map((node) => ({ ...node, selected: idSet.has(node.id) }));
@@ -4668,6 +6484,166 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     logBus.success('已在选区右侧创建图像生成节点', '选区生成');
   }, [activeId, assignActiveNodeSerials, registerPlacementShelfNodes]);
 
+  const prepareSubflowFromSelection = useCallback((ids: string[]) => {
+    const selectedIds = [...new Set(ids)].filter((id) => id && id !== BULK_PHANTOM_ID);
+    const selected = nodesRef.current.filter((node) => selectedIds.includes(node.id) && node.type !== 'groupBox');
+    if (selected.length === 0) {
+      logBus.warn('请选择至少一个普通节点；组框本身不会封装进子工作流', '子工作流');
+      return;
+    }
+    try {
+      const analysis = analyzeSubflowBoundary(selected, edgesRef.current, {
+        name: `子工作流 ${selected.length} 节点`,
+      });
+      setSubflowDraft({
+        analysis,
+        selectedIds: selected.map((node) => node.id),
+        name: analysis.definition.name,
+        description: '',
+        saving: false,
+      });
+    } catch (error) {
+      logBus.warn(error instanceof Error ? error.message : '无法分析所选节点', '子工作流');
+    }
+  }, []);
+
+  const commitSubflowDraft = useCallback(async () => {
+    const draft = subflowDraft;
+    if (!draft || draft.saving) return;
+    const name = draft.name.trim();
+    if (!name) {
+      logBus.warn('请输入子工作流名称', '子工作流');
+      return;
+    }
+    const selectedSet = new Set(draft.selectedIds);
+    if (draft.selectedIds.some((nodeId) => !nodesRef.current.some((node) => node.id === nodeId))) {
+      logBus.warn('选区在封装期间已发生变化，请关闭后重新选择', '子工作流');
+      return;
+    }
+    setSubflowDraft((current) => current ? { ...current, saving: true } : current);
+    try {
+      const id = `subflow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const saved = await api.saveSubflow({
+        ...draft.analysis.definition,
+        id,
+        projectId: activeId || undefined,
+        name,
+        description: draft.description.trim(),
+        baseRevision: 0,
+        changeSummary: '封装画布选区创建子工作流',
+      });
+      const instanceId = `subflow-instance-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const instance: Node = {
+        id: instanceId,
+        type: 'subflow',
+        position: { x: draft.analysis.bounds.x, y: draft.analysis.bounds.y },
+        selected: true,
+        data: {
+          definitionId: saved.id,
+          definitionVersion: saved.version,
+          definition: saved,
+          parameterOverrides: {},
+        },
+      };
+      const inputPortByEdge = new Map(saved.inputs.map((port) => [port.boundaryEdgeId, port]));
+      const outputPortByEdge = new Map(saved.outputs.map((port) => [port.boundaryEdgeId, port]));
+      const remappedIncoming = draft.analysis.incomingEdges.flatMap((edge) => {
+        const port = inputPortByEdge.get(edge.id);
+        if (!port) return [];
+        return [{
+          ...edge,
+          id: `${edge.id}::${instanceId}`,
+          target: instanceId,
+          targetHandle: port.id,
+        }];
+      });
+      const remappedOutgoing = draft.analysis.outgoingEdges.flatMap((edge) => {
+        const port = outputPortByEdge.get(edge.id);
+        if (!port) return [];
+        return [{
+          ...edge,
+          id: `${edge.id}::${instanceId}`,
+          source: instanceId,
+          sourceHandle: port.id,
+        }];
+      });
+      const current = { nodes: nodesRef.current, edges: edgesRef.current };
+      if (draft.selectedIds.some((nodeId) => !current.nodes.some((node) => node.id === nodeId))) {
+        throw new Error(`“${saved.name}” v${saved.version} 已保存到本地库，但画布选区已变化，未替换当前节点`);
+      }
+      const retainedNodes = current.nodes.filter((node) => !selectedSet.has(node.id));
+      const assigned = assignActiveNodeSerials([instance], retainedNodes);
+      const next = {
+        nodes: [
+          ...retainedNodes.map((node) => ({ ...node, selected: false })),
+          ...assigned,
+        ],
+        edges: [
+          ...current.edges.filter((edge) => !selectedSet.has(edge.source) && !selectedSet.has(edge.target)),
+          ...remappedIncoming,
+          ...remappedOutgoing,
+        ],
+      };
+      histCaptureTransition(current, next);
+      setNodes(next.nodes);
+      setEdges(next.edges);
+      setSubflowDraft(null);
+      logBus.success(`已封装“${saved.name}” v${saved.version}，外部连线已重接`, '子工作流');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '保存子工作流失败';
+      setSubflowDraft((current) => current ? { ...current, saving: false } : current);
+      logBus.warn(message, '子工作流');
+    }
+  }, [activeId, assignActiveNodeSerials, histCaptureTransition, subflowDraft]);
+
+  const updateSubflowDraftPort = useCallback((direction: 'inputs' | 'outputs', portId: string, patch: Record<string, unknown>) => {
+    setSubflowDraft((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        analysis: {
+          ...current.analysis,
+          definition: {
+            ...current.analysis.definition,
+            [direction]: current.analysis.definition[direction].map((port) => port.id === portId ? { ...port, ...patch } : port),
+          },
+        },
+      };
+    });
+  }, []);
+
+  const toggleSubflowDraftParameter = useCallback((parameter: SubflowParameter, enabled: boolean) => {
+    setSubflowDraft((current) => {
+      if (!current) return current;
+      const existing = current.analysis.definition.exposedParameters || [];
+      return {
+        ...current,
+        analysis: {
+          ...current.analysis,
+          definition: {
+            ...current.analysis.definition,
+            exposedParameters: enabled
+              ? [...existing.filter((item) => item.id !== parameter.id), parameter]
+              : existing.filter((item) => item.id !== parameter.id),
+          },
+        },
+      };
+    });
+  }, []);
+
+  const updateSubflowDraftParameter = useCallback((parameterId: string, patch: Partial<SubflowParameter>) => {
+    setSubflowDraft((current) => current ? {
+      ...current,
+      analysis: {
+        ...current.analysis,
+        definition: {
+          ...current.analysis.definition,
+          exposedParameters: (current.analysis.definition.exposedParameters || []).map((parameter) => parameter.id === parameterId ? { ...parameter, ...patch } : parameter),
+        },
+      },
+    } : current);
+  }, []);
+
   const importWebImagePayload = useCallback((input: unknown, sourceLabel = '网页图片反推') => {
       const data = input && typeof input === 'object' ? input as Record<string, any> : {};
       const payload = (data.payload || data || {}) as WebImageExtensionPayload;
@@ -4685,9 +6661,12 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         return false;
       }
 
-      const selectedTarget = nodesRef.current.find((node) => node.selected && node.type === CREATIVE_TARGET_NODE_TYPE);
+      const incomingMode = normalizeWebImageSendMode(payload.mode);
+      const selectedTarget = incomingMode === 'reference'
+        ? undefined
+        : nodesRef.current.find((node) => node.selected && node.type === CREATIVE_TARGET_NODE_TYPE);
       if (selectedTarget) {
-        const mode = normalizeWebImageSendMode(payload.mode);
+        const mode = incomingMode;
         const prompt = cleanWebImageText(payload.prompt);
         const imageItems = webImagePayloadImages(payload);
         if ((mode === 'image' || mode === 'both') && imageItems.length > 0) {
@@ -6348,48 +8327,567 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     setEdges((prev) => [...prev, ...built.edges]);
   }, [assignActiveNodeSerials]);
 
+  const settleRunPreflightDecision = useCallback((confirmed: boolean) => {
+    const resolve = runPreflightDecisionRef.current;
+    runPreflightDecisionRef.current = null;
+    runPreflightPresentedDigestRef.current = null;
+    setRunPreflightModal(null);
+    resolve?.(confirmed);
+  }, []);
+
+  const handleCancelRunPreflight = useCallback(() => {
+    runPreflightAbortRef.current?.abort();
+    settleRunPreflightDecision(false);
+  }, [settleRunPreflightDecision]);
+
+  const handleConfirmRunPreflight = useCallback((preview: RunActionPreview) => {
+    settleRunPreflightDecision(preview.digest === runPreflightPresentedDigestRef.current);
+  }, [settleRunPreflightDecision]);
+
+  const presentRunPreflightPreview = useCallback((preview: RunActionPreview) => new Promise<boolean>((resolve) => {
+    if (runPreflightAbortRef.current?.signal.aborted) {
+      resolve(false);
+      return;
+    }
+    runPreflightDecisionRef.current?.(false);
+    runPreflightDecisionRef.current = resolve;
+    runPreflightPresentedDigestRef.current = preview.digest;
+    setRunPreflightModal({ loading: false, preview });
+  }), []);
+
+  const captureRunPreflightSnapshot = useCallback((): RunPreflightExecutionSnapshot | null => {
+    const canvasId = useCanvasStore.getState().activeId;
+    const projectId = activeProjectIdRef.current;
+    if (!canvasId || !projectId || loadedCanvasIdRef.current !== canvasId || !loadedRef.current) return null;
+    return {
+      projectId,
+      canvasId,
+      revision: canvasRevisionsRef.current.get(canvasId) || 0,
+      graphMutationEpoch: graphMutationEpochRef.current,
+    };
+  }, []);
+
+  useEffect(() => {
+    runPreflightAbortRef.current?.abort();
+    settleRunPreflightDecision(false);
+  }, [activeId, activeProjectId, settleRunPreflightDecision]);
+
+  useEffect(() => () => {
+    runPreflightAbortRef.current?.abort();
+    runPreflightDecisionRef.current?.(false);
+    runPreflightDecisionRef.current = null;
+  }, []);
+
+  const authorizeRunNodes = useCallback(async (
+    preflightNodes: Node[],
+    preflightEdges: Edge[],
+    selectedNodeIds: string[],
+    options: RunNodesByOrderOptions,
+  ): Promise<PossibleDerivedExecutionScope | null> => {
+    if (runPreflightPendingRef.current) {
+      logBus.warn('已有运行体检正在进行，请先完成或取消当前预览', '运行体检');
+      return null;
+    }
+    const snapshot = captureRunPreflightSnapshot();
+    if (!snapshot) {
+      logBus.warn('当前项目或画布身份尚未稳定，已停止运行', '运行体检');
+      return null;
+    }
+
+    runPreflightPendingRef.current = true;
+    const controller = new AbortController();
+    runPreflightAbortRef.current = controller;
+
+    const abortError = () => {
+      const error = new Error('run preflight aborted');
+      error.name = 'AbortError';
+      return error;
+    };
+    const throwIfAborted = () => {
+      if (controller.signal.aborted) throw abortError();
+    };
+
+    try {
+      const actionKind = options.actionKind || (selectedNodeIds.length === 1 ? 'run-single' : 'run-group');
+      const expectedRevision = options.expectedRevision ?? snapshot.revision;
+      const latestDerivedScopeRef: { current: PossibleDerivedExecutionScope | null } = { current: null };
+      const preparePreview = async () => {
+        throwIfAborted();
+        const dependencyDefinitions = new Map<string, SubflowDefinition>();
+        const rootDefinitions = preflightNodes
+          .filter((node) => node.type === 'subflow')
+          .map((node) => (node.data as Record<string, unknown> | undefined)?.definition)
+          .filter((definition): definition is SubflowDefinition => Boolean(
+            definition
+            && typeof definition === 'object'
+            && typeof (definition as SubflowDefinition).id === 'string'
+            && Number.isInteger(Number((definition as SubflowDefinition).version)),
+          ));
+        for (const rootDefinition of rootDefinitions) {
+          throwIfAborted();
+          try {
+            const loaded = await loadSubflowDependencyDefinitions(
+              rootDefinition,
+              (reference) => api.getSubflow(
+                reference.definitionId,
+                reference.version,
+                reference.projectId || snapshot.projectId,
+                { signal: controller.signal },
+              ),
+            );
+            loaded.forEach((definition, key) => dependencyDefinitions.set(key, definition));
+          } catch (error) {
+            if (controller.signal.aborted) throw abortError();
+            // The pure scope builder turns the missing fixed dependency into a
+            // stable blocker. Never substitute a latest version or guess.
+          }
+        }
+        throwIfAborted();
+        const derivedScope = buildPossibleDerivedExecutionScope({
+          nodes: preflightNodes,
+          edges: preflightEdges,
+          executionNodeIds: selectedNodeIds,
+          requestId: options.requestId,
+          resolveSubflowDefinition: (reference: SubflowDependencyRef) => (
+            dependencyDefinitions.get(subflowDependencyMapKey(reference)) || null
+          ),
+        });
+        latestDerivedScopeRef.current = derivedScope;
+        const diagnosticScope = buildRunPreflightDiagnosticScope({
+          nodes: derivedScope.nodes,
+          edges: derivedScope.edges,
+          executionNodeIds: derivedScope.requiredAuthorizationNodeIds,
+          mode: 'exact-plan',
+        });
+        const assetIds = collectRunPreflightAssetIds(diagnosticScope.nodes);
+        let assetCoverage = assetIds.length <= RUN_PREFLIGHT_ASSET_LIMIT;
+        let policyCoverage = true;
+        let capabilityCoverage = true;
+        const assetRecords = new Map<string, import('../types/project').AssetRef | 'missing'>();
+        const boundedAssetIds = assetIds.slice(0, RUN_PREFLIGHT_ASSET_LIMIT);
+        let nextAssetIndex = 0;
+        const assetWorkers = Array.from(
+          { length: Math.min(RUN_PREFLIGHT_ASSET_CONCURRENCY, boundedAssetIds.length) },
+          async () => {
+            while (nextAssetIndex < boundedAssetIds.length) {
+              const assetId = boundedAssetIds[nextAssetIndex++];
+              throwIfAborted();
+              try {
+                const asset = await api.getProjectAsset(assetId, { signal: controller.signal });
+                assetRecords.set(assetId, asset);
+              } catch (error) {
+                if (controller.signal.aborted) throw abortError();
+                if (error instanceof api.ApiRequestError && error.status === 404) assetRecords.set(assetId, 'missing');
+                else assetCoverage = false;
+              }
+            }
+          },
+        );
+
+        const settingsPromise = api.getSettings({ signal: controller.signal })
+          .catch((error) => {
+            if (controller.signal.aborted) throw abortError();
+            capabilityCoverage = false;
+            return useApiKeysStore.getState().settings;
+          });
+        const policyPromise = api.getCollaborationExecutionPolicy(snapshot.projectId, {
+          signal: controller.signal,
+          excludeIntentId: options.runIntentSnapshot?.id,
+        })
+          .catch((error) => {
+            if (controller.signal.aborted) throw abortError();
+            policyCoverage = false;
+            return null;
+          });
+
+        const [settings, policy] = await Promise.all([
+          settingsPromise,
+          policyPromise,
+          Promise.all(assetWorkers),
+        ]).then(([settingsResult, policyResult]) => [settingsResult, policyResult] as const);
+        throwIfAborted();
+
+        let diagnostics: RunPreflightDiagnosticsInput = {
+          structure: [], capability: [], asset: [], policy: [],
+        };
+        let structureCoverage = derivedScope.coverageComplete;
+        let hostContextDigest = '';
+        try {
+          hostContextDigest = createRunPreflightHostContextDigest({
+            settings,
+            assetIds,
+            assetRecords,
+            policy,
+            runIntent: options.runIntentSnapshot || null,
+          });
+        } catch {
+          structureCoverage = false;
+        }
+        try {
+          diagnostics = buildRunPreflightDiagnostics({
+            nodes: diagnosticScope.nodes,
+            edges: diagnosticScope.edges,
+            executionNodeIds: derivedScope.requiredAuthorizationNodeIds,
+            scopeMode: 'exact-plan',
+            projectId: snapshot.projectId,
+            settings,
+            providersComplete: capabilityCoverage,
+            assets: workflowAssetsFromRecords(assetIds, assetRecords),
+            policy,
+            estimatedCost: options.cost?.known ? options.cost.amount : undefined,
+          });
+          diagnostics = {
+            ...diagnostics,
+            structure: [
+              ...derivedScope.blockers.map((blocker) => ({
+                ruleId: `derived-scope.${blocker.code}`,
+                severity: 'error',
+                title: blocker.title,
+                detail: blocker.dependency
+                  ? `${blocker.title} ${subflowDependencyMapKey(blocker.dependency)}`
+                  : blocker.title,
+                nodeIds: blocker.nodeIds,
+              })),
+              ...diagnostics.structure,
+            ],
+          };
+        } catch {
+          structureCoverage = false;
+        }
+
+        const current = captureRunPreflightSnapshot();
+        return prepareRunAction({
+          actionKind,
+          projectId: snapshot.projectId,
+          canvasId: snapshot.canvasId,
+          currentRevision: current?.revision ?? null,
+          expectedRevision,
+          nodes: diagnosticScope.nodes,
+          edges: diagnosticScope.edges,
+          selectedNodeIds,
+          diagnostics,
+          diagnosticCoverage: {
+            structure: structureCoverage,
+            capability: capabilityCoverage,
+            asset: assetCoverage,
+            policy: policyCoverage,
+          },
+          cost: options.cost || { known: false },
+          evidenceRefs: options.evidenceRefs,
+          requestId: options.requestId,
+          hostContextDigest,
+        });
+      };
+
+      const authorization = await authorizeRunPreflight({
+        snapshot,
+        signal: controller.signal,
+        prepare: preparePreview,
+        captureCurrent: captureRunPreflightSnapshot,
+        present: presentRunPreflightPreview,
+        revalidate: preparePreview,
+      });
+      if (!authorization.authorized && authorization.reason === 'stale') {
+        logBus.warn('体检期间画布、revision 或执行图已经变化，请重新运行', '运行体检');
+      }
+      const authorizedScope = latestDerivedScopeRef.current as PossibleDerivedExecutionScope | null;
+      return authorization.authorized && authorizedScope?.coverageComplete
+        ? authorizedScope
+        : null;
+    } catch (error) {
+      if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) return null;
+      console.warn('[run-preflight] failed closed:', error);
+      logBus.warn('运行体检上下文不可用，已停止调用 Provider', '运行体检');
+      return null;
+    } finally {
+      if (runPreflightAbortRef.current === controller) runPreflightAbortRef.current = null;
+      runPreflightPendingRef.current = false;
+      runPreflightDecisionRef.current = null;
+      runPreflightPresentedDigestRef.current = null;
+      setRunPreflightModal(null);
+    }
+  }, [captureRunPreflightSnapshot, presentRunPreflightPreview]);
+
   // ===== 批量运行 =====
   // 通用: 在指定节点子集上拓扑排序 + 串行调 runBus
   const runNodesByOrder = useCallback(
-    async (subNodes: Node[], subEdges: Edge[]) => {
-      const plannedSubgraph = excludeRandomRouteBranchDescendants(subNodes, subEdges);
-      const order = topologicalSort(plannedSubgraph.nodes, plannedSubgraph.edges, EXECUTABLE_NODE_TYPES);
-      if (order.length === 0) return 0;
-      cancelRunRef.current = false;
-      setIsRunning(true);
-      const { triggerRun, setBatchProgress, cancelAll } = useRunBusStore.getState();
-      setBatchProgress(order.length, 0);
+    async (subNodes: Node[], subEdges: Edge[], options: RunNodesByOrderOptions = {}) => {
+      if (runExecutionGateRef.current) {
+        logBus.warn('已有运行正在体检、持久化或执行，请等待当前运行结束', '运行门禁');
+        return -1;
+      }
+      const executionGateToken = Symbol('run-execution-gate');
+      runExecutionGateRef.current = executionGateToken;
       try {
+      options = {
+        ...options,
+        requestId: options.requestId || createCanvasNodeRunRequestId('canvas', options.actionKind || 'run'),
+      };
+      const plannedSubgraph = options.executionOrder
+        ? { nodes: subNodes, edges: subEdges }
+        : excludeRandomRouteBranchDescendants(subNodes, subEdges);
+      const availableNodeIds = new Set(plannedSubgraph.nodes.map((node) => node.id));
+      const requestedOrder = options.executionOrder
+        ? [...new Set(options.executionOrder.map(String).filter(Boolean))]
+        : null;
+      if (requestedOrder?.some((nodeId) => !availableNodeIds.has(nodeId))) {
+        throw new Error('原输入运行图未完整挂载，已停止重放');
+      }
+      const order = requestedOrder || topologicalSort(plannedSubgraph.nodes, plannedSubgraph.edges, EXECUTABLE_NODE_TYPES);
+      if (order.length === 0) return 0;
+      const authorizedScope = await authorizeRunNodes(
+        options.preflightContextNodes || plannedSubgraph.nodes,
+        options.preflightContextEdges || plannedSubgraph.edges,
+        order,
+        options,
+      );
+      if (!authorizedScope) return -1;
+      const authorizedNodeIds = [...authorizedScope.requiredAuthorizationNodeIds];
+      const authorizedNodeIdSet = new Set(authorizedNodeIds);
+      if (order.some((nodeId) => !authorizedNodeIdSet.has(nodeId))) {
+        throw new Error('最终体检授权范围缺少根执行节点，已停止运行');
+      }
+      const secondaryProviderAction = options.secondaryProviderAction
+        ? validateSecondaryProviderAction(options.secondaryProviderAction)
+        : null;
+      if (options.secondaryProviderAction && !secondaryProviderAction) {
+        throw new Error('次级 Provider action 已损坏，已停止运行');
+      }
+      if (secondaryProviderAction) {
+        const authorizedNode = authorizedScope.nodes.find((node) => node.id === secondaryProviderAction.nodeId);
+        const currentAction = secondaryProviderActionFromNodeData(authorizedNode?.data);
+        if (options.requestId !== secondaryProviderAction.requestId
+          || order.length !== 1
+          || order[0] !== secondaryProviderAction.nodeId
+          || authorizedNodeIds.length !== 1
+          || authorizedNodeIds[0] !== secondaryProviderAction.nodeId
+          || authorizedNode?.type !== secondaryProviderAction.nodeType
+          || currentAction?.requestId !== secondaryProviderAction.requestId
+          || currentAction.digest !== secondaryProviderAction.digest) {
+          throw new Error('次级 Provider action 与最终体检授权范围不一致，已停止运行');
+        }
+      }
+      const persistenceSnapshot = captureRunPreflightSnapshot();
+      if (!persistenceSnapshot) return -1;
+      if (!isSameRunPreflightExecutionSnapshot(persistenceSnapshot, captureRunPreflightSnapshot())) {
+        throw new Error('确认后画布、revision 或执行图发生变化，已停止创建 Run');
+      }
+      const plannedNodeIds = new Set(order);
+      const recordedNodeId = (nodeId: string) => options.originalNodeIdByRuntimeId?.[nodeId] || nodeId;
+      const recordedOrder = order.map(recordedNodeId);
+      const plannedEdges = plannedSubgraph.edges
+        .filter((edge) => plannedNodeIds.has(edge.source) && plannedNodeIds.has(edge.target))
+        .map((edge) => ({ source: recordedNodeId(edge.source), target: recordedNodeId(edge.target) }));
+      const authorizedEdges = authorizedScope.edges.map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        sourceHandle: edge.sourceHandle ?? null,
+        targetHandle: edge.targetHandle ?? null,
+      }));
+      const { triggerRun, setBatchProgress, cancelAll, setActiveRunContext } = useRunBusStore.getState();
+      let unregisterExecutionContexts: () => void = () => undefined;
+      let unregisterPreparedExecutionContexts: () => void = () => undefined;
+      let preparedRunExecution: PreparedRunExecution | null = null;
+      let runContext: RunContext | null = null;
+      let runId: string | null = null;
+      let failedCount = 0;
+      let executionStarted = false;
+      try {
+        try {
+          const run = await api.createProjectRun({
+            canvasId: persistenceSnapshot.canvasId,
+            canvasRevision: persistenceSnapshot.revision,
+            status: 'queued',
+            parentRunId: options.parentRunId,
+            summary: {
+              plannedNodeIds: recordedOrder,
+              plannedEdges,
+              authorizedNodeIds,
+              authorizedEdges,
+              nodeCount: order.length,
+              authorizedNodeCount: authorizedNodeIds.length,
+              replayMode: options.replayMode || null,
+              replaySourceRunId: options.replaySourceRunId || null,
+              replaySourceAttemptId: options.replaySourceAttemptId || null,
+              runIntentId: options.runIntentId || null,
+              runIntentRecovery: options.runIntentSnapshot?.status === 'accepted' ? 'legacy-accepted' : null,
+              runRequestId: options.requestId || null,
+              secondaryProviderActionSchema: secondaryProviderAction?.schema || null,
+              secondaryProviderActionId: secondaryProviderAction?.actionId || null,
+              secondaryProviderActionTarget: secondaryProviderAction?.target || null,
+              secondaryProviderActionDigest: secondaryProviderAction?.digest || null,
+            },
+          });
+          runId = run.id;
+          if (!isSameRunPreflightExecutionSnapshot(persistenceSnapshot, captureRunPreflightSnapshot())) {
+            failedCount += 1;
+            throw new Error('创建 Run 期间画布或执行输入发生变化，已停止调用 Provider');
+          }
+          runContext = {
+            contextId: `run-context-${run.id}`,
+            runId: run.id,
+            projectId: run.projectId,
+            canvasId: run.canvasId,
+            canvasRevision: run.canvasRevision,
+            mode: options.replayMode ? 'replay' : order.length === 1 ? 'single' : 'batch',
+            plannedNodeIds: [...recordedOrder],
+            authorizedNodeIds,
+            parentRunId: options.parentRunId || null,
+            replayMode: options.replayMode || null,
+            replaySourceRunId: options.replaySourceRunId || null,
+            replaySourceAttemptId: options.replaySourceAttemptId || null,
+            requestId: options.requestId || null,
+            secondaryProviderActionSchema: secondaryProviderAction?.schema || null,
+            secondaryProviderActionId: secondaryProviderAction?.actionId || null,
+            secondaryProviderActionTarget: secondaryProviderAction?.target || null,
+            secondaryProviderActionDigest: secondaryProviderAction?.digest || null,
+            createdAt: Date.now(),
+          };
+          await api.updateProjectRun(run.id, {
+            status: 'running',
+            startedAt: Date.now(),
+            summary: { runContextId: runContext.contextId, executionMode: runContext.mode },
+          });
+          if (!isSameRunPreflightExecutionSnapshot(persistenceSnapshot, captureRunPreflightSnapshot())) {
+            failedCount += 1;
+            throw new Error('启动 Run 期间画布或执行输入发生变化，已停止调用 Provider');
+          }
+        } catch (error) {
+          // E4 的诊断与受控重试依赖持久化的 Run/NodeRun/Attempt 作为权威证据。
+          // 若 Run 无法创建，继续调用 Provider 会留下不可诊断、不可审计的“幽灵运行”，
+          // 因此所有执行入口统一 fail-closed。
+          failedCount += 1;
+          throw new Error(`无法创建持久化 Run，已停止执行：${error instanceof Error ? error.message : String(error)}`);
+        }
+        if (runId && options.prepareRunExecution) {
+          try {
+            preparedRunExecution = await options.prepareRunExecution(runId);
+          } catch (error) {
+            failedCount += 1;
+            throw error;
+          }
+        }
+        if (!isSameRunPreflightExecutionSnapshot(persistenceSnapshot, captureRunPreflightSnapshot())) {
+          failedCount += 1;
+          throw new Error('准备运行期间画布或执行输入发生变化，已停止调用 Provider');
+        }
+        cancelRunRef.current = false;
+        cancelPersistenceRef.current = Promise.resolve();
+        unregisterExecutionContexts = options.executionContexts
+          ? registerRunNodeExecutionContexts(options.executionContexts)
+          : () => undefined;
+        if (preparedRunExecution) {
+          unregisterPreparedExecutionContexts = registerRunNodeExecutionContexts(preparedRunExecution.executionContexts);
+        }
+        setActiveRunContext(runContext);
+        setIsRunning(true);
+        executionStarted = true;
+        setBatchProgress(order.length, 0);
         for (let i = 0; i < order.length; i++) {
           if (cancelRunRef.current) break;
           const id = order[i];
-          await new Promise<void>((resolve) => {
+          const doneResult = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
             let done = false;
-            const finish = () => {
+            let executionToken: string | null = null;
+            const finish = (result: { ok: boolean; error?: string }) => {
               if (done) return;
               done = true;
               unsub();
               window.clearTimeout(timer);
-              resolve();
+              resolve(result);
             };
             const unsub = useRunBusStore.subscribe((state) => {
-              if (state.lastDone && state.lastDone.id === id) finish();
-              if (cancelRunRef.current) finish();
+              if (cancelRunRef.current) finish({ ok: false, error: 'stopped' });
+              else if (matchesRunCompletion(state.lastDone, id, executionToken)) finish({ ok: state.lastDone.ok, error: state.lastDone.error });
+              else if (executionToken && state.executionTokens[id] !== executionToken) finish({ ok: false, error: 'superseded' });
             });
             // 安全超时 60 分钟，避免图像/视频/SD2.0/音频长轮询被批量运行提前截断。
-            const timer = window.setTimeout(finish, 60 * 60 * 1000);
-            triggerRun(id, 'batch');
+            const timer = window.setTimeout(() => finish({ ok: false, error: 'timeout' }), 60 * 60 * 1000);
+            executionToken = triggerRun(id, order.length === 1 && !options.replayMode ? 'single' : 'batch');
+            const current = useRunBusStore.getState();
+            if (cancelRunRef.current) finish({ ok: false, error: 'stopped' });
+            else if (matchesRunCompletion(current.lastDone, id, executionToken)) finish({ ok: current.lastDone.ok, error: current.lastDone.error });
+            else if (current.executionTokens[id] !== executionToken) finish({ ok: false, error: 'superseded' });
           });
+          if (!doneResult.ok) failedCount += 1;
           setBatchProgress(order.length, i + 1);
         }
+        return order.length;
+      } catch (error) {
+        if (failedCount === 0) failedCount = 1;
+        throw error;
       } finally {
-        cancelAll();
-        setIsRunning(false);
+        let status: ProjectRunTerminalStatus = cancelRunRef.current ? 'stopped' : failedCount > 0 ? 'failed' : 'succeeded';
+        let finalizationError: unknown = null;
+        if (cancelRunRef.current) {
+          try {
+            await cancelPersistenceRef.current;
+          } catch (error) {
+            failedCount += 1;
+            finalizationError = error;
+            console.error('[run-center] failed to persist cancelled node runs:', error);
+          }
+        }
+        if (preparedRunExecution) {
+          try {
+            await preparedRunExecution.finalize(status);
+          } catch (error) {
+            failedCount += 1;
+            if (status !== 'stopped') status = 'failed';
+            finalizationError ||= error;
+            console.error('[run-center] failed to finish prepared run hierarchy:', error);
+          }
+        }
+        if (runId) {
+          try {
+            await api.updateProjectRun(runId, {
+              status,
+              summary: {
+                plannedNodeIds: recordedOrder,
+                plannedEdges,
+                authorizedNodeIds,
+                authorizedEdges,
+                nodeCount: order.length,
+                authorizedNodeCount: authorizedNodeIds.length,
+                failedCount,
+                replayMode: options.replayMode || null,
+                replaySourceRunId: options.replaySourceRunId || null,
+                replaySourceAttemptId: options.replaySourceAttemptId || null,
+                runIntentId: options.runIntentId || null,
+                runRequestId: options.requestId || null,
+                secondaryProviderActionSchema: secondaryProviderAction?.schema || null,
+                secondaryProviderActionId: secondaryProviderAction?.actionId || null,
+                secondaryProviderActionTarget: secondaryProviderAction?.target || null,
+                secondaryProviderActionDigest: secondaryProviderAction?.digest || null,
+                terminalEvidencePersistenceFailed: Boolean(finalizationError),
+              },
+            });
+          } catch (error) {
+            finalizationError ||= error;
+            console.error('[run-center] failed to finish run:', error);
+          }
+        }
+        unregisterPreparedExecutionContexts();
+        unregisterExecutionContexts();
+        if (executionStarted) {
+          setActiveRunContext(null);
+          void cancelAll();
+          setIsRunning(false);
+        }
         cancelRunRef.current = false;
+        cancelPersistenceRef.current = Promise.resolve();
+        if (finalizationError) {
+          throw new Error(
+            `运行终态证据持久化失败：${finalizationError instanceof Error ? finalizationError.message : String(finalizationError)}`,
+          );
+        }
       }
-      return order.length;
+      } finally {
+        if (runExecutionGateRef.current === executionGateToken) runExecutionGateRef.current = null;
+      }
     },
-    []
+    [authorizeRunNodes, captureRunPreflightSnapshot]
   );
 
   const handleRunAll = useCallback(async () => {
@@ -6400,12 +8898,12 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       alert('画布上没有可执行节点');
       return;
     }
-    await runNodesByOrder(nodes, edges);
+    await runNodesByOrder(nodes, edges, { actionKind: 'run-all' });
   }, [isRunning, nodes, edges, runNodesByOrder]);
 
   // 组执行: 仅在选中的节点子集上运行(仅保留子集内部边作为依赖)
   const handleRunGroup = useCallback(
-    async (ids: string[]) => {
+    async (ids: string[], options: RunNodesByOrderOptions = {}) => {
       if (isRunning) return;
       const idSet = new Set(ids);
       const subNodes = nodes.filter((n) => idSet.has(n.id));
@@ -6415,10 +8913,296 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         alert('所选节点中没有可执行节点');
         return;
       }
-      await runNodesByOrder(subNodes, subEdges);
+      await runNodesByOrder(subNodes, subEdges, {
+        ...options,
+        preflightContextNodes: options.preflightContextNodes || nodes,
+        preflightContextEdges: options.preflightContextEdges || edges,
+        preflightScopeMode: options.preflightScopeMode || 'selection-input-context',
+        actionKind: options.actionKind || (executable.length === 1 ? 'run-single' : 'run-group'),
+      });
     },
     [isRunning, nodes, edges, runNodesByOrder]
   );
+
+  useEffect(() => {
+    const handleCanvasNodeRunRequest = (event: Event) => {
+      const detail = (event as CustomEvent<CanvasNodeRunRequestDetail>).detail;
+      const nodeId = String(detail?.nodeId || '').trim();
+      const requestId = String(detail?.requestId || '').trim();
+      if (!nodeId) return;
+      void handleRunGroup([nodeId], {
+        actionKind: 'run-single',
+        ...(requestId ? { requestId } : {}),
+      });
+    };
+    window.addEventListener(CANVAS_NODE_RUN_REQUEST_EVENT, handleCanvasNodeRunRequest);
+    return () => window.removeEventListener(CANVAS_NODE_RUN_REQUEST_EVENT, handleCanvasNodeRunRequest);
+  }, [handleRunGroup]);
+
+  useEffect(() => {
+    const handleSecondaryProviderActionRequest = (event: Event) => {
+      const detail = (event as CustomEvent<CanvasSecondaryProviderActionRequestDetail>).detail;
+      const action = validateSecondaryProviderAction(detail?.action);
+      if (!action) {
+        logBus.warn('次级 Provider action 请求无效，已拒绝运行', '运行体检');
+        return;
+      }
+      const currentNodes = nodesRef.current;
+      const currentEdges = edgesRef.current;
+      const node = currentNodes.find((candidate) => candidate.id === action.nodeId);
+      const storedAction = secondaryProviderActionFromNodeData(node?.data);
+      if (!node
+        || node.type !== action.nodeType
+        || storedAction?.requestId !== action.requestId
+        || storedAction.digest !== action.digest) {
+        logBus.warn('次级 Provider action 已过期或被修改，已拒绝运行', '运行体检');
+        return;
+      }
+
+      const clearPendingAction = () => {
+        setNodes((current) => current.map((candidate) => {
+          if (candidate.id !== action.nodeId) return candidate;
+          const latestAction = secondaryProviderActionFromNodeData(candidate.data);
+          if (latestAction?.requestId !== action.requestId || latestAction.digest !== action.digest) return candidate;
+          return {
+            ...candidate,
+            data: {
+              ...(candidate.data as Record<string, unknown>),
+              ...secondaryProviderActionNodePatch(null),
+            },
+          };
+        }));
+      };
+
+      void runNodesByOrder([node], [], {
+        executionOrder: [node.id],
+        actionKind: 'run-single',
+        requestId: action.requestId,
+        preflightContextNodes: currentNodes,
+        preflightContextEdges: currentEdges,
+        preflightScopeMode: 'selection-input-context',
+        secondaryProviderAction: action,
+      }).catch((error) => {
+        logBus.error(
+          `次级 Provider action 运行失败：${error instanceof Error ? error.message : String(error)}`,
+          '运行体检',
+        );
+      }).finally(clearPendingAction);
+    };
+    window.addEventListener(CANVAS_SECONDARY_PROVIDER_ACTION_REQUEST_EVENT, handleSecondaryProviderActionRequest);
+    return () => window.removeEventListener(CANVAS_SECONDARY_PROVIDER_ACTION_REQUEST_EVENT, handleSecondaryProviderActionRequest);
+  }, [runNodesByOrder, setNodes]);
+
+  const handleRetryProjectRun = useCallback(async (run: import('../types/project').RunDetail, mode: ProjectRunReplayMode) => {
+    if (isRunning || !activeId || run.canvasId !== activeId) return 0;
+    if (isSecondaryProviderActionRun(run)) {
+      logBus.warn('次级 Provider action 不支持普通重试或重放，请从节点原操作重新发起并确认体检', '运行中心');
+      return 0;
+    }
+    const plannedIds = getRunPlannedNodeIds(run);
+    const storedPlanEdges = getRunPlannedEdges(run);
+    if (mode === 'full-current') {
+      const currentIds = new Set(nodes.map((node) => node.id));
+      const runnableIds = plannedIds.filter((id) => currentIds.has(id));
+      if (!runnableIds.length) return 0;
+      const runnableSet = new Set(runnableIds);
+      return runNodesByOrder(
+        nodes.filter((node) => runnableSet.has(node.id)),
+        edges.filter((edge) => runnableSet.has(edge.source) && runnableSet.has(edge.target)),
+        {
+          parentRunId: run.id,
+          replayMode: mode,
+          replaySourceRunId: run.id,
+          actionKind: 'retry-run',
+          evidenceRefs: [{ runId: run.id }],
+          preflightContextNodes: nodes,
+          preflightContextEdges: edges,
+          preflightScopeMode: 'selection-input-context',
+        },
+      );
+    }
+    const failedAndDownstream = mode === 'failed-original'
+      ? new Set(collectFailedDownstreamNodeIds(run, storedPlanEdges))
+      : null;
+    const requestedIds = failedAndDownstream
+      ? plannedIds.filter((nodeId) => failedAndDownstream.has(nodeId))
+      : plannedIds;
+    const runtime = buildRunOriginalReplayRuntime(run, requestedIds, `${run.id}-${Date.now()}`);
+    setRunReplayRuntime({ nodes: runtime.nodes, edges: runtime.edges });
+    try {
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve())));
+      return await runNodesByOrder(runtime.nodes, runtime.edges, {
+        parentRunId: run.id,
+        replayMode: mode,
+        replaySourceRunId: run.id,
+        executionOrder: runtime.executionNodeIds,
+        originalNodeIdByRuntimeId: runtime.originalNodeIdByRuntimeId,
+        executionContexts: runtime.executionContexts,
+        actionKind: mode === 'full-original' ? 'replay-run' : 'retry-run',
+        evidenceRefs: [{ runId: run.id }],
+      });
+    } finally {
+      setRunReplayRuntime(null);
+    }
+  }, [activeId, edges, isRunning, nodes, runNodesByOrder]);
+
+  const executeSubflowNodeReplay = useCallback(async (
+    run: import('../types/project').RunDetail,
+    nodeRun: import('../types/project').NodeRunSummary,
+    sourceAttempt?: import('../types/project').RunAttemptSummary,
+  ) => {
+    if (isRunning || !activeId || run.canvasId !== activeId) return 0;
+    if (isSecondaryProviderActionRun(run)) {
+      logBus.warn('次级 Provider action 不支持内部节点重放，请从原操作重新发起', '运行中心');
+      return 0;
+    }
+    const runtime = sourceAttempt
+      ? buildRunAttemptOriginalReplayRuntime(run, nodeRun.id, sourceAttempt.id, `${run.id}-${sourceAttempt.id}-${Date.now()}`)
+      : buildSubflowNodeRunOriginalReplayRuntime(run, nodeRun.id, `${run.id}-${nodeRun.id}-${Date.now()}`);
+    if (!runtime.parentNodeRun) throw new Error('内部节点重试缺少外层实例记录');
+    setRunReplayRuntime({ nodes: runtime.nodes, edges: runtime.edges });
+    try {
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve())));
+      return await runNodesByOrder(runtime.nodes, runtime.edges, {
+        parentRunId: run.id,
+        replayMode: sourceAttempt ? 'attempt-original' : 'subflow-node-original',
+        replaySourceRunId: run.id,
+        replaySourceAttemptId: sourceAttempt?.id,
+        executionOrder: runtime.executionNodeIds,
+        originalNodeIdByRuntimeId: runtime.originalNodeIdByRuntimeId,
+        actionKind: sourceAttempt ? 'retry-attempt' : 'retry-subflow',
+        evidenceRefs: [sourceAttempt
+          ? { runId: run.id, nodeRunId: nodeRun.id, attemptId: sourceAttempt.id }
+          : { runId: run.id, nodeRunId: nodeRun.id }],
+        prepareRunExecution: async (runId) => {
+          const sourceParent = runtime.parentNodeRun!;
+          const parent = await api.createProjectNodeRun(runId, {
+            nodeId: sourceParent.nodeId,
+            originalNodeId: sourceParent.originalNodeId || undefined,
+            definitionId: sourceParent.definitionId || undefined,
+            definitionVersion: sourceParent.definitionVersion || undefined,
+            subflowPath: [...sourceParent.subflowPath],
+            status: 'running',
+            inputSnapshot: sourceParent.inputSnapshot,
+          });
+          const startedAt = Date.now();
+          const attempt = await api.createProjectRunAttempt(runId, parent.id, {
+            provider: 'subflow',
+            model: sourceParent.definitionId
+              ? `${sourceParent.definitionId}@${sourceParent.definitionVersion || 'unknown'}`
+              : undefined,
+            status: 'running',
+            timestamps: { queuedAt: startedAt, startedAt },
+          });
+          return {
+            executionContexts: Object.fromEntries(Object.entries(runtime.executionContexts).map(([runtimeNodeId, context]) => [runtimeNodeId, {
+              ...context,
+              parentNodeRunId: parent.id,
+            }])),
+            finalize: async (status) => {
+              const finishedAt = Date.now();
+              await api.finalizeProjectNodeRunAttempt(runId, parent.id, attempt.id, {
+                status,
+                timestamps: { finishedAt },
+                error: status === 'succeeded'
+                  ? null
+                  : {
+                    kind: status === 'stopped' ? 'cancelled' : 'protocol',
+                    message: status === 'stopped'
+                      ? `内部节点重试已停止: ${runtime.sourceNodeRun.originalNodeId || runtime.sourceNodeRun.nodeId}`
+                      : `内部节点重试失败: ${runtime.sourceNodeRun.originalNodeId || runtime.sourceNodeRun.nodeId}`,
+                    code: status === 'stopped' ? 'SUBFLOW_RETRY_STOPPED' : 'SUBFLOW_RETRY_FAILED',
+                    retryable: status !== 'stopped',
+                  },
+              });
+            },
+          };
+        },
+      });
+    } finally {
+      setRunReplayRuntime(null);
+    }
+  }, [activeId, isRunning, runNodesByOrder]);
+
+  const handleRetrySubflowNodeRun = useCallback(async (
+    run: import('../types/project').RunDetail,
+    nodeRun: import('../types/project').NodeRunSummary,
+  ) => executeSubflowNodeReplay(run, nodeRun), [executeSubflowNodeReplay]);
+
+  const handleRetryProjectRunAttempt = useCallback(async (
+    run: import('../types/project').RunDetail,
+    nodeRun: import('../types/project').NodeRunSummary,
+    attempt: import('../types/project').RunAttemptSummary,
+  ) => {
+    if (isSecondaryProviderActionRun(run)) {
+      logBus.warn('次级 Provider action 不支持 Attempt 重放，请从节点原操作重新发起', '运行中心');
+      return 0;
+    }
+    if (nodeRun.parentNodeRunId) return executeSubflowNodeReplay(run, nodeRun, attempt);
+    if (isRunning || !activeId || run.canvasId !== activeId) return 0;
+    const runtime = buildRunAttemptOriginalReplayRuntime(run, nodeRun.id, attempt.id, `${run.id}-${attempt.id}-${Date.now()}`);
+    setRunReplayRuntime({ nodes: runtime.nodes, edges: runtime.edges });
+    try {
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve())));
+      return await runNodesByOrder(runtime.nodes, runtime.edges, {
+        parentRunId: run.id,
+        replayMode: 'attempt-original',
+        replaySourceRunId: run.id,
+        replaySourceAttemptId: attempt.id,
+        executionOrder: runtime.executionNodeIds,
+        originalNodeIdByRuntimeId: runtime.originalNodeIdByRuntimeId,
+        executionContexts: runtime.executionContexts,
+        actionKind: 'retry-attempt',
+        evidenceRefs: [{ runId: run.id, nodeRunId: nodeRun.id, attemptId: attempt.id }],
+      });
+    } finally {
+      setRunReplayRuntime(null);
+    }
+  }, [activeId, executeSubflowNodeReplay, isRunning, runNodesByOrder]);
+
+  const handleAcceptRunIntent = useCallback(async (intent: import('../types/project').RunIntent) => {
+    const currentRevision = activeId ? canvasRevisionsRef.current.get(activeId) || 0 : 0;
+    if (!activeId || intent.canvasId !== activeId || intent.canvasRevision !== currentRevision) {
+      logBus.warn('远程运行请求对应的画布或版本已经变化，已标记为过期', '协作运行');
+      await api.updateCollaborationRunIntent(intent.id, { status: 'stale' });
+      return false;
+    }
+    const requestedIds = intent.nodeIds.filter((id) => nodesRef.current.some((node) => node.id === id));
+    if (intent.nodeIds.length > 0 && requestedIds.length !== intent.nodeIds.length) {
+      logBus.warn('远程运行请求包含已删除节点，已标记为过期', '协作运行');
+      await api.updateCollaborationRunIntent(intent.id, { status: 'stale' });
+      return false;
+    }
+    const currentNodes = nodesRef.current;
+    const currentEdges = edgesRef.current;
+    const planned = excludeRandomRouteBranchDescendants(currentNodes, currentEdges);
+    const requestedSet = new Set(requestedIds.length ? requestedIds : planned.nodes.map((node) => node.id));
+    const runNodes = planned.nodes.filter((node) => requestedSet.has(node.id));
+    const runEdges = planned.edges.filter((edge) => requestedSet.has(edge.source) && requestedSet.has(edge.target));
+    if (!runNodes.some((node) => node.type && EXECUTABLE_NODE_TYPES.has(node.type))) {
+      await api.updateCollaborationRunIntent(intent.id, { status: 'stale' });
+      return false;
+    }
+    const count = await runNodesByOrder(runNodes, runEdges, {
+      runIntentId: intent.id,
+      actionKind: 'run-intent',
+      requestId: intent.id,
+      runIntentSnapshot: intent,
+      cost: intent.estimatedCostKnown === true && intent.estimatedCost != null
+        ? { known: true, amount: Math.max(0, Number(intent.estimatedCost) || 0), currency: 'USD' }
+        : { known: false },
+      expectedRevision: intent.canvasRevision,
+      preflightContextNodes: requestedIds.length ? currentNodes : planned.nodes,
+      preflightContextEdges: requestedIds.length ? currentEdges : planned.edges,
+      preflightScopeMode: requestedIds.length ? 'selection-input-context' : 'exact-plan',
+    });
+    if (count < 0) return false;
+    if (count === 0) {
+      await api.updateCollaborationRunIntent(intent.id, { status: 'stale' });
+      return false;
+    }
+    return true;
+  }, [activeId, runNodesByOrder]);
 
   // ===== ALT+拖动复制节点 =====
   // 思路: dragStart 时在原位插入占位克隆(临时ID),用户拖动过程中原位看起来有节点不动;
@@ -6603,8 +9387,9 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   }, [deleteReq?.ts]);
 
   const handleCancelRun = useCallback(() => {
+    if (cancelRunRef.current) return;
     cancelRunRef.current = true;
-    useRunBusStore.getState().cancelAll();
+    cancelPersistenceRef.current = useRunBusStore.getState().cancelAll();
   }, []);
 
   const handleAlignSelection = useCallback((action: NodeAlignAction, ids?: string[]) => {
@@ -7375,7 +10160,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       // 连接有效性校验(防止绕过 isValidConnection 的底层调用)
       const src = curNodes.find((n) => n.id === params.source);
       let tgt = curNodes.find((n) => n.id === params.target);
-      if (!isConnectionValid(src, tgt)) return;
+      if (!isConnectionValid(src, tgt, params, curEdges)) return;
 
       // ⚡ 组容器连出去重: 如果 source 是 groupBox, 并且组内成员已经独立连到同一个下游 target,
       // 则自动断开那些「成员→target」的重复边, 只保留 group→target
@@ -7421,9 +10206,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       }
 
       // 根据上游输出类型染色连线
-      const outs = src ? getNodeOutputs(src) : [];
-      const ins = tgt ? getNodeInputs(tgt) : [];
-      const matched = outs.find((o) => ins.includes(o) || o === 'any' || ins.includes('any'));
+      const matched = getConnectionPortType(src, tgt, params);
       const matchedPortType = matched ?? 'any';
       const color = matched && matched !== 'any' ? PORT_COLOR[matched] : undefined;
       setEdges((eds) =>
@@ -7450,7 +10233,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       const curNodes = nodesRef.current;
       const src = curNodes.find((n) => n.id === (params as Connection).source);
       const tgt = curNodes.find((n) => n.id === (params as Connection).target);
-      return isConnectionValid(src, tgt);
+      return isConnectionValid(src, tgt, params, edgesRef.current);
     },
     []
   );
@@ -8742,6 +11525,67 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         continue;
       }
 
+      // ComfyUI 应用可以在一次运行中同时返回多种媒体。自动输出保持一个聚合节点，
+      // 让图片 / 视频 / 音频 / 文本继续作为同一组工作流结果传递；用户手动连接的
+      // 其他 OutputNode 不做删除或拆分。
+      if (t === 'comfyui-store') {
+        const downstream = edges
+          .filter((edge) => edge.source === n.id)
+          .map((edge) => {
+            const target = nodes.find((node) => node.id === edge.target);
+            if (!target || target.type !== 'output') return null;
+            const incoming = edges.filter((candidate) => candidate.target === target.id).length;
+            const hasOutgoing = edges.some((candidate) => candidate.source === target.id);
+            const auto = target.id.startsWith('output-auto-') && edge.id.startsWith('e-auto-');
+            return { target, edge, auto, removable: auto && incoming === 1 && !hasOutgoing && (target.data as any)?.userMoved !== true };
+          })
+          .filter(Boolean) as Array<{ target: Node; edge: Edge; auto: boolean; removable: boolean }>;
+        const keeper = downstream.find((item) => !item.auto) || downstream[0];
+        const aggregateData = {
+          pickKind: undefined,
+          pickIndex: undefined,
+          aggregateSource: 'comfyui-store',
+          imageUrl: imgs[0] || '',
+          imageUrls: imgs,
+          videoUrl: vids[0] || '',
+          videoUrls: vids,
+          audioUrl: auds[0] || '',
+          audioUrls: auds,
+          outputText: texts.join('\n'),
+          text: texts.join('\n'),
+          outputKinds: Array.isArray(d.outputKinds) ? d.outputKinds : [],
+          primaryKind: d.primaryKind || items[0]?.kind || 'image',
+        };
+        if (keeper) {
+          setNodes((prev) => prev.map((node) => node.id === keeper.target.id
+            ? { ...node, data: { ...(node.data as any), ...aggregateData } }
+            : node));
+        } else {
+          const sourceRect = rectOf(n);
+          const outputSize = defaultSizeOf('output');
+          const desired = [{
+            x: (n.position?.x ?? 0) + sourceRect.w + 80,
+            y: (n.position?.y ?? 0) + sourceRect.h / 2 - outputSize.h / 2,
+            w: outputSize.w,
+            h: outputSize.h,
+          }];
+          const offset = placeBatchNodes(desired, [...nodes, ...pendingPlacedNodes], { source: 'placement:auto-comfyui-output', gap: 0 });
+          const newId = `output-auto-${n.id}-${Date.now()}-aggregate-${Math.random().toString(36).slice(2, 6)}`;
+          const aggregateNode: Node = {
+            id: newId,
+            type: 'output',
+            position: { x: desired[0].x + offset.dx, y: desired[0].y + offset.dy },
+            data: aggregateData,
+            selected: false,
+          } as Node;
+          toAddNodes.push(aggregateNode);
+          pendingPlacedNodes.push(aggregateNode);
+          toAddEdges.push({ id: `e-auto-${newId}`, source: n.id, target: newId, type: 'deletable' } as Edge);
+        }
+        newSigPatches.push([n.id, outputSig]);
+        continue;
+      }
+
       // 收集当前下游 OutputNode（手动 + 自动）
       // 意图：N 个产物 → N 个独立 OutputNode。只要某个 OutputNode 仅从本节点连入且未带 pickKind，
       // 就给它“升级”为 pickKind+pickIndex（按 items 排序中未被占用的下一个），让它只显示一项；
@@ -9318,7 +12162,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
 
   const isDark = theme === 'dark';
   const isPixel = style === 'pixel';
-  const isDecorativeEdgeVisual = isSlamdunk || isSoccer || isDragonBall || isTetris || isFarmStory;
+  const isDecorativeEdgeVisual = isSlamdunk || isSoccer || isDragonBall || isTetris || isFarmStory || isGardenDefense;
   const heavyEdgeMotion = isDecorativeEdgeVisual && edges.length >= EDGE_MOTION_HEAVY_EDGE_COUNT;
   const edgeMotionReduced = isDecorativeEdgeVisual && (viewportMoving || nodeDragging);
   const edgeMotionMode = isDecorativeEdgeVisual ? (edgeMotionReduced ? 'reduced' : 'scoped') : undefined;
@@ -9406,8 +12250,19 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     });
   }, [farmMiniMapRouteHint, farmMiniMapRouteHintCountLabel, farmMiniMapRouteHintMarker, flashFarmObject, getFarmViewportCenter, getViewport, pushFarmFloatingFeedback, setCenter]);
   const renderedNodes = useMemo(
-    () => (isFarmStory ? nodes.map(withFarmNodeVisualState) : nodes),
-    [isFarmStory, nodes],
+    () => {
+      const themedNodes = isFarmStory
+        ? nodes.map(withFarmNodeVisualState)
+        : isGardenDefense
+          ? nodes.map(withGardenDefenseNodeVisualState)
+          : nodes;
+      return runReplayRuntime ? [...themedNodes, ...runReplayRuntime.nodes] : themedNodes;
+    },
+    [isFarmStory, isGardenDefense, nodes, runReplayRuntime],
+  );
+  const renderedEdges = useMemo(
+    () => runReplayRuntime ? [...edges, ...runReplayRuntime.edges] : edges,
+    [edges, runReplayRuntime],
   );
   const farmMiniMapHeavySurface = isFarmStory
     && ((farmCanvas.objects.length + farmCanvas.animals.length) >= FARM_MINIMAP_HEAVY_OBJECT_COUNT
@@ -9691,6 +12546,19 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         onExportResourcePackage={handleExportResourcePackage}
         onAlignSelection={handleAlignSelection}
       >
+        <button
+          type="button"
+          className={`t8-toolbar-button relative flex h-8 w-8 items-center justify-center rounded-md transition-colors${projectWorkbenchOpen ? ' bg-[var(--accent-primary)] text-white' : ''}`}
+          aria-label="项目工作台"
+          title="项目工作台：子流程、运行、资产、诊断与协作"
+          aria-pressed={projectWorkbenchOpen}
+          onClick={(event) => {
+            event.stopPropagation();
+            setProjectWorkbenchOpen((value) => !value);
+          }}
+        >
+          <LucideIcons.Boxes size={15} />
+        </button>
         {isFarmStory && (
           <button
             type="button"
@@ -9723,9 +12591,15 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
             <span aria-hidden="true" data-farm-toolbar-priority-dot="true" />
           </button>
         )}
+        <GardenDefenseExperience
+          visualStyle={visualStyle}
+          canvasId={activeId}
+          viewportMoving={viewportMoving}
+          nodeDragging={nodeDragging}
+        />
         <TetrisPanel
-            visualStyle={visualStyle}
-            viewportMoving={viewportMoving}
+          visualStyle={visualStyle}
+          viewportMoving={viewportMoving}
           nodeDragging={nodeDragging}
         />
         <DragonBallRadar
@@ -9744,6 +12618,35 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         items={generationHistoryItems}
         onClose={() => setGenerationHistoryOpen(false)}
         onFocusNode={focusGenerationHistoryNode}
+      />
+      <RunPreflightModal
+        preview={runPreflightModal?.preview || null}
+        loading={runPreflightModal?.loading === true}
+        onConfirm={handleConfirmRunPreflight}
+        onCancel={handleCancelRunPreflight}
+      />
+      <ProjectWorkbench
+        open={projectWorkbenchOpen && loaded && loadedCanvasId === activeId && activeProjectId != null}
+        canvasId={activeId}
+        projectId={activeProjectId || 'project-local'}
+        canvasRevision={activeId ? activeCanvasRevision : 0}
+        patchConflictMessage={canvasPatchConflictMessage}
+        nodes={nodes}
+        edges={edges}
+        onClose={() => setProjectWorkbenchOpen(false)}
+        onInsertSubflow={handleInsertSubflow}
+        onUpgradeSubflowInstances={handleUpgradeSubflowInstances}
+        onInsertAsset={handleInsertProjectAsset}
+        onFocusNode={focusGenerationHistoryNode}
+        onDoctorHighlightsChange={handleDoctorHighlightsChange}
+        onPreviewPatch={handlePreviewCanvasPatch}
+        onApplyPatch={handleApplyCanvasPatch}
+        onRevertPatch={handleRevertCanvasPatch}
+        onResolvePatchConflict={handleResolveCanvasPatchConflict}
+        onAcceptRunIntent={handleAcceptRunIntent}
+        onRetryRun={handleRetryProjectRun}
+        onRetrySubflowNodeRun={handleRetrySubflowNodeRun}
+        onRetryRunAttempt={handleRetryProjectRunAttempt}
       />
       <FarmStoryPanel
         visualStyle={visualStyle}
@@ -9885,44 +12788,45 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         className="hidden"
         onChange={handleImportFile}
       />
-      <ReactFlow
-        nodes={renderedNodes}
-        edges={edges}
-        nodeTypes={memoNodeTypes}
-        edgeTypes={memoEdgeTypes}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        onConnectStart={onConnectStart}
-        onConnectEnd={onConnectEnd}
-        isValidConnection={onIsValidConnection}
-        connectionLineComponent={memoConnectionLineComponent}
-        onNodeDragStart={onNodeDragStart}
-        onNodeDrag={onNodeDrag}
-        onNodeDragStop={onNodeDragStop}
-        onMoveStart={handleViewportMoveStart}
-        onMoveEnd={handleViewportMoveEnd}
-        onSelectionContextMenu={onSelectionContextMenu}
-        onNodeContextMenu={onNodeContextMenu}
-        onPaneContextMenu={onPaneContextMenu}
-        onDragOver={onCanvasFileDragOver}
-        onDrop={onCanvasFileDrop}
-        onSelectionChange={onSelectionChange}
-        onSelectionStart={onSelectionStart}
-        onSelectionEnd={onSelectionEnd}
-        selectionKeyCode={memoSelectionKeyCode}
-        multiSelectionKeyCode={memoMultiSelectionKeyCode}
-        selectionMode={SelectionMode.Partial}
-        panOnDrag={memoPanOnDrag}
-        snapToGrid={snapEnabled}
-        snapGrid={SNAP_GRID}
-        elevateNodesOnSelect={false}
-        minZoom={CANVAS_MIN_ZOOM}
-        fitView
-        fitViewOptions={CANVAS_OVERVIEW_FIT_OPTIONS}
-        proOptions={memoProOptions}
-        defaultEdgeOptions={memoDefaultEdgeOptions}
-      >
+      <WorkflowDoctorHighlightContext.Provider value={workflowDoctorHighlightMap}>
+        <ReactFlow
+          nodes={renderedNodes}
+          edges={renderedEdges}
+          nodeTypes={memoNodeTypes}
+          edgeTypes={memoEdgeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          onConnectStart={onConnectStart}
+          onConnectEnd={onConnectEnd}
+          isValidConnection={onIsValidConnection}
+          connectionLineComponent={memoConnectionLineComponent}
+          onNodeDragStart={onNodeDragStart}
+          onNodeDrag={onNodeDrag}
+          onNodeDragStop={onNodeDragStop}
+          onMoveStart={handleViewportMoveStart}
+          onMoveEnd={handleViewportMoveEnd}
+          onSelectionContextMenu={onSelectionContextMenu}
+          onNodeContextMenu={onNodeContextMenu}
+          onPaneContextMenu={onPaneContextMenu}
+          onDragOver={onCanvasFileDragOver}
+          onDrop={onCanvasFileDrop}
+          onSelectionChange={onSelectionChange}
+          onSelectionStart={onSelectionStart}
+          onSelectionEnd={onSelectionEnd}
+          selectionKeyCode={memoSelectionKeyCode}
+          multiSelectionKeyCode={memoMultiSelectionKeyCode}
+          selectionMode={SelectionMode.Partial}
+          panOnDrag={memoPanOnDrag}
+          snapToGrid={snapEnabled}
+          snapGrid={SNAP_GRID}
+          elevateNodesOnSelect={false}
+          minZoom={CANVAS_MIN_ZOOM}
+          fitView
+          fitViewOptions={CANVAS_OVERVIEW_FIT_OPTIONS}
+          proOptions={memoProOptions}
+          defaultEdgeOptions={memoDefaultEdgeOptions}
+        >
         <Background
           variant={BackgroundVariant.Dots}
           gap={20}
@@ -10014,9 +12918,11 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
             setCenter(position.x, position.y, { zoom, duration: 400 });
           }}
           style={{
-            width: isFarmStory ? 214 : isOp ? 144 : isNaruto ? 182 : isEva ? 258 : isYyh ? 224 : isSlamdunk ? 214 : isSoccer ? 224 : isDragonBall ? 192 : undefined,
-            height: isFarmStory ? 136 : isOp ? 144 : isNaruto ? 122 : isEva ? 172 : isYyh ? 144 : isSlamdunk ? 128 : isSoccer ? 136 : isDragonBall ? 192 : undefined,
+            width: isGardenDefense ? 224 : isFarmStory ? 214 : isOp ? 144 : isNaruto ? 182 : isEva ? 258 : isYyh ? 224 : isSlamdunk ? 214 : isSoccer ? 224 : isDragonBall ? 192 : undefined,
+            height: isGardenDefense ? 144 : isFarmStory ? 136 : isOp ? 144 : isNaruto ? 122 : isEva ? 172 : isYyh ? 144 : isSlamdunk ? 128 : isSoccer ? 136 : isDragonBall ? 192 : undefined,
             background: isFarmStory
+              ? themeTokens.panelBg
+              : isGardenDefense
               ? themeTokens.panelBg
               : isOp
               ? themeTokens.panelBg
@@ -10035,6 +12941,8 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
               : isDark ? 'rgba(20,20,22,.9)' : 'rgba(255,255,255,.9)',
             border: isFarmStory
               ? `3px solid ${themeTokens.secondary}`
+              : isGardenDefense
+              ? `4px solid ${themeTokens.edge}`
               : isOp
               ? `4px double ${themeTokens.textMain}`
               : isNaruto
@@ -10050,11 +12958,13 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
               : isDragonBall
                   ? `3px solid ${themeTokens.warning}`
                 : `1px solid ${isDark ? 'rgba(255,255,255,.1)' : 'rgba(0,0,0,.08)'}`,
-            borderRadius: isFarmStory ? 10 : isOp ? 999 : isNaruto ? '18px 18px 12px 12px' : isEva ? 8 : isYyh ? 12 : isSlamdunk ? 10 : isSoccer ? 12 : isDragonBall ? 999 : 8,
-            right: isFarmStory ? 24 : isOp ? 24 : isNaruto ? 24 : isEva ? 24 : isYyh ? 24 : isSlamdunk ? 24 : isSoccer ? 24 : isDragonBall ? 28 : undefined,
-            bottom: isFarmStory ? 32 : isOp ? 42 : isNaruto ? 40 : isEva ? 24 : isYyh ? 28 : isSlamdunk ? 32 : isSoccer ? 32 : isDragonBall ? 34 : undefined,
+            borderRadius: isGardenDefense ? 7 : isFarmStory ? 10 : isOp ? 999 : isNaruto ? '18px 18px 12px 12px' : isEva ? 8 : isYyh ? 12 : isSlamdunk ? 10 : isSoccer ? 12 : isDragonBall ? 999 : 8,
+            right: isGardenDefense ? 24 : isFarmStory ? 24 : isOp ? 24 : isNaruto ? 24 : isEva ? 24 : isYyh ? 24 : isSlamdunk ? 24 : isSoccer ? 24 : isDragonBall ? 28 : undefined,
+            bottom: isGardenDefense ? 34 : isFarmStory ? 32 : isOp ? 42 : isNaruto ? 40 : isEva ? 24 : isYyh ? 28 : isSlamdunk ? 32 : isSoccer ? 32 : isDragonBall ? 34 : undefined,
             boxShadow: isFarmStory
               ? `0 0 0 5px ${themeTokens.warning}, 5px 5px 0 ${themeTokens.edge}, 0 18px 46px rgba(76,49,20,.24)`
+              : isGardenDefense
+              ? `0 0 0 5px ${themeTokens.warning}, 6px 7px 0 ${themeTokens.edge}, 0 20px 48px rgba(54,39,16,.3)`
               : isOp
               ? `0 0 0 7px ${themeTokens.warning}, 5px 5px 0 ${themeTokens.textMain}`
               : isNaruto
@@ -10071,11 +12981,11 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
                   ? `0 0 0 5px ${themeTokens.secondary}, 5px 5px 0 ${themeTokens.textMain}, 0 18px 46px rgba(0,0,0,.28), inset 0 0 34px ${themeTokens.warning}33`
               : undefined,
             cursor: 'pointer',
-            overflow: isFarmStory || isOp || isNaruto || isEva || isYyh || isSlamdunk || isSoccer || isDragonBall ? 'hidden' : undefined,
+            overflow: isGardenDefense || isFarmStory || isOp || isNaruto || isEva || isYyh || isSlamdunk || isSoccer || isDragonBall ? 'hidden' : undefined,
             display: (viewportMoving || nodeDragging) && heavyCanvasSurface ? 'none' : undefined,
           }}
-          maskColor={isFarmStory ? 'rgba(111,191,74,.22)' : isOp ? 'rgba(15,124,140,.28)' : isNaruto ? 'rgba(255,91,31,.22)' : isEva ? 'rgba(156,255,0,.18)' : isYyh ? 'rgba(67,247,255,.16)' : isSlamdunk ? 'rgba(240,123,34,.22)' : isSoccer ? 'rgba(18,107,216,.22)' : isDragonBall ? 'rgba(255,176,0,.22)' : isDark ? 'rgba(0,0,0,.6)' : 'rgba(255,255,255,.6)'}
-          nodeColor={() => (isFarmStory ? themeTokens.secondary : isOp ? themeTokens.secondary : isNaruto ? themeTokens.accent : isEva ? themeTokens.danger : isYyh ? themeTokens.success : isSlamdunk ? themeTokens.accent : isSoccer ? themeTokens.accent : isDragonBall ? themeTokens.warning : isDark ? '#a1a1aa' : '#52525b')}
+          maskColor={isGardenDefense ? 'rgba(255,216,83,.2)' : isFarmStory ? 'rgba(111,191,74,.22)' : isOp ? 'rgba(15,124,140,.28)' : isNaruto ? 'rgba(255,91,31,.22)' : isEva ? 'rgba(156,255,0,.18)' : isYyh ? 'rgba(67,247,255,.16)' : isSlamdunk ? 'rgba(240,123,34,.22)' : isSoccer ? 'rgba(18,107,216,.22)' : isDragonBall ? 'rgba(255,176,0,.22)' : isDark ? 'rgba(0,0,0,.6)' : 'rgba(255,255,255,.6)'}
+          nodeColor={() => (isGardenDefense ? themeTokens.warning : isFarmStory ? themeTokens.secondary : isOp ? themeTokens.secondary : isNaruto ? themeTokens.accent : isEva ? themeTokens.danger : isYyh ? themeTokens.success : isSlamdunk ? themeTokens.accent : isSoccer ? themeTokens.accent : isDragonBall ? themeTokens.warning : isDark ? '#a1a1aa' : '#52525b')}
         />
         {farmMiniMapVisible && (
           <div
@@ -10147,8 +13057,11 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
           </div>
         )}
         {/* 选中可执行节点时的浮动操作栏 (执行 / 中止 / 关闭) */}
-        <NodeActionBar />
-      </ReactFlow>
+        <NodeActionBar
+          onRunNode={(nodeId) => handleRunGroup([nodeId])}
+          onStopRun={handleCancelRun}
+        />
+        </ReactFlow>
       {creativeDeskEditing && (
         <CreativeDeskLayer
           creativeDesk={creativeDesk}
@@ -10169,6 +13082,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         />
       )}
       {floatingControlRail}
+      </WorkflowDoctorHighlightContext.Provider>
 
       {/* 跨节点素材拖拽浮层 (Ctrl + 鼠标左键 从素材缩略图拖出) */}
       <MaterialDragOverlay />
@@ -10411,6 +13325,292 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         </div>
       )}
 
+      {subflowDraft && (
+        <div
+          className="fixed inset-0 z-[90] grid place-items-center bg-black/55 p-4"
+          data-canvas-floating-ui="subflow-create-dialog"
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget && !subflowDraft.saving) setSubflowDraft(null);
+          }}
+        >
+          <form
+            className="max-h-[90vh] w-full max-w-[960px] overflow-auto rounded-md border-2 border-[var(--border-primary)] bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-2xl"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void commitSubflowDraft();
+            }}
+          >
+            <div className="flex items-center gap-3 border-b border-[var(--border-primary)] px-5 py-4">
+              <span className="grid h-10 w-10 place-items-center rounded bg-[var(--accent-primary)] text-white"><LucideIcons.GitFork size={20} /></span>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-base font-bold">封装为子工作流</h2>
+                <p className="text-xs text-[var(--text-secondary)]">保存固定版本，并把当前选区原位替换成单个可复用节点。</p>
+              </div>
+              <button type="button" className="grid h-9 w-9 place-items-center rounded border border-[var(--border-primary)]" aria-label="关闭" disabled={subflowDraft.saving} onClick={() => setSubflowDraft(null)}>
+                <LucideIcons.X size={17} />
+              </button>
+            </div>
+            <div className="grid gap-4 p-5 md:grid-cols-[1fr_260px]">
+              <div className="min-w-0 space-y-4">
+                <label className="block text-xs font-semibold">
+                  名称
+                  <input
+                    autoFocus
+                    value={subflowDraft.name}
+                    maxLength={80}
+                    className="mt-1 h-10 w-full rounded border border-[var(--border-primary)] bg-[var(--bg-primary)] px-3 text-sm outline-none focus:border-[var(--accent-primary)]"
+                    onChange={(event) => setSubflowDraft((current) => current ? { ...current, name: event.target.value } : current)}
+                  />
+                </label>
+                <label className="block text-xs font-semibold">
+                  说明
+                  <textarea
+                    value={subflowDraft.description}
+                    rows={5}
+                    maxLength={500}
+                    className="mt-1 w-full resize-none rounded border border-[var(--border-primary)] bg-[var(--bg-primary)] p-3 text-sm outline-none focus:border-[var(--accent-primary)]"
+                    placeholder="用途、输入约束和输出内容"
+                    onChange={(event) => setSubflowDraft((current) => current ? { ...current, description: event.target.value } : current)}
+                  />
+                </label>
+              </div>
+              <section className="min-w-0 border-l border-[var(--border-primary)] pl-4">
+                <div className="mb-3 text-xs font-bold">边界检查</div>
+                <dl className="grid grid-cols-2 gap-y-2 text-xs">
+                  <dt className="text-[var(--text-secondary)]">内部节点</dt><dd className="text-right font-semibold">{subflowDraft.analysis.definition.nodes.length}</dd>
+                  <dt className="text-[var(--text-secondary)]">内部连线</dt><dd className="text-right font-semibold">{subflowDraft.analysis.definition.edges.length}</dd>
+                  <dt className="text-[var(--text-secondary)]">输入端口</dt><dd className="text-right font-semibold">{subflowDraft.analysis.definition.inputs.length}</dd>
+                  <dt className="text-[var(--text-secondary)]">输出端口</dt><dd className="text-right font-semibold">{subflowDraft.analysis.definition.outputs.length}</dd>
+                </dl>
+                <div className="mt-4 max-h-36 space-y-1 overflow-auto pr-1 text-[11px]">
+                  {[...subflowDraft.analysis.definition.inputs, ...subflowDraft.analysis.definition.outputs].map((port) => (
+                    <div key={port.id} className="flex items-center justify-between gap-2 border-b border-[var(--border-primary)] py-1.5">
+                      <span className="truncate">{port.id.startsWith('in-') ? '输入' : '输出'} · {port.name}</span>
+                      <span className="shrink-0 opacity-60">{port.kind}</span>
+                    </div>
+                  ))}
+                  {subflowDraft.analysis.definition.inputs.length + subflowDraft.analysis.definition.outputs.length === 0 && (
+                    <div className="py-3 text-[var(--text-secondary)]">当前选区没有跨边界连线。</div>
+                  )}
+                </div>
+              </section>
+            </div>
+            <section className="border-t border-[var(--border-primary)] px-5 py-4">
+              <div className="mb-3 flex items-center justify-between gap-3"><div><h3 className="text-xs font-bold">公开端口确认</h3><p className="mt-1 text-[11px] text-[var(--text-secondary)]">每条跨边界连线保持独立端口；名称相同也不会自动合并。</p></div><span className="text-[10px] text-[var(--text-secondary)]">{subflowDraft.analysis.definition.inputs.length} 入 / {subflowDraft.analysis.definition.outputs.length} 出</span></div>
+              <div className="max-h-[34vh] overflow-auto border-y border-[var(--border-primary)]">
+                {(['inputs', 'outputs'] as const).flatMap((direction) => subflowDraft.analysis.definition[direction].map((port, index) => {
+                  const boundary = direction === 'inputs'
+                    ? subflowDraft.analysis.incomingEdges.find((edge) => edge.id === port.boundaryEdgeId)
+                    : subflowDraft.analysis.outgoingEdges.find((edge) => edge.id === port.boundaryEdgeId);
+                  return <div key={`${direction}-${port.id}`} className="grid gap-2 border-b border-[var(--border-primary)] px-2 py-3 md:grid-cols-[72px_minmax(120px,1fr)_110px_72px_100px_minmax(150px,1.4fr)]">
+                    <div className="text-[11px]"><span className="block font-bold">{direction === 'inputs' ? '输入' : '输出'} {index + 1}</span><span className="mt-1 block truncate opacity-50" title={port.id}>{port.id}</span></div>
+                    <label className="text-[10px] text-[var(--text-secondary)]">名称<input value={port.name} maxLength={60} className="mt-1 h-8 w-full rounded border border-[var(--border-primary)] bg-[var(--bg-primary)] px-2 text-xs text-[var(--text-primary)]" onChange={(event) => updateSubflowDraftPort(direction, port.id, { name: event.target.value })} /></label>
+                    <label className="text-[10px] text-[var(--text-secondary)]">类型<select value={port.kind} className="mt-1 h-8 w-full rounded border border-[var(--border-primary)] bg-[var(--bg-primary)] px-2 text-xs text-[var(--text-primary)]" onChange={(event) => updateSubflowDraftPort(direction, port.id, { kind: event.target.value })}>{['text', 'image', 'video', 'audio', 'model3d', 'metadata', 'config', 'any'].map((kind) => <option key={kind}>{kind}</option>)}</select></label>
+                    <label className="text-[10px] text-[var(--text-secondary)]">顺序<input type="number" min={0} max={999} value={port.order ?? index} className="mt-1 h-8 w-full rounded border border-[var(--border-primary)] bg-[var(--bg-primary)] px-2 text-xs text-[var(--text-primary)]" onChange={(event) => updateSubflowDraftPort(direction, port.id, { order: Math.max(0, Number(event.target.value) || 0) })} /></label>
+                    <div className="grid grid-cols-2 gap-1 text-[10px] text-[var(--text-secondary)]"><label>最少<input type="number" min={0} max={99} value={port.minConnections ?? (port.required ? 1 : 0)} className="mt-1 h-8 w-full rounded border border-[var(--border-primary)] bg-[var(--bg-primary)] px-1 text-xs text-[var(--text-primary)]" onChange={(event) => updateSubflowDraftPort(direction, port.id, { minConnections: Math.max(0, Number(event.target.value) || 0) })} /></label><label>最多<input type="number" min={1} max={99} value={port.maxConnections ?? ''} placeholder="∞" className="mt-1 h-8 w-full rounded border border-[var(--border-primary)] bg-[var(--bg-primary)] px-1 text-xs text-[var(--text-primary)]" onChange={(event) => updateSubflowDraftPort(direction, port.id, { maxConnections: event.target.value ? Math.max(1, Number(event.target.value) || 1) : null })} /></label></div>
+                    <label className="text-[10px] text-[var(--text-secondary)]">说明<input value={port.description || ''} maxLength={160} placeholder={boundary ? `${boundary.source} → ${boundary.target}` : '用途和约束'} className="mt-1 h-8 w-full rounded border border-[var(--border-primary)] bg-[var(--bg-primary)] px-2 text-xs text-[var(--text-primary)]" onChange={(event) => updateSubflowDraftPort(direction, port.id, { description: event.target.value })} /></label>
+                    <div className="md:col-start-2 md:col-span-5 flex flex-wrap items-center gap-4 text-[10px] text-[var(--text-secondary)]"><label className="flex items-center gap-1"><input type="checkbox" checked={port.required} onChange={(event) => updateSubflowDraftPort(direction, port.id, { required: event.target.checked, minConnections: event.target.checked ? Math.max(1, port.minConnections || 0) : 0 })} />必填</label><label className="flex min-w-48 flex-1 items-center gap-2">默认值<input defaultValue={port.defaultValue == null ? '' : typeof port.defaultValue === 'string' ? port.defaultValue : JSON.stringify(port.defaultValue)} className="h-7 min-w-0 flex-1 rounded border border-[var(--border-primary)] bg-[var(--bg-primary)] px-2 text-[11px] text-[var(--text-primary)]" onBlur={(event) => updateSubflowDraftPort(direction, port.id, { defaultValue: parseSubflowPortDefault(event.target.value, port.kind) })} /></label><span className="truncate" title={boundary ? `${boundary.source}:${boundary.sourceHandle || 'default'} → ${boundary.target}:${boundary.targetHandle || 'default'}` : ''}>影响：{boundary ? `${boundary.source} → ${boundary.target}` : '内部端口'}</span></div>
+                  </div>;
+                }))}
+                {subflowDraft.analysis.definition.inputs.length + subflowDraft.analysis.definition.outputs.length === 0 && <div className="py-8 text-center text-xs text-[var(--text-secondary)]">选区没有跨边界连线，无需公开端口。</div>}
+              </div>
+            </section>
+            {(() => {
+              const candidates = subflowParameterCandidates(subflowDraft.analysis.definition as SubflowDefinition);
+              const exposed = subflowDraft.analysis.definition.exposedParameters || [];
+              const exposedById = new Map(exposed.map((parameter) => [parameter.id, parameter]));
+              return <section className="border-t border-[var(--border-primary)] px-5 py-4">
+                <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                  <div><h3 className="text-xs font-bold">公开参数与固定设置</h3><p className="mt-1 text-[11px] text-[var(--text-secondary)]">仅勾选项允许实例覆盖；其余配置随固定版本锁定。凭据和私密字段已从定义中移除，只能读取全局 API Key 设置。</p></div>
+                  <span className="text-[10px] text-[var(--text-secondary)]">公开 {exposed.length} · 固定 {Math.max(0, candidates.length - exposed.length)} · 私密字段不入包</span>
+                </div>
+                <div className="max-h-48 overflow-auto rounded border border-[var(--border-primary)]">
+                  {candidates.map((candidate) => {
+                    const parameter = exposedById.get(candidate.id);
+                    return <div key={candidate.id} className="grid items-center gap-2 border-b border-[var(--border-primary)] px-3 py-2 md:grid-cols-[24px_minmax(160px,1fr)_minmax(180px,1.2fr)_92px]">
+                      <input type="checkbox" aria-label={`公开 ${candidate.name}`} checked={!!parameter} onChange={(event) => toggleSubflowDraftParameter(candidate, event.target.checked)} />
+                      <div className="min-w-0"><div className="truncate text-xs font-semibold">{candidate.name}</div><code className="block truncate text-[9px] opacity-45">{candidate.nodeId}.{candidate.dataKey}</code></div>
+                      {parameter ? <input value={parameter.name} maxLength={80} className="h-8 min-w-0 rounded border border-[var(--border-primary)] bg-[var(--bg-primary)] px-2 text-xs text-[var(--text-primary)]" aria-label="公开参数名称" onChange={(event) => updateSubflowDraftParameter(parameter.id, { name: event.target.value })} /> : <span className="text-[10px] text-[var(--text-secondary)]">固定为 {String(candidate.defaultValue)}</span>}
+                      {parameter ? <label className="flex items-center gap-1 text-[10px] text-[var(--text-secondary)]"><input type="checkbox" checked={!!parameter.required} onChange={(event) => updateSubflowDraftParameter(parameter.id, { required: event.target.checked })} />实例必填</label> : <span className="text-[10px] text-[var(--text-secondary)]">固定设置</span>}
+                    </div>;
+                  })}
+                  {candidates.length === 0 && <div className="px-3 py-6 text-center text-xs text-[var(--text-secondary)]">当前内部节点没有适合公开的基础配置字段。</div>}
+                </div>
+              </section>;
+            })()}
+            <div className="flex justify-end gap-2 border-t border-[var(--border-primary)] px-5 py-4">
+              <button type="button" className="h-10 rounded border border-[var(--border-primary)] px-5 text-sm font-semibold" disabled={subflowDraft.saving} onClick={() => setSubflowDraft(null)}>取消</button>
+              <button type="submit" className="h-10 rounded bg-[var(--accent-primary)] px-5 text-sm font-bold text-white disabled:opacity-50" disabled={subflowDraft.saving || !subflowDraft.name.trim()}>
+                {subflowDraft.saving ? '正在保存…' : '保存并替换选区'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {subflowInspector && (() => {
+        const depth = subflowInspector.stack.length - 1;
+        const editActive = subflowInspector.edit?.depth === depth ? subflowInspector.edit : undefined;
+        const detaching = Boolean(subflowInspector.detaching);
+        const definition = editActive?.draft || subflowInspector.stack[depth];
+        const viewKey = buildSubflowInspectorViewportKey({
+          rootInstanceNodeId: subflowInspector.instanceNodeId,
+          pathNodeIds: subflowInspector.pathNodeIds,
+          projectId: definition.projectId || activeId || 'local',
+          definitionId: definition.id,
+          definitionVersion: definition.version,
+          editing: Boolean(editActive),
+        });
+        const savedViewport = subflowInspectorViewportsRef.current[viewKey];
+        const targetHandles = new Map<string, Set<string>>();
+        const sourceHandles = new Map<string, Set<string>>();
+        const addHandle = (collection: Map<string, Set<string>>, nodeId: string, handle: string | null | undefined, fallback: string) => {
+          const values = collection.get(nodeId) || new Set<string>();
+          values.add(handle || fallback);
+          collection.set(nodeId, values);
+        };
+        for (const edge of definition.edges) {
+          addHandle(sourceHandles, edge.source, edge.sourceHandle, SUBFLOW_INSPECTOR_DEFAULT_SOURCE_HANDLE);
+          addHandle(targetHandles, edge.target, edge.targetHandle, SUBFLOW_INSPECTOR_DEFAULT_TARGET_HANDLE);
+        }
+        for (const port of definition.inputs) addHandle(targetHandles, port.internalNodeId, port.internalHandle, SUBFLOW_INSPECTOR_DEFAULT_TARGET_HANDLE);
+        for (const port of definition.outputs) addHandle(sourceHandles, port.internalNodeId, port.internalHandle, SUBFLOW_INSPECTOR_DEFAULT_SOURCE_HANDLE);
+        const previewNodes = definition.nodes.map((node) => ({
+          ...node,
+          type: 'subflowInspector',
+          draggable: !!editActive,
+          selectable: true,
+          data: {
+            label: `${node.type === 'subflow' ? '子流程 · ' : ''}${String((node.data as any)?.label || (node.data as any)?.definition?.name || node.type || '节点')}`,
+            sourceHandles: [...(sourceHandles.get(node.id) || [SUBFLOW_INSPECTOR_DEFAULT_SOURCE_HANDLE])],
+            targetHandles: [...(targetHandles.get(node.id) || [SUBFLOW_INSPECTOR_DEFAULT_TARGET_HANDLE])],
+            onOpenNested: !editActive && !detaching && node.type === 'subflow' ? () => { void handleOpenNestedSubflow(node); } : undefined,
+          },
+        }));
+        const previewEdges = definition.edges.map((edge) => ({
+          ...edge,
+          sourceHandle: edge.sourceHandle || SUBFLOW_INSPECTOR_DEFAULT_SOURCE_HANDLE,
+          targetHandle: edge.targetHandle || SUBFLOW_INSPECTOR_DEFAULT_TARGET_HANDLE,
+          animated: false,
+          selectable: !!editActive,
+        }));
+        return (
+          <div className="fixed inset-0 z-[90] grid place-items-center bg-black/55 p-2 sm:p-4" data-canvas-floating-ui="subflow-inspector" onPointerDown={(event) => { if (event.target === event.currentTarget && !editActive && !detaching) setSubflowInspector(null); }}>
+            <div
+              className="flex max-h-[calc(100vh-1rem)] w-full max-w-[1180px] flex-col overflow-hidden rounded-md border-2 border-[var(--border-primary)] bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-2xl sm:max-h-[92vh]"
+              onKeyDown={(event) => {
+                if (!editActive || (!event.ctrlKey && !event.metaKey)) return;
+                const key = event.key.toLowerCase();
+                const isUndo = key === 'z' && !event.shiftKey;
+                const isRedo = key === 'y' || (key === 'z' && event.shiftKey);
+                if (!isUndo && !isRedo) return;
+                event.stopPropagation();
+                const target = event.target as HTMLElement;
+                if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+                event.preventDefault();
+                if (isUndo) handleUndoSubflowRevision();
+                else handleRedoSubflowRevision();
+              }}
+            >
+              <div className="flex flex-wrap items-start gap-2 border-b border-[var(--border-primary)] px-3 py-3 sm:flex-nowrap sm:items-center sm:gap-3 sm:px-5">
+                <LucideIcons.Workflow size={20} className="shrink-0 text-[var(--accent-primary)]" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1 text-xs">
+                    {subflowInspector.stack.map((item, index) => <span key={`${item.id}-${item.version}`} className="flex items-center gap-1"><button type="button" disabled={!!editActive || detaching} className={`max-w-44 truncate rounded px-1.5 py-1 disabled:cursor-not-allowed disabled:opacity-45 ${index === subflowInspector.stack.length - 1 ? 'bg-[var(--accent-primary)] font-bold text-white' : 'hover:bg-[var(--bg-tertiary)]'}`} onClick={() => setSubflowInspector((current) => current ? { ...current, stack: current.stack.slice(0, index + 1), pathNodeIds: current.pathNodeIds.slice(0, index + 1), edit: undefined } : current)}>{item.name}</button>{index < subflowInspector.stack.length - 1 && <LucideIcons.ChevronRight size={12} className="opacity-45" />}</span>)}
+                  </div>
+                  <p className="mt-1 text-[11px] text-[var(--text-secondary)]">{editActive ? `编辑草稿 · 基于 revision ${editActive.baseRevision}` : `固定版本 v${definition.version} · revision ${definition.revision || definition.version}`} · {definition.nodes.length} 节点 · {definition.edges.length} 连线 · {editActive ? '发布后生成不可变新版本' : '双击子流程继续进入'}</p>
+                </div>
+                <div className="flex basis-full flex-wrap items-center justify-end gap-2 sm:basis-auto sm:flex-nowrap">
+                  {editActive ? <>
+                    <button type="button" title="撤销内部草稿（Ctrl/Cmd+Z）" className="grid h-9 w-9 place-items-center rounded border border-[var(--border-primary)] disabled:opacity-40" disabled={editActive.saving || editActive.undoStack.length === 0} onClick={handleUndoSubflowRevision}><LucideIcons.Undo2 size={15} /></button>
+                    <button type="button" title="重做内部草稿（Ctrl/Cmd+Shift+Z 或 Ctrl/Cmd+Y）" className="grid h-9 w-9 place-items-center rounded border border-[var(--border-primary)] disabled:opacity-40" disabled={editActive.saving || editActive.redoStack.length === 0} onClick={handleRedoSubflowRevision}><LucideIcons.Redo2 size={15} /></button>
+                    <button type="button" className="flex h-9 items-center gap-2 rounded border border-[var(--border-primary)] px-3 text-xs font-semibold" disabled={editActive.saving} onClick={handleCancelSubflowRevisionEdit}><LucideIcons.X size={15} /> 放弃草稿</button>
+                    <button type="button" className="flex h-9 items-center gap-2 rounded bg-[var(--accent-primary)] px-3 text-xs font-bold text-white disabled:opacity-50" disabled={editActive.saving || !!editActive.nodeDataError || !editActive.draft.name.trim() || !editActive.changeSummary.trim()} onClick={() => void handlePublishSubflowRevision()}><LucideIcons.Upload size={15} /> {editActive.saving ? '发布中…' : '发布新版本'}</button>
+                  </> : <>
+                    <button type="button" disabled={detaching} className="flex h-9 items-center gap-2 rounded border border-[var(--border-primary)] bg-[var(--bg-tertiary)] px-3 text-xs font-semibold disabled:opacity-45" onClick={handleStartSubflowRevisionEdit}><LucideIcons.Pencil size={15} /> 编辑新版本</button>
+                    {subflowInspector.stack.length > 1
+                      ? <button type="button" disabled={detaching} className="flex h-9 items-center gap-2 rounded border border-[var(--border-primary)] bg-[var(--bg-tertiary)] px-3 text-xs font-semibold disabled:opacity-45" onClick={handleReturnSubflowInspectorLevel}><LucideIcons.CornerUpLeft size={15} /> 返回上一级</button>
+                      : <button type="button" disabled={detaching} className="flex h-9 items-center gap-2 rounded border border-[var(--border-primary)] bg-[var(--bg-tertiary)] px-3 text-xs font-semibold disabled:opacity-45" onClick={() => void handleDetachSubflow()}><LucideIcons.Unplug size={15} /> {detaching ? '解析依赖中…' : '脱离定义'}</button>}
+                  </>}
+                  <button type="button" disabled={!!editActive?.saving || detaching} className="grid h-9 w-9 place-items-center rounded border border-[var(--border-primary)] disabled:opacity-45" aria-label="关闭" onClick={() => setSubflowInspector(null)}><LucideIcons.X size={17} /></button>
+                </div>
+              </div>
+              <div className="grid min-h-0 flex-1 overflow-y-auto md:grid-cols-[minmax(0,1fr)_280px] md:overflow-hidden">
+                <section className="relative h-[42vh] min-h-[260px] border-b border-[var(--border-primary)] bg-[var(--bg-primary)] md:h-[68vh] md:min-h-[420px] md:border-b-0 md:border-r">
+                  <ReactFlowProvider>
+                    <ReactFlow
+                      key={viewKey}
+                      nodeTypes={subflowInspectorNodeTypes}
+                      nodes={previewNodes}
+                      edges={previewEdges}
+                      defaultViewport={savedViewport || { x: 0, y: 0, zoom: 1 }}
+                      fitView={!savedViewport}
+                      fitViewOptions={{ padding: 0.18, maxZoom: 1.15 }}
+                      nodesDraggable={!!editActive}
+                      nodesConnectable={!!editActive}
+                      elementsSelectable
+                      deleteKeyCode={null}
+                      multiSelectionKeyCode={null}
+                      onNodesChange={editActive ? handleSubflowRevisionNodesChange : undefined}
+                      onEdgesChange={editActive ? handleSubflowRevisionEdgesChange : undefined}
+                      onConnect={editActive ? handleConnectSubflowRevision : undefined}
+                      onNodeClick={editActive ? (_, node) => handleSelectSubflowRevisionNode(node.id) : undefined}
+                      onEdgeClick={editActive ? (_, edge) => handleSelectSubflowRevisionEdge(edge.id) : undefined}
+                      onPaneClick={editActive ? handleClearSubflowRevisionSelection : undefined}
+                      onNodeDragStart={editActive ? handleSubflowRevisionNodeDragStart : undefined}
+                      onNodeDragStop={editActive ? handleSubflowRevisionNodeDragStop : undefined}
+                      onMoveEnd={(_, viewport) => { subflowInspectorViewportsRef.current[viewKey] = viewport; }}
+                      onNodeDoubleClick={(_, previewNode) => {
+                        if (editActive || detaching) return;
+                        const original = definition.nodes.find((node) => node.id === previewNode.id);
+                        if (original?.type === 'subflow') void handleOpenNestedSubflow(original);
+                      }}
+                      proOptions={{ hideAttribution: true }}
+                    >
+                      <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
+                      <Controls showInteractive={!!editActive} position="bottom-right" />
+                    </ReactFlow>
+                  </ReactFlowProvider>
+                  <div className="pointer-events-none absolute left-3 top-3 rounded border border-[var(--border-primary)] bg-[var(--bg-secondary)]/95 px-2 py-1 text-[10px] text-[var(--text-secondary)]">{editActive ? '新版本草稿 · 可拖动、连线和选择删除' : '固定版本只读 · 视口按层记忆'}</div>
+                </section>
+                <aside className="min-h-0 overflow-visible p-3 md:overflow-auto md:p-4">
+                  {subflowInspector.error && <div role="alert" className="mb-4 rounded border border-red-500/60 bg-red-500/10 p-3 text-[11px] leading-5 text-red-500">{subflowInspector.error}{editActive?.conflict && <div className="mt-2 border-t border-red-500/30 pt-2"><p>服务器当前为 v{editActive.conflict.latestVersion} / revision {editActive.conflict.revision}；你的草稿仍保留，未覆盖他人版本。</p><button type="button" className="mt-2 h-8 rounded border border-red-500/60 px-3 text-[10px] font-bold" onClick={handleLoadLatestSubflowRevision}>放弃当前草稿并载入最新版本</button></div>}</div>}
+                  {editActive && <section className="mb-5 space-y-3 rounded border border-[var(--accent-primary)]/50 bg-[var(--bg-tertiary)] p-3">
+                    <h3 className="text-xs font-bold">新版本信息</h3>
+                    <label className="block text-[10px] font-semibold">名称<input value={editActive.draft.name} maxLength={100} className="mt-1 h-9 w-full rounded border border-[var(--border-primary)] bg-[var(--bg-primary)] px-2 text-xs text-[var(--text-primary)]" onChange={(event) => handleUpdateSubflowRevisionMetadata('name', event.target.value)} /></label>
+                    <label className="block text-[10px] font-semibold">说明<textarea value={editActive.draft.description} maxLength={2000} rows={3} className="mt-1 w-full resize-y rounded border border-[var(--border-primary)] bg-[var(--bg-primary)] px-2 py-2 text-xs text-[var(--text-primary)]" onChange={(event) => handleUpdateSubflowRevisionMetadata('description', event.target.value)} /></label>
+                    <label className="block text-[10px] font-semibold">变更说明（必填）<textarea value={editActive.changeSummary} maxLength={500} rows={2} className="mt-1 w-full resize-y rounded border border-[var(--border-primary)] bg-[var(--bg-primary)] px-2 py-2 text-xs text-[var(--text-primary)]" placeholder="说明本次为什么发布、改了什么" onChange={(event) => handleUpdateSubflowRevisionChangeSummary(event.target.value)} /></label>
+                    <button type="button" className="flex h-9 w-full items-center justify-center gap-2 rounded border border-red-500/60 text-xs font-semibold text-red-500 disabled:cursor-not-allowed disabled:opacity-40" disabled={!editActive.draft.nodes.some((node) => node.selected) && !editActive.draft.edges.some((edge) => edge.selected)} onClick={handleDeleteSubflowRevisionSelection}><LucideIcons.Trash2 size={14} /> 删除选中节点或连线</button>
+                    <p className="text-[10px] leading-4 text-[var(--text-secondary)]">不会覆盖 v{definition.version}，也不会自动升级主画布中的固定版本实例。</p>
+                  </section>}
+                  {editActive?.selectedNodeId && <section className="mb-5">
+                    <h3 className="mb-2 text-xs font-bold">节点配置 · {editActive.selectedNodeId}</h3>
+                    <textarea value={editActive.nodeDataText} rows={12} spellCheck={false} className={`w-full resize-y rounded border bg-[var(--bg-primary)] px-2 py-2 font-mono text-[10px] leading-4 text-[var(--text-primary)] ${editActive.nodeDataError ? 'border-red-500' : 'border-[var(--border-primary)]'}`} onChange={(event) => handleUpdateSubflowRevisionNodeData(event.target.value)} />
+                    {editActive.nodeDataError && <p className="mt-1 text-[10px] text-red-500">{editActive.nodeDataError}</p>}
+                  </section>}
+                  <section>
+                    <h3 className="mb-2 text-xs font-bold">公开端口</h3>
+                    <div className="space-y-1 text-xs">
+                      {[...definition.inputs, ...definition.outputs].map((port) => <div key={port.id} className="border-b border-[var(--border-primary)] py-2"><div className="flex justify-between gap-3"><span className="truncate">{definition.inputs.includes(port) ? '输入' : '输出'} · {port.name}</span><code className="shrink-0 opacity-55">{port.kind}</code></div>{port.description && <p className="mt-1 text-[10px] text-[var(--text-secondary)]">{port.description}</p>}</div>)}
+                      {definition.inputs.length + definition.outputs.length === 0 && <div className="py-3 text-[var(--text-secondary)]">无公开端口</div>}
+                    </div>
+                  </section>
+                  <section className="mt-5">
+                    <h3 className="mb-2 text-xs font-bold">公开参数</h3>
+                    <div className="space-y-1 text-xs">
+                      {(definition.exposedParameters || []).map((parameter) => <div key={parameter.id} className="border-b border-[var(--border-primary)] py-2"><div className="font-semibold">{parameter.name}</div><div className="mt-1 truncate text-[10px] text-[var(--text-secondary)]">{parameter.nodeId}.{parameter.dataKey}{parameter.required ? ' · 必填' : ''}</div></div>)}
+                      {(definition.exposedParameters || []).length === 0 && <div className="py-3 text-[var(--text-secondary)]">无公开参数</div>}
+                    </div>
+                  </section>
+                  {definition.description && <p className="mt-5 whitespace-pre-wrap text-xs leading-5 text-[var(--text-secondary)]">{definition.description}</p>}
+                  <div className="mt-5 rounded border border-[var(--border-primary)] bg-[var(--bg-tertiary)] p-3 text-[10px] leading-5 text-[var(--text-secondary)]">{editActive ? '发布前会校验内部节点、连线、公开端口、公开参数和嵌套固定版本；失败不会写入新版本。' : subflowInspector.stack.length === 1 ? '“脱离定义”只作用于当前主画布实例，会完整展开固定版本并保留外部连接；该操作可撤销。' : '当前查看的是嵌套固定版本；请先返回最外层，才能脱离主画布实例，避免误展开错误层级。'}</div>
+                </aside>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       <SendMaterialsModal
         open={!!sendModal}
         materials={sendModal?.materials || []}
@@ -10635,6 +13835,18 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
               >
                 <Workflow size={13} />
                 <span>保存工作流到资源库</span>
+              </button>
+              <button
+                className={menuItemCls}
+                disabled={sendNodeCount === 0}
+                title={sendNodeCount > 0 ? '把所选节点封装为带显式输入输出端口的固定版本子工作流' : '请选择至少 1 个节点'}
+                onClick={() => {
+                  closeContextMenu();
+                  prepareSubflowFromSelection(ids);
+                }}
+              >
+                <LucideIcons.GitFork size={13} />
+                <span>封装为子工作流</span>
               </button>
               <button
                 className={menuItemCls}

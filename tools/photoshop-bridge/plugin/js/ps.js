@@ -18,6 +18,24 @@
     return !!(app.documents && app.documents.length > 0);
   }
 
+  function activeDocumentId() {
+    try {
+      return app.activeDocument && app.activeDocument.id;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function activeLayerCount() {
+    try {
+      const doc = app.activeDocument;
+      if (!doc || !doc.layers || typeof doc.layers.length !== 'number') return null;
+      return doc.layers.length;
+    } catch (_) {
+      return null;
+    }
+  }
+
   async function downloadToTemp(item) {
     const buffer = await net.fetchBytes(item.url);
     const cleanUrl = String(item.url || '').split(/[?#]/)[0];
@@ -33,22 +51,50 @@
   async function placeImage(item) {
     const file = await downloadToTemp(item);
     const token = await fs.createSessionToken(file);
+    const hadDocument = hasDocument();
+    const beforeDocId = activeDocumentId();
+    const beforeLayers = activeLayerCount();
+    let openedDocument = false;
+    let batchResult = null;
     await core.executeAsModal(async () => {
       if (!app.documents.length) {
         await app.open(file);
+        openedDocument = true;
         return;
       }
-      await action.batchPlay([{
+      batchResult = await action.batchPlay([{
         _obj: 'placeEvent',
         null: { _path: token, _kind: 'local' },
+        linked: false,
         freeTransformCenterState: { _enum: 'quadCenterState', _value: 'QCSAverage' },
         offset: {
           _obj: 'offset',
           horizontal: { _unit: 'pixelsUnit', _value: 0 },
           vertical: { _unit: 'pixelsUnit', _value: 0 },
         },
-      }], {});
+        _options: { dialogOptions: 'dontDisplay' },
+      }], { synchronousExecution: true, modalBehavior: 'execute' });
     }, { commandName: 'T8 置入图像' });
+
+    const afterLayers = activeLayerCount();
+    const afterDocId = activeDocumentId();
+    if (
+      hadDocument &&
+      beforeDocId &&
+      afterDocId === beforeDocId &&
+      beforeLayers !== null &&
+      afterLayers !== null &&
+      afterLayers <= beforeLayers
+    ) {
+      throw new Error('Photoshop 置入后未新增图层，请在 PS 面板重试或检查当前文档是否可编辑。');
+    }
+    return {
+      placed: true,
+      openedDocument,
+      beforeLayers,
+      afterLayers,
+      batchResultCount: Array.isArray(batchResult) ? batchResult.length : 0,
+    };
   }
 
   async function exportDocumentPng() {

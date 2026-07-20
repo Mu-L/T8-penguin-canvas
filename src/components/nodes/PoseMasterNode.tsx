@@ -22,6 +22,7 @@ import {
   UserPlus,
 } from 'lucide-react';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { PORT_COLOR } from '../../config/portTypes';
 import * as api from '../../services/api';
@@ -3880,7 +3881,7 @@ const PoseMasterNode = (props: NodeProps) => {
           <button
             type="button"
             className="t8-btn t8-btn-primary nodrag nopan h-12 w-full text-base font-bold"
-            onClick={() => void runPose()}
+            onClick={() => requestCanvasNodeRun(id)}
           >
             <Play size={16} /> 运行输出{renderModeLabel}
           </button>

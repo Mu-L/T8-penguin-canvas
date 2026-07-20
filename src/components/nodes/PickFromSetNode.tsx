@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { useThemeStore } from '../../stores/theme';
 import { useUpstreamMaterials, type MaterialKind } from './useUpstreamMaterials';
 import { PORT_COLOR } from '../../config/portTypes';
@@ -348,7 +349,7 @@ const PickFromSetNode = (p: NodeProps) => {
 
         {/* 主按钮 */}
         <button
-          onClick={handlePick}
+          onClick={() => requestCanvasNodeRun(p.id)}
           disabled={status === 'running' || total === 0}
           className={btnClass}
           style={isPixel ? { ...pixelBtnStyle, opacity: status === 'running' || total === 0 ? 0.55 : 1 } : undefined}

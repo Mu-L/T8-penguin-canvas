@@ -10,13 +10,13 @@ https://www.runninghub.cn/?inviteCode=rh-v1121
 My favorite girl Go YounJung
 # 🐧 贞贞的无限画布（企鹅共创版） · T8-penguin-canvas
 
-> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.4.8
+> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.5.4
 >
 > GitHub：<https://github.com/T8mars/T8-penguin-canvas>
 
 一个面向 AI 创作的 **节点式画布**：拖拽节点、连线编排、生成图像 / 视频 / 音频、调用 LLM、串接 RunningHub 工作流，叠加批量执行、智能对齐、打组、主题模板与终端日志。Web 浏览器和桌面端均可使用。
 
-![status](https://img.shields.io/badge/version-v2.4.8-brightgreen) ![node](https://img.shields.io/badge/node-55-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
+![status](https://img.shields.io/badge/version-v2.5.4-brightgreen) ![node](https://img.shields.io/badge/node-56-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
 
 ---
 
@@ -35,8 +35,15 @@ My favorite girl Go YounJung
 
 ## ✨ 功能亮点
 
-- 🎨 **55 个节点**，覆盖文本 / 图像 / 视频 / 音频 / LLM / RunningHub / ComfyUI / 3D / 工具 / 辅助 / 工具箱 / 输出预览 / 上传素材 / 素材集 / 批量打标 / 随机路由
+- 🎨 **56 个节点**，覆盖文本 / 图像 / 视频 / 音频 / LLM / RunningHub / ComfyUI / 3D / 工具 / 辅助 / 工具箱 / 输出预览 / 上传素材 / 素材集 / 批量打标 / 随机路由
 - 🧺 **画布级批量导入 + 素材合集打散**：上传节点支持一次选择多张图 / 多个视频 / 多段音频；也可直接把剪贴板或文件拖到画布，同类型多素材自动形成合集，上传和输出合集都可一键打散为多个独立素材节点
+- 🐎 **v2.5.4 Happy Horse / Seed Audio / 3D 白模自动更新版**：视频节点新增 Happy Horse 文生视频、单图生视频和多参考图生视频，音频节点新增 Doubao Seed Audio；3D 表情编辑器使用离线 ICT FaceKit 中性人类白模和 52 通道，支持照片比例校准及精确图片输出；教程同步新增第十六弹，贞贞国内/海外平台名称统一。
+- 🌐 **v2.5.3 双站 API 与网页素材采集自动更新版**：RunningHub 国内/海外双 Key 与站点路由、贞贞 SD2 的 Seedance/Seedream、ComfyUI 多类型聚合输出、Chrome 网页素材 Popup/Side Panel 批量采集和顶部 API 获取入口正式发布；Electron 发布新增必需私有 sidecar 强制校验，缺失即阻断。
+- 🌻 **v2.5.2 庭院守卫沉浸大屏自动更新版**：植物大战僵尸主题的庭院守卫新增类似俄罗斯方块主题的沉浸大屏按钮，战局不重载、按视口自适应放大并支持 Esc 退出；顶部“画布教程”同步新增教程第十五弹 Bilibili / YouTube 链接。
+- 🌻 **v2.5.1 庭院守卫 + Seedream 自动更新版**：新增第 14 套庭院守卫主题和按需加载的 Phaser 塔防面板，支持阳光、植物冷却、15 关、升级、局面恢复、鼠标离开自动暂停与主题默认音乐；图像节点新增 Seedream V5 Pro，支持文生图、多图编辑、PNG/JPEG、预设及自定义尺寸和最多 10 张参考图。
+- 🧭 **v2.5.0 随机路由 / 即梦 CLI / PS 与打标自动更新版**：随机路由新增“并发生成 / 顺序生成”模式，默认并发触发本次随机命中的多路下游；即梦 CLI 适配 v1.4.10，图像生成支持 `generate_num` 1-10，视频补齐 `seedance2.0mini`、`seedance2.0_vip` 4K 和 Seedance 1.x 新命名兼容；批量打标补齐图图打标器入口、最近打标文件定位和全部绝对路径查看；画布发送到 Photoshop 改为带状态确认的队列，PS 插件可正确打开前端地址并渲染资产缩略图。
+- 🌻 **庭院守卫主题 + 大画布塔防**：新增第 14 套强识别主题，使用原创植物、入侵者、战场和木质藤蔓 UI 覆盖顶栏、侧栏、节点、连线、MiniMap 与上下文菜单；1280×720 Phaser 战场直接位于无限画布世界坐标中，包含 5×9 草坪、阳光、8 种植物、8 种入侵者、15 关、清道器、昼夜波次、叶章升级、图鉴、局面恢复和原创音效。Phaser 按主题懒加载，普通主题不承担运行时体积。
+- 🎬 **v2.4.9 视频剪辑音频与导演分镜 mini 自动更新版**：视频剪辑合成在拖动片段并加入转场后，源视频音频会跟随 xfade / acrossfade 时间线压缩，不再按旧位置二次混音导致声音重叠、位移或最后一段无声；独立音频仍会叠加到保留的原声上。导演分镜台同步补齐 `seedance-2.0-mini` 模型选项，和 SD2.0 节点保持一致；本版继续校验 Photoshop 插件随 Electron 安装包分发。
 - 🧩 **v2.4.8 插件安装与素材工作流自动更新版**：顶部在“画布教程”左侧新增独立“插件安装”入口，集中说明 Photoshop UXP、Figma Bridge 和网页图片反推插件安装路径；批量打标补齐单项删除、LLM/Vision 预设、自定义模型、TXT/JSON 互斥、原素材目录保存和 Ideogram-4 JSON；上传 / 输出视频素材新增首尾帧获取、英伟达极速超分和 FlashVsr 质量超分；PS 插件升级到 0.1.3，增加启动诊断、资产分页和 UXP 面板尺寸护栏，并随 Electron 包一并校验打包。
 - 🖌️ **v2.4.7 Photoshop 联动 UI 热修自动更新版**：修复 `T8 Photoshop Link` 面板紧凑宽度下 `刷新 / 连接` 按钮文字被挤成竖排的问题，并补强插件 UI 自动化，覆盖资产库、生成、设置、PS 当前画面上传回 T8、画布发送到 PS 命令置入和生成后置入 PS。
 - 🖌️ **v2.4.6 Photoshop 联动热修自动更新版**：修复 `T8 Photoshop Link` 在 Photoshop UXP Manifest v5 下访问 `http://127.0.0.1:18766` 被 `Permission denied / Manifest entry not found` 拦截的问题，插件 manifest 改为带协议和端口的本机白名单；同时支持 18766-18776 本机端口 fallback，避免旧后端占用 18766 时新版桌面端退到后续端口后插件仍连错。
@@ -80,7 +87,8 @@ My favorite girl Go YounJung
 - 🏷️ **生成提示词 @ 素材提及 + 大编辑器**：图像 / 视频 / SD2.0 / 音频 / LLM / RunningHub / RH 钱包应用 / RH 超市文本参数可输入 `@` 选择当前上游素材，输入框内显示统一对齐的小预览 chip，提交时稳定解析为 `@image1` / `@video1` / `@audio1`；聚焦提示词框按 `Alt+Enter` 或点击放大按钮可打开全局大编辑器，`Ctrl+Enter` 完成、`Esc` 取消。
 - 🏅 **主题成就与有效时长**：按主题记录有效使用时长、特色节点事件、资源保存与工作流保存，解锁勋章和影片馆占位奖励；奖励影片素材未提供前会显示“待解锁 / 影片素材待提供”，不写入提示词、短链、Cookie 或资源 URL 等敏感内容。
 - 🧱 **俄罗斯方块主题 + 小游戏**：新增第 12 套强识别 Tetris Canvas 主题，浅色为奶白彩块，深色为街机霓虹；右上角快捷栏默认展开 10×20 俄罗斯方块小游戏，支持 7-bag、公平出块、幽灵落点、暂存、硬降、99 级递增、最高分保存，鼠标离开 / 窗口失焦 / 画布拖动时自动暂停，键盘只在游戏区域 hover 或 focus 时接管。
-- 🌾 **牧场物语主题 + 全画布养成层**：新增第 13 套强识别 Farm Story Canvas 主题，包含木牌节点、牧场地图底纹、农具端口、麻绳 / 水渠 / 田埂连线、镰刀剪线、牧场 MiniMap 标记和左侧牧场 HUD；当前按 roadmap 分阶段开发，已接入开垦、播种、浇水、收获、订单、建筑、装饰、动物、NPC、天气、节庆、惊喜事件、漂亮度和成就摘要。
+- 🌾 **牧场物语主题 + 全画布养成层**：新增第 13 套强识别 Farm Story Canvas 主题，作为牧场物语主题十三套内置模板中的完整养成主题，包含木牌节点、牧场地图底纹、农具端口、麻绳 / 水渠 / 田埂连线、镰刀剪线、牧场 MiniMap 标记和左侧牧场 HUD；当前按 roadmap 分阶段开发，已接入开垦、播种、浇水、收获、订单、建筑、装饰、动物、NPC、天气、节庆、惊喜事件、漂亮度和成就摘要。
+- 🌻 **庭院守卫主题 + 大画布战斗层**：新增第 14 套强识别 Garden Defense 主题，战斗区域随无限画布一起平移缩放，不占用右下角小地图；支持阳光经济、植物冷却、8+8 单位、15 关战役、昼夜、特殊能力、首领、5 级升级、长期档案与每画布战局存档。
 - 🧰 **ComfyUI / RH 工具箱 / 云上传增强**：ComfyUI 内置基础文生图样例和导入检查清单，后端把缺模型、缺节点、未启动、workflow 校验失败等错误转成可执行提示；默认只允许本机 ComfyUI，可信远端可通过单实例高危开关或 `T8_COMFYUI_ALLOW_REMOTE=1` 开启；RH 工具箱生成图像 / 视频 / 文本 / 音频快捷接入位；COS / OSS 上传失败会返回签名、权限、Bucket / Region、网络等结构化排查建议。
 - 📝 **文本节点自由缩放**：文本节点四角拖拽可独立调整宽高，输出端口固定贴合右侧中点，并在尺寸变化后刷新 ReactFlow internals，避免连线和端口脱离
 - 🔗 **RH 文本 NodeID 绑定**（v1.9.0）：文本节点可填写 RH 节点序号，RunningHub / RH 钱包应用 / RH 超市会按应用参数里的 RH nodeId 自动匹配上游文本；节点内也能手动选择绑定文本，冲突和错误序号会保留清晰状态提示
@@ -130,7 +138,7 @@ PS 面板包含 `资产 / 生成 / 设置` 三个页签：资产页可浏览最�
 - 🖱️ **右键画布快速添加节点**：菜单列出 7 个高频节点（upload / text / image / video / seedance / audio / llm）
 - 🎯 **框选自动菜单**：≥2 节点框选后自动弹出操作面板（组执行 / 复制 / 快复制 / 删除 / 打组）
 - ⏪ **Undo / Redo / 复制粘贴 / 导入导出 / 工作流模板** 完整画布交互
-- 🌗 **主题模板系统**：科技风 / 像素糖果风 / OP 风格 / RH 风格 / 火影忍者风格 / EVA 风格 / 幽游白书风格 / 灌篮高手风格 / 足球小将风格 / 七龙珠风格 / 圣斗士风格 / 俄罗斯方块主题 / 牧场物语主题十三套内置模板，支持浅色 / 深色、导入导出、编辑保存、自定义路径与默认静音主题音乐；牧场物语主题提供全画布种植、建造、装饰和经营反馈层，俄罗斯方块主题提供方块拼接画布、方块化 MiniMap、scoped 方块连线和可玩的右上角小游戏，圣斗士风格提供十二宫 / 冥界篇双主题，七龙珠风格提供胶囊设备面板、神龙雷达画布与气功波连线，幽游白书肖像大师隐藏模式会自动切换专用隐藏音乐
+- 🌗 **主题模板系统**：科技风 / 像素糖果风 / OP 风格 / RH 风格 / 火影忍者风格 / EVA 风格 / 幽游白书风格 / 灌篮高手风格 / 足球小将风格 / 七龙珠风格 / 圣斗士风格 / 俄罗斯方块主题 / 牧场物语主题 / 庭院守卫主题十四套内置模板，支持浅色 / 深色、导入导出、编辑保存、自定义路径与默认静音主题音乐；庭院守卫把 1280×720 塔防战场放入大画布世界坐标，牧场物语提供全画布种植经营层，俄罗斯方块提供可玩的右上角小游戏，圣斗士风格提供十二宫 / 冥界篇双主题
 - 🧭 **主题悬浮控件统一**：小图标按钮使用固定语义类，避免 OP / 像素等强风格按钮膨胀；火影小地图、控制条和音乐按钮对齐到与 RH 一致的底部悬浮体验
 - 🎭 **公开主题设计规范**：见 [`docs/theme-design-guide.md`](docs/theme-design-guide.md)，用户可按规范制作、导入和分享更好看的主题画布
 - 🖥️ **终端日志面板**：底部抽屉式实时日志，对齐主项目 logBus 协议
@@ -215,8 +223,8 @@ T8_COMFYUI_ALLOW_REMOTE: "1"
 | 层 | 技术 |
 |---|---|
 | 前端框架 | React 19 · TypeScript 5 · Vite 6 |
-| 样式 | Tailwind CSS 3 · CSS Modules · 主题模板（科技风 / 像素糖果风 / OP 风格 / RH 风格 / 火影忍者风格 / EVA 风格 / 幽游白书风格 / 灌篮高手风格 / 足球小将风格 / 七龙珠风格 / 圣斗士风格 / 俄罗斯方块主题 / 牧场物语主题） |
-| 画布引擎 | @xyflow/react 12 · zustand 5 · lucide-react |
+| 样式 | Tailwind CSS 3 · CSS Modules · 主题模板（科技风 / 像素糖果风 / OP 风格 / RH 风格 / 火影忍者风格 / EVA 风格 / 幽游白书风格 / 灌篮高手风格 / 足球小将风格 / 七龙珠风格 / 圣斗士风格 / 俄罗斯方块主题 / 牧场物语主题 / 庭院守卫主题） |
+| 画布引擎 | @xyflow/react 12 · Phaser 3（庭院守卫按需加载）· zustand 5 · lucide-react |
 | 后端 | Node.js · Express · sharp（图像处理） · multer（上传） |
 | 桌面端 | Electron 33 |
 | AI 上游 | 贞贞工坊（图像/视频/Suno）· RunningHub · 任意 OpenAI 兼容 LLM |

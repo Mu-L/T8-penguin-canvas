@@ -1,6 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const config = require('../config');
 const settingsRouter = require('./settings');
 const { normalizeAdvancedProviders, maskAdvancedProviders } = require('../providers/registry');
@@ -409,7 +410,8 @@ function resolveBatchTagModel(provider, input = {}, kind = 'image') {
 function ensureInside(root, target) {
   const resolvedRoot = path.resolve(root);
   const resolvedTarget = path.resolve(target);
-  if (resolvedTarget !== resolvedRoot && !resolvedTarget.startsWith(resolvedRoot + path.sep)) {
+  const rel = path.relative(resolvedRoot, resolvedTarget);
+  if (rel !== '' && (!rel || rel.startsWith('..') || path.isAbsolute(rel))) {
     throw new Error('输出路径不安全。');
   }
   return resolvedTarget;
@@ -426,6 +428,17 @@ function uniqueFilePath(root, name, overwrite = false) {
     if (!fs.existsSync(currentPath)) return { name: currentName, path: currentPath };
   }
   throw new Error('无法生成不冲突的输出文件名。');
+}
+
+function ensureWritableDirectory(dirPath) {
+  const resolved = path.resolve(dirPath);
+  if (fs.existsSync(resolved)) {
+    const stat = fs.statSync(resolved);
+    if (!stat.isDirectory()) throw new Error(`输出路径不是目录: ${resolved}`);
+    return resolved;
+  }
+  fs.mkdirSync(resolved, { recursive: true });
+  return resolved;
 }
 
 function decodePublicPathname(value) {
@@ -538,26 +551,79 @@ function collectDevSourceCandidateDirs(parentRoot, projectRoot, maxDirs = 500) {
   return out;
 }
 
+function splitDevSourceRoots(value) {
+  return String(value || '')
+    .split(process.platform === 'win32' ? /[;\r\n]+/ : /[:;\r\n]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function addDevSourceRoot(out, seen, root) {
+  const raw = String(root || '').trim();
+  if (!raw || !path.isAbsolute(raw)) return;
+  let resolved = '';
+  try {
+    resolved = path.resolve(raw);
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) return;
+  } catch {
+    return;
+  }
+  const key = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  if (seen.has(key)) return;
+  seen.add(key);
+  out.push(resolved);
+}
+
+function devSourceSearchRoots(projectRoot) {
+  const out = [];
+  const seen = new Set();
+  for (const root of splitDevSourceRoots(process.env.T8PC_BATCH_TAG_SOURCE_ROOTS)) {
+    addDevSourceRoot(out, seen, root);
+  }
+  addDevSourceRoot(out, seen, path.dirname(projectRoot));
+
+  const userRoots = [
+    os.homedir(),
+    process.env.USERPROFILE,
+    process.env.HOME,
+    process.env.ONEDRIVE,
+    process.env.OneDrive,
+    process.env.OneDriveConsumer,
+    process.env.OneDriveCommercial,
+  ].filter(Boolean);
+  const commonNames = ['Desktop', 'Downloads', 'Pictures', 'Documents', 'Videos'];
+  for (const root of userRoots) {
+    for (const name of commonNames) addDevSourceRoot(out, seen, path.join(root, name));
+  }
+  for (const root of userRoots) addDevSourceRoot(out, seen, root);
+  return out;
+}
+
 function inferDevSiblingSourcePath(item = {}) {
   if (config.IS_PACKAGED) return '';
   const sourceName = sourceBasenameFromItem(item);
   if (!sourceName) return '';
   const expectedSize = Number(item.size || item.fileSize || 0);
   const projectRoot = path.resolve(config.BASE_DIR || path.join(__dirname, '..', '..'));
-  const parentRoot = path.dirname(projectRoot);
   const matches = [];
-  const dirs = collectDevSourceCandidateDirs(parentRoot, projectRoot);
-  for (const dir of dirs) {
-    const candidate = path.resolve(dir, sourceName);
-    if (isPathInside(projectRoot, candidate)) continue;
-    try {
-      const stat = fs.statSync(candidate);
-      if (!stat.isFile()) continue;
-      if (expectedSize > 0 && stat.size !== expectedSize) continue;
-      matches.push(candidate);
-      if (matches.length > 1) return '';
-    } catch {
-      // Missing candidates are normal while scanning sibling folders.
+  const checkedDirs = new Set();
+  for (const root of devSourceSearchRoots(projectRoot)) {
+    const dirs = collectDevSourceCandidateDirs(root, projectRoot);
+    for (const dir of dirs) {
+      const dirKey = process.platform === 'win32' ? path.resolve(dir).toLowerCase() : path.resolve(dir);
+      if (checkedDirs.has(dirKey)) continue;
+      checkedDirs.add(dirKey);
+      const candidate = path.resolve(dir, sourceName);
+      if (isPathInside(projectRoot, candidate)) continue;
+      try {
+        const stat = fs.statSync(candidate);
+        if (!stat.isFile()) continue;
+        if (expectedSize > 0 && stat.size !== expectedSize) continue;
+        matches.push(candidate);
+        if (matches.length > 1) return '';
+      } catch {
+        // Missing candidates are normal while scanning likely source folders.
+      }
     }
   }
   return matches.length === 1 ? matches[0] : '';
@@ -659,7 +725,7 @@ function buildJsonPayload({
 function writeBatchTagSidecars(input = {}) {
   const localTarget = input.outputRoot ? null : resolveLocalSidecarTarget(input.item);
   const outputRoot = path.resolve(localTarget?.root || input.outputRoot || path.join(config.OUTPUT_DIR, 'batch-tags'));
-  fs.mkdirSync(outputRoot, { recursive: true });
+  ensureWritableDirectory(outputRoot);
   const formats = sidecarFormats(input.formats);
   const names = buildSidecarNames(localTarget?.item || input.item, formats);
   const saved = [];
@@ -672,7 +738,7 @@ function writeBatchTagSidecars(input = {}) {
     const name = names[format];
     if (!name) continue;
     const target = uniqueFilePath(outputRoot, name, input.overwrite === true);
-    fs.mkdirSync(path.dirname(target.path), { recursive: true });
+    ensureWritableDirectory(path.dirname(target.path));
     fs.writeFileSync(target.path, payload, 'utf8');
     saved.push({
       format,

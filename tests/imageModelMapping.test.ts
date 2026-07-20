@@ -83,3 +83,41 @@ test('GPT Image 2 2K and 4K variants stay on the Zhenzhen gpt-image-2 route', ()
   assert.match(proxySource, /image_size: gptImage2ForcedSize \|\| image_size/);
   assert.match(proxySource, /size: gptImage2ForcedSize \? undefined : size/);
 });
+
+test('Seedream V5 Pro is isolated behind its own image protocol and supports up to 10 edit references', () => {
+  const seedream = IMAGE_MODELS.find((model) => model.id === 'seedream-v5-pro');
+
+  assert.equal(seedream?.tabLabel, 'Seedream');
+  assert.equal(seedream?.apiModel, 'seedream-v5-pro');
+  assert.equal(seedream?.paramKind, 'seedream-v5');
+  assert.deepEqual(seedream?.capabilities, ['t2i', 'i2i', 'edit']);
+  assert.equal(seedream?.defaultSize, '2048x2048');
+  assert.ok(seedream?.sizes.includes('1024x1024'));
+  assert.ok(seedream?.sizes.includes('4096x4096'));
+  assert.ok(seedream?.sizes.includes('custom'));
+  assert.equal(seedream?.maxReferenceImages, 10);
+  assert.match(imageNodeSource, /sizeLevel === 'custom' \? seedreamCustomSize : sizeLevel/);
+  assert.match(imageNodeSource, /Seedream 自定义尺寸格式应为 宽x高/);
+  assert.match(imageNodeSource, /response_format: isSeedream \? 'url' : undefined/);
+  assert.match(imageNodeSource, /output_format: isSeedream \? seedreamOutputFormat : undefined/);
+  assert.match(proxySource, /if \(paramKind === 'seedream-v5'\)/);
+  assert.match(proxySource, /const url = `\$\{upstreamBase\}\/generations`/);
+  assert.match(proxySource, /if \(seedreamRefs\.length\) body\.image = seedreamRefs/);
+  assert.match(proxySource, /Seedream 尺寸格式无效/);
+  assert.match(imageNodeSource, /remaining: maxRefs - orderedImages\.length/);
+});
+
+test('Seedream tab keeps legacy source by default and exposes isolated seedance.nz image routing', () => {
+  assert.match(imageNodeSource, /d\?\.seedreamApiSource === 'seedance-nz' \? 'seedance-nz' : 'zhenzhen'/);
+  assert.match(imageNodeSource, /贞贞的AI工坊（海外） · 原 Seedream/);
+  assert.match(imageNodeSource, /贞贞的平价AI工坊（国内） · api\.seedance\.nz/);
+  assert.match(imageNodeSource, /seedream-v5-pro-i2i/);
+  assert.match(imageNodeSource, /seedream-v5-pro-t2i/);
+  assert.match(imageNodeSource, /submitSeedreamNz/);
+  assert.match(imageNodeSource, /querySeedreamNz/);
+  assert.match(proxySource, /\/image\/seedance-nz\/submit/);
+  assert.match(proxySource, /\/image\/seedance-nz\/status\/:tid/);
+  assert.match(proxySource, /settings\?\.zhenzhenSd2ApiKey/);
+  assert.match(proxySource, /seedanceNz\.submitImageTask/);
+  assert.match(proxySource, /seedanceNz\.queryImageTask/);
+});

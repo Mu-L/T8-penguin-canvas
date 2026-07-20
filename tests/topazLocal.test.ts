@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
+import { EXECUTABLE_NODE_TYPES } from '../src/config/executableNodeTypes.ts';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 const require = createRequire(import.meta.url);
 const {
@@ -96,27 +98,36 @@ test('Topaz Video fixes thm-2 to 1x and rejects empty actions', () => {
 });
 
 test('Topaz local nodes are registered, executable, routed and package-checked', () => {
-  const registry = read('src/config/nodeRegistry.ts');
-  const ports = read('src/config/portTypes.ts');
   const types = read('src/types/canvas.ts');
   const canvas = read('src/components/Canvas.tsx');
-  const actionBar = read('src/components/NodeActionBar.tsx');
   const loop = read('src/components/nodes/LoopNode.tsx');
   const server = read('backend/src/server.js');
   const postBuild = read('electron/_post_build.cjs');
 
-  assert.match(registry, /type:\s*'topaz-image-upscale'[\s\S]*label:\s*'Topaz图像高清化'[\s\S]*category:\s*'toolbox'/);
-  assert.match(registry, /type:\s*'topaz-video-upscale'[\s\S]*label:\s*'Topaz视频高清化'[\s\S]*category:\s*'toolbox'/);
-  assert.match(ports, /'topaz-image-upscale':\s*\{\s*inputs:\s*\['image'\],\s*outputs:\s*\['image'\]\s*\}/);
-  assert.match(ports, /'topaz-video-upscale':\s*\{\s*inputs:\s*\['video'\],\s*outputs:\s*\['video'\]\s*\}/);
+  assertProductionNodeSchema('topaz-image-upscale', {
+    label: 'Topaz图像高清化',
+    category: 'toolbox',
+    inputs: ['image'],
+    outputs: ['image'],
+    executable: true,
+  });
+  assertProductionNodeSchema('topaz-video-upscale', {
+    label: 'Topaz视频高清化',
+    category: 'toolbox',
+    inputs: ['video'],
+    outputs: ['video'],
+    executable: true,
+  });
   assert.match(types, /\|\s*'topaz-image-upscale'/);
   assert.match(types, /\|\s*'topaz-video-upscale'/);
   assert.match(canvas, /TopazImageUpscaleNode/);
   assert.match(canvas, /TopazVideoUpscaleNode/);
   assert.match(canvas, /'topaz-image-upscale':\s*TopazImageUpscaleNode/);
   assert.match(canvas, /'topaz-video-upscale':\s*TopazVideoUpscaleNode/);
-  assert.match(actionBar, /'topaz-image-upscale', 'topaz-video-upscale'/);
-  assert.match(loop, /'topaz-image-upscale', 'topaz-video-upscale'/);
+  assert.equal(EXECUTABLE_NODE_TYPES.has('topaz-image-upscale'), true);
+  assert.equal(EXECUTABLE_NODE_TYPES.has('topaz-video-upscale'), true);
+  assert.match(loop, /import \{ EXECUTABLE_NODE_TYPES \} from '\.\.\/\.\.\/config\/executableNodeTypes'/);
+  assert.match(loop, /topologicalSort\(routePlanned\.nodes, routePlanned\.edges, EXECUTABLE_NODE_TYPES\)/);
   assert.match(server, /const topazRouter = require\('\.\/routes\/topaz'\)/);
   assert.match(server, /app\.use\('\/api\/topaz', topazRouter\)/);
   assert.match(postBuild, /routes', 'topaz\.t8c'/);

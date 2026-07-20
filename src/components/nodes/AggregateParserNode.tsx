@@ -17,6 +17,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { placeSingleNode } from '../../utils/nodePlacement';
 import { getAggregateParserStatus, resolveAggregateMedia, type AggregateParserMedia, type AggregateParserMode, type AggregateParserResult, type AggregateParserStatus } from '../../services/parseHub';
 import { buildCookieGuide, detectParseAuthProfile, hasUsableCookie, normalizeCookieInput } from '../../utils/parseAuth';
@@ -758,7 +759,7 @@ const AggregateParserNode = (p: NodeProps) => {
           <button
             type="button"
             className="t8-btn t8-btn-primary w-full min-h-10 text-xs"
-            onClick={() => { void handleRun().catch(() => undefined); }}
+            onClick={() => requestCanvasNodeRun(p.id)}
             disabled={isRunning}
           >
             {isRunning ? <Loader2 size={15} className="animate-spin" /> : mode === 'download' ? <Download size={15} /> : <Clipboard size={15} />}

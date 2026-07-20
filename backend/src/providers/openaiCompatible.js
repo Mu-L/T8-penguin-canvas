@@ -1,5 +1,6 @@
 const { resolveMediaRef } = require('./mediaResolver');
 const { normalizeLlmMessageMedia } = require('./llmMedia');
+const { providerTrace } = require('./providerTrace');
 
 const DEFAULT_TIMEOUT_MS = 8000;
 const IMAGE_EDIT_REMOTE_MAX_BYTES = 20 * 1024 * 1024;
@@ -465,19 +466,22 @@ async function generateChat(provider, input = {}, options = {}) {
       fetchImpl: options.fetchImpl,
     });
     const raw = await responseJson(res);
+    const trace = providerTrace(res, raw, { pollCount: 0 });
     if (!res.ok) {
       return {
         ok: false,
         code: 'http_error',
         providerId: provider.id,
         protocol: provider.protocol,
+        model,
         error: `扩展 LLM 调用失败：HTTP ${res.status}${raw?.message ? ` ${trimBodyForError(raw.message)}` : ''}`,
         raw,
+        ...trace,
       };
     }
     const text = extractChatText(raw);
     if (!text) {
-      return { ok: false, code: 'empty_text', providerId: provider.id, protocol: provider.protocol, error: '扩展 LLM 没有返回文本。', raw };
+      return { ok: false, code: 'empty_text', providerId: provider.id, protocol: provider.protocol, model, error: '扩展 LLM 没有返回文本。', raw, ...trace };
     }
     const data = unwrapOpenAIResponse(raw);
     const finishReason = data?.choices?.[0]?.finish_reason || data?.choices?.[0]?.finishReason || '';
@@ -492,6 +496,7 @@ async function generateChat(provider, input = {}, options = {}) {
       finishReason,
       truncated: ['length', 'max_tokens', 'content_length'].includes(String(finishReason || '').toLowerCase()),
       raw,
+      ...trace,
     };
   } catch (e) {
     return {
@@ -586,21 +591,24 @@ async function generateImage(provider, input = {}, options = {}) {
       fetchImpl: options.fetchImpl,
     });
     const raw = await responseJson(res);
+    const trace = providerTrace(res, raw, { pollCount: 0 });
     if (!res.ok) {
       return {
         ok: false,
         code: 'http_error',
         providerId: provider.id,
         protocol: provider.protocol,
+        model,
         error: `扩展图像调用失败：HTTP ${res.status}${raw?.message ? ` ${trimBodyForError(raw.message)}` : ''}`,
         raw,
+        ...trace,
       };
     }
     const imageUrls = extractImageUrls(raw);
     if (!imageUrls.length) {
-      return { ok: false, code: 'empty_image', providerId: provider.id, protocol: provider.protocol, error: '扩展图像接口没有返回图片。', raw };
+      return { ok: false, code: 'empty_image', providerId: provider.id, protocol: provider.protocol, model, error: '扩展图像接口没有返回图片。', raw, ...trace };
     }
-    return { ok: true, kind: 'image', code: 'completed', providerId: provider.id, protocol: provider.protocol, model, imageUrls, raw };
+    return { ok: true, kind: 'image', code: 'completed', providerId: provider.id, protocol: provider.protocol, model, imageUrls, raw, ...trace };
   } catch (e) {
     return {
       ok: false,
@@ -655,21 +663,24 @@ async function generateVideo(provider, input = {}, options = {}) {
       fetchImpl: options.fetchImpl,
     });
     const raw = await responseJson(res);
+    const trace = providerTrace(res, raw, { pollCount: 0 });
     if (!res.ok) {
       return {
         ok: false,
         code: 'http_error',
         providerId: provider.id,
         protocol: provider.protocol,
+        model,
         error: `扩展视频调用失败：HTTP ${res.status}${raw?.message ? ` ${trimBodyForError(raw.message)}` : ''}`,
         raw,
+        ...trace,
       };
     }
     const videoUrls = extractVideoUrls(raw);
     if (!videoUrls.length) {
-      return { ok: false, code: 'empty_video', providerId: provider.id, protocol: provider.protocol, error: '扩展视频接口没有返回视频。', taskId: extractTaskId(raw), raw };
+      return { ok: false, code: 'empty_video', providerId: provider.id, protocol: provider.protocol, model, error: '扩展视频接口没有返回视频。', taskId: extractTaskId(raw), raw, ...trace };
     }
-    return { ok: true, kind: 'video', code: 'completed', providerId: provider.id, protocol: provider.protocol, model, taskId: extractTaskId(raw), videoUrls, raw };
+    return { ok: true, kind: 'video', code: 'completed', providerId: provider.id, protocol: provider.protocol, model, taskId: extractTaskId(raw), videoUrls, raw, ...trace };
   } catch (e) {
     return {
       ok: false,

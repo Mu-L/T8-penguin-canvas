@@ -8,6 +8,8 @@ import {
   randomRouteOutputHandle,
   selectRandomRouteHandles,
 } from '../src/utils/randomRoute.ts';
+import { topologicalLayers } from '../src/utils/topologicalSort.ts';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 function read(rel: string) {
   return readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
@@ -25,6 +27,7 @@ test('random route normalizes output count and random pass count within supporte
   assert.deepEqual(normalizeRandomRouteSettings({}), {
     totalOutputs: 10,
     randomPassCount: 1,
+    executionMode: 'parallel',
   });
 
   assert.deepEqual(
@@ -32,6 +35,7 @@ test('random route normalizes output count and random pass count within supporte
     {
       totalOutputs: 100,
       randomPassCount: 2,
+      executionMode: 'parallel',
     },
   );
 
@@ -40,6 +44,7 @@ test('random route normalizes output count and random pass count within supporte
     {
       totalOutputs: 1,
       randomPassCount: 1,
+      executionMode: 'parallel',
     },
   );
 
@@ -48,6 +53,16 @@ test('random route normalizes output count and random pass count within supporte
     {
       totalOutputs: 5,
       randomPassCount: 5,
+      executionMode: 'parallel',
+    },
+  );
+
+  assert.deepEqual(
+    normalizeRandomRouteSettings({ totalOutputs: 5, randomPassCount: 2, randomRouteExecutionMode: 'serial' }),
+    {
+      totalOutputs: 5,
+      randomPassCount: 2,
+      executionMode: 'serial',
     },
   );
 });
@@ -116,6 +131,27 @@ test('outer canvas execution lets random route own its downstream branch nodes',
   assert.deepEqual(pruned.edges, []);
 });
 
+test('topological layers allow independent random route branches to run together', () => {
+  const nodes = [
+    node('image-a'),
+    node('image-b'),
+    node('video-c', 'video'),
+    node('llm-d', 'llm'),
+    node('note', 'text'),
+  ];
+  const edges = [
+    edge('image-a', 'video-c'),
+    edge('image-b', 'video-c'),
+    edge('video-c', 'llm-d'),
+    edge('note', 'llm-d'),
+  ];
+
+  assert.deepEqual(
+    topologicalLayers(nodes, edges, new Set(['image', 'video', 'llm'])),
+    [['image-a', 'image-b'], ['video-c'], ['llm-d']],
+  );
+});
+
 test('random route is a pass-through router and does not auto-output input materials', () => {
   const canvas = read('src/components/Canvas.tsx');
 
@@ -137,24 +173,30 @@ test('random route removes stale auto-output nodes created by older builds', () 
 });
 
 test('random route node is registered as a dynamic utility node with run support', () => {
-  const registry = read('src/config/nodeRegistry.ts');
-  const ports = read('src/config/portTypes.ts');
   const types = read('src/types/canvas.ts');
   const canvas = read('src/components/Canvas.tsx');
-  const actionBar = read('src/components/NodeActionBar.tsx');
   const nodeSource = read('src/components/nodes/RandomRouteNode.tsx');
   const features = read('features.json');
 
-  assert.match(registry, /type:\s*'random-route'[\s\S]*label:\s*'随机路由'[\s\S]*category:\s*'utility'/);
-  assert.match(ports, /'random-route':\s*\{\s*inputs:\s*\['any'\],\s*outputs:\s*\['any'\]\s*\}/);
+  assertProductionNodeSchema('random-route', {
+    label: '随机路由',
+    category: 'utility',
+    inputs: ['any'],
+    outputs: ['any'],
+    executable: true,
+  });
   assert.match(types, /\|\s*'random-route'/);
   assert.match(canvas, /const RandomRouteNode = lazyCanvasNode\(\(\) => import\('\.\/nodes\/RandomRouteNode'\)/);
   assert.match(canvas, /'random-route':\s*RandomRouteNode/);
   assert.match(canvas, /'random-route'/);
-  assert.match(actionBar, /'random-route'/);
   assert.match(features, /"nodeType":\s*"random-route"/);
   assert.match(features, /"type":\s*"random-route"/);
   assert.match(nodeSource, /data-random-route-node/);
   assert.match(nodeSource, /RANDOM_ROUTE_MAX_OUTPUTS/);
   assert.match(nodeSource, /random_pass_count/);
+  assert.match(nodeSource, /randomRouteExecutionMode/);
+  assert.match(nodeSource, /并发生成/);
+  assert.match(nodeSource, /顺序生成/);
+  assert.match(nodeSource, /topologicalLayers/);
+  assert.match(nodeSource, /Promise\.all/);
 });

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 const require = createRequire(import.meta.url);
 const path = require('node:path');
@@ -13,25 +14,25 @@ function read(rel: string) {
 }
 
 test('aggregate parser node is registered in toolbox with media ports', () => {
-  const registry = read('src/config/nodeRegistry.ts');
-  const ports = read('src/config/portTypes.ts');
   const types = read('src/types/canvas.ts');
   const canvas = read('src/components/Canvas.tsx');
   const placement = read('src/utils/nodePlacement.ts');
-  const actionBar = read('src/components/NodeActionBar.tsx');
   const loop = read('src/components/nodes/LoopNode.tsx');
 
-  assert.match(registry, /type:\s*'aggregate-parser'[\s\S]*label:\s*'聚合解析'[\s\S]*category:\s*'toolbox'/);
-  assert.match(ports, /'aggregate-parser':\s*\{\s*inputs:\s*\['text'\],\s*outputs:\s*\['text',\s*'image',\s*'video',\s*'audio'\]\s*\}/);
+  assertProductionNodeSchema('aggregate-parser', {
+    label: '聚合解析',
+    category: 'toolbox',
+    inputs: ['text'],
+    outputs: ['text', 'image', 'video', 'audio'],
+    executable: true,
+  });
   assert.match(types, /\|\s*'aggregate-parser'/);
   assert.match(canvas, /const AggregateParserNode = lazyCanvasNode\(\(\) => import\('\.\/nodes\/AggregateParserNode'\)/);
   assert.match(canvas, /'aggregate-parser':\s*AggregateParserNode/);
   assert.match(canvas, /'aggregate-parser':\s*\{[\s\S]*aggregateParserMode:\s*'download'/);
   assert.match(canvas, /'aggregate-parser':\s*\{[\s\S]*aggregateParserModeUserSet:\s*false/);
   assert.match(canvas, /'aggregate-parser':\s*\{[\s\S]*aggregateParserAcceptedCompliance:\s*false/);
-  assert.match(canvas, /'cinematic',\s*'video-motion',\s*'multi-angle-visual',\s*'portrait-master',\s*'pose-master',\s*'aggregate-parser'/);
-  assert.match(actionBar, /'portrait-master',\s*'pose-master',\s*'aggregate-parser'/);
-  assert.match(loop, /'aggregate-parser'/);
+  assert.match(loop, /import \{ EXECUTABLE_NODE_TYPES \} from '\.\.\/\.\.\/config\/executableNodeTypes'/);
   assert.match(placement, /'aggregate-parser':\s*\{\s*w:\s*620,\s*h:\s*680\s*\}/);
 });
 

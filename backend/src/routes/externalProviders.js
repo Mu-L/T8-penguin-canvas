@@ -122,22 +122,39 @@ async function saveOneMediaOutput(url, kind = 'image', options = {}) {
   return text;
 }
 
-async function saveImageOutputs(urls, options = {}) {
+async function saveMediaOutputs(kind, urls, options = {}) {
   const out = [];
+  const errors = [];
   for (const url of Array.isArray(urls) ? urls : []) {
-    const saved = await saveOneMediaOutput(url, 'image', options);
-    if (saved) out.push(saved);
+    try {
+      const saved = await saveOneMediaOutput(url, kind, options);
+      if (saved) out.push(saved);
+    } catch (error) {
+      errors.push({
+        kind,
+        url: String(url || '').slice(0, 2048),
+        error: error?.message || String(error),
+      });
+    }
   }
-  return out;
+  return { urls: out, errors };
+}
+
+async function saveImageOutputs(urls, options = {}) {
+  return (await saveMediaOutputs('image', urls, options)).urls;
 }
 
 async function saveVideoOutputs(urls, options = {}) {
-  const out = [];
-  for (const url of Array.isArray(urls) ? urls : []) {
-    const saved = await saveOneMediaOutput(url, 'video', options);
-    if (saved) out.push(saved);
-  }
-  return out;
+  return (await saveMediaOutputs('video', urls, options)).urls;
+}
+
+function outputKindsForPayload(payload = {}) {
+  const kinds = [];
+  if (Array.isArray(payload.imageUrls) && payload.imageUrls.length) kinds.push('image');
+  if (Array.isArray(payload.videoUrls) && payload.videoUrls.length) kinds.push('video');
+  if (Array.isArray(payload.audioUrls) && payload.audioUrls.length) kinds.push('audio');
+  if (String(payload.text || '').trim()) kinds.push('text');
+  return kinds;
 }
 
 function resultResponse(res, result, provider, dataPatch = {}) {
@@ -361,10 +378,48 @@ router.post('/image', async (req, res) => {
     });
     if (!result.ok) return resultResponse(res, result, resolved.provider);
     const remoteImageUrls = Array.isArray(result.imageUrls) ? result.imageUrls : [];
-    const imageUrls = await saveImageOutputs(remoteImageUrls);
+    const remoteVideoUrls = Array.isArray(result.videoUrls) ? result.videoUrls : [];
+    const remoteAudioUrls = Array.isArray(result.audioUrls) ? result.audioUrls : [];
+    const [savedImages, savedVideos, savedAudios] = await Promise.all([
+      saveMediaOutputs('image', remoteImageUrls),
+      saveMediaOutputs('video', remoteVideoUrls),
+      saveMediaOutputs('audio', remoteAudioUrls),
+    ]);
+    const imageUrls = savedImages.urls;
+    const videoUrls = savedVideos.urls;
+    const audioUrls = savedAudios.urls;
+    const outputSaveErrors = [...savedImages.errors, ...savedVideos.errors, ...savedAudios.errors];
+    const outputKinds = outputKindsForPayload({ imageUrls, videoUrls, audioUrls, text: result.text });
+    const primaryKind = outputKinds[0] || result.primaryKind || result.kind || 'image';
+    if (!outputKinds.length && outputSaveErrors.length) {
+      return resultResponse(res, {
+        ...result,
+        ok: false,
+        code: 'output_persist_failed',
+        error: `ComfyUI 已生成结果，但保存到 T8 本地失败：${outputSaveErrors[0].error}`,
+      }, resolved.provider, {
+        remoteImageUrls,
+        remoteVideoUrls,
+        remoteAudioUrls,
+        imageUrls,
+        videoUrls,
+        audioUrls,
+        outputKinds,
+        primaryKind,
+        outputSaveErrors,
+      });
+    }
     return resultResponse(res, result, resolved.provider, {
       remoteImageUrls,
+      remoteVideoUrls,
+      remoteAudioUrls,
       imageUrls,
+      videoUrls,
+      audioUrls,
+      outputKinds,
+      primaryKind,
+      kind: primaryKind,
+      outputSaveErrors,
     });
   } catch (e) {
     return res.status(500).json({

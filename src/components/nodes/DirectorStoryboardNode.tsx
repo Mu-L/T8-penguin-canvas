@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, useReactFlow, type NodeProps } from '@xyflow/react';
 import {
   AlertCircle,
   Clapperboard,
@@ -24,12 +24,16 @@ import {
 import {
   querySeedance,
   submitSeedance,
+  type SeedanceTaskProvider,
   uploadFile,
 } from '../../services/generation';
 import * as api from '../../services/api';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { createCanvasNodeRunRequestId, requestCanvasNodeRun } from '../../utils/canvasRunRequest';
+import type { RunNodeLifecycleReporter } from '../../types/project';
 import { useMaterialDropTarget } from '../../hooks/useMaterialDropTarget';
 import { useThemeStore } from '../../stores/theme';
+import { useApiKeysStore } from '../../stores/apiKeys';
 import { logBus } from '../../stores/logs';
 import { taskCompletionSound } from '../../stores/taskCompletionSound';
 import { useDragMaterialStore, type MaterialPayload } from '../../stores/dragMaterial';
@@ -67,13 +71,19 @@ import {
   type DirectorStoryboardShot,
 } from '../../utils/directorStoryboard';
 import { materialMentionKey, type MediaMention } from './mediaMentions';
+import {
+  LEGACY_SEEDANCE_MODEL_OPTIONS,
+  LEGACY_SEEDANCE_RATIO_OPTIONS,
+  LEGACY_SEEDANCE_RESOLUTION_OPTIONS,
+  SEEDANCE_NZ_MODEL_OPTIONS,
+  SEEDANCE_NZ_NATIVE_RESOLUTION_OPTIONS,
+  SEEDANCE_NZ_RATIO_OPTIONS,
+  SEEDANCE_NZ_RESOLUTION_OPTIONS,
+  isSeedanceBuiltinSource,
+  isSeedanceNzStandardModel,
+  type SeedanceBuiltinSource,
+} from '../../config/seedance';
 
-const MODEL_OPTIONS = [
-  { value: 'doubao-seedance-2-0-fast-260128', label: 'seedance-2-0-fast' },
-  { value: 'doubao-seedance-2-0-260128', label: 'seedance-2-0' },
-];
-const RATIO_OPTIONS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9', '9:21', 'adaptive'];
-const RESOLUTION_OPTIONS = ['480p', '720p', 'native1080p', '1080p', '2k', '4k'];
 const FRAME_MODE_OPTIONS = [
   { value: 'auto', label: '多参考图' },
   { value: 'first', label: '首帧' },
@@ -89,6 +99,7 @@ type JobUiResult = {
   title?: string;
   shotId?: string;
   taskId?: string | null;
+  taskProvider?: Exclude<SeedanceTaskProvider, 'auto'> | null;
   videoUrl?: string | null;
   error?: string | null;
   progress?: string;
@@ -97,6 +108,22 @@ type JobUiResult = {
 type ResultsMap = Record<string, JobUiResult>;
 type ReferenceKind = 'image' | 'video' | 'audio';
 type BridgeUploadTarget = 'first-image' | 'last-image' | 'previous-video' | 'next-video';
+type DirectorStoryboardRunMode =
+  | 'all'
+  | 'shot'
+  | 'bridge-one'
+  | 'bridge-all'
+  | 'refresh-bridge-one'
+  | 'refresh-all';
+
+const DIRECTOR_STORYBOARD_RUN_PURPOSE: Record<DirectorStoryboardRunMode, string> = {
+  all: 'storyboard-all',
+  shot: 'storyboard-shot',
+  'bridge-one': 'storyboard-bridge',
+  'bridge-all': 'storyboard-bridges',
+  'refresh-bridge-one': 'storyboard-refresh-bridge',
+  'refresh-all': 'storyboard-refresh-all',
+};
 
 type DurationResizeState = {
   shotId: string;
@@ -289,12 +316,14 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
+  const rf = useReactFlow();
   const update = useUpdateNodeData(id);
   const hasAutoOutput = useHasAutoOutput(id);
   const { theme, style: themeStyle } = useThemeStore();
   const isDark = theme === 'dark';
   const isPixel = themeStyle === 'pixel';
   const d = (data as any) || {};
+  const hasSeedanceNzKey = useApiKeysStore((state) => !!String(state.settings.zhenzhenSd2ApiKey || '').trim());
   const src = `director:${id.slice(0, 6)}`;
 
   const shots = useMemo(
@@ -335,9 +364,26 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
   );
   const hasBusyBridge = bridges.some((bridge) => isBridgeBusy(bridge));
   const isBusy = status === 'submitting' || status === 'polling' || hasBusyBridge;
-  const model = String(d.model || MODEL_OPTIONS[0].value);
-  const ratio = String(d.ratio || '16:9');
-  const resolution = String(d.resolution || '480p');
+  const savedBuiltinSource = String(d.seedanceApiSource || '');
+  const builtinSource: SeedanceBuiltinSource = isSeedanceBuiltinSource(savedBuiltinSource)
+    ? savedBuiltinSource
+    : 'zhenzhen-legacy';
+  const effectiveTaskProvider: Exclude<SeedanceTaskProvider, 'auto'> = builtinSource === 'auto'
+    ? (hasSeedanceNzKey ? 'seedance-nz' : 'zhenzhen-legacy')
+    : builtinSource;
+  const isSeedanceNzSelected = effectiveTaskProvider === 'seedance-nz';
+  const legacyModel = String(d.model || LEGACY_SEEDANCE_MODEL_OPTIONS[0].value);
+  const seedanceNzModel = String(d.seedanceNzModel || 'fast');
+  const model = isSeedanceNzSelected ? seedanceNzModel : legacyModel;
+  const modelOptions = isSeedanceNzSelected ? SEEDANCE_NZ_MODEL_OPTIONS : LEGACY_SEEDANCE_MODEL_OPTIONS;
+  const ratioOptions = isSeedanceNzSelected ? SEEDANCE_NZ_RATIO_OPTIONS : LEGACY_SEEDANCE_RATIO_OPTIONS;
+  const resolutionOptions = isSeedanceNzSelected
+    ? (isSeedanceNzStandardModel(seedanceNzModel) ? SEEDANCE_NZ_NATIVE_RESOLUTION_OPTIONS : SEEDANCE_NZ_RESOLUTION_OPTIONS)
+    : LEGACY_SEEDANCE_RESOLUTION_OPTIONS;
+  const savedRatio = String(d.ratio || '16:9');
+  const ratio = ratioOptions.includes(savedRatio as any) ? savedRatio : '16:9';
+  const savedResolution = String(d.resolution || '480p');
+  const resolution = resolutionOptions.includes(savedResolution as any) ? savedResolution : '720p';
   const generateAudio = d.generateAudio !== false;
   const returnLastFrame = d.returnLastFrame === true;
   const watermark = d.watermark === true;
@@ -473,6 +519,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
   );
   const runSettings = useMemo(() => ({
     model,
+    taskProvider: builtinSource,
     ratio,
     resolution,
     generateAudio,
@@ -481,7 +528,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
     webSearch,
     seed,
     providerParams,
-  }), [model, ratio, resolution, generateAudio, returnLastFrame, watermark, webSearch, seed, providerParams]);
+  }), [model, builtinSource, ratio, resolution, generateAudio, returnLastFrame, watermark, webSearch, seed, providerParams]);
   const currentShotPlan = useMemo(
     () => buildDirectorStoryboardRunPlan(shots, runSettings, {
       upstreamPrompt,
@@ -1098,6 +1145,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
         bridgePatch.status = patch.status;
       }
       if (patch.taskId !== undefined) bridgePatch.taskId = patch.taskId;
+      if (patch.taskProvider !== undefined) bridgePatch.taskProvider = patch.taskProvider;
       if (patch.videoUrl !== undefined) bridgePatch.videoUrl = patch.videoUrl;
       if (patch.error !== undefined) bridgePatch.error = patch.error;
       if (Object.keys(bridgePatch).length > 0) patchBridge(bridgeIdFromJob, bridgePatch);
@@ -1129,6 +1177,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
     setJobPatch(job, {
       status: videoUrl ? 'success' : (existing.status === 'error' ? 'error' : 'polling'),
       taskId,
+      taskProvider: existing.taskProvider || bridge.taskProvider || null,
       videoUrl,
       error: videoUrl ? null : (existing.error || bridge.error || null),
       progress: videoUrl ? '100%' : (existing.progress || '待查询'),
@@ -1136,7 +1185,10 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
     return true;
   };
 
-  const refreshStoryboardOutputs = async (options: { bridgeId?: string } = {}) => {
+  const refreshStoryboardOutputs = async (
+    options: { bridgeId?: string } = {},
+    reporter?: RunNodeLifecycleReporter,
+  ) => {
     const targetBridgeId = options.bridgeId;
     const targetJobId = targetBridgeId ? `bridge-${targetBridgeId}` : '';
     const jobsToRefresh = targetBridgeId
@@ -1150,14 +1202,14 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
         if (bridge) patchBridge(bridge.id, { error: message });
         update({ error: message });
         logBus.warn(`导演分镜台桥接重新获取失败：${message}`, src);
-        return;
+        throw new Error(message);
       }
       if (!syncBridgeResultFromState(bridge, job)) {
         const message = '这个桥接还没有 taskId 或视频记录，无法重新获取；请先生成桥接。';
         patchBridge(bridge.id, { error: message });
         update({ error: message });
         logBus.warn(`导演分镜台桥接重新获取失败：${message}`, src);
-        return;
+        throw new Error(message);
       }
     } else {
       for (const bridge of bridgesRef.current) {
@@ -1166,51 +1218,226 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
       }
     }
 
-    const recoverable = jobsToRefresh
+    const refreshable = jobsToRefresh
       .map((job) => [job, resultsRef.current[job.id]] as const)
+      .filter(([, result]) => result?.taskId || result?.videoUrl);
+    if (refreshable.length === 0) {
+      const message = targetBridgeId
+        ? '这个桥接还没有可重新获取的任务或视频记录。'
+        : '当前没有可重新获取的任务或视频记录，请先生成分镜或桥接。';
+      update({ status: 'error', error: message });
+      logBus.warn(`导演分镜台重新获取失败：${message}`, src);
+      throw new Error(message);
+    }
+
+    const recoverable = refreshable
       .filter(([, result]) => result?.taskId && !result.videoUrl);
+    const refreshErrors: string[] = [];
     if (recoverable.length > 0) {
       logBus.info(`导演分镜台重新获取：补查 ${recoverable.length} 个已提交任务`, src);
       await Promise.all(recoverable.map(async ([job, result]) => {
         if (!result?.taskId) return;
+        const taskProvider = result.taskProvider || effectiveTaskProvider;
+        const baseTrace = {
+          provider: taskProvider,
+          model: job.payload.model,
+          upstreamTaskId: result.taskId,
+          jobId: job.id,
+          jobKind: job.kind,
+          operation: 'refresh-query',
+          httpStatusSource: 'local-backend',
+        };
+        await reporter?.providerRequest(baseTrace);
         try {
-          const query = await querySeedance(result.taskId);
+          const query = await querySeedance(result.taskId, taskProvider);
+          const responseTrace = {
+            ...baseTrace,
+            provider: query.taskProvider || taskProvider,
+            model: query.model || job.payload.model,
+            requestId: query.requestId,
+            transportHttpStatus: query.transportHttpStatus,
+            upstreamHttpStatus: query.upstreamHttpStatus,
+            usage: query.usage,
+            status: query.status,
+          };
+          await reporter?.providerPolling({
+            ...responseTrace,
+            taskId: result.taskId,
+            progress: query.progress,
+            pollCount: 1,
+          });
           if (query.status === 'succeeded' && query.videoUrl) {
             setJobPatch(job, {
               status: 'success',
               taskId: result.taskId,
+              taskProvider: query.taskProvider || result.taskProvider || null,
               videoUrl: query.videoUrl,
               error: null,
               progress: '100%',
             });
             if (job.kind === 'bridge') {
               const bridgeIdFromJob = job.id.replace(/^bridge-/, '');
-              patchBridge(bridgeIdFromJob, { status: 'success', videoUrl: query.videoUrl, error: null, taskId: result.taskId });
+              patchBridge(bridgeIdFromJob, {
+                status: 'success',
+                videoUrl: query.videoUrl,
+                error: null,
+                taskId: result.taskId,
+                taskProvider: query.taskProvider || result.taskProvider || null,
+              });
             } else {
-              patchShot(job.shotId, { status: 'success', videoUrl: query.videoUrl, error: null, taskId: result.taskId });
+              patchShot(job.shotId, {
+                status: 'success',
+                videoUrl: query.videoUrl,
+                error: null,
+                taskId: result.taskId,
+                taskProvider: query.taskProvider || result.taskProvider || null,
+              });
             }
+            await reporter?.providerResponse({ ...responseTrace, status: 'succeeded' });
           } else if (query.status === 'failed') {
-            const error = query.failReason || '任务失败';
-            setJobPatch(job, { status: 'error', taskId: result.taskId, error, progress: '失败' });
+            const message = query.failReason || '任务失败';
+            setJobPatch(job, {
+              status: 'error',
+              taskId: result.taskId,
+              taskProvider: result.taskProvider || null,
+              error: message,
+              progress: '失败',
+            });
             if (job.kind === 'bridge') {
-              patchBridge(job.id.replace(/^bridge-/, ''), { status: 'error', error, taskId: result.taskId });
+              patchBridge(job.id.replace(/^bridge-/, ''), {
+                status: 'error',
+                error: message,
+                taskId: result.taskId,
+                taskProvider: result.taskProvider || null,
+              });
             } else {
-              patchShot(job.shotId, { status: 'error', error, taskId: result.taskId });
+              patchShot(job.shotId, {
+                status: 'error',
+                error: message,
+                taskId: result.taskId,
+                taskProvider: result.taskProvider || null,
+              });
             }
+            refreshErrors.push(`${job.title}: ${message}`);
+            await reporter?.providerResponse({
+              ...responseTrace,
+              status: 'failed',
+              error: { message },
+            });
+          } else if (query.status === 'succeeded') {
+            const message = '任务已完成但未返回视频地址';
+            setJobPatch(job, {
+              status: 'error',
+              taskId: result.taskId,
+              taskProvider: query.taskProvider || result.taskProvider || null,
+              error: message,
+              progress: '失败',
+            });
+            if (job.kind === 'bridge') {
+              patchBridge(job.id.replace(/^bridge-/, ''), {
+                status: 'error',
+                error: message,
+                taskId: result.taskId,
+                taskProvider: query.taskProvider || result.taskProvider || null,
+              });
+            } else {
+              patchShot(job.shotId, {
+                status: 'error',
+                error: message,
+                taskId: result.taskId,
+                taskProvider: query.taskProvider || result.taskProvider || null,
+              });
+            }
+            refreshErrors.push(`${job.title}: ${message}`);
+            await reporter?.providerResponse({
+              ...responseTrace,
+              status: 'failed',
+              error: { message },
+            });
+          } else {
+            setJobPatch(job, {
+              status: 'polling',
+              taskId: result.taskId,
+              taskProvider: query.taskProvider || result.taskProvider || null,
+              error: null,
+              progress: query.progress || '处理中',
+            });
+            if (job.kind === 'bridge') {
+              patchBridge(job.id.replace(/^bridge-/, ''), {
+                status: 'polling',
+                error: null,
+                taskId: result.taskId,
+                taskProvider: query.taskProvider || result.taskProvider || null,
+              });
+            } else {
+              patchShot(job.shotId, {
+                status: 'polling',
+                error: null,
+                taskId: result.taskId,
+                taskProvider: query.taskProvider || result.taskProvider || null,
+              });
+            }
+            await reporter?.providerResponse(responseTrace);
           }
         } catch (error: any) {
           const message = error?.message || '重新获取失败';
-          setJobPatch(job, { status: 'error', taskId: result.taskId, error: message, progress: '失败' });
+          setJobPatch(job, {
+            status: 'error',
+            taskId: result.taskId,
+            taskProvider: result.taskProvider || null,
+            error: message,
+            progress: '失败',
+          });
+          if (job.kind === 'bridge') {
+            patchBridge(job.id.replace(/^bridge-/, ''), {
+              status: 'error',
+              error: message,
+              taskId: result.taskId,
+              taskProvider: result.taskProvider || null,
+            });
+          } else {
+            patchShot(job.shotId, {
+              status: 'error',
+              error: message,
+              taskId: result.taskId,
+              taskProvider: result.taskProvider || null,
+            });
+          }
+          refreshErrors.push(`${job.title}: ${message}`);
+          await reporter?.providerResponse({
+            ...baseTrace,
+            requestId: error?.requestId,
+            transportHttpStatus: error?.transportHttpStatus,
+            upstreamHttpStatus: error?.upstreamHttpStatus,
+            status: 'failed',
+            error: { message, code: error?.code },
+          });
         }
       }));
     }
     const items = applyStoryboardOutputs(currentOutputPlan, {
       directorOutputRefreshNonce: Date.now(),
+      status: refreshErrors.length > 0 ? 'error' : 'success',
+      error: refreshErrors.length > 0 ? `${refreshErrors.length} 个任务重新获取失败` : null,
     });
+    await reporter?.output({
+      status: refreshErrors.length > 0 ? 'failed' : 'succeeded',
+      outputCount: items.length,
+      assets: items.map((item) => ({ kind: 'video', sourceUrl: item.videoUrl })),
+    });
+    if (refreshErrors.length > 0) {
+      const message = refreshErrors.join('；');
+      logBus.error(`导演分镜台重新获取失败：${message}`, src);
+      throw new Error(message);
+    }
     logBus.info(`导演分镜台重新获取：已整理 ${items.length} 个视频输出`, src);
   };
 
-  const pollJob = async (job: DirectorStoryboardJob, signal?: AbortSignal): Promise<string> => {
+  const pollJob = async (
+    job: DirectorStoryboardJob,
+    signal?: AbortSignal,
+    reporter?: RunNodeLifecycleReporter,
+  ): Promise<string> => {
     if (!String(job.payload.prompt || '').trim()) {
       throw new Error('这个分镜没有提示词');
     }
@@ -1219,48 +1446,216 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
       `提交${job.kind === 'bridge' ? '桥接' : '分镜'} ${job.title}: ${job.payload.duration || 5}s ${job.payload.ratio || ratio} ${job.payload.resolution || resolution}`,
       src,
     );
+    await reporter?.providerRequest({
+      provider: effectiveTaskProvider,
+      model: job.payload.model,
+      jobId: job.id,
+      jobKind: job.kind,
+    });
     setJobPatch(job, { status: 'submitting', error: null, progress: '提交中' });
-    const submitted = await submitSeedance(job.payload);
-    setJobPatch(job, { status: 'polling', taskId: submitted.taskId, progress: '15%' });
+    let submitted: Awaited<ReturnType<typeof submitSeedance>>;
+    try {
+      submitted = await submitSeedance(job.payload);
+    } catch (error: any) {
+      await reporter?.providerResponse({
+        provider: effectiveTaskProvider,
+        model: job.payload.model,
+        requestId: error?.requestId,
+        transportHttpStatus: error?.transportHttpStatus,
+        upstreamHttpStatus: error?.upstreamHttpStatus,
+        status: 'failed',
+        error: { message: error?.message || '提交失败', code: error?.code },
+        jobId: job.id,
+        jobKind: job.kind,
+        httpStatusSource: 'local-backend',
+      });
+      throw error;
+    }
+    const submittedProvider = submitted.taskProvider || effectiveTaskProvider;
+    await reporter?.providerSubmitted({
+      provider: submittedProvider,
+      model: submitted.model || job.payload.model,
+      upstreamTaskId: submitted.taskId,
+      requestId: submitted.requestId,
+      transportHttpStatus: submitted.transportHttpStatus,
+      upstreamHttpStatus: submitted.upstreamHttpStatus,
+      usage: submitted.usage,
+      jobId: job.id,
+      jobKind: job.kind,
+      httpStatusSource: 'local-backend',
+    });
+    setJobPatch(job, {
+      status: 'polling',
+      taskId: submitted.taskId,
+      taskProvider: submittedProvider,
+      progress: '15%',
+    });
+    if (job.kind === 'bridge') {
+      patchBridge(job.id.replace(/^bridge-/, ''), {
+        status: 'polling',
+        taskId: submitted.taskId,
+        taskProvider: submittedProvider,
+        error: null,
+      });
+    } else {
+      patchShot(job.shotId, {
+        status: 'polling',
+        taskId: submitted.taskId,
+        taskProvider: submittedProvider,
+        error: null,
+      });
+    }
     logBus.info(`${job.title} taskId=${submitted.taskId} 已提交，进入轮询`, src);
 
     for (let elapsed = 1; elapsed <= maxPoll; elapsed += 1) {
-      await sleep(pollInt * 1000, signal);
-      const result = await querySeedance(submitted.taskId);
+      try {
+        await sleep(pollInt * 1000, signal);
+      } catch (error: any) {
+        const message = error?.message || (signal?.aborted ? '用户已停止' : '等待轮询失败');
+        await reporter?.providerResponse({
+          provider: submittedProvider,
+          model: submitted.model || job.payload.model,
+          upstreamTaskId: submitted.taskId,
+          requestId: submitted.requestId,
+          pollCount: Math.max(0, elapsed - 1),
+          status: signal?.aborted ? 'cancelled' : 'failed',
+          error: { message, code: error?.code },
+          jobId: job.id,
+          jobKind: job.kind,
+          httpStatusSource: 'local-backend',
+        });
+        throw error;
+      }
+      let result;
+      try {
+        result = await querySeedance(submitted.taskId, submittedProvider);
+      } catch (error: any) {
+        await reporter?.providerResponse({
+          provider: submittedProvider,
+          model: submitted.model || job.payload.model,
+          upstreamTaskId: submitted.taskId,
+          requestId: error?.requestId || submitted.requestId,
+          transportHttpStatus: error?.transportHttpStatus,
+          upstreamHttpStatus: error?.upstreamHttpStatus,
+          pollCount: elapsed,
+          status: 'failed',
+          error: { message: error?.message || '轮询失败', code: error?.code },
+          jobId: job.id,
+          jobKind: job.kind,
+          httpStatusSource: 'local-backend',
+        });
+        throw error;
+      }
       const pct = Math.min(95, Math.round(15 + (elapsed * 80) / maxPoll));
+      const pollingTrace = {
+        provider: result.taskProvider || submittedProvider || effectiveTaskProvider,
+        model: result.model || submitted.model || job.payload.model || null,
+        taskId: submitted.taskId,
+        upstreamTaskId: submitted.taskId,
+        requestId: result.requestId,
+        transportHttpStatus: result.transportHttpStatus,
+        upstreamHttpStatus: result.upstreamHttpStatus,
+        usage: result.usage,
+        httpStatusSource: 'local-backend',
+        jobId: job.id,
+        jobKind: job.kind,
+        pollCount: elapsed,
+        pollLimit: maxPoll,
+        status: result.status,
+        progress: result.progress || `${pct}%`,
+      };
+      await reporter?.polling(pollingTrace);
+      await reporter?.providerPolling(pollingTrace);
       if (result.status === 'succeeded' && result.videoUrl) {
+        await reporter?.providerResponse({
+          provider: result.taskProvider || submittedProvider,
+          model: result.model || submitted.model || job.payload.model,
+          upstreamTaskId: submitted.taskId,
+          requestId: result.requestId || submitted.requestId,
+          transportHttpStatus: result.transportHttpStatus,
+          upstreamHttpStatus: result.upstreamHttpStatus,
+          usage: result.usage,
+          pollCount: elapsed,
+          status: 'succeeded',
+          jobId: job.id,
+          jobKind: job.kind,
+          httpStatusSource: 'local-backend',
+        });
         logBus.success(`${job.title} 完成 → ${result.videoUrl}`, src);
         return result.videoUrl;
       }
       if (result.status === 'failed') {
-        throw new Error(result.failReason || '生成失败');
+        const message = result.failReason || '生成失败';
+        await reporter?.providerResponse({
+          provider: result.taskProvider || submittedProvider,
+          model: result.model || submitted.model || job.payload.model,
+          upstreamTaskId: submitted.taskId,
+          requestId: result.requestId || submitted.requestId,
+          transportHttpStatus: result.transportHttpStatus,
+          upstreamHttpStatus: result.upstreamHttpStatus,
+          usage: result.usage,
+          pollCount: elapsed,
+          status: 'failed',
+          error: { message },
+          jobId: job.id,
+          jobKind: job.kind,
+          httpStatusSource: 'local-backend',
+        });
+        throw new Error(message);
       }
       setJobPatch(job, {
         status: 'polling',
         taskId: submitted.taskId,
+        taskProvider: result.taskProvider || submittedProvider,
         progress: result.progress || `${pct}%`,
       });
       if (elapsed === 1 || elapsed % 3 === 0) {
         logBus.debug(`${job.title} 轮询 ${elapsed}/${maxPoll} · ${result.status} · ${result.progress || `${pct}%`}`, src);
       }
     }
+    await reporter?.providerResponse({
+      provider: submittedProvider,
+      model: submitted.model || job.payload.model,
+      upstreamTaskId: submitted.taskId,
+      requestId: submitted.requestId,
+      pollCount: maxPoll,
+      status: 'failed',
+      error: { message: '轮询超时' },
+      jobId: job.id,
+      jobKind: job.kind,
+    });
     throw new Error('轮询超时');
   };
 
-  const runBridge = async (bridgeId?: string) => {
+  const runBridge = async (bridgeId?: string, reporter?: RunNodeLifecycleReporter) => {
     const selectedBridge = bridgeId ? bridgesRef.current.find((bridge) => bridge.id === bridgeId) : null;
-    if (selectedBridge && isBridgeBusy(selectedBridge)) return;
+    if (bridgeId && !selectedBridge) {
+      const message = '指定的桥接已不存在，无法生成。';
+      update({ status: 'error', error: message });
+      throw new Error(message);
+    }
+    if (selectedBridge && isBridgeBusy(selectedBridge)) {
+      const message = '这个桥接已有任务在处理中，请先停止或重新获取结果。';
+      patchBridge(selectedBridge.id, { error: message });
+      update({ status: 'error', error: message });
+      throw new Error(message);
+    }
     let selectedBridges = bridgeId
       ? bridgesRef.current.filter((bridge) => bridge.id === bridgeId)
       : bridgesRef.current.filter((bridge) => bridge.firstFrameUrl && bridge.lastFrameUrl && !isBridgeBusy(bridge));
     if (selectedBridges.length === 0 && bridgeId) {
       const bridge = bridgesRef.current.find((item) => item.id === bridgeId);
-      if (!bridge) return;
+      if (!bridge) {
+        const message = '指定的桥接已不存在，无法生成。';
+        update({ status: 'error', error: message });
+        throw new Error(message);
+      }
       try {
         selectedBridges = [await prepareBridgeFrames(bridge)];
       } catch (error: any) {
-        update({ error: error?.message || '桥接首尾帧未准备好' });
-        return;
+        const message = error?.message || '桥接首尾帧未准备好';
+        update({ status: 'error', error: message });
+        throw error instanceof Error ? error : new Error(message);
       }
     }
 
@@ -1270,9 +1665,9 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
         ? '请先生成前后两个镜头视频，或手动上传前段/后段视频、首帧/尾帧后再生成桥接。'
         : '还没有准备好的桥接片段，请先在两个镜头之间获取首尾帧。';
       if (bridgeId) patchBridge(bridgeId, { status: 'error', error: message });
-      update({ error: message });
+      update({ status: 'error', error: message });
       logBus.warn(message, src);
-      return;
+      throw new Error(message);
     }
 
     taskCompletionSound.primeAudio();
@@ -1312,24 +1707,33 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
     };
 
     try {
-      const runResult = await runDirectorStoryboardJobs(plan, pollJob, {
+      const runResult = await runDirectorStoryboardJobs(plan, (job, signal) => pollJob(job, signal, reporter), {
         signal: controller.signal,
         onJobComplete,
       });
       const failed = runResult.results.filter((result) => result.status !== 'success');
-      applyStoryboardOutputs(outputPlan, {
+      const items = applyStoryboardOutputs(outputPlan, {
         status: controller.signal.aborted ? 'cancelled' : failed.length > 0 ? 'error' : 'success',
         error: failed.length ? `${failed.length} 个桥接任务失败或取消` : null,
       });
-      if (failed.length > 0) {
-        logBus.warn(`导演分镜台桥接完成，但有 ${failed.length} 个失败或取消`, src);
-      } else {
-        logBus.success(`导演分镜台桥接完成：${plan.length} 个视频`, src);
+      if (controller.signal.aborted || failed.length > 0) {
+        const message = controller.signal.aborted
+          ? '用户已停止'
+          : `${failed.length} 个桥接任务失败或取消`;
+        logBus.warn(`导演分镜台桥接完成，但有 ${message}`, src);
+        throw new Error(message);
       }
+      await reporter?.output({
+        status: 'succeeded',
+        outputCount: items.length,
+        assets: items.map((item) => ({ kind: 'video', sourceUrl: item.videoUrl })),
+      });
+      logBus.success(`导演分镜台桥接完成：${plan.length} 个视频`, src);
     } catch (error: any) {
       const message = error?.message || '桥接生成失败';
       applyStoryboardOutputs(outputPlan, { status: controller.signal.aborted ? 'cancelled' : 'error', error: message });
       logBus.error(`导演分镜台桥接失败: ${message}`, src);
+      throw error instanceof Error ? error : new Error(message);
     } finally {
       for (const job of plan) {
         const bridgeIdFromJob = job.id.replace(/^bridge-/, '');
@@ -1340,16 +1744,22 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
     }
   };
 
-  const runStoryboard = async (onlyShotId?: string) => {
-    if (isBusy) return;
+  const runStoryboard = async (onlyShotId?: string, reporter?: RunNodeLifecycleReporter) => {
+    if (abortRef.current || bridgeAbortRefs.current.size > 0) {
+      throw new Error('导演分镜台已有本地任务正在运行，请先停止后再试。');
+    }
     const selectedShots = onlyShotId ? shots.filter((shot) => shot.id === onlyShotId) : shots;
-    if (selectedShots.length === 0) return;
+    if (selectedShots.length === 0) {
+      throw new Error(onlyShotId ? '指定的分镜已不存在，无法生成。' : '当前没有可生成的分镜。');
+    }
     const plan = buildDirectorStoryboardRunPlan(selectedShots, runSettings, {
       upstreamPrompt,
       mentionMaterials: storyboardMentionMaterials,
     });
     const outputPlan = onlyShotId && currentOutputPlan.length > 0 ? currentOutputPlan : plan;
-    if (plan.length === 0) return;
+    if (plan.length === 0) {
+      throw new Error('当前没有可提交的分镜任务。');
+    }
 
     taskCompletionSound.primeAudio();
     const controller = new AbortController();
@@ -1394,7 +1804,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
     };
 
     try {
-      const runResult = await runDirectorStoryboardJobs(plan, pollJob, {
+      const runResult = await runDirectorStoryboardJobs(plan, (job, signal) => pollJob(job, signal, reporter), {
         signal: controller.signal,
         onJobComplete,
       });
@@ -1406,6 +1816,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
       });
       if (failed.length > 0) {
         logBus.warn(`导演分镜台完成，但有 ${failed.length} 个任务失败或取消`, src);
+        throw new Error(`${failed.length} 个分镜任务失败或取消`);
       } else {
         logBus.success(`导演分镜台全部完成：${videosRef.current.length} 个视频`, src);
       }
@@ -1413,6 +1824,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
       const message = error?.message || '导演分镜生成失败';
       applyStoryboardOutputs(outputPlan, { status: controller.signal.aborted ? 'cancelled' : 'error', error: message });
       logBus.error(`导演分镜台失败: ${message}`, src);
+      throw error instanceof Error ? error : new Error(message);
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
     }
@@ -1427,10 +1839,96 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
     logBus.warn('用户停止导演分镜台：已停止本地提交/轮询，已提交的远端视频任务会按平台状态继续或自行结束', src);
   };
 
-  useRunTrigger(id, async () => {
-    if (isBusy) return;
-    await runStoryboard();
-  }, 'director-storyboard');
+  const requestStoryboardRun = (mode: DirectorStoryboardRunMode, targetId = '') => {
+    const normalizedTargetId = String(targetId || '').trim();
+    const requestId = createCanvasNodeRunRequestId(id, DIRECTOR_STORYBOARD_RUN_PURPOSE[mode]);
+    update({
+      directorStoryboardRunMode: mode,
+      directorStoryboardRunTargetId: normalizedTargetId,
+      directorStoryboardRunRequestId: requestId,
+    });
+    // Let React publish the persisted intent before Canvas snapshots the graph
+    // for the execution digest and confirmation preview.
+    window.requestAnimationFrame(() => {
+      if (requestCanvasNodeRun(id, { requestId })) return;
+      const liveData = rf.getNode(id)?.data as Record<string, unknown> | undefined;
+      if (liveData?.directorStoryboardRunRequestId !== requestId) return;
+      update({
+        directorStoryboardRunMode: 'all',
+        directorStoryboardRunTargetId: '',
+        directorStoryboardRunRequestId: '',
+        status: 'error',
+        error: '无法提交画布运行请求，请重试。',
+      });
+    });
+  };
+
+  useRunTrigger(id, async (reporter) => {
+    const liveData = rf.getNode(id)?.data as Record<string, unknown> | undefined;
+    const contextRequestId = String(reporter.runContext?.requestId || '').trim();
+    const persistedRequestId = String(liveData?.directorStoryboardRunRequestId || '').trim();
+    const requestedMode = String(liveData?.directorStoryboardRunMode || '').trim() as DirectorStoryboardRunMode;
+    const requestedTargetId = String(liveData?.directorStoryboardRunTargetId || '').trim();
+    try {
+      if (abortRef.current || bridgeAbortRefs.current.size > 0) {
+        throw new Error('导演分镜台已有本地任务正在运行，请先停止后再试。');
+      }
+      // Canvas assigns a requestId to ordinary group/single runs too. Only a
+      // persisted node-surface intent opts into the secondary mode dispatcher.
+      if (!persistedRequestId) {
+        await runStoryboard(undefined, reporter);
+        return;
+      }
+      if (!contextRequestId || contextRequestId !== persistedRequestId) {
+        throw new Error('导演分镜运行请求已变化或失效，已拒绝执行。');
+      }
+      switch (requestedMode) {
+        case 'all':
+          if (requestedTargetId) throw new Error('生成全部分镜请求不应包含目标 ID。');
+          await runStoryboard(undefined, reporter);
+          break;
+        case 'shot':
+          if (!requestedTargetId || !shots.some((shot) => shot.id === requestedTargetId)) {
+            throw new Error('指定的分镜已不存在，无法重跑。');
+          }
+          await runStoryboard(requestedTargetId, reporter);
+          break;
+        case 'bridge-one':
+          if (!requestedTargetId || !bridgesRef.current.some((bridge) => bridge.id === requestedTargetId)) {
+            throw new Error('指定的桥接已不存在，无法生成。');
+          }
+          await runBridge(requestedTargetId, reporter);
+          break;
+        case 'bridge-all':
+          if (requestedTargetId) throw new Error('生成所有桥接请求不应包含目标 ID。');
+          await runBridge(undefined, reporter);
+          break;
+        case 'refresh-bridge-one':
+          if (!requestedTargetId || !bridgesRef.current.some((bridge) => bridge.id === requestedTargetId)) {
+            throw new Error('指定的桥接已不存在，无法重新获取。');
+          }
+          await refreshStoryboardOutputs({ bridgeId: requestedTargetId }, reporter);
+          break;
+        case 'refresh-all':
+          if (requestedTargetId) throw new Error('重新获取全部输出请求不应包含目标 ID。');
+          await refreshStoryboardOutputs({}, reporter);
+          break;
+        default:
+          throw new Error('导演分镜运行模式无效，已拒绝执行。');
+      }
+    } finally {
+      if (contextRequestId) {
+        const latestData = rf.getNode(id)?.data as Record<string, unknown> | undefined;
+        if (latestData?.directorStoryboardRunRequestId === contextRequestId) {
+          update({
+            directorStoryboardRunMode: 'all',
+            directorStoryboardRunTargetId: '',
+            directorStoryboardRunRequestId: '',
+          });
+        }
+      }
+    }
+  }, 'director-storyboard', { lifecycleAware: true });
 
   const totalDuration = shots.reduce((sum, shot) => sum + shot.durationSec, 0);
   const statusText = isBusy ? '生成中' : status === 'success' ? '已完成' : status === 'error' ? '有失败' : status === 'cancelled' ? '已停止' : '待生成';
@@ -1785,7 +2283,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
           </button>
           <button
             type="button"
-            onClick={() => void runBridge(activeBridge.id)}
+            onClick={() => requestStoryboardRun('bridge-one', activeBridge.id)}
             disabled={isActiveBridgeBusy}
             className="nodrag flex items-center justify-center gap-1 rounded border px-2 py-1 text-[10px] font-semibold disabled:opacity-50"
             style={{ borderColor: 'var(--t8-accent, #d946ef)', color: 'var(--t8-accent, #d946ef)' }}
@@ -1797,7 +2295,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
           <span className="min-w-0 flex-1 truncate">{activeBridge.error || (activeBridge.videoUrl ? `已生成：${fileName(activeBridge.videoUrl)}` : '桥接会输出在两个分镜之间。')}</span>
           <button
             type="button"
-            onClick={() => void refreshStoryboardOutputs({ bridgeId: activeBridge.id })}
+            onClick={() => requestStoryboardRun('refresh-bridge-one', activeBridge.id)}
             disabled={!canRefreshActiveBridgeOutput || isActiveBridgeLocallyPolling}
             className="nodrag shrink-0 rounded border px-1.5 py-0.5 disabled:opacity-40"
             style={{ borderColor: 'var(--t8-border-strong, rgba(255,255,255,.18))', color: 'var(--t8-text-main, #f8fafc)' }}
@@ -1807,7 +2305,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
           </button>
           <button
             type="button"
-            onClick={() => void runBridge()}
+            onClick={() => requestStoryboardRun('bridge-all')}
             disabled={readyBridgeCount === 0}
             className="nodrag shrink-0 rounded border px-1.5 py-0.5 disabled:opacity-40"
             style={{ borderColor: 'var(--t8-border-strong, rgba(255,255,255,.18))', color: 'var(--t8-text-main, #f8fafc)' }}
@@ -1964,14 +2462,55 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
 
       <div className="space-y-2 p-3">
         <div className="grid grid-cols-4 gap-1.5">
-          <select value={model} onChange={(event) => update({ model: event.target.value })} className="nodrag rounded border px-2 py-1 text-[11px] outline-none col-span-2" style={inputStyle}>
-            {MODEL_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+          <select
+            value={builtinSource}
+            onChange={(event) => {
+              const nextSource = event.target.value as SeedanceBuiltinSource;
+              const nextUsesSeedanceNz = nextSource === 'seedance-nz' || (nextSource === 'auto' && hasSeedanceNzKey);
+              update({
+                seedanceApiSource: nextSource,
+                ratio: nextUsesSeedanceNz && savedRatio === '9:21' ? '9:16' : savedRatio,
+                resolution: nextUsesSeedanceNz && savedResolution === 'native4K' ? 'native4k' : savedResolution,
+              });
+            }}
+            className="nodrag col-span-4 rounded border px-2 py-1 text-[11px] outline-none"
+            style={inputStyle}
+            title="Seedance API 来源"
+          >
+            <option value="auto">主力 API（自动：优先国内平价工坊）</option>
+            <option value="seedance-nz">贞贞的平价AI工坊（国内） · api.seedance.nz</option>
+            <option value="zhenzhen-legacy">贞贞的AI工坊（海外） · ai.t8star.org</option>
+          </select>
+        </div>
+        {isSeedanceNzSelected && !hasSeedanceNzKey && (
+          <div className="rounded border px-2 py-1 text-[10px]" style={{ borderColor: 'var(--t8-warning, #f59e0b)', color: 'var(--t8-warning, #f59e0b)' }}>
+            尚未配置“贞贞的平价AI工坊（国内） API Key”，请先到 API 设置填写。
+          </div>
+        )}
+        <div className="grid grid-cols-4 gap-1.5">
+          <select
+            value={model}
+            onChange={(event) => {
+              const nextModel = event.target.value;
+              update({
+                [isSeedanceNzSelected ? 'seedanceNzModel' : 'model']: nextModel,
+                resolution: isSeedanceNzSelected
+                  && !isSeedanceNzStandardModel(nextModel)
+                  && String(resolution).startsWith('native')
+                  ? '720p'
+                  : resolution,
+              });
+            }}
+            className="nodrag rounded border px-2 py-1 text-[11px] outline-none col-span-2"
+            style={inputStyle}
+          >
+            {modelOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
           <select value={ratio} onChange={(event) => update({ ratio: event.target.value })} className="nodrag rounded border px-2 py-1 text-[11px] outline-none" style={inputStyle}>
-            {RATIO_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+            {ratioOptions.map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
           <select value={resolution} onChange={(event) => update({ resolution: event.target.value })} className="nodrag rounded border px-2 py-1 text-[11px] outline-none" style={inputStyle}>
-            {RESOLUTION_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+            {resolutionOptions.map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
         </div>
 
@@ -1984,10 +2523,12 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
             <input type="checkbox" checked={returnLastFrame} onChange={(event) => update({ returnLastFrame: event.target.checked })} />
             末帧
           </label>
-          <label className="flex items-center gap-1 text-[10px]" style={mutedStyle}>
-            <input type="checkbox" checked={watermark} onChange={(event) => update({ watermark: event.target.checked })} />
-            水印
-          </label>
+          {!isSeedanceNzSelected ? (
+            <label className="flex items-center gap-1 text-[10px]" style={mutedStyle}>
+              <input type="checkbox" checked={watermark} onChange={(event) => update({ watermark: event.target.checked })} />
+              水印
+            </label>
+          ) : <span className="text-[10px]" style={mutedStyle}>原生协议</span>}
           <input
             type="number"
             value={seed}
@@ -2004,7 +2545,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
           data={d}
           update={update}
           context={{
-            providerSource: 'zhenzhen',
+            providerSource: effectiveTaskProvider,
             providerModel: model,
             model,
             apiModel: model,
@@ -2197,7 +2738,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
                   title="单镜头模型，留空继承全局"
                 >
                   <option value="">继承模型</option>
-                  {MODEL_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                  {modelOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
                 </select>
                 <select
                   value={activeShot.ratioOverride || ''}
@@ -2207,7 +2748,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
                   title="单镜头比例，留空继承全局"
                 >
                   <option value="">继承比例</option>
-                  {RATIO_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+                  {ratioOptions.map((item) => <option key={item} value={item}>{item}</option>)}
                 </select>
                 <select
                   value={activeShot.resolutionOverride || ''}
@@ -2217,7 +2758,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
                   title="单镜头分辨率，留空继承全局"
                 >
                   <option value="">继承分辨率</option>
-                  {RESOLUTION_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+                  {resolutionOptions.map((item) => <option key={item} value={item}>{item}</option>)}
                 </select>
               </div>
             </div>
@@ -2274,7 +2815,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
               <button type="button" onClick={duplicateShot} className="nodrag flex items-center justify-center gap-1 rounded border px-1 py-1 text-[10px]" style={{ borderColor: 'var(--t8-border-strong, rgba(255,255,255,.18))' }}>
                 <Copy size={10} /> 复制
               </button>
-              <button type="button" onClick={() => runStoryboard(activeShot.id)} disabled={isBusy} className="nodrag flex items-center justify-center gap-1 rounded border px-1 py-1 text-[10px] disabled:opacity-50" style={{ borderColor: 'var(--t8-accent, #d946ef)', color: 'var(--t8-accent, #d946ef)' }}>
+              <button type="button" onClick={() => requestStoryboardRun('shot', activeShot.id)} disabled={isBusy} className="nodrag flex items-center justify-center gap-1 rounded border px-1 py-1 text-[10px] disabled:opacity-50" style={{ borderColor: 'var(--t8-accent, #d946ef)', color: 'var(--t8-accent, #d946ef)' }}>
                 <RotateCcw size={10} /> 重跑
               </button>
               <button type="button" onClick={() => removeShot(activeShot.id)} disabled={shots.length <= 1} className="nodrag flex items-center justify-center gap-1 rounded border px-1 py-1 text-[10px] text-rose-300 disabled:opacity-40" style={{ borderColor: 'rgba(244,63,94,.45)' }}>
@@ -2290,7 +2831,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
           {!isBusy ? (
             <button
               type="button"
-              onClick={() => runStoryboard()}
+              onClick={() => requestStoryboardRun('all')}
               className="nodrag flex items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold"
               style={{
                 borderColor: 'var(--t8-accent, #d946ef)',
@@ -2316,7 +2857,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
             </span>
                 <button
                   type="button"
-                  onClick={() => void refreshStoryboardOutputs()}
+                  onClick={() => requestStoryboardRun('refresh-all')}
                   className="nodrag ml-auto shrink-0 rounded border px-1.5 py-0.5 text-[10px]"
               style={{ borderColor: 'var(--t8-border-strong, rgba(255,255,255,.18))', color: 'var(--t8-text-main, #f8fafc)' }}
               title="不重新提交任务，仅重新整理已完成的视频输出"

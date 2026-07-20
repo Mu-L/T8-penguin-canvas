@@ -39,8 +39,19 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { uploadDataUrl, uploadFileBlob } from '../../services/imageOps';
 import { generateLlm, queryImageStatus, submitImageAsync } from '../../services/generation';
+import type { RunNodeLifecycleReporter } from '../../types/project';
+import { extractRunProviderTrace } from '../../utils/runProviderTrace';
+import {
+  createSecondaryProviderActionForNode,
+  requestCanvasSecondaryProviderAction,
+  resolveSecondaryProviderActionForRun,
+  secondaryProviderActionFromNodeData,
+  secondaryProviderActionNodePatch,
+  type SecondaryProviderActionEnvelope,
+} from '../../utils/secondaryProviderAction';
 import * as api from '../../services/api';
 import { logBus } from '../../stores/logs';
 import { taskCompletionSound } from '../../stores/taskCompletionSound';
@@ -1311,6 +1322,48 @@ const Panorama3DNode = (p: NodeProps) => {
   const [isPlanningAction, setIsPlanningAction] = useState(false);
   const [directorStageBox, setDirectorStageBox] = useState<DirectorStageBox>({ left: 0, top: 0, width: 100, height: 100 });
 
+  const queueAiActionPlan = useCallback((prompt: string) => {
+    const normalizedPrompt = prompt.trim();
+    const boundView = sanitizePanoramaViewAngles(viewRef.current);
+    const boundAvatars = sanitizePanoramaAvatars(avatarsRef.current);
+    try {
+      const action = createSecondaryProviderActionForNode(p.id, 'panorama-3d', {
+        actionId: 'panorama-3d.ai-action-plan',
+        target: 'action-plan',
+        params: {
+          prompt: normalizedPrompt,
+          plannerSystemPrompt: buildPanoramaActionPlannerSystemPrompt(),
+          plannerUserPrompt: buildPanoramaActionPlannerUserPrompt({
+            prompt: normalizedPrompt,
+            view: boundView,
+            avatars: boundAvatars,
+            activeAvatarId: activeAvatarId || undefined,
+          }),
+          view: boundView as unknown as Record<string, unknown>,
+          avatars: boundAvatars as unknown as Record<string, unknown>[],
+          activeAvatarId: activeAvatarId || undefined,
+        },
+      });
+      update({
+        panoramaActionPrompt: normalizedPrompt,
+        panoramaActionPlanError: '',
+        ...secondaryProviderActionNodePatch(action),
+      });
+      setActionPlanStatus('等待运行前检查…');
+      queueMicrotask(() => {
+        if (!requestCanvasSecondaryProviderAction(action)) {
+          const current = secondaryProviderActionFromNodeData(rf.getNode(p.id)?.data);
+          if (current?.requestId === action.requestId) update(secondaryProviderActionNodePatch(null));
+          setActionPlanStatus('无法请求画布运行前检查');
+        }
+      });
+    } catch (e: any) {
+      const message = e?.message || 'AI 动作解析请求无效';
+      setActionPlanStatus(message);
+      update({ panoramaActionPlanError: message });
+    }
+  }, [activeAvatarId, p.id, rf, update]);
+
   useEffect(() => {
     setKeyframeSequenceDraft(String(keyframeSequenceCount));
   }, [keyframeSequenceCount]);
@@ -2123,16 +2176,17 @@ const Panorama3DNode = (p: NodeProps) => {
     });
   }, [activeAvatar, applyView, avatars, effectiveShotCamera]);
 
-  const storeActionPlanDraft = useCallback((plan: PanoramaActionPlan, status: string) => {
+  const storeActionPlanDraft = useCallback((plan: PanoramaActionPlan, status: string, boundPrompt = actionPrompt) => {
     const next = sanitizePanoramaActionPlan({
       ...plan,
-      prompt: plan.prompt || actionPrompt,
+      prompt: plan.prompt || boundPrompt,
     });
     setActionPlan(next);
     setActionPlanStatus(status);
     update({
-      panoramaActionPrompt: actionPrompt,
+      panoramaActionPrompt: boundPrompt,
       panoramaActionPlan: next,
+      panoramaActionPlanError: '',
     });
     return next;
   }, [actionPrompt, update]);
@@ -2148,49 +2202,99 @@ const Panorama3DNode = (p: NodeProps) => {
     storeActionPlanDraft(next, next.warnings?.length ? next.warnings[0] : '已生成本地动作草案');
   }, [actionPrompt, activeAvatar?.id, avatars, storeActionPlanDraft]);
 
-  const createAiActionPlan = useCallback(async () => {
+  const requestAiActionPlan = useCallback(() => {
     if (!actionPrompt.trim()) {
       createLocalActionPlan();
       return;
     }
+    queueAiActionPlan(actionPrompt);
+  }, [actionPrompt, createLocalActionPlan, queueAiActionPlan]);
+
+  const executeAiActionPlan = useCallback(async (
+    action: Extract<SecondaryProviderActionEnvelope, { actionId: 'panorama-3d.ai-action-plan' }>,
+    reporter: RunNodeLifecycleReporter,
+  ) => {
+    const params = action.params;
+    const boundView = sanitizePanoramaViewAngles(params.view);
+    const boundAvatars = sanitizePanoramaAvatars(params.avatars);
+    let providerRequested = false;
+    let providerResponded = false;
     setIsPlanningAction(true);
     setActionPlanStatus('AI解析中...');
     try {
+      await reporter.providerRequest({
+        provider: 'zhenzhen-llm',
+        model: 'gpt-4o-mini',
+        actionId: action.actionId,
+        actionTarget: action.target,
+        requestId: action.requestId,
+      });
+      providerRequested = true;
       const res = await generateLlm({
         model: 'gpt-4o-mini',
         temperature: 0.15,
         max_tokens: 2800,
         messages: [
-          { role: 'system', content: buildPanoramaActionPlannerSystemPrompt() },
-          {
-            role: 'user',
-            content: buildPanoramaActionPlannerUserPrompt({
-              prompt: actionPrompt,
-              view: viewRef.current,
-              avatars,
-              activeAvatarId: activeAvatar?.id,
-            }),
-          },
+          { role: 'system', content: params.plannerSystemPrompt },
+          { role: 'user', content: params.plannerUserPrompt },
         ],
       });
+      const trace = extractRunProviderTrace(res);
+      await reporter.providerResponse({
+        provider: 'zhenzhen-llm',
+        model: res.model || 'gpt-4o-mini',
+        ...trace,
+        status: 'succeeded',
+      });
+      providerResponded = true;
+      if (res.usage) {
+        await reporter.providerUsage({
+          provider: 'zhenzhen-llm',
+          model: res.model || 'gpt-4o-mini',
+          usage: res.usage,
+        });
+      }
       const parsed = parsePanoramaActionPlanJson(res.content);
       if (!parsed || parsed.avatars.length === 0) {
         throw new Error('AI 未返回有效动作 JSON');
       }
-      storeActionPlanDraft({ ...parsed, prompt: parsed.prompt || actionPrompt }, '已生成 AI 动作草案');
+      const stored = storeActionPlanDraft(
+        { ...parsed, prompt: parsed.prompt || params.prompt },
+        '已生成 AI 动作草案',
+        params.prompt,
+      );
+      await reporter.output({
+        status: 'succeeded',
+        actionPlan: stored,
+      });
     } catch (e: any) {
+      const message = e?.message || '调用失败';
+      if (!providerRequested) {
+        setActionPlanStatus(`AI解析未开始：${message}`);
+        update({ panoramaActionPlanError: message });
+        throw e;
+      }
       const fallback = buildPanoramaLocalActionPlan({
-        prompt: actionPrompt,
-        view: viewRef.current,
-        avatars,
-        activeAvatarId: activeAvatar?.id,
+        prompt: params.prompt,
+        view: boundView,
+        avatars: boundAvatars,
+        activeAvatarId: params.activeAvatarId,
         mode: 'append',
       });
-      storeActionPlanDraft(fallback, `AI解析失败，已用本地草案：${e?.message || '调用失败'}`);
+      storeActionPlanDraft(fallback, `AI解析失败，已用本地草案：${message}`, params.prompt);
+      update({ panoramaActionPlanError: message });
+      if (providerRequested && !providerResponded) {
+        await reporter.providerResponse({
+          provider: 'zhenzhen-llm',
+          model: 'gpt-4o-mini',
+          status: 'failed',
+        });
+      }
+      throw e;
     } finally {
       setIsPlanningAction(false);
     }
-  }, [actionPrompt, activeAvatar?.id, avatars, createLocalActionPlan, storeActionPlanDraft]);
+  }, [storeActionPlanDraft, update]);
 
   const planAvatarPatch = useCallback((
     planAvatar: PanoramaActionPlanAvatar,
@@ -3610,6 +3714,31 @@ const Panorama3DNode = (p: NodeProps) => {
     await generatePanorama();
   }, [exportFrame, generatePanorama, panelMode]);
 
+  const runNodeWithSecondaryAction = useCallback(async (reporter: RunNodeLifecycleReporter) => {
+    const action = resolveSecondaryProviderActionForRun({
+      nodeId: p.id,
+      nodeType: 'panorama-3d',
+      nodeData: rf.getNode(p.id)?.data,
+      runContext: reporter.runContext,
+    });
+    if (action) {
+      if (action.actionId !== 'panorama-3d.ai-action-plan') {
+        throw new Error('3D 全景节点收到不受支持的次级 Provider action');
+      }
+      try {
+        await executeAiActionPlan(action, reporter);
+      } finally {
+        const current = secondaryProviderActionFromNodeData(rf.getNode(p.id)?.data);
+        if (current?.requestId === action.requestId) update(secondaryProviderActionNodePatch(null));
+      }
+      return;
+    }
+    if (reporter.runContext?.secondaryProviderActionId) {
+      throw new Error('3D 全景 AI 动作 action 已过期或被修改，已停止调用 Provider');
+    }
+    await runNode();
+  }, [executeAiActionPlan, p.id, rf, runNode, update]);
+
   const handleReferenceUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -3697,7 +3826,7 @@ const Panorama3DNode = (p: NodeProps) => {
     });
   }, [buildPromptFinalFor, update]);
 
-  useRunTrigger(p.id, runNode, 'image');
+  useRunTrigger(p.id, runNodeWithSecondaryAction, 'image', { lifecycleAware: true });
 
   const nodeStyle = {
     width: 1180,
@@ -3979,7 +4108,7 @@ const Panorama3DNode = (p: NodeProps) => {
           <Sparkles size={12} />
           本地解析
         </button>
-        <button type="button" className="t8-btn h-8 px-2 text-[10px]" onClick={() => void createAiActionPlan()} disabled={isPlanningAction}>
+        <button type="button" className="t8-btn h-8 px-2 text-[10px]" onClick={requestAiActionPlan} disabled={isPlanningAction}>
           {isPlanningAction ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
           AI解析
         </button>
@@ -4515,7 +4644,7 @@ const Panorama3DNode = (p: NodeProps) => {
               </details>
 
               <div className="grid grid-cols-4 gap-1.5">
-                <button type="button" className="t8-btn t8-btn-primary min-h-8 px-2 text-[11px]" onClick={generatePanorama} disabled={isGenerating}>
+                <button type="button" className="t8-btn t8-btn-primary min-h-8 px-2 text-[11px]" onClick={() => requestCanvasNodeRun(p.id)} disabled={isGenerating}>
                   {isGenerating ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
                   {d.panoramaGeneratedUrl ? '重新生成' : '生成全景'}
                 </button>

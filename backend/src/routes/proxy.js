@@ -12,6 +12,13 @@ const config = require('../config');
 const { getWhitePng } = require('../utils/whitePng');
 const { tryDecodeDuckPayload } = require('../utils/duckPayload');
 const { normalizeLlmMessageMedia } = require('../providers/llmMedia');
+const seedanceNz = require('../providers/seedanceNz');
+const {
+  normalizeRhSite,
+  buildRhSiteCandidates,
+  shouldRetryRhSiteResponse,
+  missingRhKeyError,
+} = require('../providers/runninghubSite');
 const { runLocalHooks } = require('../extensions/runtimeHooks');
 
 const router = express.Router();
@@ -317,7 +324,8 @@ const taskKeyMap = new Map();
 function rememberTaskKey(taskId, apiKey, meta = {}) {
   if (!taskId || !apiKey) return;
   taskKeyMap.set(String(taskId), { apiKey, ...meta });
-  setTimeout(() => taskKeyMap.delete(String(taskId)), 30 * 60 * 1000);
+  const timer = setTimeout(() => taskKeyMap.delete(String(taskId)), 30 * 60 * 1000);
+  timer.unref?.();
 }
 function recallTaskMeta(taskId) {
   if (!taskId) return null;
@@ -325,10 +333,6 @@ function recallTaskMeta(taskId) {
   if (!item) return null;
   return typeof item === 'string' ? { apiKey: item } : item;
 }
-function recallTaskKey(taskId) {
-  return recallTaskMeta(taskId)?.apiKey || null;
-}
-
 function normalizeProviderParams(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
@@ -419,14 +423,16 @@ async function invalidateZhenzhenProviderKey(providerContext, apiKey, errorText)
 }
 
 // ========== 工具:保存上游返回的图像到本地 ==========
-async function saveRemoteImage(url) {
+async function saveRemoteImage(url, fetchImpl = fetch) {
   try {
-    const res = await fetch(url);
+    const res = await fetchImpl(url);
     if (!res.ok) throw new Error(`下载失败: ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
-    const ext = (url.match(/\.(png|jpe?g|webp|gif)/i)?.[1] || 'png').toLowerCase();
+    const contentExt = extFromContentType(res.headers?.get?.('content-type'));
+    const ext = (contentExt || url.match(/\.(png|jpe?g|webp|gif)/i)?.[1] || 'png').toLowerCase();
     const filename = `img_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
     const filePath = path.join(config.OUTPUT_DIR, filename);
+    fs.mkdirSync(config.OUTPUT_DIR, { recursive: true });
     fs.writeFileSync(filePath, buf);
     return `/files/output/${filename}`;
   } catch (e) {
@@ -469,7 +475,7 @@ function saveBase64Image(b64) {
 }
 
 // ========== POST /api/proxy/image — 图像生成 ==========
-// body: { model, apiModel?, paramKind?, prompt, aspect_ratio?, image_size?, images?[], size?, image?, quality?, n? }
+// body: { model, apiModel?, paramKind?, prompt, aspect_ratio?, image_size?, images?[], size?, image?, quality?, n?, response_format?, output_format? }
 //
 // 主项目对齐的双协议路由:
 //  1. paramKind === 'gpt-size'
@@ -995,7 +1001,7 @@ async function buildGeminiOfficialContents(prompt, refs) {
 //   - Gemini 3 官方图像模型: JSON /v1/models/{model}:generateContent + generationConfig.responseFormat.image
 //   - Grok Image: JSON /generations?async=true { model, prompt, aspect_ratio, image:[base64...]? }
 // ========================================================================
-async function callImageUpstreamAsync({ apiKey, finalApiModel, paramKind, prompt, n, aspect_ratio, image_size, refs, size, quality }) {
+async function callImageUpstreamAsync({ apiKey, finalApiModel, paramKind, prompt, n, aspect_ratio, image_size, refs, size, quality, response_format, output_format }) {
   const upstreamBase = `${config.ZHENZHEN_BASE_URL}/v1/images`;
   const auth = `Bearer ${apiKey}`;
   const ar = String(aspect_ratio || '').trim();
@@ -1027,6 +1033,43 @@ async function callImageUpstreamAsync({ apiKey, finalApiModel, paramKind, prompt
         Authorization: auth,
         'x-goog-api-key': apiKey,
       },
+      body: JSON.stringify(body),
+    });
+  }
+
+  // ===== Seedream V5 Pro (OpenAI Dall-e compatible JSON) =====
+  // Text-to-image omits image; image editing uses the same endpoint with image[].
+  if (paramKind === 'seedream-v5') {
+    const seedreamRefs = [];
+    if (hasRefs) {
+      for (const ref of refs.slice(0, 10)) {
+        const converted = await refToBananaImage(ref);
+        if (converted) seedreamRefs.push(converted);
+      }
+      if (seedreamRefs.length === 0) {
+        throw new Error('Seedream 参考图读取失败，已中止生成，避免按文生图生成');
+      }
+    }
+    const requestedSize = String(size || image_size || '2048x2048')
+      .trim()
+      .replace(/\s+/g, '')
+      .replace(/[X×]/g, 'x');
+    if (!/^\d+x\d+$/.test(requestedSize)) {
+      throw new Error(`Seedream 尺寸格式无效: ${requestedSize || '(空)'}，应为 WIDTHxHEIGHT`);
+    }
+    const body = {
+      model: finalApiModel,
+      prompt,
+      size: requestedSize,
+      response_format: response_format === 'b64_json' ? 'b64_json' : 'url',
+      output_format: output_format === 'jpeg' ? 'jpeg' : 'png',
+    };
+    if (seedreamRefs.length) body.image = seedreamRefs;
+    const url = `${upstreamBase}/generations`;
+    console.log('[upstream] Seedream JSON → /generations model:', finalApiModel, 'size:', body.size, 'output_format:', body.output_format, { requested: refs?.length || 0, converted: seedreamRefs.length });
+    return await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: auth },
       body: JSON.stringify(body),
     });
   }
@@ -1121,13 +1164,324 @@ async function normalizeImageResponse(data) {
   return { kind: 'unknown' };
 }
 
+function seedreamNzProgress(value, fallback = '0%') {
+  const text = String(value ?? '').trim();
+  if (!text) return fallback;
+  return /^\d+(?:\.\d+)?$/.test(text) ? `${text}%` : text;
+}
+
+function seedanceNzTrace(value = {}) {
+  const requestId = String(value?.requestId || '').trim();
+  const upstreamHttpStatus = Number(value?.upstreamHttpStatus);
+  const pollCount = value?.pollCount === undefined ? undefined : Math.max(0, Math.trunc(Number(value.pollCount) || 0));
+  const usage = value?.usage && typeof value.usage === 'object' && !Array.isArray(value.usage) ? value.usage : undefined;
+  return {
+    ...(requestId ? { requestId } : {}),
+    ...(Number.isInteger(upstreamHttpStatus) && upstreamHttpStatus >= 100 && upstreamHttpStatus <= 599 ? { upstreamHttpStatus } : {}),
+    ...(pollCount !== undefined ? { pollCount } : {}),
+    ...(usage ? { usage } : {}),
+  };
+}
+
+// seedance.nz Seedream uses a dedicated async protocol. Keep this route
+// isolated from the existing zhenzhen /v1/images/generations implementation.
+router.post('/image/seedance-nz/submit', async (req, res) => {
+  const settings = loadRawSettings();
+  const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) {
+    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”' });
+  }
+  try {
+    const result = await seedanceNz.submitImageTask(req.body || {}, apiKey);
+    rememberTaskKey(result.taskId, apiKey, {
+      provider: 'seedance-nz-image',
+      model: result.model,
+      taskType: result.taskType,
+    });
+    return res.json({
+      success: true,
+      data: {
+        sync: false,
+        taskId: result.taskId,
+        status: 'pending',
+        progress: '0%',
+        model: result.model,
+        taskProvider: 'seedance-nz-image',
+        raw: result.raw,
+        ...seedanceNzTrace(result),
+      },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    console.error('proxy/image/seedance-nz/submit 错误:', error?.message || error);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: error?.message || 'seedance.nz Seedream 请求失败',
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+router.get('/image/seedance-nz/status/:tid', async (req, res) => {
+  const settings = loadRawSettings();
+  const remembered = recallTaskMeta(req.params.tid);
+  const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) {
+    return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
+  }
+  try {
+    const result = await seedanceNz.queryImageTask(req.params.tid, apiKey);
+    if (result.status === 'succeeded') {
+      if (!result.imageUrl) {
+        return res.status(502).json({ success: false, error: 'Seedream 任务成功但未返回图片 URL', raw: result.raw, ...seedanceNzTrace(result) });
+      }
+      const localUrl = await saveRemoteImage(result.imageUrl, seedanceNz.fetchRemote);
+      return res.json({
+        success: true,
+        data: {
+          status: 'completed',
+          progress: '100%',
+          urls: [localUrl],
+          remoteUrls: [result.imageUrl],
+          raw: result.raw,
+          ...seedanceNzTrace(result),
+        },
+      });
+    }
+    if (result.status === 'failed') {
+      return res.json({
+        success: false,
+        data: {
+          status: 'failed',
+          progress: seedreamNzProgress(result.progress, '100%'),
+          error: result.failReason || 'Seedream 任务失败',
+          raw: result.raw,
+          ...seedanceNzTrace(result),
+        },
+      });
+    }
+    return res.json({
+      success: true,
+      data: {
+        status: result.status,
+        progress: seedreamNzProgress(result.progress),
+        raw: result.raw,
+        ...seedanceNzTrace(result),
+      },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    console.error('proxy/image/seedance-nz/status 错误:', error?.message || error);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: error?.message || 'seedance.nz Seedream 查询失败',
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+router.post('/video/happyhorse/submit', async (req, res) => {
+  const settings = loadRawSettings();
+  const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) {
+    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”' });
+  }
+  try {
+    const result = await seedanceNz.submitHappyHorseTask(req.body || {}, apiKey);
+    rememberTaskKey(result.taskId, apiKey, {
+      provider: 'happyhorse-nz',
+      model: result.model,
+      taskType: result.taskType,
+    });
+    return res.json({
+      success: true,
+      data: {
+        taskId: result.taskId,
+        model: result.model,
+        taskType: result.taskType,
+        raw: result.raw,
+        ...seedanceNzTrace(result),
+      },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    console.error('proxy/video/happyhorse/submit 错误:', error?.message || error);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: error?.message || 'Happy Horse 请求失败',
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+router.get('/video/happyhorse/status/:tid', async (req, res) => {
+  const settings = loadRawSettings();
+  const remembered = recallTaskMeta(req.params.tid);
+  const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
+  try {
+    const result = await seedanceNz.queryTask(req.params.tid, apiKey);
+    let videoUrl = result.videoUrl;
+    if (result.status === 'succeeded' && videoUrl) {
+      videoUrl = await saveRemoteVideo(videoUrl, seedanceNz.fetchRemote);
+    }
+    return res.json({
+      success: true,
+      data: {
+        status: result.status,
+        progress: result.progress,
+        videoUrl,
+        failReason: result.failReason,
+        model: remembered?.model || '',
+        taskType: remembered?.taskType || '',
+        raw: result.raw,
+        ...seedanceNzTrace(result),
+      },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    console.error('proxy/video/happyhorse/status 错误:', error?.message || error);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: error?.message || 'Happy Horse 查询失败',
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+router.post('/video/wan/submit', async (req, res) => {
+  const settings = loadRawSettings();
+  const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) {
+    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”' });
+  }
+  try {
+    const result = await seedanceNz.submitWanTask(req.body || {}, apiKey);
+    rememberTaskKey(result.taskId, apiKey, {
+      provider: 'wan-nz',
+      model: result.model,
+      taskType: result.taskType,
+    });
+    return res.json({
+      success: true,
+      data: {
+        taskId: result.taskId,
+        model: result.model,
+        taskType: result.taskType,
+        raw: result.raw,
+        ...seedanceNzTrace(result),
+      },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    console.error('proxy/video/wan/submit 错误:', error?.message || error);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: error?.message || 'Wan 2.7 Spicy 请求失败',
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+router.get('/video/wan/status/:tid', async (req, res) => {
+  const settings = loadRawSettings();
+  const remembered = recallTaskMeta(req.params.tid);
+  const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
+  try {
+    const result = await seedanceNz.queryTask(req.params.tid, apiKey);
+    let videoUrl = result.videoUrl;
+    if (result.status === 'succeeded' && videoUrl) {
+      videoUrl = await saveRemoteVideo(videoUrl, seedanceNz.fetchRemote);
+    }
+    return res.json({
+      success: true,
+      data: {
+        status: result.status,
+        progress: result.progress,
+        videoUrl,
+        failReason: result.failReason,
+        model: remembered?.model || '',
+        taskType: remembered?.taskType || '',
+        raw: result.raw,
+        ...seedanceNzTrace(result),
+      },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    console.error('proxy/video/wan/status 错误:', error?.message || error);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: error?.message || 'Wan 2.7 Spicy 查询失败',
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+router.post('/audio/seed-audio/submit', async (req, res) => {
+  const settings = loadRawSettings();
+  const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) {
+    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”' });
+  }
+  try {
+    const result = await seedanceNz.submitAudioTask(req.body || {}, apiKey);
+    rememberTaskKey(result.taskId, apiKey, {
+      provider: 'seed-audio-nz',
+      model: result.model,
+    });
+    return res.json({ success: true, data: { taskId: result.taskId, model: result.model, raw: result.raw, ...seedanceNzTrace(result) } });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    console.error('proxy/audio/seed-audio/submit 错误:', error?.message || error);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: error?.message || 'Seed Audio 请求失败',
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+router.get('/audio/seed-audio/status/:tid', async (req, res) => {
+  const settings = loadRawSettings();
+  const remembered = recallTaskMeta(req.params.tid);
+  const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
+  try {
+    const result = await seedanceNz.queryAudioTask(req.params.tid, apiKey);
+    let audioUrl = result.audioUrl;
+    if (result.status === 'succeeded' && audioUrl) audioUrl = await saveRemoteAudio(audioUrl);
+    return res.json({
+      success: true,
+      data: {
+        status: result.status,
+        progress: result.progress,
+        audioUrl,
+        remoteAudioUrl: result.audioUrl,
+        failReason: result.failReason,
+        model: remembered?.model || '',
+        raw: result.raw,
+        ...seedanceNzTrace(result),
+      },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    console.error('proxy/audio/seed-audio/status 错误:', error?.message || error);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: error?.message || 'Seed Audio 查询失败',
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
 router.post('/image', async (req, res) => {
   const settings = loadRawSettings();
   const {
     model, apiModel, paramKind: paramKindIn,
     prompt, n,
     aspect_ratio, image_size,
-    images, image, size, quality, providerParams,
+    images, image, size, quality, response_format, output_format, providerParams,
   } = req.body || {};
   // v1.2.9.15: 一体化「专属优先 fallback 通用」校验
   if (!ensureKeyOrSelectedGroup(settings, res, apiModel || model || '', '图像', providerParams)) return;
@@ -1136,7 +1490,7 @@ router.post('/image', async (req, res) => {
   const gptImage2ForcedSize = gptImage2ZhenzhenVariantSize(originalApiModel);
   const finalApiModel = normalizeImageApiModel(originalApiModel);
   const ml = `${originalApiModel} ${finalApiModel}`.toLowerCase();
-  const paramKind = paramKindIn || (ml.includes('grok') && ml.includes('image') ? 'grok-image' : (isBananaImageModel(ml) ? 'banana-ratio' : 'gpt-size'));
+  const paramKind = paramKindIn || (ml.includes('seedream-v5') ? 'seedream-v5' : (ml.includes('grok') && ml.includes('image') ? 'grok-image' : (isBananaImageModel(ml) ? 'banana-ratio' : 'gpt-size')));
   if (!finalApiModel) return res.status(400).json({ success: false, error: 'model 必填' });
   const refs = Array.isArray(images) ? images.filter(Boolean) : [];
   if (typeof image === 'string' && image && !refs.includes(image)) refs.unshift(image);
@@ -1151,7 +1505,7 @@ router.post('/image', async (req, res) => {
     });
     const r = await callImageUpstreamAsync({
       apiKey: settings.zhenzhenApiKey, finalApiModel, paramKind,
-      prompt, n, aspect_ratio, image_size: gptImage2ForcedSize || image_size, refs, size: gptImage2ForcedSize ? undefined : size, quality,
+      prompt, n, aspect_ratio, image_size: gptImage2ForcedSize || image_size, refs, size: gptImage2ForcedSize ? undefined : size, quality, response_format, output_format,
     });
     const text = await r.text();
     let data; try { data = JSON.parse(text); } catch {
@@ -1195,7 +1549,7 @@ router.post('/image/submit', async (req, res) => {
   const settings = loadRawSettings();
   try {
     const { model, apiModel, paramKind: paramKindIn, prompt, n,
-            aspect_ratio, image_size, images, image, size, quality, providerParams } = req.body || {};
+            aspect_ratio, image_size, images, image, size, quality, response_format, output_format, providerParams } = req.body || {};
     // v1.2.9.15: 一体化「专属优先 fallback 通用」校验
     if (!ensureKeyOrSelectedGroup(settings, res, apiModel || model || '', '图像', providerParams)) return;
     if (!prompt) return res.status(400).json({ success: false, error: 'prompt 不得为空' });
@@ -1203,7 +1557,7 @@ router.post('/image/submit', async (req, res) => {
     const gptImage2ForcedSize = gptImage2ZhenzhenVariantSize(originalApiModel);
     const finalApiModel = normalizeImageApiModel(originalApiModel);
     const ml = `${originalApiModel} ${finalApiModel}`.toLowerCase();
-    const paramKind = paramKindIn || (ml.includes('grok') && ml.includes('image') ? 'grok-image' : (isBananaImageModel(ml) ? 'banana-ratio' : 'gpt-size'));
+    const paramKind = paramKindIn || (ml.includes('seedream-v5') ? 'seedream-v5' : (ml.includes('grok') && ml.includes('image') ? 'grok-image' : (isBananaImageModel(ml) ? 'banana-ratio' : 'gpt-size')));
     if (!finalApiModel) return res.status(400).json({ success: false, error: 'model 必填' });
     const refs = Array.isArray(images) ? images.filter(Boolean) : [];
     if (typeof image === 'string' && image && !refs.includes(image)) refs.unshift(image);
@@ -1218,7 +1572,7 @@ router.post('/image/submit', async (req, res) => {
     });
     const r = await callImageUpstreamAsync({
       apiKey: settings.zhenzhenApiKey, finalApiModel, paramKind,
-      prompt, n, aspect_ratio, image_size: gptImage2ForcedSize || image_size, refs, size: gptImage2ForcedSize ? undefined : size, quality,
+      prompt, n, aspect_ratio, image_size: gptImage2ForcedSize || image_size, refs, size: gptImage2ForcedSize ? undefined : size, quality, response_format, output_format,
     });
     const text = await r.text();
     let data; try { data = JSON.parse(text); } catch { data = { _raw: text }; }
@@ -2102,9 +2456,9 @@ function getUpstreamErrorMessage(data, text, status) {
 }
 
 // 保存远程视频到本地
-async function saveRemoteVideo(url) {
+async function saveRemoteVideo(url, fetchImpl = fetch) {
   try {
-    const res = await fetch(url);
+    const res = await fetchImpl(url);
     if (!res.ok) throw new Error(`下载失败: ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
     const ext = (url.match(/\.(mp4|webm|mov)/i)?.[1] || 'mp4').toLowerCase();
@@ -3010,7 +3364,7 @@ router.get('/video/query', async (req, res) => {
 router.post('/seedance/submit', async (req, res) => {
   const settings = loadRawSettings();
   // v1.2.9.15: 一体化「专属优先 fallback 通用」校验
-  let apiKey = settings.zhenzhenApiKey;
+  let apiKey = settings?.zhenzhenApiKey || '';
   const baseUrl = config.ZHENZHEN_BASE_URL;
   const {
     model, prompt,
@@ -3020,8 +3374,43 @@ router.post('/seedance/submit', async (req, res) => {
     firstFrame, lastFrame,
     refImages,
     videos, audios,
+    taskProvider,
     providerParams,
   } = req.body || {};
+
+  const requestedTaskProvider = taskProvider === 'auto'
+    ? (settings?.zhenzhenSd2ApiKey ? seedanceNz.PROVIDER_ID : 'zhenzhen-legacy')
+    : (taskProvider || 'zhenzhen-legacy');
+
+  if (requestedTaskProvider === seedanceNz.PROVIDER_ID) {
+    try {
+      const result = await seedanceNz.submitTask(req.body || {}, settings?.zhenzhenSd2ApiKey || '');
+      rememberTaskKey(result.taskId, settings.zhenzhenSd2ApiKey, {
+        provider: seedanceNz.PROVIDER_ID,
+        model: result.model,
+        taskType: result.taskType,
+      });
+      return res.json({
+        success: true,
+        data: {
+          taskId: result.taskId,
+          taskProvider: seedanceNz.PROVIDER_ID,
+          model: result.model,
+          taskType: result.taskType,
+          raw: result.raw,
+          ...seedanceNzTrace(result),
+        },
+      });
+    } catch (e) {
+      console.error('proxy/seedance/submit seedance.nz 错误:', e?.message || e);
+      const status = Number(e?.status);
+      return res.status(status >= 400 && status < 600 ? status : 500).json({ success: false, error: e?.message || 'seedance.nz 请求失败', ...seedanceNzTrace(e) });
+    }
+  }
+
+  if (requestedTaskProvider !== 'zhenzhen-legacy') {
+    return res.status(400).json({ success: false, error: `不支持的 Seedance provider：${requestedTaskProvider}` });
+  }
   if (!ensureKeyOrSelectedGroup(settings, res, 'seedance', 'Seedance', providerParams)) return;
 
   if (!model) return res.status(400).json({ success: false, error: 'model 必填' });
@@ -3125,8 +3514,8 @@ router.post('/seedance/submit', async (req, res) => {
     }
     const taskId = data?.id || data?.task_id;
     if (!taskId) return res.status(500).json({ success: false, error: '未获取到 task_id: ' + text.slice(0, 200) });
-    rememberTaskKey(taskId, apiKey, { model, ...providerContext.taskMeta });
-    res.json({ success: true, data: { taskId, raw: data } });
+    rememberTaskKey(taskId, apiKey, { provider: 'zhenzhen-legacy', model, ...providerContext.taskMeta });
+    res.json({ success: true, data: { taskId, taskProvider: 'zhenzhen-legacy', model, raw: data } });
   } catch (e) {
     console.error('proxy/seedance/submit 错误:', e);
     res.status(500).json({ success: false, error: e.message || '请求失败' });
@@ -3138,6 +3527,36 @@ router.get('/seedance/query', async (req, res) => {
   const taskId = String(req.query.taskId || '').trim();
   if (!taskId) return res.status(400).json({ success: false, error: 'taskId 必填' });
   const rememberedMeta = recallTaskMeta(taskId);
+  const requestedTaskProvider = String(req.query.taskProvider || rememberedMeta?.provider || 'zhenzhen-legacy').trim();
+
+  if (requestedTaskProvider === seedanceNz.PROVIDER_ID) {
+    const apiKey = rememberedMeta?.apiKey || settings?.zhenzhenSd2ApiKey || '';
+    try {
+      const result = await seedanceNz.queryTask(taskId, apiKey);
+      let videoUrl = result.videoUrl;
+      if (result.status === 'succeeded' && videoUrl) {
+        videoUrl = await saveRemoteVideo(videoUrl, seedanceNz.fetchRemote);
+      }
+      return res.json({
+        success: true,
+        data: {
+          ...result,
+          videoUrl,
+          taskProvider: seedanceNz.PROVIDER_ID,
+          model: rememberedMeta?.model || '',
+          taskType: rememberedMeta?.taskType || '',
+        },
+      });
+    } catch (e) {
+      console.error('proxy/seedance/query seedance.nz 错误:', e?.message || e);
+      const status = Number(e?.status);
+      return res.status(status >= 400 && status < 600 ? status : 500).json({ success: false, error: e?.message || 'seedance.nz 查询失败', ...seedanceNzTrace(e) });
+    }
+  }
+
+  if (requestedTaskProvider !== 'zhenzhen-legacy') {
+    return res.status(400).json({ success: false, error: `不支持的 Seedance provider：${requestedTaskProvider}` });
+  }
   if (rememberedMeta?.apiKey) {
     if (settings) settings.zhenzhenApiKey = rememberedMeta.apiKey;
     else return res.status(400).json({ success: false, error: '未找到 settings' });
@@ -3212,6 +3631,7 @@ router.get('/seedance/query', async (req, res) => {
         progress: data?.progress || '',
         videoUrl,
         failReason: data?.fail_reason || data?.failReason || null,
+        taskProvider: 'zhenzhen-legacy',
         raw: data,
       },
     });
@@ -3506,42 +3926,67 @@ router.post('/audio/upload', audioUpload.single('file'), async (req, res) => {
 // ========================================================================
 // RunningHub 工作流(异步)
 // 协议:POST /task/openapi/ai-app/run + POST /task/openapi/outputs
-// API Key 取自 settings.rhApiKey（与 settings.js / 前端 ApiSettings 字段保持一致；
-// 历史代码误写为 runninghubApiKey 导致永远读不到，已修正）
-// v1.2.9.16: 取消 rhWalletApiKey 单独字段 —— 普通 RH 节点 与 RH 钱包应用节点
-//            统一使用 settings.rhApiKey，简化用户配置心智。
+// 国内站使用 settings.rhApiKey，海外站使用 settings.rhIntlApiKey。
+// RH 钱包应用仍只做 UI 区分，不再拥有独立钱包 Key。
 // ========================================================================
-// 统一选 key 工具：所有 RH 调用只用 settings.rhApiKey。
-function pickRhApiKey(settings) {
-  return settings?.rhApiKey || settings?.runninghubApiKey || '';
+
+function rhRequestedSite(value) {
+  return normalizeRhSite(value);
 }
-function missingRhKeyError() {
-  return '未配置 RunningHub API Key（请在设置中填写 RunningHub API Key）';
+
+function isRhTaskStateCode(code) {
+  return ['0', '804', '813', '805'].includes(String(code));
+}
+
+function logRhSiteFallback(stage, from, to, detail = '') {
+  console.warn(`[RH/${stage}] ${from.id} -> ${to.id} 自动切换站点${detail ? ` · ${detail}` : ''}`);
 }
 
 router.post('/runninghub/submit', async (req, res) => {
   const settings = loadRawSettings();
   const { webappId, nodeInfoList, instanceType } = req.body || {};
-  const apiKey = pickRhApiKey(settings);
-  if (!apiKey) return res.status(400).json({ success: false, error: missingRhKeyError() });
+  const requestedSite = rhRequestedSite(req.body?.site);
+  const candidates = buildRhSiteCandidates(settings, requestedSite);
+  if (candidates.length === 0) return res.status(400).json({ success: false, error: missingRhKeyError(requestedSite) });
   if (!webappId) return res.status(400).json({ success: false, error: 'webappId 必填' });
   try {
-    const body = { apiKey, webappId, nodeInfoList: nodeInfoList || [] };
-    if (instanceType) body.instanceType = instanceType;
-    const r = await fetch(`${config.RH_BASE_URL}/task/openapi/ai-app/run`, {
-      method: 'POST',
-      headers: { Host: 'www.runninghub.cn', 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify(body),
-    });
-    const data = await r.json();
-    if (data.code === 0) {
-      const taskId = data?.data?.taskId;
-      rememberTaskKey(taskId, apiKey, { provider: 'runninghub', webappId, instanceType: instanceType || '' });
-      console.log(`[RH/submit] webappId=${webappId} fields=${Array.isArray(nodeInfoList) ? nodeInfoList.length : 0} instance=${instanceType || 'default'} taskId=${taskId || ''}`);
-      return res.json({ success: true, data: { taskId, raw: data } });
+    let lastResponse = null;
+    let lastData = null;
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = candidates[index];
+      const body = { apiKey: candidate.apiKey, webappId, nodeInfoList: nodeInfoList || [] };
+      if (instanceType) body.instanceType = instanceType;
+      const r = await fetch(`${candidate.baseUrl}/task/openapi/ai-app/run`, {
+        method: 'POST',
+        headers: { Host: candidate.host, 'Content-Type': 'application/json', Authorization: `Bearer ${candidate.apiKey}` },
+        body: JSON.stringify(body),
+      });
+      const data = await parseJsonResponse(r, `RH ${candidate.label}提交接口`);
+      lastResponse = r;
+      lastData = data;
+      if (String(data?.code) === '0' && data?.data?.taskId) {
+        const taskId = data.data.taskId;
+        rememberTaskKey(taskId, candidate.apiKey, {
+          provider: 'runninghub',
+          webappId,
+          instanceType: instanceType || '',
+          rhSite: candidate.id,
+        });
+        console.log(`[RH/submit] site=${candidate.id} webappId=${webappId} fields=${Array.isArray(nodeInfoList) ? nodeInfoList.length : 0} instance=${instanceType || 'default'} taskId=${taskId}`);
+        return res.json({
+          success: true,
+          data: { taskId, site: candidate.id, fallbackUsed: candidate.id !== requestedSite, raw: data },
+        });
+      }
+      const next = candidates[index + 1];
+      if (!next || !shouldRetryRhSiteResponse(r, data)) break;
+      logRhSiteFallback('submit', candidate, next, data?.msg || `HTTP ${r.status}`);
     }
-    console.warn(`[RH/submit] failed webappId=${webappId} code=${data.code} msg=${data.msg || ''}`);
-    return res.status(400).json({ success: false, error: data.msg || `RH 提交失败 code=${data.code}` });
+    console.warn(`[RH/submit] failed webappId=${webappId} code=${lastData?.code} msg=${lastData?.msg || ''}`);
+    return res.status(lastResponse?.status === 401 || lastResponse?.status === 403 ? lastResponse.status : 400).json({
+      success: false,
+      error: lastData?.msg || `RH 提交失败 code=${lastData?.code}`,
+    });
   } catch (e) {
     console.error('proxy/rh/submit 错误:', e);
     res.status(500).json({ success: false, error: e.message || '请求失败' });
@@ -3552,19 +3997,35 @@ router.get('/runninghub/query', async (req, res) => {
   const settings = loadRawSettings();
   const taskId = String(req.query.taskId || '').trim();
   if (!taskId) return res.status(400).json({ success: false, error: 'taskId 必填' });
-  const apiKey = recallTaskKey(taskId) || pickRhApiKey(settings);
-  if (!apiKey) return res.status(400).json({ success: false, error: missingRhKeyError() });
+  const taskMeta = recallTaskMeta(taskId);
+  const requestedSite = rhRequestedSite(taskMeta?.rhSite || req.query.site);
+  const candidates = buildRhSiteCandidates(settings, requestedSite, taskMeta?.apiKey || '');
+  if (candidates.length === 0) return res.status(400).json({ success: false, error: missingRhKeyError(requestedSite) });
   try {
-    const r = await fetch(`${config.RH_BASE_URL}/task/openapi/outputs`, {
-      method: 'POST',
-      headers: { Host: 'www.runninghub.cn', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apiKey, taskId }),
-    });
-    const data = await r.json();
+    let selectedCandidate = candidates[0];
+    let selectedData = null;
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = candidates[index];
+      const r = await fetch(`${candidate.baseUrl}/task/openapi/outputs`, {
+        method: 'POST',
+        headers: { Host: candidate.host, 'Content-Type': 'application/json', Authorization: `Bearer ${candidate.apiKey}` },
+        body: JSON.stringify({ apiKey: candidate.apiKey, taskId }),
+      });
+      const data = await parseJsonResponse(r, `RH ${candidate.label}查询接口`);
+      selectedCandidate = candidate;
+      selectedData = data;
+      if (isRhTaskStateCode(data?.code)) break;
+      const next = candidates[index + 1];
+      if (!next || !shouldRetryRhSiteResponse(r, data)) break;
+      logRhSiteFallback('query', candidate, next, data?.msg || `HTTP ${r.status}`);
+    }
+    const data = selectedData || {};
+    rememberTaskKey(taskId, selectedCandidate.apiKey, { ...(taskMeta || {}), provider: 'runninghub', rhSite: selectedCandidate.id });
     // code 0=成功 / 804=运行中 / 813=排队 / 805=失败
+    const taskCode = String(data.code ?? '');
     let status = 'PENDING';
     let urls = [];
-    if (data.code === 0) {
+    if (taskCode === '0') {
       status = 'SUCCESS';
       // RH outputs 返回结构兼容：
       //   ① data: [{fileUrl, fileType}, ...]                  // 常见 (AI 应用)
@@ -3611,9 +4072,9 @@ router.get('/runninghub/query', async (req, res) => {
           urls.push(remote);
         }
       }
-    } else if (data.code === 804) status = 'RUNNING';
-    else if (data.code === 813) status = 'QUEUED';
-    else if (data.code === 805) status = 'FAILED';
+    } else if (taskCode === '804') status = 'RUNNING';
+    else if (taskCode === '813') status = 'QUEUED';
+    else if (taskCode === '805') status = 'FAILED';
     else status = 'UNKNOWN';
     // failReason 序列化为字符串：ComfyUI 报错可能是 object（traceback/exception_message/...）
     // 前端直接用于 setError 会造成 React JSX 渲染 object 崩溃。
@@ -3628,7 +4089,7 @@ router.get('/runninghub/query', async (req, res) => {
         failReasonStr = String(failReasonRaw);
       }
     }
-    console.log(`[RH/query] taskId=${taskId} status=${status} code=${data.code} urls=${urls.length}${failReasonStr ? ` fail=${String(failReasonStr).slice(0, 160)}` : ''}`);
+    console.log(`[RH/query] site=${selectedCandidate.id} taskId=${taskId} status=${status} code=${data.code} urls=${urls.length}${failReasonStr ? ` fail=${String(failReasonStr).slice(0, 160)}` : ''}`);
     res.json({
       success: true,
       data: {
@@ -3636,6 +4097,8 @@ router.get('/runninghub/query', async (req, res) => {
         urls,
         failReason: failReasonStr,
         code: data.code,
+        site: selectedCandidate.id,
+        fallbackUsed: selectedCandidate.id !== requestedSite,
         raw: data,
       },
     });
@@ -3649,27 +4112,38 @@ router.post('/runninghub/cancel', async (req, res) => {
   const settings = loadRawSettings();
   const taskId = String(req.body?.taskId || '').trim();
   if (!taskId) return res.status(400).json({ success: false, error: 'taskId 必填' });
-  const apiKey = recallTaskKey(taskId) || pickRhApiKey(settings);
-  if (!apiKey) return res.status(400).json({ success: false, error: missingRhKeyError() });
+  const taskMeta = recallTaskMeta(taskId);
+  const requestedSite = rhRequestedSite(taskMeta?.rhSite || req.body?.site);
+  const candidates = buildRhSiteCandidates(settings, requestedSite, taskMeta?.apiKey || '');
+  if (candidates.length === 0) return res.status(400).json({ success: false, error: missingRhKeyError(requestedSite) });
   try {
-    const cancelUrl = `${config.RH_BASE_URL}/task/openapi/cancel`;
-    const r = await fetch(cancelUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({ apiKey, taskId }),
-    });
-    const data = await parseJsonResponse(r, 'RH 取消接口');
-    console.log(`[RH/cancel] taskId=${taskId} http=${r.status} code=${data?.code} msg=${data?.msg || ''}`);
-    if (String(data?.code) === '0') {
-      return res.json({ success: true, data: { taskId, raw: data } });
+    let lastResponse = null;
+    let lastData = null;
+    let lastCandidate = candidates[0];
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = candidates[index];
+      const r = await fetch(`${candidate.baseUrl}/task/openapi/cancel`, {
+        method: 'POST',
+        headers: { Host: candidate.host, 'Content-Type': 'application/json', Authorization: `Bearer ${candidate.apiKey}` },
+        body: JSON.stringify({ apiKey: candidate.apiKey, taskId }),
+      });
+      const data = await parseJsonResponse(r, `RH ${candidate.label}取消接口`);
+      lastResponse = r;
+      lastData = data;
+      lastCandidate = candidate;
+      console.log(`[RH/cancel] site=${candidate.id} taskId=${taskId} http=${r.status} code=${data?.code} msg=${data?.msg || ''}`);
+      if (String(data?.code) === '0') {
+        rememberTaskKey(taskId, candidate.apiKey, { ...(taskMeta || {}), provider: 'runninghub', rhSite: candidate.id });
+        return res.json({ success: true, data: { taskId, site: candidate.id, fallbackUsed: candidate.id !== requestedSite, raw: data } });
+      }
+      const next = candidates[index + 1];
+      if (!next || !shouldRetryRhSiteResponse(r, data)) break;
+      logRhSiteFallback('cancel', candidate, next, data?.msg || `HTTP ${r.status}`);
     }
     try {
-      console.warn(`[RH/cancel] failed taskId=${taskId} raw=${JSON.stringify(data).slice(0, 500)}`);
+      console.warn(`[RH/cancel] failed site=${lastCandidate.id} taskId=${taskId} raw=${JSON.stringify(lastData).slice(0, 500)}`);
     } catch {}
-    return res.status(400).json({ success: false, error: data?.msg || `RH 取消失败 code=${data?.code}` });
+    return res.status(lastResponse?.status === 401 || lastResponse?.status === 403 ? lastResponse.status : 400).json({ success: false, error: lastData?.msg || `RH 取消失败 code=${lastData?.code}` });
   } catch (e) {
     console.error('proxy/rh/cancel 错误:', e);
     res.status(502).json({
@@ -3695,8 +4169,9 @@ router.post('/runninghub/cancel', async (req, res) => {
 // ----------------------------------------------------------------
 router.post('/runninghub/upload-asset', express.json({ limit: '20mb' }), async (req, res) => {
   const settings = loadRawSettings();
-  const apiKey = pickRhApiKey(settings);
-  if (!apiKey) return res.status(400).json({ success: false, error: missingRhKeyError() });
+  const requestedSite = rhRequestedSite(req.body?.site);
+  const candidates = buildRhSiteCandidates(settings, requestedSite);
+  if (candidates.length === 0) return res.status(400).json({ success: false, error: missingRhKeyError(requestedSite) });
   const url = String(req.body?.url || '').trim();
   if (!url) return res.status(400).json({ success: false, error: 'url 必填' });
   try {
@@ -3739,22 +4214,29 @@ router.post('/runninghub/upload-asset', express.json({ limit: '20mb' }), async (
     if (mimeMap[ext]) mime = mimeMap[ext];
     if (!ext) baseName += '.bin';
     // 3) FormData 上传到 RH
-    const fd = new FormData();
-    fd.append('apiKey', apiKey);
-    fd.append('fileType', 'input');
-    const blob = new Blob([buf], { type: mime });
-    fd.append('file', blob, baseName);
-    const r = await fetch(`${config.RH_BASE_URL}/task/openapi/upload`, {
-      method: 'POST',
-      headers: { Host: 'www.runninghub.cn' },
-      body: fd,
-    });
-    const data = await r.json();
-    console.log('[RH/upload-asset]', baseName, mime, buf.length, '→', data?.code, data?.data?.fileName);
-    if (data.code === 0 && data?.data?.fileName) {
-      return res.json({ success: true, data: { fileName: data.data.fileName, fileType: data.data.fileType || mime } });
+    let lastData = null;
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = candidates[index];
+      const fd = new FormData();
+      fd.append('apiKey', candidate.apiKey);
+      fd.append('fileType', 'input');
+      fd.append('file', new Blob([buf], { type: mime }), baseName);
+      const r = await fetch(`${candidate.baseUrl}/task/openapi/upload`, {
+        method: 'POST',
+        headers: { Host: candidate.host, Authorization: `Bearer ${candidate.apiKey}` },
+        body: fd,
+      });
+      const data = await parseJsonResponse(r, `RH ${candidate.label}上传接口`);
+      lastData = data;
+      console.log('[RH/upload-asset]', `site=${candidate.id}`, baseName, mime, buf.length, '→', data?.code, data?.data?.fileName);
+      if (String(data?.code) === '0' && data?.data?.fileName) {
+        return res.json({ success: true, data: { fileName: data.data.fileName, fileType: data.data.fileType || mime, site: candidate.id, fallbackUsed: candidate.id !== requestedSite } });
+      }
+      const next = candidates[index + 1];
+      if (!next || !shouldRetryRhSiteResponse(r, data)) break;
+      logRhSiteFallback('upload', candidate, next, data?.msg || `HTTP ${r.status}`);
     }
-    return res.status(400).json({ success: false, error: data.msg || `RH 上传失败 code=${data.code}` });
+    return res.status(400).json({ success: false, error: lastData?.msg || `RH 上传失败 code=${lastData?.code}` });
   } catch (e) {
     console.error('proxy/rh/upload-asset 错误:', e);
     res.status(500).json({ success: false, error: e.message || '请求失败' });
@@ -3764,16 +4246,30 @@ router.post('/runninghub/upload-asset', express.json({ limit: '20mb' }), async (
 // 获取 AI 应用信息(nodeInfoList 等)
 router.get('/runninghub/app-info', async (req, res) => {
   const settings = loadRawSettings();
-  const apiKey = pickRhApiKey(settings);
-  if (!apiKey) return res.status(400).json({ success: false, error: missingRhKeyError() });
+  const requestedSite = rhRequestedSite(req.query.site);
+  const candidates = buildRhSiteCandidates(settings, requestedSite);
+  if (candidates.length === 0) return res.status(400).json({ success: false, error: missingRhKeyError(requestedSite) });
   const webappId = String(req.query.webappId || '').trim();
   if (!webappId) return res.status(400).json({ success: false, error: 'webappId 必填' });
   try {
-    const url = `${config.RH_BASE_URL}/api/webapp/apiCallDemo?apiKey=${encodeURIComponent(apiKey)}&webappId=${encodeURIComponent(webappId)}`;
-    const r = await fetch(url, { method: 'GET', headers: { Host: 'www.runninghub.cn' } });
-    const data = await r.json();
-    if (data.code !== 0) return res.status(400).json({ success: false, error: data.msg || `RH 查询失败 code=${data.code}` });
-    res.json({ success: true, data: data.data || {} });
+    let lastData = null;
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = candidates[index];
+      const url = `${candidate.baseUrl}/api/webapp/apiCallDemo?apiKey=${encodeURIComponent(candidate.apiKey)}&webappId=${encodeURIComponent(webappId)}`;
+      const r = await fetch(url, { method: 'GET', headers: { Host: candidate.host, Authorization: `Bearer ${candidate.apiKey}` } });
+      const data = await parseJsonResponse(r, `RH ${candidate.label}应用参数接口`);
+      lastData = data;
+      if (String(data?.code) === '0') {
+        return res.json({
+          success: true,
+          data: { ...(data.data || {}), rhSite: candidate.id, rhFallbackUsed: candidate.id !== requestedSite },
+        });
+      }
+      const next = candidates[index + 1];
+      if (!next || !shouldRetryRhSiteResponse(r, data)) break;
+      logRhSiteFallback('app-info', candidate, next, data?.msg || `HTTP ${r.status}`);
+    }
+    return res.status(400).json({ success: false, error: lastData?.msg || `RH 查询失败 code=${lastData?.code}` });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message || '请求失败' });
   }

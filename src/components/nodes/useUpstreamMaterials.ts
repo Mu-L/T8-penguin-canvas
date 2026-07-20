@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useEdges, useNodeConnections, useNodesData } from '@xyflow/react';
 import { collectMaterialSetBucketsFromData, valueOfMaterialSetItem } from '../../utils/materialSet';
+import { selectSourceHandleData } from '../../utils/sourceHandleData';
 import { fileNameFromUrl } from '../../utils/mediaCollection';
 import { normalizeRhNodeId } from '../../utils/rhTextBinding';
 import { dedupeUpstreamMaterialBuckets } from '../../utils/upstreamMaterialBuckets';
@@ -262,9 +263,10 @@ export function useUpstreamMaterials(nodeId: string): UpstreamMaterials {
     for (const n of list) {
       if (!n) continue;
       const sid = n.id;
-      const ud: any = n.data || {};
       const handles = handleMap.get(sid) || new Set<string | null>([null]);
-      const textMeta = textMetaFromData(ud);
+      const routedData = selectSourceHandleData((n.data || {}) as Record<string, unknown>, handles);
+      for (const ud of routedData as any[]) {
+        const textMeta = textMetaFromData(ud);
 
       // 显式素材集: 保留素材集内部顺序，并用序号 key 避免相同 URL 被全局去重误删。
       // 同时跳过下面的旧字段读取，避免 imageUrls/textSegments 双写后重复出现。
@@ -368,6 +370,7 @@ export function useUpstreamMaterials(nodeId: string): UpstreamMaterials {
       pushUrl(sid, 'audio', ud.audioUrl_1, audios);
       if (Array.isArray(ud.audioUrls)) {
         for (const u of ud.audioUrls) pushUrl(sid, 'audio', u, audios);
+      }
       }
     }
 

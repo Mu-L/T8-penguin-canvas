@@ -6,10 +6,6 @@ function read(path: string) {
   return readFileSync(new URL(path, import.meta.url), 'utf8');
 }
 
-function escapeRegExp(value: string) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 test('package config enables GitHub release updates and local release scripts', () => {
   const pkg = JSON.parse(read('../package.json'));
   const publish = pkg.build.publish?.[0];
@@ -31,7 +27,8 @@ test('electron main process owns updater checks, downloads, and install IPC', ()
   const installerNsh = read('../electron/build-resources/installer.nsh');
   const nsis = pkg.build.nsis;
 
-  assert.match(main, new RegExp(`const APP_VERSION = '${escapeRegExp(pkg.version)}'`));
+  assert.match(main, /const APP_VERSION = require\('\.\.\/package\.json'\)\.version/);
+  assert.match(main, /process\.env\.T8PC_APP_VERSION = APP_VERSION/);
   assert.equal(nsis.createDesktopShortcut, 'always');
   assert.equal(nsis.createStartMenuShortcut, true);
   assert.match(main, /require\('electron-updater'\)/);

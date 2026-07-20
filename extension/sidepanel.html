@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>T8 网页素材采集</title>
+  <link rel="stylesheet" href="styles/asset-panel.css" />
+</head>
+<body class="side-panel">
+  <main class="app-shell">
+    <header class="topbar">
+      <div><strong>T8 网页素材</strong><span id="pageTitle">当前页面</span></div>
+    </header>
+    <section class="toolbar">
+      <button id="scanButton" class="primary" type="button">扫描页面</button>
+      <button id="captureButton" type="button">截取视口</button>
+      <label class="check"><input id="autoScroll" type="checkbox" /> 扫描懒加载</label>
+      <div class="privacy-note">导入会读取当前账号可见图片，并保存到本机 T8。</div>
+    </section>
+    <section class="filters">
+      <label>最小宽度 <input id="minWidth" type="number" min="0" step="50" value="200" /></label>
+      <label>最小高度 <input id="minHeight" type="number" min="0" step="50" value="200" /></label>
+    </section>
+    <section class="selection-bar">
+      <span id="counts">0 项</span>
+      <button id="selectAll" type="button">全选</button>
+      <button id="clearSelection" type="button">清空</button>
+    </section>
+    <section id="assetList" class="asset-list" aria-live="polite"></section>
+    <footer>
+      <div id="status" class="status">点击扫描页面开始。</div>
+      <button id="importButton" class="primary import-button" type="button" disabled>导入到 T8</button>
+    </footer>
+  </main>
+  <script src="scripts/asset-panel.js"></script>
+</body>
+</html>

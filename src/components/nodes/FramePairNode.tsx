@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { useThemeStore } from '../../stores/theme';
 import { useUpstreamMaterials } from './useUpstreamMaterials';
 import SmartImage from '../SmartImage';
@@ -343,7 +344,7 @@ const FramePairNode = (p: NodeProps) => {
         </div>
 
         <button
-          onClick={handleExtract}
+          onClick={() => requestCanvasNodeRun(p.id)}
           disabled={status === 'running' || !upstreamVideo}
           className={btnClass}
           style={isPixel ? { opacity: status === 'running' || !upstreamVideo ? 0.55 : 1 } : undefined}

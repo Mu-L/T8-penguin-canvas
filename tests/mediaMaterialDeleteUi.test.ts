@@ -80,6 +80,8 @@ test('image material context menu can send the current image to Photoshop', () =
   assert.match(contextMenu, /发送到 Photoshop/);
   assert.match(contextMenu, /正在发送到 Photoshop/);
   assert.match(contextMenu, /已发送到 Photoshop/);
+  assert.match(contextMenu, /Photoshop 面板队列/);
+  assert.match(contextMenu, /请查看 PS 面板置入状态/);
   assert.match(contextMenu, /menu\.kind !== 'image' \|\| !menu\.url/);
   assert.match(contextMenu, /kind:\s*'image'/);
   assert.match(contextMenu, /url:\s*menu\.url/);

@@ -4,10 +4,9 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const dns = require('dns').promises;
-const net = require('net');
 const sharp = require('sharp');
 const config = require('../config');
+const { safeRemoteMediaFetch } = require('../utils/safeRemoteMediaFetch');
 
 const router = express.Router();
 
@@ -489,37 +488,6 @@ function toLocalPathnameIfSameApp(url) {
   return url;
 }
 
-function isPrivateAddress(address) {
-  const ip = net.isIP(address);
-  if (ip === 4) {
-    const parts = address.split('.').map((x) => Number(x));
-    return (
-      parts[0] === 10 ||
-      parts[0] === 127 ||
-      parts[0] === 0 ||
-      (parts[0] === 169 && parts[1] === 254) ||
-      (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
-      (parts[0] === 192 && parts[1] === 168)
-    );
-  }
-  if (ip === 6) {
-    const v = address.toLowerCase();
-    return v === '::1' || v.startsWith('fc') || v.startsWith('fd') || v.startsWith('fe80:');
-  }
-  return false;
-}
-
-async function assertSafeRemoteUrl(url) {
-  const u = new URL(url);
-  if (!/^https?:$/i.test(u.protocol)) throw new Error('不支持的资源 URL');
-  const host = u.hostname.toLowerCase();
-  if (!host || host === 'localhost' || host.endsWith('.localhost')) throw new Error('不允许从本机地址拉取远端资源');
-  const addresses = net.isIP(host) ? [{ address: host }] : await dns.lookup(host, { all: true });
-  if (!addresses.length || addresses.some((x) => isPrivateAddress(x.address))) {
-    throw new Error('不允许从内网地址拉取远端资源');
-  }
-}
-
 function decorateSetItem(parentId, raw, index) {
   const kind = normalizeMaterialSetKind(raw?.kind);
   if (kind === 'text') {
@@ -616,27 +584,18 @@ async function readSource(url, root, db) {
   }
 
   if (/^https?:\/\//i.test(url)) {
-    await assertSafeRemoteUrl(url);
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REMOTE_FETCH_TIMEOUT_MS);
-    let resp;
-    try {
-      resp = await fetch(url, { signal: controller.signal, redirect: 'follow' });
-      if (!resp.ok) throw new Error(`拉取远端资源失败: HTTP ${resp.status}`);
-      const declaredSize = Number(resp.headers.get('content-length') || 0);
-      if (declaredSize > REMOTE_MAX_BYTES) throw new Error('远端资源过大');
-      const ab = await resp.arrayBuffer();
-      if (ab.byteLength > REMOTE_MAX_BYTES) throw new Error('远端资源过大');
-      const u = new URL(url);
-      const originalName = decodeURIComponent(path.basename(u.pathname || 'remote_asset')) || 'remote_asset';
-      return {
-        buffer: Buffer.from(ab),
-        originalName,
-        mime: resp.headers.get('content-type') || mimeFromExt(path.extname(originalName)),
-      };
-    } finally {
-      clearTimeout(timer);
-    }
+    const remote = await safeRemoteMediaFetch(url, {
+      maxBytes: REMOTE_MAX_BYTES,
+      timeoutMs: REMOTE_FETCH_TIMEOUT_MS,
+      userAgent: 'T8-PenguinCanvas-ResourceLibrary/1.0',
+    });
+    const u = new URL(remote.finalUrl || url);
+    const originalName = decodeURIComponent(path.basename(u.pathname || 'remote_asset')) || 'remote_asset';
+    return {
+      buffer: remote.buffer,
+      originalName,
+      mime: remote.contentType || mimeFromExt(path.extname(originalName)),
+    };
   }
 
   throw new Error('不支持的资源 URL');

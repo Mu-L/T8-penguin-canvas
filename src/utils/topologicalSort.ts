@@ -8,7 +8,7 @@ import type { Node, Edge } from '@xyflow/react';
 export function topologicalSort(
   nodes: Node[],
   edges: Edge[],
-  executableTypes: Set<string>
+  executableTypes: ReadonlySet<string>
 ): string[] {
   const exeNodes = nodes.filter((n) => n.type && executableTypes.has(n.type));
   const exeIds = new Set(exeNodes.map((n) => n.id));
@@ -53,4 +53,61 @@ export function topologicalSort(
   }
 
   return result;
+}
+
+/**
+ * 与 topologicalSort 使用同一套依赖规则，但返回可并发执行的层。
+ * 同一层内节点之间没有可执行依赖；下一层必须等待上一层完成。
+ * 遇到环时剩余节点按原始顺序单节点串行兜底，避免错误并发。
+ */
+export function topologicalLayers(
+  nodes: Node[],
+  edges: Edge[],
+  executableTypes: ReadonlySet<string>
+): string[][] {
+  const exeNodes = nodes.filter((n) => n.type && executableTypes.has(n.type));
+  const exeIds = new Set(exeNodes.map((n) => n.id));
+
+  const inDegree = new Map<string, number>();
+  const adj = new Map<string, string[]>();
+  exeIds.forEach((id) => {
+    inDegree.set(id, 0);
+    adj.set(id, []);
+  });
+
+  for (const e of edges) {
+    if (exeIds.has(e.source) && exeIds.has(e.target) && e.source !== e.target) {
+      adj.get(e.source)!.push(e.target);
+      inDegree.set(e.target, (inDegree.get(e.target) || 0) + 1);
+    }
+  }
+
+  let queue: string[] = [];
+  for (const n of exeNodes) {
+    if ((inDegree.get(n.id) || 0) === 0) queue.push(n.id);
+  }
+
+  const layers: string[][] = [];
+  const got = new Set<string>();
+  while (queue.length > 0) {
+    const layer = queue;
+    queue = [];
+    layers.push(layer);
+    for (const id of layer) {
+      got.add(id);
+      for (const next of adj.get(id) || []) {
+        const d = (inDegree.get(next) || 0) - 1;
+        inDegree.set(next, d);
+        if (d === 0) queue.push(next);
+      }
+    }
+  }
+
+  if (got.size < exeIds.size) {
+    for (const n of exeNodes) {
+      if (!got.has(n.id)) layers.push([n.id]);
+    }
+  }
+
+  return layers;
 }

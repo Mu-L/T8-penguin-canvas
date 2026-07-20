@@ -1,9 +1,9 @@
 import { memo, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { AlertCircle, ArrowLeft, Boxes, Download, Loader2, Play, Plus, RefreshCw, Search, Settings, Trash2, Upload, Workflow } from 'lucide-react';
-import { PORT_COLOR } from '../../config/portTypes';
+import { AlertCircle, ArrowLeft, Boxes, Download, FileText, Film, Loader2, Music, Play, Plus, RefreshCw, Search, Settings, Trash2, Upload, Workflow } from 'lucide-react';
 import { COMFYUI_APP_MANIFEST } from '../../data/comfyuiAppManifest';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { runComfyuiApp } from '../../services/comfyuiApps';
 import { useApiKeysStore } from '../../stores/apiKeys';
 import { logBus } from '../../stores/logs';
@@ -128,7 +128,17 @@ const ComfyUIStoreNode = ({ id, data, selected }: NodeProps) => {
     req.audios > orderedAudios.length ? `音频还缺 ${req.audios - orderedAudios.length} 个` : '',
   ].filter(Boolean);
   const imageUrls: string[] = Array.isArray(d.imageUrls) ? d.imageUrls : (d.imageUrl ? [d.imageUrl] : []);
+  const videoUrls: string[] = Array.isArray(d.videoUrls) ? d.videoUrls : (d.videoUrl ? [d.videoUrl] : []);
+  const audioUrls: string[] = Array.isArray(d.audioUrls) ? d.audioUrls : (d.audioUrl ? [d.audioUrl] : []);
   const outputText = String(d.outputText || '');
+  const outputKinds: string[] = Array.isArray(d.outputKinds) ? d.outputKinds : [];
+  const outputSummary = [
+    imageUrls.length ? `${imageUrls.length} 图` : '',
+    videoUrls.length ? `${videoUrls.length} 视频` : '',
+    audioUrls.length ? `${audioUrls.length} 音频` : '',
+    outputText.trim() ? '1 文本' : '',
+  ].filter(Boolean).join(' / ');
+  const multiTypeHandle = 'linear-gradient(135deg, #facc15 0 25%, #fb7185 25% 50%, #a78bfa 50% 75%, #38bdf8 75% 100%)';
 
   const bg = isPixel ? 'var(--px-surface)' : isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.96)';
   const text = isPixel ? 'var(--px-ink)' : isLight ? '#0f172a' : '#e5f7fb';
@@ -254,7 +264,21 @@ const ComfyUIStoreNode = ({ id, data, selected }: NodeProps) => {
       throw new Error(message);
     }
     taskCompletionSound.primeAudio();
-    update({ status: 'running', error: '', imageUrl: '', imageUrls: [], outputText: '', progress: '提交中' });
+    update({
+      status: 'running',
+      error: '',
+      imageUrl: '',
+      imageUrls: [],
+      videoUrl: '',
+      videoUrls: [],
+      audioUrl: '',
+      audioUrls: [],
+      outputText: '',
+      outputKinds: [],
+      primaryKind: '',
+      outputSaveErrors: [],
+      progress: '提交中',
+    });
     logBus.info(`ComfyUI 应用提交: ${activeApp.title} · ${getComfyProviderBaseUrl(provider)}`, src);
     try {
       const result = await runComfyuiApp({
@@ -278,10 +302,19 @@ const ComfyUIStoreNode = ({ id, data, selected }: NodeProps) => {
         videoUrls: result.videoUrls || [],
         audioUrls: result.audioUrls || [],
         outputText: result.text || '',
+        outputKinds: result.outputKinds,
+        primaryKind: result.primaryKind,
+        outputSaveErrors: result.outputSaveErrors || [],
         error: '',
       });
-      logBus.success(`ComfyUI 应用完成: ${result.imageUrls.length} 图`, src);
-      taskCompletionSound.notifyComplete(id, 'image');
+      const summary = [
+        result.imageUrls.length ? `${result.imageUrls.length} 图` : '',
+        result.videoUrls?.length ? `${result.videoUrls.length} 视频` : '',
+        result.audioUrls?.length ? `${result.audioUrls.length} 音频` : '',
+        result.text?.trim() ? '1 文本' : '',
+      ].filter(Boolean).join(' / ');
+      logBus.success(`ComfyUI 应用完成: ${summary || '无输出'}`, src);
+      taskCompletionSound.notifyComplete(id, result.primaryKind);
     } catch (error: any) {
       const message = error?.message || 'ComfyUI 应用运行失败';
       update({ status: 'error', error: message, progress: '' });
@@ -290,12 +323,12 @@ const ComfyUIStoreNode = ({ id, data, selected }: NodeProps) => {
     }
   };
 
-  useRunTrigger(id, handleRun, 'image');
+  useRunTrigger(id, handleRun, String(d.primaryKind || outputKinds[0] || 'image'));
 
   return (
     <div className="t8-comfyui-store-node relative flex flex-col nowheel" style={rootStyle}>
-      <Handle type="target" position={Position.Left} style={{ ...handleStyle, background: PORT_COLOR.image, left: -6 }} />
-      <Handle type="source" position={Position.Right} style={{ ...handleStyle, background: PORT_COLOR.image, right: -6 }} />
+      <Handle type="target" position={Position.Left} title="多类型输入：文本 / 图片 / 视频 / 音频" style={{ ...handleStyle, background: multiTypeHandle, left: -6 }} />
+      <Handle type="source" position={Position.Right} title="多类型输出：文本 / 图片 / 视频 / 音频" style={{ ...handleStyle, background: multiTypeHandle, right: -6 }} />
       <ResizableCorners
         selected={selected}
         minWidth={340}
@@ -314,7 +347,7 @@ const ComfyUIStoreNode = ({ id, data, selected }: NodeProps) => {
           <div className="min-w-0 flex-1">
             <div className="truncate text-base font-black">ComfyUI超市</div>
             <div className="truncate text-[11px]" style={{ color: sub }}>
-              {activeApp ? activeApp.title : `${manifest.apps.length} 个应用`} · 本地工作流
+              {activeApp ? activeApp.title : `${manifest.apps.length} 个应用`} · {outputSummary || '本地工作流'}
             </div>
           </div>
           {activeApp && (
@@ -641,7 +674,7 @@ const ComfyUIStoreNode = ({ id, data, selected }: NodeProps) => {
               ))}
             </div>
 
-            <button type="button" className={`${buttonCls} w-full py-2 text-sm font-black`} style={{ ...inputStyle, borderColor: accent, color: accent }} disabled={isBusy} onClick={handleRun}>
+            <button type="button" className={`${buttonCls} w-full py-2 text-sm font-black`} style={{ ...inputStyle, borderColor: accent, color: accent }} disabled={isBusy} onClick={() => requestCanvasNodeRun(id)}>
               {isBusy ? <><Loader2 size={14} className="animate-spin" /> 运行中...</> : <><Play size={14} /> 运行 ComfyUI</>}
             </button>
 
@@ -658,7 +691,34 @@ const ComfyUIStoreNode = ({ id, data, selected }: NodeProps) => {
                 ))}
               </div>
             )}
-            {outputText && <pre className="max-h-24 overflow-auto rounded border p-2 text-[10px] whitespace-pre-wrap" style={{ borderColor: border }}>{outputText}</pre>}
+            {Array.isArray(d.outputSaveErrors) && d.outputSaveErrors.length > 0 && status === 'success' && (
+              <div className="flex gap-1 rounded border px-2 py-1 text-[11px] text-amber-500" style={{ borderColor: 'rgba(245,158,11,0.45)' }}>
+                <AlertCircle size={12} className="mt-0.5 shrink-0" />
+                <span className="break-all">部分输出未能保存到 T8 本地：{d.outputSaveErrors[0]?.error || '下载失败'}</span>
+              </div>
+            )}
+            {videoUrls.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1 text-[11px] font-bold" style={{ color: sub }}><Film size={12} /> 视频 ({videoUrls.length})</div>
+                {videoUrls.slice(0, 3).map((url, index) => (
+                  <video key={`${url}-${index}`} src={url} controls preload="metadata" className="nodrag nopan nowheel w-full rounded border" style={{ borderColor: border, maxHeight: 180 }} />
+                ))}
+              </div>
+            )}
+            {audioUrls.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1 text-[11px] font-bold" style={{ color: sub }}><Music size={12} /> 音频 ({audioUrls.length})</div>
+                {audioUrls.slice(0, 4).map((url, index) => (
+                  <audio key={`${url}-${index}`} src={url} controls preload="metadata" className="nodrag nopan nowheel w-full" />
+                ))}
+              </div>
+            )}
+            {outputText && (
+              <div className="space-y-1">
+                <div className="flex items-center gap-1 text-[11px] font-bold" style={{ color: sub }}><FileText size={12} /> 文本</div>
+                <pre className="max-h-24 overflow-auto rounded border p-2 text-[10px] whitespace-pre-wrap" style={{ borderColor: border }}>{outputText}</pre>
+              </div>
+            )}
             <button type="button" className={buttonCls} style={inputStyle} onClick={() => setManifest(mergeComfyAppManifests(COMFYUI_APP_MANIFEST, getUserComfyAppManifest()))}>
               <RefreshCw size={12} /> 刷新应用
             </button>

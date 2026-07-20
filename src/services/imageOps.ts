@@ -250,11 +250,12 @@ export async function openOutputFolder(
 
 export async function openLocalPath(
   targetPath: string,
-): Promise<{ path: string; opened: boolean }> {
+  options: { selectFile?: boolean } = {},
+): Promise<{ path: string; targetPath?: string; selectFile?: boolean; opened: boolean }> {
   const cleanPath = String(targetPath || '').trim();
   if (!cleanPath) throw new Error('缺少要打开的本地目录');
   const nativeOpenPath = typeof window !== 'undefined' ? window.t8pc?.openPath : undefined;
-  if (nativeOpenPath) {
+  if (nativeOpenPath && !options.selectFile) {
     const opened = await nativeOpenPath(cleanPath);
     if (opened?.success) {
       return { path: opened.path || cleanPath, opened: true };
@@ -264,7 +265,7 @@ export async function openLocalPath(
   const r = await fetch('/api/files/open-local-path', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: cleanPath }),
+    body: JSON.stringify({ path: cleanPath, selectFile: options.selectFile === true }),
   });
   const text = await r.text();
   let json: any = null;
@@ -278,5 +279,5 @@ export async function openLocalPath(
     throw new Error(`打开本地目录接口返回异常: ${text.slice(0, 120)}`);
   }
   if (!r.ok || !json?.success) throw new Error(json?.error || `HTTP ${r.status}`);
-  return json.data as { path: string; opened: boolean };
+  return json.data as { path: string; targetPath?: string; selectFile?: boolean; opened: boolean };
 }

@@ -3,8 +3,131 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
+const { getProjectDatabase } = require('../services/projectDatabase');
+const { mapCanvasMutationError } = require('../services/canvasPatch');
 
 const router = express.Router();
+
+function projectDatabase() {
+  return getProjectDatabase(config);
+}
+
+function expectedRevisionFromRequest(req) {
+  const raw = req.body?.baseRevision ?? req.get('if-match');
+  if (raw == null || raw === '') return null;
+  const parsed = Number(String(raw).replace(/^W\//, '').replace(/"/g, ''));
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
+const LOCAL_PATCH_ACTOR_ID = 'local-owner';
+const LOCAL_PATCH_SESSION_ID = 'local-session';
+const LOCAL_PATCH_AUTHORITY = Object.freeze({
+  source: 'local-owner',
+  role: 'owner',
+  capabilities: Object.freeze(['manageProviders']),
+});
+const LOCAL_AGENT_PATCH_AUTHORITY = Object.freeze({
+  source: 'agent',
+  role: 'owner',
+  capabilities: Object.freeze([]),
+});
+
+function localCanvasPatchAuthority(patch) {
+  // Canvas Agent plan ids are created by the versioned host planner, not copied
+  // from model output. This marker can only reduce local-owner authority.
+  return /^agent-plan-/i.test(String(patch?.id || ''))
+    ? LOCAL_AGENT_PATCH_AUTHORITY
+    : LOCAL_PATCH_AUTHORITY;
+}
+
+function sendCanvasPatchError(res, error, options = {}) {
+  const mapped = mapCanvasMutationError(error, options);
+  return res.status(mapped.status).json(mapped.body);
+}
+
+function scopeCanvasPatch(rawPatch, scope) {
+  const source = rawPatch && typeof rawPatch === 'object' && !Array.isArray(rawPatch) ? rawPatch : {};
+  const patch = {
+    ...source,
+    operations: Array.isArray(source.operations) ? source.operations.map((rawOperation) => ({
+      ...(rawOperation && typeof rawOperation === 'object' && !Array.isArray(rawOperation) ? rawOperation : {}),
+      projectId: scope.projectId,
+      canvasId: scope.canvasId,
+      actorId: scope.actorId,
+      sessionId: scope.sessionId,
+    })) : source.operations,
+  };
+  for (const key of ['projectId', 'canvasId', 'actorId', 'sessionId']) delete patch[key];
+  return patch;
+}
+
+function ensurePatchCanvas(database, canvasId) {
+  let document = database.getCanvas(canvasId);
+  const file = getCanvasFile(canvasId);
+  if (!document && fs.existsSync(file)) document = database.ensureCanvas(canvasId, readJsonFile(file));
+  return document;
+}
+
+function patchResultDocument(result) {
+  const document = result?.document;
+  return document && typeof document === 'object' && Array.isArray(document.nodes) && Array.isArray(document.edges)
+    ? document
+    : null;
+}
+
+function writePatchCompatibilityMirrors(canvasId, document) {
+  const warnings = [];
+  try {
+    atomicWriteJson(getCanvasFile(canvasId), document);
+  } catch (_) {
+    console.warn('[canvas-patch] legacy canvas mirror write failed after authoritative SQLite commit');
+    warnings.push({
+      code: 'legacy_canvas_mirror_failed',
+      message: 'Patch 已由 SQLite 成功提交，但兼容画布镜像暂未同步；后续读取会重试修复。',
+    });
+  }
+  try {
+    const list = loadCanvasList();
+    const item = list.find((entry) => entry.id === canvasId);
+    if (item) {
+      item.nodeCount = document.nodes.length;
+      item.updatedAt = Number(document.updatedAt) || Date.now();
+      item.revision = Number(document.revision) || item.revision;
+      saveCanvasList(list);
+    }
+  } catch (_) {
+    console.warn('[canvas-patch] legacy canvas list mirror write failed after authoritative SQLite commit');
+    warnings.push({
+      code: 'legacy_canvas_list_mirror_failed',
+      message: 'Patch 已由 SQLite 成功提交，但兼容画布列表元数据暂未同步。',
+    });
+  }
+  return warnings;
+}
+
+function sendAuthoritativePatchResult(res, canvasId, result, database = null) {
+  const warnings = [];
+  let currentDocument = null;
+  try {
+    currentDocument = database && typeof database.getCanvas === 'function'
+      ? patchResultDocument({ document: database.getCanvas(canvasId) })
+      : null;
+  } catch (_) {
+    console.warn('[canvas-patch] authoritative canvas refresh failed after SQLite commit');
+    warnings.push({
+      code: 'authoritative_canvas_refresh_failed',
+      message: 'Patch 已由 SQLite 成功提交，但提交后的画布刷新暂时失败；请重新读取画布状态。',
+    });
+  }
+  const document = currentDocument || patchResultDocument(result);
+  if (document) warnings.push(...writePatchCompatibilityMirrors(canvasId, document));
+  return res.json({ success: true, data: result, ...(warnings.length ? { warnings } : {}) });
+}
+
+function removeCanvasRequestControls(value) {
+  for (const key of ['allowEmpty', 'actorId', 'sessionId', 'clientSeq', 'baseRevision']) delete value[key];
+  return value;
+}
 
 // 工具函数
 function readJsonFile(file) {
@@ -848,25 +971,45 @@ router.post('/', (req, res) => {
   list.push(canvas);
   saveCanvasList(list);
   // 初始化空画布数据
-  atomicWriteJson(getCanvasFile(id), {
+  const initialData = {
     nodes: [],
     edges: [],
     viewport: { x: 0, y: 0, zoom: 1 },
     nextNodeSerialId: 1,
     farmCanvas: createDefaultFarmCanvasState(),
-  });
-  res.json({ success: true, data: canvas });
+  };
+  const document = projectDatabase().ensureCanvas(id, initialData);
+  atomicWriteJson(getCanvasFile(id), document);
+  res.json({ success: true, data: { ...canvas, revision: document.revision } });
 });
 
 // GET /api/canvas/:id — 获取单个画布数据
 router.get('/:id', (req, res) => {
   const file = getCanvasFile(req.params.id);
-  if (!fs.existsSync(file)) {
-    return res.status(404).json({ success: false, error: '画布不存在' });
-  }
   try {
-    const data = readJsonFile(file);
-    res.json({ success: true, data });
+    const database = projectDatabase();
+    let document = database.getCanvas(req.params.id);
+    if (!document) {
+      if (!fs.existsSync(file)) return res.status(404).json({ success: false, error: '画布不存在' });
+      document = database.ensureCanvas(req.params.id, readJsonFile(file));
+    } else {
+      let mirrorRevision = null;
+      try {
+        if (fs.existsSync(file)) mirrorRevision = Number(readJsonFile(file)?.revision);
+      } catch {
+        mirrorRevision = null;
+      }
+      if (!Number.isSafeInteger(mirrorRevision) || mirrorRevision !== Number(document.revision)) {
+        try {
+          atomicWriteJson(file, document);
+        } catch (_) {
+          console.warn('[canvas] legacy mirror repair failed; serving authoritative SQLite document');
+          res.set('X-T8-Canvas-Mirror-Warning', 'legacy_canvas_mirror_failed');
+        }
+      }
+    }
+    res.set('ETag', `"${document.revision}"`);
+    res.json({ success: true, data: document });
   } catch (e) {
     res.status(500).json({ success: false, error: '读取失败: ' + e.message });
   }
@@ -889,19 +1032,41 @@ router.put('/:id', (req, res) => {
       return res.status(400).json({ success: false, error: '拒绝空数据覆盖' });
     }
   }
-  const persisted = {
+  const persisted = removeCanvasRequestControls({
+    ...(incoming && typeof incoming === 'object' ? incoming : {}),
     nodes: Array.isArray(incoming?.nodes) ? incoming.nodes : [],
     edges: Array.isArray(incoming?.edges) ? incoming.edges : [],
     viewport: incoming?.viewport || { x: 0, y: 0, zoom: 1 },
     nextNodeSerialId: deriveNextNodeSerialId(incoming?.nodes, incoming?.nextNodeSerialId),
-  };
+  });
   if (Object.prototype.hasOwnProperty.call(incoming || {}, 'creativeDesk')) {
     persisted.creativeDesk = sanitizeCreativeDeskState(incoming.creativeDesk);
   }
   if (Object.prototype.hasOwnProperty.call(incoming || {}, 'farmCanvas')) {
     persisted.farmCanvas = sanitizeFarmCanvasState(incoming.farmCanvas);
   }
-  atomicWriteJson(file, persisted);
+  try {
+    if (fs.existsSync(file)) projectDatabase().ensureCanvas(req.params.id, readJsonFile(file));
+    const document = projectDatabase().saveCanvasSnapshot(req.params.id, persisted, {
+      expectedRevision: expectedRevisionFromRequest(req),
+      actorId: req.body?.actorId,
+      sessionId: req.body?.sessionId,
+      clientSeq: req.body?.clientSeq,
+    });
+    atomicWriteJson(file, document);
+    persisted.revision = document.revision;
+    persisted.schema = document.schema;
+    persisted.schemaVersion = document.schemaVersion;
+    persisted.projectId = document.projectId;
+    persisted.canvasId = document.canvasId;
+    persisted.updatedAt = document.updatedAt;
+  } catch (e) {
+    return sendCanvasPatchError(res, e, {
+      fallbackCode: 'canvas_snapshot_save_failed',
+      fallbackMessage: '画布快照保存失败',
+      defaultStatus: 500,
+    });
+  }
   // 更新列表元数据
   const list = loadCanvasList();
   const item = list.find((x) => x.id === req.params.id);
@@ -910,7 +1075,173 @@ router.put('/:id', (req, res) => {
     item.updatedAt = Date.now();
     saveCanvasList(list);
   }
-  res.json({ success: true });
+  res.set('ETag', `"${persisted.revision}"`);
+  res.json({ success: true, data: { revision: persisted.revision, updatedAt: persisted.updatedAt } });
+});
+
+// GET /api/canvas/:id/sync?afterRevision=N — 增量同步；遇到整快照保存时自动返回快照。
+router.get('/:id/sync', (req, res) => {
+  try {
+    const file = getCanvasFile(req.params.id);
+    if (!projectDatabase().getCanvas(req.params.id) && fs.existsSync(file)) {
+      projectDatabase().ensureCanvas(req.params.id, readJsonFile(file));
+    }
+    const data = projectDatabase().syncCanvas(req.params.id, req.query?.afterRevision);
+    if (!data) return res.status(404).json({ success: false, error: '画布不存在' });
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e?.message || String(e) });
+  }
+});
+
+// POST /api/canvas/:id/operations — 结构化画布操作，供协作网关和后续本机实时编辑共用。
+router.post('/:id/operations', (req, res) => {
+  try {
+    const file = getCanvasFile(req.params.id);
+    if (!projectDatabase().getCanvas(req.params.id) && fs.existsSync(file)) {
+      projectDatabase().ensureCanvas(req.params.id, readJsonFile(file));
+    }
+    const result = projectDatabase().applyOperations(req.params.id, req.body?.operations, {
+      expectedRevision: expectedRevisionFromRequest(req),
+    });
+    atomicWriteJson(file, result.document);
+    const list = loadCanvasList();
+    const item = list.find((entry) => entry.id === req.params.id);
+    if (item) {
+      item.nodeCount = result.document.nodes.length;
+      item.updatedAt = result.document.updatedAt;
+      item.revision = result.document.revision;
+      saveCanvasList(list);
+    }
+    res.set('ETag', `"${result.document.revision}"`);
+    res.json({ success: true, data: result });
+  } catch (e) {
+    return sendCanvasPatchError(res, e, {
+      fallbackCode: 'canvas_operation_invalid',
+      fallbackMessage: '画布操作请求无效',
+    });
+  }
+});
+
+// POST /api/canvas/:id/patches/preview — 只预览，不写画布 revision。
+router.post('/:id/patches/preview', (req, res) => {
+  try {
+    const database = projectDatabase();
+    const document = ensurePatchCanvas(database, req.params.id);
+    if (!document) return res.status(404).json({ success: false, code: 'canvas_not_found', error: '画布不存在' });
+    const context = {
+      actorId: LOCAL_PATCH_ACTOR_ID,
+      sessionId: LOCAL_PATCH_SESSION_ID,
+      projectId: document.projectId,
+      canvasId: document.canvasId,
+    };
+    const patch = scopeCanvasPatch(req.body?.patch, context);
+    const preview = database.previewCanvasPatch(req.params.id, patch, {
+      actorId: context.actorId,
+      sessionId: context.sessionId,
+      projectId: context.projectId,
+      authority: localCanvasPatchAuthority(patch),
+    });
+    res.json({ success: true, data: preview });
+  } catch (error) {
+    return sendCanvasPatchError(res, error);
+  }
+});
+
+// POST /api/canvas/:id/patches — 用户确认后由 SQLite 权威事务应用。
+router.post('/:id/patches', (req, res) => {
+  try {
+    const database = projectDatabase();
+    const document = ensurePatchCanvas(database, req.params.id);
+    if (!document) return res.status(404).json({ success: false, code: 'canvas_not_found', error: '画布不存在' });
+    const context = {
+      actorId: LOCAL_PATCH_ACTOR_ID,
+      sessionId: LOCAL_PATCH_SESSION_ID,
+      projectId: document.projectId,
+      canvasId: document.canvasId,
+    };
+    const patch = scopeCanvasPatch(req.body?.patch, context);
+    const result = database.applyCanvasPatch(req.params.id, patch, {
+      previewDigest: req.body?.previewDigest,
+      confirmed: req.body?.confirmed === true,
+      actorId: context.actorId,
+      sessionId: context.sessionId,
+      projectId: context.projectId,
+      authority: localCanvasPatchAuthority(patch),
+    });
+    return sendAuthoritativePatchResult(res, req.params.id, result, database);
+  } catch (error) {
+    return sendCanvasPatchError(res, error);
+  }
+});
+
+// GET /api/canvas/:id/patches — 当前本机用户的持久 Patch/撤销记录。
+router.get('/:id/patches', (req, res) => {
+  try {
+    const database = projectDatabase();
+    const document = ensurePatchCanvas(database, req.params.id);
+    if (!document) return res.status(404).json({ success: false, code: 'canvas_not_found', error: '画布不存在' });
+    const limit = Math.min(100, Math.max(1, Math.trunc(Number(req.query?.limit) || 50)));
+    const patches = database.listCanvasPatches(req.params.id, { actorId: LOCAL_PATCH_ACTOR_ID, limit });
+    res.json({ success: true, data: patches });
+  } catch (error) {
+    return sendCanvasPatchError(res, error);
+  }
+});
+
+// POST /api/canvas/:id/patches/:patchId/revert — 以新的个人逆向 Operation 事务撤销。
+router.post('/:id/patches/:patchId/revert', (req, res) => {
+  try {
+    const database = projectDatabase();
+    const document = ensurePatchCanvas(database, req.params.id);
+    if (!document) return res.status(404).json({ success: false, code: 'canvas_not_found', error: '画布不存在' });
+    const result = database.revertCanvasPatch(req.params.id, req.params.patchId, {
+      expectedRevision: req.body?.expectedRevision ?? req.body?.baseRevision,
+      actorId: LOCAL_PATCH_ACTOR_ID,
+      sessionId: LOCAL_PATCH_SESSION_ID,
+      projectId: document.projectId,
+    });
+    return sendAuthoritativePatchResult(res, req.params.id, result, database);
+  } catch (error) {
+    return sendCanvasPatchError(res, error);
+  }
+});
+
+// GET /api/canvas/:id/history — 列出持久化快照；只返回元数据，不回传大快照正文。
+router.get('/:id/history', (req, res) => {
+  try {
+    const file = getCanvasFile(req.params.id);
+    if (!projectDatabase().getCanvas(req.params.id) && fs.existsSync(file)) {
+      projectDatabase().ensureCanvas(req.params.id, readJsonFile(file));
+    }
+    if (!projectDatabase().getCanvas(req.params.id)) return res.status(404).json({ success: false, error: '画布不存在' });
+    res.json({ success: true, data: projectDatabase().listCanvasSnapshots(req.params.id, req.query?.limit) });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e?.message || String(e) });
+  }
+});
+
+// POST /api/canvas/:id/history/:revision/restore — 恢复为新 revision，保留全部旧历史。
+router.post('/:id/history/:revision/restore', (req, res) => {
+  try {
+    const file = getCanvasFile(req.params.id);
+    if (!projectDatabase().getCanvas(req.params.id) && fs.existsSync(file)) {
+      projectDatabase().ensureCanvas(req.params.id, readJsonFile(file));
+    }
+    const document = projectDatabase().restoreCanvasSnapshot(req.params.id, req.params.revision, {
+      expectedRevision: expectedRevisionFromRequest(req),
+      actorId: req.body?.actorId,
+      sessionId: req.body?.sessionId,
+    });
+    atomicWriteJson(file, document);
+    res.set('ETag', `"${document.revision}"`);
+    res.json({ success: true, data: document });
+  } catch (e) {
+    return sendCanvasPatchError(res, e, {
+      fallbackCode: 'snapshot_restore_invalid',
+      fallbackMessage: '历史快照恢复请求无效',
+    });
+  }
 });
 
 // POST /api/canvas/:id/auto-save — 将当前画布镜像保存到用户配置的本地目录
@@ -927,6 +1258,43 @@ router.post('/:id/auto-save', (req, res) => {
       return res.status(400).json({ success: false, error: '未配置 canvasAutoSavePath' });
     }
 
+    const database = projectDatabase();
+    const authoritative = ensurePatchCanvas(database, req.params.id);
+    if (!authoritative) {
+      return res.status(404).json({
+        success: false,
+        code: 'canvas_auto_save_not_found',
+        error: '画布不存在',
+      });
+    }
+    const currentRevision = Number(authoritative.revision);
+    if (!Number.isSafeInteger(currentRevision) || currentRevision < 1) {
+      console.warn('[canvas-auto-save] authoritative canvas has an invalid revision');
+      return res.status(500).json({
+        success: false,
+        code: 'canvas_auto_save_failed',
+        error: '画布自动保存失败',
+      });
+    }
+    const hasIncomingRevision = Object.prototype.hasOwnProperty.call(incoming, 'revision');
+    const incomingRevision = hasIncomingRevision ? Number(incoming.revision) : null;
+    if (hasIncomingRevision && (!Number.isSafeInteger(incomingRevision) || incomingRevision < 1)) {
+      return res.status(400).json({
+        success: false,
+        code: 'canvas_auto_save_revision_invalid',
+        error: '画布修订号无效',
+        currentRevision,
+      });
+    }
+    if (incomingRevision != null && incomingRevision > currentRevision) {
+      return res.status(409).json({
+        success: false,
+        code: 'canvas_auto_save_revision_conflict',
+        error: '自动保存请求不是当前权威画布修订',
+        currentRevision,
+      });
+    }
+
     const list = loadCanvasList();
     const item = list.find((x) => x.id === req.params.id);
     const name = item?.name || req.params.id;
@@ -934,34 +1302,71 @@ router.post('/:id/auto-save', (req, res) => {
     const filename = `${safeFilename(name)}-${safeFilename(shortId)}.json`;
     const target = path.join(saveDir, filename);
     const now = Date.now();
-    const payload = {
+    let existing = null;
+    try {
+      if (fs.existsSync(target)) existing = readJsonFile(target);
+    } catch (_) {
+      existing = null;
+    }
+    const existingRevision = Number(existing?.revision);
+    if (Number.isSafeInteger(existingRevision) && existingRevision > currentRevision) {
+      return res.status(409).json({
+        success: false,
+        code: 'canvas_auto_save_mirror_ahead',
+        error: '自动保存镜像修订高于当前权威画布，已拒绝覆盖',
+        currentRevision,
+      });
+    }
+    const autoSavedAt = existingRevision === currentRevision && typeof existing?.autoSavedAt === 'string'
+      ? existing.autoSavedAt
+      : new Date(now).toISOString();
+    const payload = removeCanvasRequestControls({
+      ...authoritative,
       schema: 't8-penguin-canvas-autosave',
       version: 1,
-      autoSavedAt: new Date(now).toISOString(),
+      autoSavedAt,
+      revision: currentRevision,
       canvas: {
         id: req.params.id,
         name,
-        nodeCount: incoming.nodes.length,
-        edgeCount: incoming.edges.length,
-        createdAt: item?.createdAt || null,
-        updatedAt: item?.updatedAt || now,
+        nodeCount: authoritative.nodes.length,
+        edgeCount: authoritative.edges.length,
+        createdAt: item?.createdAt ?? authoritative.createdAt ?? null,
+        updatedAt: authoritative.updatedAt ?? item?.updatedAt ?? now,
       },
-      nodes: incoming.nodes,
-      edges: incoming.edges,
-      viewport: incoming.viewport || { x: 0, y: 0, zoom: 1 },
-      nextNodeSerialId: deriveNextNodeSerialId(incoming.nodes, incoming.nextNodeSerialId),
-    };
-    if (Object.prototype.hasOwnProperty.call(incoming || {}, 'creativeDesk')) {
-      payload.creativeDesk = sanitizeCreativeDeskState(incoming.creativeDesk);
+      nodes: authoritative.nodes,
+      edges: authoritative.edges,
+      viewport: authoritative.viewport || { x: 0, y: 0, zoom: 1 },
+      nextNodeSerialId: deriveNextNodeSerialId(authoritative.nodes, authoritative.nextNodeSerialId),
+    });
+    if (Object.prototype.hasOwnProperty.call(authoritative, 'creativeDesk')) {
+      payload.creativeDesk = sanitizeCreativeDeskState(authoritative.creativeDesk);
     }
-    if (Object.prototype.hasOwnProperty.call(incoming || {}, 'farmCanvas')) {
-      payload.farmCanvas = sanitizeFarmCanvasState(incoming.farmCanvas);
+    if (Object.prototype.hasOwnProperty.call(authoritative, 'farmCanvas')) {
+      payload.farmCanvas = sanitizeFarmCanvasState(authoritative.farmCanvas);
     }
 
-    atomicWriteJson(target, payload);
-    res.json({ success: true, data: { path: target, nodeCount: incoming.nodes.length, edgeCount: incoming.edges.length } });
-  } catch (e) {
-    res.status(500).json({ success: false, error: e?.message || String(e) });
+    const idempotent = existingRevision === currentRevision
+      && JSON.stringify(existing) === JSON.stringify(payload);
+    if (!idempotent) atomicWriteJson(target, payload);
+    res.json({
+      success: true,
+      data: {
+        path: target,
+        nodeCount: authoritative.nodes.length,
+        edgeCount: authoritative.edges.length,
+        revision: currentRevision,
+        idempotent,
+        staleIgnored: incomingRevision != null && incomingRevision < currentRevision,
+      },
+    });
+  } catch (_) {
+    console.warn('[canvas-auto-save] authoritative mirror write failed');
+    res.status(500).json({
+      success: false,
+      code: 'canvas_auto_save_failed',
+      error: '画布自动保存失败',
+    });
   }
 });
 
@@ -972,6 +1377,7 @@ router.delete('/:id', (req, res) => {
   saveCanvasList(filtered);
   const file = getCanvasFile(req.params.id);
   if (fs.existsSync(file)) fs.unlinkSync(file);
+  projectDatabase().deleteCanvas(req.params.id);
   res.json({ success: true });
 });
 

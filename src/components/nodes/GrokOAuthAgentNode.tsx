@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, useReactFlow, type NodeProps } from '@xyflow/react';
 import {
   AlertCircle,
   Bot,
@@ -29,6 +29,8 @@ import {
 } from 'lucide-react';
 import { PORT_COLOR } from '../../config/portTypes';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { createCanvasNodeRunRequestId, requestCanvasNodeRun } from '../../utils/canvasRunRequest';
+import type { RunNodeLifecycleReporter } from '../../types/project';
 import * as api from '../../services/api';
 import {
   completeGrokOAuthLogin,
@@ -939,6 +941,7 @@ function downloadName(url: string, fallback: string) {
 }
 
 const GrokOAuthAgentNode = ({ id, data, selected }: NodeProps) => {
+  const rf = useReactFlow();
   const update = useUpdateNodeData(id);
   const d = (data || {}) as any;
   const { theme, style: themeStyle } = useThemeStore();
@@ -1796,7 +1799,10 @@ const GrokOAuthAgentNode = ({ id, data, selected }: NodeProps) => {
     }
   }, [appendArtifact, appendMessage, autoIntent, autoPublishArtifacts, chatSettings.contextLimit, clearTransientLocalMaterials, contextCompressedCount, contextSummary, d.grokConversationId, d.requestId, d.videoModel, id, isBusy, localPrompt, mentionMaterials, mode, modePayload, orderedAudios, orderedTexts, payloadBase, persistLocalMaterials, persistPrompt, promptMentions, publishArtifact, status, update, updateMessage]);
 
-  const handleQuickRun = useCallback(async (override?: { prompt?: string; mentions?: MediaMention[] }) => {
+  const handleQuickRun = useCallback(async (
+    override?: { prompt?: string; mentions?: MediaMention[] },
+    reporter?: RunNodeLifecycleReporter,
+  ) => {
     if (isBusy) return;
     const rawRunPrompt = typeof override?.prompt === 'string' ? override.prompt : quickPrompt;
     const rawRunMentions = Array.isArray(override?.mentions) ? override.mentions : quickPromptMentions;
@@ -1858,6 +1864,8 @@ const GrokOAuthAgentNode = ({ id, data, selected }: NodeProps) => {
         ];
       }
       const modelValue = String(runtimeModePayload.model || '');
+      await reporter?.providerRequest({ provider: 'grok-oauth', model: modelValue || inferredMode });
+      let providerSubmittedRecorded = false;
       const sourceArtifactIds = Array.isArray(base.sourceArtifactIds) ? base.sourceArtifactIds : [];
       const parentArtifactId = String(base.parentArtifactId || sourceArtifactIds[0] || '');
       let finalReply = '';
@@ -1897,9 +1905,30 @@ const GrokOAuthAgentNode = ({ id, data, selected }: NodeProps) => {
           },
           onEvent: (event) => {
             if (event.type === 'tool.progress' || event.event === 'tool.progress') {
+              const progress = Number(event.progress || 0);
+              const eventResult = event.result || {};
+              const payload = {
+                provider: 'grok-oauth',
+                model: modelValue || null,
+                requestId: event.requestId || d.requestId || null,
+                transportHttpStatus: eventResult.transportHttpStatus,
+                upstreamHttpStatus: eventResult.upstreamHttpStatus,
+                usage: eventResult.usage,
+                pollCount: event.pollCount,
+                httpStatusSource: 'local-backend',
+                mode: inferredMode,
+                progress,
+                message: event.message || 'Grok OAuth 简易生成中...',
+              };
+              if (payload.requestId && !providerSubmittedRecorded) {
+                providerSubmittedRecorded = true;
+                void reporter?.providerSubmitted(payload);
+              }
+              if (inferredMode === 'video') void reporter?.polling(payload);
+              else void reporter?.progress(payload);
               update({
                 status: inferredMode === 'video' ? 'polling' : 'running',
-                progress: Number(event.progress || 0),
+                progress,
                 requestId: event.requestId || d.requestId || '',
                 progressMessage: event.message || 'Grok OAuth 简易生成中...',
               });
@@ -1920,6 +1949,16 @@ const GrokOAuthAgentNode = ({ id, data, selected }: NodeProps) => {
       const fallbackArtifact = resultToArtifact(inferredMode, { ...(result || {}), text: textOut || result?.text, reply: textOut || result?.reply }, base.prompt, modelValue);
       const outputArtifact = latestEventArtifact || fallbackArtifact;
       if (!outputArtifact) throw new Error('Grok OAuth 没有返回可输出内容。');
+      await reporter?.providerResponse({
+        provider: 'grok-oauth',
+        model: modelValue || inferredMode,
+        requestId: result?.requestId || outputArtifact.requestId,
+        transportHttpStatus: result?.transportHttpStatus,
+        upstreamHttpStatus: result?.upstreamHttpStatus,
+        usage: result?.usage,
+        status: 'succeeded',
+        httpStatusSource: 'local-backend',
+      });
       outputArtifact.id = outputArtifact.id || makeId('quick_artifact');
       outputArtifact.turnId = outputArtifact.turnId || turnId;
       outputArtifact.command = outputArtifact.command || command;
@@ -1928,15 +1967,33 @@ const GrokOAuthAgentNode = ({ id, data, selected }: NodeProps) => {
       outputArtifact.prompt = outputArtifact.prompt || base.prompt;
       outputArtifact.model = outputArtifact.model || modelValue;
       const label = artifactKindLabel(outputArtifact.kind);
-      update(buildArtifactOutputPatch(outputArtifact, {
-        prompt: base.prompt,
-        summary: `${label} 已输出到画布素材`,
-        quickLastRunSummary: `${label} · 已输出`,
-        lastQuickOutputId: outputArtifact.id,
-      }));
+      update({
+        ...buildArtifactOutputPatch(outputArtifact, {
+          prompt: base.prompt,
+          summary: `${label} 已输出到画布素材`,
+          quickLastRunSummary: `${label} · 已输出`,
+          lastQuickOutputId: outputArtifact.id,
+        }),
+        provider: 'grok-oauth',
+        model: modelValue || inferredMode,
+        requestId: result?.requestId || outputArtifact.requestId,
+        transportHttpStatus: result?.transportHttpStatus,
+        upstreamHttpStatus: result?.upstreamHttpStatus,
+        usage: result?.usage,
+      });
       taskCompletionSound.notifyComplete(id, 'grok-oauth-agent');
       logBus.success(`Grok OAuth 简易生成完成：${label}`, `grok:${id}`);
     } catch (e: any) {
+      await reporter?.providerResponse({
+        provider: 'grok-oauth',
+        model: String((modePayload(inferredMode, base) as any).model || inferredMode),
+        requestId: e?.requestId,
+        transportHttpStatus: e?.transportHttpStatus,
+        upstreamHttpStatus: e?.upstreamHttpStatus,
+        status: e?.name === 'AbortError' ? 'stopped' : 'failed',
+        error: { message: e?.message || String(e), code: e?.code },
+        httpStatusSource: 'local-backend',
+      });
       if (e?.name === 'AbortError') {
         update({ status: 'idle', error: '已中止 Grok OAuth 任务。', progressMessage: '' });
       } else {
@@ -2050,7 +2107,45 @@ const GrokOAuthAgentNode = ({ id, data, selected }: NodeProps) => {
 
   const activeSlashCommand = useMemo(() => parseSlashCommand(localPrompt)?.command || slashCommandFromMode(mode), [localPrompt, mode]);
 
-  useRunTrigger(id, handleQuickRun, 'grok-oauth-agent');
+  const requestGrokCanvasRun = useCallback((
+    surface: 'quick' | 'studio',
+    override?: { prompt?: string; mentions?: MediaMention[] },
+  ) => {
+    const requestId = createCanvasNodeRunRequestId(id, `grok-${surface}`);
+    const promptPatch = surface === 'studio'
+      ? {
+          ...(typeof override?.prompt === 'string' ? { prompt: override.prompt } : {}),
+          ...(Array.isArray(override?.mentions) ? { promptMentions: override.mentions } : {}),
+        }
+      : {
+          ...(typeof override?.prompt === 'string' ? { quickPrompt: override.prompt } : {}),
+          ...(Array.isArray(override?.mentions) ? { quickPromptMentions: override.mentions } : {}),
+        };
+    // Persist the chosen surface before requesting Canvas authorization. The
+    // surface and latest prompt therefore participate in the execution-graph
+    // digest instead of living in an uninspectable click-local closure.
+    update({ ...promptPatch, grokRunSurface: surface, grokRunRequestId: requestId });
+    window.requestAnimationFrame(() => requestCanvasNodeRun(id, { requestId }));
+  }, [id, update]);
+
+  useRunTrigger(
+    id,
+    async (reporter) => {
+      const liveData = rf.getNode(id)?.data as Record<string, unknown> | undefined;
+      const exactRequestedSurface = Boolean(reporter.runContext?.requestId)
+        && reporter.runContext?.requestId === liveData?.grokRunRequestId
+        ? String(liveData?.grokRunSurface || 'quick')
+        : 'quick';
+      try {
+        if (exactRequestedSurface === 'studio') await handleRun();
+        else await handleQuickRun(undefined, reporter);
+      } finally {
+        update({ grokRunSurface: 'quick', grokRunRequestId: '' });
+      }
+    },
+    'grok-oauth-agent',
+    { lifecycleAware: true },
+  );
 
   const renderModeParams = (compact = false) => {
     if (mode === 'chat') {
@@ -2226,7 +2321,7 @@ const GrokOAuthAgentNode = ({ id, data, selected }: NodeProps) => {
             mentions={quickPromptMentions}
             materials={mentionMaterials}
             onChange={(value, mentions) => update({ quickPrompt: value, quickPromptMentions: mentions })}
-            onSubmit={(value, mentions) => void handleQuickRun({ prompt: value, mentions })}
+            onSubmit={(value, mentions) => requestGrokCanvasRun('quick', { prompt: value, mentions })}
             placeholder="写一句话直接生成，也可以 @ 引用上游或产物"
             isDark={isDark}
             isPixel={isPixel}
@@ -2245,7 +2340,7 @@ const GrokOAuthAgentNode = ({ id, data, selected }: NodeProps) => {
               <Square size={12} /> 停止
             </button>
           ) : (
-            <button type="button" onClick={() => void handleQuickRun()} className="nodrag rounded px-2 py-1.5 text-[11px] font-bold flex items-center justify-center gap-1" style={{ background: surfaceStrong, color: text, border: `1px solid ${border}` }}>
+            <button type="button" onClick={() => requestGrokCanvasRun('quick')} className="nodrag rounded px-2 py-1.5 text-[11px] font-bold flex items-center justify-center gap-1" style={{ background: surfaceStrong, color: text, border: `1px solid ${border}` }}>
               <Send size={12} /> 简易生成
             </button>
           )}
@@ -2314,7 +2409,7 @@ const GrokOAuthAgentNode = ({ id, data, selected }: NodeProps) => {
           loginPanel={loginPanel(false)}
           renderModeParams={() => renderModeParams(false)}
           onClose={() => setStudioOpen(false)}
-          onRun={(override) => void handleRun(override)}
+          onRun={(override) => requestGrokCanvasRun('studio', override)}
           onStop={handleStop}
           onRefresh={() => void refreshStatus()}
           onPromptChange={(value, mentions) => update({ prompt: value, promptMentions: mentions })}

@@ -5,6 +5,7 @@ const {
   resolveMediaRef,
 } = require('./mediaResolver');
 const { isAllowedComfyuiUrl } = require('./comfyuiAccess');
+const { mergeProviderTrace, providerTrace } = require('./providerTrace');
 
 const DEFAULT_TIMEOUT_MS = 5000;
 const GENERATION_TIMEOUT_MS = 60 * 60 * 1000;
@@ -763,6 +764,19 @@ function viewUrl(baseUrl, item, defaultType = 'output') {
   return `${baseUrl}/view?filename=${encodeURIComponent(filename)}&type=${encodeURIComponent(type)}&subfolder=${encodeURIComponent(subfolder)}`;
 }
 
+function outputItems(value) {
+  if (Array.isArray(value)) return value;
+  return value && typeof value === 'object' ? [value] : [];
+}
+
+function comfyOutputMediaKind(item, fallback = 'image') {
+  const filename = String(item?.filename || item?.file || item?.name || '').toLowerCase();
+  const format = String(item?.format || item?.mime || item?.content_type || '').toLowerCase();
+  if (/\.(mp4|webm|mov|m4v|mkv)(?:$|\?)/i.test(filename) || format.startsWith('video/')) return 'video';
+  if (/\.(mp3|wav|ogg|m4a|flac|aac)(?:$|\?)/i.test(filename) || format.startsWith('audio/')) return 'audio';
+  return fallback;
+}
+
 function collectComfyOutputs(raw, promptId, baseUrl) {
   const source = raw?.[promptId] || raw?.data?.[promptId] || raw?.data || raw;
   const outputs = source?.outputs || source?.output || {};
@@ -770,20 +784,22 @@ function collectComfyOutputs(raw, promptId, baseUrl) {
   const videoUrls = [];
   const audioUrls = [];
   const texts = [];
+  const pushMedia = (item, fallback) => {
+    const url = viewUrl(baseUrl, item, 'output');
+    if (!url) return;
+    const kind = comfyOutputMediaKind(item, fallback);
+    const target = kind === 'video' ? videoUrls : kind === 'audio' ? audioUrls : imageUrls;
+    if (!target.includes(url)) target.push(url);
+  };
   for (const output of Object.values(outputs || {})) {
     if (!output || typeof output !== 'object') continue;
-    for (const item of Array.isArray(output.images) ? output.images : []) {
-      const url = viewUrl(baseUrl, item, 'output');
-      if (url && !imageUrls.includes(url)) imageUrls.push(url);
-    }
-    for (const item of Array.isArray(output.videos) ? output.videos : []) {
-      const url = viewUrl(baseUrl, item, 'output');
-      if (url && !videoUrls.includes(url)) videoUrls.push(url);
-    }
-    for (const item of Array.isArray(output.audio) ? output.audio : []) {
-      const url = viewUrl(baseUrl, item, 'output');
-      if (url && !audioUrls.includes(url)) audioUrls.push(url);
-    }
+    for (const item of outputItems(output.images)) pushMedia(item, 'image');
+    for (const item of outputItems(output.videos)) pushMedia(item, 'video');
+    for (const item of outputItems(output.video)) pushMedia(item, 'video');
+    // VHS_VideoCombine commonly returns MP4/WebM through the historical `gifs` key.
+    for (const item of outputItems(output.gifs)) pushMedia(item, 'image');
+    for (const item of outputItems(output.audio)) pushMedia(item, 'audio');
+    for (const item of outputItems(output.audios)) pushMedia(item, 'audio');
     for (const key of ['text', 'texts', 'string', 'strings']) {
       const value = output[key];
       if (typeof value === 'string') texts.push(value);
@@ -791,6 +807,15 @@ function collectComfyOutputs(raw, promptId, baseUrl) {
     }
   }
   return { imageUrls, videoUrls, audioUrls, text: texts.join('\n').trim() };
+}
+
+function outputKindsForResult(result = {}) {
+  const kinds = [];
+  if (Array.isArray(result.imageUrls) && result.imageUrls.length) kinds.push('image');
+  if (Array.isArray(result.videoUrls) && result.videoUrls.length) kinds.push('video');
+  if (Array.isArray(result.audioUrls) && result.audioUrls.length) kinds.push('audio');
+  if (String(result.text || '').trim()) kinds.push('text');
+  return kinds;
 }
 
 function extractPromptId(raw) {
@@ -809,6 +834,7 @@ async function pollHistory(baseUrl, promptId, options = {}) {
   const minMaxPoll = Math.ceil(GENERATION_TIMEOUT_MS / Math.max(1, interval));
   const maxPoll = Math.max(requestedMaxPoll, minMaxPoll);
   let lastRaw = null;
+  let trace = {};
   for (let i = 0; i < maxPoll; i += 1) {
     if (i > 0 && interval > 0) await new Promise((resolve) => setTimeout(resolve, interval));
     const res = await fetchWithTimeout(`${baseUrl}/history/${encodeURIComponent(promptId)}`, {
@@ -818,22 +844,31 @@ async function pollHistory(baseUrl, promptId, options = {}) {
     });
     const raw = await responseJson(res);
     lastRaw = raw;
-    if (!res.ok) throw new Error(`ComfyUI history 查询失败：HTTP ${res.status}`);
+    trace = mergeProviderTrace(trace, providerTrace(res, raw, { pollCount: i + 1 }));
+    if (!res.ok) {
+      const error = new Error(`ComfyUI history 查询失败：HTTP ${res.status}`);
+      Object.assign(error, trace);
+      throw error;
+    }
     const outputs = collectComfyOutputs(raw, promptId, baseUrl);
     if (outputs.imageUrls.length || outputs.videoUrls.length || outputs.audioUrls.length || outputs.text) {
-      return { raw, ...outputs };
+      return { raw, ...outputs, ...trace };
     }
-    const status = extractStatus(raw);
-    if (SUCCESS_STATUSES.has(status)) return { raw, ...outputs };
+    const statusSource = raw?.[promptId] || raw?.data?.[promptId] || raw?.data || raw;
+    const status = extractStatus(statusSource);
+    if (SUCCESS_STATUSES.has(status)) return { raw, ...outputs, ...trace };
     if (FAILURE_STATUSES.has(status)) {
       const classified = classifyComfyUiError(raw, 'ComfyUI 工作流执行失败。');
       const error = new Error(classified.error);
       error.code = classified.code;
       error.raw = raw;
+      Object.assign(error, trace);
       throw error;
     }
   }
-  throw new Error(`ComfyUI 工作流超时：${JSON.stringify(lastRaw || promptId).slice(0, 500)}`);
+  const error = new Error(`ComfyUI 工作流超时：${JSON.stringify(lastRaw || promptId).slice(0, 500)}`);
+  Object.assign(error, trace, { pollCount: maxPoll });
+  throw error;
 }
 
 async function generateImage(provider, input = {}, options = {}) {
@@ -860,6 +895,7 @@ async function generateImage(provider, input = {}, options = {}) {
     return { ok: false, code: 'invalid_workflow', providerId: provider.id, protocol: 'comfyui', error: 'ComfyUI 工作流 JSON 无效。' };
   }
 
+  let trace = {};
   try {
     const res = await fetchWithTimeout(`${baseUrl}/prompt`, {
       method: 'POST',
@@ -869,21 +905,27 @@ async function generateImage(provider, input = {}, options = {}) {
       fetchImpl: options.fetchImpl,
     });
     const raw = await responseJson(res);
+    trace = providerTrace(res, raw, { pollCount: 0 });
     if (!res.ok) {
       const classified = classifyComfyUiError(raw, `ComfyUI 提交失败：HTTP ${res.status}`);
-      return { ok: false, code: classified.code, providerId: provider.id, protocol: 'comfyui', error: classified.error, raw };
+      return { ok: false, code: classified.code, providerId: provider.id, protocol: 'comfyui', model: workflow.id || workflow.name, error: classified.error, raw, ...trace };
     }
     const promptId = extractPromptId(raw);
     if (!promptId) {
-      return { ok: false, code: 'missing_prompt_id', providerId: provider.id, protocol: 'comfyui', error: 'ComfyUI 未返回 prompt_id。', raw };
+      return { ok: false, code: 'missing_prompt_id', providerId: provider.id, protocol: 'comfyui', model: workflow.id || workflow.name, error: 'ComfyUI 未返回 prompt_id。', raw, ...trace };
     }
     const polled = await pollHistory(baseUrl, promptId, options);
-    if (!polled.imageUrls.length) {
-      return { ok: false, code: 'empty_image', providerId: provider.id, protocol: 'comfyui', error: 'ComfyUI 工作流完成但没有返回图片。', raw: polled.raw };
+    trace = mergeProviderTrace(trace, polled);
+    const outputKinds = outputKindsForResult(polled);
+    if (!outputKinds.length) {
+      return { ok: false, code: 'empty_output', providerId: provider.id, protocol: 'comfyui', model: workflow.id || workflow.name, taskId: promptId, error: 'ComfyUI 工作流完成但没有返回图片、视频、音频或文本。', raw: polled.raw, ...trace };
     }
+    const primaryKind = outputKinds[0];
     return {
       ok: true,
-      kind: 'image',
+      kind: primaryKind,
+      primaryKind,
+      outputKinds,
       code: 'completed',
       providerId: provider.id,
       protocol: 'comfyui',
@@ -894,10 +936,11 @@ async function generateImage(provider, input = {}, options = {}) {
       audioUrls: polled.audioUrls,
       text: polled.text,
       raw: polled.raw,
+      ...trace,
     };
   } catch (e) {
     const classified = classifyComfyUiError(e?.raw || e, e?.message || 'ComfyUI 调用失败。');
-    return { ok: false, code: e?.code || classified.code, providerId: provider.id, protocol: 'comfyui', error: classified.error };
+    return { ok: false, code: e?.code || classified.code, providerId: provider.id, protocol: 'comfyui', model: workflow.id || workflow.name, error: classified.error, ...mergeProviderTrace(trace, e) };
   }
 }
 
@@ -958,6 +1001,8 @@ async function testProvider(provider, options = {}) {
 
 module.exports = {
   classifyComfyUiError,
+  collectComfyOutputs,
   generateImage,
+  outputKindsForResult,
   testProvider,
 };

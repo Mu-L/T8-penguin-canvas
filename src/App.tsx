@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Moon, Settings, Sun, Wifi, WifiOff, Sparkles, Cloud, ExternalLink, Copy, Check, Gift, Heart, Youtube, PlayCircle, Bell, Wand2, Globe, MessageCircle, CalendarDays, Rocket, Library, Palette, Skull, Sailboat, BookOpen, Shield, Crown, PanelLeftClose, PanelLeftOpen, Puzzle } from 'lucide-react';
+import { Moon, Settings, Sun, Wifi, WifiOff, Sparkles, Cloud, ExternalLink, Copy, Check, Gift, Heart, Youtube, PlayCircle, Bell, Wand2, Globe, MessageCircle, CalendarDays, Rocket, Library, Palette, Skull, Sailboat, BookOpen, Shield, Crown, PanelLeftClose, PanelLeftOpen, Puzzle, KeyRound } from 'lucide-react';
 import { useThemeStore } from './stores/theme';
 import { seedDragonBallRadarForShenronTest, useDragonBallRadarStore } from './stores/dragonBallRadar';
 import { seedSaintSeiyaGoldClothsForHadesTest, useSaintSeiyaSanctuaryStore } from './stores/saintSeiyaSanctuary';
@@ -50,6 +50,38 @@ function isShortcutTypingTarget(target: EventTarget | null): boolean {
 }
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 't8-sidebar-collapsed';
+const ZHAOTUTU_TAGGER_TRAINER_URL = 'https://zhaotutu.xyz';
+const ZHAOTUTU_TAGGER_TRAINER_LABEL = '最好的打标和模型训练工具-图图打标及训练器：点击获取';
+const API_ACQUISITION_LINKS = [
+  {
+    id: 'zhenzhen-cn',
+    title: '贞贞的平价AI小屋（国内版）',
+    description: '主要调用国内模型，非盈利运营，仅保留 5%-10% 网站维护费用；国内模型价格约为海外版的 7.5-8 折（新网站）。',
+    action: '获取国内版 API Key',
+    url: 'https://api.seedance.nz/sign-up?aff=5f4w',
+  },
+  {
+    id: 'zhenzhen-intl',
+    title: '贞贞的AI工坊（海外版）',
+    description: '主要调用海外模型并服务海外用户，也包含国内模型；由于整体成本较高，国内模型价格不具优势。',
+    action: '获取海外版 API Key',
+    url: 'https://ai.t8star.org/register?aff=dP7j',
+  },
+  {
+    id: 'runninghub-cn',
+    title: 'RunningHub APIKEY 国内版',
+    description: '适配更多 AI 应用，并提供最新模型体验。',
+    action: '获取国内版 RH API Key',
+    url: 'https://www.runninghub.cn/user-center/1819214514410942465/webapp?inviteCode=rh-v1121',
+  },
+  {
+    id: 'runninghub-intl',
+    title: 'RunningHub APIKEY 海外版',
+    description: '审核规则更宽松，支持更多海外模型。',
+    action: '获取海外版 RH API Key',
+    url: 'https://www.runninghub.ai/user-center/1907375370302308353/webapp?inviteCode=rh-v1121',
+  },
+] as const;
 
 function readSidebarCollapsedPreference(): boolean {
   if (typeof window === 'undefined') return false;
@@ -183,6 +215,16 @@ const CANVAS_TUTORIALS = [
     bilibili: 'https://www.bilibili.com/video/BV1mj7h6CEYx/',
     youtube: 'https://www.youtube.com/watch?v=wCOoTtuxQPM',
   },
+  {
+    title: '教程第十五弹（新增植物大战僵尸主题，新增PS插件支持Photoshop和画布发送及生成，图像节点新增seedream模块，修复agnes图像编辑报错，新增即梦cli，导演台，SD2.0节点的sd2.0mini和原生4K，新增随机路由节点，新增批量打标节点，新增视频剪辑节点，优化提示库模板功能，视频类素材左侧新增首尾帧，极速放大及质量放大功能）',
+    bilibili: 'https://www.bilibili.com/video/BV1RoN76RE9m/',
+    youtube: 'https://www.youtube.com/watch?v=K65BqvSTfh4',
+  },
+  {
+    title: '教程第十六弹（支持贞贞的平价AI小屋，全国内站模型比海外站便宜5-7.5折，支持宽审核，每日更新模型，RH API分离设置）',
+    bilibili: 'https://www.bilibili.com/video/BV11zNM6jEQR/',
+    youtube: 'https://www.youtube.com/watch?v=_G9xLFd0DN0',
+  },
 ];
 
 const CANVAS_PLUGIN_INSTALL_GUIDES = [
@@ -205,13 +247,13 @@ const CANVAS_PLUGIN_INSTALL_GUIDES = [
     safety: 'Bridge 走本机 localhost:3845 / 127.0.0.1，不把素材上传到远端中转服务。',
   },
   {
-    name: '网页图片反推 Chrome 扩展',
+    name: '网页图片反推与素材采集 Chrome 扩展',
     target: '浏览器扩展',
     devPath: 'extension\\manifest.json',
     packagedPath: 'resources/extension/web-image-reverse/',
     install: 'Chrome 扩展程序打开开发者模式，选择“加载已解压的扩展程序”，开发版选 extension，打包版选 resources/extension/web-image-reverse/。',
-    use: '网页图片右键反推提示词、生成图片，并可把 RunningHub / VibeX 网页结果发送回 T8 画布。',
-    safety: '扩展只负责网页侧采集与本机桥接，不内置用户密钥。',
+    use: '网页图片右键反推提示词、生成图片；点击扩展图标可在 Popup 或 Side Panel 扫描图片、背景图、srcset、canvas，筛选后批量导入为一个上传素材节点，也可截取当前视口。',
+    safety: '扩展不内置用户密钥。批量素材先写入本机 T8 input，再通过带会话令牌的本机桥接发送；公网 URL 回退会拒绝内网地址并限制单图与批次大小。',
   },
 ] as const;
 
@@ -263,6 +305,12 @@ function App() {
   // 「视频教程」推广浮层开关
   const [videoOpen, setVideoOpen] = useState(false);
   const videoWrapRef = useRef<HTMLDivElement>(null);
+  // 「图图打标器」推广浮层开关
+  const [zhaotutuOpen, setZhaotutuOpen] = useState(false);
+  const zhaotutuWrapRef = useRef<HTMLDivElement>(null);
+  // 「API获取」说明浮层开关
+  const [apiAcquisitionOpen, setApiAcquisitionOpen] = useState(false);
+  const apiAcquisitionWrapRef = useRef<HTMLDivElement>(null);
   // 「插件安装」说明浮层开关
   const [pluginInstallOpen, setPluginInstallOpen] = useState(false);
   const pluginInstallWrapRef = useRef<HTMLDivElement>(null);
@@ -282,6 +330,36 @@ function App() {
   // 画布接收节点添加的 ref(从 Sidebar -> Canvas)
   const addNodeRef = useRef<AddNodeFn | null>(null);
   const insertWorkflowRef = useRef<InsertWorkflowFn | null>(null);
+
+  const handleOpenZhaotutuTaggerTrainer = useCallback(async () => {
+    setZhaotutuOpen(false);
+    setPluginInstallOpen(false);
+    setCanvasTutorialOpen(false);
+    if (typeof window === 'undefined') return;
+    if (typeof window.t8pc?.openExternal === 'function') {
+      try {
+        const result = await window.t8pc.openExternal(ZHAOTUTU_TAGGER_TRAINER_URL);
+        if (result?.success === true) return;
+      } catch {
+        /* fallback to browser window below */
+      }
+    }
+    window.open(ZHAOTUTU_TAGGER_TRAINER_URL, '_blank', 'noopener,noreferrer');
+  }, []);
+
+  const handleOpenApiAcquisition = useCallback(async (url: string) => {
+    setApiAcquisitionOpen(false);
+    if (typeof window === 'undefined') return;
+    if (typeof window.t8pc?.openExternal === 'function') {
+      try {
+        const result = await window.t8pc.openExternal(url);
+        if (result?.success === true) return;
+      } catch {
+        /* fallback to browser window below */
+      }
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }, []);
 
   const toggleSidebarCollapsed = useCallback(() => {
     setSidebarCollapsed((collapsed) => !collapsed);
@@ -322,6 +400,42 @@ function App() {
       document.removeEventListener('keydown', onKey);
     };
   }, [videoOpen]);
+
+  // 「图图打标器」浮层: 点击容器外部 / 按 ESC 自动关闭
+  useEffect(() => {
+    if (!zhaotutuOpen) return;
+    const onDocDown = (e: MouseEvent) => {
+      if (!zhaotutuWrapRef.current) return;
+      if (!zhaotutuWrapRef.current.contains(e.target as Node)) setZhaotutuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setZhaotutuOpen(false);
+    };
+    document.addEventListener('mousedown', onDocDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [zhaotutuOpen]);
+
+  // 「API获取」浮层: 点击容器外部 / 按 ESC 自动关闭
+  useEffect(() => {
+    if (!apiAcquisitionOpen) return;
+    const onDocDown = (e: MouseEvent) => {
+      if (!apiAcquisitionWrapRef.current) return;
+      if (!apiAcquisitionWrapRef.current.contains(e.target as Node)) setApiAcquisitionOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setApiAcquisitionOpen(false);
+    };
+    document.addEventListener('mousedown', onDocDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [apiAcquisitionOpen]);
 
   // 「插件安装」浮层: 点击容器外部 / 按 ESC 自动关闭
   useEffect(() => {
@@ -414,7 +528,8 @@ function App() {
   }, [aixOpen]);
 
   useEffect(() => {
-    const hasOpenTopSurface = cloudOpen || videoOpen || pluginInstallOpen || canvasTutorialOpen || zhenOpen || appOpen || aixOpen || resourceOpen;
+    const hasOpenTopSurface =
+      cloudOpen || videoOpen || zhaotutuOpen || apiAcquisitionOpen || pluginInstallOpen || canvasTutorialOpen || zhenOpen || appOpen || aixOpen || resourceOpen;
     if (!hasOpenTopSurface) return;
 
     const onDocPointerDown = (e: PointerEvent) => {
@@ -435,6 +550,8 @@ function App() {
 
       setCloudOpen(false);
       setVideoOpen(false);
+      setZhaotutuOpen(false);
+      setApiAcquisitionOpen(false);
       setPluginInstallOpen(false);
       setCanvasTutorialOpen(false);
       setZhenOpen(false);
@@ -447,7 +564,7 @@ function App() {
     return () => {
       document.removeEventListener('pointerdown', onDocPointerDown, true);
     };
-  }, [cloudOpen, videoOpen, pluginInstallOpen, canvasTutorialOpen, zhenOpen, appOpen, aixOpen, resourceOpen]);
+  }, [cloudOpen, videoOpen, zhaotutuOpen, apiAcquisitionOpen, pluginInstallOpen, canvasTutorialOpen, zhenOpen, appOpen, aixOpen, resourceOpen]);
 
   const handleCopyWx = async () => {
     try {
@@ -890,11 +1007,181 @@ function App() {
           )}
         </div>
         <div className="flex items-center gap-1">
+          {/* 「图图打标器」推广按钮: 放在插件安装左侧, 点击后展示说明与获取链接 */}
+          <div ref={zhaotutuWrapRef} className="relative">
+            <button
+              onClick={() => {
+                setZhaotutuOpen((v) => !v);
+                setApiAcquisitionOpen(false);
+                setPluginInstallOpen(false);
+                setCanvasTutorialOpen(false);
+              }}
+              className={
+                isPixel
+                  ? 'px-btn px-btn--sm px-btn--mint'
+                  : `flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all border ${
+                      isDark
+                        ? zhaotutuOpen
+                          ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-200 shadow-[0_0_12px_rgba(16,185,129,0.32)]'
+                          : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20'
+                        : zhaotutuOpen
+                          ? 'bg-emerald-100 border-emerald-400 text-emerald-800'
+                          : 'bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100'
+                    }`
+              }
+              title="图图打标器 · 打标和模型训练工具"
+            >
+              <ExternalLink size={14} />
+              <span className="text-[11px]">图图打标器</span>
+            </button>
+
+            {zhaotutuOpen && (
+              <div
+                className={
+                  isPixel
+                    ? 'absolute right-0 top-full mt-2 z-[60] w-[360px] px-panel rounded-2xl p-3 animate-[fadeIn_.18s_ease-out]'
+                    : `absolute right-0 top-full mt-2 z-[60] w-[360px] max-w-[calc(100vw-24px)] rounded-xl p-3 border shadow-2xl backdrop-blur-md animate-[fadeIn_.18s_ease-out] ${
+                        isDark
+                          ? 'bg-zinc-900/95 border-emerald-400/20 shadow-emerald-500/10'
+                          : 'bg-white/95 border-emerald-200 shadow-emerald-500/10'
+                      }`
+                }
+                style={{ zoom: 1.25 }}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <div className={`flex items-center gap-2 ${isPixel ? '' : isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>
+                  <ExternalLink size={16} className={isPixel ? '' : 'shrink-0'} />
+                  <span className={`text-sm font-bold ${isPixel ? 'px-title' : ''}`}>图图打标器</span>
+                </div>
+
+                <div
+                  className={`mt-2 text-[12px] leading-relaxed ${
+                    isPixel ? '' : isDark ? 'text-white/75' : 'text-zinc-700'
+                  }`}
+                >
+                  {ZHAOTUTU_TAGGER_TRAINER_LABEL.replace('：点击获取', '')}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleOpenZhaotutuTaggerTrainer}
+                  className={
+                    isPixel
+                      ? 'mt-3 px-btn px-btn--mint w-full justify-center'
+                      : `mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-semibold transition-all ${
+                          isDark
+                            ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/25 hover:border-emerald-300/60'
+                            : 'bg-emerald-50 border-emerald-400 text-emerald-700 hover:bg-emerald-100'
+                        }`
+                  }
+                >
+                  <ExternalLink size={13} />
+                  <span>点击获取</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* 「API获取」按钮: 紧邻图图打标器，以短标题展示四套 API 注册入口 */}
+          <div ref={apiAcquisitionWrapRef} className="relative">
+            <button
+              onClick={() => {
+                setApiAcquisitionOpen((v) => !v);
+                setZhaotutuOpen(false);
+                setPluginInstallOpen(false);
+                setCanvasTutorialOpen(false);
+              }}
+              className={
+                isPixel
+                  ? 'px-btn px-btn--sm px-btn--yellow'
+                  : `flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all border ${
+                      isDark
+                        ? apiAcquisitionOpen
+                          ? 'bg-violet-500/20 border-violet-400/50 text-violet-200 shadow-[0_0_12px_rgba(139,92,246,0.32)]'
+                          : 'bg-violet-500/10 border-violet-500/30 text-violet-300 hover:bg-violet-500/20'
+                        : apiAcquisitionOpen
+                          ? 'bg-violet-100 border-violet-400 text-violet-800'
+                          : 'bg-violet-50 border-violet-300 text-violet-700 hover:bg-violet-100'
+                    }`
+              }
+              title="API获取 · 国内与海外 API Key 注册入口"
+            >
+              <KeyRound size={14} />
+              <span className="text-[11px]">API获取</span>
+            </button>
+
+            {apiAcquisitionOpen && (
+              <div
+                className={
+                  isPixel
+                    ? 'absolute left-0 top-full mt-2 z-[60] w-[540px] max-w-[calc(100vw-24px)] px-panel rounded-2xl p-3 animate-[fadeIn_.18s_ease-out]'
+                    : `absolute left-0 top-full mt-2 z-[60] w-[540px] max-w-[calc(100vw-24px)] rounded-xl p-3 border shadow-2xl backdrop-blur-md animate-[fadeIn_.18s_ease-out] ${
+                        isDark
+                          ? 'bg-zinc-900/95 border-violet-400/20 shadow-violet-500/10'
+                          : 'bg-white/95 border-violet-200 shadow-violet-500/10'
+                      }`
+                }
+                style={{ zoom: 1.25 }}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <div className={`flex items-center gap-2 ${isPixel ? '' : isDark ? 'text-violet-300' : 'text-violet-700'}`}>
+                  <KeyRound size={16} className={isPixel ? '' : 'shrink-0'} />
+                  <span className={`text-sm font-bold ${isPixel ? 'px-title' : ''}`}>API 获取</span>
+                </div>
+                <div className={`mt-1 text-[11px] leading-relaxed ${isPixel ? '' : isDark ? 'text-white/65' : 'text-zinc-600'}`}>
+                  根据服务区域选择对应版本，国内与海外站的账号和 API Key 相互独立。
+                </div>
+
+                <div className="mt-3 grid max-h-[70vh] gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                  {API_ACQUISITION_LINKS.map((item) => (
+                    <section
+                      key={item.id}
+                      className={
+                        isPixel
+                          ? 'flex min-h-[142px] flex-col rounded-xl border-2 border-black bg-[#FFF8D6] p-2 shadow-[3px_3px_0_#111]'
+                          : `flex min-h-[142px] flex-col rounded-lg border p-2.5 ${
+                              isDark
+                                ? 'bg-violet-400/10 border-violet-300/20'
+                                : 'bg-violet-50/80 border-violet-200'
+                            }`
+                      }
+                    >
+                      <h3 className={`text-[12px] font-bold leading-snug ${isPixel ? '' : isDark ? 'text-violet-100' : 'text-violet-950'}`}>
+                        {item.title}
+                      </h3>
+                      <p className={`mt-1.5 flex-1 text-[10px] leading-relaxed ${isPixel ? '' : isDark ? 'text-white/70' : 'text-zinc-700'}`}>
+                        {item.description}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => void handleOpenApiAcquisition(item.url)}
+                        className={
+                          isPixel
+                            ? 'mt-2 px-btn px-btn--mint w-full justify-center'
+                            : `mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-[10px] font-semibold transition-all ${
+                                isDark
+                                  ? 'bg-violet-500/15 border-violet-400/40 text-violet-100 hover:bg-violet-500/25 hover:border-violet-300/60'
+                                  : 'bg-violet-100 border-violet-300 text-violet-800 hover:bg-violet-200'
+                              }`
+                        }
+                        title={item.action}
+                      >
+                        <ExternalLink size={12} />
+                        <span>{item.action}</span>
+                      </button>
+                    </section>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* 「插件安装」说明按钮: 放在画布教程左侧, 汇总需要宿主软件单独加载的联动插件 */}
           <div ref={pluginInstallWrapRef} className="relative">
             <button
               onClick={() => {
                 setPluginInstallOpen((v) => !v);
+                setApiAcquisitionOpen(false);
                 setCanvasTutorialOpen(false);
               }}
               className={
@@ -998,6 +1285,7 @@ function App() {
             <button
               onClick={() => {
                 setCanvasTutorialOpen((v) => !v);
+                setApiAcquisitionOpen(false);
                 setPluginInstallOpen(false);
               }}
               className={

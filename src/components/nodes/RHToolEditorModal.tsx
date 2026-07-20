@@ -40,6 +40,7 @@ const RHToolEditorModal: React.FC<RHToolEditorModalProps> = ({ isOpen, onClose, 
   const emptyForm = useMemo(
     () => ({
       webappId: '',
+      rhSite: 'cn' as 'cn' | 'intl',
       title: '',
       description: '',
       categoryId:
@@ -79,6 +80,7 @@ const RHToolEditorModal: React.FC<RHToolEditorModalProps> = ({ isOpen, onClose, 
     setEditingTool(t);
     setForm({
       webappId: t.webappId,
+      rhSite: t.rhSite === 'intl' ? 'intl' : 'cn',
       title: t.title,
       description: t.description || '',
       categoryId: t.categoryId || '',
@@ -99,10 +101,11 @@ const RHToolEditorModal: React.FC<RHToolEditorModalProps> = ({ isOpen, onClose, 
     setAutoFetching(true);
     setFormError('');
     try {
-      const data = await fetchRhAppInfo(form.webappId.trim());
+      const data = await fetchRhAppInfo(form.webappId.trim(), form.rhSite);
       const cover = data?.covers?.[0]?.thumbnailUri || data?.covers?.[0]?.url || '';
       setForm((f) => ({
         ...f,
+        rhSite: data?.rhSite === 'intl' ? 'intl' : f.rhSite,
         title: f.title || data?.webappName || '',
         coverUrl: f.coverUrl || cover,
       }));
@@ -126,6 +129,7 @@ const RHToolEditorModal: React.FC<RHToolEditorModalProps> = ({ isOpen, onClose, 
     if (editingTool) {
       const r = await updateTool(editingTool.id, {
         webappId: form.webappId.trim(),
+        rhSite: form.rhSite,
         title: form.title.trim(),
         description: form.description,
         categoryId: form.categoryId || '',
@@ -136,6 +140,7 @@ const RHToolEditorModal: React.FC<RHToolEditorModalProps> = ({ isOpen, onClose, 
     } else {
       const r = await addTool({
         webappId: form.webappId.trim(),
+        rhSite: form.rhSite,
         title: form.title.trim(),
         description: form.description,
         categoryId: form.categoryId || '',
@@ -330,6 +335,16 @@ const RHToolEditorModal: React.FC<RHToolEditorModalProps> = ({ isOpen, onClose, 
                   {editingTool ? `编辑：${editingTool.title}` : '添加应用'}
                 </div>
                 <div className="flex gap-2">
+                  <select
+                    aria-label="RunningHub 站点"
+                    value={form.rhSite}
+                    onChange={(e) => setForm((f) => ({ ...f, rhSite: e.target.value === 'intl' ? 'intl' : 'cn' }))}
+                    style={{ ...inputStyle, width: 150, flex: '0 0 150px' }}
+                    title="选择该应用所属的 RunningHub 站点"
+                  >
+                    <option value="cn">国内站 .cn</option>
+                    <option value="intl">海外站 .ai</option>
+                  </select>
                   <input
                     placeholder="webappId（RunningHub AI 应用 ID）"
                     value={form.webappId}

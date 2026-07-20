@@ -75,6 +75,7 @@ export interface RhToolboxTool {
   description?: string;
   categoryId: string;
   webappId: string;
+  rhSite?: 'cn' | 'intl';
   enabled?: boolean;
   order?: number;
   capabilities: string[];
@@ -688,6 +689,7 @@ export function normalizeRhToolboxManifest(manifest: Partial<RhToolboxManifest> 
       description: cleanText(raw?.description),
       categoryId,
       webappId,
+      rhSite: raw?.rhSite === 'intl' ? 'intl' : 'cn',
       enabled: raw?.enabled === true && !!webappId,
       order: Number.isFinite(raw?.order) ? Number(raw.order) : index,
       capabilities: cleanCapabilities(raw?.capabilities),
@@ -738,9 +740,10 @@ function rhToolboxToolIdentityKeys(tool: RhToolboxTool): string[] {
   const id = compactRhToolboxIdentity(tool.id);
   const title = compactRhToolboxIdentity(tool.title);
   const webappId = compactRhToolboxIdentity(tool.webappId);
-  if (id) keys.add(`id:${id}`);
-  if (title) keys.add(`title:${title}`);
-  if (webappId) keys.add(`webapp:${webappId}`);
+  const rhSite = tool.rhSite === 'intl' ? 'intl' : 'cn';
+  if (id) keys.add(`id:${rhSite}:${id}`);
+  if (title) keys.add(`title:${rhSite}:${title}`);
+  if (webappId) keys.add(`webapp:${rhSite}:${webappId}`);
   return Array.from(keys);
 }
 

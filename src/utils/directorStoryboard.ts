@@ -1,4 +1,4 @@
-import type { SeedanceSubmitRequest } from '../services/generation';
+import type { SeedanceSubmitRequest, SeedanceTaskProvider } from '../services/generation';
 import type { MediaMention, MediaMentionKind } from '../components/nodes/mediaMentions';
 
 export type DirectorStoryboardFrameMode = 'auto' | 'first' | 'firstlast' | 'multiframe';
@@ -47,6 +47,7 @@ export interface DirectorStoryboardShot {
   resolutionOverride?: string;
   status?: string;
   taskId?: string | null;
+  taskProvider?: Exclude<SeedanceTaskProvider, 'auto'> | null;
   videoUrl?: string | null;
   error?: string | null;
 }
@@ -69,6 +70,7 @@ export interface DirectorStoryboardInputShot {
   resolutionOverride?: string;
   status?: string;
   taskId?: string | null;
+  taskProvider?: Exclude<SeedanceTaskProvider, 'auto'> | null;
   videoUrl?: string | null;
   error?: string | null;
 }
@@ -91,6 +93,7 @@ export interface DirectorStoryboardBridge {
   nextVideoUrl?: string;
   status?: DirectorStoryboardBridgeStatus;
   taskId?: string | null;
+  taskProvider?: Exclude<SeedanceTaskProvider, 'auto'> | null;
   videoUrl?: string | null;
   error?: string | null;
 }
@@ -108,12 +111,14 @@ export interface DirectorStoryboardInputBridge {
   nextVideoUrl?: string;
   status?: DirectorStoryboardBridgeStatus;
   taskId?: string | null;
+  taskProvider?: Exclude<SeedanceTaskProvider, 'auto'> | null;
   videoUrl?: string | null;
   error?: string | null;
 }
 
 export interface DirectorStoryboardSettings {
   model: string;
+  taskProvider?: SeedanceTaskProvider;
   ratio: string;
   resolution: string;
   generateAudio: boolean;
@@ -541,6 +546,9 @@ export function sanitizeDirectorStoryboardShots(input: DirectorStoryboardInputSh
       resolutionOverride: normalizeString(shot.resolutionOverride) || undefined,
       status: normalizeString(shot.status) || undefined,
       taskId: shot.taskId || null,
+      taskProvider: shot.taskProvider === 'seedance-nz' || shot.taskProvider === 'zhenzhen-legacy'
+        ? shot.taskProvider
+        : null,
       videoUrl: shot.videoUrl || null,
       error: shot.error || null,
     };
@@ -636,6 +644,9 @@ export function sanitizeDirectorStoryboardBridges(
       nextVideoUrl: normalizeString(saved.nextVideoUrl) || undefined,
       status: sanitizeBridgeStatus(saved.status),
       taskId: saved.taskId || null,
+      taskProvider: saved.taskProvider === 'seedance-nz' || saved.taskProvider === 'zhenzhen-legacy'
+        ? saved.taskProvider
+        : null,
       videoUrl: saved.videoUrl || null,
       error: saved.error || null,
     };
@@ -770,6 +781,7 @@ export function buildDirectorShotSeedancePayload(
   const prompt = [context.upstreamPrompt, localPrompt].map((item) => normalizeString(item)).filter(Boolean).join('\n\n');
   const payload: SeedanceSubmitRequest = {
     model: shot.modelOverride || settings.model,
+    taskProvider: settings.taskProvider,
     prompt,
     duration: sanitizeDurationSec(shot.durationSec),
     ratio: shot.ratioOverride || settings.ratio,
@@ -824,6 +836,7 @@ export function buildDirectorStoryboardBridgeRunPlan(
 
     const payload: SeedanceSubmitRequest = {
       model: settings.model,
+      taskProvider: settings.taskProvider,
       prompt: normalizeString(bridge.prompt) || bridgeFallbackPrompt(previousEntry.shot, nextEntry.shot),
       duration: sanitizeDurationSec(bridge.durationSec || DIRECTOR_STORYBOARD_DEFAULT_BRIDGE_DURATION_SEC),
       ratio: settings.ratio,
@@ -872,6 +885,7 @@ function buildBridgeJob(
   if (!firstFrame || !lastFrame) return null;
   const payload: SeedanceSubmitRequest = {
     model: settings.model,
+    taskProvider: settings.taskProvider,
     prompt: normalizeString(settings.bridgePrompt) || `Smooth transition from ${previous.title} to ${next.title}`,
     duration: sanitizeDurationSec(settings.bridgeDurationSec || 4),
     ratio: settings.ratio,

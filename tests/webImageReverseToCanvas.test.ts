@@ -286,6 +286,54 @@ test('web image Chrome extension exposes image context menu and canvas send mode
   assert.match(background, /\/api\/proxy\/external\/image/);
 });
 
+test('web asset collector exposes popup side panel scanning capture and reference import', () => {
+  const manifest = JSON.parse(readProjectFile('extension/manifest.json'));
+  assert.equal(manifest.action.default_popup, 'popup.html');
+  assert.equal(manifest.side_panel.default_path, 'sidepanel.html');
+  assert.ok(manifest.permissions.includes('sidePanel'));
+
+  const background = readProjectFile('extension/scripts/background.js');
+  assert.match(background, /t8WebAssets\.scan/);
+  assert.match(background, /scanAssetsInTab/);
+  assert.match(background, /document\.querySelectorAll\(['"]img['"]\)/);
+  assert.match(background, /backgroundImage/);
+  assert.match(background, /canvas\.toDataURL/);
+  assert.match(background, /captureVisibleTab/);
+  assert.match(background, /t8WebAssets\.import/);
+  assert.match(background, /\/api\/web-assets\/status/);
+  assert.match(background, /\/api\/web-assets\/import/);
+  assert.match(background, /mode:\s*['"]reference['"]/);
+  assert.match(background, /source:\s*['"]web-asset-importer['"]/);
+
+  const panel = readProjectFile('extension/scripts/asset-panel.js');
+  assert.match(panel, /minWidth/);
+  assert.match(panel, /minHeight/);
+  assert.match(panel, /selectAll/);
+  assert.match(panel, /clearSelection/);
+  assert.match(panel, /失败项仍保持选中/);
+  assert.match(readProjectFile('extension/popup.html'), /导入到 T8/);
+  assert.match(readProjectFile('extension/sidepanel.html'), /扫描懒加载/);
+  assert.match(readProjectFile('extension/sidepanel.html'), /当前账号可见图片/);
+});
+
+test('Canvas imports web asset reference messages as one multi-image upload node', () => {
+  const canvas = readProjectFile('src/components/Canvas.tsx');
+  assert.match(canvas, /WebImageExtensionSendMode = ['"]prompt['"] \| ['"]image['"] \| ['"]both['"] \| ['"]reference['"]/);
+  assert.match(canvas, /mode === ['"]reference['"] && imageItems\.length > 0/);
+  assert.match(canvas, /type:\s*['"]upload['"]/);
+  assert.match(canvas, /createUploadDataFromItems\(['"]image['"], imageItems\)/);
+  assert.match(canvas, /source:\s*['"]web-asset-importer['"]/);
+  assert.match(canvas, /webAssetItems:\s*webAssetPayloadMetadata\(payload\)/);
+  assert.match(canvas, /incomingMode === ['"]reference['"]/);
+  const uploadNode = readProjectFile('src/components/nodes/UploadNode.tsx');
+  assert.match(uploadNode, /d\.webAssetImporter/);
+  assert.match(uploadNode, /网页采集 · \{mediaItems\.length\} 张/);
+
+  const bridge = readProjectFile('backend/src/routes/vibexBridge.js');
+  assert.match(bridge, /['"]prompt['"], ['"]image['"], ['"]both['"], ['"]reference['"]/);
+  assert.match(bridge, /mode === ['"]reference['"] \? ['"]web-asset-importer['"]/);
+});
+
 test('Canvas accepts web image extension payloads as prompt and output material nodes', () => {
   const canvas = readProjectFile('src/components/Canvas.tsx');
   assert.match(canvas, /t8:web-image-result/);

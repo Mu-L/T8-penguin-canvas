@@ -21,6 +21,10 @@ import {
 } from '../../providers/models';
 import {
   generateExternalVideo,
+  submitHappyHorse,
+  queryHappyHorse,
+  submitWan,
+  queryWan,
   submitVideo,
   queryVideo,
   submitVideoFal,
@@ -31,6 +35,8 @@ import {
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useHasAutoOutput } from './useHasAutoOutput';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
+import type { RunNodeLifecycleReporter } from '../../types/project';
 import { logBus } from '../../stores/logs';
 import { useThemeStore } from '../../stores/theme';
 import { useUpstreamMaterials, type Material } from './useUpstreamMaterials';
@@ -63,6 +69,8 @@ import { LocalNodeAddonSlot } from 'virtual:t8-local-extensions';
  *   - Veo      (kind=veo)       — 默认 veo-omni-10s / 旧 Veo 3.1 子模型 / images(≤3)
  *   - Grok Video(kind=grok)     — Zhenzhen Grok 1.5 New / Grok Video 1.5 FAL / 旧版 FAL / grok-video-3 / images
  *   - Sora2    (kind=sora)      — Zhenzhen API + FAL 双渠道 / Base64 参考图(≤1)
+ *   - HappyHorse(kind=happyhorse)— api.seedance.nz 文生/图生/参考图生视频(≤9 图)
+ *   - Wan      (kind=wan)       — api.seedance.nz Wan 2.7 Spicy 图生视频(1 张首帧)
  *   - Seedance  (kind=seedance) — 零破坏兼容旧 veo 字段
  * 流程: submit → poll(5s 间隔) → 转存 → 展示
  */
@@ -144,6 +152,9 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   const modelDef = useMemo(() => VIDEO_MODELS.find((m) => m.id === mainId) || VIDEO_MODELS[0], [mainId]);
   // 子模型(上游真实 model 名)
   const apiModel: string = d?.model && modelDef.apiModelOptions.some((o) => o.value === d.model) ? d.model : modelDef.apiModelOptions[0].value;
+  const isHappyHorse = !isExternalSelected && modelDef.kind === 'happyhorse';
+  const isWan = !isExternalSelected && modelDef.kind === 'wan';
+  const happyHorseMode = apiModel.endsWith('-i2v') ? 'i2v' : apiModel.endsWith('-r2v') ? 'r2v' : 't2v';
   // 各参数(跳过着调用 update 默认值)
   const ratio: string = d?.ratio || modelDef.defaultRatio;
   const duration: number = d?.duration ?? modelDef.defaultDuration ?? (modelDef.durations?.[0] || 0);
@@ -151,6 +162,10 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   const seed: number = typeof d?.seed === 'number' ? d.seed : 0;
   const enhancePrompt: boolean = d?.enhancePrompt ?? false;
   const enableUpsample: boolean = d?.enableUpsample ?? false;
+  const wanNegativePrompt: string = typeof d?.wanNegativePrompt === 'string' ? d.wanNegativePrompt : '';
+  const wanAudioUrl: string = typeof d?.wanAudioUrl === 'string' ? d.wanAudioUrl : '';
+  const wanPromptExtend: boolean = d?.wanPromptExtend === true;
+  const wanSeed: number = Number.isInteger(d?.wanSeed) ? d.wanSeed : -1;
 
   // FAL 专属参数
   const isFal = isFalVideoModel(apiModel);
@@ -179,7 +194,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     ? []
     : modelDef.durations || [];
   const resolutionOptions = isJimengSeedanceSelected
-    ? ['480p', '720p', '1080p']
+    ? ['480p', '720p', '1080p', '4k']
     : isAgnesExternalSelected
     ? ['480p', '720p', '1080p']
     : isGrok15New
@@ -291,7 +306,11 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     [localRefImages, localRefVideos, localRefAudios, id],
   );
   const maxMentionRefs =
-    isVeoOmni
+    isWan
+      ? 1
+      : isHappyHorse
+      ? happyHorseMode === 't2v' ? 0 : happyHorseMode === 'i2v' ? 1 : 9
+      : isVeoOmni
       ? 1
       : isGrok15New
       ? 1
@@ -398,7 +417,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   //   useRunTrigger 认为 runFn 完成 markDone(true)。 但实际任务 videoUrl 还未赋值 → LoopNode awaitNode
   //   立即继续 → extractFromNode 读不到 videoUrl → result=null → failCount++。
   //   修复: 轮询完成才 resolve，handleGenerate await 它，markDone 时机=任务真正结束。
-  const startPolling = (tid: string, runId: number): Promise<void> => {
+  const startPolling = (tid: string, runId: number, reporter?: RunNodeLifecycleReporter): Promise<void> => {
     stopPoll();
     return new Promise<void>((resolve, reject) => {
       pollRejectRef.current = reject;
@@ -422,32 +441,93 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           return;
         }
         try {
-          const r = await queryVideo(tid, apiModel);
+          const r = isWan
+            ? await queryWan(tid)
+            : isHappyHorse
+              ? await queryHappyHorse(tid)
+              : await queryVideo(tid, apiModel);
+          const normalizedStatus = String(r.status || '').trim().toUpperCase();
+          const currentProgress = String(r.progress ?? '');
+          await reporter?.polling({
+            provider: isWan || isHappyHorse ? 'seedance-nz' : 'zhenzhen',
+            model: apiModel,
+            taskId: tid,
+            recovery: {
+              kind: isWan ? 'wan' : isHappyHorse ? 'happyhorse' : 'video',
+              taskId: tid, model: apiModel, pollIntervalMs: POLL_INT, maxPolls: MAX,
+            },
+            requestId: r.requestId,
+            transportHttpStatus: r.transportHttpStatus,
+            upstreamHttpStatus: r.upstreamHttpStatus,
+            usage: r.usage,
+            httpStatusSource: 'local-backend',
+            pollCount: elapsed,
+            pollLimit: MAX,
+            status: normalizedStatus,
+            progress: currentProgress,
+          });
           if (!isCurrentGenerationRun(runId)) {
             rejectStoppedGeneration(reject);
             return;
           }
-          if (r.progress && r.progress !== lastProgress) {
-            lastProgress = r.progress;
-            logBus.debug(`[${elapsed}/${MAX}] status=${r.status} progress=${r.progress}`, src);
+          if (currentProgress && currentProgress !== lastProgress) {
+            lastProgress = currentProgress;
+            logBus.debug(`[${elapsed}/${MAX}] status=${r.status} progress=${currentProgress}`, src);
           }
-          if (r.status === 'SUCCESS' && r.videoUrl) {
+          if (['SUCCESS', 'SUCCEEDED', 'COMPLETED'].includes(normalizedStatus) && r.videoUrl) {
             pollRejectRef.current = null;
             stopPoll();
-            update({ status: 'success', videoUrl: r.videoUrl, progress: '100%' });
+            update({
+              status: 'success',
+              videoUrl: r.videoUrl,
+              progress: '100%',
+              provider: isWan || isHappyHorse ? 'seedance-nz' : 'zhenzhen',
+              apiModel,
+              taskId: tid,
+              requestId: r.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+            });
+            await reporter?.providerResponse({
+              provider: isWan || isHappyHorse ? 'seedance-nz' : 'zhenzhen',
+              model: apiModel,
+              upstreamTaskId: tid,
+              requestId: r.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+              status: 'succeeded',
+              httpStatusSource: 'local-backend',
+            });
             logBus.success(`任务完成 → ${r.videoUrl}`, src);
             taskCompletionSound.notifyComplete(id, 'video');
             resolve();
-          } else if (r.status === 'FAILURE') {
+          } else if (['FAILURE', 'FAILED'].includes(normalizedStatus)) {
             pollRejectRef.current = null;
             stopPoll();
             const msg = r.failReason || '生成失败';
+            await reporter?.providerResponse({
+              provider: isWan || isHappyHorse ? 'seedance-nz' : 'zhenzhen',
+              model: apiModel,
+              upstreamTaskId: tid,
+              requestId: r.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+              status: 'failed',
+              error: { message: msg },
+              httpStatusSource: 'local-backend',
+            });
             update({ status: 'error', error: msg });
             setError(msg);
             logBus.error(`生成失败: ${msg}`, src);
             reject(new Error(msg));
           } else {
-            update({ status: 'polling', progress: r.progress || '' });
+            update({ status: 'polling', progress: currentProgress });
           }
         } catch (e: any) {
           if (!isCurrentGenerationRun(runId)) {
@@ -465,7 +545,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   const falPollRef = useRef<{ responseUrl?: string; endpoint?: string; requestId?: string } | null>(null);
 
   // v1.2.9.11: 同样改造为 Promise（理由同 startPolling）
-  const startFalPolling = (runId: number): Promise<void> => {
+  const startFalPolling = (runId: number, reporter?: RunNodeLifecycleReporter): Promise<void> => {
     stopPoll();
     return new Promise<void>((resolve, reject) => {
       pollRejectRef.current = reject;
@@ -489,6 +569,27 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         }
         try {
           const r = await queryVideoFal(falPollRef.current!);
+          await reporter?.polling({
+            provider: 'fal',
+            model: apiModel,
+            requestId: falPollRef.current?.requestId || null,
+            recovery: {
+              kind: 'video-fal',
+              requestId: falPollRef.current?.requestId || null,
+              responseUrl: falPollRef.current?.responseUrl,
+              endpoint: falPollRef.current?.endpoint,
+              model: apiModel,
+              pollIntervalMs: POLL_INT,
+              maxPolls: MAX,
+            },
+            transportHttpStatus: r.transportHttpStatus,
+            upstreamHttpStatus: r.upstreamHttpStatus,
+            usage: r.usage,
+            httpStatusSource: 'local-backend',
+            pollCount: elapsed,
+            pollLimit: MAX,
+            status: r.status,
+          });
           if (!isCurrentGenerationRun(runId)) {
             rejectStoppedGeneration(reject);
             return;
@@ -497,7 +598,29 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           if (r.status === 'completed' && r.videoUrl) {
             pollRejectRef.current = null;
             stopPoll();
-            update({ status: 'success', videoUrl: r.videoUrl, progress: '100%' });
+            update({
+              status: 'success',
+              videoUrl: r.videoUrl,
+              progress: '100%',
+              provider: 'fal',
+              apiModel,
+              requestId: r.requestId || falPollRef.current?.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+            });
+            await reporter?.providerResponse({
+              provider: 'fal',
+              model: apiModel,
+              requestId: r.requestId || falPollRef.current?.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+              status: 'succeeded',
+              httpStatusSource: 'local-backend',
+            });
             logBus.success(`FAL 视频完成 → ${r.videoUrl}`, src);
             taskCompletionSound.notifyComplete(id, 'video');
             resolve();
@@ -505,6 +628,18 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             pollRejectRef.current = null;
             stopPoll();
             const msg = r.error || 'FAL 生成失败';
+            await reporter?.providerResponse({
+              provider: 'fal',
+              model: apiModel,
+              requestId: r.requestId || falPollRef.current?.requestId,
+              transportHttpStatus: r.transportHttpStatus,
+              upstreamHttpStatus: r.upstreamHttpStatus,
+              usage: r.usage,
+              pollCount: elapsed,
+              status: 'failed',
+              error: { message: msg },
+              httpStatusSource: 'local-backend',
+            });
             update({ status: 'error', error: msg });
             setError(msg);
             logBus.error(`FAL 生成失败: ${msg}`, src);
@@ -523,14 +658,24 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     });
   };
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (reporter?: RunNodeLifecycleReporter) => {
     setError(null);
     const { prompt: upstreamPrompt, imageUrls, videoUrls, audioUrls } = collectUpstream();
     const resolvedLocalPrompt = resolveMediaMentions(localPrompt, promptMentions, mentionMaterials);
     const finalPrompt = (upstreamPrompt || resolvedLocalPrompt || '').trim();
-    if (!finalPrompt) {
+    if (!finalPrompt && !isWan && !(isHappyHorse && happyHorseMode !== 't2v')) {
       setError('未连接 text 节点也未填写 prompt');
       logBus.error('生成中止: 缺少 prompt', src);
+      return;
+    }
+    if (isHappyHorse && happyHorseMode !== 't2v' && imageUrls.length === 0) {
+      setError(`Happy Horse ${happyHorseMode} 至少需要 1 张参考图`);
+      logBus.error(`生成中止: Happy Horse ${happyHorseMode} 缺少参考图`, src);
+      return;
+    }
+    if (isWan && imageUrls.length === 0) {
+      setError('Wan 2.7 Spicy 必须连接或拖入 1 张首帧图');
+      logBus.error('生成中止: Wan 2.7 Spicy 缺少首帧图', src);
       return;
     }
     if (isVeoOmni && imageUrls.length === 0) {
@@ -546,6 +691,15 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     const runId = nextGenerationRun();
     cancelActivePoll();
     falPollRef.current = null;
+    const traceProvider = isExternalSelected && providerSelection.provider
+      ? providerSelection.provider.id
+      : isFal
+        ? 'fal'
+        : isWan || isHappyHorse
+          ? 'seedance-nz'
+          : 'zhenzhen';
+    const traceModel = isExternalSelected && providerSelection.provider ? externalProviderModel : apiModel;
+    await reporter?.providerRequest({ provider: traceProvider, model: traceModel });
     taskCompletionSound.primeAudio();
     update({ status: 'submitting', error: null, videoUrl: null, taskId: null });
     try {
@@ -580,17 +734,113 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         if (!isCurrentGenerationRun(runId)) return;
         const nextVideoUrl = r.videoUrls[0];
         if (!nextVideoUrl) throw new Error('扩展平台没有返回视频。');
+        if (r.taskId || r.requestId) {
+          await reporter?.providerSubmitted({
+            provider: traceProvider,
+            model: traceModel,
+            upstreamTaskId: r.taskId,
+            requestId: r.requestId,
+            transportHttpStatus: r.transportHttpStatus,
+            upstreamHttpStatus: r.upstreamHttpStatus,
+            usage: r.usage,
+            httpStatusSource: 'local-backend',
+          });
+        }
+        await reporter?.providerResponse({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: r.taskId,
+          requestId: r.requestId,
+          transportHttpStatus: r.transportHttpStatus,
+          upstreamHttpStatus: r.upstreamHttpStatus,
+          usage: r.usage,
+          status: 'succeeded',
+          httpStatusSource: 'local-backend',
+        });
         update({
           status: 'success',
           videoUrl: nextVideoUrl,
           videoUrls: r.videoUrls,
           remoteVideoUrls: r.remoteVideoUrls,
           taskId: r.taskId || null,
+          provider: traceProvider,
+          apiModel: traceModel,
+          requestId: r.requestId,
+          transportHttpStatus: r.transportHttpStatus,
+          upstreamHttpStatus: r.upstreamHttpStatus,
+          usage: r.usage,
           lastPrompt: finalPrompt,
           progress: '100%',
         });
         logBus.success(`扩展平台视频完成 → ${nextVideoUrl}`, src);
         taskCompletionSound.notifyComplete(id, 'video');
+        return;
+      }
+
+      if (isWan) {
+        const firstImage = imageUrls[0];
+        logBus.info(
+          `提交 Wan 2.7 Spicy: ${apiModel} · ${duration}s · ${resolution || '720p'} · promptExtend=${wanPromptExtend}`,
+          src,
+        );
+        const result = await submitWan({
+          model: 'wan-2.7-spicy-i2v',
+          prompt: finalPrompt || undefined,
+          duration: Number(duration) || 2,
+          resolution: resolution === '1080p' ? '1080p' : '720p',
+          images: [firstImage],
+          negativePrompt: wanNegativePrompt.trim() || undefined,
+          audioUrl: wanAudioUrl.trim() || undefined,
+          promptExtend: wanPromptExtend,
+          seed: wanSeed,
+        });
+        if (!isCurrentGenerationRun(runId)) return;
+        await reporter?.providerSubmitted({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: result.taskId,
+          requestId: result.requestId,
+          transportHttpStatus: result.transportHttpStatus,
+          upstreamHttpStatus: result.upstreamHttpStatus,
+          usage: result.usage,
+          httpStatusSource: 'local-backend',
+        });
+        update({ status: 'polling', taskId: result.taskId, lastPrompt: finalPrompt, progress: '0%' });
+        logBus.info(`Wan 2.7 Spicy 任务 ${result.taskId} 已提交，开始轮询`, src);
+        await startPolling(result.taskId, runId, reporter);
+        return;
+      }
+
+      if (isHappyHorse) {
+        const happyImages = happyHorseMode === 't2v'
+          ? []
+          : imageUrls.slice(0, happyHorseMode === 'i2v' ? 1 : 9);
+        logBus.info(
+          `提交 Happy Horse: ${apiModel} · ${duration}s · ${resolution || '720p'} · ${ratio} · refs=${happyImages.length}`,
+          src,
+        );
+        const result = await submitHappyHorse({
+          model: apiModel as 'happyhorse-1.1-t2v' | 'happyhorse-1.1-i2v' | 'happyhorse-1.1-r2v',
+          prompt: finalPrompt || undefined,
+          duration: Number(duration) || 4,
+          ratio,
+          resolution: (resolution === '1080p' ? '1080p' : '720p'),
+          images: happyImages.length ? happyImages : undefined,
+        });
+        if (!isCurrentGenerationRun(runId)) return;
+        await reporter?.providerSubmitted({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: result.taskId,
+          requestId: result.requestId,
+          transportHttpStatus: result.transportHttpStatus,
+          upstreamHttpStatus: result.upstreamHttpStatus,
+          usage: result.usage,
+          httpStatusSource: 'local-backend',
+        });
+        update({ status: 'polling', taskId: result.taskId, lastPrompt: finalPrompt, progress: '0%' });
+        logBus.info(`Happy Horse 任务 ${result.taskId} 已提交，开始轮询`, src);
+        await startPolling(result.taskId, runId, reporter);
         return;
       }
 
@@ -665,15 +915,45 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         const r = await submitVideoFal(falReq);
         if (!isCurrentGenerationRun(runId)) return;
         if (r.sync && r.videoUrl) {
-          update({ status: 'success', videoUrl: r.videoUrl, lastPrompt: finalPrompt, progress: '100%' });
+          await reporter?.providerResponse({
+            provider: traceProvider,
+            model: traceModel,
+            requestId: r.requestId,
+            transportHttpStatus: r.transportHttpStatus,
+            upstreamHttpStatus: r.upstreamHttpStatus,
+            usage: r.usage,
+            status: 'succeeded',
+            httpStatusSource: 'local-backend',
+          });
+          update({
+            status: 'success',
+            videoUrl: r.videoUrl,
+            lastPrompt: finalPrompt,
+            progress: '100%',
+            provider: traceProvider,
+            apiModel: traceModel,
+            requestId: r.requestId,
+            transportHttpStatus: r.transportHttpStatus,
+            upstreamHttpStatus: r.upstreamHttpStatus,
+            usage: r.usage,
+          });
           logBus.success(`FAL 同步完成 → ${r.videoUrl}`, src);
           taskCompletionSound.notifyComplete(id, 'video');
         } else {
           falPollRef.current = { responseUrl: r.responseUrl, endpoint: r.endpoint, requestId: r.requestId };
+          await reporter?.providerSubmitted({
+            provider: traceProvider,
+            model: traceModel,
+            requestId: r.requestId,
+            transportHttpStatus: r.transportHttpStatus,
+            upstreamHttpStatus: r.upstreamHttpStatus,
+            usage: r.usage,
+            httpStatusSource: 'local-backend',
+          });
           update({ status: 'polling', lastPrompt: finalPrompt, progress: '15%' });
           logBus.info(`FAL 异步任务 requestId=${r.requestId} 进入轮询…`, src);
           // v1.2.9.11: await 让 useRunTrigger 等到任务真正完成才 markDone
-          await startFalPolling(runId);
+          await startFalPolling(runId, reporter);
         }
         return;
       }
@@ -745,13 +1025,33 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
 
       const r = await submitVideo(payload);
       if (!isCurrentGenerationRun(runId)) return;
+      await reporter?.providerSubmitted({
+        provider: traceProvider,
+        model: traceModel,
+        upstreamTaskId: r.taskId,
+        requestId: r.requestId,
+        transportHttpStatus: r.transportHttpStatus,
+        upstreamHttpStatus: r.upstreamHttpStatus,
+        usage: r.usage,
+        httpStatusSource: 'local-backend',
+      });
       update({ status: 'polling', taskId: r.taskId, lastPrompt: finalPrompt, progress: '0%' });
       logBus.info(`异步任务已提交 taskId=${r.taskId} 进入轮询…`, src);
       // v1.2.9.11: await 让 useRunTrigger 等到任务真正完成才 markDone
-      await startPolling(r.taskId, runId);
+      await startPolling(r.taskId, runId, reporter);
     } catch (e: any) {
       if (!isCurrentGenerationRun(runId)) return;
       const msg = e?.message || '提交失败';
+      await reporter?.providerResponse({
+        provider: traceProvider,
+        model: traceModel,
+        transportHttpStatus: e?.transportHttpStatus,
+        upstreamHttpStatus: e?.upstreamHttpStatus,
+        requestId: e?.requestId,
+        status: 'failed',
+        error: { message: msg, code: e?.code },
+        httpStatusSource: 'local-backend',
+      });
       setError(msg);
       update({ status: 'error', error: msg });
       logBus.error(`提交失败: ${msg}`, src);
@@ -768,10 +1068,10 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   };
 
   // 批量运行接入
-  useRunTrigger(id, async () => {
+  useRunTrigger(id, async (reporter) => {
     if (status === 'submitting' || status === 'polling') return;
-    await handleGenerate();
-  }, 'video');
+    await handleGenerate(reporter);
+  }, 'video', { lifecycleAware: true });
 
   // === 跨节点拖拽: source (输出视频可拖出) ===
   const startDrag = useDragMaterialStore((s) => s.start);
@@ -787,7 +1087,15 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     if (payload.kind === 'image' && payload.url) {
       const cur = Array.isArray(d?.localRefImages) ? d.localRefImages : [];
       if (cur.indexOf(payload.url) !== -1) return;
-      const cap = isGrok15New ? 1 : isJimengSeedanceSelected ? JIMENG_SEEDANCE_LIMITS.images : (modelDef.maxRefImages || 7) + 4;
+      const cap = isWan
+        ? 1
+        : isHappyHorse
+        ? maxMentionRefs
+        : isGrok15New
+          ? 1
+          : isJimengSeedanceSelected
+            ? JIMENG_SEEDANCE_LIMITS.images
+            : (modelDef.maxRefImages || 7) + 4;
       if (cur.length >= cap) return;
       update({ localRefImages: [...cur, payload.url] });
     } else if (payload.kind === 'video' && payload.url && isJimengSeedanceSelected) {
@@ -812,7 +1120,13 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   const refsCount = orderedImages.length + localRefImages.length;
   const videoRefsCount = orderedVideos.length + localRefVideos.length;
   const audioRefsCount = orderedAudios.length + localRefAudios.length;
-  const previewTitle = isJimengSeedanceSelected
+  const previewTitle = isWan
+    ? `上游素材 · 首帧图 ${Math.min(refsCount, 1)}/1`
+    : isHappyHorse
+    ? happyHorseMode === 't2v'
+      ? '上游素材 · 当前模型不使用参考图'
+      : `上游素材 · 参考图 ${Math.min(refsCount, maxMentionRefs)}/${maxMentionRefs}`
+    : isJimengSeedanceSelected
     ? `上游素材 · 图${Math.min(refsCount, JIMENG_SEEDANCE_LIMITS.images)}/${JIMENG_SEEDANCE_LIMITS.images} 视${Math.min(videoRefsCount, JIMENG_SEEDANCE_LIMITS.videos)}/${JIMENG_SEEDANCE_LIMITS.videos} 音${Math.min(audioRefsCount, JIMENG_SEEDANCE_LIMITS.audios)}/${JIMENG_SEEDANCE_LIMITS.audios}`
     : `上游素材 · 参考图 ${Math.min(refsCount, maxMentionRefs)}/${maxMentionRefs}`;
 
@@ -1192,6 +1506,66 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           </>
         )}
 
+        {isHappyHorse && (
+          <div className="rounded border border-amber-300/20 bg-amber-400/[0.06] px-2 py-1.5 text-[10px] leading-relaxed text-white/55">
+            {happyHorseMode === 't2v'
+              ? '文生视频只使用提示词，不发送画布中的参考图。'
+              : happyHorseMode === 'i2v'
+                ? '图生视频必须有参考图，只取排序后的第 1 张作为首图。'
+                : '参考图生视频需要 1-9 张图，可在提示词中使用“图1 / 图2”指代。'}
+            <div className="mt-1 text-white/35">贞贞的平价AI工坊（国内） · 3-15 秒 · 720p / 1080p</div>
+          </div>
+        )}
+
+        {isWan && (
+          <div className="rounded border border-orange-300/20 bg-orange-400/[0.06] p-2 space-y-2">
+            <div className="text-[10px] leading-relaxed text-white/60">
+              Wan 2.7 Spicy 仅支持图生视频，必须提供 1 张首帧图；提示词可选。
+              <div className="mt-1 text-white/35">贞贞的平价AI工坊 · 海外模型 · 2-15 秒 · 720p / 1080p</div>
+            </div>
+            <div>
+              <label className="text-[10px] text-white/50 block mb-1">反向提示词（可选）</label>
+              <textarea
+                value={wanNegativePrompt}
+                onChange={(e) => update({ wanNegativePrompt: e.target.value })}
+                placeholder="不希望出现在视频中的内容"
+                className="w-full h-12 resize-none rounded bg-white/5 border border-white/10 px-2 py-1 text-[11px] text-white outline-none focus:border-orange-300/40 placeholder:text-white/25"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-white/50 block mb-1">配乐公网 URL（可选）</label>
+              <input
+                value={wanAudioUrl}
+                onChange={(e) => update({ wanAudioUrl: e.target.value })}
+                placeholder="https://.../audio.mp3"
+                className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-orange-300/40 placeholder:text-white/25"
+              />
+            </div>
+            <div className="grid grid-cols-[1fr_110px] gap-2 items-end">
+              <label className="flex items-center gap-1.5 text-[10px] text-white/60 cursor-pointer pb-1.5">
+                <input
+                  type="checkbox"
+                  checked={wanPromptExtend}
+                  onChange={(e) => update({ wanPromptExtend: e.target.checked })}
+                  className="accent-orange-400"
+                />
+                扩写提示词
+              </label>
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">Seed（-1 随机）</label>
+                <input
+                  type="number"
+                  min={-1}
+                  max={2147483647}
+                  value={wanSeed}
+                  onChange={(e) => update({ wanSeed: Math.max(-1, Math.min(2147483647, Number(e.target.value) || 0)) })}
+                  className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-orange-300/40"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
         {isJimengSeedanceSelected && (
           <div className="rounded border border-white/10 bg-white/5 p-1.5 space-y-1">
             <div className="flex items-center justify-between gap-2">
@@ -1220,7 +1594,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         )}
 
         {/* 比例(非 FAL 时显示原始控件) */}
-        {showGenericVideoControls && !isGrok15New && (
+        {showGenericVideoControls && !isGrok15New && !isWan && (
         <div className="grid grid-cols-2 gap-1.5">
           <div>
             <label className="text-[10px] text-white/50 block mb-1">比例</label>
@@ -1250,6 +1624,21 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             </div>
           )}
         </div>
+        )}
+
+        {isWan && durationOptions.length > 0 && (
+          <div>
+            <label className="text-[10px] text-white/50 block mb-1">时长(s)</label>
+            <select
+              value={String(duration)}
+              onChange={(e) => update({ duration: Number(e.target.value) })}
+              className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-white/30"
+            >
+              {durationOptions.map((seconds) => (
+                <option key={seconds} value={seconds} className="bg-zinc-900">{seconds}s</option>
+              ))}
+            </select>
+          </div>
         )}
 
         {/* 分辨率(仅 grok 非FAL) */}
@@ -1333,7 +1722,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         )}
 
         {/* Seed(非FAL) */}
-        {showGenericVideoControls && (
+        {showGenericVideoControls && !isHappyHorse && !isWan && (
         <div>
           <label className="text-[10px] text-white/50 block mb-1">Seed (0=随机)</label>
           <input
@@ -1472,7 +1861,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
 
         {!isBusy ? (
           <button
-            onClick={handleGenerate}
+            onClick={() => requestCanvasNodeRun(id)}
             className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 text-xs font-medium transition-colors"
           >
             <Sparkles size={12} /> 生成视频

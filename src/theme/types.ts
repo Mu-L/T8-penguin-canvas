@@ -14,7 +14,8 @@ export type ThemeVisualStyle =
   | 'dragon-ball'
   | 'saint-seiya'
   | 'tetris'
-  | 'farm-story';
+  | 'farm-story'
+  | 'garden-defense';
 export type ThemeIntensity = 'subtle' | 'medium' | 'strong';
 export type ThemeMusicPreset =
   | 'tech-pulse'
@@ -31,7 +32,8 @@ export type ThemeMusicPreset =
   | 'pegasus-cosmos'
   | 'hades-eclipse'
   | 'block-drop'
-  | 'farm-breeze';
+  | 'farm-breeze'
+  | 'garden-march';
 export type ThemeMusicSource = 'synth' | 'url' | 'upload';
 
 export interface ThemeTokens {
@@ -80,9 +82,9 @@ export interface ThemeModeDefinition {
 export interface ThemeVisuals {
   style: ThemeVisualStyle;
   intensity?: ThemeIntensity;
-  iconPack?: 'default' | 'op' | 'naruto' | 'eva' | 'yyh' | 'slamdunk' | 'soccer' | 'dragon-ball' | 'saint-seiya' | 'tetromino-well' | 'farm-tools';
-  canvasPattern?: 'none' | 'dots' | 'map' | 'circuit' | 'confetti' | 'hub' | 'chakra' | 'eva-grid' | 'spirit-map' | 'court' | 'pitch' | 'dragon-radar' | 'sanctuary-zodiac' | 'tetris-stack' | 'pasture-map';
-  nodeFrame?: 'plain' | 'glass' | 'sticker' | 'wanted' | 'hub-card' | 'shinobi-scroll' | 'eva-panel' | 'spirit-case' | 'scoreboard-card' | 'match-card' | 'capsule-card' | 'cloth-box-card' | 'arcade-cabinet-card' | 'farm-sign-card';
+  iconPack?: 'default' | 'op' | 'naruto' | 'eva' | 'yyh' | 'slamdunk' | 'soccer' | 'dragon-ball' | 'saint-seiya' | 'tetromino-well' | 'farm-tools' | 'garden-guard';
+  canvasPattern?: 'none' | 'dots' | 'map' | 'circuit' | 'confetti' | 'hub' | 'chakra' | 'eva-grid' | 'spirit-map' | 'court' | 'pitch' | 'dragon-radar' | 'sanctuary-zodiac' | 'tetris-stack' | 'pasture-map' | 'defense-lawn';
+  nodeFrame?: 'plain' | 'glass' | 'sticker' | 'wanted' | 'hub-card' | 'shinobi-scroll' | 'eva-panel' | 'spirit-case' | 'scoreboard-card' | 'match-card' | 'capsule-card' | 'cloth-box-card' | 'arcade-cabinet-card' | 'farm-sign-card' | 'garden-card';
   headerMark?: string;
 }
 

@@ -19,6 +19,8 @@ import {
 } from 'lucide-react';
 import { PORT_COLOR } from '../../config/portTypes';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
+import type { RunNodeLifecycleReporter } from '../../types/project';
 import { cancelRh, fetchRhAppInfo, uploadFile } from '../../services/generation';
 import { runRhToolboxTool, getRhToolboxManifest, type RunRhToolboxProgress } from '../../services/rhToolbox';
 import { getRhToolboxPersistentManifest } from '../../services/api';
@@ -184,7 +186,10 @@ const RHToolboxNode = ({ id, data, selected }: NodeProps) => {
   );
   const activeTool = useMemo(() => {
     if (!baseActiveTool) return undefined;
-    if (!activeToolAppInfoFields.length) return baseActiveTool;
+    const resolvedSite: 'cn' | 'intl' = activeToolAppInfo?.rhSite === 'intl' ? 'intl' : (baseActiveTool.rhSite === 'intl' ? 'intl' : 'cn');
+    if (!activeToolAppInfoFields.length) {
+      return resolvedSite === baseActiveTool.rhSite ? baseActiveTool : { ...baseActiveTool, rhSite: resolvedSite };
+    }
     const enrichedParams = (baseActiveTool.userParams || []).map((param) => {
       const matchedField = activeToolAppInfoFields.find((field: any) => (
         getRhToolboxNodeInfoFieldNodeId(field) === String(param.rhNodeId || '').trim().replace(/^#/, '')
@@ -208,12 +213,15 @@ const RHToolboxNode = ({ id, data, selected }: NodeProps) => {
       ...enrichedParams,
       ...(baseActiveTool.fixedParams || []),
     ]);
-    if (enrichedParams === baseActiveTool.userParams && inferredParams.length === 0) return baseActiveTool;
+    if (enrichedParams === baseActiveTool.userParams && inferredParams.length === 0) {
+      return resolvedSite === baseActiveTool.rhSite ? baseActiveTool : { ...baseActiveTool, rhSite: resolvedSite };
+    }
     return {
       ...baseActiveTool,
+      rhSite: resolvedSite,
       userParams: [...enrichedParams, ...inferredParams],
     };
-  }, [activeToolAppInfoFields, baseActiveTool]);
+  }, [activeToolAppInfo, activeToolAppInfoFields, baseActiveTool]);
 
   const initialSize = (d?.size && typeof d.size.w === 'number') ? d.size : { w: 360, h: 460 };
   const [size, setSize] = useState<{ w: number; h: number }>(initialSize);
@@ -284,7 +292,7 @@ const RHToolboxNode = ({ id, data, selected }: NodeProps) => {
     if (!baseActiveTool?.webappId || baseActiveTool.runtime?.fetchAppInfo === false) return () => {
       disposed = true;
     };
-    fetchRhAppInfo(baseActiveTool.webappId)
+    fetchRhAppInfo(baseActiveTool.webappId, baseActiveTool.rhSite === 'intl' ? 'intl' : 'cn')
       .then((info) => {
         if (disposed) return;
         setActiveToolAppInfo(info);
@@ -596,7 +604,7 @@ const RHToolboxNode = ({ id, data, selected }: NodeProps) => {
     return resolved;
   };
 
-  const handleRun = async () => {
+  const handleRun = async (reporter?: RunNodeLifecycleReporter) => {
     if (!activeTool) {
       update({ status: 'error', error: '请先选择 RH工具箱工具' });
       throw new Error('请先选择 RH工具箱工具');
@@ -620,6 +628,7 @@ const RHToolboxNode = ({ id, data, selected }: NodeProps) => {
       outputText: '',
     });
     const source = `rh-toolbox:${id}`;
+    await reporter?.providerRequest({ provider: 'runninghub', model: activeTool.id });
     try {
       const explicitInputValues = collectExplicitInputValues();
       const resolvedUserParams = collectResolvedUserParams();
@@ -631,6 +640,23 @@ const RHToolboxNode = ({ id, data, selected }: NodeProps) => {
         setProgressMessage(progress.message);
         if (progress.taskId) activeTaskIdRef.current = progress.taskId;
         if (progress.taskId && progress.stage !== 'cancel') update({ status: progress.stage === 'poll' ? 'polling' : 'submitting', taskId: progress.taskId });
+        const payload = {
+          provider: 'runninghub',
+          toolId: activeTool.id,
+          site: activeTool.rhSite === 'intl' ? 'intl' : 'cn',
+          taskId: progress.taskId || null,
+          requestId: progress.requestId,
+          transportHttpStatus: progress.transportHttpStatus,
+          upstreamHttpStatus: progress.upstreamHttpStatus,
+          usage: progress.usage,
+          httpStatusSource: 'local-backend',
+          pollCount: progress.pollCount || null,
+          stage: progress.stage,
+          message: progress.message,
+        };
+        if (progress.stage === 'poll') void reporter?.polling(payload);
+        else if (progress.stage === 'submit' && progress.taskId) void reporter?.providerSubmitted(payload);
+        else void reporter?.progress(payload);
         if (progress.taskId && stopRequestedRef.current) {
           void handleStop();
         }
@@ -654,6 +680,17 @@ const RHToolboxNode = ({ id, data, selected }: NodeProps) => {
       const textOutputs = result.textOutputs.filter(Boolean);
       const textValue = textOutputs.join('\n\n');
       activeTaskIdRef.current = '';
+      await reporter?.providerResponse({
+        provider: 'runninghub',
+        model: activeTool.id,
+        upstreamTaskId: result.taskId,
+        requestId: result.requestId,
+        transportHttpStatus: result.transportHttpStatus,
+        upstreamHttpStatus: result.upstreamHttpStatus,
+        usage: result.usage,
+        status: 'succeeded',
+        httpStatusSource: 'local-backend',
+      });
       update({
         status: 'success',
         taskId: result.taskId,
@@ -672,12 +709,29 @@ const RHToolboxNode = ({ id, data, selected }: NodeProps) => {
         texts: textOutputs,
         textSegments: textOutputs,
         raw: result.raw,
+        provider: 'runninghub',
+        model: activeTool.id,
+        requestId: result.requestId,
+        transportHttpStatus: result.transportHttpStatus,
+        upstreamHttpStatus: result.upstreamHttpStatus,
+        usage: result.usage,
         error: '',
       });
       setProgressMessage(`完成 · ${result.urls.length} 个输出`);
       logBus.success(`${activeTool.title} 完成 · ${result.urls.length} 个输出`, source);
     } catch (error: any) {
       const message = error?.message || 'RH工具箱运行失败';
+      await reporter?.providerResponse({
+        provider: 'runninghub',
+        model: activeTool.id,
+        upstreamTaskId: activeTaskIdRef.current || undefined,
+        requestId: error?.requestId,
+        transportHttpStatus: error?.transportHttpStatus,
+        upstreamHttpStatus: error?.upstreamHttpStatus,
+        status: aborter.signal.aborted ? 'stopped' : 'failed',
+        error: { message, code: error?.code },
+        httpStatusSource: 'local-backend',
+      });
       if (aborter.signal.aborted && !/取消 RH 后台任务失败/.test(message)) {
         activeTaskIdRef.current = '';
         stopRequestedRef.current = false;
@@ -720,7 +774,7 @@ const RHToolboxNode = ({ id, data, selected }: NodeProps) => {
     update({ taskId: tid, error: '正在请求取消 RH 后台任务...' });
     logBus.warn(`用户主动停止，正在请求取消 RH 后台任务 taskId=${tid}`, source);
     try {
-      await cancelRh(tid);
+      await cancelRh(tid, activeTool?.rhSite === 'intl' ? 'intl' : 'cn');
       logBus.success(`已请求取消 RH 后台任务 taskId=${tid}`, source);
       abortRef.current?.abort();
       abortRef.current = null;
@@ -748,10 +802,10 @@ const RHToolboxNode = ({ id, data, selected }: NodeProps) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runCancelSeq, runCancelTargets, id, isBusy, d.taskId]);
 
-  useRunTrigger(id, async () => {
+  useRunTrigger(id, async (reporter) => {
     if (isBusy) return;
-    await handleRun();
-  });
+    await handleRun(reporter);
+  }, undefined, { lifecycleAware: true });
 
   const onResize = (_event: any, params: { width: number; height: number }) => {
     const next = { w: Math.round(params.width), h: Math.round(params.height) };
@@ -785,7 +839,7 @@ const RHToolboxNode = ({ id, data, selected }: NodeProps) => {
       <div className="flex-1 min-w-0">
         <div className="font-bold leading-tight truncate" style={{ fontSize: 15 }}>RH工具箱</div>
         <div className="text-[10px] truncate" style={{ color: subText }}>
-          {activeTool ? `${activeTool.title} · ${activeTool.capabilities.map(capabilityLabel).join(' / ')}` : '维护者精选 RunningHub 工具'}
+          {activeTool ? `${activeTool.title} · ${activeTool.rhSite === 'intl' ? '海外站' : '国内站'} · ${activeTool.capabilities.map(capabilityLabel).join(' / ')}` : '维护者精选 RunningHub 工具'}
         </div>
       </div>
       {status !== 'idle' && (
@@ -1191,7 +1245,7 @@ const RHToolboxNode = ({ id, data, selected }: NodeProps) => {
               <Square size={12} /> {cancelling ? '取消中...' : '停止'}
             </button>
           ) : (
-            <button type="button" onClick={() => { void handleRun().catch(() => undefined); }} className="nodrag w-full flex items-center justify-center gap-1.5 rounded py-2 text-xs font-bold" style={{ background: accent, color: isPixel ? 'var(--px-surface)' : '#001018', border: `1px solid ${accent}` }}>
+            <button type="button" onClick={() => requestCanvasNodeRun(id)} className="nodrag w-full flex items-center justify-center gap-1.5 rounded py-2 text-xs font-bold" style={{ background: accent, color: isPixel ? 'var(--px-surface)' : '#001018', border: `1px solid ${accent}` }}>
               <Play size={12} fill="currentColor" /> 运行工具
             </button>
           )}

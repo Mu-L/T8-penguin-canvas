@@ -32,6 +32,7 @@ import { createPortal } from 'react-dom';
 import { PORT_COLOR } from '../../config/portTypes';
 import { ANIME_TAG_MASTER_CATEGORIES, ANIME_TAG_MASTER_ITEMS } from '../../data/animeTagMasterManifest';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { defaultSizeOf, placeSingleNode } from '../../utils/nodePlacement';
 import {
   ANIME_TAG_MASTER_EVENT,
@@ -1055,7 +1056,7 @@ function AnimeTagMasterNode({ id, data, selected }: NodeProps) {
     reader.readAsDataURL(file);
   }, []);
 
-  const runAnimeTagOutput = useCallback(async (mode: AnimeTagOutputMode = outputMode) => {
+  const runAnimeTagOutput = useCallback(async (mode: AnimeTagOutputMode) => {
     if (!selectedTag) throw new Error('请先选择一个动漫标签');
     let outputTag = itemWithLazyPreview(selectedTag) || selectedTag;
     if (mode === 'image' && !outputTag.imageUrl && !outputTag.thumbnailUrl) {
@@ -1089,9 +1090,22 @@ function AnimeTagMasterNode({ id, data, selected }: NodeProps) {
     setStatus(mode === 'image'
       ? (outputTag.imageUrl || outputTag.thumbnailUrl ? '已输出动漫标签图像。' : '在线图库暂未返回预览，已输出标签占位参考图。')
       : '已输出动漫标签提示词。');
-  }, [id, itemWithLazyPreview, outputMode, requestLazyPreview, rf, selectedTag, update]);
+  }, [id, itemWithLazyPreview, requestLazyPreview, rf, selectedTag, update]);
 
-  const handleRun = useCallback(() => runAnimeTagOutput(outputMode), [outputMode, runAnimeTagOutput]);
+  const handleRun = useCallback(() => {
+    const liveData = rf.getNode(id)?.data as Record<string, unknown> | undefined;
+    const mode: AnimeTagOutputMode = liveData?.animeTagOutputMode === 'image' ? 'image' : 'tags';
+    return runAnimeTagOutput(mode);
+  }, [id, rf, runAnimeTagOutput]);
+
+  const requestAnimeTagRun = useCallback((mode: AnimeTagOutputMode) => {
+    setOutputMode(mode);
+    update({
+      animeTagOutputMode: mode,
+      animeTagSelectedId: selectedTag?.id,
+    });
+    requestCanvasNodeRun(id);
+  }, [id, selectedTag?.id, update]);
   useRunTrigger(id, handleRun, 'anime-tag-master');
 
   const displaySelectedTag = itemWithLazyPreview(selectedTag);
@@ -1465,20 +1479,14 @@ function AnimeTagMasterNode({ id, data, selected }: NodeProps) {
           <button
             type="button"
             className={outputMode === 'tags' ? 'active' : ''}
-            onClick={() => {
-              setOutputMode('tags');
-              void runAnimeTagOutput('tags');
-            }}
+            onClick={() => requestAnimeTagRun('tags')}
           >
             <FileText size={15} /> 输出标签
           </button>
           <button
             type="button"
             className={outputMode === 'image' ? 'active' : ''}
-            onClick={() => {
-              setOutputMode('image');
-              void runAnimeTagOutput('image');
-            }}
+            onClick={() => requestAnimeTagRun('image')}
           >
             <ImageIcon size={15} /> 输出图像
           </button>
@@ -1508,7 +1516,7 @@ function AnimeTagMasterNode({ id, data, selected }: NodeProps) {
 
       <footer className="anime-tag-master-footer nodrag nopan">
         <span>{filteredItems.length} 个匹配 · {library.items.length} 个自定义</span>
-        <button type="button" onClick={() => void handleRun()}>
+        <button type="button" onClick={() => requestAnimeTagRun(outputMode)}>
           {outputMode === 'image' ? <ImageIcon size={17} /> : <FileText size={17} />}
           运行
         </button>

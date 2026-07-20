@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 import fs from 'node:fs';
 
 import {
@@ -165,8 +166,12 @@ test('advancedProviderModelOptions uses explicit lists before safe provider defa
     [
       'seedance2.0fast_vip',
       'seedance2.0_vip',
+      'seedance2.0mini',
       'seedance2.0fast',
       'seedance2.0',
+      'seedance1.5pro',
+      'seedance1.0fast',
+      'seedance1.0',
       'jimeng-video-720p',
       'jimeng-video-1080p',
     ],
@@ -270,17 +275,34 @@ test('ImageNode makes ModelScope multi-LoRA total weight visible and bounded', (
   assert.match(source, /max=\{rowMax\}/);
 });
 
+test('ImageNode lets Jimeng CLI request up to 10 images without lifting other providers past 4', () => {
+  const source = fs.readFileSync(new URL('../src/components/nodes/ImageNode.tsx', import.meta.url), 'utf8');
+
+  assert.match(source, /const isJimengCliImageSelected = isExternalSelected && providerSelection\.provider\?\.protocol === 'jimeng-cli'/);
+  assert.match(source, /const externalImageCountLimit = isJimengCliImageSelected \? 10 : 4/);
+  assert.match(source, /Math\.min\(externalImageCountLimit,\s*Number\(d\?\.providerParams\?\.n \|\| 1\)\)/);
+  assert.match(source, /生成数量/);
+  assert.match(source, /即梦 CLI v1\.4\.10 起支持 text2image \/ image2image 一次生成 1-10 张/);
+});
+
 test('VideoNode keeps Jimeng Seedance media limits separate from Grok FAL controls', () => {
   const source = fs.readFileSync(new URL('../src/components/nodes/VideoNode.tsx', import.meta.url), 'utf8');
-  const ports = fs.readFileSync(new URL('../src/config/portTypes.ts', import.meta.url), 'utf8');
+
+  assertProductionNodeSchema('video', {
+    label: '视频',
+    category: 'core',
+    inputs: ['text', 'image', 'video', 'audio'],
+    outputs: ['video'],
+    executable: true,
+  });
 
   assert.match(source, /JIMENG_SEEDANCE_LIMITS = \{ images: 9, videos: 3, audios: 3 \}/);
   assert.match(source, /showBuiltinFalControls = !isExternalSelected && isFal/);
   assert.match(source, /isJimengSeedanceSelected \? \['image', 'video', 'audio', 'text'\]/);
+  assert.match(source, /isJimengSeedanceSelected\s*\?\s*\['480p', '720p', '1080p', '4k'\]/);
   assert.match(source, /videos: videoRefs/);
   assert.match(source, /audios: audioRefs/);
   assert.match(source, /图\$\{refs\.length\}\/视\$\{videoRefs\.length\}\/音\$\{audioRefs\.length\}/);
-  assert.match(ports, /video:\s*\{\s*inputs:\s*\['text', 'image', 'video', 'audio'\],\s*outputs:\s*\['video'\]\s*\}/);
 });
 
 test('SeedanceNode exposes explicit Jimeng intelligent multiframe mode only for Jimeng CLI', () => {
@@ -295,11 +317,14 @@ test('SeedanceNode exposes explicit Jimeng intelligent multiframe mode only for 
 
 test('SeedanceNode exposes Zhenzhen mini model and native4K resolution', () => {
   const source = fs.readFileSync(new URL('../src/components/nodes/SeedanceNode.tsx', import.meta.url), 'utf8');
+  const seedanceConfig = fs.readFileSync(new URL('../src/config/seedance.ts', import.meta.url), 'utf8');
   const generation = fs.readFileSync(new URL('../src/services/generation.ts', import.meta.url), 'utf8');
 
-  assert.match(source, /value: 'doubao-seedance-2\.0-mini'/);
-  assert.match(source, /label: 'seedance-2\.0-mini'/);
-  assert.match(source, /RESOLUTION_OPTIONS = \[[^\]]*'native4K'[^\]]*\]/);
+  assert.match(source, /LEGACY_SEEDANCE_MODEL_OPTIONS as MODEL_OPTIONS/);
+  assert.match(source, /LEGACY_SEEDANCE_RESOLUTION_OPTIONS as RESOLUTION_OPTIONS/);
+  assert.match(seedanceConfig, /value: 'doubao-seedance-2\.0-mini'/);
+  assert.match(seedanceConfig, /label: 'seedance-2\.0-mini'/);
+  assert.match(seedanceConfig, /LEGACY_SEEDANCE_RESOLUTION_OPTIONS = \[[^\]]*'native4K'[^\]]*\]/);
   assert.match(generation, /doubao-seedance-2\.0-mini/);
   assert.match(generation, /native4K/);
 });

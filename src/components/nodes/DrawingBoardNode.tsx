@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, useReactFlow, type NodeProps } from '@xyflow/react';
 import {
   ArrowDown,
   ArrowUp,
@@ -44,8 +44,21 @@ import {
 } from 'lucide-react';
 import { PORT_COLOR } from '../../config/portTypes';
 import { uploadDataUrl, uploadFileBlob } from '../../services/imageOps';
-import { runRhImageCutout } from '../../services/rhToolboxCapabilities';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { createCanvasNodeRunRequestId, requestCanvasNodeRun } from '../../utils/canvasRunRequest';
+import {
+  createSecondaryProviderActionForNode,
+  executeRegisteredSecondaryProviderAction,
+  registerSecondaryProviderActionExecutor,
+  requestCanvasSecondaryProviderAction,
+  resolveSecondaryProviderActionForRun,
+  secondaryProviderActionFromNodeData,
+  secondaryProviderActionNodePatch,
+  type QueueSecondaryProviderAction,
+  type SecondaryProviderActionExecution,
+} from '../../utils/secondaryProviderAction';
+import { executeRhImageEditorCutoutAction } from '../../utils/rhImageEditorCutout';
+import type { RunNodeLifecycleReporter } from '../../types/project';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useUpstreamMaterials } from './useUpstreamMaterials';
 import {
@@ -691,6 +704,7 @@ function downloadJsonFile(filename: string, payload: unknown) {
 const DrawingBoardNode = ({ id, data, selected }: NodeProps) => {
   const update = useUpdateNodeData(id);
   const upstream = useUpstreamMaterials(id);
+  const rf = useReactFlow();
   const d = (data as any) || {};
   const initialLayersRef = useRef<BoardLayer[] | null>(null);
   if (!initialLayersRef.current) initialLayersRef.current = normalizeLayers(d.boardLayers, d.boardElements);
@@ -708,6 +722,10 @@ const DrawingBoardNode = ({ id, data, selected }: NodeProps) => {
   const historyRef = useRef<BoardLayer[][]>([]);
   const futureRef = useRef<BoardLayer[][]>([]);
   const textEditHistoryRef = useRef<string | null>(null);
+  const editorSessionIdRef = useRef('');
+  if (!editorSessionIdRef.current) {
+    editorSessionIdRef.current = createCanvasNodeRunRequestId(id, 'drawing-board-editor');
+  }
 
   const [layers, setLayers] = useState<BoardLayer[]>(() => initialLayersRef.current || [createBlankLayer(1)]);
   const [activeLayerId, setActiveLayerId] = useState<string>(() => {
@@ -743,6 +761,21 @@ const DrawingBoardNode = ({ id, data, selected }: NodeProps) => {
   const [rhCutoutRunning, setRhCutoutRunning] = useState(false);
   const [dragLayerId, setDragLayerId] = useState<string | null>(null);
   const [, forceRender] = useState(0);
+  const layersRef = useRef(layers);
+  layersRef.current = layers;
+
+  const queueSecondaryAction = useCallback<QueueSecondaryProviderAction>((draft) => {
+    const action = createSecondaryProviderActionForNode(id, 'drawing-board', draft);
+    update(secondaryProviderActionNodePatch(action));
+    queueMicrotask(() => {
+      if (!requestCanvasSecondaryProviderAction(action)) {
+        const current = secondaryProviderActionFromNodeData(rf.getNode(id)?.data);
+        if (current?.requestId === action.requestId) update(secondaryProviderActionNodePatch(null));
+        setError('无法请求画板 RH 抠图运行体检');
+      }
+    });
+    return action;
+  }, [id, rf, update]);
 
   const activeLayer = useMemo(() => layers.find((layer) => layer.id === activeLayerId && layer.kind === 'layer'), [activeLayerId, layers]);
   const activeLayerWritable = useMemo(() => isLayerEditable(layers, activeLayer), [activeLayer, layers]);
@@ -928,6 +961,103 @@ const DrawingBoardNode = ({ id, data, selected }: NodeProps) => {
       }
     });
   }, []);
+
+  const executeAuthorizedEditorCutoutRef = useRef<
+    (execution: SecondaryProviderActionExecution) => Promise<void>
+  >(async () => undefined);
+  executeAuthorizedEditorCutoutRef.current = async ({ action, reporter }) => {
+    if (action.actionId !== 'rh-image.editor-cutout' || action.target !== 'editor-cutout') {
+      throw new Error('画板 RH 抠图 action 与已注册能力不匹配');
+    }
+    const params = action.params;
+    if (params.surface !== 'drawing-board' || params.editorSessionId !== editorSessionIdRef.current) {
+      throw new Error('画板 RH 抠图编辑会话已变化，已停止调用 Provider');
+    }
+
+    const resolveBoundTarget = () => {
+      const matches: Array<{ layer: BoardLayer; element: ImageElement }> = [];
+      for (const layer of layersRef.current) {
+        if (layer.kind !== 'layer') continue;
+        const element = layer.elements.find(
+          (item): item is ImageElement => item.kind === 'image' && item.id === params.targetId,
+        );
+        if (element) matches.push({ layer, element });
+      }
+      if (matches.length !== 1) {
+        throw new Error('画板 RH 抠图目标已删除或不唯一，已停止调用 Provider');
+      }
+      const match = matches[0];
+      if (!isLayerEditable(layersRef.current, match.layer) || match.element.url !== params.imageUrl) {
+        throw new Error('画板 RH 抠图目标或源图已变化，已停止调用 Provider');
+      }
+      return match;
+    };
+
+    setRhCutoutRunning(true);
+    setStatus('running');
+    setError(null);
+    try {
+      await executeRhImageEditorCutoutAction(action, reporter, {
+        assertTargetCurrent: resolveBoundTarget,
+        onProgress: (progress) => {
+          if (progress.stage === 'error') setError(progress.message || 'RH 自动抠图处理中发生错误');
+        },
+        onComplete: async (result) => {
+          let resultImage: HTMLImageElement | null = null;
+          try {
+            resultImage = await loadImage(result.outputUrl);
+          } catch {
+            // 结果 URL 仍会回写；预览可在后续自然重试。
+          }
+          const { layer: sourceLayer, element: source } = resolveBoundTarget();
+          const naturalW = resultImage
+            ? Math.max(1, Math.round(resultImage.naturalWidth || source.naturalW || source.w))
+            : source.naturalW;
+          const naturalH = resultImage
+            ? Math.max(1, Math.round(resultImage.naturalHeight || source.naturalH || source.h))
+            : source.naturalH;
+
+          pushHistorySnapshot(layersRef.current);
+          patchLayers((prev) => prev.map((layer) => (
+            layer.id === sourceLayer.id && layer.kind === 'layer'
+              ? {
+                  ...layer,
+                  elements: layer.elements.map((element) => (
+                    element.id === source.id && element.kind === 'image' && element.url === params.imageUrl
+                      ? {
+                          ...element,
+                          url: result.outputUrl,
+                          name: `${source.name || '图片'} RH抠图`,
+                          naturalW,
+                          naturalH,
+                        }
+                      : element
+                  )),
+                }
+              : layer
+          )));
+          setActiveLayerId(sourceLayer.id);
+          setSelectedElementId(source.id);
+          applyTool('select');
+          setError(null);
+          setStatus('success');
+        },
+      });
+    } catch (error: any) {
+      setError(error?.message || 'RH 自动抠图失败');
+      setStatus('error');
+      throw error;
+    } finally {
+      setRhCutoutRunning(false);
+    }
+  };
+
+  useEffect(() => registerSecondaryProviderActionExecutor(
+    id,
+    'rh-image.editor-cutout',
+    'editor-cutout',
+    (execution) => executeAuthorizedEditorCutoutRef.current(execution),
+  ), [id]);
 
   const drawElement = useCallback(
     (ctx: CanvasRenderingContext2D, el: BoardElement, includeSelection: boolean) => {
@@ -1661,7 +1791,7 @@ const DrawingBoardNode = ({ id, data, selected }: NodeProps) => {
     }
   }, [applyTool, cutoutDraft, cutoutFeather, cutoutInvert, cutoutSmooth, layers, loadImage, patchLayers, pushHistorySnapshot]);
 
-  const applyRhCutoutToSelectedImage = useCallback(async () => {
+  const applyRhCutoutToSelectedImage = useCallback(() => {
     if (!selectedCutoutSource) {
       setError('请先选中一张可编辑图片再自动抠图');
       return;
@@ -1671,57 +1801,27 @@ const DrawingBoardNode = ({ id, data, selected }: NodeProps) => {
       setError('源图片图层已隐藏、锁定或不存在，无法自动抠图');
       return;
     }
-
-    setRhCutoutRunning(true);
-    setStatus('running');
-    setError(null);
     try {
-      const result = await runRhImageCutout(source.url, {
-        onProgress: (progress) => {
-          if (progress.stage === 'error') setError(progress.message);
+      queueSecondaryAction({
+        actionId: 'rh-image.editor-cutout',
+        target: 'editor-cutout',
+        params: {
+          capability: 'image.cutout',
+          preferredToolId: 'image-cutout-v1',
+          imageUrl: source.url,
+          surface: 'drawing-board',
+          editorSessionId: editorSessionIdRef.current,
+          targetId: source.id,
+          retryCount: 2,
+          retryDelayMs: 1200,
         },
       });
-      let naturalW = source.naturalW;
-      let naturalH = source.naturalH;
-      try {
-        const img = await loadImage(result.outputUrl);
-        naturalW = Math.max(1, Math.round(img.naturalWidth || naturalW || source.w));
-        naturalH = Math.max(1, Math.round(img.naturalHeight || naturalH || source.h));
-      } catch {
-        // The RH result URL is still written back; preview loading can retry naturally.
-      }
-
-      pushHistorySnapshot();
-      patchLayers((prev) => prev.map((layer) => (
-        layer.id === sourceLayer.id && layer.kind === 'layer'
-          ? {
-              ...layer,
-              elements: layer.elements.map((el) => (
-                el.id === source.id && el.kind === 'image'
-                  ? {
-                      ...el,
-                      url: result.outputUrl,
-                      name: `${source.name || '图片'} RH抠图`,
-                      naturalW,
-                      naturalH,
-                    }
-                  : el
-              )),
-            }
-          : layer
-      )));
-      setActiveLayerId(sourceLayer.id);
-      setSelectedElementId(source.id);
-      applyTool('select');
-      setStatus('success');
+      setError(null);
     } catch (e: any) {
-      const msg = e?.message || 'RH 自动抠图失败';
-      setError(msg);
+      setError(e?.message || '无法提交 RH 自动抠图');
       setStatus('error');
-    } finally {
-      setRhCutoutRunning(false);
     }
-  }, [applyTool, layers, loadImage, patchLayers, pushHistorySnapshot, selectedCutoutSource]);
+  }, [layers, queueSecondaryAction, selectedCutoutSource]);
 
   const upstreamSig = useMemo(() => upstream.images.map((m) => m.url).join('|'), [upstream.images]);
 
@@ -2180,7 +2280,30 @@ const DrawingBoardNode = ({ id, data, selected }: NodeProps) => {
     }
   }, [activeLayerId, boardH, boardW, layers, ratio, renderCanvas, renderableLayers, update]);
 
-  useRunTrigger(id, exportBoard);
+  const runBoard = useCallback(async (reporter: RunNodeLifecycleReporter) => {
+    const action = resolveSecondaryProviderActionForRun({
+      nodeId: id,
+      nodeType: 'drawing-board',
+      nodeData: rf.getNode(id)?.data,
+      runContext: reporter.runContext,
+    });
+    if (!action) {
+      if (reporter.runContext?.secondaryProviderActionId) {
+        throw new Error('画板的次级 Provider action 已过期或被修改，已停止调用 Provider');
+      }
+      await exportBoard();
+      return;
+    }
+    try {
+      await executeRegisteredSecondaryProviderAction(action, reporter);
+    } finally {
+      const current = secondaryProviderActionFromNodeData(rf.getNode(id)?.data);
+      if (current?.requestId === action.requestId) update(secondaryProviderActionNodePatch(null));
+    }
+  }, [exportBoard, id, rf, update]);
+
+  // 普通导出和次级 Provider action 共用唯一运行监听器。
+  useRunTrigger(id, runBoard, undefined, { lifecycleAware: true });
 
   const chooseTool = (value: BoardTool) => applyTool(value);
 
@@ -2450,7 +2573,7 @@ const DrawingBoardNode = ({ id, data, selected }: NodeProps) => {
               <button className="t8-mini-icon-button" type="button" title="删除图层" onClick={() => deleteLayer(activeLayer.id)}>
                 <Trash2 size={13} />
               </button>
-              <button className="t8-mini-icon-button" type="button" title="输出 PNG" onClick={exportBoard} disabled={status === 'running'}>
+              <button className="t8-mini-icon-button" type="button" title="输出 PNG" onClick={() => requestCanvasNodeRun(id)} disabled={status === 'running'}>
                 {status === 'running' ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
               </button>
               <button className="t8-mini-icon-button" type="button" title="删除选中元素" onClick={() => deleteSelectedElement()} disabled={!selectedElement}>
@@ -3100,7 +3223,7 @@ const DrawingBoardNode = ({ id, data, selected }: NodeProps) => {
             <button
               type="button"
               className="t8-btn t8-btn-primary min-h-8 px-2 text-[11px]"
-              onClick={exportBoard}
+              onClick={() => requestCanvasNodeRun(id)}
               disabled={status === 'running'}
             >
               {status === 'running' ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}

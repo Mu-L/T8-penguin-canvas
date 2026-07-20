@@ -11,6 +11,7 @@ import {
   prepareCanvasResourcePackageImport,
 } from '../src/utils/canvasCreativeWorkflow.ts';
 import { getMediaItemsFromData } from '../src/utils/mediaCollection.ts';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 
@@ -302,7 +303,7 @@ test('resource package carries importable library references, thumbnails, and a 
   assert.equal(JSON.stringify(plan).includes('private-token'), false);
 });
 
-test('image edit board actions await async production and surface annotation edit failures', () => {
+test('image edit board actions await async production and route Provider edits through persisted node runs', () => {
   const modal = read('../src/components/nodes/ImageEditModal.tsx');
   const outputNode = read('../src/components/nodes/OutputNode.tsx');
   const uploadNode = read('../src/components/nodes/UploadNode.tsx');
@@ -311,17 +312,21 @@ test('image edit board actions await async production and surface annotation edi
   assert.match(modal, /await onProduce\(\[url\], \{ type: 'brush', strokeCount: brushStrokes\.length \}\);\s*onClose\(\);/);
   assert.match(modal, /await onProduce\(\[originUrl, annotatedUrl\], \{[\s\S]*type: 'annotation-edit'[\s\S]*\}\);\s*onClose\(\);/);
 
-  assert.match(outputNode, /return runAnnotationEditProduce\(cleanUrls, _meta\);/);
-  assert.match(uploadNode, /return runAnnotationEditProduce\(cleanUrls, _meta\);/);
-  assert.match(outputNode, /if \(_meta\?\.type === 'annotation-edit'\) \{\s*return runAnnotationEditProduce\(cleanUrls, _meta\);\s*\}\s*if \(cleanUrls\.length === 0\)/);
-  assert.match(uploadNode, /if \(_meta\?\.type === 'annotation-edit'\) \{\s*return runAnnotationEditProduce\(cleanUrls, _meta\);\s*\}\s*if \(cleanUrls\.length === 0\)/);
-  assert.match(outputNode, /logBus\.error\(error\?\.message \|\| '标注改图失败', logSource\);\s*throw error;/);
-  assert.match(uploadNode, /logBus\.error\(error\?\.message \|\| '标注改图失败', logSource\);\s*throw error;/);
+  assert.match(outputNode, /return queueAnnotationEditProduce\(cleanUrls, _meta\);/);
+  assert.match(uploadNode, /return queueAnnotationEditProduce\(cleanUrls, _meta\);/);
+  assert.match(outputNode, /if \(_meta\?\.type === 'annotation-edit'\) \{\s*return queueAnnotationEditProduce\(cleanUrls, _meta\);\s*\}\s*if \(cleanUrls\.length === 0\)/);
+  assert.match(uploadNode, /if \(_meta\?\.type === 'annotation-edit'\) \{\s*return queueAnnotationEditProduce\(cleanUrls, _meta\);\s*\}\s*if \(cleanUrls\.length === 0\)/);
+  assert.match(outputNode, /actionId: 'image-edit\.annotation'/);
+  assert.match(uploadNode, /actionId: 'image-edit\.annotation'/);
+  assert.match(outputNode, /resolveSecondaryProviderActionForRun/);
+  assert.match(uploadNode, /resolveSecondaryProviderActionForRun/);
+  assert.match(outputNode, /logBus\.error\(error\?\.message \|\| '标注改图失败', logSource\);/);
+  assert.match(uploadNode, /logBus\.error\(error\?\.message \|\| '标注改图失败', logSource\);/);
+  assert.match(outputNode, /if \(providerRequested && !providerResponded\) \{\s*await reporter\.providerResponse\([\s\S]*?throw error;/);
+  assert.match(uploadNode, /if \(providerRequested && !providerResponded\) \{\s*await reporter\.providerResponse\([\s\S]*?throw error;/);
 });
 
 test('Cowart-inspired workflow is wired through node registry, toolbar, canvas, themes, and docs', () => {
-  const registry = read('../src/config/nodeRegistry.ts');
-  const ports = read('../src/config/portTypes.ts');
   const toolbar = read('../src/components/CanvasToolbar.tsx');
   const canvas = read('../src/components/Canvas.tsx');
   const targetNode = read('../src/components/nodes/GenerationTargetNode.tsx');
@@ -332,9 +337,13 @@ test('Cowart-inspired workflow is wired through node registry, toolbar, canvas, 
   const css = read('../src/styles/index.css');
   const features = read('../features.json');
 
-  assert.match(registry, /type:\s*'generation-target'/);
-  assert.match(registry, /label:\s*'生成目标框'/);
-  assert.match(ports, /'generation-target':\s*\{\s*inputs:\s*\['text', 'image'\],\s*outputs:\s*\['image'\]/);
+  assertProductionNodeSchema('generation-target', {
+    label: '生成目标框',
+    category: 'input',
+    inputs: ['text', 'image'],
+    outputs: ['image'],
+    executable: false,
+  });
 
   assert.match(toolbar, /onCreateGenerationTarget:\s*\(\)\s*=>\s*void/);
   assert.match(toolbar, /生成目标框/);

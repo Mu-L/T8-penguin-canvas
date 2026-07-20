@@ -232,6 +232,191 @@ test('Jimeng image generation sends Seedream 4.7 model_version from CLI model op
   assert.deepEqual(result.imageUrls, ['/files/output/seedream47.png']);
 });
 
+test('Jimeng image generation passes generate_num for text2image batch output', async () => {
+  const commands: any[] = [];
+  const provider = {
+    id: 'jimeng-cli',
+    protocol: 'jimeng-cli',
+    imageModels: ['seedream-4.7'],
+    jimengConfig: { executablePath: 'dreamina', pollSeconds: 20 },
+  };
+
+  const result = await jimengCli.generateImage(provider, {
+    prompt: 'ten product angles',
+    providerModel: 'seedream-4.7',
+    size: '1024x1024',
+    n: 12,
+  }, {
+    runCli: async (command: string, args: string[]) => {
+      commands.push({ command, args });
+      return {
+        images: [
+          'C:\\tmp\\batch-1.png',
+          'C:\\tmp\\batch-2.png',
+        ],
+      };
+    },
+    storeOutput: async (value: string) => `/files/output/${value.split('\\').pop()}`,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(commands[0].args[0], 'text2image');
+  assert.ok(commands[0].args.includes('--generate_num=10'));
+  assert.deepEqual(result.imageUrls, ['/files/output/batch-1.png', '/files/output/batch-2.png']);
+});
+
+test('Jimeng image generation passes generate_num for image2image batch output', async () => {
+  const commands: any[] = [];
+  const provider = {
+    id: 'jimeng-cli',
+    protocol: 'jimeng-cli',
+    imageModels: ['seedream-5.0'],
+    jimengConfig: { executablePath: 'dreamina', pollSeconds: 20 },
+  };
+
+  const result = await jimengCli.generateImage(provider, {
+    prompt: 'variation set',
+    providerModel: 'seedream-5.0',
+    size: '2048x2048',
+    images: ['C:\\tmp\\ref.png'],
+    providerParams: { generate_num: 6 },
+  }, {
+    resolveLocalMedia: async (value: string) => value,
+    runCli: async (command: string, args: string[]) => {
+      commands.push({ command, args });
+      return { images: ['C:\\tmp\\edit-1.png'], submit_id: 'img-edit-batch' };
+    },
+    storeOutput: async (value: string) => `/files/output/${value.split('\\').pop()}`,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(commands[0].args[0], 'image2image');
+  assert.ok(commands[0].args.includes('--generate_num=6'));
+  assert.deepEqual(result.imageUrls, ['/files/output/edit-1.png']);
+});
+
+test('Jimeng Seedance 2.0 VIP can request 4K video resolution', async () => {
+  const commands: any[] = [];
+  const provider = {
+    id: 'jimeng-cli',
+    protocol: 'jimeng-cli',
+    videoModels: ['seedance2.0_vip'],
+    jimengConfig: { executablePath: 'dreamina', pollSeconds: 20 },
+  };
+
+  const result = await jimengCli.generateVideo(provider, {
+    prompt: '4k city flythrough',
+    providerModel: 'seedance2.0_vip',
+    aspect_ratio: '16:9',
+    duration: 8,
+    resolution: '4k',
+  }, {
+    runCli: async (command: string, args: string[]) => {
+      commands.push({ command, args });
+      return { videos: ['C:\\tmp\\vip-4k.mp4'], submit_id: 'vid-4k' };
+    },
+    storeOutput: async (value: string) => `/files/output/${value.split('\\').pop()}`,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(commands[0].args[0], 'text2video');
+  assert.ok(commands[0].args.includes('--model_version=seedance2.0_vip'));
+  assert.ok(commands[0].args.includes('--video_resolution=4k'));
+});
+
+test('Jimeng video generation supports Seedance 2.0 mini and Seedance 1.x image2video model names', async () => {
+  const commands: any[] = [];
+  const provider = {
+    id: 'jimeng-cli',
+    protocol: 'jimeng-cli',
+    videoModels: ['seedance2.0mini', 'seedance1.5pro', 'seedance1.0fast', 'seedance1.0'],
+    jimengConfig: { executablePath: 'dreamina', pollSeconds: 20 },
+  };
+
+  await jimengCli.generateVideo(provider, {
+    prompt: 'mini model shot',
+    providerModel: 'seedance2.0mini',
+    aspect_ratio: '16:9',
+    duration: 5,
+    resolution: '720p',
+  }, {
+    runCli: async (command: string, args: string[]) => {
+      commands.push({ command, args });
+      return { videos: ['C:\\tmp\\mini.mp4'], submit_id: 'vid-mini' };
+    },
+    storeOutput: async (value: string) => `/files/output/${value.split('\\').pop()}`,
+  });
+
+  await jimengCli.generateVideo(provider, {
+    prompt: 'legacy seedance web name',
+    providerModel: 'seedance1.5pro',
+    aspect_ratio: '16:9',
+    duration: 5,
+    resolution: '720p',
+    images: ['C:\\tmp\\ref-15.png'],
+    providerParams: { frameMode: 'first' },
+  }, {
+    resolveLocalMedia: async (value: string) => value,
+    runCli: async (command: string, args: string[]) => {
+      commands.push({ command, args });
+      return { videos: ['C:\\tmp\\seedance15.mp4'], submit_id: 'vid-15' };
+    },
+    storeOutput: async (value: string) => `/files/output/${value.split('\\').pop()}`,
+  });
+
+  await jimengCli.generateVideo(provider, {
+    prompt: 'old seedance alias',
+    providerModel: '3.0_fast',
+    aspect_ratio: '16:9',
+    duration: 5,
+    resolution: '720p',
+    images: ['C:\\tmp\\ref-fast.png'],
+    providerParams: { frameMode: 'first' },
+  }, {
+    resolveLocalMedia: async (value: string) => value,
+    runCli: async (command: string, args: string[]) => {
+      commands.push({ command, args });
+      return { videos: ['C:\\tmp\\seedance10fast.mp4'], submit_id: 'vid-10-fast' };
+    },
+    storeOutput: async (value: string) => `/files/output/${value.split('\\').pop()}`,
+  });
+
+  assert.ok(commands[0].args.includes('--model_version=seedance2.0mini'));
+  assert.equal(commands[1].args[0], 'image2video');
+  assert.ok(commands[1].args.includes('--model_version=seedance1.5pro'));
+  assert.equal(commands[2].args[0], 'image2video');
+  assert.ok(commands[2].args.includes('--model_version=seedance1.0fast'));
+});
+
+test('Jimeng video generation does not pass Seedance 1.x models to unsupported text2video command', async () => {
+  const commands: any[] = [];
+  const provider = {
+    id: 'jimeng-cli',
+    protocol: 'jimeng-cli',
+    videoModels: ['seedance1.0fast'],
+    jimengConfig: { executablePath: 'dreamina', pollSeconds: 20 },
+  };
+
+  const result = await jimengCli.generateVideo(provider, {
+    prompt: 'unsupported pure text old model',
+    providerModel: 'seedance1.0fast',
+    aspect_ratio: '16:9',
+    duration: 5,
+    resolution: '720p',
+  }, {
+    runCli: async (command: string, args: string[]) => {
+      commands.push({ command, args });
+      return { videos: ['C:\\tmp\\fallback-text.mp4'], submit_id: 'vid-text' };
+    },
+    storeOutput: async (value: string) => `/files/output/${value.split('\\').pop()}`,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(commands[0].args[0], 'text2video');
+  assert.equal(commands[0].args.some((arg: string) => arg.startsWith('--model_version=seedance1.')), false);
+  assert.ok(commands[0].args.includes('--video_resolution=720p'));
+});
+
 test('Jimeng async video keeps polling until query_result returns downloaded path objects', async () => {
   const commands: any[] = [];
   const provider = {

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 const loadRhToolboxUtils = async () => import('../src/utils/rhToolbox.ts');
 const loadRhToolboxCapabilities = async () => import('../src/utils/rhToolboxCapabilities.ts');
@@ -8,22 +9,26 @@ const loadRhToolboxDeveloper = async () => import('../src/utils/rhToolboxDevelop
 const loadRhToolboxManifest = async () => import('../src/data/rhToolboxManifest.ts');
 
 test('RH toolbox node is registered as a visible executable RH node', () => {
-  const registry = readFileSync(new URL('../src/config/nodeRegistry.ts', import.meta.url), 'utf8');
-  const ports = readFileSync(new URL('../src/config/portTypes.ts', import.meta.url), 'utf8');
   const types = readFileSync(new URL('../src/types/canvas.ts', import.meta.url), 'utf8');
   const canvas = readFileSync(new URL('../src/components/Canvas.tsx', import.meta.url), 'utf8');
   const actionBar = readFileSync(new URL('../src/components/NodeActionBar.tsx', import.meta.url), 'utf8');
   const loop = readFileSync(new URL('../src/components/nodes/LoopNode.tsx', import.meta.url), 'utf8');
 
-  assert.match(registry, /type:\s*'rh-toolbox'[\s\S]*label:\s*'RH工具箱'[\s\S]*category:\s*'rh'/);
-  assert.match(ports, /'rh-toolbox':\s*\{\s*inputs:\s*\['text', 'image', 'video', 'audio'\],\s*outputs:\s*\['text', 'image', 'video', 'audio'\]\s*\}/);
+  assertProductionNodeSchema('rh-toolbox', {
+    label: 'RH工具箱',
+    category: 'rh',
+    inputs: ['text', 'image', 'video', 'audio'],
+    outputs: ['text', 'image', 'video', 'audio'],
+    executable: true,
+  });
   assert.match(types, /\|\s*'rh-toolbox'/);
   assert.match(canvas, /const RHToolboxNode = lazyCanvasNode\(\(\) => import\('\.\/nodes\/RHToolboxNode'\), 'RHToolboxNode'\)/);
   assert.match(canvas, /'rh-toolbox': RHToolboxNode/);
   assert.match(canvas, /'rh-toolbox':\s*\{/);
-  assert.match(canvas, /'rh-tools', 'rh-toolbox'/);
-  assert.match(actionBar, /'rh-tools', 'rh-toolbox'/);
-  assert.match(loop, /'rh-tools', 'rh-toolbox'/);
+  assert.match(canvas, /import \{ EXECUTABLE_NODE_TYPES \} from '\.\.\/config\/executableNodeTypes'/);
+  assert.match(actionBar, /EXECUTABLE_NODE_TYPES\.has\(n\.type\)/);
+  assert.match(loop, /import \{ EXECUTABLE_NODE_TYPES \} from '\.\.\/\.\.\/config\/executableNodeTypes'/);
+  assert.match(loop, /topologicalSort\([^;]+EXECUTABLE_NODE_TYPES\)/s);
 });
 
 test('RH image capability service exposes cutout, upscale, and expand wrappers for batch processing', () => {
@@ -58,6 +63,8 @@ test('RH video material shortcuts ship frame extraction and RH video upscalers',
   const category = manifest.categories.find((item) => item.id === 'video-category-9d33p');
   assert.equal(category?.name, '视频超分');
   assert.equal(category?.parentId, 'video');
+  assert.match(rail, /status: result\.cancelled \? 'stopped' : result\.failedItems\.length > 0 \? 'partial' : 'succeeded'/);
+  assert.match(rail, /if \(result\.failedItems\.length > 0\)[\s\S]*throw new Error\(warning\)/);
 
   const nvidia = findRhToolboxToolById(manifest, 'video-nividia-upscale');
   assert.equal(nvidia?.title, '英伟达极速超分');
@@ -540,6 +547,8 @@ test('RH toolbox image cutout is exposed as a reusable node capability', async (
   assert.match(button, /onRunningChange\?\.\(false\)/);
   assert.match(button, /点击取消/);
   assert.match(button, /failedItems/);
+  assert.match(button, /status: result\.cancelled \? 'stopped' : result\.failedItems\.length > 0 \? 'partial' : 'succeeded'/);
+  assert.match(button, /else if \(result\.failedItems\.length > 0\)[\s\S]*throw new Error\(warning\)/);
   assert.match(rail, /data-rh-image-capability-rail/);
   assert.match(rail, /RH_IMAGE_NODE_CAPABILITY_PRESETS/);
   assert.match(rail, /variant="rail"/);
@@ -987,6 +996,42 @@ test('RH toolbox developer drafts replace the edited released tool instead of du
   assert.equal(merged.tools.some((tool) => tool.id === 'image-upscale-4k'), false);
 });
 
+test('RH toolbox keeps domestic and overseas apps separate even when their WebApp IDs match', async () => {
+  const { mergeRhToolboxManifests } = await loadRhToolboxUtils();
+  const makeTool = (rhSite: 'cn' | 'intl') => ({
+    id: `same-app-${rhSite}`,
+    title: 'Same RunningHub App',
+    description: rhSite,
+    categoryId: 'custom',
+    webappId: '2000000000000000000',
+    rhSite,
+    enabled: true,
+    order: rhSite === 'cn' ? 0 : 1,
+    capabilities: ['image.edit'],
+    inputSchema: [],
+    outputSchema: [{ key: 'output-image', label: 'output', kind: 'image', role: 'append-output' }],
+    fixedParams: [],
+    userParams: [],
+    runtime: { instanceType: 'default', pollIntervalMs: 5000, maxPolls: 720, fetchAppInfo: true },
+    ui: { icon: 'Wrench', showInNode: true },
+  });
+  const domestic = {
+    schema: 't8-rh-toolbox-manifest',
+    version: 1,
+    categories: [{ id: 'custom', name: 'Custom', order: 0 }],
+    tools: [makeTool('cn')],
+  };
+  const overseas = {
+    schema: 't8-rh-toolbox-manifest',
+    version: 1,
+    categories: [{ id: 'custom', name: 'Custom', order: 0 }],
+    tools: [makeTool('intl')],
+  };
+
+  const merged = mergeRhToolboxManifests(domestic, overseas);
+  assert.deepEqual(merged.tools.map((tool) => tool.rhSite).sort(), ['cn', 'intl']);
+});
+
 test('RH toolbox developer manifest normalizes old duplicate drafts before display', async () => {
   const { RH_TOOLBOX_MANIFEST } = await loadRhToolboxManifest();
   const { normalizeRhToolboxManifest } = await loadRhToolboxUtils();
@@ -1088,25 +1133,25 @@ test('RH stop buttons cancel the remote RunningHub task instead of only stopping
   const rhToolboxNode = readFileSync(new URL('../src/components/nodes/RHToolboxNode.tsx', import.meta.url), 'utf8');
   const proxy = readFileSync(new URL('../backend/src/routes/proxy.js', import.meta.url), 'utf8');
 
-  assert.match(generation, /export async function cancelRh\(taskId: string\)/);
+  assert.match(generation, /export async function cancelRh\(taskId: string, site: RhSite = 'cn'\)/);
   assert.match(generation, /\/api\/proxy\/runninghub\/cancel/);
   assert.match(generation, /safeJsonResponse/);
   assert.match(generation, /返回了非 JSON 响应/);
   assert.match(proxy, /router\.post\('\/runninghub\/cancel'/);
   assert.match(proxy, /\/task\/openapi\/cancel/);
-  assert.match(proxy, /Authorization:\s*`Bearer \$\{apiKey\}`/);
+  assert.match(proxy, /Authorization:\s*`Bearer \$\{candidate\.apiKey\}`/);
   assert.match(proxy, /\[RH\/cancel\]/);
   assert.match(proxy, /parseJsonResponse/);
-  assert.match(proxy, /parseJsonResponse\(r,\s*'RH 取消接口'\)/);
+  assert.match(proxy, /parseJsonResponse\(r,\s*`RH \$\{candidate\.label\}取消接口`\)/);
   assert.match(proxy, /返回非 JSON/);
   assert.match(proxy, /task\/openapi\/cancel/);
-  assert.match(proxy, /rememberTaskKey\(taskId,\s*apiKey,\s*\{\s*provider:\s*'runninghub'/);
-  assert.match(proxy, /const apiKey = recallTaskKey\(taskId\) \|\| pickRhApiKey\(settings\)/);
+  assert.match(proxy, /rememberTaskKey\(taskId,\s*candidate\.apiKey/);
+  assert.match(proxy, /buildRhSiteCandidates\(settings, requestedSite, taskMeta\?\.apiKey \|\| ''\)/);
   assert.match(service, /cancelRh/);
   assert.match(service, /stage:\s*'cancel'/);
   assert.match(service, /已提交 RH 任务/);
   assert.match(service, /cancelTaskIfNeeded/);
-  assert.match(service, /cancelRh\(taskId\)/);
+  assert.match(service, /cancelRh\(taskId, site\)/);
   assert.match(button, /用户取消/);
   assert.match(button, /AbortController/);
   assert.match(button, /activeTaskIdsRef/);
@@ -1115,20 +1160,20 @@ test('RH stop buttons cancel the remote RunningHub task instead of only stopping
   assert.match(runningHubNode, /cancelRh/);
   assert.match(runningHubNode, /stopRequestedRef/);
   assert.match(runningHubNode, /cancelInFlightRef/);
-  assert.match(runningHubNode, /await cancelRh\(tid\)/);
+  assert.match(runningHubNode, /await cancelRh\(tid, activeRhSiteRef\.current\)/);
   assert.match(runningHubNode, /提交返回后立即取消 RH 后台任务/);
   assert.match(runningHubNode, /stopPoll\(new Error\('已取消'\)\)/);
   assert.match(runningHubNode, /cancelling \? '取消中\.\.\.' : '停止'/);
   assert.match(rhToolsNode, /cancelRh/);
   assert.match(rhToolsNode, /stopRequestedRef/);
   assert.match(rhToolsNode, /cancelInFlightRef/);
-  assert.match(rhToolsNode, /await cancelRh\(tid\)/);
+  assert.match(rhToolsNode, /await cancelRh\(tid, activeRhSiteRef\.current\)/);
   assert.match(rhToolsNode, /提交返回后立即取消 RH 后台任务/);
   assert.match(rhToolsNode, /reject:\s*\(error\?: Error\) => void/);
   assert.match(rhToolsNode, /cancelling \? '取消中\.\.\.' : '停止'/);
   assert.match(rhToolboxNode, /cancelRh/);
   assert.match(rhToolboxNode, /cancelInFlightRef/);
-  assert.match(rhToolboxNode, /await cancelRh\(tid\)/);
+  assert.match(rhToolboxNode, /await cancelRh\(tid, activeTool\?\.rhSite === 'intl' \? 'intl' : 'cn'\)/);
   assert.match(rhToolboxNode, /cancelling \? '取消中\.\.\.' : '停止'/);
 });
 

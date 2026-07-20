@@ -4,6 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const config = require('./config');
 const { startFigmaBridgeOnAppStart } = require('./utils/figmaBridge');
+const { getRunRecoveryManager } = require('./services/runRecovery');
+const canvasAgentToolsRouter = require('./routes/canvasAgentTools');
 
 const app = express();
 
@@ -15,6 +17,22 @@ app.use(cors({
     cb(null, !origin || LOCAL_ORIGIN_RE.test(origin) || UXP_ORIGIN_RE.test(origin));
   },
 }));
+const canvasAgentJsonParser = express.json({ limit: '64kb', strict: true });
+app.use('/api/canvas-agent', (req, res, next) => {
+  const contentLength = Number(req.get('content-length'));
+  if (Number.isFinite(contentLength) && contentLength > 64 * 1024) {
+    return res.status(413).json({ success: false, code: 'agent_request_too_large', error: 'Agent 工具请求超过 64 KiB' });
+  }
+  return canvasAgentJsonParser(req, res, (error) => {
+    if (!error) return next();
+    const tooLarge = error?.type === 'entity.too.large';
+    return res.status(tooLarge ? 413 : 400).json({
+      success: false,
+      code: tooLarge ? 'agent_request_too_large' : 'agent_request_invalid',
+      error: tooLarge ? 'Agent 工具请求超过 64 KiB' : 'Agent 工具请求格式无效',
+    });
+  });
+}, canvasAgentToolsRouter);
 app.use(express.json({ limit: '120mb' }));
 app.use(express.urlencoded({ extended: true, limit: '120mb' }));
 
@@ -76,6 +94,12 @@ const vibexBridgeRouter = require('./routes/vibexBridge');
 const videoOpsRouter = require('./routes/videoOps');
 const batchTagsRouter = require('./routes/batchTags');
 const photoshopBridgeRouter = require('./routes/photoshopBridge');
+const feishuBitableRouter = require('./routes/feishuBitable');
+const webAssetsRouter = require('./routes/webAssets');
+const collaborationRouter = require('./routes/collaboration');
+const projectRunsRouter = require('./routes/projectRuns');
+const projectAssetsRouter = require('./routes/projectAssets');
+const subflowsRouter = require('./routes/subflows');
 const { registerLocalExtensions } = require('./extensions/localExtensions');
 const localHooks = require('./extensions/runtimeHooks');
 
@@ -101,6 +125,12 @@ app.use('/api/vibex-bridge', vibexBridgeRouter);
 app.use('/api/video-ops', videoOpsRouter);
 app.use('/api/batch-tags', batchTagsRouter);
 app.use('/api/photoshop-bridge', photoshopBridgeRouter);
+app.use('/api/feishu-bitable', feishuBitableRouter);
+app.use('/api/web-assets', webAssetsRouter);
+app.use('/api/collaboration', collaborationRouter);
+app.use('/api/project-runs', projectRunsRouter);
+app.use('/api/project-assets', projectAssetsRouter);
+app.use('/api/subflows', subflowsRouter);
 registerLocalExtensions(app, { config, express, logger: console, hooks: localHooks });
 
 // ========== 前端静态资源(仅打包模式) ==========
@@ -117,7 +147,7 @@ if (config.IS_PACKAGED && config.FRONTEND_DIST && fs.existsSync(config.FRONTEND_
 const PORT = config.PORT;
 const HOST = config.HOST;
 
-app.listen(PORT, HOST, () => {
+const server = app.listen(PORT, HOST, () => {
   console.log('==================================================');
   console.log('🐧 T8-penguin-canvas 后端服务');
   console.log('==================================================');
@@ -130,4 +160,45 @@ app.listen(PORT, HOST, () => {
   console.log('   按 Ctrl+C 停止服务器...');
   console.log('--------------------------------------------------');
   startFigmaBridgeOnAppStart(console);
+  setImmediate(() => {
+    getRunRecoveryManager({}).recoverPendingRuns()
+      .then((result) => {
+        if (result.recovered || result.failed || result.interrupted) console.log('[run-recovery] startup result', result);
+      })
+      .catch((error) => console.warn('[run-recovery] startup failed:', error?.message || error));
+  });
 });
+
+let shutdownStarted = false;
+let semanticPipelineClosed = false;
+
+function closeSemanticPipeline() {
+  if (semanticPipelineClosed) return;
+  semanticPipelineClosed = true;
+  try {
+    projectAssetsRouter.semanticPipeline?.close?.();
+  } catch (error) {
+    console.warn('[asset-semantic] shutdown failed:', error?.message || error);
+  }
+}
+
+function gracefulShutdown(signal) {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  closeSemanticPipeline();
+  if (signal === 'SIGINT') process.exitCode = 130;
+  else if (signal === 'SIGTERM') process.exitCode = 143;
+  if (!server.listening) return;
+  const forceClose = setTimeout(() => server.closeAllConnections?.(), 5_000);
+  forceClose.unref?.();
+  server.close((error) => {
+    clearTimeout(forceClose);
+    if (error) console.warn('[backend] graceful shutdown failed:', error?.message || error);
+  });
+}
+
+process.once('SIGINT', () => gracefulShutdown('SIGINT'));
+process.once('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.once('exit', closeSemanticPipeline);
+
+module.exports = { app, server, gracefulShutdown, closeSemanticPipeline };

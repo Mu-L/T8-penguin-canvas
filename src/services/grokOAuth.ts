@@ -49,6 +49,9 @@ export interface GrokOAuthMediaResult {
   prompt?: string;
   reply?: string;
   requestId?: string;
+  transportHttpStatus?: number;
+  upstreamHttpStatus?: number;
+  usage?: Record<string, unknown>;
   status?: string;
   progress?: number;
   message?: string;
@@ -87,9 +90,28 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
     // ignore non-json body
   }
   if (!res.ok || data?.success === false) {
-    throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
+    const error = new Error(data?.error || data?.message || `HTTP ${res.status}`) as Error & Record<string, any>;
+    error.transportHttpStatus = res.status;
+    error.requestId = data?.requestId || data?.request_id || res.headers?.get?.('x-request-id') || undefined;
+    error.upstreamHttpStatus = data?.upstreamHttpStatus || data?.upstream_http_status || undefined;
+    throw error;
   }
-  return (data?.data ?? data) as T;
+  const payload = data?.data ?? data;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return payload as T;
+  const requestId = payload.requestId || payload.request_id || res.headers?.get?.('x-request-id') || undefined;
+  const upstreamHttpStatus = Number(payload.upstreamHttpStatus ?? payload.upstream_http_status);
+  const usage = payload.usage && typeof payload.usage === 'object' && !Array.isArray(payload.usage)
+    ? payload.usage
+    : payload.raw?.usage && typeof payload.raw.usage === 'object' && !Array.isArray(payload.raw.usage)
+      ? payload.raw.usage
+      : undefined;
+  return {
+    ...payload,
+    ...(requestId ? { requestId } : {}),
+    transportHttpStatus: res.status,
+    ...(Number.isInteger(upstreamHttpStatus) && upstreamHttpStatus >= 100 && upstreamHttpStatus <= 599 ? { upstreamHttpStatus } : {}),
+    ...(usage ? { usage } : {}),
+  } as T;
 }
 
 export async function getGrokOAuthStatus(): Promise<GrokOAuthStatus> {
@@ -442,6 +464,7 @@ async function runLegacyGrokOAuthAgentFallback(
       event: 'tool.progress',
       ...meta,
       requestId,
+      pollCount: 0,
       progress: first.progress || 8,
       message: first.message ? `${first.message} 旧接口兼容轮询中...` : '视频任务已提交，旧接口兼容轮询中...',
       result: first,
@@ -456,6 +479,7 @@ async function runLegacyGrokOAuthAgentFallback(
         event: 'tool.progress',
         ...meta,
         requestId,
+        pollCount: i + 1,
         progress: typeof result.progress === 'number'
           ? result.progress
           : Math.min(95, 10 + Math.round(((i + 1) / GROK_VIDEO_AGENT_MAX_POLLS) * 85)),

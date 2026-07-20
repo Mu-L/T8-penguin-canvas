@@ -11,13 +11,20 @@ const { spawn } = require('child_process');
 const sharp = require('sharp');
 const config = require('../config');
 const { tryDecodeDuckPayload } = require('../utils/duckPayload');
+const { getProjectDatabase } = require('../services/projectDatabase');
+const {
+  getBackgroundAssetIndexer,
+  writeAtomicTarget,
+  MAX_IMAGE_INPUT_PIXELS,
+} = require('../services/assetIndexer');
+const { getAssetPreviewPipeline, sanitizePreviewError } = require('../services/assetPreviewPipeline');
 
 const router = express.Router();
+const projectDatabase = getProjectDatabase(config);
+const previewPipeline = getAssetPreviewPipeline(config, projectDatabase);
+const assetIndexer = getBackgroundAssetIndexer(config, projectDatabase, previewPipeline);
 const THUMBNAIL_IMAGE_RE = /\.(png|jpe?g|webp|gif|bmp|avif|tiff?)(?:$|\?)/i;
-const MAX_THUMBNAIL_JOBS = Math.max(1, Math.min(4, Number.parseInt(process.env.T8PC_THUMBNAIL_CONCURRENCY || '2', 10) || 2));
 const thumbnailInflight = new Map();
-const thumbnailQueue = [];
-let activeThumbnailJobs = 0;
 const LOCAL_IMPORT_EXTENSIONS = new Map([
   ['.png', { kind: 'image', mime: 'image/png' }],
   ['.jpg', { kind: 'image', mime: 'image/jpeg' }],
@@ -69,10 +76,28 @@ const uploadSingleFile = upload.single('file');
 
 // POST /api/files/upload — 上传文件
 router.post('/upload', (req, res) => {
-  uploadSingleFile(req, res, (err) => {
+  uploadSingleFile(req, res, async (err) => {
     if (err) return sendUploadError(res, err);
     if (!req.file) {
       return res.status(400).json({ success: false, code: 'missing_file', error: '未收到文件' });
+    }
+    let asset = null;
+    let indexError = null;
+    try {
+      asset = await assetIndexer.indexFile(req.file.path, {
+        projectId: req.body?.projectId,
+        rootName: 'input',
+        rootPath: config.INPUT_DIR,
+        publicPrefix: '/files/input/',
+        canvasId: req.body?.canvasId,
+        sourceNodeId: req.body?.sourceNodeId,
+        sourceNodeType: req.body?.sourceNodeType || (req.body?.sourceNodeId ? 'upload' : undefined),
+        creatorId: req.body?.creatorId || 'local-owner',
+        sourceType: req.body?.sourceNodeId ? 'upload-node' : 'upload',
+      });
+    } catch (error) {
+      indexError = error?.message || String(error);
+      console.warn('[asset-index] upload indexing failed:', indexError);
     }
     return res.json({
       success: true,
@@ -81,6 +106,10 @@ router.post('/upload', (req, res) => {
         url: `/files/input/${req.file.filename}`,
         size: req.file.size,
         mime: req.file.mimetype,
+        assetId: asset?.id || null,
+        storageMode: asset?.storageMode || 'managed',
+        availability: asset?.availability || (indexError ? 'unverified' : 'available'),
+        ...(indexError ? { indexError } : {}),
       },
     });
   });
@@ -128,10 +157,37 @@ function importLocalFile(sourcePath) {
 }
 
 // POST /api/files/import-local — Electron 系统选择器拿到绝对路径后，复制到 input 并保留原始路径
-router.post('/import-local', express.json({ limit: '1mb' }), (req, res) => {
+router.post('/import-local', express.json({ limit: '1mb' }), async (req, res) => {
   try {
     const data = importLocalFile(req.body?.sourcePath || req.body?.path);
-    return res.json({ success: true, data });
+    let asset = null;
+    let indexError = null;
+    try {
+      asset = await assetIndexer.indexFile(data.path, {
+        projectId: req.body?.projectId,
+        rootName: 'input',
+        rootPath: config.INPUT_DIR,
+        publicPrefix: '/files/input/',
+        canvasId: req.body?.canvasId,
+        sourceNodeId: req.body?.sourceNodeId,
+        sourceNodeType: req.body?.sourceNodeType,
+        creatorId: req.body?.creatorId || 'local-owner',
+        sourceType: req.body?.sourceNodeId ? 'upload-node-import' : 'local-import-copy',
+      });
+    } catch (error) {
+      indexError = error?.message || String(error);
+      console.warn('[asset-index] local import indexing failed:', indexError);
+    }
+    return res.json({
+      success: true,
+      data: {
+        ...data,
+        assetId: asset?.id || null,
+        storageMode: asset?.storageMode || 'managed',
+        availability: asset?.availability || (indexError ? 'unverified' : 'available'),
+        ...(indexError ? { indexError } : {}),
+      },
+    });
   } catch (e) {
     return res.status(400).json({ success: false, error: e?.message || String(e) });
   }
@@ -239,10 +295,16 @@ function resolveOutputSubdir(subdir) {
   return { safeSubdir, targetDir };
 }
 
-function spawnOpenFolder(targetDir) {
+function spawnOpenFolder(targetDir, options = {}) {
   return new Promise((resolve, reject) => {
     const platform = process.platform;
     const command = platform === 'win32' ? 'explorer.exe' : platform === 'darwin' ? 'open' : 'xdg-open';
+    const selectPath = String(options.selectPath || '').trim();
+    const args = selectPath && platform === 'win32'
+      ? [`/select,${selectPath}`]
+      : selectPath && platform === 'darwin'
+        ? ['-R', selectPath]
+        : [targetDir];
     let child;
     let settled = false;
     const done = (error) => {
@@ -252,7 +314,7 @@ function spawnOpenFolder(targetDir) {
       else resolve();
     };
     try {
-      child = spawn(command, [targetDir], {
+      child = spawn(command, args, {
         detached: true,
         stdio: 'ignore',
         shell: false,
@@ -277,49 +339,34 @@ function clampThumbnailSize(value) {
 function thumbnailCacheFile(sourcePath, stat, size) {
   const key = crypto
     .createHash('sha1')
-    .update(`${sourcePath}|${stat.size}|${Math.round(stat.mtimeMs)}|${size}`)
+    .update(`${sourcePath}|${stat.size}|${stat.mtimeMs}|${stat.ctimeMs}|${size}|${config.ASSET_PREVIEW_PIPELINE_VERSION}`)
     .digest('hex')
     .slice(0, 28);
   return path.join(config.THUMBNAILS_DIR, `preview_${size}_${key}.webp`);
-}
-
-function pumpThumbnailQueue() {
-  while (activeThumbnailJobs < MAX_THUMBNAIL_JOBS && thumbnailQueue.length > 0) {
-    const job = thumbnailQueue.shift();
-    activeThumbnailJobs += 1;
-    Promise.resolve()
-      .then(job.task)
-      .then(job.resolve, job.reject)
-      .finally(() => {
-        activeThumbnailJobs -= 1;
-        pumpThumbnailQueue();
-      });
-  }
-}
-
-function queueThumbnailJob(task) {
-  return new Promise((resolve, reject) => {
-    thumbnailQueue.push({ task, resolve, reject });
-    pumpThumbnailQueue();
-  });
 }
 
 async function ensureThumbnailFile(sourcePath, target, size) {
   if (fs.existsSync(target)) return target;
   const inflight = thumbnailInflight.get(target);
   if (inflight) return inflight;
-  const promise = queueThumbnailJob(async () => {
+  const promise = previewPipeline.runEphemeral(async () => {
     if (fs.existsSync(target)) return target;
-    await sharp(sourcePath, { animated: false, limitInputPixels: false })
-      .rotate()
-      .resize({
-        width: size,
-        height: size,
-        fit: 'inside',
-        withoutEnlargement: true,
+    await writeAtomicTarget(target, async (temporary) => {
+      await sharp(sourcePath, {
+        animated: false,
+        failOn: 'error',
+        limitInputPixels: MAX_IMAGE_INPUT_PIXELS,
       })
-      .webp({ quality: config.THUMBNAIL_QUALITY || 78, effort: 4 })
-      .toFile(target);
+        .rotate()
+        .resize({
+          width: size,
+          height: size,
+          fit: 'inside',
+          withoutEnlargement: true,
+        })
+        .webp({ quality: config.THUMBNAIL_QUALITY || 78, effort: 4 })
+        .toFile(temporary);
+    });
     return target;
   }).finally(() => {
     thumbnailInflight.delete(target);
@@ -354,7 +401,8 @@ router.get('/thumbnail', async (req, res) => {
     res.type('image/webp');
     return res.sendFile(target);
   } catch (e) {
-    return res.status(500).json({ success: false, error: e?.message || String(e) });
+    const safe = sanitizePreviewError(e);
+    return res.status(safe.code === 'preview-queue-full' ? 429 : 500).json({ success: false, code: safe.code, error: safe.message });
   }
 });
 
@@ -497,26 +545,33 @@ router.post('/open-output-folder', express.json({ limit: '64kb' }), async (req, 
   }
 });
 
-function resolveOpenLocalDirectory(targetPath) {
+function resolveOpenLocalTarget(targetPath, selectFile = false) {
   const raw = String(targetPath || '').trim();
   if (!raw || !path.isAbsolute(raw)) {
     throw new Error('本地目录路径必须是绝对路径');
   }
   const resolved = path.resolve(raw);
   const stat = fs.statSync(resolved);
-  return stat.isDirectory() ? resolved : path.dirname(resolved);
+  const isFile = stat.isFile();
+  return {
+    path: isFile ? path.dirname(resolved) : resolved,
+    targetPath: resolved,
+    selectFile: Boolean(selectFile && isFile),
+  };
 }
 
 // POST /api/files/open-local-path — 打开最近一次真实保存目录（用于原素材目录 sidecar）
 router.post('/open-local-path', express.json({ limit: '64kb' }), async (req, res) => {
   try {
-    const targetDir = resolveOpenLocalDirectory(req.body?.path || req.body?.targetPath);
+    const target = resolveOpenLocalTarget(req.body?.path || req.body?.targetPath, req.body?.selectFile === true);
     const dryRun = Boolean(req.body?.dryRun) || process.env.T8PC_OPEN_FOLDER_DRY_RUN === '1';
-    if (!dryRun) await spawnOpenFolder(targetDir);
+    if (!dryRun) await spawnOpenFolder(target.path, target.selectFile ? { selectPath: target.targetPath } : {});
     return res.json({
       success: true,
       data: {
-        path: targetDir,
+        path: target.path,
+        targetPath: target.targetPath,
+        selectFile: target.selectFile,
         opened: !dryRun,
       },
     });
@@ -614,5 +669,8 @@ router.post('/save-to-disk', express.json({ limit: '2mb' }), async (req, res) =>
 });
 
 module.exports = router;
+module.exports.assetIndexer = assetIndexer;
+module.exports.previewPipeline = previewPipeline;
 module.exports.importLocalFile = importLocalFile;
-module.exports.resolveOpenLocalDirectory = resolveOpenLocalDirectory;
+module.exports.resolveOpenLocalTarget = resolveOpenLocalTarget;
+module.exports.resolveOpenLocalDirectory = (targetPath) => resolveOpenLocalTarget(targetPath).path;

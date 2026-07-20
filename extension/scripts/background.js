@@ -283,6 +283,212 @@ async function generateImage(message) {
   };
 }
 
+async function scanAssetsInTab(tabId, autoScroll) {
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: async (shouldScroll) => {
+      const originalX = window.scrollX;
+      const originalY = window.scrollY;
+      if (shouldScroll) {
+        const step = Math.max(360, Math.floor(window.innerHeight * 0.8));
+        const maxY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+        for (let y = 0; y <= maxY; y += step) {
+          window.scrollTo(originalX, y);
+          await new Promise((resolve) => setTimeout(resolve, 120));
+        }
+        window.scrollTo(originalX, maxY);
+        await new Promise((resolve) => setTimeout(resolve, 180));
+      }
+
+      const out = [];
+      const seen = new Set();
+      const absolute = (value) => {
+        const text = String(value || '').trim();
+        if (!text) return '';
+        if (/^(data:|blob:)/i.test(text)) return text;
+        try { return new URL(text, document.baseURI).href; } catch { return ''; }
+      };
+      const add = (url, meta = {}) => {
+        const clean = absolute(url);
+        if (!clean || seen.has(clean) || out.length >= 200) return;
+        seen.add(clean);
+        let name = meta.name || '';
+        if (!name) {
+          if (/^data:/i.test(clean)) name = `embedded-image-${out.length + 1}.png`;
+          else if (/^blob:/i.test(clean)) name = `blob-image-${out.length + 1}.png`;
+          else {
+            try { name = decodeURIComponent(new URL(clean).pathname.split('/').pop() || 'web-image'); } catch { name = 'web-image'; }
+          }
+        }
+        out.push({
+          id: `asset-${out.length}-${clean.slice(-48)}`,
+          url: clean,
+          previewUrl: clean,
+          name: String(name).slice(0, 160),
+          width: Math.max(0, Number(meta.width) || 0),
+          height: Math.max(0, Number(meta.height) || 0),
+          source: meta.source || 'image',
+        });
+      };
+      const srcsetUrls = (value) => {
+        const text = String(value || '').trim();
+        if (!text) return [];
+        if (/^data:/i.test(text)) return [text.replace(/\s+\d+(?:\.\d+)?[wx]\s*$/i, '')];
+        return text.split(',').map((part) => part.trim().split(/\s+/)[0]).filter(Boolean);
+      };
+
+      document.querySelectorAll('img').forEach((image) => {
+        add(image.currentSrc || image.src, {
+          name: image.alt || image.getAttribute('title') || '',
+          width: image.naturalWidth || image.width,
+          height: image.naturalHeight || image.height,
+          source: 'img',
+        });
+        srcsetUrls(image.getAttribute('srcset')).forEach((url) => add(url, { source: 'srcset' }));
+      });
+      document.querySelectorAll('picture source, source[srcset]').forEach((source) => {
+        srcsetUrls(source.getAttribute('srcset')).forEach((url) => add(url, { source: 'picture' }));
+      });
+      document.querySelectorAll('*').forEach((node) => {
+        const background = getComputedStyle(node).backgroundImage;
+        if (!background || background === 'none') return;
+        const matches = background.matchAll(/url\((?:"|')?(.+?)(?:"|')?\)/g);
+        for (const match of matches) {
+          const rect = node.getBoundingClientRect();
+          add(match[1], { width: Math.round(rect.width), height: Math.round(rect.height), source: 'background' });
+        }
+      });
+      document.querySelectorAll('canvas').forEach((canvas, index) => {
+        try {
+          add(canvas.toDataURL('image/png'), { name: `canvas-${index + 1}.png`, width: canvas.width, height: canvas.height, source: 'canvas' });
+        } catch {
+          // Cross-origin tainted canvas cannot be exported.
+        }
+      });
+      if (shouldScroll) window.scrollTo(originalX, originalY);
+      return out;
+    },
+    args: [!!autoScroll],
+  });
+  return Array.isArray(results?.[0]?.result) ? results[0].result : [];
+}
+
+async function resolveAssetsInPage(tabId, assets) {
+  if (!tabId || !assets.length) return [];
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: async (input) => {
+        const toDataUrl = (blob) => new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(reader.error || new Error('read_failed'));
+          reader.readAsDataURL(blob);
+        });
+        return Promise.all(input.map(async (asset, index) => {
+          if (asset.dataUrl) return { index, dataUrl: asset.dataUrl };
+          try {
+            const response = await fetch(asset.url, { credentials: 'include', cache: 'force-cache' });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const blob = await response.blob();
+            if (!String(blob.type || '').startsWith('image/')) throw new Error('not_image');
+            if (blob.size > 30 * 1024 * 1024) throw new Error('too_large');
+            return { index, dataUrl: await toDataUrl(blob) };
+          } catch (error) {
+            return { index, error: error?.message || String(error) };
+          }
+        }));
+      },
+      args: [assets.map((asset) => ({ url: asset.url || '', dataUrl: asset.dataUrl || '' }))],
+    });
+    return Array.isArray(results?.[0]?.result) ? results[0].result : [];
+  } catch {
+    return [];
+  }
+}
+
+async function findWebAssetsBackend() {
+  const settings = await storageGet({ t8_backend_base: DEFAULT_BACKEND_BASE });
+  let lastError = null;
+  for (const backendBase of backendCandidates(settings.t8_backend_base)) {
+    try {
+      const response = await fetch(absoluteBackendUrl(backendBase, '/api/web-assets/status'));
+      const data = await readJsonResponse(response);
+      if (response.ok && data?.success && data?.data?.token) return { backendBase, token: data.data.token };
+      lastError = new Error(data?.error || `T8 后端返回 HTTP ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error('无法连接支持网页素材采集的 T8 后端。');
+}
+
+async function importWebAssets(message) {
+  const assets = Array.isArray(message.assets) ? message.assets.slice(0, 50) : [];
+  if (!assets.length) throw new Error('没有选择要导入的网页素材。');
+  const resolved = await resolveAssetsInPage(message.tabId, assets);
+  const resolvedByIndex = new Map(resolved.filter((item) => item?.dataUrl).map((item) => [item.index, item.dataUrl]));
+  const prepared = assets.map((asset, index) => ({
+    url: asset.url || '',
+    dataUrl: asset.dataUrl || resolvedByIndex.get(index) || '',
+    name: asset.name || `web-image-${index + 1}`,
+    pageUrl: message.pageUrl || '',
+    width: asset.width || 0,
+    height: asset.height || 0,
+    source: asset.source || 'web',
+  }));
+  const backend = await findWebAssetsBackend();
+  const imported = [];
+  const failures = [];
+  const chunkSize = 4;
+  for (let start = 0; start < prepared.length; start += chunkSize) {
+    const chunk = prepared.slice(start, start + chunkSize);
+    try {
+      const response = await fetch(absoluteBackendUrl(backend.backendBase, '/api/web-assets/import'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-t8-web-assets-token': backend.token },
+        body: JSON.stringify({ assets: chunk }),
+      });
+      const data = await readJsonResponse(response);
+      const items = Array.isArray(data?.data?.items) ? data.data.items : [];
+      const chunkFailures = Array.isArray(data?.data?.failures) ? data.data.failures : [];
+      imported.push(...items);
+      failures.push(...chunkFailures.map((failure) => ({ ...failure, index: start + Number(failure.index || 0) })));
+      if (!response.ok && !items.length && !chunkFailures.length) {
+        chunk.forEach((asset, index) => failures.push({ index: start + index, name: asset.name, error: data?.error || `HTTP ${response.status}` }));
+      }
+    } catch (error) {
+      chunk.forEach((asset, index) => failures.push({ index: start + index, name: asset.name, error: normalizeBackendFetchError(error) }));
+    }
+  }
+  if (!imported.length) {
+    const error = new Error(failures[0]?.error || '网页素材导入失败。');
+    error.failures = failures;
+    throw error;
+  }
+
+  await sendToCanvas({
+    mode: 'reference',
+    source: 'web-asset-importer',
+    images: imported.map((item) => ({
+      url: item.url,
+      name: item.name || item.filename,
+      mime: item.mime,
+      size: item.size,
+      width: item.width,
+      height: item.height,
+      sourceUrl: item.sourceUrl,
+      pageUrl: item.pageUrl,
+    })),
+    imageUrls: imported.map((item) => item.url),
+    pageUrl: message.pageUrl || '',
+    pageTitle: message.pageTitle || '',
+    createdAt: Date.now(),
+    metadata: { importedCount: imported.length, failedCount: failures.length },
+  });
+  return { imported, failures };
+}
+
 chrome.runtime.onInstalled.addListener(installContextMenu);
 chrome.runtime.onStartup.addListener(installContextMenu);
 installContextMenu();
@@ -303,6 +509,35 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.action === 't8WebAssets.scan') {
+    scanAssetsInTab(message.tabId, message.autoScroll)
+      .then((assets) => sendResponse({ ok: true, assets }))
+      .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
+    return true;
+  }
+
+  if (message?.action === 't8WebAssets.capture') {
+    chrome.tabs.captureVisibleTab(message.windowId, { format: 'png' }, (dataUrl) => {
+      if (chrome.runtime.lastError) sendResponse({ ok: false, error: chrome.runtime.lastError.message });
+      else sendResponse({ ok: true, dataUrl });
+    });
+    return true;
+  }
+
+  if (message?.action === 't8WebAssets.import') {
+    importWebAssets(message)
+      .then((result) => sendResponse({ ok: true, imported: result.imported.length, failures: result.failures }))
+      .catch((error) => sendResponse({ ok: false, error: error?.message || String(error), failures: error?.failures || [] }));
+    return true;
+  }
+
+  if (message?.action === 't8WebAssets.openSidePanel') {
+    chrome.sidePanel.open({ windowId: message.windowId })
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
+    return true;
+  }
+
   if (message?.action === 't8WebImage.getSettings') {
     storageGet({
       t8_backend_base: DEFAULT_BACKEND_BASE,

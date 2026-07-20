@@ -16,6 +16,7 @@ import {
   dragonBallShenronHiddenMusicUrl,
   dragonBallThemeMusicUrl,
   evaThemeMusicUrl,
+  gardenDefenseThemeMusicUrl,
   getTemplateMode,
   resolveThemeTemplate,
   narutoThemeMusicUrl,
@@ -37,6 +38,7 @@ import type {
   ThemeVisuals,
 } from '../theme/types';
 import { useThemeStore } from '../stores/theme';
+import { requestGardenThemeMusicAutoplay } from '../theme/musicAutoplay';
 
 interface ThemeTemplateManagerProps {
   open: boolean;
@@ -98,6 +100,7 @@ const VISUAL_STYLE_OPTIONS = [
   { value: 'saint-seiya', label: '圣斗士' },
   { value: 'tetris', label: '俄罗斯方块' },
   { value: 'farm-story', label: '牧场物语' },
+  { value: 'garden-defense', label: '庭院守卫' },
 ] as const;
 
 const VISUAL_INTENSITY_OPTIONS = [
@@ -122,6 +125,7 @@ const MUSIC_PRESET_OPTIONS: Array<{ value: ThemeMusicPreset; label: string }> = 
   { value: 'hades-eclipse', label: '冥界日蚀' },
   { value: 'block-drop', label: '落块冲刺' },
   { value: 'farm-breeze', label: '牧场微风' },
+  { value: 'garden-march', label: '庭院守卫进行曲' },
 ];
 
 const MAX_THEME_AUDIO_SIZE = 20 * 1024 * 1024;
@@ -257,6 +261,17 @@ function visualDefaultsFor(style: ThemeVisuals['style'], legacyStyle: LegacyThem
       canvasPattern: 'pasture-map',
       nodeFrame: 'farm-sign-card',
       headerMark: prev?.headerMark || 'FARM STORY',
+    };
+  }
+  if (style === 'garden-defense') {
+    return {
+      ...fallbackVisuals(legacyStyle),
+      ...(prev || {}),
+      style,
+      iconPack: 'garden-guard',
+      canvasPattern: 'defense-lawn',
+      nodeFrame: 'garden-card',
+      headerMark: prev?.headerMark || 'GARDEN GUARD',
     };
   }
   if (style === 'tech') {
@@ -405,6 +420,17 @@ function fallbackMusic(legacyStyle: LegacyThemeStyle, visuals?: ThemeVisuals): T
       volume: 0.14,
       bpm: 96,
       copyrightNote: '原创轻量牧场合成循环；后续可替换为已授权季节音乐。',
+    };
+  }
+  if (visualStyle === 'garden-defense') {
+    return {
+      title: '植物大战僵尸白天（Grasswalk）',
+      preset: 'garden-march',
+      source: 'url',
+      url: gardenDefenseThemeMusicUrl,
+      volume: 0.16,
+      bpm: 112,
+      copyrightNote: '庭院守卫主题默认音乐文件；garden-march 保留为合成备选。公开分发前请确认音乐授权边界。',
     };
   }
   if (legacyStyle === 'tech' || visualStyle === 'tech') {
@@ -598,6 +624,7 @@ export default function ThemeTemplateManager({ open, onClose }: ThemeTemplateMan
   };
 
   const handleApply = () => {
+    requestGardenThemeMusicAutoplay(editor);
     setTemplate(editor.id, mode);
     setTheme(mode);
     setMessage('已应用主题');

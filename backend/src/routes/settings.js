@@ -1,4 +1,4 @@
-// 三套 API Key 设置路由
+// 主 API Key 与分类独立 Key 设置路由
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -40,13 +40,17 @@ const TASK_COMPLETION_SOUND_EXTENSION_BY_MIME = {
   'audio/webm': '.webm',
 };
 
-// 默认 settings 结构(三套通用 Key + 8 类分类 Key)
+// 默认 settings 结构（主 Key + 8 类分类 Key）
 const DEFAULT_SETTINGS = {
-  // 三套通用 Key
+  // 主 Key
   zhenzhenApiKey: '',
   zhenzhenBaseUrl: config.ZHENZHEN_BASE_URL, // 固定 https://ai.t8star.org
+  zhenzhenSd2ApiKey: '',
+  zhenzhenSd2BaseUrl: config.ZHENZHEN_SD2_BASE_URL,
   rhApiKey: '',
   rhBaseUrl: config.RH_BASE_URL,
+  rhIntlApiKey: '',
+  rhIntlBaseUrl: config.RH_INTL_BASE_URL,
   // v1.2.9.16: 取消 rhWalletApiKey —— RH 钱包应用节点与普通 RunningHub 节点统一使用 rhApiKey
   llmApiKey: '',
   llmBaseUrl: config.ZHENZHEN_BASE_URL, // 同贞贞工坊上游
@@ -226,6 +230,7 @@ function loadSettings({ persistMigrations = true } = {}) {
       ...DEFAULT_SETTINGS,
       ...data,
       zhenzhenBaseUrl: config.ZHENZHEN_BASE_URL,
+      zhenzhenSd2BaseUrl: config.ZHENZHEN_SD2_BASE_URL,
       llmBaseUrl: config.ZHENZHEN_BASE_URL,
     };
     merged.advancedProviders = normalizeAdvancedProviders(data.advancedProviders);
@@ -277,7 +282,9 @@ router.get('/', (_req, res) => {
   const masked = {
     ...settings,
     zhenzhenApiKey: maskKey(settings.zhenzhenApiKey),
+    zhenzhenSd2ApiKey: maskKey(settings.zhenzhenSd2ApiKey),
     rhApiKey: maskKey(settings.rhApiKey),
+    rhIntlApiKey: maskKey(settings.rhIntlApiKey),
     llmApiKey: maskKey(settings.llmApiKey),
     advancedProviders: maskAdvancedProviders(settings.advancedProviders),
     advancedProviderSummary: summarizeAdvancedProviders(settings.advancedProviders),
@@ -377,6 +384,9 @@ router.post('/', (req, res) => {
     ...safeIncoming,
     // base URL 强制为配置值,不允许覆盖
     zhenzhenBaseUrl: config.ZHENZHEN_BASE_URL,
+    zhenzhenSd2BaseUrl: config.ZHENZHEN_SD2_BASE_URL,
+    rhBaseUrl: config.RH_BASE_URL,
+    rhIntlBaseUrl: config.RH_INTL_BASE_URL,
     llmBaseUrl: config.ZHENZHEN_BASE_URL,
   };
   merged.advancedProviders = hasAdvancedProviders
@@ -468,6 +478,7 @@ function normalizeRhToolsBackup(raw) {
       return {
         id,
         webappId: webappId.slice(0, 120),
+        rhSite: String(t?.rhSite || '').toLowerCase() === 'intl' ? 'intl' : 'cn',
         title: title.slice(0, 120),
         description: typeof t?.description === 'string' ? t.description.slice(0, 2000) : '',
         categoryId: categoryIds.has(categoryId) ? categoryId : '',
@@ -639,6 +650,7 @@ function normalizeRhToolboxManifestPayload(raw) {
       description: cleanRhToolboxText(item?.description, '', 4000),
       categoryId,
       webappId,
+      rhSite: String(item?.rhSite || '').toLowerCase() === 'intl' ? 'intl' : 'cn',
       enabled: item?.enabled !== false && !!webappId,
       order: Number.isFinite(Number(item?.order)) ? Number(item.order) : index,
       capabilities: Array.isArray(item?.capabilities)
@@ -833,14 +845,17 @@ router.post('/rh-tool-categories/reorder', (req, res) => {
 
 // 获取应用列表
 router.get('/rh-tool-apps', (_req, res) => {
-  const list = loadJson(config.RH_TOOL_APPS_FILE, []);
+  const list = loadJson(config.RH_TOOL_APPS_FILE, []).map((item) => ({
+    ...item,
+    rhSite: String(item?.rhSite || '').toLowerCase() === 'intl' ? 'intl' : 'cn',
+  }));
   list.sort((a, b) => (a.order || 0) - (b.order || 0));
   res.json({ success: true, data: list });
 });
 
 // 新增应用
 router.post('/rh-tool-apps', (req, res) => {
-  const { webappId, title, description, categoryId, coverUrl } = req.body || {};
+  const { webappId, title, description, categoryId, coverUrl, rhSite } = req.body || {};
   if (!webappId || !title) {
     return res.json({ success: false, error: '缺少必要参数 (webappId / title)' });
   }
@@ -848,6 +863,7 @@ router.post('/rh-tool-apps', (req, res) => {
   const newApp = {
     id: genId('rhtool'),
     webappId: String(webappId).trim(),
+    rhSite: String(rhSite || '').toLowerCase() === 'intl' ? 'intl' : 'cn',
     title: String(title).trim(),
     description: description ? String(description) : '',
     categoryId: categoryId || '',
@@ -866,12 +882,13 @@ router.put('/rh-tool-apps/:id', (req, res) => {
   const list = loadJson(config.RH_TOOL_APPS_FILE, []);
   const app = list.find((a) => a.id === id);
   if (!app) return res.json({ success: false, error: '应用不存在' });
-  const { webappId, title, description, categoryId, coverUrl } = req.body || {};
+  const { webappId, title, description, categoryId, coverUrl, rhSite } = req.body || {};
   if (typeof webappId === 'string' && webappId.trim()) app.webappId = webappId.trim();
   if (typeof title === 'string' && title.trim()) app.title = title.trim();
   if (typeof description === 'string') app.description = description;
   if (typeof categoryId === 'string') app.categoryId = categoryId;
   if (typeof coverUrl === 'string') app.coverUrl = coverUrl;
+  if (typeof rhSite === 'string') app.rhSite = rhSite.toLowerCase() === 'intl' ? 'intl' : 'cn';
   saveJson(config.RH_TOOL_APPS_FILE, list);
   res.json({ success: true, data: app });
 });
@@ -954,11 +971,12 @@ router.post('/rh-tools/import', (req, res) => {
         catIdMap.set(c.id, c.id);
       }
 
-      const toolByWebapp = new Map(existingTools.map((t) => [String(t.webappId || '').trim(), t]));
+      const toolIdentity = (tool) => `${normalizeRhSite(tool?.rhSite)}:${String(tool?.webappId || '').trim()}`;
+      const toolByWebapp = new Map(existingTools.map((t) => [toolIdentity(t), t]));
       const mergedTools = [...existingTools];
       for (const t of normalized.tools) {
         const mappedCategory = catIdMap.get(t.categoryId) || t.categoryId || '';
-        const existing = toolByWebapp.get(t.webappId);
+        const existing = toolByWebapp.get(toolIdentity(t));
         if (existing) {
           Object.assign(existing, { ...t, id: existing.id, categoryId: mappedCategory });
         } else {

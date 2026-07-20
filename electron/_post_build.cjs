@@ -12,6 +12,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -23,6 +24,14 @@ const PRODUCT_NAME = PACKAGE_JSON.build && PACKAGE_JSON.build.productName
 const UNPACKED = path.join(ROOT, 'dist_electron', 'win-unpacked');
 const RES = path.join(UNPACKED, 'resources');
 let missingCount = 0;
+const CANVAS_AGENT_INTEGRITY_MANIFEST = 'canvas-agent-source-integrity.json';
+const CANVAS_AGENT_INTEGRITY_FILES = Object.freeze([
+  { source: 'routes/canvasAgentTools.js', output: 'routes/canvasAgentTools.t8c', format: 't8c' },
+  { source: 'services/canvasAgentTools.js', output: 'services/canvasAgentTools.t8c', format: 't8c' },
+  { source: 'services/canvasAgentPublicView.js', output: 'services/canvasAgentPublicView.t8c', format: 't8c' },
+  { source: 'services/runEvidenceDiagnosis.js', output: 'services/runEvidenceDiagnosis.t8c', format: 't8c' },
+  { source: 'shared/canvasNodeSchema.json', output: 'shared/canvasNodeSchema.json', format: 'json' },
+]);
 
 function ok(p) {
   console.log('  ✅', path.relative(UNPACKED, p));
@@ -78,9 +87,13 @@ function checkAchievementMedia() {
 function checkWebImageExtensionResources() {
   const extensionRoot = path.join(RES, 'extension', 'web-image-reverse');
   checkFile(path.join(extensionRoot, 'manifest.json'));
+  checkFile(path.join(extensionRoot, 'popup.html'));
+  checkFile(path.join(extensionRoot, 'sidepanel.html'));
+  checkFile(path.join(extensionRoot, 'scripts', 'asset-panel.js'));
   checkFile(path.join(extensionRoot, 'scripts', 'background.js'));
   checkFile(path.join(extensionRoot, 'scripts', 'content.js'));
   checkFile(path.join(extensionRoot, 'scripts', 'runninghub-bridge.js'));
+  checkFile(path.join(extensionRoot, 'styles', 'asset-panel.css'));
   checkFile(path.join(extensionRoot, 'styles', 'content.css'));
 }
 
@@ -129,6 +142,62 @@ function failSecurity(message, p) {
   process.exit(1);
 }
 
+function sha256File(filename) {
+  return crypto.createHash('sha256').update(fs.readFileSync(filename)).digest('hex');
+}
+
+function checkCanvasAgentIntegrity() {
+  const manifestPath = path.join(RES, 'backend-enc', CANVAS_AGENT_INTEGRITY_MANIFEST);
+  if (!fs.existsSync(manifestPath)) {
+    missingCount += 1;
+    bad(manifestPath);
+    return;
+  }
+  ok(manifestPath);
+  let manifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  } catch (_) {
+    failSecurity('canvas Agent integrity manifest must be valid JSON:', manifestPath);
+  }
+  if (manifest?.schema !== 't8-canvas-agent-electron-integrity-v1'
+    || manifest?.hashAlgorithm !== 'sha256'
+    || !Array.isArray(manifest?.entries)
+    || manifest.entries.length !== CANVAS_AGENT_INTEGRITY_FILES.length) {
+    failSecurity('canvas Agent integrity manifest schema or entry count is invalid:', manifestPath);
+  }
+  const entries = new Map(manifest.entries.map((entry) => [entry?.source, entry]));
+  if (entries.size !== CANVAS_AGENT_INTEGRITY_FILES.length) {
+    failSecurity('canvas Agent integrity manifest contains duplicate sources:', manifestPath);
+  }
+  for (const expected of CANVAS_AGENT_INTEGRITY_FILES) {
+    const entry = entries.get(expected.source);
+    if (!entry || entry.output !== expected.output || entry.format !== expected.format
+      || !/^[a-f0-9]{64}$/.test(String(entry.sourceSha256 || ''))
+      || !/^[a-f0-9]{64}$/.test(String(entry.outputSha256 || ''))) {
+      failSecurity(`canvas Agent integrity entry is invalid: ${expected.source}`, manifestPath);
+    }
+    const sourcePath = path.join(ROOT, 'backend', 'src', ...expected.source.split('/'));
+    const outputPath = path.join(RES, 'backend-enc', ...expected.output.split('/'));
+    if (!fs.existsSync(sourcePath)) failSecurity('canvas Agent integrity source is missing:', sourcePath);
+    if (!fs.existsSync(outputPath)) failSecurity('canvas Agent integrity output is missing:', outputPath);
+    if (sha256File(sourcePath) !== entry.sourceSha256) {
+      failSecurity(`canvas Agent encrypted output was built from stale source: ${expected.source}`, sourcePath);
+    }
+    if (sha256File(outputPath) !== entry.outputSha256) {
+      failSecurity(`canvas Agent packaged output SHA-256 mismatch: ${expected.output}`, outputPath);
+    }
+    if (expected.format === 'json' && entry.sourceSha256 !== entry.outputSha256) {
+      failSecurity('canvas Agent packaged node schema differs from source JSON:', outputPath);
+    }
+    if (expected.format === 't8c') {
+      const header = fs.readFileSync(outputPath).subarray(0, 7).toString('utf8');
+      if (header !== 'T8ENC1\n') failSecurity('canvas Agent backend source is not encrypted:', outputPath);
+    }
+  }
+  console.log('  ✅ canvas Agent source/output SHA-256 integrity verified');
+}
+
 function escapeRegExp(text) {
   return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -161,12 +230,15 @@ function isSmallTextFile(p) {
 function runLocalPostBuildChecks() {
   const disabled = process.env.T8_ENABLE_LOCAL_PRIVATE === '0'
     || process.env.T8_DISABLE_LOCAL_EXTENSIONS === '1';
+  const required = process.env.T8_REQUIRE_LOCAL_PRIVATE === '1';
   const hookPath = path.join(ROOT, 'local-private', 'extensions', 'build', 'post-build.cjs');
   if (disabled) {
+    if (required) failSecurity('formal release cannot disable local private build hook:', hookPath);
     console.log('  ⚠️  local private build hook disabled by environment');
     return;
   }
   if (!fs.existsSync(hookPath)) {
+    if (required) failSecurity('formal release requires local private build hook:', hookPath);
     console.log('  ✅ no local private build hook configured');
     return;
   }
@@ -192,6 +264,28 @@ function runLocalPostBuildChecks() {
     walkFiles,
     isSmallTextFile,
   });
+}
+
+function checkRequiredLocalPrivateArtifacts() {
+  if (process.env.T8_REQUIRE_LOCAL_PRIVATE !== '1') return;
+  const requiredBackend = [
+    path.join(RES, 'backend-enc', 'local-private', 'extensions', 'backend', 'index.t8c'),
+    path.join(RES, 'backend-enc', 'local-private', 'recharge', 'backend', 'routes.t8c'),
+  ];
+  for (const file of requiredBackend) {
+    if (!fs.existsSync(file)) failSecurity('formal release missing encrypted local private backend:', file);
+    ok(file);
+  }
+
+  const forbiddenPlaintext = [
+    path.join(RES, 'backend-enc', 'local-private', 'extensions', 'backend', 'index.cjs'),
+    path.join(RES, 'backend-enc', 'local-private', 'recharge', 'backend', 'routes.cjs'),
+  ];
+  for (const file of forbiddenPlaintext) {
+    if (fs.existsSync(file)) failSecurity('formal release leaked local private backend source:', file);
+  }
+
+  console.log('  ✅ formal release local private frontend/backend artifacts verified');
 }
 
 function checkAiWatermarkRuntime() {
@@ -279,7 +373,15 @@ function checkFfmpegRuntime() {
   if (missingTransitions.length > 0) {
     failSecurity(`packaged ffmpeg missing native xfade transitions from catalog: ${missingTransitions.join(', ')}`, ffmpeg);
   }
+  const encodersResult = spawnSync(ffmpeg, ['-hide_banner', '-encoders'], { encoding: 'utf8' });
+  const encodersOutput = `${encodersResult.stdout || ''}\n${encodersResult.stderr || ''}`;
+  const requiredAssetEncoders = ['libx264', 'aac', 'libwebp'];
+  const missingAssetEncoders = requiredAssetEncoders.filter((encoder) => !new RegExp(`\\b${escapeRegExp(encoder)}\\b`).test(encodersOutput));
+  if (encodersResult.status !== 0 || missingAssetEncoders.length > 0) {
+    failSecurity(`packaged ffmpeg missing intelligent asset preview encoders: ${missingAssetEncoders.join(', ')}`, ffmpeg);
+  }
   console.log('  ✅ ffmpeg xfade high-quality transitions verified against packaged catalog');
+  console.log('  ✅ ffmpeg H.264/AAC/WebP asset preview encoders verified');
 }
 
 function checkFfprobeRuntime() {
@@ -374,10 +476,11 @@ function checkUpdateArtifacts() {
   const blockmap = path.join(distDir, `${installerName}.blockmap`);
   const latest = path.join(distDir, 'latest.yml');
   const strict = process.env.T8_REQUIRE_UPDATE_ARTIFACTS === '1';
+  const directoryBuild = process.env.T8_DIRECTORY_BUILD === '1';
   const hasInstaller = fs.existsSync(installer);
   const hasBlockmap = fs.existsSync(blockmap);
 
-  if (!strict && !hasInstaller && !hasBlockmap) {
+  if (!strict && (directoryBuild || (!hasInstaller && !hasBlockmap))) {
     console.log('  ⚠️  NSIS update artifacts not present; skipping installer/latest.yml checks for dir build');
     return;
   }
@@ -568,6 +671,37 @@ function main() {
   checkFile(path.join(RES, 'backend-enc', 'routes', 'videoOps.t8c'));
   checkFile(path.join(RES, 'backend-enc', 'routes', 'batchTags.t8c'));
   checkFile(path.join(RES, 'backend-enc', 'routes', 'photoshopBridge.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'routes', 'feishuBitable.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'routes', 'webAssets.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'routes', 'projectRuns.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'routes', 'projectAssets.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'routes', 'subflows.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'routes', 'collaboration.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'routes', 'canvasAgentTools.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'projectDatabase.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'assetBlobStore.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'assetUploadManager.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'assetIndexer.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'assetPreviewPipeline.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'assetSemanticModels.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'assetSemanticWorker.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'assetSemanticPipeline.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'modelPreviewRenderer.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'assetPublicView.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'runRedaction.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'runLifecycle.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'runErrors.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'runUsage.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'runRecovery.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'canvasAgentTools.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'canvasAgentPublicView.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'runEvidenceDiagnosis.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'shared', 'canvasNodeSchema.json'));
+  checkCanvasAgentIntegrity();
+  checkFile(path.join(RES, 'backend-enc', 'collaboration', 'gateway.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'collaboration', 'auth.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'collaboration', 'protocol.t8c'));
+  checkFile(path.join(RES, 'app.asar.unpacked', 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node'));
   checkNoLocalVibexRoute();
   checkFile(path.join(RES, 'backend-enc', 'achievements', 'media.t8c'));
   checkFile(path.join(RES, 'backend-enc', 'achievements', 'store.t8c'));
@@ -586,15 +720,20 @@ function main() {
   checkFile(path.join(RES, 'backend-enc', 'tools', 'aiWatermark', 'runner.t8c'));
   checkFile(path.join(RES, 'backend-enc', 'tools', 'aiWatermark', 'media.t8c'));
   checkFile(path.join(RES, 'backend-enc', 'tools', 'topaz', 'runner.t8c'));
+  checkFile(path.join(RES, 'tools', 'asset-semantic', 'semantic_runner.py'));
   checkFile(path.join(RES, 'backend-enc', 'utils', 'duckPayload.t8c'));
   checkFile(path.join(RES, 'backend-enc', 'utils', 'codexCliRunner.t8c'));
   checkFile(path.join(RES, 'backend-enc', 'utils', 'figmaBridge.t8c'));
   checkFile(path.join(RES, 'backend-enc', 'utils', 'parseHubBridge.t8c'));
   checkFile(path.join(RES, 'backend-enc', 'utils', 'runtimeArchive.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'utils', 'safeRemoteMediaFetch.t8c'));
 
   console.log('\n[2] 前端 dist:');
   checkFile(path.join(RES, 'frontend', 'index.html'));
   checkFile(path.join(RES, 'frontend', 'assets'));
+  checkFile(path.join(RES, 'frontend', 'assets', 'face-expression', 't8-ict-neutral-head-v1.glb'));
+  checkFile(path.join(RES, 'frontend', 'assets', 'face-expression', 'asset-manifest.json'));
+  checkFile(path.join(RES, 'frontend', 'assets', 'face-expression', 'LICENSE-ICT-FaceKit.txt'));
   checkWebImageExtensionResources();
   checkFile(path.join(RES, 'shared', 'achievementManifest.json'));
   checkFile(path.join(RES, 'shared', 'videoTransitions.json'));
@@ -613,6 +752,7 @@ function main() {
   checkFrontendAsset('dragonball-shenron-cha-la-head-cha-la-', '.mp3');
   checkFrontendAsset('saint-seiya-pegasus-fantasy-', '.mp3');
   checkFrontendAsset('saint-seiya-hades-last-holy-war-', '.mp3');
+  checkFrontendAsset('garden-defense-grasswalk-', '.mp3');
   checkAchievementMedia();
 
   console.log('\n[3] 清除可能混入的明文后端源码:');
@@ -620,6 +760,7 @@ function main() {
 
   console.log('\n[4] 本地私有扩展分发检查:');
   runLocalPostBuildChecks();
+  checkRequiredLocalPrivateArtifacts();
 
   console.log('\n[5] 去AI水印 sidecar runtime:');
   checkAiWatermarkRuntime();

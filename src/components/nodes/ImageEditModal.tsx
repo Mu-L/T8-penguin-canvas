@@ -39,8 +39,15 @@ import {
 } from 'lucide-react';
 import { useThemeStore } from '../../stores/theme';
 import { opCrop, opGridCrop, uploadDataUrl, uploadFileBlob } from '../../services/imageOps';
-import { runRhImageCutout } from '../../services/rhToolboxCapabilities';
 import { createMaxCropBoxForAspect, fitCropBoxToAspect, resizeCropBoxWithAspect } from '../../utils/imageCropAspect';
+import { createCanvasNodeRunRequestId } from '../../utils/canvasRunRequest';
+import {
+  registerSecondaryProviderActionExecutor,
+  type QueueSecondaryProviderAction,
+  type SecondaryProviderActionExecution,
+  type SecondaryProviderActionNodeType,
+} from '../../utils/secondaryProviderAction';
+import { executeRhImageEditorCutoutAction } from '../../utils/rhImageEditorCutout';
 
 /**
  * ImageEditModal
@@ -66,11 +73,20 @@ export type ImageEditProduceMeta =
   | { type: 'annotation-edit'; instruction: string; strokeCount: number; annotationTextCount: number; annotationShapeCount: number }
   | { type: 'compose'; layerCount: number; canvasW: number; canvasH: number };
 
+type ImageEditSecondaryActionNodeType = Extract<
+  SecondaryProviderActionNodeType,
+  'output' | 'upload' | 'video-edit'
+>;
+
 interface Props {
   srcUrl: string;
   onClose: () => void;
   /** 产物 urls 注入到外部 (在 OutputNode 中创建 N 个新 OutputNode) */
   onProduce: (urls: string[], meta: ImageEditProduceMeta) => void | Promise<void>;
+  /** RH 抠图必须归属于持久画布节点，并通过该节点的 Secondary Provider Run 执行。 */
+  secondaryActionNodeId?: string;
+  secondaryActionNodeType?: ImageEditSecondaryActionNodeType;
+  queueSecondaryAction?: QueueSecondaryProviderAction;
 }
 
 type EditMode = 'crop' | 'mask' | 'brush' | 'grid' | 'compose';
@@ -392,7 +408,14 @@ function computeRects(
   return rects;
 }
 
-const ImageEditModal = ({ srcUrl, onClose, onProduce }: Props) => {
+const ImageEditModal = ({
+  srcUrl,
+  onClose,
+  onProduce,
+  secondaryActionNodeId,
+  secondaryActionNodeType,
+  queueSecondaryAction,
+}: Props) => {
   const { theme, style } = useThemeStore();
   const isDark = theme === 'dark';
   const isPixel = style === 'pixel';
@@ -450,6 +473,25 @@ const ImageEditModal = ({ srcUrl, onClose, onProduce }: Props) => {
   const [composeStageBox, setComposeStageBox] = useState({ w: 800, h: 500 });
   const composeStageRef = useRef<HTMLDivElement | null>(null);
   const composeFileInputRef = useRef<HTMLInputElement | null>(null);
+  const editorSessionIdRef = useRef('');
+  if (!editorSessionIdRef.current) {
+    editorSessionIdRef.current = createCanvasNodeRunRequestId(
+      secondaryActionNodeId || 'image-edit-modal',
+      'image-edit-session',
+    );
+  }
+  const workingSrcUrlRef = useRef(workingSrcUrl);
+  const composeLayersRef = useRef(composeLayers);
+  const selectedIdsRef = useRef(selectedIds);
+  const modeRef = useRef(mode);
+  const canvasWRef = useRef(canvasW);
+  const canvasHRef = useRef(canvasH);
+  workingSrcUrlRef.current = workingSrcUrl;
+  composeLayersRef.current = composeLayers;
+  selectedIdsRef.current = selectedIds;
+  modeRef.current = mode;
+  canvasWRef.current = canvasW;
+  canvasHRef.current = canvasH;
   const composeFitRef = useRef<{ scale: number; offsetX: number; offsetY: number }>({
     scale: 1,
     offsetX: 0,
@@ -491,8 +533,12 @@ const ImageEditModal = ({ srcUrl, onClose, onProduce }: Props) => {
     startAngle: number;
     startStroke: Extract<DrawStroke, { kind: 'brush-text' }>;
   } | null>(null);
+  const hasSecondaryActionOwner = Boolean(
+    secondaryActionNodeId && secondaryActionNodeType && queueSecondaryAction,
+  );
 
   useEffect(() => {
+    workingSrcUrlRef.current = srcUrl;
     setWorkingSrcUrl(srcUrl);
     setNaturalSize(null);
     setRhCutoutMessage(null);
@@ -1107,7 +1153,125 @@ const ImageEditModal = ({ srcUrl, onClose, onProduce }: Props) => {
     );
   };
 
-  async function applyRhCutoutToCurrentImage() {
+  const executeAuthorizedEditorCutoutRef = useRef<
+    (execution: SecondaryProviderActionExecution) => Promise<void>
+  >(async () => undefined);
+  executeAuthorizedEditorCutoutRef.current = async ({ action, reporter }) => {
+    if (action.actionId !== 'rh-image.editor-cutout' || action.target !== 'editor-cutout') {
+      throw new Error('图片编辑器 RH 抠图 action 与已注册能力不匹配');
+    }
+    if (
+      !secondaryActionNodeId
+      || !secondaryActionNodeType
+      || action.nodeId !== secondaryActionNodeId
+      || action.nodeType !== secondaryActionNodeType
+    ) {
+      throw new Error('图片编辑器 RH 抠图所属画布节点已变化，已停止调用 Provider');
+    }
+    const params = action.params;
+    if (params.surface !== 'image-edit-modal' || params.editorSessionId !== editorSessionIdRef.current) {
+      throw new Error('图片编辑器 RH 抠图会话已变化，已停止调用 Provider');
+    }
+
+    const resolveBoundTarget = () => {
+      if (params.targetId === 'working-image') {
+        if (modeRef.current === 'compose' || workingSrcUrlRef.current !== params.imageUrl) {
+          throw new Error('图片编辑器 RH 抠图当前图片或编辑模式已变化，已停止调用 Provider');
+        }
+        return { kind: 'working' as const };
+      }
+      const selectedIdsNow = selectedIdsRef.current;
+      const layer = composeLayersRef.current.find((item) => item.id === params.targetId) || null;
+      if (
+        modeRef.current !== 'compose'
+        || selectedIdsNow.length !== 1
+        || selectedIdsNow[0] !== params.targetId
+        || !layer
+        || layer.locked
+        || layer.src !== params.imageUrl
+      ) {
+        throw new Error('图片编辑器 RH 抠图图层目标或源图已变化，已停止调用 Provider');
+      }
+      return { kind: 'compose' as const, layer };
+    };
+
+    setBusy(true);
+    setRhCutoutRunning(true);
+    setErrMsg(null);
+    setRhCutoutMessage('RH工具箱抠图中...');
+    try {
+      await executeRhImageEditorCutoutAction(action, reporter, {
+        assertTargetCurrent: resolveBoundTarget,
+        onProgress: (progress) => setRhCutoutMessage(progress.message || 'RH工具箱抠图中...'),
+        onComplete: async (result) => {
+          const target = resolveBoundTarget();
+          if (target.kind === 'compose') {
+            const snapshot = {
+              layers: composeLayersRef.current,
+              selectedIds: selectedIdsRef.current,
+              canvasW: canvasWRef.current,
+              canvasH: canvasHRef.current,
+            };
+            setComposeHistory((historyItems) => [...historyItems, snapshot].slice(-50));
+            setComposeFuture([]);
+            const nextLayers = composeLayersRef.current.map((layer) => (
+              layer.id === target.layer.id && layer.src === params.imageUrl
+                ? {
+                    ...layer,
+                    src: result.outputUrl,
+                    name: `${target.layer.name || '图层'} RH抠图`,
+                  }
+                : layer
+            ));
+            composeLayersRef.current = nextLayers;
+            selectedIdsRef.current = [target.layer.id];
+            setComposeLayers(nextLayers);
+            setSelectedIds([target.layer.id]);
+          } else {
+            const image = await loadImage(result.outputUrl).catch(() => null);
+            resolveBoundTarget();
+            workingSrcUrlRef.current = result.outputUrl;
+            setWorkingSrcUrl(result.outputUrl);
+            if (image) setNaturalSize({ w: image.naturalWidth, h: image.naturalHeight });
+            setMaskStrokes([]);
+            setMaskHistory([]);
+            setMaskRedo([]);
+            setBrushStrokes([]);
+            setBrushHistory([]);
+            setBrushRedo([]);
+            setCustomLines([]);
+            setHistory([]);
+            setCrop({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 });
+          }
+          setRhCutoutMessage(`已完成 RH抠图：${result.tool.title}`);
+        },
+      });
+    } catch (error: any) {
+      setErrMsg(error?.message || 'RH抠图失败');
+      setRhCutoutMessage(null);
+      throw error;
+    } finally {
+      setRhCutoutRunning(false);
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!secondaryActionNodeId || !secondaryActionNodeType) return undefined;
+    return registerSecondaryProviderActionExecutor(
+      secondaryActionNodeId,
+      'rh-image.editor-cutout',
+      'editor-cutout',
+      (execution) => executeAuthorizedEditorCutoutRef.current(execution),
+    );
+  }, [secondaryActionNodeId, secondaryActionNodeType]);
+
+  function applyRhCutoutToCurrentImage() {
+    if (!hasSecondaryActionOwner || !queueSecondaryAction) {
+      setErrMsg('RH抠图需要所属持久画布节点，已停止调用 Provider');
+      setRhCutoutMessage(null);
+      return;
+    }
     if (mode === 'compose' && !selectedComposeImageLayer) {
       setErrMsg('请先选中一个图像图层再抠图');
       return;
@@ -1121,45 +1285,26 @@ const ImageEditModal = ({ srcUrl, onClose, onProduce }: Props) => {
       setErrMsg('缺少可抠图的图片');
       return;
     }
-
-    setBusy(true);
-    setRhCutoutRunning(true);
-    setErrMsg(null);
-    setRhCutoutMessage('RH工具箱抠图中...');
     try {
-      const result = await runRhImageCutout(sourceUrl, {
-        onProgress: (progress) => setRhCutoutMessage(progress.message),
+      queueSecondaryAction({
+        actionId: 'rh-image.editor-cutout',
+        target: 'editor-cutout',
+        params: {
+          capability: 'image.cutout',
+          preferredToolId: 'image-cutout-v1',
+          imageUrl: sourceUrl,
+          surface: 'image-edit-modal',
+          editorSessionId: editorSessionIdRef.current,
+          targetId: selectedComposeImageLayer?.id || 'working-image',
+          retryCount: 2,
+          retryDelayMs: 1200,
+        },
       });
-
-      if (selectedComposeImageLayer) {
-        pushComposeHistory();
-        updateLayer(selectedComposeImageLayer.id, {
-          src: result.outputUrl,
-          name: `${selectedComposeImageLayer.name || '图层'} RH抠图`,
-        });
-        setSelectedIds([selectedComposeImageLayer.id]);
-      } else {
-        setWorkingSrcUrl(result.outputUrl);
-        const img = await loadImage(result.outputUrl).catch(() => null);
-        if (img) setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
-        setMaskStrokes([]);
-        setMaskHistory([]);
-        setMaskRedo([]);
-        setBrushStrokes([]);
-        setBrushHistory([]);
-        setBrushRedo([]);
-        setCustomLines([]);
-        setHistory([]);
-        setCrop({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 });
-      }
-
-      setRhCutoutMessage(`已完成 RH抠图：${result.tool.title}`);
+      setErrMsg(null);
+      setRhCutoutMessage('等待运行体检确认');
     } catch (e: any) {
-      setErrMsg(e?.message || 'RH抠图失败');
+      setErrMsg(e?.message || '无法提交 RH抠图');
       setRhCutoutMessage(null);
-    } finally {
-      setRhCutoutRunning(false);
-      setBusy(false);
     }
   }
 
@@ -2298,10 +2443,13 @@ const ImageEditModal = ({ srcUrl, onClose, onProduce }: Props) => {
             onClick={applyRhCutoutToCurrentImage}
             disabled={
               busy ||
+              !hasSecondaryActionOwner ||
               (mode === 'compose' && (!selectedComposeImageLayer || selectedComposeImageLayer.locked))
             }
             title={
-              mode === 'compose'
+              !hasSecondaryActionOwner
+                ? 'RH抠图需要所属持久画布节点，当前入口已禁用'
+                : mode === 'compose'
                 ? selectedComposeImageLayer
                   ? selectedComposeImageLayer.locked
                     ? '选中图层已锁定，无法抠图'

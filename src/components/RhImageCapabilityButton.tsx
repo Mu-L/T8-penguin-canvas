@@ -12,8 +12,16 @@ import {
   type RhImageCapabilityPresetId,
 } from '../utils/rhToolboxCapabilities';
 import { logBus } from '../stores/logs';
+import {
+  registerSecondaryProviderActionExecutor,
+  type QueueSecondaryProviderAction,
+  type SecondaryProviderActionExecution,
+} from '../utils/secondaryProviderAction';
+import { extractRunProviderTrace } from '../utils/runProviderTrace';
 
 interface RhImageCapabilityButtonProps {
+  secondaryActionNodeId: string;
+  queueSecondaryAction: QueueSecondaryProviderAction;
   sourceUrl?: string;
   sourceUrls?: string[];
   accent: string;
@@ -73,6 +81,8 @@ function logRhImageCapabilityProgress(
 }
 
 export default function RhImageCapabilityButton({
+  secondaryActionNodeId,
+  queueSecondaryAction,
   sourceUrl,
   sourceUrls,
   accent,
@@ -132,6 +142,9 @@ export default function RhImageCapabilityButton({
     ...(selectedParamPreset?.userParams || {}),
     ...(userParams || {}),
   }), [selectedParamPreset, userParams]);
+  const actionPresetId = Object.prototype.hasOwnProperty.call(RH_IMAGE_CAPABILITY_PRESETS, resolvedPreset.id)
+    ? resolvedPreset.id as RhImageCapabilityPresetId
+    : null;
 
   useEffect(() => {
     setSelectedParamPresetId(defaultParamPresetId);
@@ -198,6 +211,148 @@ export default function RhImageCapabilityButton({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const executeAuthorizedCapabilityRef = useRef<(execution: SecondaryProviderActionExecution) => Promise<void>>(async () => undefined);
+  executeAuthorizedCapabilityRef.current = async ({ action, reporter }) => {
+    if (action.actionId !== 'rh-image.capability' || !actionPresetId || action.target !== actionPresetId) {
+      throw new Error('RH 图像 action 与已注册能力不匹配');
+    }
+    const params = action.params;
+    const controller = new AbortController();
+    let providerRequested = false;
+    let providerResponded = false;
+    abortRef.current = controller;
+    setRunning(true);
+    onRunningChange?.(true);
+    setError('');
+    activeTaskIdsRef.current.clear();
+    lastPollLogRef.current = 0;
+    logBus.info(
+      `${buttonLabel}: 开始处理 ${params.imageUrls.length} 张图像${selectedParamPreset ? ` · ${selectedParamPreset.label}` : ''}${params.preferredToolId ? ` · tool=${params.preferredToolId}` : ''}`,
+      `rh-image:${compactLabel}`,
+    );
+    setMessage(params.imageUrls.length > 1 ? `准备批量${buttonLabel} 1/${params.imageUrls.length}` : `提交 RH ${buttonLabel}${selectedParamPreset ? ` · ${selectedParamPreset.label}` : ''}`);
+    try {
+      await reporter.providerRequest({
+        provider: 'runninghub',
+        model: params.preferredToolId || params.capability,
+        actionId: action.actionId,
+        actionTarget: action.target,
+        itemCount: params.imageUrls.length,
+      });
+      providerRequested = true;
+      const result = await runRhImageCapabilityBatch({
+        capability: params.capability,
+        preferredToolId: params.preferredToolId,
+        userParams: params.userParams,
+        imageUrls: params.imageUrls,
+        signal: controller.signal,
+        retryCount: params.retryCount,
+        retryDelayMs: params.retryDelayMs,
+        continueOnError: params.continueOnError,
+        onProgress: (progress) => {
+          if (progress.taskId) activeTaskIdsRef.current.add(progress.taskId);
+          setMessage(progress.message);
+          logRhImageCapabilityProgress(`rh-image:${compactLabel}`, buttonLabel, progress, lastPollLogRef);
+          if (progress.taskId) {
+            void reporter.providerPolling({
+              provider: 'runninghub',
+              model: params.preferredToolId || params.capability,
+              upstreamTaskId: progress.taskId,
+              pollCount: progress.pollCount,
+            });
+          }
+        },
+        onItemProgress: ({ index, total, attempt, maxAttempts, status, error: itemError }) => {
+          const retryText = maxAttempts > 1 ? ` · 第 ${attempt}/${maxAttempts} 次` : '';
+          if (status === 'retry') {
+            setMessage(`第 ${index + 1}/${total} 张重试中${retryText}`);
+            logBus.warn(`${buttonLabel}: 第 ${index + 1}/${total} 张失败后重试${retryText} · ${itemError || '未知错误'}`, `rh-image:${compactLabel}`);
+          } else if (status === 'error') {
+            setMessage(`第 ${index + 1}/${total} 张失败：${itemError || '未知错误'}`);
+            logBus.error(`${buttonLabel}: 第 ${index + 1}/${total} 张失败 · ${itemError || '未知错误'}`, `rh-image:${compactLabel}`);
+          } else if (status === 'success') {
+            setMessage(`第 ${index + 1}/${total} 张完成`);
+            logBus.success(`${buttonLabel}: 第 ${index + 1}/${total} 张完成`, `rh-image:${compactLabel}`);
+          } else {
+            setMessage(`准备第 ${index + 1}/${total} 张${retryText}`);
+            logBus.info(`${buttonLabel}: 准备第 ${index + 1}/${total} 张${retryText}`, `rh-image:${compactLabel}`);
+          }
+        },
+      });
+      const trace = extractRunProviderTrace(result.results[0]?.result || result.results[0] || {});
+      await reporter.providerResponse({
+        provider: 'runninghub',
+        model: params.preferredToolId || params.capability,
+        upstreamTaskId: result.taskIds[0],
+        ...trace,
+        status: result.cancelled ? 'stopped' : result.failedItems.length > 0 ? 'partial' : 'succeeded',
+      });
+      providerResponded = true;
+      onComplete(result);
+      await reporter.output({
+        status: result.cancelled ? 'stopped' : result.failedItems.length > 0 ? 'partial' : 'succeeded',
+        assets: result.imageUrls.map((url) => ({ kind: 'image', sourceUrl: url })),
+      });
+      if (result.cancelled) {
+        setMessage(`已取消，保留 ${result.imageUrls.length} 张结果`);
+        logBus.warn(`${buttonLabel}: 已取消，保留 ${result.imageUrls.length} 张结果`, `rh-image:${compactLabel}`);
+        throw new Error('RH 图像 action 已取消');
+      } else if (result.failedItems.length > 0) {
+        const warning = `${result.failedItems.length} 张失败，已输出 ${result.imageUrls.length} 张`;
+        setMessage(warning);
+        setError(warning);
+        logBus.warn(`${buttonLabel}: ${warning}`, `rh-image:${compactLabel}`);
+        throw new Error(warning);
+      } else {
+        setMessage(result.imageUrls.length > 1 ? `已输出 ${result.imageUrls.length} 张` : '已输出');
+        logBus.success(
+          `${buttonLabel}: 已输出 ${result.imageUrls.length} 张${result.taskIds.length ? ` · taskId=${result.taskIds.join(',')}` : ''}`,
+          `rh-image:${compactLabel}`,
+        );
+      }
+    } catch (err) {
+      const nextError = formatError(err);
+      if ((controller.signal.aborted || /action 已取消/.test(nextError)) && !/取消 RH 后台任务失败/.test(nextError)) {
+        setMessage('已取消');
+        logBus.warn(`${buttonLabel}: 已取消`, `rh-image:${compactLabel}`);
+        if (providerRequested && !providerResponded) {
+          await reporter.providerResponse({
+            provider: 'runninghub',
+            model: params.preferredToolId || params.capability,
+            status: 'stopped',
+          });
+        }
+        throw err;
+      }
+      setError(nextError);
+      logBus.error(`${buttonLabel}: ${nextError}`, `rh-image:${compactLabel}`);
+      onError?.(nextError);
+      if (providerRequested && !providerResponded) {
+        await reporter.providerResponse({
+          provider: 'runninghub',
+          model: params.preferredToolId || params.capability,
+          status: 'failed',
+        });
+      }
+      throw err;
+    } finally {
+      abortRef.current = null;
+      activeTaskIdsRef.current.clear();
+      setRunning(false);
+      onRunningChange?.(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!actionPresetId) return undefined;
+    return registerSecondaryProviderActionExecutor(
+      secondaryActionNodeId,
+      'rh-image.capability',
+      actionPresetId,
+      (execution) => executeAuthorizedCapabilityRef.current(execution),
+    );
+  }, [actionPresetId, secondaryActionNodeId]);
+
   const runCapability = async (e: MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
     e.stopPropagation();
@@ -220,83 +375,27 @@ export default function RhImageCapabilityButton({
       abortRef.current?.abort();
       return;
     }
-    if (cleanSourceUrls.length === 0) return;
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setRunning(true);
-    onRunningChange?.(true);
-    setError('');
-    activeTaskIdsRef.current.clear();
-    lastPollLogRef.current = 0;
-    logBus.info(
-      `${buttonLabel}: 开始处理 ${cleanSourceUrls.length} 张图像${selectedParamPreset ? ` · ${selectedParamPreset.label}` : ''}${resolvedPreferredToolId ? ` · tool=${resolvedPreferredToolId}` : ''}`,
-      `rh-image:${compactLabel}`,
-    );
-    setMessage(cleanSourceUrls.length > 1 ? `准备批量${buttonLabel} 1/${cleanSourceUrls.length}` : `提交 RH ${buttonLabel}${selectedParamPreset ? ` · ${selectedParamPreset.label}` : ''}`);
+    if (cleanSourceUrls.length === 0 || !actionPresetId) return;
     try {
-      const result = await runRhImageCapabilityBatch({
-        capability,
-        preferredToolId: resolvedPreferredToolId,
-        userParams: Object.keys(capabilityUserParams).length > 0 ? capabilityUserParams : undefined,
-        imageUrls: cleanSourceUrls,
-        signal: controller.signal,
-        retryCount,
-        retryDelayMs,
-        continueOnError,
-        onProgress: (progress) => {
-          if (progress.taskId) activeTaskIdsRef.current.add(progress.taskId);
-          setMessage(progress.message);
-          logRhImageCapabilityProgress(`rh-image:${compactLabel}`, buttonLabel, progress, lastPollLogRef);
-        },
-        onItemProgress: ({ index, total, attempt, maxAttempts, status, error: itemError }) => {
-          const retryText = maxAttempts > 1 ? ` · 第 ${attempt}/${maxAttempts} 次` : '';
-          if (status === 'retry') {
-            setMessage(`第 ${index + 1}/${total} 张重试中${retryText}`);
-            logBus.warn(`${buttonLabel}: 第 ${index + 1}/${total} 张失败后重试${retryText} · ${itemError || '未知错误'}`, `rh-image:${compactLabel}`);
-          } else if (status === 'error') {
-            setMessage(`第 ${index + 1}/${total} 张失败：${itemError || '未知错误'}`);
-            logBus.error(`${buttonLabel}: 第 ${index + 1}/${total} 张失败 · ${itemError || '未知错误'}`, `rh-image:${compactLabel}`);
-          } else if (status === 'success') {
-            setMessage(`第 ${index + 1}/${total} 张完成`);
-            logBus.success(`${buttonLabel}: 第 ${index + 1}/${total} 张完成`, `rh-image:${compactLabel}`);
-          } else {
-            setMessage(`准备第 ${index + 1}/${total} 张${retryText}`);
-            logBus.info(`${buttonLabel}: 准备第 ${index + 1}/${total} 张${retryText}`, `rh-image:${compactLabel}`);
-          }
+      queueSecondaryAction({
+        actionId: 'rh-image.capability',
+        target: actionPresetId,
+        params: {
+          capability,
+          preferredToolId: resolvedPreferredToolId,
+          userParams: Object.keys(capabilityUserParams).length > 0 ? capabilityUserParams : undefined,
+          imageUrls: cleanSourceUrls,
+          retryCount,
+          retryDelayMs,
+          continueOnError,
         },
       });
-      onComplete(result);
-      if (result.cancelled) {
-        setMessage(`已取消，保留 ${result.imageUrls.length} 张结果`);
-        logBus.warn(`${buttonLabel}: 已取消，保留 ${result.imageUrls.length} 张结果`, `rh-image:${compactLabel}`);
-      } else if (result.failedItems.length > 0) {
-        const warning = `${result.failedItems.length} 张失败，已输出 ${result.imageUrls.length} 张`;
-        setMessage(warning);
-        setError(warning);
-        logBus.warn(`${buttonLabel}: ${warning}`, `rh-image:${compactLabel}`);
-        onError?.(warning);
-      } else {
-        setMessage(result.imageUrls.length > 1 ? `已输出 ${result.imageUrls.length} 张` : '已输出');
-        logBus.success(
-          `${buttonLabel}: 已输出 ${result.imageUrls.length} 张${result.taskIds.length ? ` · taskId=${result.taskIds.join(',')}` : ''}`,
-          `rh-image:${compactLabel}`,
-        );
-      }
+      setMessage('等待运行体检确认');
     } catch (err) {
       const nextError = formatError(err);
-      if (controller.signal.aborted && !/取消 RH 后台任务失败/.test(nextError)) {
-        setMessage('已取消');
-        logBus.warn(`${buttonLabel}: 已取消`, `rh-image:${compactLabel}`);
-        return;
-      }
       setError(nextError);
-      logBus.error(`${buttonLabel}: ${nextError}`, `rh-image:${compactLabel}`);
+      setMessage(nextError);
       onError?.(nextError);
-    } finally {
-      abortRef.current = null;
-      activeTaskIdsRef.current.clear();
-      setRunning(false);
-      onRunningChange?.(false);
     }
   };
 

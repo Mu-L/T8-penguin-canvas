@@ -24,6 +24,7 @@ export type NodeType =
   | 'fal-toolbox'
   | 'fal-toolbox-maker'
   | 'model-3d-preview'
+  | 'face-expression-3d'
   | 'model-3d-upload'
   | 'grok-oauth-agent'
   | 'codex-cli-agent'
@@ -46,6 +47,7 @@ export type NodeType =
   | 'frame-pair'
   | 'loop'
   | 'random-route'
+  | 'subflow'
   | 'pick-from-set'
   | 'text-split'
   | 'resize'
@@ -78,6 +80,8 @@ export type NodeType =
   | 'upload'
   | 'material-set'
   | 'generation-target'
+  | 'feishu-bitable-input'
+  | 'feishu-bitable-output'
   | 'output';
 
 // 节点分类
@@ -259,6 +263,7 @@ export interface CanvasListItem {
   nodeCount: number;
   createdAt: number;
   updatedAt: number;
+  revision?: number;
 }
 
 export type CreativeDeskFrameId =
@@ -629,6 +634,12 @@ export interface FarmCanvasState {
 
 // 画布完整数据
 export interface CanvasData {
+  schema?: 't8-canvas-document';
+  schemaVersion?: 2;
+  projectId?: string;
+  canvasId?: string;
+  revision?: number;
+  updatedAt?: number;
   nodes: any[];
   edges: any[];
   viewport: { x: number; y: number; zoom: number };
@@ -639,11 +650,15 @@ export interface CanvasData {
 
 // API Key 设置(对应后端 settings)
 export interface ApiSettings {
-  // 三套通用 Key
+  // 主 API Key
   zhenzhenApiKey: string;
   zhenzhenBaseUrl: string; // 锁定 https://ai.t8star.org
+  zhenzhenSd2ApiKey: string;
+  zhenzhenSd2BaseUrl: string; // 锁定 https://api.seedance.nz
   rhApiKey: string;
   rhBaseUrl: string; // https://www.runninghub.cn
+  rhIntlApiKey: string;
+  rhIntlBaseUrl: string; // https://www.runninghub.ai
   llmApiKey: string;
   llmBaseUrl: string; // 锁定 https://ai.t8star.org
   // 分类 API Key（留空时 fallback 到 zhenzhenApiKey）

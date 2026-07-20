@@ -1,5 +1,5 @@
 import { memo, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } from 'react';
-import { Handle, Position, useEdges, useNodes, type NodeProps } from '@xyflow/react';
+import { Handle, Position, useEdges, useNodes, useReactFlow, type NodeProps } from '@xyflow/react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -27,6 +27,7 @@ import {
 } from '../../services/imageOps';
 import { runRhImageCapability } from '../../services/rhToolboxCapabilities';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { createCanvasNodeRunRequestId, requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { formatMediaSize, getMediaItemsFromData, type MediaItem, type MediaKind } from '../../utils/mediaCollection';
 import {
   buildBatchOutputName,
@@ -80,6 +81,7 @@ const TRIM_AXIS_OPTIONS: Array<{ value: TrimBorderAxis; label: string }> = [
 ];
 
 const trimModeLabel = (mode: TrimBorderMode) => TRIM_MODE_OPTIONS.find((item) => item.value === mode)?.label || '自动检测';
+type BatchProcessorRunMode = 'all' | 'retry-failed';
 
 function batchStatusMeta(status: BatchProcessorItem['status']) {
   if (status === 'running') return { label: '正在处理', color: '#f59e0b', glow: 'rgba(245, 158, 11, 0.32)' };
@@ -218,6 +220,7 @@ function ToggleStep({
 }
 
 function BatchProcessorNode({ id, data, selected }: NodeProps) {
+  const rf = useReactFlow();
   const update = useUpdateNodeData(id);
   const edges = useEdges();
   const nodes = useNodes();
@@ -538,8 +541,15 @@ function BatchProcessorNode({ id, data, selected }: NodeProps) {
     abortRef.current = null;
   };
 
-  const retryFailed = () => {
-    if (!running) void runBatch(true);
+  const requestBatchProcessorRun = (mode: BatchProcessorRunMode) => {
+    if (running) return;
+    const requestId = mode === 'retry-failed'
+      ? createCanvasNodeRunRequestId(id, 'batch-processor-retry')
+      : '';
+    update({ batchProcessorRunMode: mode, batchProcessorRunRequestId: requestId });
+    // Wait one frame so Canvas receives the same persisted mode that enters
+    // the execution-graph digest instead of a stale render closure.
+    window.requestAnimationFrame(() => requestCanvasNodeRun(id, requestId ? { requestId } : {}));
   };
 
   const stopBatch = () => {
@@ -548,9 +558,18 @@ function BatchProcessorNode({ id, data, selected }: NodeProps) {
     update({ status: 'idle', batchProcessorUploadNotice: '正在取消批处理...' });
   };
 
-  useRunTrigger(id, async () => {
-    if (!running) await runBatch(false);
-  }, 'batch-processor');
+  useRunTrigger(id, async (reporter) => {
+    if (running) return;
+    const liveData = rf.getNode(id)?.data as Record<string, unknown> | undefined;
+    const retryOnly = Boolean(reporter.runContext?.requestId)
+      && reporter.runContext?.requestId === liveData?.batchProcessorRunRequestId
+      && liveData?.batchProcessorRunMode === 'retry-failed';
+    try {
+      await runBatch(retryOnly);
+    } finally {
+      update({ batchProcessorRunMode: 'all', batchProcessorRunRequestId: '' });
+    }
+  }, 'batch-processor', { lifecycleAware: true });
 
   const clearItems = () => {
     cancelRef.current = true;
@@ -729,12 +748,12 @@ function BatchProcessorNode({ id, data, selected }: NodeProps) {
                 取消
               </button>
             ) : (
-              <button type="button" className="t8-btn t8-btn-primary px-3 py-2 text-sm" onClick={() => void runBatch(false)} disabled={allItems.length === 0 || busy}>
+              <button type="button" className="t8-btn t8-btn-primary px-3 py-2 text-sm" onClick={() => requestBatchProcessorRun('all')} disabled={allItems.length === 0 || busy}>
                 <Play size={14} />
                 开始批处理
               </button>
             )}
-            <button type="button" className="t8-btn px-3 py-2 text-sm" onClick={retryFailed} disabled={running || progress.fail === 0}>
+            <button type="button" className="t8-btn px-3 py-2 text-sm" onClick={() => requestBatchProcessorRun('retry-failed')} disabled={running || progress.fail === 0}>
               <RotateCcw size={14} />
               重试失败
             </button>

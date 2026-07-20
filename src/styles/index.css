@@ -13,10 +13,42 @@
 @import './theme-saintseiya.css';
 @import './theme-tetris.css';
 @import './theme-farm-story.css';
+@import './theme-garden-defense.css';
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* 批量打标顶部“图图打标器”入口必须在所有主题头部底色上保持可读。 */
+html[data-theme-template] .react-flow__node button.t8-batch-tagger-tool-link,
+html[data-theme-style] .react-flow__node button.t8-batch-tagger-tool-link,
+html[data-theme-visual] .react-flow__node button.t8-batch-tagger-tool-link,
+.react-flow__node button.t8-batch-tagger-tool-link {
+  background: #f8fafc !important;
+  color: #0f172a !important;
+  border: 1px solid rgba(15, 23, 42, .45) !important;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .72), 0 1px 4px rgba(15, 23, 42, .18) !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+}
+
+html[data-theme-template] .react-flow__node button.t8-batch-tagger-tool-link *,
+html[data-theme-style] .react-flow__node button.t8-batch-tagger-tool-link *,
+html[data-theme-visual] .react-flow__node button.t8-batch-tagger-tool-link *,
+.react-flow__node button.t8-batch-tagger-tool-link * {
+  color: #0f172a !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+}
+
+html[data-theme-template] .react-flow__node button.t8-batch-tagger-tool-link:hover,
+html[data-theme-style] .react-flow__node button.t8-batch-tagger-tool-link:hover,
+html[data-theme-visual] .react-flow__node button.t8-batch-tagger-tool-link:hover,
+.react-flow__node button.t8-batch-tagger-tool-link:hover {
+  background: #ffffff !important;
+  color: #020617 !important;
+  border-color: rgba(15, 23, 42, .62) !important;
+}
 
 /* RH工具箱应用按钮必须避开强主题的全局节点按钮覆盖。 */
 html[data-theme-template] .react-flow__node .rh-toolbox-app-grid button.rh-toolbox-app-button,
@@ -3582,6 +3614,66 @@ html[data-theme-visual="op"] .t8-group-box__handle {
   box-shadow:
     0 0 0 2px color-mix(in srgb, var(--t8-bg-canvas, transparent) 70%, transparent),
     0 6px 14px rgba(0, 0, 0, 0.28);
+}
+
+.t8-workflow-doctor-node-marker {
+  --t8-doctor-mark: #38bdf8;
+  position: absolute;
+  inset: -7px;
+  z-index: 61;
+  display: block;
+  border: 2px solid var(--t8-doctor-mark);
+  border-radius: max(var(--t8-radius-panel, 12px), 12px);
+  pointer-events: none;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--t8-doctor-mark) 22%, transparent),
+    0 0 18px color-mix(in srgb, var(--t8-doctor-mark) 24%, transparent);
+}
+
+.t8-workflow-doctor-node-marker[data-doctor-severity="warning"] {
+  --t8-doctor-mark: #f59e0b;
+}
+
+.t8-workflow-doctor-node-marker[data-doctor-severity="error"] {
+  --t8-doctor-mark: #ef4444;
+}
+
+.t8-workflow-doctor-node-marker__label {
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 25px;
+  height: 19px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--t8-doctor-mark) 76%, #fff);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--t8-bg-panel-elevated, #111827) 90%, #000);
+  color: var(--t8-doctor-mark);
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.react-flow__handle.t8-workflow-doctor-port-highlight {
+  --t8-doctor-port-mark: #38bdf8;
+  z-index: 64 !important;
+  outline: 2px solid color-mix(in srgb, var(--t8-doctor-port-mark) 82%, #fff);
+  outline-offset: 2px;
+  box-shadow:
+    0 0 0 5px color-mix(in srgb, var(--t8-doctor-port-mark) 28%, transparent),
+    0 0 14px color-mix(in srgb, var(--t8-doctor-port-mark) 52%, transparent) !important;
+}
+
+.react-flow__handle.t8-workflow-doctor-port-highlight[data-doctor-severity="warning"] {
+  --t8-doctor-port-mark: #f59e0b;
+}
+
+.react-flow__handle.t8-workflow-doctor-port-highlight[data-doctor-severity="error"] {
+  --t8-doctor-port-mark: #ef4444;
 }
 
 .react-flow__node.t8-nearest-node-pulse {

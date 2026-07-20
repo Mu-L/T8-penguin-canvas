@@ -31,6 +31,7 @@ import {
   Wand2,
 } from 'lucide-react';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
+import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { placeSingleNode } from '../../utils/nodePlacement';
 import { useUpdateNodeData } from './useUpdateNodeData';
 
@@ -2470,7 +2471,7 @@ const ToolboxParamNode = (p: NodeProps) => {
             </div>
           </div>
 
-          <button type="button" className="t8-btn t8-btn-primary w-full min-h-9 text-xs mt-3" onClick={handleRun}>
+          <button type="button" className="t8-btn t8-btn-primary w-full min-h-9 text-xs mt-3" onClick={() => requestCanvasNodeRun(p.id)}>
             <Play size={13} fill="currentColor" />
             运行输出文本
           </button>
@@ -2650,7 +2651,7 @@ const ToolboxParamNode = (p: NodeProps) => {
             </div>
           </div>
 
-          <button type="button" className="t8-btn t8-btn-primary w-full min-h-9 text-xs" onClick={handleRun}>
+          <button type="button" className="t8-btn t8-btn-primary w-full min-h-9 text-xs" onClick={() => requestCanvasNodeRun(p.id)}>
             <Play size={13} fill="currentColor" />
             运行输出文本
           </button>
@@ -2832,7 +2833,7 @@ const ToolboxParamNode = (p: NodeProps) => {
           </section>
         </div>
 
-        <button type="button" className="t8-btn t8-btn-primary w-full min-h-9 text-xs" onClick={handleRun}>
+        <button type="button" className="t8-btn t8-btn-primary w-full min-h-9 text-xs" onClick={() => requestCanvasNodeRun(p.id)}>
           <Play size={13} fill="currentColor" />
           运行输出文本
         </button>

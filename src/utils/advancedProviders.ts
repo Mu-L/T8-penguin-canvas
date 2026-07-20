@@ -255,8 +255,12 @@ const FALLBACK_MODELS: Record<AdvancedProviderNodeKind, Partial<Record<string, s
     'jimeng-cli': [
       'seedance2.0fast_vip',
       'seedance2.0_vip',
+      'seedance2.0mini',
       'seedance2.0fast',
       'seedance2.0',
+      'seedance1.5pro',
+      'seedance1.0fast',
+      'seedance1.0',
       'jimeng-video-720p',
       'jimeng-video-1080p',
     ],

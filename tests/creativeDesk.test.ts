@@ -67,14 +67,21 @@ test('canvas route persists creative desk background state with normal saves and
     CANVAS_FILE: config.CANVAS_FILE,
     SETTINGS_FILE: config.SETTINGS_FILE,
     DEFAULT_CANVAS_AUTO_SAVE_DIR: config.DEFAULT_CANVAS_AUTO_SAVE_DIR,
+    PROJECT_DB_FILE: config.PROJECT_DB_FILE,
+    PROJECT_DB_BACKUP_FILE: config.PROJECT_DB_BACKUP_FILE,
   };
-  t.after(() => Object.assign(config, oldConfig));
-  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  t.after(() => {
+    require('../backend/src/services/projectDatabase.js').getProjectDatabase(config).close();
+    Object.assign(config, oldConfig);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
 
   config.DATA_DIR = dataDir;
   config.CANVAS_FILE = path.join(dataDir, 'canvas_list.json');
   config.SETTINGS_FILE = path.join(tmpDir, 'settings.json');
   config.DEFAULT_CANVAS_AUTO_SAVE_DIR = autoRoot;
+  config.PROJECT_DB_FILE = path.join(dataDir, 'projects.sqlite3');
+  config.PROJECT_DB_BACKUP_FILE = path.join(dataDir, 'projects.sqlite3.backup');
   fs.writeFileSync(
     config.CANVAS_FILE,
     JSON.stringify([{ id: 'canvas-creative-desk-test', name: '创作台', nodeCount: 0, createdAt: 1, updatedAt: 1 }]),
@@ -99,6 +106,10 @@ test('canvas route persists creative desk background state with normal saves and
     viewport: { x: -80, y: 40, zoom: 0.75 },
     nextNodeSerialId: 9,
     creativeDesk: creativeDeskFixture(),
+    theme: { id: 'legacy-theme', customTokens: { '--legacy-accent': '#123456' } },
+    legacyPluginState: { providerSpecific: { enabled: true, nested: ['keep', 7] } },
+    actorId: 'request-only-actor',
+    baseRevision: 0,
   };
 
   const saved = await fetch(`${base}/api/canvas/canvas-creative-desk-test?allowEmpty=1`, {
@@ -106,20 +117,27 @@ test('canvas route persists creative desk background state with normal saves and
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   }).then((res) => res.json());
-  assert.equal(saved.success, true);
+  assert.equal(saved.success, true, saved.error);
 
   const loaded = await fetch(`${base}/api/canvas/canvas-creative-desk-test`).then((res) => res.json());
   assert.equal(loaded.success, true);
   assert.deepEqual(loaded.data.creativeDesk, body.creativeDesk);
+  assert.deepEqual(loaded.data.theme, body.theme);
+  assert.deepEqual(loaded.data.legacyPluginState, body.legacyPluginState);
+  assert.equal(Object.hasOwn(loaded.data, 'actorId'), false);
+  assert.equal(Object.hasOwn(loaded.data, 'baseRevision'), false);
 
   const mirrored = await fetch(`${base}/api/canvas/canvas-creative-desk-test/auto-save`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   }).then((res) => res.json());
-  assert.equal(mirrored.success, true);
+  assert.equal(mirrored.success, true, mirrored.error);
   const mirrorPayload = JSON.parse(fs.readFileSync(mirrored.data.path, 'utf8'));
   assert.deepEqual(mirrorPayload.creativeDesk, body.creativeDesk);
+  assert.deepEqual(mirrorPayload.theme, body.theme);
+  assert.deepEqual(mirrorPayload.legacyPluginState, body.legacyPluginState);
+  assert.equal(Object.hasOwn(mirrorPayload, 'actorId'), false);
 });
 
 test('creative desk is wired through types, canvas UI, layer styles, and resource library references', () => {
@@ -135,7 +153,8 @@ test('creative desk is wired through types, canvas UI, layer styles, and resourc
   assert.match(types, /frameColorId\?: CreativeDeskFrameColorId \| string/);
 
   assert.match(canvas, /import CreativeDeskLayer from '\.\/CreativeDeskLayer'/);
-  assert.match(canvas, /creativeDesk,\s*setCreativeDesk/);
+  assert.match(canvas, /const \[creativeDesk, rawSetCreativeDesk\] = useState<CreativeDeskState>/);
+  assert.match(canvas, /const setCreativeDesk = useCallback\([\s\S]{0,420}?rawSetCreativeDesk\(next\.value\)/);
   assert.match(canvas, /data\.creativeDesk/);
   assert.match(canvas, /migrateCreativeDeskToViewportCoordinates\(data\.creativeDesk,\s*data\.viewport\)/);
   assert.match(canvas, /payload = \{ nodes: persistNodes, edges: persistEdges, viewport: getViewport\(\), nextNodeSerialId, creativeDesk/);
