@@ -1,12 +1,12 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.5.8",
-  "lastUpdated": "2026-07-20-worktree-integration-snapshot-gates-unreleased",
+  "lastUpdated": "2026-07-20-canonical-core-integration-adopted-unreleased",
   "sixSystemsImplementationAudit": {
     "version": "2.5.8",
-    "status": "verified-local-b1-f2-f7-b2-schema32-f9-f10-uncommitted-unreleased",
+    "status": "verified-local-b1-f2-f7-b2-schema32-f9-f10-integrated-core-unreleased",
     "date": "2026-07-18",
-  "lastUpdated": "2026-07-20-f6-f7-local-regression-closure",
+  "lastUpdated": "2026-07-20-canonical-core-integration-adopted",
     "completedRounds": 27,
     "plannedRounds": 32,
     "completedRoundIds": [
@@ -114,9 +114,9 @@
       "继续共同底座 B2/B3：v1–21、v24–28 和非精确兼容端点在找到真实历史源码/数据库前继续标为 legacy bridge/fallback，不得伪造。B3 会话/权限/网关/执行策略/本地红队的源码清单已经闭合；下一步只收集真实 Provider、公网 TLS/SNI、安装版端口与权限、以及资源负载证据。本轮 schema32/F9/F10 本地机制不能替代这些证据。",
       "F8-F10 发布证据 v2 的本地失败关闭契约已完成；下一步必须由至少三个独立客户端、两台真实 Windows 设备生成各自 attestation/evidence，并实际验证同时编辑、断网 60 秒、主机重启、备份恢复和 Electron 安装版。没有这些实物证据不得勾选 F8。",
       "F9 的 Base URL、自检、安全降级、持久化与 Nginx/Caddy 示例已完成本地自动化；仍必须在真实域名、证书和 HTTPS 反向代理下验证 health、invite、WebSocket、upload、Range 及 TLS/SNI。F10 的分级限速与发布证据门已完成本地自动化；仍必须完成真实公网红队、连接/吞吐/100MB+ 上传/10 万素材和存储增长压测。",
-	      "release/core 独立 checkpoint 与第三工作树语义合并已经完成；下一步只有在用户再次明确授权后，才能把已验证的 integration merge commit 推进核心开发分支或进入发布阶段。正式发布仍须先补真实 Windows/双设备/公网/负载证据并重新执行发布门；Electron/NSIS 正式包仍只允许构建一次。"
+	      "release/core 独立 checkpoint 与第三工作树语义合并已经完成；用户随后明确授权核心采用，canonical core 的 codex/vibex-workbench-node 已从 4e3061094014b5dc2720d52ed178a62e8469a9d3 通过 fast-forward 采用 merge commit 68b5f72526a7272cc9787f6fda8b27a6f2fb54c8 与工作流记录 664cb1ea096767cded581d391fcd2b3dcbceb31c，没有复制、checkout 覆盖或丢弃 core 本地文件。后续功能仍只在 T8-penguin-canvas-dev-* 开发工作树进行，验证并再次授权后才推进 core；正式发布仍须先补真实 Windows/双设备/公网/负载证据并重新执行发布门，Electron/NSIS 正式包仍只允许构建一次。"
     ],
-	    "releaseBoundary": "严格本地自动化进度仍为 27/32：共同底座 1/3、多人协作 7/10、智能素材中心 5/5。schema32、全节点 RunEvent、B3 原始代码侧清单、F9 本地自检/安全持久化、F10 本地分级限流/发布证据门和 AssetCenter 响应式 P2 已落地，并已从 release/F2 与 core 两个冻结点合入第三工作树；但 B2/B3 的真实历史/Windows/安装/Provider/公网/负载证据、F8 双设备/Electron、F9 真实公网 HTTPS/TLS/SNI 与 F10 真实红队/负载仍未闭环，不能增加 completedRounds。发布事实不变：E5 随 v2.5.7、只有协作 F1 随 v2.5.8 发布；其余能力仍只是本地集成开发结果。本轮未执行生产 build、Electron/NSIS 打包、版本升级、推送、tag 或 GitHub Release，不能称为生产级多人协作正式版。"
+	    "releaseBoundary": "严格本地自动化进度仍为 27/32：共同底座 1/3、多人协作 7/10、智能素材中心 5/5。schema32、全节点 RunEvent、B3 原始代码侧清单、F9 本地自检/安全持久化、F10 本地分级限流/发布证据门和 AssetCenter 响应式 P2 已落地，先在第三工作树完成 release/F2 与 core 的语义合并，随后经用户明确授权由 canonical core 以 fast-forward 正式采用；但 B2/B3 的真实历史/Windows/安装/Provider/公网/负载证据、F8 双设备/Electron、F9 真实公网 HTTPS/TLS/SNI 与 F10 真实红队/负载仍未闭环，不能增加 completedRounds。发布事实不变：E5 随 v2.5.7、只有协作 F1 随 v2.5.8 发布；其余能力仍只是本地集成开发结果。本轮未执行生产 build、Electron/NSIS 打包、版本升级、推送、tag 或 GitHub Release，不能称为生产级多人协作正式版。"
   },
   "wan27DolaSeedreamModels": {
     "version": "2.5.5",

@@ -2,13 +2,14 @@
 
 在修改代码、架构、配置、测试、UI、部署、GitHub 或技术文档前，完整阅读本文件、`SKILL.md`、`features.json`、`roadmap.md`、`package.json`、相关源码/测试，以及当前交接记录。项目没有 `meta.json`。
 
-## 当前权威开发与冻结点
+## 当前权威开发与核心采用点
 
-- 当前已验证开发工作树是 `E:\PenguinPravite\T8-penguin-canvas-dev-integration-f2-core-20260720`，分支 `codex/integration-f2-core-20260720`，双父 merge commit `68b5f72526a7272cc9787f6fda8b27a6f2fb54c8`。
+- 当前继续开发的权威工作树是 `E:\PenguinPravite\T8-penguin-canvas-dev-integration-f2-core-20260720`，分支 `codex/integration-f2-core-20260720`；其双父语义 merge commit 是 `68b5f72526a7272cc9787f6fda8b27a6f2fb54c8`。
 - merge commit 的第一父提交是 core checkpoint `4e3061094014b5dc2720d52ed178a62e8469a9d3`，第二父提交是 release/F2 checkpoint `e0c6679b5a22539dd5b4983165ecc3f9d5c790e1`。
-- `E:\PenguinPravite\T8-penguin-canvas-release-2.5.7` 与 `E:\PenguinPravite\T8-penguin-canvas` 都是冻结工作树。不得继续在 release 命名路径开发，也不得在未获用户新授权时移动 canonical core 分支或 HEAD。
+- 用户已于 2026-07-20 明确授权核心采用；`E:\PenguinPravite\T8-penguin-canvas` 的 `codex/vibex-workbench-node` 已通过 `git merge --ff-only` 采用上述语义合并及后续工作流记录，没有复制或覆盖工作树。canonical core 是稳定集成落点，不是日常功能开发目录。
+- `E:\PenguinPravite\T8-penguin-canvas-release-2.5.7` 继续冻结。不得继续在 release 命名路径开发；后续功能继续在当前 integration 开发工作树，或新建 `T8-penguin-canvas-dev-*` 工作树，经验证后再由用户授权推进 core。
 - release/F2 的旧 `T8_ALLOW_LEGACY_F2_WORKTREE=1` 例外已随 HEAD 从 `9b6f6a4...` 移动到 checkpoint 而永久失效。后续功能只能位于 `T8-penguin-canvas-dev-*` 开发工作树。
-- core checkpoint 本身早于集成后的 role 脚本，采用 merge commit 前不能依赖 core 路径内的机器门禁，必须把它视为人工只读；采用集成结果后，`predev` 系列门禁才会随源码进入 canonical core。
+- canonical core 现已包含集成后的 role 脚本与 `predev` 系列门禁：`npm run worktree:core` 应通过，`npm run worktree:development` 必须拒绝 core 路径；开发工作树的结果相反。
 
 ## 永久保护
 
