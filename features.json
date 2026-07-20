@@ -153,7 +153,7 @@
   },
   "electronReleaseV260": {
     "version": "2.6.0",
-    "status": "release-candidate-external-evidence-pending",
+    "status": "release-authorized-postrelease-evidence-pending",
     "date": "2026-07-21",
     "description": "v2.6.0 公开源码发布候选整合多人协作 F2-F7、schema32 与运行/发布加固，并收录普通 RUN 免打断、Provider 错误、VibeX、Photoshop 0.1.4 和图像节点仅图片输出修复。",
     "capabilities": [
@@ -166,9 +166,9 @@
       "集成基线已覆盖 193 个 TS 与 186 个 CJS 测试文件共 2872 项：2865 通过、7 条件跳过；type-check、public、RH toolbox、数据库 writer/lifecycle、语法、JSON 与工作树门通过。",
       "v2.6.0 候选聚焦回归 52/52、完整 TS 回归 195 个文件四组全部通过；同时修复 Windows CRLF 下三个源码取段测试，并把生成停止断言收窄到按钮区域，允许新输出复选框在生成期间按设计禁用。",
       "npm run type-check -- --pretty false、npm run public:check、npm run rh-toolbox:check、JSON/脚本语法、core/development 工作树门与 git diff --check 通过。",
-      "dist:release 的 t8-collaboration-release-evidence-v2 默认清单当前不存在，脚本会在 Electron 构建和 GitHub 上传前失败；不得以本机回环、mock 或手写 passed 替代。"
+      "t8-collaboration-release-evidence-v2 默认清单当前不存在；用户于 2026-07-21 明确要求 v2.6.0 先发布、后补真实证据。一次性 deferral 只接受完全缺失的清单、精确 2.6.0 和固定 40 位 target，不产生 passed 项，也不能用于未来版本。"
     ],
-    "releaseBoundary": "正式 Electron/NSIS 构建次数保持 0。必须先固定并推送 v2.6.0 公开源码提交，再由至少两台真实 Windows、三个隔离客户端及真实公共 HTTPS/TLS 环境采集与该提交绑定的完整证据；证据通过后只执行一次 T8_RELEASE_APPROVAL=release-2.6.0 npm run dist:release。"
+    "releaseBoundary": "正式 Electron/NSIS 构建次数在本记录写入时仍为 0。v2.6.0 按用户明确要求采用一次性先发布后补证据例外，只执行一次 T8_RELEASE_APPROVAL=release-2.6.0 npm run dist:release；F8-F10 继续保持未完成，发布后必须由至少两台真实 Windows、三个隔离客户端及真实公共 HTTPS/TLS 环境补齐并绑定 source commit。"
   },
   "electronReleaseV258": {
     "version": "2.5.8",
@@ -5240,7 +5240,7 @@
     "semverVersion": "2.6.0",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
     "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；当前源码候选版本为 v2.6.0，整合多人协作 F2-F7、schema32、运行/发布加固和创作稳定性热修。最近正式发布版本仍为 v2.5.8；公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.6.0 正式 Electron/NSIS 尚未构建；t8-collaboration-release-evidence-v2 真实双设备、公网、红队与负载清单通过并绑定最终源码提交后，才允许执行唯一一次 T8_RELEASE_APPROVAL=release-2.6.0 npm run dist:release。最近已验证的自动更新 Release 仍为 v2.5.8。",
+    "installer": "v2.6.0 正式 Electron/NSIS 尚未构建；用户已明确要求本版先发布、后补真实双设备/公网/红队/负载证据。只允许使用精确 v2.6.0 一次性 deferral 执行唯一一次 T8_RELEASE_APPROVAL=release-2.6.0 npm run dist:release，F8-F10 状态不得因此改为完成。最近已验证的自动更新 Release 仍为 v2.5.8。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",

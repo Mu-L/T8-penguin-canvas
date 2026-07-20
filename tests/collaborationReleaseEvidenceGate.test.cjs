@@ -7,8 +7,10 @@ const path = require('node:path');
 
 const {
   COLLABORATION_RELEASE_EVIDENCE_CONTRACT,
+  COLLABORATION_RELEASE_EVIDENCE_POST_RELEASE_DEFERRAL_APPROVAL,
   COLLABORATION_RELEASE_REQUIRED_CHECKS,
   assertCollaborationReleaseEvidence,
+  assertCollaborationReleaseEvidenceForPublish,
 } = require('../scripts/collaboration-release-evidence.cjs');
 
 const TARGET = 'a'.repeat(40);
@@ -319,6 +321,51 @@ function validate(item) {
   });
 }
 
+test('v2.6.0 owner-approved deferral accepts only a missing manifest and never marks evidence passed', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-collab-evidence-deferral-'));
+  const evidencePath = path.join(directory, 'manifest.json');
+  try {
+    const result = assertCollaborationReleaseEvidenceForPublish({
+      root: path.resolve(__dirname, '..'),
+      evidencePath,
+      version: VERSION,
+      target: TARGET,
+      deferralApproval: COLLABORATION_RELEASE_EVIDENCE_POST_RELEASE_DEFERRAL_APPROVAL,
+    });
+    assert.equal(result.deferred, true);
+    assert.equal(result.releaseVersion, VERSION);
+    assert.equal(result.sourceCommit, TARGET);
+    assert.equal(result.reason, 'owner-approved-post-release-evidence');
+    assert.equal(Object.hasOwn(result, 'checkCount'), false);
+
+    assert.throws(() => assertCollaborationReleaseEvidenceForPublish({
+      root: path.resolve(__dirname, '..'),
+      evidencePath,
+      version: VERSION,
+      target: TARGET,
+      deferralApproval: 'wrong-approval',
+    }), /manifest is missing/);
+    assert.throws(() => assertCollaborationReleaseEvidenceForPublish({
+      root: path.resolve(__dirname, '..'),
+      evidencePath,
+      version: '2.6.1',
+      target: TARGET,
+      deferralApproval: COLLABORATION_RELEASE_EVIDENCE_POST_RELEASE_DEFERRAL_APPROVAL,
+    }), /manifest is missing/);
+
+    fs.writeFileSync(evidencePath, '{}\n', 'utf8');
+    assert.throws(() => assertCollaborationReleaseEvidenceForPublish({
+      root: path.resolve(__dirname, '..'),
+      evidencePath,
+      version: VERSION,
+      target: TARGET,
+      deferralApproval: COLLABORATION_RELEASE_EVIDENCE_POST_RELEASE_DEFERRAL_APPROVAL,
+    }), /contractVersion/);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('F8-F10 release evidence v2 accepts source-bound device, client, public and load evidence', () => {
   const item = fixture();
   try {
@@ -394,9 +441,10 @@ test('formal Electron and GitHub release entry points invoke the F8-F10 gate but
   const github = fs.readFileSync(path.resolve(__dirname, '../scripts/release-github.cjs'), 'utf8');
   const guide = fs.readFileSync(path.resolve(__dirname, '../docs/collaboration-release-evidence.md'), 'utf8');
   const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf8'));
-  assert.match(dist, /assertCollaborationReleaseEvidence\(\{[\s\S]*target: releaseTarget/);
-  assert.match(github, /if \(!dryRun\) \{[\s\S]*assertCollaborationReleaseEvidence\(\{[\s\S]*target: releaseTarget/);
+  assert.match(dist, /assertCollaborationReleaseEvidenceForPublish\(\{[\s\S]*target: releaseTarget/);
+  assert.match(github, /if \(!dryRun\) \{[\s\S]*assertCollaborationReleaseEvidenceForPublish\(\{[\s\S]*target: releaseTarget/);
   assert.match(guide, /不得手工把未执行项目改写为 `passed`/);
+  assert.match(guide, /owner-approved-post-release-v2\.6\.0/);
   assert.match(guide, /T8_COLLAB_RELEASE_EVIDENCE/);
   assert.match(guide, /至少 100 MiB 上传/);
   assert.match(guide, /独立设备和客户端/);

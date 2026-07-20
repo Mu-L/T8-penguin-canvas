@@ -13,6 +13,8 @@ const {
 } = require('./collaboration-evidence-attestation.cjs');
 
 const CONTRACT_VERSION = 't8-collaboration-release-evidence-v2';
+const POST_RELEASE_DEFERRAL_VERSION = '2.6.0';
+const POST_RELEASE_DEFERRAL_APPROVAL = 'owner-approved-post-release-v2.6.0';
 const MAX_MANIFEST_BYTES = 1024 * 1024;
 const MAX_ARTIFACT_BYTES = 256 * 1024 * 1024;
 const MAX_TOTAL_ARTIFACT_BYTES = 512 * 1024 * 1024;
@@ -615,6 +617,40 @@ function assertCollaborationReleaseEvidence(options = {}) {
   });
 }
 
+function assertCollaborationReleaseEvidenceForPublish(options = {}) {
+  try {
+    return Object.freeze({
+      ...assertCollaborationReleaseEvidence(options),
+      deferred: false,
+    });
+  } catch (error) {
+    const version = String(options.version || require(path.join(
+      path.resolve(options.root || path.join(__dirname, '..')),
+      'package.json',
+    )).version);
+    const target = String(options.target || process.env.T8_RELEASE_TARGET || '').toLowerCase();
+    const approval = String(
+      options.deferralApproval ?? process.env.T8_COLLAB_RELEASE_EVIDENCE_DEFERRAL ?? '',
+    );
+    const missingManifest = error?.code === 'collaboration_release_evidence_invalid'
+      && error?.details?.reason === 'ENOENT';
+    if (version !== POST_RELEASE_DEFERRAL_VERSION
+      || approval !== POST_RELEASE_DEFERRAL_APPROVAL
+      || !/^[a-f0-9]{40}$/.test(target)
+      || !missingManifest) {
+      throw error;
+    }
+    return Object.freeze({
+      contractVersion: CONTRACT_VERSION,
+      releaseVersion: version,
+      sourceCommit: target,
+      deferred: true,
+      deferralApproval: POST_RELEASE_DEFERRAL_APPROVAL,
+      reason: 'owner-approved-post-release-evidence',
+    });
+  }
+}
+
 function gitHead(root) {
   const result = spawnSync('git', ['rev-parse', 'HEAD'], {
     cwd: root,
@@ -648,6 +684,9 @@ if (require.main === module) {
 
 module.exports = {
   COLLABORATION_RELEASE_EVIDENCE_CONTRACT: CONTRACT_VERSION,
+  COLLABORATION_RELEASE_EVIDENCE_POST_RELEASE_DEFERRAL_APPROVAL: POST_RELEASE_DEFERRAL_APPROVAL,
+  COLLABORATION_RELEASE_EVIDENCE_POST_RELEASE_DEFERRAL_VERSION: POST_RELEASE_DEFERRAL_VERSION,
   COLLABORATION_RELEASE_REQUIRED_CHECKS: REQUIRED_CHECKS,
   assertCollaborationReleaseEvidence,
+  assertCollaborationReleaseEvidenceForPublish,
 };

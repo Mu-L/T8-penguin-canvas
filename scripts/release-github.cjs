@@ -13,7 +13,7 @@ const {
 } = require('./release-provenance.cjs');
 const { assertReleaseWorktreeClean } = require('./release-worktree.cjs');
 const { assertLatestYamlArtifact } = require('./latest-yml.cjs');
-const { assertCollaborationReleaseEvidence } = require('./collaboration-release-evidence.cjs');
+const { assertCollaborationReleaseEvidenceForPublish } = require('./collaboration-release-evidence.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
 const pkg = require(path.join(ROOT, 'package.json'));
@@ -650,15 +650,22 @@ function main() {
   assertReleaseGitState(releaseTarget);
 
   if (!dryRun) {
-    const evidence = assertCollaborationReleaseEvidence({
+    const evidence = assertCollaborationReleaseEvidenceForPublish({
       root: ROOT,
       version,
       target: releaseTarget,
     });
-    console.log(
-      `[release] collaboration evidence: ${evidence.checkCount} checks, `
-      + `${evidence.artifactCount} artifacts, manifest ${evidence.manifestSha256}`,
-    );
+    if (evidence.deferred) {
+      console.warn(
+        `[release] collaboration evidence deferred for ${evidence.releaseVersion}: `
+        + `${evidence.reason}; post-release evidence remains required`,
+      );
+    } else {
+      console.log(
+        `[release] collaboration evidence: ${evidence.checkCount} checks, `
+        + `${evidence.artifactCount} artifacts, manifest ${evidence.manifestSha256}`,
+      );
+    }
   }
 
   let sealedRecovery;
