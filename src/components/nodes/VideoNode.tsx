@@ -50,6 +50,7 @@ import { useDragMaterialStore, type MaterialPayload } from '../../stores/dragMat
 import { useMaterialDropTarget } from '../../hooks/useMaterialDropTarget';
 import { taskCompletionSound } from '../../stores/taskCompletionSound';
 import { useApiKeysStore } from '../../stores/apiKeys';
+import { normalizeProviderErrorMessage } from '../../utils/providerErrorMessage.ts';
 import {
   advancedProviderModelOptions,
   advancedProvidersForNode,
@@ -508,7 +509,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           } else if (['FAILURE', 'FAILED'].includes(normalizedStatus)) {
             pollRejectRef.current = null;
             stopPoll();
-            const msg = r.failReason || '生成失败';
+            const msg = normalizeProviderErrorMessage(r.failReason, '生成失败');
             await reporter?.providerResponse({
               provider: isWan || isHappyHorse ? 'seedance-nz' : 'zhenzhen',
               model: apiModel,
@@ -626,7 +627,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           } else if (r.status === 'failed') {
             pollRejectRef.current = null;
             stopPoll();
-            const msg = r.error || 'FAL 生成失败';
+            const msg = normalizeProviderErrorMessage(r.error, 'FAL 生成失败');
             await reporter?.providerResponse({
               provider: 'fal',
               model: apiModel,
@@ -1040,7 +1041,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       await startPolling(r.taskId, runId, reporter);
     } catch (e: any) {
       if (!isCurrentGenerationRun(runId)) return;
-      const msg = e?.message || '提交失败';
+      const msg = normalizeProviderErrorMessage(e, '提交失败');
       await reporter?.providerResponse({
         provider: traceProvider,
         model: traceModel,
@@ -1885,7 +1886,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         {error && (
           <div className="flex items-start gap-1 text-[10px] text-red-300 bg-red-500/10 border border-red-500/20 rounded px-2 py-1">
             <AlertCircle size={11} className="mt-0.5 flex-shrink-0" />
-            <span className="break-all">{error}</span>
+            <span className="break-all">{normalizeProviderErrorMessage(error, '生成失败')}</span>
           </div>
         )}
       </div>

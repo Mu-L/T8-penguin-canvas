@@ -3,6 +3,7 @@
  * 所有请求走 /api/proxy/* (后端会注入对应 Key 并转存结果)
  */
 import type { AdvancedProviderConfig } from '../types/canvas';
+import { normalizeProviderErrorMessage } from '../utils/providerErrorMessage.ts';
 
 export interface ProviderTransportTrace {
   /** 上游或本地代理显式返回的请求 ID；绝不从通用 id 字段猜测。 */
@@ -49,7 +50,10 @@ function withProviderTransportTrace<T extends Record<string, any>>(
 }
 
 function providerResponseError(response: Response, data: any, fallback?: string): Error & Record<string, any> {
-  const error = new Error(data?.error || data?.message || fallback || `HTTP ${response.status}`) as Error & Record<string, any>;
+  const error = new Error(normalizeProviderErrorMessage(
+    [data?.error, data?.message],
+    fallback || `HTTP ${response.status}`,
+  )) as Error & Record<string, any>;
   const trace = providerTransportTrace(data?.data ?? data, response);
   error.transportHttpStatus = trace.transportHttpStatus;
   error.status = response.status;
@@ -783,7 +787,16 @@ export async function queryVideoFal(params: { endpoint?: string; requestId?: str
   });
   const data = await r.json();
   if (!r.ok && !data.data) throw providerResponseError(r, data);
-  return withProviderTransportTrace(data.data || { status: 'failed', error: data?.error || 'unknown' }, r);
+  const payload = withProviderTransportTrace(
+    data.data || { status: 'failed', error: data?.error || 'unknown' },
+    r,
+  );
+  return {
+    ...payload,
+    ...(payload.error !== undefined && payload.error !== null
+      ? { error: normalizeProviderErrorMessage(payload.error, 'FAL 生成失败') }
+      : {}),
+  };
 }
 
 // ========================================================================
@@ -856,6 +869,9 @@ export async function queryVideo(taskId: string, model?: string): Promise<VideoQ
   const payload = data.data || {};
   return {
     ...payload,
+    ...(payload.failReason !== undefined && payload.failReason !== null
+      ? { failReason: normalizeProviderErrorMessage(payload.failReason, '生成失败') }
+      : {}),
     ...providerTransportTrace(payload, r),
   };
 }
