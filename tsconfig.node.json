@@ -1,6 +1,8 @@
 {
   "compilerOptions": {
     "composite": true,
+    "target": "ES2022",
+    "outDir": "build/tsc-node",
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "bundler",
