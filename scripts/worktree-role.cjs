@@ -72,8 +72,8 @@ function evaluateWorktreeRole({
       } else {
         errors.push('feature development is forbidden in a release-named worktree');
       }
-    } else if (pathRole !== 'development') {
-      errors.push('feature development must use T8-penguin-canvas-dev-<topic>; the canonical core is an integration landing point');
+    } else if (!['core', 'development'].includes(pathRole)) {
+      errors.push('development must use the canonical T8-penguin-canvas path or T8-penguin-canvas-dev-<topic>');
     }
   } else if (normalizedMode === 'release') {
     if (pathRole !== 'release') errors.push('formal release requires a release-named worktree');

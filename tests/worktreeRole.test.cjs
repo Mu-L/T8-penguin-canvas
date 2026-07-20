@@ -80,14 +80,13 @@ test('development rejects release paths except the one explicit legacy F2 pair',
   assert.equal(copiedException.ok, false);
 });
 
-test('development rejects the canonical core path and requires a dedicated development worktree', () => {
+test('development accepts the canonical core and optional dedicated development paths', () => {
   const core = evaluateWorktreeRole({
     root: root('T8-penguin-canvas'),
     branch: 'codex/vibex-workbench-node',
     mode: 'development',
   });
-  assert.equal(core.ok, false);
-  assert.match(core.errors.join(' '), /canonical core is an integration landing point/);
+  assert.equal(core.ok, true);
 
   const development = evaluateWorktreeRole({
     root: root('T8-penguin-canvas-dev-next-topic'),
