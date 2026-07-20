@@ -4,6 +4,7 @@ import { Play, X, Edit2 } from 'lucide-react';
 import { useThemeStore } from '../../stores/theme';
 import { resolveThemeTemplate } from '../../theme/defaultTemplates';
 import { useGroupBusStore, GROUP_COLORS } from '../../stores/groupBus';
+import { shouldCollectNodeTextOutput } from '../../utils/imageNodeOutputMode';
 
 // 文件名后缀识别(与 OutputNode 一致): 剑中低代价修正「上游用 imageUrl 装视频/音频」兑底
 const isVideoUrl = (u: string) => /\.(mp4|webm|mov|m4v|mkv)(\?|$)/i.test(u);
@@ -103,11 +104,13 @@ const GroupBoxNode = ({ id, data, selected }: NodeProps) => {
       if (!memberSet.has(n.id)) continue;
       if (n.type === 'groupBox') continue;
       const ud: any = n.data || {};
-      // 文本
-      pushUnique(out.texts, ud.outputText);
-      pushUnique(out.texts, ud.reply);
-      pushUnique(out.texts, ud.prompt);
-      pushUnique(out.texts, ud.text);
+      if (shouldCollectNodeTextOutput(n.type, n.data)) {
+        // 文本
+        pushUnique(out.texts, ud.outputText);
+        pushUnique(out.texts, ud.reply);
+        pushUnique(out.texts, ud.prompt);
+        pushUnique(out.texts, ud.text);
+      }
       // 图像 - 单
       pushUnique(out.images, ud.imageUrl);
       // 图像 - 多

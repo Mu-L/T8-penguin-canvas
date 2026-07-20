@@ -1,7 +1,7 @@
 {
   "name": "t8-penguin-canvas",
   "private": false,
-  "version": "2.5.8",
+  "version": "2.6.0",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "T8-penguin-canvas — AI 节点画布工作流工具（Web + Electron 桌面端）",
@@ -239,8 +239,8 @@
         ]
       },
       {
-        "from": "tools/photoshop-bridge",
-        "to": "tools/photoshop-bridge",
+        "from": "tools/photoshop-bridge/plugin",
+        "to": "tools/photoshop-bridge/plugin",
         "filter": [
           "**/*"
         ]

@@ -9,10 +9,99 @@
   const app = photoshop.app || {};
   const core = photoshop.core || {};
   const action = photoshop.action || {};
+  const constants = photoshop.constants || {};
   const fs = uxp.storage && uxp.storage.localFileSystem;
   const formats = uxp.storage && uxp.storage.formats;
   const shell = uxp.shell;
   const net = T8PS.net;
+
+  function errorText(error, fallback) {
+    if (error && typeof error.message === 'string' && error.message.trim()) return error.message.trim();
+    if (typeof error === 'string' && error.trim()) return error.trim();
+    return fallback || '未知 Photoshop 错误';
+  }
+
+  function assertBatchPlaySucceeded(results, fallback) {
+    const list = Array.isArray(results) ? results : [];
+    const failed = list.find((entry) => entry && (
+      String(entry._obj || '').toLowerCase() === 'error' ||
+      (typeof entry.result === 'number' && entry.result < 0)
+    ));
+    if (failed) throw new Error(errorText(failed, fallback));
+  }
+
+  function activeLayerInfo() {
+    const available = !!(
+      app &&
+      core && typeof core.executeAsModal === 'function' &&
+      action && typeof action.batchPlay === 'function' &&
+      fs && typeof fs.getTemporaryFolder === 'function'
+    );
+    try {
+      const doc = app.activeDocument;
+      const layers = doc && doc.activeLayers;
+      const layer = layers && layers.length ? layers[0] : null;
+      return {
+        available,
+        hasDocument: !!doc,
+        hasLayer: !!layer,
+        documentId: doc && doc.id != null ? doc.id : null,
+        documentName: doc && doc.name ? String(doc.name) : '',
+        layerId: layer && layer.id != null ? layer.id : null,
+        layerName: layer && layer.name ? String(layer.name) : '',
+      };
+    } catch (error) {
+      return {
+        available,
+        hasDocument: false,
+        hasLayer: false,
+        documentId: null,
+        documentName: '',
+        layerId: null,
+        layerName: '',
+        error: errorText(error),
+      };
+    }
+  }
+
+  function isThirtyTwoBit(value) {
+    const expected = constants.BitsPerChannelType && constants.BitsPerChannelType.THIRTYTWO;
+    if (expected != null && value === expected) return true;
+    if (typeof value === 'number') return value === 32;
+    return /(?:thirty.?two|32)/i.test(String(value == null ? '' : value));
+  }
+
+  function modeMatches(value, names) {
+    const modes = constants.DocumentMode || {};
+    if (names.some((name) => modes[name] != null && value === modes[name])) return true;
+    const text = String(value == null ? '' : value);
+    return names.some((name) => {
+      if (name === 'GRAYSCALE') return /gray|grey/i.test(text);
+      if (name === 'BITMAP') return /bitmap/i.test(text);
+      if (name === 'INDEXEDCOLOR') return /indexed/i.test(text);
+      return new RegExp(name, 'i').test(text);
+    });
+  }
+
+  function needsRgbConversionForPng(value) {
+    if (modeMatches(value, ['RGB', 'GRAYSCALE', 'BITMAP', 'INDEXEDCOLOR'])) return false;
+    return modeMatches(value, ['CMYK', 'LAB', 'DUOTONE', 'MULTICHANNEL']);
+  }
+
+  async function normalizeTemporaryDocumentForPng(doc) {
+    if (isThirtyTwoBit(doc.bitsPerChannel)) {
+      const eightBit = constants.BitsPerChannelType && constants.BitsPerChannelType.EIGHT;
+      if (eightBit == null) throw new Error('当前 Photoshop 无法把 32 位图层转换为 PNG 支持的位深');
+      doc.bitsPerChannel = eightBit;
+    }
+    if (doc.mode != null && needsRgbConversionForPng(doc.mode)) {
+      const rgbMode = constants.ChangeMode && constants.ChangeMode.RGB;
+      if (rgbMode == null || typeof doc.changeMode !== 'function') {
+        throw new Error('当前 Photoshop 无法把图层颜色模式转换为 RGB');
+      }
+      await doc.changeMode(rgbMode);
+    }
+  }
 
   function hasDocument() {
     return !!(app.documents && app.documents.length > 0);
@@ -116,31 +205,60 @@
     const file = await folder.createFile(`t8_layer_${Date.now()}.png`, { overwrite: true });
     let docName = 'Photoshop Document';
     let layerName = 'Layer';
-    await core.executeAsModal(async () => {
+    await core.executeAsModal(async (executionContext) => {
       const srcDoc = app.activeDocument;
       if (!srcDoc) throw new Error('没有打开的 Photoshop 文档');
       const srcId = srcDoc.id;
       docName = srcDoc.name || docName;
       const layers = srcDoc.activeLayers || [];
       if (!layers.length) throw new Error('请先选中要上传或编辑的图层');
-      layerName = layers[0].name || layerName;
-      await action.batchPlay([{
+      const selectedLayer = layers[0];
+      layerName = selectedLayer.name || layerName;
+      const layerId = selectedLayer.id == null ? Number.NaN : Number(selectedLayer.id);
+      const using = Number.isFinite(layerId)
+        ? { _ref: 'layer', _id: layerId }
+        : { _ref: 'layer', _enum: 'ordinal', _value: 'targetEnum' };
+      const makeResult = await action.batchPlay([{
         _obj: 'make',
         _target: [{ _ref: 'document' }],
         name: 't8_tmp_layer_export',
-        using: {
-          _ref: [
-            { _ref: 'layer', _enum: 'ordinal', _value: 'targetEnum' },
-            { _ref: 'document', _enum: 'ordinal', _value: 'targetEnum' },
-          ],
-        },
+        using,
+        version: 5,
+        _options: { dialogOptions: 'dontDisplay' },
       }], { synchronousExecution: true });
+      assertBatchPlaySucceeded(makeResult, 'Photoshop 无法从当前图层创建临时文档');
       const tmpDoc = app.activeDocument;
       if (!tmpDoc || tmpDoc.id === srcId) throw new Error('未能从当前图层创建临时文档');
-      await tmpDoc.saveAs.png(file, {}, true);
-      await tmpDoc.closeWithoutSaving();
+      const hostControl = executionContext && executionContext.hostControl;
+      let autoCloseRegistered = false;
+      if (hostControl && typeof hostControl.registerAutoCloseDocument === 'function') {
+        try {
+          await hostControl.registerAutoCloseDocument(tmpDoc.id);
+          autoCloseRegistered = true;
+        } catch (_) {
+          // Fall back to explicit close for older or incomplete host implementations.
+        }
+      }
+      let operationError = null;
+      try {
+        await normalizeTemporaryDocumentForPng(tmpDoc);
+        await tmpDoc.saveAs.png(file, {}, true);
+      } catch (error) {
+        operationError = error;
+      }
+      if (!autoCloseRegistered) {
+        try {
+          await tmpDoc.closeWithoutSaving();
+        } catch (closeError) {
+          if (!operationError) operationError = closeError;
+        }
+      }
+      if (operationError) throw operationError;
     }, { commandName: 'T8 导出当前图层' });
     const buffer = await file.read({ format: formats.binary });
+    if (!buffer || typeof buffer.byteLength !== 'number' || buffer.byteLength <= 0) {
+      throw new Error('当前图层导出结果为空，请确认图层可见且包含可渲染内容');
+    }
     return { buffer, documentName: docName, layerName };
   }
 
@@ -163,7 +281,7 @@
     }
   }
 
-  T8PS.ps = { hasDocument, placeImage, exportCurrentPng, openUrl, onDocChange };
+  T8PS.ps = { hasDocument, activeLayerInfo, placeImage, exportCurrentPng, openUrl, onDocChange };
   } catch (error) {
     report(error);
     const unavailable = async () => {
@@ -171,6 +289,16 @@
     };
     T8PS.ps = {
       hasDocument: () => false,
+      activeLayerInfo: () => ({
+        available: false,
+        hasDocument: false,
+        hasLayer: false,
+        documentId: null,
+        documentName: '',
+        layerId: null,
+        layerName: '',
+        error: error && error.message ? error.message : String(error),
+      }),
       placeImage: unavailable,
       exportCurrentPng: unavailable,
       openUrl: unavailable,

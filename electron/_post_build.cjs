@@ -656,14 +656,37 @@ function checkFigmaBridgeRuntime() {
 
 function checkPhotoshopBridgeResources() {
   const root = path.join(RES, 'tools', 'photoshop-bridge', 'plugin');
-  checkFile(path.join(root, 'manifest.json'));
-  checkFile(path.join(root, 'index.html'));
-  checkFile(path.join(root, 'style.css'));
-  checkFile(path.join(root, 'js', 'boot.js'));
-  checkFile(path.join(root, 'js', 'state.js'));
-  checkFile(path.join(root, 'js', 'net.js'));
-  checkFile(path.join(root, 'js', 'ps.js'));
-  checkFile(path.join(root, 'js', 'app.js'));
+  const sourceRoot = path.join(ROOT, 'tools', 'photoshop-bridge', 'plugin');
+  const requiredFiles = [
+    'manifest.json',
+    'index.html',
+    'style.css',
+    path.join('js', 'boot.js'),
+    path.join('js', 'state.js'),
+    path.join('js', 'net.js'),
+    path.join('js', 'ps.js'),
+    path.join('js', 'app.js'),
+  ];
+  for (const relativePath of requiredFiles) {
+    const packagedPath = path.join(root, relativePath);
+    const sourcePath = path.join(sourceRoot, relativePath);
+    checkFile(packagedPath);
+    if (fs.existsSync(packagedPath) && fs.existsSync(sourcePath) && sha256File(packagedPath) !== sha256File(sourcePath)) {
+      failSecurity('packaged Photoshop plugin differs from the authoritative source:', packagedPath);
+    }
+  }
+  const sourceManifest = JSON.parse(fs.readFileSync(path.join(sourceRoot, 'manifest.json'), 'utf8'));
+  const packagedManifestPath = path.join(root, 'manifest.json');
+  if (fs.existsSync(packagedManifestPath)) {
+    const packagedManifest = JSON.parse(fs.readFileSync(packagedManifestPath, 'utf8'));
+    if (packagedManifest.id !== sourceManifest.id || packagedManifest.version !== sourceManifest.version) {
+      failSecurity('packaged Photoshop plugin manifest id/version is stale:', packagedManifestPath);
+    }
+  }
+  const staleArchive = path.join(RES, 'tools', 'photoshop-bridge', 'PS联动插件.rar');
+  if (fs.existsSync(staleArchive)) {
+    failSecurity('stale Photoshop plugin archive must not be packaged:', staleArchive);
+  }
 }
 
 function checkUpdateArtifacts() {

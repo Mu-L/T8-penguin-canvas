@@ -2,6 +2,7 @@ import type { Edge, Node } from '@xyflow/react';
 import { collectMaterialSetBucketsFromData, valueOfMaterialSetItem } from './materialSet.ts';
 import { selectSourceHandleData } from './sourceHandleData.ts';
 import { dedupeUpstreamMaterialBuckets } from './upstreamMaterialBuckets.ts';
+import { shouldCollectNodeTextOutput } from './imageNodeOutputMode.ts';
 
 export type LoopMaterialKind = 'text' | 'image' | 'video' | 'audio';
 
@@ -165,27 +166,29 @@ export function collectLoopIterationMaterials(
         continue;
       }
 
-      const textArrayField = ['textSegments', 'segments', 'texts']
-        .find((field) => Array.isArray(data[field]) && data[field].length > 0);
-      if (textArrayField) {
-        data[textArrayField].forEach((item: unknown, index: number) => pushText(
-          sourceId,
-          item,
-          `text-array:${sourceId}:${textArrayField}:${index}`,
-        ));
-      } else {
-        pushText(sourceId, data.outputText, `text-field:${sourceId}:outputText`);
-        pushText(sourceId, data.reply, `text-field:${sourceId}:reply`);
-        let primaryPrompt = '';
-        if (typeof data.promptResolved === 'string' && data.promptResolved.trim()) {
-          primaryPrompt = data.promptResolved.trim();
-          pushText(sourceId, data.promptResolved, `text-field:${sourceId}:promptResolved`);
+      if (shouldCollectNodeTextOutput(source.type, source.data)) {
+        const textArrayField = ['textSegments', 'segments', 'texts']
+          .find((field) => Array.isArray(data[field]) && data[field].length > 0);
+        if (textArrayField) {
+          data[textArrayField].forEach((item: unknown, index: number) => pushText(
+            sourceId,
+            item,
+            `text-array:${sourceId}:${textArrayField}:${index}`,
+          ));
         } else {
-          primaryPrompt = typeof data.prompt === 'string' ? data.prompt.trim() : '';
-          pushText(sourceId, data.prompt, `text-field:${sourceId}:prompt`);
-        }
-        if (typeof data.text === 'string' && data.text.trim() !== primaryPrompt) {
-          pushText(sourceId, data.text, `text-field:${sourceId}:text`);
+          pushText(sourceId, data.outputText, `text-field:${sourceId}:outputText`);
+          pushText(sourceId, data.reply, `text-field:${sourceId}:reply`);
+          let primaryPrompt = '';
+          if (typeof data.promptResolved === 'string' && data.promptResolved.trim()) {
+            primaryPrompt = data.promptResolved.trim();
+            pushText(sourceId, data.promptResolved, `text-field:${sourceId}:promptResolved`);
+          } else {
+            primaryPrompt = typeof data.prompt === 'string' ? data.prompt.trim() : '';
+            pushText(sourceId, data.prompt, `text-field:${sourceId}:prompt`);
+          }
+          if (typeof data.text === 'string' && data.text.trim() !== primaryPrompt) {
+            pushText(sourceId, data.text, `text-field:${sourceId}:text`);
+          }
         }
       }
 

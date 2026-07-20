@@ -1,10 +1,10 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.5.8",
-  "lastUpdated": "2026-07-20-vibex-select-scroll-hotfix-unreleased",
+  "version": "2.6.0",
+  "lastUpdated": "2026-07-21-v2.6.0-release-candidate",
   "sixSystemsImplementationAudit": {
-    "version": "2.5.8",
-    "status": "verified-local-b1-f2-f7-b2-schema32-f9-f10-integrated-core-development-unreleased",
+    "version": "2.6.0",
+    "status": "verified-local-b1-f2-f7-b2-schema32-f9-f10-v2.6.0-release-candidate-external-evidence-pending",
     "date": "2026-07-18",
   "lastUpdated": "2026-07-20-canonical-core-direct-development-restored",
     "completedRounds": 27,
@@ -48,11 +48,13 @@
     },
     "currentIncrement": {
       "name": "b2-schema32-f9-f10-local-hardening-and-assetcenter-p2",
-      "status": "verified-local-integrated-core-development-unreleased",
+      "status": "verified-local-integrated-core-v2.6.0-release-candidate-external-evidence-pending",
       "capabilities": [
         "2026-07-20 用户明确选择恢复简单工作流：E:\\PenguinPravite\\T8-penguin-canvas 是唯一默认开发目录，development mode 同时接受 canonical core 与可选的 T8-penguin-canvas-dev-<topic>，但继续拒绝全部 release 命名路径。此前‘core 只作 integration landing point、必须在第三工作树开发’的规则已被本条覆盖；predev/predev:vite/predev:backend/preelectron:dev 继续执行角色门，专项锁定 core/dev 接受与 release 拒绝。",
         "2026-07-20 视频节点结构化 Provider 错误已在核心目录热修：新增有界错误消息归一化器，只读取 message/error/detail/failReason/reason/code 等已知字段；普通视频与 FAL 查询边界保证 failReason/error 为字符串，HTTP 失败保留 transport trace；VideoNode 的普通轮询、FAL 轮询、提交异常和最终渲染均再次归一化，第三方返回 {message, code} 时不再触发 React error #31 或画布错误边界。动态回归 4/4、相关视频前端 43/43、type-check 通过；未生产 build、打包、升级版本或发布，不增加 completedRounds。",
         "2026-07-20 VibeX 节点 Electron 下拉滚动已热修：iframe 原生 select 定位补丁不再把菜单自身的 scroll 当作外部页面滚动关闭；滚轮和拖动菜单滚动条时保持展开，overscroll containment 防止滚动链穿透，外部滚动、resize、Escape、点击外部及选择后的关闭行为保持。VibeX 组合 12/12、Electron main 语法、type-check 与 public-check 通过；未生产 build、打包、升级版本或发布，不增加 completedRounds。",
+        "2026-07-21 Photoshop 当前图层编辑已热修：插件 0.1.4 的编辑模式始终强制读取活动图层，不再受资产页上传偏好及其 localStorage 历史值影响；活动图层临时文档改用直接 layer reference + version 5 descriptor，显式识别 batchPlay resolved error，CMYK/Lab/Duotone/Multichannel 在 PNG 保存前转为 RGB、32-bit 降为 8-bit，同时保留 Bitmap/Indexed/Grayscale 等 PNG 兼容模式，并通过 executeAsModal host auto-close 在成功、失败或用户取消时清理。生成页立即显示当前文档/图层 readiness，300×420 最小面板可内部滚动到执行按钮与错误消息；执行开始时快照平台、模型与全部生成选项，并在导出/上传期间锁定重连、模式/选项切换、手动上传/置入及后台置入命令，避免跨 host 请求与竞争 Photoshop modal。Electron 只复制权威 plugin 目录，排除同级未跟踪旧 0.1.3 RAR；post-build 将逐文件 SHA-256 和 manifest id/version 与源码比对。面板显示 v0.1.4，App/README 明确 manifest 升级需 Unload，旧路径需 Remove 后重新 Add。真实 Photoshop 用户侧仍需按该步骤加载新版确认；未生产 build、Electron/NSIS 打包、应用版本升级、推送、tag 或 Release，不增加 completedRounds。",
+        "2026-07-21 图像/编辑节点新增默认勾选的“仅输出图片结果（不输出 Prompt）”：新节点显式保存 imageOnlyOutput=true，旧画布缺字段也按开启处理；用户取消勾选后可恢复原有提示词与图片一起输出。实现只在输出边界过滤文本，不清空 prompt/lastPrompt，因此重跑、Prompt 模板与图片元数据保持可用。OutputNode、通用上游素材收集、Canvas 自动输出、Relay、RandomRoute、GroupBox、Loop 快照、跨画布发送及素材集合并统一复用同一规则；OutputNode 签名纳入开关状态，Relay/RandomRoute 改为订阅真实上游连接和节点数据并使用内容签名，切换后即时清理或恢复 Prompt。共享图像节点 Schema 同步 boolean 白名单和默认值。专项与相邻回归 26/26、type-check、public-check、development 工作树门及 diff-check 通过；未生产 build、Electron/NSIS 打包、版本升级、推送、tag 或 Release，不增加 completedRounds。",
         "2026-07-20 工作树防复发与无损集成门已补强：项目根物理 AGENTS.md 固定 legacy F2 精确路径/分支/HEAD、禁止破坏性 Git/生产构建和 TEMP-only 数据库测试；只读 integration audit report schema 2 在 staged 门之外，会对两项永久保护文件核对普通文件属性、精确 bytes 与 SHA-256，缺失、符号链接、尺寸或内容漂移均失败关闭。Git 检查使用进程级精确 safe.directory 与 GIT_OPTIONAL_LOCKS=0，不修改全局 Git 配置，并在 Codex 隔离账户实测。专项 12/12；历史集成审计的 408 个碰撞已通过 checkpoint 与第三工作树语义合并关闭，保护快照 2/2 完整。该工具门不增加完成轮次。",
         "2026-07-20 当前数据库生产代码已切换到 schema 32 `physical-capacity-and-canonical-backup-contract`：migration checksum 为 a667e75b6d6ba425146a773d2a037ec55e09dbf38bc5fff62f02702996e4c999，extension fingerprint 为 bae4f62ab94effb8bafe3027c7bd037ab51e7c13f28bbdda5dcf80f8dce85276。该本地切片把 database identity、write sequence、物理容量 admission、canonical backup 自包含 freshness receipt、精确 v31→v32 lineage/备份和 7 个提交前 hard-exit + 1 个提交后控制例接入生产路径；这仍是 B2 的本地自动化切片，真实 Windows/磁盘/安装升级证据不足，不增加 completedRounds。",
         "2026-07-20 当前 ProjectDatabase writer inventory 为 455：read 198、write 182、maintenance 43、migration 32、test-only 0；policy 为 compliant 408 / noncompliant 11 / unresolved 4 / not-applicable 32。classificationComplete/classificationGatePassed=true，policyCompliant=false，类外 raw DB 命中为 0。11 个公开 lifecycle 边界与 4 个内部 maintenance helper 已由独立 lifecycle policy 精确冻结为 15 项 allowlist，contract fingerprint 89b2c1610a9aa9c0edde07abc483bedb544c9fc3398a6a0e4627512c438cce26，生产调用暴露 0、专项 3/3；主 writer policy 继续保持 false 是分域设计，不能把 startup/recovery/backup/close 错包进业务 coordinator，也不能把独立门的通过伪装成主门为 true。",
@@ -84,6 +86,7 @@
         "普通 RUN 的 cost.unknown 保持诚实提示但不再弹出确认窗口；阻断性结构/能力/素材/策略错误仍 fail-closed，历史重试/重放及高风险远程运行仍必须显式确认。"
       ],
       "verification": [
+        "2026-07-21 图像节点仅图片输出专项与相邻回归 26/26：覆盖旧画布缺字段、新节点默认开启、显式关闭恢复图文、edit 共享语义、非图像节点隔离、ImageNode UI、OutputNode 即时签名、普通下游素材收集、Canvas 自动输出、Relay/RandomRoute/GroupBox、Loop 快照、跨画布发送、素材集合并与共享 Schema 默认；npm run type-check、public-check、development 工作树门、JSON 与 diff-check 通过。未执行生产 build/package/release。",
         "2026-07-20 schema32 生产切换与故障矩阵：18 个串行文件 113/113 通过，冻结 schema32 checksum/extension、精确 source→target lineage、freshness receipt、physical admission、7+1 hard-exit，以及 cold PRAGMA、WAL 长读者、TEMP SQLITE_FULL、backup fsync/rename、main/WAL/journal/SHM 故障边界；新增覆盖 v31→v32 末段真实 SQLITE_FULL 的精确回滚/重试、SQLite 内部页单比特损坏与当前 schema 外键孤儿的冷开和恢复候选拒绝，且受保护证据不被改写。该结果只属于临时数据库自动化，不代表真实 Windows 磁盘和安装升级验收。",
       "2026-07-20 writer audit：455 个方法，read 198 / write 182 / maintenance 43 / migration 32 / test-only 0；policy 408 compliant / 11 noncompliant / 4 unresolved / 32 not-applicable，classification gate=true、policyCompliant=false、external raw=0，audit --compact --check exit 0。",
       "2026-07-20 F6/F7 最终聚焦回归：Electron F6 CJS 19/19、Node TS 9/9；F7 replay/preflight 35/35。覆盖决策重绑权限、单读快照导出、冻结历史 revision、runtime/可见节点分流、三类 replay 前缀 ID 避让和迟到 runtime 隔离。legacy patch 身份复用相邻 Patch/迁移组 46/46，冻结 patch_applied identity 在任何画布/快照写入前失败关闭。",
@@ -119,7 +122,7 @@
       "F9 的 Base URL、自检、安全降级、持久化与 Nginx/Caddy 示例已完成本地自动化；仍必须在真实域名、证书和 HTTPS 反向代理下验证 health、invite、WebSocket、upload、Range 及 TLS/SNI。F10 的分级限速与发布证据门已完成本地自动化；仍必须完成真实公网红队、连接/吞吐/100MB+ 上传/10 万素材和存储增长压测。",
 	      "release/core 独立 checkpoint、第三工作树语义合并与 canonical core 采用已经完成，没有复制、checkout 覆盖或丢弃 core 本地文件。用户已明确将 E:\\PenguinPravite\\T8-penguin-canvas 恢复为唯一默认开发目录，后续功能直接在当前 core 分支修改、测试并按范围提交；历史 integration 工作树只作参考，不再要求二次推进。正式发布仍须先补真实 Windows/双设备/公网/负载证据并重新执行发布门，Electron/NSIS 正式包仍只允许构建一次。"
     ],
-	    "releaseBoundary": "严格本地自动化进度仍为 27/32：共同底座 1/3、多人协作 7/10、智能素材中心 5/5。schema32、全节点 RunEvent、B3 原始代码侧清单、F9 本地自检/安全持久化、F10 本地分级限流/发布证据门和 AssetCenter 响应式 P2 已落地，语义合并结果已由 canonical core 采用，并恢复直接在 core 开发的简单工作流；但 B2/B3 的真实历史/Windows/安装/Provider/公网/负载证据、F8 双设备/Electron、F9 真实公网 HTTPS/TLS/SNI 与 F10 真实红队/负载仍未闭环，不能增加 completedRounds。发布事实不变：E5 随 v2.5.7、只有协作 F1 随 v2.5.8 发布；其余能力仍只是本地集成开发结果。本轮未执行生产 build、Electron/NSIS 打包、版本升级、推送、tag 或 GitHub Release，不能称为生产级多人协作正式版。"
+	    "releaseBoundary": "严格本地自动化进度仍为 27/32：共同底座 1/3、多人协作 7/10、智能素材中心 5/5。schema32、全节点 RunEvent、B3 原始代码侧清单、F9 本地自检/安全持久化、F10 本地分级限流/发布证据门和 AssetCenter 响应式 P2 已落地，并已整理为 v2.6.0 公开源码发布候选；但 B2/B3 的真实历史/Windows/安装/Provider/公网/负载证据、F8 双设备/Electron、F9 真实公网 HTTPS/TLS/SNI 与 F10 真实红队/负载仍未闭环，不能增加 completedRounds。v2.6.0 正式 Electron/NSIS 与自动更新 Release 必须等待与最终 40 位源码提交绑定的 t8-collaboration-release-evidence-v2 真实清单；当前正式构建次数为 0，不能称为已发布的生产级多人协作正式版。"
   },
   "wan27DolaSeedreamModels": {
     "version": "2.5.5",
@@ -147,6 +150,25 @@
       "实现参数同时核对 api.seedance.nz 官方 llms.txt 与本地 ComfyUI_Seedance 参考节点；测试 Key 未写入源码、设置、日志、文档或构建产物。"
     ],
     "releaseBoundary": "已纳入 v2.5.5 Electron 自动更新版；公开提交只包含 Wan/Dola 功能、测试、版本记录和 release notes，私有 sidecar 仅进入加密安装包。"
+  },
+  "electronReleaseV260": {
+    "version": "2.6.0",
+    "status": "release-candidate-external-evidence-pending",
+    "date": "2026-07-21",
+    "description": "v2.6.0 公开源码发布候选整合多人协作 F2-F7、schema32 与运行/发布加固，并收录普通 RUN 免打断、Provider 错误、VibeX、Photoshop 0.1.4 和图像节点仅图片输出修复。",
+    "capabilities": [
+      "F2-F7 覆盖断线重连与增量同步、结构并发、协同文本冲突与撤销、可续传素材 ACL/配额、评论审批和权威运行队列/审计。",
+      "普通 RUN 保留只读体检和最终重验，但 advisory warning 不再反复要求确认；阻断错误、历史重放和高风险远程运行继续失败关闭。",
+      "图像/编辑节点默认仅输出图片；结构化视频 Provider 错误不再触发 React #31；VibeX 菜单内部滚动保持展开；Photoshop Link 0.1.4 强制读取活动图层并补强打包一致性。",
+      "版本统一由 package.json 注入 Web、Electron 与后端，release-notes/v2.6.0.md 记录公开范围；SKILL.md、roadmap.md、local-private/**、缓存、外部源码与旧插件归档继续禁止进入公开提交。"
+    ],
+    "verification": [
+      "集成基线已覆盖 193 个 TS 与 186 个 CJS 测试文件共 2872 项：2865 通过、7 条件跳过；type-check、public、RH toolbox、数据库 writer/lifecycle、语法、JSON 与工作树门通过。",
+      "v2.6.0 候选聚焦回归 52/52、完整 TS 回归 195 个文件四组全部通过；同时修复 Windows CRLF 下三个源码取段测试，并把生成停止断言收窄到按钮区域，允许新输出复选框在生成期间按设计禁用。",
+      "npm run type-check -- --pretty false、npm run public:check、npm run rh-toolbox:check、JSON/脚本语法、core/development 工作树门与 git diff --check 通过。",
+      "dist:release 的 t8-collaboration-release-evidence-v2 默认清单当前不存在，脚本会在 Electron 构建和 GitHub 上传前失败；不得以本机回环、mock 或手写 passed 替代。"
+    ],
+    "releaseBoundary": "正式 Electron/NSIS 构建次数保持 0。必须先固定并推送 v2.6.0 公开源码提交，再由至少两台真实 Windows、三个隔离客户端及真实公共 HTTPS/TLS 环境采集与该提交绑定的完整证据；证据通过后只执行一次 T8_RELEASE_APPROVAL=release-2.6.0 npm run dist:release。"
   },
   "electronReleaseV258": {
     "version": "2.5.8",
@@ -5214,11 +5236,11 @@
       "T8_ENABLE_LOCAL_PRIVATE": "开发环境和普通本机构建可选；0=关闭本机 local-private/extensions 私有扩展。正式 dist:release 固定为 1，不能被父环境降级。GitHub/clean clone 因为没有 local-private 目录，不包含充值实现。",
       "T8_DISABLE_LOCAL_EXTENSIONS": "开发环境可选；1=关闭本地扩展。正式 dist:release 固定为 0，确保本机私有 sidecar 参与加密打包与后置校验。"
     },
-    "version": "2.5.8",
-    "semverVersion": "2.5.8",
+    "version": "2.6.0",
+    "semverVersion": "2.6.0",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；当前正式发布版本为 v2.5.8，新增多人协作 F1 的独立网关、画布资源授权、邀请、角色/能力、只读连接、主机管理与真实 LAN 验收，并保留 v2.5.7 的画布 Agent / 工作流医生 E5；公开源码仍排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.5.8 已使用 T8_RELEASE_APPROVAL=release-2.5.8、固定 T8_RELEASE_TARGET 的 npm run dist:release 完整发布，并通过私有 sidecar、加密后端、运行时归档、显式 Electron native rebuild、post-build、NSIS、自动更新资产、GitHub 全量回下载及独立 release:verify 闸门；GitHub Release 为非草稿、非预发布和 Latest。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；当前源码候选版本为 v2.6.0，整合多人协作 F2-F7、schema32、运行/发布加固和创作稳定性热修。最近正式发布版本仍为 v2.5.8；公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.6.0 正式 Electron/NSIS 尚未构建；t8-collaboration-release-evidence-v2 真实双设备、公网、红队与负载清单通过并绑定最终源码提交后，才允许执行唯一一次 T8_RELEASE_APPROVAL=release-2.6.0 npm run dist:release。最近已验证的自动更新 Release 仍为 v2.5.8。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",

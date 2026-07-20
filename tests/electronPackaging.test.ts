@@ -100,7 +100,7 @@ test('Electron does not open the renderer before the packaged backend is ready',
 });
 
 test('Electron shutdown deadline settles a permanently pending owner without losing fast failures', async () => {
-  const main = read('../electron/main.cjs');
+  const main = read('../electron/main.cjs').replace(/\r\n/g, '\n');
   const start = main.indexOf('function settleWithinElectronDeadline(');
   const end = main.indexOf('\n}\n\nfunction shutdownBackendForElectron', start) + 2;
   assert.ok(start >= 0 && end > start);

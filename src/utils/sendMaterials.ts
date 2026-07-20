@@ -2,6 +2,7 @@ import type { Node } from '@xyflow/react';
 import type { ResourceItem, ResourceMaterialSetKind } from '../services/api';
 import { collectMaterialSetBucketsFromData, normalizeMaterialSetItems, type MaterialSetItem, type MaterialSetKind } from './materialSet';
 import { fileNameFromUrl, type MediaItem, type MediaKind } from './mediaCollection';
+import { shouldCollectNodeTextOutput } from './imageNodeOutputMode';
 
 export type SendTargetMode =
   | 'auto'
@@ -97,6 +98,7 @@ export function collectSendableMaterialsFromNode(node: Node, sourceCanvasId?: st
     sourceNodeData: cloneNodeData(node.data),
   };
   for (const kind of MATERIAL_KINDS) {
+    if (kind === 'text' && !shouldCollectNodeTextOutput(node.type, node.data)) continue;
     for (const item of buckets[kind]) {
       out.push(toSendable(item, meta));
     }

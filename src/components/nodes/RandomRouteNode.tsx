@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo } from 'react';
-import { Handle, Position, useReactFlow, type Edge, type Node, type NodeProps } from '@xyflow/react';
+import { Handle, Position, useNodeConnections, useNodesData, useReactFlow, type Edge, type Node, type NodeProps } from '@xyflow/react';
 import { GitBranch, Shuffle } from 'lucide-react';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
 import { matchesRunCompletion, useRunBusStore } from '../../stores/runBus';
@@ -17,6 +17,7 @@ import {
 } from '../../utils/randomRoute';
 import { topologicalLayers, topologicalSort } from '../../utils/topologicalSort';
 import { collectMaterialSetBucketsFromData, valueOfMaterialSetItem } from '../../utils/materialSet';
+import { shouldCollectNodeTextOutput } from '../../utils/imageNodeOutputMode';
 import { useUpdateNodeData } from './useUpdateNodeData';
 
 const COLOR = '#f97316';
@@ -48,8 +49,6 @@ const pushUnique = (arr: string[], value: any) => {
   if (!trimmed) return;
   if (!arr.includes(trimmed)) arr.push(trimmed);
 };
-
-const arrayLen = (data: Record<string, any>, key: string) => (Array.isArray(data[key]) ? data[key].length : 0);
 
 function waitForNodeRun(nodeId: string): Promise<WaitResult> {
   return new Promise((resolve) => {
@@ -96,6 +95,12 @@ const RandomRouteNode = (p: NodeProps) => {
   const { theme, style } = useThemeStore();
   const d = (p.data || {}) as any;
   const settings = normalizeRandomRouteSettings(d);
+  const upstreamConnections = useNodeConnections({ id: p.id, handleType: 'target' });
+  const upstreamIds = useMemo(
+    () => Array.from(new Set(upstreamConnections.map((connection) => connection.source))),
+    [upstreamConnections],
+  );
+  const upstreamNodes = useNodesData(upstreamIds);
 
   const activeHandles = useMemo(() => {
     const raw = Array.isArray(d.randomRouteActiveHandles) ? d.randomRouteActiveHandles : [];
@@ -104,43 +109,42 @@ const RandomRouteNode = (p: NodeProps) => {
   const activeSet = useMemo(() => new Set(activeHandles), [activeHandles]);
 
   const upstreamSignature = useMemo(() => {
-    const edges = getEdges();
-    const nodes = getNodes();
-    const upstreamIds = edges.filter((edge) => edge.target === p.id).map((edge) => edge.source);
-    return upstreamIds
-      .map((uid) => {
-        const node = nodes.find((item) => item.id === uid);
+    const list = Array.isArray(upstreamNodes) ? upstreamNodes : [];
+    return list
+      .map((node) => {
+        const uid = node?.id || '';
         const data = ((node?.data || {}) as Record<string, any>);
+        const arraySignature = (key: string) => (Array.isArray(data[key]) ? JSON.stringify(data[key]) : '');
         return [
           uid,
+          node?.type || '',
           data.prompt || '',
           data.outputText || '',
           data.reply || '',
           data.text || '',
+          data.imageOnlyOutput === false ? 'image-text-output' : 'image-only-output',
           data.materialSetKind || '',
           data.imageUrl || '',
           data.videoUrl || '',
           data.audioUrl || '',
           data.modelUrl || '',
-          arrayLen(data, 'imageUrls'),
-          arrayLen(data, 'videoUrls'),
-          arrayLen(data, 'audioUrls'),
-          arrayLen(data, 'modelUrls'),
-          arrayLen(data, 'textSegments'),
-          arrayLen(data, 'segments'),
-          arrayLen(data, 'texts'),
-          arrayLen(data, 'materialSetItems'),
-          arrayLen(data, 'urls'),
-          arrayLen(data, 'generatedImages'),
+          arraySignature('imageUrls'),
+          arraySignature('videoUrls'),
+          arraySignature('audioUrls'),
+          arraySignature('modelUrls'),
+          arraySignature('textSegments'),
+          arraySignature('segments'),
+          arraySignature('texts'),
+          arraySignature('materialSetItems'),
+          arraySignature('urls'),
+          arraySignature('generatedImages'),
         ].join('|');
       })
       .join('::');
-  }, [p.id, p.data, getEdges, getNodes]);
+  }, [upstreamNodes]);
 
   useEffect(() => {
-    const edges = getEdges();
-    const nodes = getNodes();
-    const upstreamIds = edges.filter((edge) => edge.target === p.id).map((edge) => edge.source);
+    const nodes = Array.isArray(upstreamNodes) ? upstreamNodes : [];
 
     if (upstreamIds.length === 0) {
       const cur = JSON.stringify({
@@ -202,13 +206,15 @@ const RandomRouteNode = (p: NodeProps) => {
         continue;
       }
 
-      const textArrayField = ['textSegments', 'segments', 'texts'].find((field) => Array.isArray(data[field]) && data[field].length > 0);
-      if (textArrayField) data[textArrayField].forEach((text: any) => pushUnique(texts, text));
-      else {
-        pushUnique(texts, data.outputText);
-        pushUnique(texts, data.reply);
-        pushUnique(texts, data.prompt);
-        pushUnique(texts, data.text);
+      if (shouldCollectNodeTextOutput(upstreamNode?.type, upstreamNode?.data)) {
+        const textArrayField = ['textSegments', 'segments', 'texts'].find((field) => Array.isArray(data[field]) && data[field].length > 0);
+        if (textArrayField) data[textArrayField].forEach((text: any) => pushUnique(texts, text));
+        else {
+          pushUnique(texts, data.outputText);
+          pushUnique(texts, data.reply);
+          pushUnique(texts, data.prompt);
+          pushUnique(texts, data.text);
+        }
       }
 
       pushUnique(images, data.imageUrl);
@@ -349,7 +355,7 @@ const RandomRouteNode = (p: NodeProps) => {
 
   useRunTrigger(p.id, handleRun, 'random-route');
 
-  const upstreamCount = getEdges().filter((edge) => edge.target === p.id).length;
+  const upstreamCount = upstreamConnections.length;
   const downstreamCount = getEdges().filter((edge) => edge.source === p.id).length;
   const textCount = Array.isArray(d.textSegments) ? d.textSegments.length : d.prompt ? 1 : 0;
   const imageCount = (d.imageUrl ? 1 : 0) + (Array.isArray(d.imageUrls) ? d.imageUrls.length : 0);

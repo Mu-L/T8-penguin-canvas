@@ -2227,13 +2227,17 @@
           "referenceImages": {
             "type": "array",
             "maxItems": 0
+          },
+          "imageOnlyOutput": {
+            "type": "boolean"
           }
         },
         "defaults": {
           "model": "gpt-image-2",
           "aspectRatio": "1:1",
           "sizeLevel": "1K",
-          "referenceImages": []
+          "referenceImages": [],
+          "imageOnlyOutput": true
         },
         "connectionPorts": {
           "dynamic": false,

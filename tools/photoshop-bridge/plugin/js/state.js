@@ -17,6 +17,8 @@
       providerId: '',
       model: '',
       generateMode: 'generate',
+      generateBusy: false,
+      psOperationBusy: '',
       results: [],
       uploadLayer: localStorage.getItem('t8.ps.uploadLayer') !== '0',
       commandTimer: null,

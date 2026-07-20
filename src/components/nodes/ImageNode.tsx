@@ -436,6 +436,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   const status: 'idle' | 'generating' | 'success' | 'error' = d?.status || 'idle';
   const imageUrl = d?.imageUrl as string | undefined;
   const localPrompt = d?.prompt || '';
+  const imageOnlyOutput = d?.imageOnlyOutput !== false;
   const promptMentions: MediaMention[] = Array.isArray(d?.promptMentions) ? d.promptMentions : [];
   // 节点内本地上传的参考图(除了上游接入的,这里是手动上传)
   const refImages: string[] = Array.isArray(d?.referenceImages) ? d.referenceImages : [];
@@ -2462,6 +2463,18 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             className="w-full h-14 resize-none rounded bg-white/5 border border-white/10 px-2 py-1 text-[11px] text-white outline-none focus:border-white/30 placeholder:text-white/30"
           />
         </div>}
+
+        <label className="nodrag flex cursor-pointer items-center gap-1.5 rounded border border-white/10 bg-white/[0.03] px-2 py-1.5 text-[10px] text-white/60">
+          <input
+            type="checkbox"
+            className="nodrag nowheel h-3.5 w-3.5 shrink-0 accent-amber-400"
+            checked={imageOnlyOutput}
+            disabled={status === 'generating'}
+            onChange={(event) => update({ imageOnlyOutput: event.currentTarget.checked })}
+            aria-label="仅输出图片结果"
+          />
+          <span>仅输出图片结果（不输出 Prompt）</span>
+        </label>
 
         {/* 生成按钮(包含异步进度) */}
         {status === 'generating' ? (

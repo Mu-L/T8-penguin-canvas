@@ -68,6 +68,7 @@ import {
   shouldPreserveAutoOutputMaterialNode,
   writeOutputMaterialPersistenceSetting,
 } from '../utils/outputMaterialPersistence';
+import { shouldCollectNodeTextOutput } from '../utils/imageNodeOutputMode';
 import {
   buildDirectorStoryboardOutputNodeData,
   findDirectorStoryboardOutputItemForNodeData,
@@ -1633,8 +1634,8 @@ function withNodeSerialBadge(Component: ComponentType<any>): ComponentType<any> 
 
 // 节点初始 data(用于区分共享组件的 kind/preset/model 等)
 const INITIAL_DATA: Record<string, Record<string, any>> = {
-  image: { model: 'gpt-image-2', aspectRatio: '1:1', sizeLevel: '1K', referenceImages: [] },
-  edit: { mode: 'edit', model: 'gpt-image-2', aspectRatio: '1:1', sizeLevel: '1K', referenceImages: [] },
+  image: { model: 'gpt-image-2', aspectRatio: '1:1', sizeLevel: '1K', referenceImages: [], imageOnlyOutput: true },
+  edit: { mode: 'edit', model: 'gpt-image-2', aspectRatio: '1:1', sizeLevel: '1K', referenceImages: [], imageOnlyOutput: true },
   'video-edit': { ...DEFAULT_VIDEO_EDIT_DATA, clips: [], settings: { ...DEFAULT_VIDEO_EDIT_DATA.settings }, job: { ...DEFAULT_VIDEO_EDIT_DATA.job } },
   seedance: {
     seedanceApiSource: 'auto',
@@ -7355,6 +7356,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     for (const node of selectedNodes) {
       const nodeBuckets = collectMaterialSetBucketsFromData(node.data);
       for (const kind of ['text', 'image', 'video', 'audio'] as MaterialSetKind[]) {
+        if (kind === 'text' && !shouldCollectNodeTextOutput(node.type, node.data)) continue;
         buckets[kind].push(...nodeBuckets[kind]);
       }
     }
@@ -11713,7 +11715,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         seen.add(u);
         mods.push(u);
       };
-      const suppressStandaloneTextOutputs = t === 'director-storyboard';
+      const suppressStandaloneTextOutputs = t === 'director-storyboard' || !shouldCollectNodeTextOutput(t, d);
       if (!suppressStandaloneTextOutputs) {
         pushTxt(d.outputText);
         pushTxt(d.reply);

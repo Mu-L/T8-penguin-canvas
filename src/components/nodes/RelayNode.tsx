@@ -1,13 +1,14 @@
 import { memo, useEffect, useMemo } from 'react';
-import { Handle, Position, useReactFlow, type NodeProps } from '@xyflow/react';
+import { Handle, Position, useNodeConnections, useNodesData, type NodeProps } from '@xyflow/react';
 import { ArrowRightLeft } from 'lucide-react';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { collectMaterialSetBucketsFromData, valueOfMaterialSetItem } from '../../utils/materialSet';
+import { shouldCollectNodeTextOutput } from '../../utils/imageNodeOutputMode';
 
 /**
  * RelayNode - 数据中转
  * 自动透传上游全部可识别的素材字段给下游：
- *   - 文本：prompt / outputText / reply / text
+ *   - 文本：prompt / outputText / reply / text（遵守图像节点的仅图片输出契约）
  *   - 图像：imageUrl(单) + imageUrls / urls / generatedImages(多)
  *   - 视频：videoUrl
  *   - 音频：audioUrl
@@ -28,49 +29,53 @@ const pushUnique = (arr: string[], v: any) => {
 
 const RelayNode = (p: NodeProps) => {
   const update = useUpdateNodeData(p.id);
-  const { getEdges, getNodes } = useReactFlow();
   const d = p.data as any;
+  const upstreamConnections = useNodeConnections({ id: p.id, handleType: 'target' });
+  const upstreamIds = useMemo(
+    () => Array.from(new Set(upstreamConnections.map((connection) => connection.source))),
+    [upstreamConnections],
+  );
+  const upstreamNodes = useNodesData(upstreamIds);
 
   // 计算上游签名 - 仅在上游 data 变化时 effect 才会重跑，
   // 避免原来 useEffect 无 deps 导致的 setState 风暴循环。
   // signature 覆盖所有透传字段，上游任何一项变化都会触发重算。
   const upstreamSignature = useMemo(() => {
-    const edges = getEdges();
-    const nodes = getNodes();
-    const upstreamIds = edges.filter((e) => e.target === p.id).map((e) => e.source);
-    return upstreamIds
-      .map((uid) => {
-        const n = nodes.find((x) => x.id === uid);
+    const list = Array.isArray(upstreamNodes) ? upstreamNodes : [];
+    return list
+      .map((n) => {
+        const uid = n?.id || '';
         const ud = (n?.data as any) || {};
-        const arrLen = (k: string) => (Array.isArray(ud[k]) ? ud[k].length : 0);
+        const arrSig = (k: string) => (Array.isArray(ud[k]) ? JSON.stringify(ud[k]) : '');
         return [
           uid,
+          n?.type || '',
           ud.prompt || '',
           ud.outputText || '',
           ud.reply || '',
           ud.text || '',
+          ud.imageOnlyOutput === false ? 'image-text-output' : 'image-only-output',
           ud.materialSetKind || '',
           ud.imageUrl || '',
           ud.videoUrl || '',
           ud.audioUrl || '',
-          arrLen('imageUrls'),
-          arrLen('videoUrls'),
-          arrLen('audioUrls'),
-          arrLen('textSegments'),
-          arrLen('materialSetItems'),
-          arrLen('urls'),
-          arrLen('generatedImages'),
+          arrSig('imageUrls'),
+          arrSig('videoUrls'),
+          arrSig('audioUrls'),
+          arrSig('textSegments'),
+          arrSig('segments'),
+          arrSig('texts'),
+          arrSig('materialSetItems'),
+          arrSig('urls'),
+          arrSig('generatedImages'),
         ].join('|');
       })
       .join('::');
-    // p.data 变化作为一个轻量重算触发点，但计算出的字符串在上游未变时会相等
-  }, [p.id, p.data, getEdges, getNodes]);
+  }, [upstreamNodes]);
 
   // 监听上游变化，自动透传
   useEffect(() => {
-    const edges = getEdges();
-    const nodes = getNodes();
-    const upstreamIds = edges.filter((e) => e.target === p.id).map((e) => e.source);
+    const nodes = Array.isArray(upstreamNodes) ? upstreamNodes : [];
 
     // 零上游时主动清理自身透传字段，避免下游读到错乱的残留数据
     if (upstreamIds.length === 0) {
@@ -116,16 +121,18 @@ const RelayNode = (p: NodeProps) => {
         buckets.audio.forEach((item) => pushUnique(audios, item.url));
         continue;
       }
-      // 文本：优先取 outputText (OutputNode 手动编辑后的) > reply (LLM) > prompt > text
-      const textArrayFields = ['textSegments', 'segments', 'texts'];
-      const textArrayField = textArrayFields.find((field) => Array.isArray(ud[field]) && ud[field].length > 0);
-      if (textArrayField) {
-        ud[textArrayField].forEach((text: any) => pushUnique(texts, text));
-      } else {
-        pushUnique(texts, ud.outputText);
-        pushUnique(texts, ud.reply);
-        pushUnique(texts, ud.prompt);
-        pushUnique(texts, ud.text);
+      if (shouldCollectNodeTextOutput(n?.type, n?.data)) {
+        // 文本：优先取 outputText (OutputNode 手动编辑后的) > reply (LLM) > prompt > text
+        const textArrayFields = ['textSegments', 'segments', 'texts'];
+        const textArrayField = textArrayFields.find((field) => Array.isArray(ud[field]) && ud[field].length > 0);
+        if (textArrayField) {
+          ud[textArrayField].forEach((text: any) => pushUnique(texts, text));
+        } else {
+          pushUnique(texts, ud.outputText);
+          pushUnique(texts, ud.reply);
+          pushUnique(texts, ud.prompt);
+          pushUnique(texts, ud.text);
+        }
       }
       // 图像：单 + 多都收集
       pushUnique(images, ud.imageUrl);
@@ -177,7 +184,7 @@ const RelayNode = (p: NodeProps) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [upstreamSignature]);
 
-  const upstreamCount = getEdges().filter((e) => e.target === p.id).length;
+  const upstreamCount = upstreamConnections.length;
 
   // 展示计数
   const imageCount =

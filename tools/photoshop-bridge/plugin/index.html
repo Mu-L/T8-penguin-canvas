@@ -10,7 +10,7 @@
     <header class="top">
       <div>
         <div class="brand">T8 Photoshop Link</div>
-        <div class="sub">贞贞画布 · PS 联动</div>
+        <div class="sub">贞贞画布 · PS 联动 · v0.1.4</div>
       </div>
       <div class="status-pill"><span id="connDot" class="dot"></span><span id="connText">未连接</span></div>
     </header>
@@ -42,9 +42,10 @@
 
     <section class="view" data-view="generate">
       <div class="mode-row">
-        <button class="seg active" type="button" data-mode="generate">文生图</button>
-        <button class="seg" type="button" data-mode="edit">编辑当前图层</button>
+        <button class="seg active" type="button" data-mode="generate" aria-pressed="true">文生图</button>
+        <button class="seg" type="button" data-mode="edit" aria-pressed="false">编辑当前图层</button>
       </div>
+      <div id="generateModeHint" class="mode-hint">输入提示词后直接生成新图像。</div>
       <div class="bar two">
         <select id="providerSelect" class="select"></select>
         <select id="modelSelect" class="select"></select>
@@ -79,7 +80,8 @@
         <input id="serverInput" class="input" type="text" spellcheck="false" placeholder="127.0.0.1:18766">
         <button id="connectBtn" class="primary-sm" type="button">连接</button>
       </div>
-      <label class="check"><input id="uploadLayerToggle" type="checkbox" checked> 上传/编辑时优先使用当前图层</label>
+      <label class="check"><input id="uploadLayerToggle" type="checkbox" checked> 资产页上传时优先使用当前图层</label>
+      <div class="hint">“编辑当前图层”始终读取当前选中的 Photoshop 图层，不受上方上传设置影响。</div>
       <button id="openT8" class="secondary wide" type="button">打开 T8 画布</button>
       <div class="hint">插件只连接本机 T8，不保存 API Key。图像生成和编辑会使用 T8 已配置的扩展平台。</div>
       <div id="settingsMsg" class="msg"></div>

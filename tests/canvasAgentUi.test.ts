@@ -2,9 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const workbench = readFileSync(new URL('../src/components/ProjectWorkbench.tsx', import.meta.url), 'utf8');
-const api = readFileSync(new URL('../src/services/api.ts', import.meta.url), 'utf8');
-const agent = readFileSync(new URL('../src/utils/canvasAgent.ts', import.meta.url), 'utf8');
+const readSource = (relativePath: string) =>
+  readFileSync(new URL(relativePath, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+
+const workbench = readSource('../src/components/ProjectWorkbench.tsx');
+const api = readSource('../src/services/api.ts');
+const agent = readSource('../src/utils/canvasAgent.ts');
 
 function sourceBetween(source: string, start: string, end: string) {
   const startIndex = source.indexOf(start);

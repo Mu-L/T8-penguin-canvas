@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-const read = (relativePath: string) => readFileSync(new URL(`../${relativePath}`, import.meta.url), 'utf8');
+const read = (relativePath: string) =>
+  readFileSync(new URL(`../${relativePath}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const upload = read('src/components/CollaborationAssetUpload.tsx');
 const workspace = read('src/components/CollaborationWorkspace.tsx');
 

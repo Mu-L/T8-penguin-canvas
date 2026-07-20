@@ -11,7 +11,9 @@ function read(relativePath: string): string {
 
 test('topbar exposes plugin install as a separate button before canvas tutorial', () => {
   const app = read('src/App.tsx');
+  const readme = read('README.md');
   const packageJson = read('package.json');
+  const packageConfig = JSON.parse(packageJson);
   const photoshopManifest = read('tools/photoshop-bridge/plugin/manifest.json');
   const figmaManifest = read('tools/figma-bridge/plugin/manifest.json');
   const extensionManifest = read('extension/manifest.json');
@@ -24,6 +26,10 @@ test('topbar exposes plugin install as a separate button before canvas tutorial'
   assert.match(app, /T8 Photoshop Link/);
   assert.match(app, /tools\\\\photoshop-bridge\\\\plugin\\\\manifest\.json/);
   assert.match(app, /Adobe UXP Developer Tool/);
+  assert.match(app, /Unload/);
+  assert.match(app, /Remove.*Add/);
+  assert.match(readme, /Unload/);
+  assert.match(readme, /Remove.*Add/);
   assert.match(app, /T8 Penguin Canvas Bridge/);
   assert.match(app, /tools\\\\figma-bridge\\\\plugin\\\\manifest\.json/);
   assert.match(app, /Plugins\s*->\s*Development\s*->\s*Import plugin from manifest/);
@@ -35,7 +41,18 @@ test('topbar exposes plugin install as a separate button before canvas tutorial'
   assert.match(photoshopManifest, /T8 Photoshop Link/);
   assert.match(figmaManifest, /T8 Penguin Canvas Bridge/);
   assert.match(extensionManifest, /T8 Penguin Canvas Web Image Reverse/);
-  assert.match(packageJson, /"from":\s*"tools\/photoshop-bridge"/);
+  assert.match(packageJson, /"from":\s*"tools\/photoshop-bridge\/plugin"/);
+  const photoshopResource = packageConfig.build.extraResources.find((entry: any) => entry.from === 'tools/photoshop-bridge/plugin');
+  assert.deepEqual(photoshopResource, {
+    from: 'tools/photoshop-bridge/plugin',
+    to: 'tools/photoshop-bridge/plugin',
+    filter: ['**/*'],
+  });
+  assert.equal(
+    packageConfig.build.extraResources.some((entry: any) => entry.from === 'tools/photoshop-bridge'),
+    false,
+    'Electron must not package sibling archives such as a stale PS联动插件.rar',
+  );
   assert.match(packageJson, /"from":\s*"tools\/figma-bridge"/);
   assert.match(packageJson, /"from":\s*"extension"/);
 });

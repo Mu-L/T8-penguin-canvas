@@ -5,6 +5,7 @@ import { selectSourceHandleData } from '../../utils/sourceHandleData';
 import { fileNameFromUrl } from '../../utils/mediaCollection';
 import { normalizeRhNodeId } from '../../utils/rhTextBinding';
 import { dedupeUpstreamMaterialBuckets } from '../../utils/upstreamMaterialBuckets';
+import { shouldCollectNodeTextOutput } from '../../utils/imageNodeOutputMode';
 
 /**
  * useUpstreamMaterials - 通用「上游素材聚合」hook
@@ -263,6 +264,7 @@ export function useUpstreamMaterials(nodeId: string): UpstreamMaterials {
     for (const n of list) {
       if (!n) continue;
       const sid = n.id;
+      const collectNodeTextOutput = shouldCollectNodeTextOutput(n.type, n.data);
       const handles = handleMap.get(sid) || new Set<string | null>([null]);
       const routedData = selectSourceHandleData((n.data || {}) as Record<string, unknown>, handles);
       for (const ud of routedData as any[]) {
@@ -287,27 +289,29 @@ export function useUpstreamMaterials(nodeId: string): UpstreamMaterials {
         continue;
       }
 
-      // 文本: textSegments/texts 数组优先, 避免文本分割节点再把 joined prompt 当成第 N+1 项
-      const textArrayFields = ['textSegments', 'segments', 'texts'];
-      const textArrayField = textArrayFields.find((f) => Array.isArray(ud[f]) && ud[f].length > 0);
-      if (textArrayField) {
-        ud[textArrayField].forEach((item: any, index: number) => {
-          pushText(sid, item, `text-array:${sid}:${textArrayField}:${index}`, undefined, textMeta);
-        });
-      } else {
-        // 文本: outputText (用户编辑覆盖) > reply > promptResolved(@素材已解析) > prompt > text
-        pushText(sid, ud.outputText, `text-field:${sid}:outputText`, undefined, textMeta);
-        pushText(sid, ud.reply, `text-field:${sid}:reply`, undefined, textMeta);
-        let primaryPromptText = '';
-        if (typeof ud.promptResolved === 'string' && ud.promptResolved.trim()) {
-          primaryPromptText = ud.promptResolved.trim();
-          pushText(sid, ud.promptResolved, `text-field:${sid}:promptResolved`, undefined, textMeta);
+      if (collectNodeTextOutput) {
+        // 文本: textSegments/texts 数组优先, 避免文本分割节点再把 joined prompt 当成第 N+1 项
+        const textArrayFields = ['textSegments', 'segments', 'texts'];
+        const textArrayField = textArrayFields.find((f) => Array.isArray(ud[f]) && ud[f].length > 0);
+        if (textArrayField) {
+          ud[textArrayField].forEach((item: any, index: number) => {
+            pushText(sid, item, `text-array:${sid}:${textArrayField}:${index}`, undefined, textMeta);
+          });
         } else {
-          primaryPromptText = typeof ud.prompt === 'string' ? ud.prompt.trim() : '';
-          pushText(sid, ud.prompt, `text-field:${sid}:prompt`, undefined, textMeta);
-        }
-        if (typeof ud.text === 'string' && ud.text.trim() !== primaryPromptText) {
-          pushText(sid, ud.text, `text-field:${sid}:text`, undefined, textMeta);
+          // 文本: outputText (用户编辑覆盖) > reply > promptResolved(@素材已解析) > prompt > text
+          pushText(sid, ud.outputText, `text-field:${sid}:outputText`, undefined, textMeta);
+          pushText(sid, ud.reply, `text-field:${sid}:reply`, undefined, textMeta);
+          let primaryPromptText = '';
+          if (typeof ud.promptResolved === 'string' && ud.promptResolved.trim()) {
+            primaryPromptText = ud.promptResolved.trim();
+            pushText(sid, ud.promptResolved, `text-field:${sid}:promptResolved`, undefined, textMeta);
+          } else {
+            primaryPromptText = typeof ud.prompt === 'string' ? ud.prompt.trim() : '';
+            pushText(sid, ud.prompt, `text-field:${sid}:prompt`, undefined, textMeta);
+          }
+          if (typeof ud.text === 'string' && ud.text.trim() !== primaryPromptText) {
+            pushText(sid, ud.text, `text-field:${sid}:text`, undefined, textMeta);
+          }
         }
       }
 

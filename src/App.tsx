@@ -233,7 +233,7 @@ const CANVAS_PLUGIN_INSTALL_GUIDES = [
     target: 'Photoshop UXP 面板',
     devPath: 'tools\\photoshop-bridge\\plugin\\manifest.json',
     packagedPath: 'resources\\tools\\photoshop-bridge\\plugin\\manifest.json',
-    install: 'Adobe UXP Developer Tool -> Add Plugin 选择 manifest.json，然后 Load / Load & Watch；在 Photoshop 的插件菜单打开 T8 Photoshop Link。',
+    install: 'Adobe UXP Developer Tool -> Add Plugin 选择 manifest.json，然后 Load / Load & Watch；升级 manifest 时先 Unload，若仍指向旧目录则 Remove 后从当前目录重新 Add。',
     use: '画布图片可发送到 PS，PS 当前画面可上传回 T8，插件内可浏览资产并把生成结果置入当前文档。',
     safety: '只连接 localhost / 127.0.0.1 的本机端口，不保存 T8 平台 API Key。',
   },

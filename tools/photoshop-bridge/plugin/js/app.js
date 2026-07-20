@@ -35,6 +35,7 @@
     runGenerate: $('runGenerate'),
     generateResults: $('generateResults'),
     generateMsg: $('generateMsg'),
+    generateModeHint: $('generateModeHint'),
     settingsMsg: $('settingsMsg'),
     modeButtons: document.querySelectorAll('[data-mode]'),
   };
@@ -54,13 +55,134 @@
     el.className = `msg ${kind || ''}`;
   }
 
+  function setModeHint(text, kind) {
+    els.generateModeHint.textContent = text || '';
+    els.generateModeHint.className = `mode-hint ${kind || ''}`;
+  }
+
+  function photoshopLayerInfo() {
+    if (!ps || typeof ps.activeLayerInfo !== 'function') {
+      return {
+        available: false,
+        hasDocument: false,
+        hasLayer: false,
+        documentName: '',
+        layerName: '',
+        error: '当前插件未加载 Photoshop 图层接口',
+      };
+    }
+    return ps.activeLayerInfo();
+  }
+
+  function renderGenerateButton() {
+    const provider = currentProvider();
+    const models = provider && Array.isArray(provider.imageModels) ? provider.imageModels : [];
+    const busy = !!state.generateBusy;
+    const locked = busy || !!state.psOperationBusy;
+    els.runGenerate.textContent = busy
+      ? (state.generateMode === 'edit' ? '正在编辑当前图层 …' : '正在生成 …')
+      : (state.psOperationBusy ? 'Photoshop 正在处理 …' : (state.generateMode === 'edit' ? '使用当前图层编辑' : '生成'));
+    els.runGenerate.disabled = locked || !state.connected || !models.length;
+    [
+      els.providerSelect,
+      els.modelSelect,
+      els.promptInput,
+      els.ratioSelect,
+      els.sizeSelect,
+      els.autoPlaceToggle,
+      els.syncCanvasToggle,
+      els.serverInput,
+      els.connectBtn,
+    ].forEach((control) => {
+      control.disabled = locked;
+    });
+    els.modeButtons.forEach((button) => {
+      button.disabled = locked;
+    });
+    els.placeAsset.disabled = locked || !selectedAsset();
+    els.uploadCurrent.disabled = locked || !state.connected || !ps.hasDocument();
+  }
+
+  function beginPhotoshopOperation(label) {
+    if (state.psOperationBusy) return false;
+    state.psOperationBusy = label || 'photoshop';
+    renderGenerateButton();
+    return true;
+  }
+
+  function endPhotoshopOperation(label) {
+    if (state.psOperationBusy !== label) return;
+    state.psOperationBusy = '';
+    renderGenerateButton();
+  }
+
+  function showCurrentLayerFeedback() {
+    const info = photoshopLayerInfo();
+    if (!state.connected) {
+      setModeHint('已选择当前图层编辑；请先在设置页连接 T8。', 'warn');
+      return false;
+    }
+    if (!info.available) {
+      setModeHint(`T8 后端已连接，但 Photoshop 图层接口不可用${info.error ? `：${info.error}` : ''}`, 'err');
+      return false;
+    }
+    if (!info.hasDocument) {
+      setModeHint('T8 后端已连接；请先在 Photoshop 打开一个文档。', 'warn');
+      return false;
+    }
+    if (!info.hasLayer) {
+      setModeHint(`已识别文档“${info.documentName || '未命名'}”，请先选择要编辑的图层。`, 'warn');
+      return false;
+    }
+    const providerNote = state.providers.length ? '输入提示词后点击“使用当前图层编辑”。' : '还需在 T8 API 设置中启用图像扩展平台。';
+    setModeHint(`已选择当前图层“${info.layerName || '未命名图层'}” · ${providerNote}`, state.providers.length ? 'ok' : 'warn');
+    return true;
+  }
+
+  function setGenerateMode(mode, announce) {
+    state.generateMode = mode === 'edit' ? 'edit' : 'generate';
+    els.modeButtons.forEach((item) => {
+      const active = item.getAttribute('data-mode') === state.generateMode;
+      item.classList.toggle('active', active);
+      item.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    renderGenerateButton();
+    if (state.generateMode === 'edit') {
+      showCurrentLayerFeedback();
+    } else {
+      setModeHint('输入提示词后直接生成新图像。');
+      if (announce) setMsg(els.generateMsg, '已切换为文生图。');
+    }
+  }
+
+  function connectionMessage() {
+    const info = photoshopLayerInfo();
+    if (!info.available) {
+      return {
+        text: `T8 后端已连接 ${state.host}，但 Photoshop 接口不可用${info.error ? `：${info.error}` : ''}`,
+        kind: 'err',
+      };
+    }
+    if (!info.hasDocument) {
+      return { text: `已连接 ${state.host}；请在 Photoshop 打开文档后使用当前层功能。`, kind: 'warn' };
+    }
+    if (!info.hasLayer) {
+      return { text: `已连接 ${state.host}；请在 Photoshop 选择一个图层。`, kind: 'warn' };
+    }
+    return {
+      text: `已连接 ${state.host}；当前图层：${info.layerName || '未命名图层'}`,
+      kind: 'ok',
+    };
+  }
+
   function setConnected(on) {
     state.connected = !!on;
     els.connDot.classList.toggle('on', !!on);
     els.connText.textContent = on ? '已连接' : '未连接';
-    els.placeAsset.disabled = !selectedAsset();
-    els.uploadCurrent.disabled = !on || !ps.hasDocument();
-    els.runGenerate.disabled = !on || !state.providers.length;
+    const locked = !!state.generateBusy || !!state.psOperationBusy;
+    els.placeAsset.disabled = locked || !selectedAsset();
+    els.uploadCurrent.disabled = locked || !on || !ps.hasDocument();
+    renderGenerateButton();
   }
 
   function canvasUrl() {
@@ -226,7 +348,7 @@
       });
       els.assetGrid.appendChild(card);
     });
-    els.placeAsset.disabled = !selectedAsset();
+    els.placeAsset.disabled = !!state.generateBusy || !!state.psOperationBusy || !selectedAsset();
   }
 
   function renderProviders() {
@@ -251,7 +373,7 @@
     if (!state.model && models[0]) state.model = models[0];
     if (!models.includes(state.model) && models[0]) state.model = models[0];
     els.modelSelect.value = state.model || '';
-    els.runGenerate.disabled = !state.connected || !models.length;
+    renderGenerateButton();
   }
 
   function renderResults() {
@@ -286,7 +408,14 @@
       card.appendChild(meta);
       card.addEventListener('dblclick', async () => {
         const item = state.results[Number(card.getAttribute('data-index'))];
-        if (item) await ps.placeImage(item);
+        if (!item || !beginPhotoshopOperation('result-place')) return;
+        try {
+          await ps.placeImage(item);
+        } catch (err) {
+          setMsg(els.generateMsg, err.message || String(err), 'err');
+        } finally {
+          endPhotoshopOperation('result-place');
+        }
       });
       els.generateResults.appendChild(card);
     });
@@ -337,14 +466,24 @@
 
   async function pollCommands() {
     if (!state.connected) return;
+    if (state.generateBusy || state.psOperationBusy) {
+      scheduleCommandPoll(2200);
+      return;
+    }
     if (state.commandBusy) {
       scheduleCommandPoll(2200);
       return;
     }
     state.commandBusy = true;
+    let ownsPhotoshopOperation = false;
     try {
       const json = await net.apiGet('/api/photoshop-bridge/commands/pending?limit=6');
       const commands = (json.data && Array.isArray(json.data.commands)) ? json.data.commands : [];
+      if (state.generateBusy || state.psOperationBusy) return;
+      if (commands.length > 0) {
+        ownsPhotoshopOperation = beginPhotoshopOperation('canvas-command');
+        if (!ownsPhotoshopOperation) return;
+      }
       if (commands.length > 0) {
         setMsg(els.assetMsg, `正在从 T8 画布置入 ${commands.length} 个任务 …`);
       }
@@ -372,6 +511,7 @@
         setMsg(els.settingsMsg, err.message || String(err), 'err');
       }
     } finally {
+      if (ownsPhotoshopOperation) endPhotoshopOperation('canvas-command');
       state.commandBusy = false;
       scheduleCommandPoll(1800);
     }
@@ -382,12 +522,15 @@
   }
 
   async function connect() {
+    if (state.generateBusy || state.psOperationBusy) return;
     try {
       setMsg(els.settingsMsg, '正在连接 T8 …');
       await net.connect(els.serverInput.value);
       setConnected(true);
-      setMsg(els.settingsMsg, `已连接 ${state.host}`, 'ok');
       await Promise.all([loadAssets(), loadProviders()]);
+      const status = connectionMessage();
+      setMsg(els.settingsMsg, status.text, status.kind);
+      if (state.generateMode === 'edit') showCurrentLayerFeedback();
       startCommandPolling();
     } catch (err) {
       setConnected(false);
@@ -398,17 +541,25 @@
   async function placeSelectedAsset() {
     const item = selectedAsset();
     if (!item) return;
+    if (!beginPhotoshopOperation('asset-place')) {
+      setMsg(els.assetMsg, 'Photoshop 正在处理其他任务，请完成后再置入素材。', 'warn');
+      return;
+    }
     try {
       setMsg(els.assetMsg, '正在置入 Photoshop …');
       await ps.placeImage(item);
       setMsg(els.assetMsg, '已置入当前 Photoshop 文档。', 'ok');
     } catch (err) {
       setMsg(els.assetMsg, err.message || String(err), 'err');
+    } finally {
+      endPhotoshopOperation('asset-place');
     }
   }
 
   async function uploadCurrentToT8(options) {
-    const preferLayer = !!els.uploadLayerToggle.checked;
+    const preferLayer = options && Object.prototype.hasOwnProperty.call(options, 'preferLayer')
+      ? !!options.preferLayer
+      : !!els.uploadLayerToggle.checked;
     const exported = await ps.exportCurrentPng(preferLayer);
     const upload = await net.uploadPng(exported.buffer, {
       name: exported.layerName || exported.documentName || 'photoshop',
@@ -422,6 +573,10 @@
   }
 
   async function uploadCurrent() {
+    if (!beginPhotoshopOperation('asset-upload')) {
+      setMsg(els.assetMsg, 'Photoshop 正在处理其他任务，请完成后再上传。', 'warn');
+      return;
+    }
     try {
       setMsg(els.assetMsg, '正在导出并上传 …');
       const result = await uploadCurrentToT8({ queue: true });
@@ -430,10 +585,17 @@
       await loadAssets();
     } catch (err) {
       setMsg(els.assetMsg, err.message || String(err), 'err');
+    } finally {
+      endPhotoshopOperation('asset-upload');
     }
   }
 
   async function runGenerate() {
+    if (state.generateBusy) return;
+    if (state.psOperationBusy) {
+      setMsg(els.generateMsg, 'Photoshop 正在置入或上传素材，请完成后再生成。', 'warn');
+      return;
+    }
     const prompt = String(els.promptInput.value || '').trim();
     if (!prompt) {
       setMsg(els.generateMsg, '请输入提示词。', 'err');
@@ -445,48 +607,80 @@
       return;
     }
 
-    els.runGenerate.disabled = true;
+    // Capture every mutable option before exporting the layer. Export/upload can
+    // take several seconds and must not accidentally combine old and new UI state.
+    const request = {
+      mode: state.generateMode,
+      providerId: provider.id,
+      model: state.model,
+      prompt,
+      size: els.sizeSelect.value,
+      aspectRatio: els.ratioSelect.value,
+      syncToCanvas: !!els.syncCanvasToggle.checked,
+      autoPlace: !!els.autoPlaceToggle.checked,
+    };
+
+    if (request.mode === 'edit') {
+      const info = photoshopLayerInfo();
+      if (!info.available || !info.hasDocument || !info.hasLayer) {
+        showCurrentLayerFeedback();
+        setMsg(els.generateMsg, !info.available
+          ? 'Photoshop 图层接口不可用，请在 UXP Developer Tool 中重新加载插件。'
+          : (!info.hasDocument ? '请先打开 Photoshop 文档。' : '请先选择要编辑的 Photoshop 图层。'), 'err');
+        return;
+      }
+    }
+
+    if (!beginPhotoshopOperation('generate')) {
+      setMsg(els.generateMsg, 'Photoshop 正在处理其他任务，请完成后再生成。', 'warn');
+      return;
+    }
+    state.generateBusy = true;
+    renderGenerateButton();
     try {
-      setMsg(els.generateMsg, state.generateMode === 'edit' ? '正在导出图层并编辑 …' : '正在生成 …');
+      setMsg(els.generateMsg, request.mode === 'edit' ? '正在导出图层并编辑 …' : '正在生成 …');
       let refs = [];
       let exported = null;
-      if (state.generateMode === 'edit') {
-        const uploaded = await uploadCurrentToT8({ queue: false, prompt });
+      if (request.mode === 'edit') {
+        const uploaded = await uploadCurrentToT8({ queue: false, prompt: request.prompt, preferLayer: true });
         exported = uploaded.exported;
         refs = [uploaded.upload.url];
+        setMsg(els.generateMsg, `已读取当前图层“${exported.layerName || '未命名图层'}”，正在提交编辑 …`);
       }
       const json = await net.apiPost('/api/photoshop-bridge/image', {
-        providerId: provider.id,
-        providerModel: state.model,
-        model: state.model,
-        prompt,
-        size: els.sizeSelect.value,
-        aspect_ratio: els.ratioSelect.value,
+        providerId: request.providerId,
+        providerModel: request.model,
+        model: request.model,
+        prompt: request.prompt,
+        size: request.size,
+        aspect_ratio: request.aspectRatio,
         images: refs,
         referenceImages: refs,
-        syncToCanvas: els.syncCanvasToggle.checked,
+        syncToCanvas: request.syncToCanvas,
         documentName: exported && exported.documentName,
         layerName: exported && exported.layerName,
       });
       const urls = (json.data && json.data.imageUrls) || [];
       state.results = urls.map((url, index) => ({ kind: 'image', url, name: `t8_ps_result_${index + 1}.png` }));
       renderResults();
-      if (els.autoPlaceToggle.checked) {
+      if (request.autoPlace) {
         for (const item of state.results) await ps.placeImage(item);
       }
-      setMsg(els.generateMsg, `完成 ${state.results.length} 张。${els.autoPlaceToggle.checked ? '已置入 PS。' : ''}`, 'ok');
+      setMsg(els.generateMsg, `完成 ${state.results.length} 张。${request.autoPlace ? '已置入 PS。' : ''}`, 'ok');
       await loadAssets();
     } catch (err) {
       setMsg(els.generateMsg, err.message || String(err), 'err');
     } finally {
+      state.generateBusy = false;
+      endPhotoshopOperation('generate');
       renderModels();
     }
   }
 
   els.tabs.forEach((btn) => btn.addEventListener('click', () => switchTab(btn.getAttribute('data-tab') || 'assets')));
   els.modeButtons.forEach((btn) => btn.addEventListener('click', () => {
-    state.generateMode = btn.getAttribute('data-mode') || 'generate';
-    els.modeButtons.forEach((item) => item.classList.toggle('active', item === btn));
+    if (state.generateBusy || state.psOperationBusy) return;
+    setGenerateMode(btn.getAttribute('data-mode') || 'generate', true);
   }));
   els.serverInput.value = state.host;
   els.uploadLayerToggle.checked = state.uploadLayer;
@@ -526,8 +720,12 @@
   });
   els.runGenerate.addEventListener('click', runGenerate);
   els.openT8.addEventListener('click', () => ps.openUrl(canvasUrl()));
-  ps.onDocChange(() => setConnected(state.connected));
+  ps.onDocChange(() => {
+    setConnected(state.connected);
+    if (state.generateMode === 'edit' && !state.generateBusy && !state.psOperationBusy) showCurrentLayerFeedback();
+  });
 
+  setGenerateMode(state.generateMode, false);
   connect();
   } catch (error) {
     if (window.T8PS_REPORT_BOOT_ERROR) window.T8PS_REPORT_BOOT_ERROR(error, 'app.js');

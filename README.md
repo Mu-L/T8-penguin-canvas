@@ -10,13 +10,13 @@ https://www.runninghub.cn/?inviteCode=rh-v1121
 My favorite girl Go YounJung
 # 🐧 贞贞的无限画布（企鹅共创版） · T8-penguin-canvas
 
-> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.5.8
+> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.6.0
 >
 > GitHub：<https://github.com/T8mars/T8-penguin-canvas>
 
 一个面向 AI 创作的 **节点式画布**：拖拽节点、连线编排、生成图像 / 视频 / 音频、调用 LLM、串接 RunningHub 工作流，叠加批量执行、智能对齐、打组、主题模板与终端日志。Web 浏览器和桌面端均可使用。
 
-![status](https://img.shields.io/badge/version-v2.5.8-brightgreen) ![node](https://img.shields.io/badge/node-56-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
+![status](https://img.shields.io/badge/version-v2.6.0-brightgreen) ![node](https://img.shields.io/badge/node-56-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
 
 ---
 
@@ -37,6 +37,7 @@ My favorite girl Go YounJung
 
 - 🎨 **56 个节点**，覆盖文本 / 图像 / 视频 / 音频 / LLM / RunningHub / ComfyUI / 3D / 工具 / 辅助 / 工具箱 / 输出预览 / 上传素材 / 素材集 / 批量打标 / 随机路由
 - 🧺 **画布级批量导入 + 素材合集打散**：上传节点支持一次选择多张图 / 多个视频 / 多段音频；也可直接把剪贴板或文件拖到画布，同类型多素材自动形成合集，上传和输出合集都可一键打散为多个独立素材节点
+- 🔄 **v2.6.0 协作、执行与创作稳定性升级**：整合 F2-F7 的断线重连与增量同步、结构并发、协同文本与撤销、可续传素材、评论审批和权威运行队列；普通 RUN 的 advisory 警告不再反复弹窗，同时修复结构化 Provider 错误、VibeX 下拉滚动、Photoshop 当前图层编辑，并让图像节点默认只输出图片结果。正式自动更新包仍受真实双设备、公网 TLS、红队与负载证据闸门约束。
 - 🤝 **v2.5.8 多人协作 F1 自动更新版**：新增与私有后端隔离的独立协作网关、具体网卡/端口选择、LAN 链接和本地二维码；邀请严格绑定项目/画布、角色、有效期和次数，支持成员角色、邀请、单会话、全部会话与网关生命周期管理。viewer 保持只读，角色变化和撤销会立即让旧连接失效；schema 23 对 AssetRef、URL 映射、固定子工作流、历史操作、增量同步与 Patch 建立持久资源授权，缺失或内容冲突时失败关闭。真实私网浏览器已覆盖读 200/写 403、关闭码和端口释放；离线队列、双设备、审片与公网反代仍在后续轮次。
 - 🛡️ **v2.5.7 工作流医生 E5 自动更新版**：新增固定版本子工作流依赖循环诊断、临时节点/精确端口问题标记、提示注入与越权红队防护，以及多人竞争、失败回滚和旧 Attempt 隔离。固定评测包含 120 个坏工作流与 20 个干净对照；该结果只代表本语料覆盖的 4 个修复家族和 5 个规则，不外推为全部规则零误报。协作响应按权威飞书节点与精确路径保留公开资源令牌，同时继续清除普通凭据；正式 Electron 发布会固定已推送源码 SHA，并校验离线运行时、自动更新三项资产及其哈希，不能被父环境变量降级为空壳包。
 - 🩺 **v2.5.6 运行证据与工作流医生 E4 自动更新版**：执行前只读体检会核对项目、画布、revision、节点范围与结构摘要；失败后诊断引用持久化的 Run / NodeRun / Attempt 证据，并区分平台、配置、网络和画布结构问题。reviewer 只获得解释与建议，editor 不能修改主机 API Key，任何结构修复仍需预览和明确确认；Windows Electron 安装包与 `latest.yml` 自动更新资产已发布。
@@ -125,10 +126,11 @@ My favorite girl Go YounJung
 `发送到 Photoshop` 和 `T8 Photoshop Link` 面板通过 T8 后端本机队列通信，不需要把素材发到第三方中转：
 
 1. 打开 Adobe UXP Developer Tool，点击 Add Plugin，选择 `tools\photoshop-bridge\plugin\manifest.json`；打包版位置是应用目录 `resources\tools\photoshop-bridge\plugin\manifest.json`。
-2. 在 Photoshop 中运行 `T8 Photoshop Link` 面板，并保持 T8 后端 / 桌面端打开。
-3. 从 T8 的发送素材弹窗点击 `发送到 Photoshop`，图像会进入 PS 队列并自动置入当前文档；也可以在 PS 面板里导出当前图层 / 文档回到当前画布。
+2. 升级插件 manifest 时，先在 UXP Developer Tool 中 Unload；如果条目仍指向旧目录，先 Remove，再从上面的当前 `manifest.json` 重新 Add 并 Load。仅点 Reload 不能保证 manifest 版本已更新，可在面板标题下确认当前版本号。
+3. 在 Photoshop 中运行 `T8 Photoshop Link` 面板，并保持 T8 后端 / 桌面端打开。
+4. 从 T8 的发送素材弹窗点击 `发送到 Photoshop`，图像会进入 PS 队列并自动置入当前文档；也可以在 PS 面板里导出当前图层 / 文档回到当前画布。
 
-PS 面板包含 `资产 / 生成 / 设置` 三个页签：资产页可浏览最近输出、上传素材和资源库图像；生成页复用 T8 扩展 API 图像模型，支持文生图和带当前图层参考图的图像编辑，结果可自动回传画布。
+PS 面板包含 `资产 / 生成 / 设置` 三个页签：资产页可浏览最近输出、上传素材和资源库图像；生成页复用 T8 扩展 API 图像模型，支持文生图和带当前图层参考图的图像编辑，结果可自动回传画布。“编辑当前图层”始终读取当前选中的 Photoshop 图层，不受资产页普通上传偏好影响。
 - 🧍 **肖像大师**：工具箱新增捏人 Prompt 设计器，内置 9 大类词库，每个小参数 100 个可选词条，支持不选、锁定、权重、自定义补充、Avatar 分层方向预览、角色库收藏、JSON 导入导出、资源库角色分类、跨画布发送配置 / Prompt、高级随机、风格随机包、种子复现和批量输出文本节点 / 文本素材集
 - 🧍‍♂️ **姿势大师**：支持 100 种常用姿势、多人骨架、MediaPipe 识别、手部控制、A/B 关键帧、姿势库、批量分镜，并可在节点内切换线稿 / OpenPose / COCO 预览与运行输出；OpenPose/COCO keypoints JSON 可单独导出给 ComfyUI / ControlNet 复用
 - 🧪 **Grok Image / Sora2 FAL / Grok Video FAL / 即梦 CLI Seedance**：图像节点新增 Grok Image TAB；视频节点模型类型默认 `Grok Video → Veo → Sora2`，Veo 分类默认 `veo-omni-10s`，Grok Video TAB 默认 `Grok Video 1.5 (FAL)`，图像传入默认 base64，最多 1 张参考图且不发送比例参数；选择即梦 CLI Seedance 时支持 9 张图像、3 个视频、3 段音频参考，旧版 Grok FAL / Sora2 FAL 仍保留兼容入口

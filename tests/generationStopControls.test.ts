@@ -17,7 +17,14 @@ test('image generation exposes a stop control and invalidates stale async work',
   assert.match(imageNode, /generationRunRef\.current \+= 1/);
   assert.match(imageNode, /isCurrentGenerationRun\(runId\)/);
   assert.match(imageNode, /<Square size=\{11\} \/> 停止/);
-  assert.doesNotMatch(imageNode, /disabled=\{status === 'generating'\}/);
+  const controlsStart = imageNode.indexOf('{/* 生成按钮(包含异步进度) */}');
+  const controlsEnd = imageNode.indexOf('{error &&', controlsStart);
+  assert.ok(controlsStart >= 0 && controlsEnd > controlsStart);
+  assert.doesNotMatch(
+    imageNode.slice(controlsStart, controlsEnd),
+    /disabled=\{status === 'generating'\}/,
+    'the generate control must switch to a usable stop button while generation is active',
+  );
 });
 
 test('video generation stop invalidates old polling before a new task can update state', () => {

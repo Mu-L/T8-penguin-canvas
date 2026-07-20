@@ -351,6 +351,7 @@ test('Photoshop UXP plugin has assets, generate, and settings tabs without Agent
 
   const manifest = JSON.parse(read('tools/photoshop-bridge/plugin/manifest.json'));
   assert.equal(manifest.manifestVersion, 5);
+  assert.equal(manifest.version, '0.1.4');
   assert.equal(manifest.host.app, 'PS');
   assert.match(manifest.name, /T8|Photoshop|PS/i);
   assert.deepEqual(
@@ -364,6 +365,8 @@ test('Photoshop UXP plugin has assets, generate, and settings tabs without Agent
   assert.match(html, /data-tab=["']assets["']/);
   assert.match(html, /data-tab=["']generate["']/);
   assert.match(html, /data-tab=["']settings["']/);
+  assert.match(html, /id=["']generateModeHint["']/, 'current-layer mode needs an immediate visible readiness message');
+  assert.match(html, /v0\.1\.4/, 'the panel should expose its loaded plugin version for support diagnostics');
   assert.match(html, /id=["']assetPager["']/, 'asset library needs pagination in Photoshop panels');
   assert.match(html, /id=["']prevAssetPage["']/, 'asset library needs a previous page control');
   assert.match(html, /id=["']nextAssetPage["']/, 'asset library needs a next page control');
@@ -377,6 +380,7 @@ test('Photoshop UXP plugin has assets, generate, and settings tabs without Agent
   assert.match(css, /height:\s*36px/, 'plugin inputs need a fixed readable height in Photoshop UXP');
   assert.match(css, /height:\s*100vh/, 'plugin shell should be bounded to the Photoshop panel viewport');
   assert.match(css, /overflow:\s*hidden/, 'plugin shell should prevent asset lists from growing the panel');
+  assert.match(css, /\[data-view=["']generate["']\]\.active[\s\S]*overflow-y:\s*auto/, 'compact generate panels must scroll instead of clipping current-layer feedback');
   assert.match(css, /-webkit-appearance:\s*none/, 'native search/input appearance can collapse in Photoshop UXP');
   assert.match(css, /flex-wrap:\s*wrap/, 'asset cards should use a UXP-safe wrapping layout');
   assert.doesNotMatch(css, /repeat\(auto-fill/, 'auto-fill CSS grids can render blank in Photoshop UXP panels');
@@ -573,6 +577,278 @@ test('Photoshop UXP placeImage only reports success after Photoshop creates a la
   assert.equal(placed.calls[0].batchOptions.synchronousExecution, true);
 });
 
+function createPhotoshopLayerExportContext(options: {
+  batchResult?: any[];
+  saveError?: Error;
+  activateTemporaryDocument?: boolean;
+  mode?: string;
+  bitsPerChannel?: number;
+  cancelDuringSave?: boolean;
+  closeError?: Error;
+} = {}) {
+  const calls: any[] = [];
+  let closeCalls = 0;
+  let autoCloseCalls = 0;
+  const registeredDocumentIds: number[] = [];
+  const unregisteredDocumentIds: number[] = [];
+  const modeChanges: string[] = [];
+  let currentExecutionContext: any = null;
+  const output = new Uint8Array([137, 80, 78, 71]).buffer;
+  const tempFile = {
+    read: async () => output,
+  };
+  const sourceDoc: any = {
+    id: 10,
+    name: 'canvas.psd',
+    activeLayers: [{ id: 77, name: '用户当前层' }],
+    layers: [{ id: 77, name: '用户当前层' }],
+  };
+  const tempDoc: any = {
+    id: 20,
+    name: 't8_tmp_layer_export',
+    mode: options.mode || 'rgb',
+    bitsPerChannel: options.bitsPerChannel || 8,
+    changeMode: async (mode: string) => {
+      modeChanges.push(mode);
+      tempDoc.mode = mode;
+    },
+    saveAs: {
+      png: async () => {
+        if (options.cancelDuringSave && currentExecutionContext) currentExecutionContext.isCancelled = true;
+        if (options.saveError) throw options.saveError;
+      },
+    },
+    closeWithoutSaving: async () => {
+      if (options.closeError) throw options.closeError;
+      closeCalls += 1;
+      app.activeDocument = sourceDoc;
+    },
+  };
+  const app: any = {
+    documents: [sourceDoc],
+    activeDocument: sourceDoc,
+    open: async () => undefined,
+  };
+  const context: any = {
+    console,
+    ArrayBuffer,
+    Uint8Array,
+    window: {},
+    T8PS: {
+      net: {
+        fetchBytes: async () => output,
+      },
+    },
+    require: (name: string) => {
+      if (name === 'uxp') {
+        return {
+          storage: {
+            formats: { binary: 'binary' },
+            localFileSystem: {
+              getTemporaryFolder: async () => ({
+                createFile: async () => tempFile,
+              }),
+              createSessionToken: async () => 'session-token',
+            },
+          },
+          shell: { openExternal: async () => undefined },
+        };
+      }
+      if (name === 'photoshop') {
+        return {
+          app,
+          constants: {
+            ChangeMode: { RGB: 'rgb' },
+            DocumentMode: {
+              RGB: 'rgb',
+              CMYK: 'cmyk',
+              LAB: 'lab',
+              BITMAP: 'bitmap',
+              GRAYSCALE: 'grayscale',
+              INDEXEDCOLOR: 'indexedColor',
+              DUOTONE: 'duotone',
+              MULTICHANNEL: 'multichannel',
+            },
+            BitsPerChannelType: { EIGHT: 8, SIXTEEN: 16, THIRTYTWO: 32 },
+          },
+          core: {
+            executeAsModal: async (fn: any) => {
+              const autoCloseIds = new Set<number>();
+              const executionContext = {
+                isCancelled: false,
+                hostControl: {
+                  registerAutoCloseDocument: async (documentId: number) => {
+                    registeredDocumentIds.push(documentId);
+                    autoCloseIds.add(documentId);
+                  },
+                  unregisterAutoCloseDocument: async (documentId: number) => {
+                    unregisteredDocumentIds.push(documentId);
+                    autoCloseIds.delete(documentId);
+                  },
+                },
+              };
+              currentExecutionContext = executionContext;
+              try {
+                return await fn(executionContext);
+              } finally {
+                currentExecutionContext = null;
+                if (autoCloseIds.has(tempDoc.id)) {
+                  autoCloseCalls += 1;
+                  app.activeDocument = sourceDoc;
+                }
+              }
+            },
+          },
+          action: {
+            batchPlay: async (descriptors: any[], batchOptions: any) => {
+              calls.push({ descriptors, batchOptions });
+              const result = options.batchResult || [{ _obj: 'document', documentID: tempDoc.id }];
+              if (options.activateTemporaryDocument !== false && !result.some((entry) => entry?._obj === 'error')) {
+                app.activeDocument = tempDoc;
+              }
+              return result;
+            },
+            addNotificationListener: () => undefined,
+          },
+        };
+      }
+      throw new Error(`unexpected require ${name}`);
+    },
+  };
+  context.window = context;
+  vm.createContext(context);
+  vm.runInContext(read('tools/photoshop-bridge/plugin/js/ps.js'), context);
+  return {
+    context,
+    calls,
+    sourceDoc,
+    tempDoc,
+    modeChanges,
+    registeredDocumentIds,
+    unregisteredDocumentIds,
+    getCloseCalls: () => closeCalls,
+    getAutoCloseCalls: () => autoCloseCalls,
+  };
+}
+
+test('Photoshop UXP current-layer export uses a direct layer reference and always closes its temporary document', async () => {
+  const exported = createPhotoshopLayerExportContext();
+  const result = await exported.context.T8PS.ps.exportCurrentPng(true);
+
+  assert.equal(result.documentName, 'canvas.psd');
+  assert.equal(result.layerName, '用户当前层');
+  assert.equal(result.buffer.byteLength, 4);
+  assert.equal(exported.calls.length, 1);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(exported.calls[0].descriptors[0].using)),
+    { _ref: 'layer', _id: 77 },
+  );
+  assert.equal(exported.calls[0].descriptors[0].version, 5);
+  assert.deepEqual(exported.registeredDocumentIds, [20]);
+  assert.deepEqual(exported.unregisteredDocumentIds, []);
+  assert.equal(exported.getCloseCalls(), 0);
+  assert.equal(exported.getAutoCloseCalls(), 1);
+  assert.equal(exported.context.require('photoshop').app.activeDocument, exported.sourceDoc);
+
+  const failedSave = createPhotoshopLayerExportContext({ saveError: new Error('PNG save failed') });
+  await assert.rejects(
+    () => failedSave.context.T8PS.ps.exportCurrentPng(true),
+    /PNG save failed/,
+  );
+  assert.equal(failedSave.getCloseCalls(), 0);
+  assert.equal(failedSave.getAutoCloseCalls(), 1, 'temporary document must auto-close even when PNG saving fails');
+  assert.equal(failedSave.context.require('photoshop').app.activeDocument, failedSave.sourceDoc);
+});
+
+test('Photoshop UXP current-layer export normalizes CMYK 32-bit temporary documents before PNG save', async () => {
+  const exported = createPhotoshopLayerExportContext({ mode: 'cmyk', bitsPerChannel: 32 });
+  await exported.context.T8PS.ps.exportCurrentPng(true);
+
+  assert.deepEqual(exported.modeChanges, ['rgb']);
+  assert.equal(exported.tempDoc.mode, 'rgb');
+  assert.equal(exported.tempDoc.bitsPerChannel, 8);
+  assert.equal(exported.getCloseCalls(), 0);
+  assert.equal(exported.getAutoCloseCalls(), 1);
+});
+
+test('Photoshop UXP current-layer export keeps PNG-compatible Bitmap mode unchanged', async () => {
+  const exported = createPhotoshopLayerExportContext({ mode: 'bitmap', bitsPerChannel: 8 });
+  await exported.context.T8PS.ps.exportCurrentPng(true);
+
+  assert.deepEqual(exported.modeChanges, []);
+  assert.equal(exported.tempDoc.mode, 'bitmap');
+  assert.equal(exported.getAutoCloseCalls(), 1);
+});
+
+test('Photoshop UXP current-layer export registers host auto-close for modal cancellation cleanup', async () => {
+  const cancelled = createPhotoshopLayerExportContext({
+    saveError: new Error('User cancelled the operation'),
+    cancelDuringSave: true,
+    closeError: new Error('document changes forbidden after cancellation'),
+  });
+
+  await assert.rejects(
+    () => cancelled.context.T8PS.ps.exportCurrentPng(true),
+    /User cancelled/,
+  );
+  assert.deepEqual(cancelled.registeredDocumentIds, [20]);
+  assert.deepEqual(cancelled.unregisteredDocumentIds, []);
+  assert.equal(cancelled.getCloseCalls(), 0);
+  assert.equal(cancelled.getAutoCloseCalls(), 1);
+  assert.equal(cancelled.context.require('photoshop').app.activeDocument, cancelled.sourceDoc);
+});
+
+test('Photoshop UXP current-layer export surfaces resolved batchPlay errors instead of looking successful', async () => {
+  const exported = createPhotoshopLayerExportContext({
+    batchResult: [{ _obj: 'error', result: -25922, message: '当前图层命令不可用' }],
+    activateTemporaryDocument: false,
+  });
+
+  await assert.rejects(
+    () => exported.context.T8PS.ps.exportCurrentPng(true),
+    /当前图层命令不可用/,
+  );
+  assert.equal(exported.getCloseCalls(), 0);
+});
+
+test('Photoshop edit-current-layer mode ignores the persisted document-upload preference and gives immediate feedback', () => {
+  const app = read('tools/photoshop-bridge/plugin/js/app.js');
+  assert.match(
+    app,
+    /uploadCurrentToT8\(\{\s*queue:\s*false,\s*prompt:\s*request\.prompt,\s*preferLayer:\s*true\s*\}\)/,
+    'edit-current-layer must always export a layer even if the upload preference was persisted as false',
+  );
+  assert.match(app, /已选择当前图层/, 'selecting edit mode should immediately explain which layer will be used');
+  assert.match(app, /activeLayerInfo/, 'mode feedback should inspect the actual Photoshop document/layer state');
+});
+
+test('Photoshop generation snapshots mutable controls and serializes every Photoshop mutation', () => {
+  const app = read('tools/photoshop-bridge/plugin/js/app.js');
+  const state = read('tools/photoshop-bridge/plugin/js/state.js');
+  assert.match(app, /const request = \{[\s\S]*providerId:\s*provider\.id,[\s\S]*model:\s*state\.model,[\s\S]*size:\s*els\.sizeSelect\.value,[\s\S]*aspectRatio:\s*els\.ratioSelect\.value,[\s\S]*syncToCanvas:[\s\S]*autoPlace:/);
+  assert.match(app, /providerId:\s*request\.providerId/);
+  assert.match(app, /providerModel:\s*request\.model/);
+  assert.match(app, /model:\s*request\.model/);
+  assert.match(app, /size:\s*request\.size/);
+  assert.match(app, /aspect_ratio:\s*request\.aspectRatio/);
+  assert.match(app, /syncToCanvas:\s*request\.syncToCanvas/);
+  assert.match(app, /if \(request\.autoPlace\)/);
+  assert.match(app, /\[\s*els\.providerSelect,[\s\S]*els\.connectBtn,[\s\S]*\]\.forEach\(\(control\) => \{\s*control\.disabled = locked;/);
+  assert.match(app, /els\.modeButtons\.forEach\(\(button\) => \{\s*button\.disabled = locked;/);
+  assert.match(state, /psOperationBusy:\s*''/);
+  assert.match(app, /function beginPhotoshopOperation\(label\)/);
+  assert.match(app, /function endPhotoshopOperation\(label\)/);
+  assert.ok(
+    (app.match(/if \(state\.generateBusy \|\| state\.psOperationBusy\)/g) || []).length >= 2,
+    'background command polling must check the shared lock both before and after awaiting pending commands',
+  );
+  assert.match(app, /beginPhotoshopOperation\('canvas-command'\)/);
+  assert.match(app, /beginPhotoshopOperation\('generate'\)/);
+  assert.match(app, /beginPhotoshopOperation\('asset-place'\)/);
+  assert.match(app, /beginPhotoshopOperation\('asset-upload'\)/);
+  assert.match(app, /async function connect\(\) \{\s*if \(state\.generateBusy \|\| state\.psOperationBusy\) return;/, 'reconnecting must not change hosts during an in-flight Photoshop operation');
+});
+
 test('T8 app packages Photoshop plugin and drains Photoshop bridge messages into canvas', () => {
   const server = read('backend/src/server.js');
   const canvas = read('src/components/Canvas.tsx');
@@ -601,5 +877,8 @@ test('T8 app packages Photoshop plugin and drains Photoshop bridge messages into
   assert.match(api, /sendToPhotoshop/);
   assert.match(pkg, /tools\/photoshop-bridge/);
   assert.match(postBuild, /photoshop-bridge/);
+  assert.match(postBuild, /packaged Photoshop plugin differs from the authoritative source/);
+  assert.match(postBuild, /packaged Photoshop plugin manifest id\/version is stale/);
+  assert.match(postBuild, /stale Photoshop plugin archive must not be packaged/);
   assert.match(postBuild, /manifest\.json/);
 });

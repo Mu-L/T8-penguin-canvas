@@ -45,6 +45,7 @@ import {
 } from '../../utils/imageCompare';
 import { collectMaterialSetBucketsFromData, valueOfMaterialSetItem } from '../../utils/materialSet';
 import { selectSourceHandleData } from '../../utils/sourceHandleData';
+import { shouldCollectNodeTextOutput } from '../../utils/imageNodeOutputMode';
 import {
   CREATIVE_TARGET_NODE_TYPE,
   buildAnnotationEditRequest,
@@ -213,6 +214,7 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
           ud.reply || '',
           ud.prompt || '',
           ud.text || '',
+          ud.imageOnlyOutput === false ? 'image-text-output' : 'image-only-output',
           ud.imageUrl || '',
           ud.videoUrl || '',
           ud.audioUrl || '',
@@ -297,6 +299,7 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
       const list = Array.isArray(upstreamNodes) ? upstreamNodes : [];
       for (const n of list) {
         const sid = (n as any)?.id || '';
+        const collectNodeTextOutput = shouldCollectNodeTextOutput((n as any)?.type, n?.data);
         const handles = handleMap.get(sid) || new Set<string | null>([null]);
         const routedData = selectSourceHandleData((n?.data || {}) as Record<string, unknown>, handles);
         for (const ud of routedData as any[]) {
@@ -317,15 +320,17 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
         if (ud.__loopAccumulate) continue;
 
       // 文本: textSegments/texts 数组优先, 避免文本分割节点再把 joined prompt 当成第 N+1 项
-        const textArrayFields = ['textSegments', 'segments', 'texts'];
-        const textArrayField = textArrayFields.find((f) => Array.isArray(ud[f]) && ud[f].length > 0);
-        if (textArrayField) {
-          ud[textArrayField].forEach((item: any) => pushTextSegment(out.texts, item));
-        } else {
-          pushUniqueText(out.texts, ud.outputText);
-          pushUniqueText(out.texts, ud.reply);
-          pushUniqueText(out.texts, ud.prompt);
-          pushUniqueText(out.texts, ud.text);
+        if (collectNodeTextOutput) {
+          const textArrayFields = ['textSegments', 'segments', 'texts'];
+          const textArrayField = textArrayFields.find((f) => Array.isArray(ud[f]) && ud[f].length > 0);
+          if (textArrayField) {
+            ud[textArrayField].forEach((item: any) => pushTextSegment(out.texts, item));
+          } else {
+            pushUniqueText(out.texts, ud.outputText);
+            pushUniqueText(out.texts, ud.reply);
+            pushUniqueText(out.texts, ud.prompt);
+            pushUniqueText(out.texts, ud.text);
+          }
         }
 
       // === v1.2.8.4: FramePair 双端口语义 ===
@@ -484,7 +489,7 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
         out.videos = [];
         out.audios = [];
         out.models = [];
-        // 图像项模式下还保留文本 (提示词) 以便下游可读
+        // 图像项模式只保留上游明确允许的文本；imageOnlyOutput 已在收集阶段过滤。
       } else if (pickKind === 'video') {
         const pairedText = out.texts[pickIndex] || (out.texts.length === 1 ? out.texts[0] : '');
         out.videos = out.videos[pickIndex] ? [out.videos[pickIndex]] : [];
