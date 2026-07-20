@@ -80,6 +80,23 @@ test('development rejects release paths except the one explicit legacy F2 pair',
   assert.equal(copiedException.ok, false);
 });
 
+test('development rejects the canonical core path and requires a dedicated development worktree', () => {
+  const core = evaluateWorktreeRole({
+    root: root('T8-penguin-canvas'),
+    branch: 'codex/vibex-workbench-node',
+    mode: 'development',
+  });
+  assert.equal(core.ok, false);
+  assert.match(core.errors.join(' '), /canonical core is an integration landing point/);
+
+  const development = evaluateWorktreeRole({
+    root: root('T8-penguin-canvas-dev-next-topic'),
+    branch: 'codex/next-topic',
+    mode: 'development',
+  });
+  assert.equal(development.ok, true);
+});
+
 test('formal release requires both a release path and a release branch or detached commit', () => {
   assert.equal(evaluateWorktreeRole({
     root: root('T8-penguin-canvas-release-v2.6.0'),
