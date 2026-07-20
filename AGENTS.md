@@ -2,24 +2,40 @@
 
 在修改代码、架构、配置、测试、UI、部署、GitHub 或技术文档前，完整阅读本文件、`SKILL.md`、`features.json`、`roadmap.md`、`package.json`、相关源码/测试，以及当前交接记录。项目没有 `meta.json`。
 
-## 当前 legacy F2 工作树
+## 当前权威开发与冻结点
 
-- 当前续接源是 `E:\PenguinPravite\T8-penguin-canvas-release-2.5.7`、分支 `codex/f2-reconnect-sync`、冻结基准 HEAD `9b6f6a43bc407a3c47a32dd9c0536afa879f256b`。
-- 该路径名称属于 release 角色；它仅因历史未提交叠层而允许临时续接。不得把此布局复制给新功能。后续开发工作树必须命名为 `T8-penguin-canvas-dev-<topic>`。
-- 运行 development 入口时，只有上述精确路径/分支/HEAD 可以显式设置 `T8_ALLOW_LEGACY_F2_WORKTREE=1`。HEAD 一旦移动，该例外永久失效。
-- `E:\PenguinPravite\T8-penguin-canvas` 是 canonical core 和未来集成目标；未获明确授权前只读，不得在其中合并、切分支或覆盖文件。
+- 当前已验证开发工作树是 `E:\PenguinPravite\T8-penguin-canvas-dev-integration-f2-core-20260720`，分支 `codex/integration-f2-core-20260720`，双父 merge commit `68b5f72526a7272cc9787f6fda8b27a6f2fb54c8`。
+- merge commit 的第一父提交是 core checkpoint `4e3061094014b5dc2720d52ed178a62e8469a9d3`，第二父提交是 release/F2 checkpoint `e0c6679b5a22539dd5b4983165ecc3f9d5c790e1`。
+- `E:\PenguinPravite\T8-penguin-canvas-release-2.5.7` 与 `E:\PenguinPravite\T8-penguin-canvas` 都是冻结工作树。不得继续在 release 命名路径开发，也不得在未获用户新授权时移动 canonical core 分支或 HEAD。
+- release/F2 的旧 `T8_ALLOW_LEGACY_F2_WORKTREE=1` 例外已随 HEAD 从 `9b6f6a4...` 移动到 checkpoint 而永久失效。后续功能只能位于 `T8-penguin-canvas-dev-*` 开发工作树。
+- core checkpoint 本身早于集成后的 role 脚本，采用 merge commit 前不能依赖 core 路径内的机器门禁，必须把它视为人工只读；采用集成结果后，`predev` 系列门禁才会随源码进入 canonical core。
 
 ## 永久保护
 
-- 保留整个未提交工作区；禁止 `reset`、`clean`、`checkout`、整树复制、整树 ours/theirs 或任何丢弃本地修改的操作。
-- 不得编辑或暂存 `tools/ffmpeg-runtime/ffmpeg.exe`（143,314,432 bytes，SHA-256 `754A10CE2FC4A8C974FF492B351F58C02D35124D1D602FCF30F561FB1BD0F579`）。
-- 不得编辑或暂存 `tools/remove-ai-watermarks-runtime/README.md`（2,298 bytes，SHA-256 `04F13F0ADBB8593372FB9DDFA297A0DFB90D9EAD0325DE0CD340FCFE8B7CED56`）。
+- 禁止 `reset`、`clean`、checkout 覆盖、整树复制、整树 ours/theirs 或任何丢弃本地修改的操作。
+- 不得编辑或暂存源/core 工作树中的 `tools/ffmpeg-runtime/ffmpeg.exe`（143,314,432 bytes，SHA-256 `754A10CE2FC4A8C974FF492B351F58C02D35124D1D602FCF30F561FB1BD0F579`）。
+- 不得编辑或暂存源/core 工作树中的 `tools/remove-ai-watermarks-runtime/README.md`（2,298 bytes，SHA-256 `04F13F0ADBB8593372FB9DDFA297A0DFB90D9EAD0325DE0CD340FCFE8B7CED56`）。
 - 不得读取 retained/historical 项目数据库；数据库测试只能创建在系统临时目录并在测试后清理。
 - 除非用户重新明确授权，不升级版本、不生产 build/打包、不暂存/提交/推送、不创建 tag 或 GitHub Release。未来正式包只构建一次。
 
-## 无损集成
+## 已完成的无损集成
 
-- 先读 `artifacts/f2-core-integration-readiness-2026-07-20.md`，再运行只读审计：`npm run worktree:integration-audit -- --source <F2源路径> --target <核心路径> --check`。
-- 集成前必须分别冻结源叠层与核心叠层；禁止 `git add -A`。两边 checkpoint、第三个干净 integration worktree 和逐域语义三方合并均需要用户明确 Git 授权。
-- 任一保护文件内容或 staged 状态不符、任一 unmerged、工作树角色/common dir/merge base 不符、legacy 源未 checkpoint、或任一 collision 未显式解决时，必须停止集成。
-- 依赖顺序固定为 F2/F3 → B1 → B2/B3 → F4/F5 → F6 → F7 → F9/F10 本地机制；集成后重算全部 schema/writer/lifecycle/permission/node coverage 契约并运行同 ABI 回归。
+- 两边已分别制作显式 allowlist checkpoint；第三工作树完成 127 个冲突文件、1486 个冲突块的逐域语义合并，没有使用目录覆盖或整树 ours/theirs。
+- 固定依赖顺序为 F2/F3 → B1 → B2/B3 → F4/F5 → F6 → F7 → Provider/媒体 → F9/F10/配置。
+- 集成后的 193 个 TS 与 186 个 CJS 测试文件共 2872 项：2865 通过、7 个预期跳过、0 个遗留失败；type-check、public/rh-toolbox、writer/lifecycle、语法、JSON、worktree 和 diff 门通过。
+- 集成树相对 release/F2 checkpoint 的产品语义仅增加 core 的 `nodemap.md`、`update.md`，以及记录集成事实的 `features.json` 更新。
+
+## 当前剩余边界
+
+- B1、F2-F7、schema32、全节点 RunEvent、B3 权限/安全清单、F9/F10 本地机制已经闭合；不得为了制造进度重复实现。
+- 严格进度保持 27/32。B2/B3 仍缺真实历史端点、Windows 物理磁盘/安装升级回退、Provider 实网与资源负载证据。
+- F8 必须由至少三个隔离客户端、两台真实 Windows 设备与 Electron 安装版完成；F9 必须使用真实域名、公共 DNS、证书、TLS/SNI 和反向代理；F10 必须完成真实公网红队与负载。
+- 单机 localhost、mock、重复本地测试或手写汇总不能替代这些证据。没有对应环境时只维护失败关闭的采集/验证工具与事实记录，不勾选轮次。
+
+## 防止再次跑错工作树
+
+- 新功能开始前先执行 `npm run worktree:check` 与 `npm run worktree:development`，并记录绝对路径、branch、HEAD、common dir。
+- development 只接受 `T8-penguin-canvas-dev-*`；release 目录只用于发布，canonical core 只用于用户授权后的已验证集成落点。
+- 不通过复制目录同步分支；只允许 checkpoint、第三开发工作树、显式依赖切片和可复核 merge commit。
+- `predev`、`predev:vite`、`predev:backend`、`preelectron:dev` 必须保留 worktree role 门，新增开发入口也必须接入同一门。
+- 任一保护文件漂移、unmerged、角色/common dir/merge base 不符、或外部证据缺失时，必须失败关闭并停止扩大结论。
