@@ -107,6 +107,28 @@ export interface CanvasPatchRevertResult {
   document: VersionedCanvasData;
 }
 
+/**
+ * Public collaboration snapshots intentionally omit the private sessionId.
+ * Structural deltas still carry enough immutable identity metadata to rebuild
+ * the same public tombstone without exposing that private session identity.
+ */
+export interface CanvasTombstoneRecord {
+  opId: string;
+  actorId: string;
+  sessionId?: string;
+  deletedAt: number;
+  revision: number;
+  entityUid?: string | null;
+  entityType?: string | null;
+  source?: string | null;
+  target?: string | null;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
+  legacyAliases?: string[];
+  sourceEntityUid?: string | null;
+  targetEntityUid?: string | null;
+}
+
 export interface VersionedCanvasData extends CanvasData {
   schema: 't8-canvas-document';
   schemaVersion: 2;
@@ -114,17 +136,47 @@ export interface VersionedCanvasData extends CanvasData {
   canvasId: string;
   entityUid: string;
   revision: number;
+  viewportRevision: number;
   subflowInstances: Array<Record<string, unknown>>;
   tombstones: {
-    nodes: Record<string, { opId: string; actorId: string; sessionId: string; deletedAt: number; revision: number; entityUid?: string | null }>;
-    edges: Record<string, { opId: string; actorId: string; sessionId: string; deletedAt: number; revision: number; entityUid?: string | null }>;
+    nodes: Record<string, CanvasTombstoneRecord>;
+    edges: Record<string, CanvasTombstoneRecord>;
   };
   updatedAt: number;
 }
 
+export type CanvasSyncSnapshotReason =
+  | 'initial'
+  | 'client_ahead'
+  | 'range_exceeded'
+  | 'snapshot_required'
+  | 'history_gap'
+  | 'recovery_generation_changed'
+  | 'resource_scope_snapshot';
+
+export type CanvasSyncOperation = Omit<CanvasOperation, 'sessionId'> & {
+  sessionId?: never;
+  revision: number;
+};
+
 export type CanvasSyncData =
-  | { mode: 'snapshot'; document: VersionedCanvasData }
-  | { mode: 'operations'; canvasId: string; revision: number; operations: Array<CanvasOperation & { revision: number }> };
+  | {
+    mode: 'snapshot';
+    canvasId: string;
+    afterRevision: number;
+    revision: number;
+    generation: string;
+    reason: CanvasSyncSnapshotReason;
+    document: VersionedCanvasData;
+  }
+  | {
+    mode: 'operations';
+    canvasId: string;
+    afterRevision: number;
+    revision: number;
+    generation: string;
+    operations: CanvasSyncOperation[];
+  };
 
 export type WorkspaceRole = 'owner' | 'editor' | 'reviewer' | 'viewer';
 
@@ -139,8 +191,310 @@ export type WorkspaceCapability =
   | 'manageMembers'
   | 'manageProviders';
 
+export type CollaborationReviewAnchorKind = 'canvas' | 'node' | 'edge' | 'asset' | 'video';
+export type CollaborationReviewSeverity = 'low' | 'normal' | 'high' | 'blocking';
+export type CollaborationReviewResolutionStatus = 'open' | 'resolved';
+export type CollaborationReviewLifecycleStatus = 'draft' | 'in_review' | 'changes_requested' | 'approved';
+/** Compatibility projection used by pre-lifecycle clients. */
+export type CollaborationReviewThreadStatus = 'open' | 'resolved' | 'changes_requested' | 'approved';
+export type CollaborationReviewEffectiveStatus = CollaborationReviewThreadStatus | 'expired';
+export type CollaborationReviewEffectiveLifecycleStatus = CollaborationReviewLifecycleStatus | 'expired';
+
+export interface CollaborationReviewMember {
+  memberId: string;
+  displayName: string;
+  role: WorkspaceRole | null;
+}
+
+export interface CollaborationReviewAsset extends AssetRef {
+  contentRevision: number;
+  contentHash: string;
+  effectivePermissions?: {
+    view: boolean;
+    preview: boolean;
+    original: boolean;
+    organize: boolean;
+  };
+  representations?: {
+    preview?: string;
+    thumbnail?: string;
+    original?: string;
+  };
+}
+
+export type CollaborationReviewAnchor =
+  | { kind: 'canvas'; targetEntityUid?: string; x: number; y: number }
+  | { kind: 'node' | 'edge'; targetEntityUid: string; unavailable?: boolean }
+  | {
+    kind: 'asset';
+    targetEntityUid?: string;
+    unavailable?: boolean;
+    contentChanged?: boolean;
+    asset?: CollaborationReviewAsset;
+  }
+  | {
+    kind: 'video';
+    targetEntityUid?: string;
+    frameMs: number;
+    assetContentRevision?: number;
+    contentHash?: string;
+    unavailable?: boolean;
+    contentChanged?: boolean;
+    asset?: CollaborationReviewAsset;
+  };
+
+export type CollaborationReviewAnchorInput =
+  | { kind: 'canvas'; x: number; y: number }
+  | { kind: 'node' | 'edge' | 'asset'; targetUid: string }
+  | {
+    kind: 'video';
+    targetUid: string;
+    frameMs: number;
+    assetContentRevision: number;
+    contentHash: string;
+  };
+
+export interface CollaborationReviewAttachment {
+  available: boolean;
+  assetId?: string;
+  assetUid?: string;
+  assetEntityUid?: string;
+  assetContentRevision?: number;
+  contentHash?: string;
+  asset?: CollaborationReviewAsset;
+}
+
+export interface CollaborationReviewComment {
+  id: string;
+  entityUid: string;
+  threadId: string;
+  parentId: string | null;
+  parentEntityUid: string | null;
+  body: string;
+  createdBy: string;
+  author: CollaborationReviewMember;
+  mentions: CollaborationReviewMember[];
+  attachments: CollaborationReviewAttachment[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CollaborationReviewThread {
+  id: string;
+  entityUid: string;
+  projectId: string;
+  canvasId: string;
+  canvasRevision: number;
+  currentCanvasRevision: number;
+  anchor: CollaborationReviewAnchor;
+  resolutionStatus: CollaborationReviewResolutionStatus;
+  reviewStatus: CollaborationReviewLifecycleStatus;
+  effectiveReviewStatus: CollaborationReviewEffectiveLifecycleStatus;
+  /** Compatibility projection; new code must use resolutionStatus/reviewStatus. */
+  status: CollaborationReviewThreadStatus;
+  effectiveStatus: CollaborationReviewEffectiveStatus;
+  approvalExpired: boolean;
+  severity: CollaborationReviewSeverity;
+  revision: number;
+  decisionCanvasRevision: number | null;
+  createdBy: string;
+  author: CollaborationReviewMember;
+  createdAt: number;
+  updatedAt: number;
+  comments: CollaborationReviewComment[];
+}
+
+export interface CollaborationReviewPageMeta {
+  total: number;
+  limit?: number;
+  offset?: number;
+  nextOffset?: number | null;
+}
+
+export interface CollaborationReviewNotification {
+  id: string;
+  recipientMemberId: string;
+  projectId: string;
+  canvasId: string;
+  kind: 'review.mention' | 'review.reply' | 'review.thread.updated';
+  threadId: string;
+  commentId: string | null;
+  actorId: string;
+  sourceOperationId: string;
+  readAt: number | null;
+  createdAt: number;
+}
+
+export interface CollaborationReviewComparisonCollection {
+  added: string[];
+  removed: string[];
+  changed: string[];
+  counts: {
+    added: number;
+    removed: number;
+    changed: number;
+  };
+  truncated: boolean;
+}
+
+export interface CollaborationReviewComparison {
+  fromRevision: number | null;
+  toRevision: number | null;
+  nodes: CollaborationReviewComparisonCollection;
+  edges: CollaborationReviewComparisonCollection;
+  viewportChanged: boolean;
+}
+
+export interface CollaborationReviewCompareResult {
+  thread: CollaborationReviewThread;
+  comparison: CollaborationReviewComparison;
+}
+
+export interface CollaborationReviewReferenceInput {
+  assetUid: string;
+  assetContentRevision: number;
+  contentHash: string;
+}
+
+export interface CollaborationReviewCreateInput {
+  canvasId: string;
+  expectedCanvasRevision: number;
+  anchor: CollaborationReviewAnchorInput;
+  body: string;
+  severity: CollaborationReviewSeverity;
+  mentions: string[];
+  attachments: CollaborationReviewReferenceInput[];
+}
+
+export interface CollaborationReviewReplyInput {
+  body: string;
+  parentId?: string;
+  expectedCanvasRevision: number;
+  expectedThreadRevision: number;
+  mentions: string[];
+  attachments: CollaborationReviewReferenceInput[];
+}
+
+export interface CollaborationReviewUpdateInput {
+  expectedCanvasRevision: number;
+  expectedThreadRevision: number;
+  resolutionStatus?: CollaborationReviewResolutionStatus;
+  reviewStatus?: CollaborationReviewLifecycleStatus;
+  severity: CollaborationReviewSeverity;
+}
+
+export interface CollaborationRunAsset {
+  id: string;
+  kind: string;
+  filename: string;
+  mimeType: string;
+  contentRevision?: number;
+  mediaUrl: string | null;
+  thumbnailUrl?: string | null;
+}
+
+export interface CollaborationRunUsage {
+  costUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  durationMs?: number;
+  requestCount?: number;
+}
+
+export interface CollaborationRunError {
+  kind?: string;
+  code?: string;
+  message: string;
+  httpStatus?: number;
+  retryable?: boolean;
+}
+
+export interface CollaborationRunAttempt {
+  id: string;
+  nodeRunId: string;
+  status: string;
+  provider?: string | null;
+  model?: string | null;
+  httpStatus?: number | null;
+  pollCount: number;
+  timestamps: Record<string, number>;
+  usage: CollaborationRunUsage;
+  error?: CollaborationRunError | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CollaborationRunNode {
+  id: string;
+  runId: string;
+  nodeId: string;
+  parentNodeRunId?: string | null;
+  status: string;
+  outputRefs: string[];
+  updatedAt: number;
+  progressPercent?: number | null;
+  attempts?: CollaborationRunAttempt[];
+}
+
+export interface CollaborationRun {
+  id: string;
+  canvasId: string;
+  canvasRevision: number;
+  status: string;
+  parentRunId?: string | null;
+  initiatorId: string;
+  createdAt: number;
+  startedAt?: number | null;
+  finishedAt?: number | null;
+  updatedAt: number;
+  nodes: CollaborationRunNode[];
+  assets: CollaborationRunAsset[];
+}
+
+export interface CollaborationRunEvent {
+  id: number;
+  runId: string;
+  nodeRunId?: string | null;
+  type: string;
+  payload: Record<string, unknown>;
+  createdAt: number;
+}
+
+export interface CollaborationRunSyncMeta {
+  afterEventId: number;
+  nextCursor: number;
+  limit: number;
+  hasMore: boolean;
+}
+
+export interface CollaborationRunIntentView {
+  id: string;
+  canvasId: string;
+  canvasRevision: number;
+  requestedBy: string;
+  nodeIds: string[];
+  status: string;
+  runId?: string | null;
+  estimatedCost?: number | null;
+  estimatedCostKnown?: boolean;
+  actualCost?: number | null;
+  queueRevision?: number;
+  confirmationRequired?: boolean;
+  dispatchAttempts?: number;
+  nextAttemptAt?: number | null;
+  leaseExpiresAt?: number | null;
+  cancelRequestedAt?: number | null;
+  cancelledAt?: number | null;
+  lastError?: { code?: string | null; message?: string | null } | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface RunSummary {
   id: string;
+  /** Canonical immutable identity; id remains the local/display lookup key. */
+  entityUid: string;
   projectId: string;
   canvasId: string;
   canvasRevision: number;
@@ -187,6 +541,7 @@ export interface RunContext {
   secondaryProviderActionId?: string | null;
   secondaryProviderActionTarget?: string | null;
   secondaryProviderActionDigest?: string | null;
+  secondaryProviderActionInputDigest?: string | null;
   createdAt: number;
 }
 
@@ -203,6 +558,9 @@ export type RunNodeLifecycleEventType =
 export interface RunNodeLifecycleReporter {
   readonly runContext: RunContext | null;
   readonly executionToken: string;
+  /** Durable execution identity created before an executor callback starts. */
+  readonly nodeRunId: string | null;
+  readonly attemptId: string | null;
   progress(payload?: Record<string, unknown>): Promise<void>;
   polling(payload?: Record<string, unknown>): Promise<void>;
   output(payload?: Record<string, unknown>): Promise<void>;
@@ -215,6 +573,7 @@ export interface RunNodeLifecycleReporter {
 
 export interface NodeRunSummary {
   id: string;
+  entityUid: string;
   runId: string;
   nodeId: string;
   parentNodeRunId?: string | null;
@@ -232,6 +591,7 @@ export interface NodeRunSummary {
 
 export interface RunAttemptSummary {
   id: string;
+  entityUid: string;
   nodeRunId: string;
   attemptNumber: number;
   provider?: string | null;
@@ -255,6 +615,7 @@ export interface RunDetail extends RunSummary {
 
 export interface RunEventRecord {
   id: number;
+  entityUid: string;
   runId: string;
   nodeRunId?: string;
   type: string;
@@ -367,6 +728,8 @@ export interface AssetRef {
   provenance?: Record<string, unknown>;
   tags?: string[];
   collectionIds?: string[];
+  /** Immutable-content pin. This advances only when the asset bytes change. */
+  contentRevision?: number;
   organizationRevision?: AssetRevision;
   access?: {
     visibility: 'project' | 'restricted';
@@ -496,6 +859,15 @@ export interface AssetDuplicatePage {
   cursor: string | null;
   hasMore: boolean;
   limit: number;
+  catalogRevision: AssetRevision;
+}
+
+export interface AssetDuplicateRefreshResult {
+  refreshed: boolean;
+  assetId: string;
+  projectId: string;
+  catalogRevision: AssetRevision;
+  candidateCount?: number;
 }
 
 export interface AssetExactDuplicateGroup {
@@ -571,13 +943,42 @@ export interface AssetLineagePage {
 }
 
 export interface AssetIndexResult {
+  projectId: string;
+  catalogRevision: AssetRevision;
   total: number;
   indexed: number;
   failed: number;
-  availability?: { checked: number; missing: number; restored: number };
+  availability?: {
+    checked: number;
+    changed: number;
+    missing: number;
+    restored: number;
+    sourceChanged: number;
+    indeterminate: number;
+  };
   previewJobs?: { queued: number; succeeded: number; failed: number };
   startedAt: number;
   finishedAt: number;
+}
+
+export interface AssetAvailabilityRefreshInput {
+  projectId: string;
+  expectedCatalogRevision: AssetRevision;
+  entityUid: string;
+  contentRevision: number;
+  organizationRevision: AssetRevision;
+  contentHash: string;
+}
+
+export interface AssetAvailabilityRefreshResult {
+  assetId: string;
+  projectId: string;
+  state: 'available' | 'missing' | 'source-changed' | 'indeterminate';
+  reason: string;
+  changed: boolean;
+  availability: AssetRef['availability'];
+  organizationRevision: AssetRevision;
+  catalogRevision: AssetRevision;
 }
 
 export type AssetPreviewTaskState = 'queued' | 'running' | 'retrying' | 'succeeded' | 'failed';
@@ -603,15 +1004,42 @@ export interface AssetPreviewPipelineCounts {
 }
 
 export interface AssetPipelineStatus {
+  projectId: string;
   scan: {
+    projectId: string;
     running: boolean;
     lastResult: AssetIndexResult | null;
   };
   previews: {
+    projectId: string;
     active: number;
+    activeModel3d: number;
     concurrency: number;
+    concurrencyScope: 'global';
     counts: AssetPreviewPipelineCounts;
+    pending: {
+      completions: number;
+      reschedules: number;
+      reruns: number;
+    };
     nextAttemptAt?: number | null;
+    databaseStatusStale?: boolean;
+    shuttingDown?: boolean;
+    shuttingDownScope?: 'global';
+    globalRecoveryPending?: boolean;
+    storagePressure?: {
+      active: boolean;
+      reason: string;
+      retryable: boolean;
+      nextRetryAt?: number | null;
+      scope: 'global';
+    };
+    databaseBusy?: {
+      active: boolean;
+      code: string;
+      nextRetryAt?: number | null;
+      scope: 'global';
+    };
   };
 }
 
@@ -919,7 +1347,12 @@ export interface CollaborationAssetUploadSession {
   generation?: number;
   state?: CollaborationAssetUploadSessionState;
   status?: CollaborationAssetUploadSessionState;
+  filename?: string;
+  mimeType?: string;
+  expectedSize?: number;
+  expectedHash?: string | null;
   chunkSize?: number;
+  chunkCount?: number;
   receivedBytes?: number;
   receivedChunks?: Array<number | CollaborationAssetUploadChunk>;
   receivedIndexes?: number[];
@@ -930,6 +1363,9 @@ export interface CollaborationAssetUploadSession {
   asset?: AssetRef;
   reused?: boolean;
   deduplicated?: boolean;
+  createdAt?: number;
+  updatedAt?: number;
+  expiresAt?: number;
 }
 
 export interface CollaborationAssetUploadCompleteResult {
@@ -938,6 +1374,13 @@ export interface CollaborationAssetUploadCompleteResult {
   quota?: CollaborationAssetQuota;
   reused?: boolean;
   deduplicated?: boolean;
+  persistenceWarning?: {
+    code: 'asset_upload_post_commit_capacity';
+    committed: true;
+    phase: 'finalization' | 'chunk-purge' | 'quota-refresh';
+    reason: string;
+    retryable: boolean;
+  };
 }
 
 export interface CollaborationNetworkInterface {
@@ -982,7 +1425,62 @@ export interface CollaborationStatus {
   shareUrls: string[];
   defaultHost: string;
   defaultPort: number;
+  publicBaseUrl?: string | null;
+  publicExposure?: CollaborationPublicExposurePolicy | null;
+  publicExposureConfiguration?: CollaborationPublicExposureConfiguration;
+  lastPublicSelfCheck?: CollaborationPublicSelfCheck | null;
   room?: CollaborationRoomStatus | null;
+}
+
+export interface CollaborationPublicExposurePolicy {
+  baseUrl: string;
+  origin: string;
+  exposure: 'loopback' | 'lan' | 'public';
+  protocol: 'http' | 'https';
+  https: boolean;
+  insecurePublic: boolean;
+  ownerManagementAllowed: boolean;
+  sensitiveOriginalDownloadAllowed: boolean;
+  warning?: string | null;
+}
+
+export interface CollaborationPublicExposureConfiguration {
+  status: 'configured' | 'unconfigured' | 'invalid';
+  source: 'persisted' | 'environment' | 'runtime' | 'none';
+  durable: boolean;
+  failClosed: boolean;
+  canClearPersisted: boolean;
+  updatedAt?: number | null;
+  errorCode?: string | null;
+  warning?: string | null;
+}
+
+export type CollaborationPublicSelfCheckId = 'health' | 'invite' | 'websocket' | 'upload' | 'range';
+
+export interface CollaborationPublicSelfCheckResult {
+  id: CollaborationPublicSelfCheckId;
+  status: 'passed' | 'failed';
+  latencyMs: number;
+  httpStatus?: number;
+  errorCode?: string;
+  message?: string;
+  hint: string;
+}
+
+export interface CollaborationPublicSelfCheck {
+  contractVersion: 't8-collaboration-public-self-check-v1';
+  baseUrl: string;
+  exposure: 'loopback' | 'lan' | 'public';
+  protocol: 'http' | 'https';
+  https: boolean;
+  insecurePublic: boolean;
+  ownerManagementAllowed: boolean;
+  sensitiveOriginalDownloadAllowed: boolean;
+  warning?: string | null;
+  allChecksPassed: boolean;
+  status: 'passed' | 'degraded' | 'failed';
+  completedAt: number;
+  checks: CollaborationPublicSelfCheckResult[];
 }
 
 export interface CollaborationExecutionPolicy {
@@ -997,6 +1495,7 @@ export interface CollaborationExecutionPolicy {
 
 export interface CollaborationExecutionUsage {
   activeCount: number;
+  queuedCount: number;
   dailyCost: number;
   unknownCostCount: number;
   dayStart: number;
@@ -1005,6 +1504,97 @@ export interface CollaborationExecutionUsage {
 export interface CollaborationExecutionPolicySnapshot {
   policy: CollaborationExecutionPolicy;
   usage: CollaborationExecutionUsage;
+}
+
+export interface CollaborationExecutionPolicyInput {
+  allowedModels: string[];
+  dailyCostLimit: number;
+  perRunCostLimit: number;
+  concurrencyLimit: number;
+}
+
+export interface CollaborationRoomExecutionPolicy {
+  projectId: string;
+  canvasId: string;
+  allowEditorRuns: boolean;
+  memberDailyRunLimit: number;
+  canvasConcurrencyLimit: number;
+  autoApproveLowRisk: boolean;
+  highCostConfirmationThreshold: number;
+  requireUnknownCostConfirmation: boolean;
+  revision: number;
+  updatedBy?: string | null;
+  updatedAt?: number | null;
+}
+
+export interface CollaborationRoomExecutionUsage {
+  projectId: string;
+  canvasId: string;
+  requestedBy: string;
+  activeCount: number;
+  queuedCount: number;
+  requestedByDailyCount: number;
+  dayStart: number;
+}
+
+export interface CollaborationRoomExecutionPolicySnapshot {
+  policy: CollaborationRoomExecutionPolicy;
+  usage: CollaborationRoomExecutionUsage;
+}
+
+export interface CollaborationRoomExecutionPolicyInput {
+  expectedRevision: number;
+  allowEditorRuns: boolean;
+  memberDailyRunLimit: number;
+  canvasConcurrencyLimit: number;
+  autoApproveLowRisk: boolean;
+  highCostConfirmationThreshold: number;
+  requireUnknownCostConfirmation: boolean;
+}
+
+export interface CollaborationRunIntentQueueMutationInput {
+  expectedQueueRevision: number;
+}
+
+export interface CollaborationReviewVisibilityPolicy {
+  projectId: string;
+  revision: number;
+  hidePrompts: boolean;
+  hideModelParameters: boolean;
+  updatedBy?: string | null;
+  updatedAt?: number | null;
+}
+
+export interface CollaborationReviewVisibilityPolicyInput {
+  expectedRevision: number;
+  hidePrompts: boolean;
+  hideModelParameters: boolean;
+}
+
+export interface CollaborationAuditEvent {
+  id: number;
+  projectId: string;
+  canvasId?: string | null;
+  actorId: string;
+  sessionRef?: string | null;
+  action: string;
+  targetType?: string | null;
+  targetId?: string | null;
+  metadata: Record<string, unknown> | unknown[];
+  createdAt: number;
+}
+
+export interface CollaborationAuditPage {
+  events: CollaborationAuditEvent[];
+  pagination: {
+    offset: number;
+    limit: number;
+    nextOffset: number | null;
+    hasMoreWithinWindow: boolean;
+    totalWithinWindow: number;
+    windowLimit: number;
+    sourceTruncated: boolean;
+  };
 }
 
 export interface CollaborationInvite {
@@ -1065,6 +1655,7 @@ export interface CollaborationSessionRevocationResult {
 
 export interface RunIntent {
   id: string;
+  entityUid: string;
   projectId: string;
   canvasId: string;
   canvasRevision: number;
@@ -1088,8 +1679,21 @@ export interface RunIntent {
     };
   } | null;
   actualCost?: number | null;
-  status: 'pending' | 'accepted' | 'running' | 'completed' | 'failed' | 'rejected' | 'stale' | string;
+  status: 'pending' | 'accepted' | 'dispatching' | 'running' | 'completed' | 'failed' | 'rejected' | 'stale' | 'cancelled' | string;
   runId?: string | null;
+  queueRevision?: number;
+  confirmationRequired?: boolean;
+  confirmedAt?: number | null;
+  confirmedBy?: string | null;
+  dispatchAttempts?: number;
+  nextAttemptAt?: number | null;
+  leaseExpiresAt?: number | null;
+  lastHeartbeatAt?: number | null;
+  cancelRequestedAt?: number | null;
+  cancelledAt?: number | null;
+  lastErrorCode?: string | null;
+  lastErrorMessage?: string | null;
+  lastError?: { code?: string | null; message?: string | null } | null;
   createdAt: number;
   updatedAt: number;
 }

@@ -850,11 +850,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             const grid = q.imageUrls || [];
             const all = grid.length ? grid : (main ? [main] : []);
             if (!all.length) {
-              // 调试：上游字段名可能变化，把原始报文打到日志便于定位
-              try {
-                const dump = JSON.stringify(q.raw)?.slice(0, 800) || String(q.raw);
-                logBus.warn(`MJ 任务完成但未拿到 imageUrl/imageUrls，raw=${dump}`, src);
-              } catch {}
+              logBus.warn('MJ 任务完成但未拿到通过安全校验的 imageUrl/imageUrls', src);
               throw new Error('MJ 任务完成但未返回图片');
             }
             const final = main || all[0];
@@ -954,8 +950,8 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         }
 
         // 异步轮询: 1200×3s = 3600s，避免 FAL 图像长队列 30min 提前超时。
-        const { requestId, responseUrl, endpoint } = submit;
-        if (!requestId || !responseUrl) throw new Error('FAL 提交后未获得 request_id/response_url');
+        const { requestId, endpoint } = submit;
+        if (!requestId) throw new Error('FAL 提交后未获得 request_id');
         await reporter?.providerSubmitted({
           provider: traceProvider,
           model: traceModel,
@@ -969,7 +965,6 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         update({
           progress: '5%',
           taskId: requestId,
-          falResponseUrl: responseUrl,
           falEndpoint: endpoint,
         });
         const interval = 3000;
@@ -977,7 +972,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         for (let i = 0; i < maxPoll; i++) {
           await new Promise((r) => setTimeout(r, interval));
           if (!isCurrentGenerationRun(runId)) return;
-          const q = await queryImageFal({ responseUrl, endpoint, requestId });
+          const q = await queryImageFal({ endpoint, requestId });
           if (!isCurrentGenerationRun(runId)) return;
           const st = String(q.status || '').toLowerCase();
           await reporter?.polling({
@@ -985,7 +980,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             model: traceModel,
             requestId,
             recovery: {
-              kind: 'image-fal', requestId, responseUrl, endpoint, model: traceModel,
+              kind: 'image-fal', requestId, endpoint, model: traceModel,
               pollIntervalMs: interval, maxPolls: maxPoll,
             },
             transportHttpStatus: q.transportHttpStatus,

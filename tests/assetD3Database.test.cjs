@@ -88,6 +88,9 @@ test('near duplicate search separates algorithms, honors threshold zero, and req
       perceptualHash: zero,
     });
 
+    db.refreshAssetDuplicateCandidates(image.id, {
+      expectedCatalogRevision: db.getAssetCatalogRevision(image.projectId),
+    });
     const thresholdZero = db.listAssetDuplicates(image.id, { mode: 'near', maxDistance: 0, limit: 50 });
     assert.deepEqual(thresholdZero.items.map((item) => item.asset.id), [imageSame.id]);
     assert.equal(thresholdZero.items[0].algorithm, 'phash-dct64-v1');
@@ -129,10 +132,16 @@ test('near duplicate search separates algorithms, honors threshold zero, and req
       ],
     });
 
+    db.refreshAssetDuplicateCandidates(videoSource.id, {
+      expectedCatalogRevision: db.getAssetCatalogRevision(videoSource.projectId),
+    });
     const falsePositiveGuard = db.listAssetDuplicates(videoSource.id, { mode: 'near', maxDistance: 0, limit: 50 });
     assert.equal(falsePositiveGuard.items.some((item) => item.asset.id === 'near-video-single-frame'), false);
     assert.equal(falsePositiveGuard.items.some((item) => item.asset.id === 'near-video-one-different-third'), false);
 
+    db.refreshAssetDuplicateCandidates(goodSource.id, {
+      expectedCatalogRevision: db.getAssetCatalogRevision(goodSource.projectId),
+    });
     const goodMatches = db.listAssetDuplicates(goodSource.id, { mode: 'near', maxDistance: 1, limit: 50 });
     const good = goodMatches.items.find((item) => item.asset.id === goodVideo.id);
     assert.ok(good);
@@ -204,7 +213,7 @@ test('asset batch operations enforce complete explicit CAS, idempotency, query r
     assert.deepEqual(db.listAssets({ projectId: 'd3-project', tag: 'query-selected' }).map((asset) => asset.id).sort(), [first.id, second.id].sort());
 
     const staleCatalogRevision = db.getAssetCatalogRevision('d3-project');
-    db.updateAssetAvailability(excluded.id, 'missing', { sourceState: 'missing' });
+    db.setAssetTags(excluded.id, ['catalog-drift'], { expectedRevision: db.getAsset(excluded.id).organizationRevision });
     assert.throws(() => db.applyAssetBatch('d3-project', {
       idempotencyKey: 'stale-query',
       selection: { query: { query: 'batch-' }, catalogRevision: staleCatalogRevision, exclusions: [] },

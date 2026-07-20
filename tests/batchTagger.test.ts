@@ -706,7 +706,7 @@ test('batch tagger local import preserves native source path and opens the actua
   } finally {
     if (projectDatabase) {
       try { await projectDatabase.createBackup(); } catch {}
-      try { projectDatabase.close(); } catch {}
+      try { await projectDatabase.close(); } catch {}
     }
     config.DATA_DIR = oldConfig.DATA_DIR;
     config.INPUT_DIR = oldConfig.INPUT_DIR;

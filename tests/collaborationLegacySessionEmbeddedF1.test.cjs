@@ -8,7 +8,28 @@ const { WebSocket } = require('ws');
 
 const { CollaborationAuth } = require('../backend/src/collaboration/auth');
 const { CollaborationGateway, SESSION_COOKIE } = require('../backend/src/collaboration/gateway');
-const { ProjectDatabase } = require('../backend/src/services/projectDatabase');
+const {
+  PROJECT_DATABASE_SCHEMA_VERSION,
+  ProjectDatabase,
+} = require('../backend/src/services/projectDatabase');
+const {
+  PROJECT_DATABASE_MIGRATION_29_DOWN_SQL,
+} = require('../backend/src/services/projectDatabaseMigration29');
+const {
+  PROJECT_DATABASE_MIGRATION_30_DOWN_SQL,
+} = require('../backend/src/services/projectDatabaseMigration30');
+const {
+  PROJECT_DATABASE_MIGRATION_31,
+} = require('../backend/src/services/projectDatabaseMigration31');
+const {
+  PROJECT_DATABASE_MIGRATION_31_DURABLE_LEDGER_OWNED_OBJECTS,
+} = require('../backend/src/services/projectDatabaseMigration31DurableLedgers');
+const {
+  PROJECT_DATABASE_MIGRATION_31_LEGACY_GAPS_DOWN_SQL,
+} = require('../backend/src/services/projectDatabaseMigration31LegacyGaps');
+const {
+  stripSchema32ForSyntheticSchema31,
+} = require('./helpers/projectDatabaseVersion.cjs');
 
 const PROJECT_ID = 'project-legacy-session-embedded-f1';
 const CANVAS_ID = 'canvas-legacy-session-embedded-f1';
@@ -17,6 +38,25 @@ const UNAUTHORIZED_SUBFLOW_ID = 'unauthorized-embedded-b';
 const UNAUTHORIZED_ASSET_ID = 'unauthorized-embedded-asset';
 const PRIVATE_MARKER = 'B_MARKER_7391_ZEBRA';
 const DENIED_RESOURCE_STATUSES = new Set([403, 409, 422]);
+
+function stripSchema31ForHistoricalFixture(database) {
+  stripSchema32ForSyntheticSchema31(database);
+  database.exec(PROJECT_DATABASE_MIGRATION_31_LEGACY_GAPS_DOWN_SQL);
+  const drop = (type, name) => database.exec(`DROP ${type} IF EXISTS "${name}"`);
+  PROJECT_DATABASE_MIGRATION_31_DURABLE_LEDGER_OWNED_OBJECTS.triggers
+    .forEach((name) => drop('TRIGGER', name));
+  PROJECT_DATABASE_MIGRATION_31_DURABLE_LEDGER_OWNED_OBJECTS.views
+    .forEach((name) => drop('VIEW', name));
+  PROJECT_DATABASE_MIGRATION_31_DURABLE_LEDGER_OWNED_OBJECTS.indexes
+    .forEach((name) => drop('INDEX', name));
+  [...PROJECT_DATABASE_MIGRATION_31_DURABLE_LEDGER_OWNED_OBJECTS.tables]
+    .reverse()
+    .forEach((name) => drop('TABLE', name));
+  database.prepare('DELETE FROM schema_migration_receipts WHERE version = ?')
+    .run(PROJECT_DATABASE_MIGRATION_31.version);
+  database.prepare('DELETE FROM schema_migrations WHERE version = ?')
+    .run(PROJECT_DATABASE_MIGRATION_31.version);
+}
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -256,8 +296,13 @@ test('schema 22 upgrade revokes legacy invites/sessions and old cookies fail clo
 
     const legacy = new BetterSqlite3(filename);
     try {
+      stripSchema31ForHistoricalFixture(legacy);
+      legacy.prepare('DELETE FROM schema_migration_receipts WHERE version = 30').run();
+      legacy.prepare('DELETE FROM schema_migrations WHERE version = 30').run();
+      legacy.exec(PROJECT_DATABASE_MIGRATION_30_DOWN_SQL);
+      legacy.exec(PROJECT_DATABASE_MIGRATION_29_DOWN_SQL);
       legacy.exec(`
-        DELETE FROM schema_migrations WHERE version = 23;
+        DELETE FROM schema_migrations WHERE version > 22;
         DROP TABLE canvas_resource_grants;
         DROP TABLE canvas_resource_grant_state;
         UPDATE collaboration_invites SET canvas_id = NULL, revoked_at = NULL;
@@ -272,7 +317,13 @@ test('schema 22 upgrade revokes legacy invites/sessions and old cookies fail clo
       legacy.close();
     }
 
-    upgraded = new ProjectDatabase(filename, { autoBackup: false });
+    upgraded = new ProjectDatabase(filename, {
+      autoBackup: false,
+      preMigration23BackupFilename: path.join(directory, 'schema22-reopen.pre-migration23.sqlite3'),
+      preMigrationBackupFilename: path.join(directory, 'schema22-reopen.pre-migration29.sqlite3'),
+      preMigration30BackupFilename: path.join(directory, 'schema22-reopen.pre-migration30.sqlite3'),
+      preMigration31BackupFilename: path.join(directory, 'schema22-reopen.pre-migration31.sqlite3'),
+    });
     const migratedState = upgraded.getCanvasResourceGrantState(PROJECT_ID, CANVAS_ID);
     assert.ok(migratedState, 'schema 23 upgrade must create the fail-closed state row');
     assert.equal(migratedState.initializedAt, 0);
@@ -323,7 +374,7 @@ test('schema 22 upgrade revokes legacy invites/sessions and old cookies fail clo
       socketJoined: socket.joined,
     };
     assert.deepEqual(observed, {
-      schemaVersion: 23,
+      schemaVersion: PROJECT_DATABASE_SCHEMA_VERSION,
       invitesRevoked: true,
       sessionRevoked: true,
       oldTokenAuthenticates: false,
@@ -614,8 +665,8 @@ test('a legal two-level embedded definition is accepted without a false depth-li
       'Authorized parent A',
       [subflowNode('a-to-authorized-b', UNAUTHORIZED_SUBFLOW_ID, 1)],
     );
-    saveSubflow(database, embeddedB);
-    saveSubflow(database, authoritativeA);
+    const canonicalB = saveSubflow(database, embeddedB);
+    const canonicalA = saveSubflow(database, authoritativeA);
     ensureCanvas(database, [
       subflowNode('authorized-a-instance', AUTHORIZED_SUBFLOW_ID, 1),
     ]);
@@ -630,15 +681,8 @@ test('a legal two-level embedded definition is accepted without a false depth-li
     const status = await gateway.start({ host: '127.0.0.1', port: 0 });
     const baseUrl = `http://127.0.0.1:${status.port}`;
     const editor = createSession(gateway);
-    const embeddedA = subflowDefinition(
-      AUTHORIZED_SUBFLOW_ID,
-      'Authorized parent A',
-      [
-        subflowNode('a-to-authorized-b', UNAUTHORIZED_SUBFLOW_ID, 1, {
-          definition: embeddedB,
-        }),
-      ],
-    );
+    const embeddedA = clone(canonicalA);
+    embeddedA.nodes[0].data.definition = clone(canonicalB);
     const before = database.getCanvas(CANVAS_ID);
     const mutation = await postOperation(baseUrl, database, editor.cookie, {
       opId: 'legal-two-level-embedded-definition',

@@ -15,6 +15,7 @@ const {
   writeReleaseProvenance,
 } = require('./release-provenance.cjs');
 const { assertReleaseWorktreeClean } = require('./release-worktree.cjs');
+const { assertCollaborationReleaseEvidence } = require('./collaboration-release-evidence.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
 const pkg = require(path.join(ROOT, 'package.json'));
@@ -288,6 +289,20 @@ function run(label, executable, args) {
 function main() {
   assertReleaseApproval();
   const releaseTarget = assertReleaseTarget();
+  try {
+    const evidence = assertCollaborationReleaseEvidence({
+      root: ROOT,
+      version: pkg.version,
+      target: releaseTarget,
+    });
+    console.log(
+      `[dist-release] collaboration evidence: ${evidence.checkCount} checks, `
+      + `${evidence.artifactCount} artifacts, manifest ${evidence.manifestSha256}`,
+    );
+  } catch (error) {
+    console.error(`[dist-release] collaboration release gate failed: ${error?.message || error}`);
+    process.exit(1);
+  }
   assertReleaseSourceClean('release worktree check before build or recovery');
   const prepared = prepareReleaseBuild(releaseTarget);
   if (prepared.completed) {

@@ -1,0 +1,35 @@
+{
+  "canvasId": "run-history-board",
+  "projectId": "run-project",
+  "name": "旧运行记录关联",
+  "updatedAt": 1704067200009,
+  "nodes": [
+    { "id": "prompt-node-9", "type": "text", "position": { "x": 0, "y": 0 }, "data": { "prompt": "蓝色冰川" } },
+    { "id": "image-node-9", "type": "image", "position": { "x": 340, "y": 0 }, "data": { "model": "fixture-image" } }
+  ],
+  "edges": [
+    { "id": "run-flow-edge", "source": "prompt-node-9", "target": "image-node-9" }
+  ],
+  "assets": [
+    { "id": "run-output-old", "kind": "image", "filename": "glacier.png", "metadata": { "width": 1024, "height": 1024 } }
+  ],
+  "runs": [
+    {
+      "id": "run-2024-01",
+      "status": "succeeded",
+      "canvasRevision": 4,
+      "nodeIds": ["image-node-9"],
+      "outputRefs": ["run-output-old"],
+      "nodeRuns": [
+        { "id": "node-run-image-1", "nodeId": "image-node-9", "status": "succeeded", "outputRefs": ["run-output-old"], "attempts": [
+          { "id": "attempt-image-1", "status": "succeeded", "provider": "fixture", "model": "fixture-image", "requestId": "req-legacy-9" }
+        ] }
+      ],
+      "events": [
+        { "id": 1, "nodeRunId": "node-run-image-1", "type": "node.started", "createdAt": 1704067190000 },
+        { "id": 2, "nodeRunId": "node-run-image-1", "type": "node.output", "payload": { "assetId": "run-output-old" }, "createdAt": 1704067195000 }
+      ]
+    }
+  ],
+  "viewport": { "x": 30, "y": 40, "zoom": 0.95 }
+}

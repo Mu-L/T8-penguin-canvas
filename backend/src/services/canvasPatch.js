@@ -887,12 +887,21 @@ function safeCanvasMutationErrorCode(error, fallback = 'canvas_patch_invalid') {
 
 function canvasMutationErrorStatus(error, code, defaultStatus = 400) {
   const explicit = Number(error?.statusCode ?? error?.status);
-  if ([400, 401, 403, 404, 409, 413, 422, 429, 500, 503].includes(explicit)) return explicit;
+  if ([400, 401, 403, 404, 409, 413, 422, 429, 500, 503, 507].includes(explicit)) return explicit;
   if (/(?:forbidden|permission|not_owner|actor_mismatch|access_denied)/i.test(code)) return 403;
   if (/(?:not_found|missing_record|unknown_patch|canvas_missing)$/i.test(code)) return 404;
   if (/(?:revision_conflict|stale|digest_mismatch|conflict|already_applied|already_reverted|operation_id_reserved|busy)/i.test(code)) return 409;
   return [400, 500].includes(Number(defaultStatus)) ? Number(defaultStatus) : 400;
 }
+
+const PUBLIC_PROJECT_DATABASE_CAPACITY_REASONS = new Set([
+  'main-page-limit',
+  'wal-pressure',
+  'filesystem-reserve',
+  'sqlite-full',
+  'temp-storage-full',
+  'backup-storage-full',
+]);
 
 function mapCanvasMutationError(error, options = {}) {
   const fallbackCode = typeof options.fallbackCode === 'string' ? options.fallbackCode : 'canvas_patch_invalid';
@@ -905,6 +914,11 @@ function mapCanvasMutationError(error, options = {}) {
     error: safeCanvasPatchErrorMessage(error?.message, options.fallbackMessage || 'CanvasPatch 请求无效'),
   };
   if (Number.isSafeInteger(currentRevision) && currentRevision >= 0) body.currentRevision = currentRevision;
+  if (code === 'project_database_storage_capacity_exceeded') {
+    const reason = String(error?.reason || error?.details?.reason || '');
+    if (PUBLIC_PROJECT_DATABASE_CAPACITY_REASONS.has(reason)) body.reason = reason;
+    body.retryable = error?.retryable === true || error?.details?.retryable === true;
+  }
   return {
     status: canvasMutationErrorStatus(error, code, options.defaultStatus),
     body,
@@ -1279,7 +1293,10 @@ function claimTarget(claimed, kind, id, operationIndex) {
 
 function buildCanvasPatchPlan(inputDocument, inputPatch, context = {}) {
   const patch = validateCanvasPatch(inputPatch);
-  const document = normalizeCanvasDocument(inputDocument?.canvasId || context.canvasId || 'unknown', inputDocument, {
+  const normalizePlanDocument = typeof context.normalizeDocument === 'function'
+    ? context.normalizeDocument
+    : normalizeCanvasDocument;
+  const document = normalizePlanDocument(inputDocument?.canvasId || context.canvasId || 'unknown', inputDocument, {
     projectId: inputDocument?.projectId || context.projectId,
     revision: inputDocument?.revision,
     updatedAt: inputDocument?.updatedAt,
@@ -1321,7 +1338,7 @@ function buildCanvasPatchPlan(inputDocument, inputPatch, context = {}) {
         const nodeId = String(payload.node.id);
         claimTarget(claimed, 'node', nodeId, operationIndex);
         const applied = applyCanvasOperation(working, { ...envelope, type: rawOperation.type, payload });
-        working = normalizeCanvasDocument(document.canvasId, applied.document, {
+        working = normalizePlanDocument(document.canvasId, applied.document, {
           projectId: document.projectId,
           revision: working.revision + 1,
           updatedAt: document.updatedAt,
@@ -1367,7 +1384,7 @@ function buildCanvasPatchPlan(inputDocument, inputPatch, context = {}) {
           ...dataKeys.map((key) => fieldState(current, 'data', key)),
         ];
         const applied = applyCanvasOperation(working, { ...envelope, type: rawOperation.type, payload });
-        working = normalizeCanvasDocument(document.canvasId, applied.document, {
+        working = normalizePlanDocument(document.canvasId, applied.document, {
           projectId: document.projectId,
           revision: working.revision + 1,
           updatedAt: document.updatedAt,
@@ -1426,7 +1443,7 @@ function buildCanvasPatchPlan(inputDocument, inputPatch, context = {}) {
         const beforeState = fieldState(current, 'node', 'position');
         const payload = { nodeId, position: cloneJson(rawOperation.payload.position) };
         const applied = applyCanvasOperation(working, { ...envelope, type: rawOperation.type, payload });
-        working = normalizeCanvasDocument(document.canvasId, applied.document, {
+        working = normalizePlanDocument(document.canvasId, applied.document, {
           projectId: document.projectId,
           revision: working.revision + 1,
           updatedAt: document.updatedAt,
@@ -1473,7 +1490,7 @@ function buildCanvasPatchPlan(inputDocument, inputPatch, context = {}) {
         connectedEdges.forEach((edge) => claimTarget(claimed, 'edge', String(edge.id), operationIndex));
         const payload = { nodeId };
         const applied = applyCanvasOperation(working, { ...envelope, type: rawOperation.type, payload });
-        working = normalizeCanvasDocument(document.canvasId, applied.document, {
+        working = normalizePlanDocument(document.canvasId, applied.document, {
           projectId: document.projectId,
           revision: working.revision + 1,
           updatedAt: document.updatedAt,
@@ -1514,7 +1531,7 @@ function buildCanvasPatchPlan(inputDocument, inputPatch, context = {}) {
         const source = resolveNode(working, payload.edge.source, operationIndex);
         const target = resolveNode(working, payload.edge.target, operationIndex);
         const applied = applyCanvasOperation(working, { ...envelope, type: rawOperation.type, payload });
-        working = normalizeCanvasDocument(document.canvasId, applied.document, {
+        working = normalizePlanDocument(document.canvasId, applied.document, {
           projectId: document.projectId,
           revision: working.revision + 1,
           updatedAt: document.updatedAt,
@@ -1550,7 +1567,7 @@ function buildCanvasPatchPlan(inputDocument, inputPatch, context = {}) {
         const beforeViewport = cloneJson(working.viewport);
         const payload = cloneJson(rawOperation.payload);
         const applied = applyCanvasOperation(working, { ...envelope, type: rawOperation.type, payload });
-        working = normalizeCanvasDocument(document.canvasId, applied.document, {
+        working = normalizePlanDocument(document.canvasId, applied.document, {
           projectId: document.projectId,
           revision: working.revision + 1,
           updatedAt: document.updatedAt,
@@ -1579,7 +1596,7 @@ function buildCanvasPatchPlan(inputDocument, inputPatch, context = {}) {
       claimTarget(claimed, 'edge', edgeId, operationIndex);
       const payload = { edgeId };
       const applied = applyCanvasOperation(working, { ...envelope, type: rawOperation.type, payload });
-      working = normalizeCanvasDocument(document.canvasId, applied.document, {
+      working = normalizePlanDocument(document.canvasId, applied.document, {
         projectId: document.projectId,
         revision: working.revision + 1,
         updatedAt: document.updatedAt,

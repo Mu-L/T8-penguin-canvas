@@ -1,0 +1,12 @@
+{
+  "id": "viewport-extension-board",
+  "name": "扩展视口字段",
+  "updatedAt": 1704067200017,
+  "nodes": [
+    { "id": "zoom-focus", "type": "model-3d-preview", "position": { "x": 260, "y": 180 }, "data": { "label": "3D 细节检查", "camera": { "azimuth": 35, "elevation": 18, "distance": 2.4 } } }
+  ],
+  "edges": [],
+  "viewport": { "x": 418.125, "y": 233.875, "zoom": 3.5, "rotation": 0, "cameraBookmark": "detail-a", "safeArea": { "top": 24, "right": 16, "bottom": 32, "left": 16 } },
+  "panoramaState": { "projection": "perspective", "fov": 42, "target": [0, 1.2, 0] },
+  "inspector": { "open": true, "tab": "materials", "width": 360 }
+}

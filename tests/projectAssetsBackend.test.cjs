@@ -7,8 +7,10 @@ const express = require('express');
 
 test('project asset API keeps host paths private and separates index deletion from managed-file deletion', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-project-assets-api-'));
+  const previousManagementToken = process.env.T8_COLLAB_MANAGEMENT_TOKEN;
   process.env.T8PC_PACKAGED = '1';
   process.env.T8PC_USER_DATA = directory;
+  process.env.T8_COLLAB_MANAGEMENT_TOKEN = 'A'.repeat(43);
   fs.mkdirSync(path.join(directory, 'input'), { recursive: true });
   fs.mkdirSync(path.join(directory, 'output'), { recursive: true });
   const linkedPath = path.join(directory, 'linked-source.txt');
@@ -28,14 +30,27 @@ test('project asset API keeps host paths private and separates index deletion fr
     const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
   });
   const baseUrl = `http://127.0.0.1:${server.address().port}/api/project-assets`;
+  const deleteBody = (asset, confirmFilename = asset.filename) => ({
+    deleteFile: true,
+    confirmFilename,
+    expectedEntityUid: asset.entityUid,
+    expectedContentRevision: asset.contentRevision,
+    expectedContentHash: asset.contentHash,
+  });
   try {
     assert.equal(router.previewPipeline, filesRouter.previewPipeline);
     assert.equal(router.indexer, filesRouter.assetIndexer);
     const initialStatus = await (await fetch(`${baseUrl}/status`)).json();
-    assert.deepEqual(Object.keys(initialStatus.data).sort(), ['previews', 'scan']);
+    assert.deepEqual(Object.keys(initialStatus.data).sort(), ['previews', 'projectId', 'scan']);
+    assert.equal(initialStatus.data.projectId, 'project-local');
+    assert.equal(initialStatus.data.scan.projectId, 'project-local');
+    assert.equal(initialStatus.data.scan.running, false);
+    assert.equal(initialStatus.data.scan.lastResult, null);
     assert.deepEqual(Object.keys(initialStatus.data.previews.counts).sort(), ['failed', 'queued', 'retrying', 'running', 'succeeded']);
+    assert.equal(initialStatus.data.previews.projectId, 'project-local');
     assert.equal(typeof initialStatus.data.previews.active, 'number');
     assert.equal(typeof initialStatus.data.previews.concurrency, 'number');
+    assert.equal(initialStatus.data.previews.concurrencyScope, 'global');
     const uploadForm = new FormData();
     uploadForm.append('canvasId', 'canvas-upload-lineage');
     uploadForm.append('sourceNodeId', 'upload-node-a');
@@ -103,7 +118,7 @@ test('project asset API keeps host paths private and separates index deletion fr
     const linkedDelete = await fetch(`${baseUrl}/${linked.id}/file`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ deleteFile: true, confirmFilename: linked.filename }),
+      body: JSON.stringify(deleteBody(linked)),
     });
     assert.equal(linkedDelete.status, 400);
     assert.equal(fs.existsSync(linkedPath), true);
@@ -115,26 +130,40 @@ test('project asset API keeps host paths private and separates index deletion fr
 
     const managedPath = path.join(config.INPUT_DIR, 'managed.txt');
     fs.writeFileSync(managedPath, 'managed payload');
-    const scan = await fetch(`${baseUrl}/scan`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const scan = await fetch(`${baseUrl}/scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'project-local' }),
+    });
     assert.equal(scan.status, 200);
+    const scanPayload = await scan.json();
+    assert.equal(scanPayload.data.projectId, 'project-local');
+    assert.equal(Number.isSafeInteger(scanPayload.data.catalogRevision), true);
+    const statusAfterScan = await (await fetch(`${baseUrl}/status?projectId=project-local`)).json();
+    assert.equal(statusAfterScan.data.scan.projectId, 'project-local');
+    assert.equal(statusAfterScan.data.scan.running, false);
+    assert.equal(statusAfterScan.data.scan.lastResult.projectId, 'project-local');
+    assert.equal(statusAfterScan.data.scan.lastResult.catalogRevision, scanPayload.data.catalogRevision);
     const managed = database.findAssetBySourceUrl('project-local', '/files/input/managed.txt');
     assert.equal(managed.storageMode, 'managed');
     const wrongConfirm = await fetch(`${baseUrl}/${managed.id}/file`, {
-      method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deleteFile: true, confirmFilename: 'wrong.txt' }),
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(deleteBody(managed, 'wrong.txt')),
     });
     assert.equal(wrongConfirm.status, 400);
     assert.equal(fs.existsSync(managedPath), true);
     const deleteManaged = await fetch(`${baseUrl}/${managed.id}/file`, {
-      method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deleteFile: true, confirmFilename: managed.filename }),
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(deleteBody(managed)),
     });
     assert.equal(deleteManaged.status, 200);
     assert.equal(fs.existsSync(managedPath), false);
     assert.equal(database.getAsset(managed.id), null);
   } finally {
     await new Promise((resolve) => server.close(resolve));
-    database.close();
+    await database.close();
     fs.rmSync(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
     delete process.env.T8PC_PACKAGED;
     delete process.env.T8PC_USER_DATA;
+    if (previousManagementToken == null) delete process.env.T8_COLLAB_MANAGEMENT_TOKEN;
+    else process.env.T8_COLLAB_MANAGEMENT_TOKEN = previousManagementToken;
   }
 });

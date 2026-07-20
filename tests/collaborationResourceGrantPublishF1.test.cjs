@@ -1,11 +1,15 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const childProcess = require('node:child_process');
 const fs = require('node:fs');
+const Module = require('node:module');
 const os = require('node:os');
 const path = require('node:path');
-const BetterSqlite3 = require('better-sqlite3');
 const express = require('express');
-const { ProjectDatabase } = require('../backend/src/services/projectDatabase');
+const {
+  PROJECT_DATABASE_SCHEMA_VERSION,
+  ProjectDatabase,
+} = require('../backend/src/services/projectDatabase');
 const { CollaborationAuth } = require('../backend/src/collaboration/auth');
 const { CollaborationGateway } = require('../backend/src/collaboration/gateway');
 
@@ -13,6 +17,31 @@ const PROJECT_ID = 'project-resource-grant-publish-f1';
 const CANVAS_ID = 'canvas-resource-grant-publish-f1';
 const MAIN_SUBFLOW_ID = 'authorized-main-flow';
 const DENIED_PUBLISH_STATUSES = new Set([400, 403, 409]);
+
+let historicalSchema22Module = null;
+
+function loadHistoricalSchema22ProjectDatabase() {
+  if (historicalSchema22Module) return historicalSchema22Module;
+  const root = path.resolve(__dirname, '..');
+  const filename = path.join(root, 'backend', 'src', 'services', 'projectDatabase.js');
+  const source = childProcess.execFileSync(
+    'git',
+    [
+      '-c',
+      `safe.directory=${root.replaceAll('\\', '/')}`,
+      'show',
+      'v2.5.7:backend/src/services/projectDatabase.js',
+    ],
+    { cwd: root, encoding: 'utf8', windowsHide: true },
+  );
+  const historical = new Module(`${filename}#v2.5.7`, module);
+  historical.filename = filename;
+  historical.paths = Module._nodeModulePaths(path.dirname(filename));
+  historical._compile(source, filename);
+  historicalSchema22Module = historical.exports;
+  assert.equal(historicalSchema22Module.PROJECT_DATABASE_SCHEMA_VERSION, 22);
+  return historicalSchema22Module;
+}
 
 function textNode(id, text, data = {}) {
   return {
@@ -411,50 +440,36 @@ test('schema 22 upgrade does not auto-grant resources already referenced by a le
   let upgraded = null;
   let gateway = null;
   try {
-    const latest = new ProjectDatabase(filename, { autoBackup: false });
+    const historical = loadHistoricalSchema22ProjectDatabase();
+    const legacy = new historical.ProjectDatabase(filename, { autoBackup: false });
     try {
-      addAsset(latest, legacyAssetId, 'legacy-reference.png');
+      addAsset(legacy, legacyAssetId, 'legacy-reference.png');
       saveSubflow(
-        latest,
+        legacy,
         subflowDefinition(legacySubflowId, 'Legacy referenced subflow'),
       );
-      ensureCanvas(latest, [
+      ensureCanvas(legacy, [
         textNode('legacy-asset-node', 'legacy asset', { sourceAssetId: legacyAssetId }),
         subflowNode('legacy-subflow-node', legacySubflowId, 1),
       ]);
-      assert.deepEqual(normalizeGrants(latest), {
-        assets: [legacyAssetId],
-        subflows: [`${legacySubflowId}@1`],
-      });
-    } finally {
-      latest.close();
-    }
-
-    const legacy = new BetterSqlite3(filename);
-    try {
-      legacy.exec(`
-        DELETE FROM schema_migrations WHERE version = 23;
-        DROP TABLE canvas_resource_grants;
-        DROP TABLE canvas_resource_grant_state;
-      `);
       assert.equal(
-        legacy.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version,
+        legacy.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version,
         22,
       );
       assert.equal(
-        legacy.prepare(
+        legacy.db.prepare(
           "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'canvas_resource_grants'",
         ).get(),
         undefined,
       );
     } finally {
-      legacy.close();
+      await legacy.close();
     }
 
     upgraded = new ProjectDatabase(filename, { autoBackup: false });
     assert.equal(
       upgraded.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version,
-      23,
+      PROJECT_DATABASE_SCHEMA_VERSION,
     );
     const resolvedLegacyReferences = upgraded.resolveCanvasDocumentResources(
       upgraded.getCanvas(CANVAS_ID),

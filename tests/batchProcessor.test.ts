@@ -301,46 +301,58 @@ test('batch processor backend routes process every local image step and final ar
   const sharp = require('sharp');
   const config = require('../backend/src/config.js');
   const imageOpsRouter = require('../backend/src/routes/imageOps.js');
-  const filesRouter = require('../backend/src/routes/files.js');
 
   const oldConfig = {
+    DATA_DIR: config.DATA_DIR,
     INPUT_DIR: config.INPUT_DIR,
     OUTPUT_DIR: config.OUTPUT_DIR,
     THUMBNAILS_DIR: config.THUMBNAILS_DIR,
+    ASSET_PREVIEWS_DIR: config.ASSET_PREVIEWS_DIR,
+    ASSET_BLOB_DIR: config.ASSET_BLOB_DIR,
+    PROJECT_DB_FILE: config.PROJECT_DB_FILE,
+    PROJECT_DB_BACKUP_FILE: config.PROJECT_DB_BACKUP_FILE,
   };
   const root = mkdtempSync(join(tmpdir(), 't8-batch-'));
+  config.DATA_DIR = join(root, 'data');
   config.INPUT_DIR = join(root, 'input');
   config.OUTPUT_DIR = join(root, 'output');
   config.THUMBNAILS_DIR = join(root, 'thumbs');
+  config.ASSET_PREVIEWS_DIR = join(config.THUMBNAILS_DIR, 'asset-previews');
+  config.ASSET_BLOB_DIR = join(config.DATA_DIR, 'asset-blobs');
+  config.PROJECT_DB_FILE = join(config.DATA_DIR, 't8-projects.sqlite3');
+  config.PROJECT_DB_BACKUP_FILE = join(config.DATA_DIR, 't8-projects.sqlite3.backup');
+  mkdirSync(config.DATA_DIR, { recursive: true });
   mkdirSync(config.INPUT_DIR, { recursive: true });
   mkdirSync(config.OUTPUT_DIR, { recursive: true });
   mkdirSync(config.THUMBNAILS_DIR, { recursive: true });
-
-  const sourcePath = join(config.INPUT_DIR, 'bars.png');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="black"/><rect x="0" y="3" width="10" height="4" fill="#ff3355"/></svg>`;
-  writeFileSync(sourcePath, await sharp(Buffer.from(svg)).png().toBuffer());
-
-  const app = express();
-  app.use(express.json({ limit: '4mb' }));
-  app.use('/api/image', imageOpsRouter);
-  app.use('/api/files', filesRouter);
-  const server = await new Promise<any>((resolve) => {
-    const s = app.listen(0, '127.0.0.1', () => resolve(s));
-  });
-  const base = `http://127.0.0.1:${server.address().port}`;
-  const post = async (path: string, body: any) => {
-    const res = await fetch(`${base}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const json = await res.json();
-    assert.equal(res.ok, true, `${path} failed: ${JSON.stringify(json)}`);
-    assert.equal(json.success, true, `${path} returned success=false`);
-    return json.data;
-  };
+  let server: any = null;
 
   try {
+    const filesRouter = require('../backend/src/routes/files.js');
+    const sourcePath = join(config.INPUT_DIR, 'bars.png');
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="black"/><rect x="0" y="3" width="10" height="4" fill="#ff3355"/></svg>`;
+    writeFileSync(sourcePath, await sharp(Buffer.from(svg)).png().toBuffer());
+
+    const app = express();
+    app.use(express.json({ limit: '4mb' }));
+    app.use('/api/image', imageOpsRouter);
+    app.use('/api/files', filesRouter);
+    server = await new Promise<any>((resolve) => {
+      const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
+    });
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const post = async (path: string, body: any) => {
+      const res = await fetch(`${base}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      assert.equal(res.ok, true, `${path} failed: ${JSON.stringify(json)}`);
+      assert.equal(json.success, true, `${path} returned success=false`);
+      return json.data;
+    };
+
     const trim = await post('/api/image/trim-border', { imageUrl: '/files/input/bars.png', mode: 'black', axis: 'vertical' });
     assert.equal(trim.crop.h, 4);
     assert.deepEqual(trim.crop.removed, { top: 3, right: 0, bottom: 3, left: 0 });
@@ -359,11 +371,15 @@ test('batch processor backend routes process every local image step and final ar
     assert.equal(opened.opened, false);
     assert.match(opened.path, /output[\\/]batch$/);
   } finally {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    config.INPUT_DIR = oldConfig.INPUT_DIR;
-    config.OUTPUT_DIR = oldConfig.OUTPUT_DIR;
-    config.THUMBNAILS_DIR = oldConfig.THUMBNAILS_DIR;
-    rmSync(root, { recursive: true, force: true });
+    if (server) {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+    try {
+      await require('../backend/src/services/projectDatabase.js').closeProjectDatabase();
+    } finally {
+      Object.assign(config, oldConfig);
+      rmSync(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
+    }
   }
 });
 

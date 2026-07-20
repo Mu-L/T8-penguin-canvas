@@ -1,0 +1,22 @@
+{
+  "id": "pixel-scrapbook",
+  "name": "像素剪贴创作台",
+  "theme": { "style": "pixel", "mode": "day", "name": "farm-story" },
+  "updatedAt": 1704067200003,
+  "nodes": [
+    { "id": "idea-pixel", "type": "idea", "position": { "x": 24, "y": 36 }, "data": { "label": "灵感便笺", "text": "做一张像素企鹅旅行明信片" } },
+    { "id": "image-pixel", "type": "image", "position": { "x": 360, "y": 36 }, "data": { "label": "明信片画面" } }
+  ],
+  "edges": [
+    { "id": "pixel-prompt", "source": "idea-pixel", "target": "image-pixel", "sourceHandle": "idea-out:text", "targetHandle": "image-in:text" }
+  ],
+  "viewport": { "x": 64, "y": 48, "zoom": 1 },
+  "creativeDesk": {
+    "version": 1,
+    "coordinateMode": "flow",
+    "defaultOpacity": 0.92,
+    "items": [
+      { "id": "desk-card-1", "kind": "image", "url": "/files/output/postcard.png", "title": "企鹅明信片", "x": 120, "y": 80, "width": 320, "height": 220, "scale": 1, "rotation": -2, "opacity": 0.95, "frameId": "polaroid", "frameColorId": "cream", "zIndex": 2, "createdAt": 1704067100000 }
+    ]
+  }
+}

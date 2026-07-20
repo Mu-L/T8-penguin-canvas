@@ -6,12 +6,14 @@ import {
   addAssetToCollection,
   applyProjectAssetBatch,
   decideProjectAssetDuplicate,
+  deleteProjectAssetFile,
   getProjectAssetPermissions,
   getProjectAssetSourceTree,
   listProjectAssetLineage,
   listProjectAssetDuplicateGroupMembers,
   listProjectAssetDuplicateGroups,
   listProjectAssetDuplicates,
+  refreshProjectAssetDuplicates,
   removeAssetFromCollection,
   setProjectAssetPermissions,
   setProjectAssetTags,
@@ -223,6 +225,11 @@ test('API adapter sends atomic ACL replacement and normalizes near-frame/source-
         projectId: 'project-local', assetId: 'a', scope: 'project', revision: 2, grants: [], updatedAt: 2,
       } }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
+    if (url.endsWith('/api/project-assets/a/duplicates/refresh')) {
+      return new Response(JSON.stringify({ success: true, data: {
+        refreshed: true, assetId: 'a', projectId: 'project-local', catalogRevision: 91, candidateCount: 1,
+      } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
     if (url.includes('/duplicates?')) {
       return new Response(JSON.stringify({ success: true, data: [{
         id: 'near-a-b', type: 'near', asset: asset('b', 13), algorithm: 'phash-dct64-v1', distance: 4,
@@ -231,7 +238,7 @@ test('API adapter sends atomic ACL replacement and normalizes near-frame/source-
           sourceNormalizedTime: 0.25, targetNormalizedTime: 0.3, distance: 4,
         },
         decision: 'pending', decisionRevision: 7, confidence: 'high', evidenceCount: 1, coverage: 0.8,
-      }], meta: { nextCursor: 'next', hasMore: true } }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }], meta: { nextCursor: 'next', hasMore: true, catalogRevision: 91 } }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     if (url.includes('/duplicate-candidates/') && url.endsWith('/decision')) {
       return new Response(JSON.stringify({ success: true, data: {
@@ -298,8 +305,21 @@ test('API adapter sends atomic ACL replacement and normalizes near-frame/source-
       type: 'collection.move', fromCollectionIds: ['collection-from'], toCollectionId: 'collection-to',
     });
 
+    const refresh = await refreshProjectAssetDuplicates('a', { expectedCatalogRevision: 91 });
+    assert.deepEqual(refresh, {
+      refreshed: true,
+      assetId: 'a',
+      projectId: 'project-local',
+      catalogRevision: 91,
+      candidateCount: 1,
+    });
+    const refreshCall = calls.find((call) => call.url.endsWith('/duplicates/refresh'))!;
+    assert.equal(refreshCall.init?.method, 'POST');
+    assert.deepEqual(JSON.parse(String(refreshCall.init?.body)), { expectedCatalogRevision: 91 });
+
     const duplicates = await listProjectAssetDuplicates('a', { maxDistance: 64 });
     assert.equal(duplicates.hasMore, true);
+    assert.equal(duplicates.catalogRevision, 91);
     assert.deepEqual(duplicates.items[0].frameMatches, [{
       sourceIndex: 2, targetIndex: 3, sourceTime: 1.25, targetTime: 1.5,
       distance: 4, algorithm: 'phash-dct64-v1',
@@ -308,11 +328,15 @@ test('API adapter sends atomic ACL replacement and normalizes near-frame/source-
 
     assert.match(calls.find((call) => call.url.includes('/duplicates?'))!.url, /maxDistance=8/);
 
-    const decision = await decideProjectAssetDuplicate('near-a-b', 'confirmed', 7, 'project-local');
+    const decision = await decideProjectAssetDuplicate('near-a-b', 'confirmed', {
+      expectedRevision: 7,
+      expectedCatalogRevision: 91,
+      projectId: 'project-local',
+    });
     assert.equal(decision.decision, 'confirmed');
     assert.equal(decision.revision, 8, 'decision endpoint returns revision, not decisionRevision');
     assert.deepEqual(JSON.parse(String(calls.find((call) => call.url.includes('/duplicate-candidates/'))!.init?.body)), {
-      decision: 'confirmed', expectedRevision: 7, projectId: 'project-local',
+      decision: 'confirmed', expectedRevision: 7, expectedCatalogRevision: 91, projectId: 'project-local',
     });
 
     await setProjectAssetTags('a', ['approved'], 11);
@@ -378,8 +402,14 @@ test('duplicate candidate, exact-group, and group-member adapters keep cursor re
             distance: 3,
           })),
         }],
-        meta: { nextCursor: 'candidate-next', hasMore: true },
+        meta: { nextCursor: 'candidate-next', hasMore: true, catalogRevision: 91 },
       }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.includes('/project-assets/missing-catalog/duplicates?')) {
+      return new Response(JSON.stringify({ success: true, data: [], meta: { hasMore: false } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
     }
     if (url.includes('/project-assets/duplicate-groups/group-a?')) {
       return new Response(JSON.stringify({
@@ -411,7 +441,15 @@ test('duplicate candidate, exact-group, and group-member adapters keep cursor re
     assert.equal(candidates.limit, 100);
     assert.equal(candidates.cursor, 'candidate-next');
     assert.equal(candidates.hasMore, true);
+    assert.equal(candidates.catalogRevision, 91);
     assert.equal(candidates.items[0].frameMatches.length, 12, 'per-candidate frame evidence stays bounded');
+    await assert.rejects(
+      () => listProjectAssetDuplicates('missing-catalog'),
+      (error) => error instanceof Error
+        && error.name === 'ApiRequestError'
+        && 'status' in error
+        && error.status === 409,
+    );
 
     const groups = await listProjectAssetDuplicateGroups({
       projectId: 'project-stable',
@@ -510,6 +548,120 @@ test('lineage API adapter preserves the bounded cursor-page metadata and abort s
   }
 });
 
+test('asset file delete adapter binds client-visible identity and fails closed outside the committed result ABI', async () => {
+  const originalFetch = globalThis.fetch;
+  const responses: unknown[] = [
+    { success: true, data: { id: 'asset-normal', indexRemoved: true, fileDeleted: true, blobRetained: false } },
+    { success: true, data: { id: 'asset-legacy', fileDeleted: true } },
+    { success: true, data: {
+      id: 'server-selected-another-asset',
+      indexRemoved: true,
+      fileDeleted: false,
+      persistenceWarning: {
+        code: 'asset_delete_cleanup_pending',
+        committed: 'true',
+        phase: 'C:\\private\\project.sqlite3',
+        reconciliationPending: true,
+        retryable: false,
+        message: 'SQLITE_FULL INSERT secret-token',
+      },
+    } },
+    { success: true, data: {
+      id: 'asset-warning',
+      indexRemoved: true,
+      fileDeleted: true,
+      blobRetained: false,
+      persistenceWarning: {
+        code: 'asset_delete_cleanup_pending',
+        committed: true,
+        phase: 'cas-record-finalize',
+        reconciliationPending: true,
+        retryable: false,
+        message: 'C:\\private\\project.sqlite3 secret-token',
+        privateSql: 'UPDATE asset_blobs SET deleted_at = ? SECRET',
+      },
+    } },
+  ];
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const expectedIdentity = {
+    entityUid: '019f6d00-0000-7000-8000-000000000001',
+    contentRevision: 7,
+    contentHash: 'a'.repeat(64),
+  };
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(input), init });
+    return new Response(JSON.stringify(responses.shift()), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  }) as typeof fetch;
+  try {
+    assert.deepEqual(await deleteProjectAssetFile('asset-normal', 'normal.png', expectedIdentity), {
+      id: 'asset-normal',
+      indexRemoved: true,
+      fileDeleted: true,
+      blobRetained: false,
+    });
+    await assert.rejects(
+      () => deleteProjectAssetFile('asset-legacy', 'legacy.png', expectedIdentity),
+      /素材删除响应无效/,
+    );
+    await assert.rejects(
+      () => deleteProjectAssetFile('asset-forged', 'forged.png', expectedIdentity),
+      (error: unknown) => error instanceof Error
+        && /素材删除响应无效/.test(error.message)
+        && !/private|sqlite|secret|server-selected/i.test(error.message),
+    );
+    const committed = await deleteProjectAssetFile('asset-warning', 'warning.png', expectedIdentity);
+    assert.deepEqual(committed, {
+      id: 'asset-warning',
+      indexRemoved: true,
+      fileDeleted: true,
+      blobRetained: false,
+      persistenceWarning: {
+        code: 'asset_delete_cleanup_pending',
+        committed: true,
+        phase: 'cas-record-finalize',
+        reconciliationPending: true,
+        retryable: false,
+      },
+    });
+    assert.doesNotMatch(JSON.stringify(committed), /private|sqlite|secret|message|privateSql/i);
+    assert.equal(calls.length, 4);
+    assert.ok(calls.every((call) => call.init?.method === 'DELETE'));
+    assert.deepEqual(JSON.parse(String(calls[3].init?.body)), {
+      deleteFile: true,
+      confirmFilename: 'warning.png',
+      expectedEntityUid: expectedIdentity.entityUid,
+      expectedContentRevision: expectedIdentity.contentRevision,
+      expectedContentHash: expectedIdentity.contentHash,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('AssetCenter treats a cleanup warning as committed deletion and never asks for a duplicate delete', () => {
+  const center = read('src/components/assets/AssetCenter.tsx').replace(/\r\n?/g, '\n');
+  const start = center.indexOf("const confirmDeleteFile = () => runMutation('delete-file'");
+  const end = center.indexOf('  const showDuplicatePage', start);
+  assert.ok(start >= 0 && end > start);
+  const deletion = center.slice(start, end);
+  assert.match(deletion, /const \{ value: result, revision \} = await runSelectedMutationRequest/);
+  assert.match(deletion, /result\.persistenceWarning\?\.phase === 'cas-record-finalize'/);
+  assert.match(deletion, /索引已移除，原文件记录对账待完成/);
+  assert.match(deletion, /else if \(result\.persistenceWarning\)[\s\S]*索引已移除，原文件清理待完成/);
+  assert.match(deletion, /else if \(result\.blobRetained\)[\s\S]*索引已移除，共享原文件仍被其他素材使用/);
+  assert.match(deletion, /expectedEntityUid|entityUid: targetDraft\.asset\.entityUid/);
+  assert.match(deletion, /contentRevision: Number\(targetDraft\.asset\.contentRevision\)/);
+  assert.match(deletion, /contentHash: String\(targetDraft\.asset\.contentHash \|\| ''\)/);
+  assert.match(deletion, /else \{[\s\S]*已删除原文件并移除索引/,
+    'a valid non-retained response without a warning keeps the success message');
+  assert.match(deletion, /setDeleteDraft\(\(current\) => current\?\.asset\.id === targetId \? null : current\)/);
+  assert.match(deletion, /setSelectedAssetId\(null\)[\s\S]*setSelectedAsset\(null\)[\s\S]*refreshVisibleCatalogPages\(\)/);
+  assert.doesNotMatch(deletion, /重试|再次删除|删除失败|throw result\.persistenceWarning/);
+});
+
 test('loaded canvas projectId is the stable D3 scope from Canvas through every asset request', () => {
   const canvas = read('src/components/Canvas.tsx');
   const workbench = read('src/components/ProjectWorkbench.tsx');
@@ -534,9 +686,9 @@ test('loaded canvas projectId is the stable D3 scope from Canvas through every a
   assert.match(center, /api\.listAssetCollections\(assetProjectId\)/);
   assert.match(center, /api\.applyProjectAssetBatch\(\{\s*projectId: assetProjectId/);
   assert.match(center, /api\.linkProjectAssets\(\{ paths, projectId: assetProjectId, canvasId:/);
-  assert.match(center, /api\.scanProjectAssets\(assetProjectId\)/);
+  assert.match(center, /const expectedProjectId = assetProjectId;[\s\S]{0,900}?api\.scanProjectAssets\(expectedProjectId, \{ signal: controller\.signal \}\)/);
   assert.match(center, /api\.listProjectAssetDuplicateGroups\(\{\s*projectId: assetProjectId/);
-  assert.match(center, /api\.decideProjectAssetDuplicate\([^\n]+assetProjectId\)/);
+  assert.match(center, /api\.decideProjectAssetDuplicate\([\s\S]{0,300}?expectedCatalogRevision,[\s\S]{0,100}?projectId: assetProjectId,[\s\S]{0,20}?\)/);
   assert.match(center, /\}, \[assetProjectId\]\);/, 'project changes must reset D3 selection, detail, pagination, and saved-view state');
 });
 
@@ -634,6 +786,24 @@ test('candidate, exact-group, and exact-member UI renders one bounded cursor pag
   const memberLoader = center.slice(memberStart, sourceStart);
 
   assert.match(candidateLoader, /limit: 25/);
+  assert.match(candidateLoader, /if \(!nextPage && mode !== 'exact'\)/);
+  assert.match(candidateLoader, /api\.refreshProjectAssetDuplicates\(targetId/);
+  assert.ok(
+    candidateLoader.indexOf('api.refreshProjectAssetDuplicates(targetId')
+      < candidateLoader.indexOf('api.listProjectAssetDuplicates(targetId'),
+    'the explicit first-page refresh must finish before the pure list request',
+  );
+  assert.match(candidateLoader, /expectedCatalogRevision: catalogRevisionRef\.current|const expectedCatalogRevision = catalogRevisionRef\.current/);
+  assert.match(candidateLoader, /page\.catalogRevision/);
+  assert.match(candidateLoader, /error instanceof api\.ApiRequestError && error\.status === 409[\s\S]*resetCatalog\(activeFiltersRef\.current\)/);
+  assert.match(candidateLoader, /generation !== duplicateGenerationRef\.current \|\| !canApplySelectedMutation\(targetId, targetRevision\)/);
+  assert.match(candidateLoader, /decisionDuplicateGeneration !== duplicateGenerationRef\.current/);
+  assert.match(candidateLoader, /String\(currentCandidatePage\?\.catalogRevision\) !== String\(expectedCatalogRevision\)/);
+  assert.match(candidateLoader, /const candidatePageIsActive = duplicatePageIndexRef\.current === candidatePageIndex/);
+  assert.match(candidateLoader, /if \(candidatePageIsActive\) \{[\s\S]*setDuplicates/);
+  assert.match(candidateLoader, /decisionStillCurrent[\s\S]*if \(!decisionStillCurrent\) return;/);
+  assert.match(candidateLoader, /error instanceof api\.ApiRequestError && error\.status === 409[\s\S]*setDuplicatePages\(\[\]\)[\s\S]*resetCatalog\(activeFiltersRef\.current\)/);
+  assert.match(center, /finally \{ setMutation\(\(current\) => current === name \? '' : current\); \}/);
   assert.match(candidateLoader, /setDuplicates\(page\.items\)/);
   assert.doesNotMatch(candidateLoader, /setDuplicates\([^)]*(?:concat|\.\.\.current)/, 'candidate DOM state must not accumulate earlier pages');
   assert.match(groupLoader, /limit: 25/);
@@ -646,6 +816,35 @@ test('candidate, exact-group, and exact-member UI renders one bounded cursor pag
   assert.match(center, /duplicates\.map/);
   assert.match(center, /duplicateGroups\.map/);
   assert.doesNotMatch(center, /duplicatePages\.flatMap|duplicateGroupPages\.flatMap|memberState\.pages\.flatMap/);
+});
+
+test('catalog resets and revision drift invalidate cached duplicate cursor pages before reuse', () => {
+  const center = read('src/components/assets/AssetCenter.tsx');
+  const requestStart = center.indexOf('const requestPage');
+  const resetStart = center.indexOf('const resetCatalog', requestStart);
+  const effectStart = center.indexOf('useEffect(() => {', resetStart);
+  assert.ok(requestStart >= 0 && resetStart > requestStart && effectStart > resetStart);
+  const requestPage = center.slice(requestStart, resetStart);
+  const resetCatalog = center.slice(resetStart, effectStart);
+  for (const source of [requestPage, resetCatalog]) {
+    assert.match(source, /duplicateGenerationRef\.current \+= 1/);
+    assert.match(source, /duplicateControllerRef\.current\?\.abort\(\)/);
+    assert.match(source, /setDuplicatePages\(\[\]\)/);
+    assert.match(source, /setDuplicatePageIndex\(0\)/);
+    assert.match(source, /setDuplicates\(\[\]\)/);
+    assert.match(source, /setDuplicateHasMore\(false\)/);
+    assert.match(source, /setMutation\(\(current\) => current === 'duplicates' \? '' : current\)/);
+  }
+  assert.ok(
+    requestPage.indexOf('setDuplicatePages([])') < requestPage.indexOf('void requestPage(0, nextGeneration, requestFilters)'),
+    'revision drift must discard cached candidate pages before requesting the new catalog snapshot',
+  );
+  const selectStart = center.indexOf('const selectAsset');
+  const selectEnd = center.indexOf('const activateAssetAtIndex', selectStart);
+  const selectAsset = center.slice(selectStart, selectEnd);
+  assert.match(selectAsset, /duplicateGenerationRef\.current \+= 1/);
+  assert.match(selectAsset, /duplicateControllerRef\.current\?\.abort\(\)/);
+  assert.match(selectAsset, /setMutation\(\(current\) => current === 'duplicates' \? '' : current\)/);
 });
 
 test('lineage UI renders only the current page and rejects stale A→B→A or project-switch responses', () => {
@@ -755,6 +954,7 @@ test('D3 asset UI/API contracts preserve D2 virtualization while exposing comple
   assert.match(api, /source-tree/);
   assert.match(api, /\/permissions/);
   assert.match(api, /expectedRevision/);
+  assert.match(api, /expectedCatalogRevision/);
   assert.match(api, /fromCollectionIds/);
   assert.match(api, /organizationRevisions/);
   assert.match(api, /Math\.min\(8,/);

@@ -10,9 +10,22 @@ const fsp = require('fs').promises;
 const path = require('path');
 const sharp = require('sharp');
 const config = require('../config');
+const { isLoopbackAddress, safeRemoteMediaFetch } = require('../utils/safeRemoteMediaFetch');
 
 const router = express.Router();
 const RESOURCE_DB_FILE = 'resource_library.json';
+const MAX_REMOTE_IMAGE_BYTES = Math.max(
+  1024 * 1024,
+  Math.min(512 * 1024 * 1024, Number(process.env.T8_IMAGE_OPS_MAX_REMOTE_BYTES) || 128 * 1024 * 1024),
+);
+const REMOTE_IMAGE_DEADLINE_MS = Math.max(
+  1_000,
+  Math.min(5 * 60_000, Number(process.env.T8_IMAGE_OPS_REMOTE_DEADLINE_MS) || 60_000),
+);
+const REMOTE_IMAGE_IDLE_TIMEOUT_MS = Math.max(
+  1_000,
+  Math.min(60_000, Number(process.env.T8_IMAGE_OPS_REMOTE_IDLE_TIMEOUT_MS) || 15_000),
+);
 
 function assertInside(root, target) {
   const base = path.resolve(root);
@@ -24,8 +37,7 @@ function assertInside(root, target) {
 function toLocalPathnameIfSameApp(url) {
   try {
     const u = new URL(url);
-    const host = u.hostname.toLowerCase();
-    if (host === '127.0.0.1' || host === 'localhost' || host === '::1') {
+    if (isLoopbackAddress(u.hostname)) {
       return decodeURIComponent(u.pathname || '');
     }
   } catch {
@@ -101,14 +113,21 @@ function resolveLocalUrl(url) {
   return null;
 }
 
-// 下载远端图像到 buffer
-async function fetchImageBuffer(url) {
+// 远端图像只允许全球可路由单播地址；本机素材必须先命中上面的受控挂载解析，
+// 不能退回到任意 loopback HTTP 请求。
+async function fetchImageBuffer(url, remoteFetchOptions = {}) {
   const local = resolveLocalUrl(url);
   if (local && fs.existsSync(local)) return fs.readFileSync(local);
   if (url && /^https?:/i.test(url)) {
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`下载失败: ${r.status}`);
-    return Buffer.from(await r.arrayBuffer());
+    const remote = await safeRemoteMediaFetch(url, {
+      maxBytes: MAX_REMOTE_IMAGE_BYTES,
+      deadlineMs: REMOTE_IMAGE_DEADLINE_MS,
+      idleTimeoutMs: REMOTE_IMAGE_IDLE_TIMEOUT_MS,
+      accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif,image/bmp;q=0.9,*/*;q=0.1',
+      userAgent: 'T8-PenguinCanvas-ImageOps/1.0',
+      ...remoteFetchOptions,
+    });
+    return remote.buffer;
   }
   if (url && url.startsWith('data:image/')) {
     const m = url.match(/^data:image\/[a-z+]+;base64,(.+)$/i);
@@ -1214,5 +1233,14 @@ router.post('/remove-bg', async (req, res) => {
     res.status(500).json({ success: false, error: e.message });
   }
 });
+
+router._test = {
+  MAX_REMOTE_IMAGE_BYTES,
+  REMOTE_IMAGE_DEADLINE_MS,
+  REMOTE_IMAGE_IDLE_TIMEOUT_MS,
+  fetchImageBuffer,
+  resolveLocalUrl,
+  toLocalPathnameIfSameApp,
+};
 
 module.exports = router;

@@ -1,7 +1,5 @@
 'use strict';
 
-const { explicitRunCost } = require('./runUsage');
-
 const ACTIVE_STATUSES = new Set(['queued', 'running', 'polling']);
 const RECOVERY_KINDS = new Set([
   'runninghub',
@@ -20,6 +18,43 @@ const RECOVERY_KINDS = new Set([
 
 function boundedText(value, maxLength = 2048) {
   return String(value || '').trim().slice(0, maxLength);
+}
+
+function runRecoveryStateConflict(message) {
+  return Object.assign(new Error(message), {
+    code: 'run_recovery_state_conflict',
+    status: 409,
+    retryable: false,
+  });
+}
+
+function assertRecoveryTicketCurrent(database, ticket, expected = {}) {
+  const run = database.getRun(ticket.run.id);
+  const nodeRun = database.getNodeRun(ticket.nodeRun.id);
+  const attempt = database.getAttempt(ticket.attempt.id);
+  const exactIdentity = run
+    && nodeRun
+    && attempt
+    && run.id === ticket.run.id
+    && run.entityUid === ticket.run.entityUid
+    && nodeRun.id === ticket.nodeRun.id
+    && nodeRun.entityUid === ticket.nodeRun.entityUid
+    && nodeRun.runId === run.id
+    && attempt.id === ticket.attempt.id
+    && attempt.entityUid === ticket.attempt.entityUid
+    && attempt.nodeRunId === nodeRun.id;
+  const active = exactIdentity
+    && ACTIVE_STATUSES.has(String(run.status || ''))
+    && ACTIVE_STATUSES.has(String(nodeRun.status || ''))
+    && ACTIVE_STATUSES.has(String(attempt.status || ''));
+  const exactRevision = active
+    && Number(run.revision) === Number(expected.runRevision ?? ticket.run.revision)
+    && Number(nodeRun.revision) === Number(expected.nodeRunRevision ?? ticket.nodeRun.revision)
+    && Number(attempt.revision) === Number(expected.attemptRevision ?? ticket.attempt.revision);
+  if (!exactRevision) {
+    throw runRecoveryStateConflict('恢复票据对应的 Run/NodeRun/Attempt 已变化，未提交陈旧恢复写入');
+  }
+  return { run, nodeRun, attempt };
 }
 
 function normalizeRunRecoveryDescriptor(value) {
@@ -57,8 +92,20 @@ function isRecoverableRunAttempt(attempt) {
   );
 }
 
-function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function wait(ms, signal = null) {
+  if (signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener?.('abort', finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    signal?.addEventListener?.('abort', finish, { once: true });
+  });
 }
 
 function recoveryRequest(baseUrl, descriptor) {
@@ -127,8 +174,9 @@ function normalizeRecoveryPayload(payload, descriptor) {
   };
 }
 
-async function queryRecoveryViaLocalApi(baseUrl, descriptor, fetchImpl = fetch) {
+async function queryRecoveryViaLocalApi(baseUrl, descriptor, fetchImpl = fetch, options = {}) {
   const request = recoveryRequest(baseUrl, descriptor);
+  if (options.signal) request.options.signal = options.signal;
   const response = await fetchImpl(request.url, request.options);
   const text = await response.text();
   let payload = null;
@@ -147,13 +195,22 @@ class RunRecoveryManager {
     this.database = options.database;
     this.baseUrl = options.baseUrl;
     this.fetchImpl = options.fetchImpl || fetch;
-    this.queryRecovery = options.queryRecovery || ((descriptor) => queryRecoveryViaLocalApi(this.baseUrl, descriptor, this.fetchImpl));
+    this.queryRecovery = options.queryRecovery || ((descriptor, _ticket, _index, context = {}) => (
+      queryRecoveryViaLocalApi(this.baseUrl, descriptor, this.fetchImpl, context)
+    ));
     this.wait = options.wait || wait;
     this.broadcast = options.broadcast || {};
-    this.recordRunOutputAssets = options.recordRunOutputAssets
-      || ((input) => this.database.recordRunOutputAssets(input));
+    this.commitRunOutputArtifacts = typeof options.commitRunOutputArtifacts === 'function'
+      ? options.commitRunOutputArtifacts
+      : null;
+    this.afterRunRecoveryStartCommit = typeof options.afterRunRecoveryStartCommit === 'function'
+      ? options.afterRunRecoveryStartCommit
+      : null;
     this.running = null;
-    this.lastResult = { status: 'idle', recovered: 0, failed: 0, interrupted: 0, pending: 0, startedAt: null, finishedAt: null };
+    this.stopping = false;
+    this.shutdownPromise = null;
+    this.lifecycleAbortController = new AbortController();
+    this.lastResult = { status: 'idle', recovered: 0, failed: 0, interrupted: 0, deferred: 0, pending: 0, startedAt: null, finishedAt: null };
   }
 
   status() {
@@ -161,155 +218,249 @@ class RunRecoveryManager {
   }
 
   recoverPendingRuns() {
+    if (this.stopping) return Promise.resolve(this.status());
     if (this.running) return this.running;
     this.running = this.runAll().finally(() => { this.running = null; });
     return this.running;
   }
 
+  shutdown(options = {}) {
+    if (this.shutdownPromise) return this.shutdownPromise;
+    this.stopping = true;
+    this.lifecycleAbortController.abort();
+    const timeoutMs = Math.max(100, Math.min(30_000, Number(options.timeoutMs) || 5_000));
+    const running = this.running;
+    if (!running) return Promise.resolve({ drained: true });
+    this.shutdownPromise = new Promise((resolve) => {
+      let settled = false;
+      const finish = (result) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(result);
+      };
+      const timer = setTimeout(() => finish({ drained: false, forced: true }), timeoutMs);
+      running.then(
+        () => finish({ drained: true }),
+        (error) => finish({ drained: true, error }),
+      );
+    });
+    return this.shutdownPromise;
+  }
+
   async runAll() {
     const tickets = this.database.listPendingRunRecoveries();
-    const result = { status: 'running', recovered: 0, failed: 0, interrupted: 0, pending: tickets.length, startedAt: Date.now(), finishedAt: null };
+    const result = { status: 'running', recovered: 0, failed: 0, interrupted: 0, deferred: 0, pending: tickets.length, startedAt: Date.now(), finishedAt: null };
     this.lastResult = result;
     for (let index = 0; index < tickets.length; index += 4) {
+      if (this.stopping) {
+        result.deferred += tickets.length - index;
+        result.pending = 0;
+        break;
+      }
       const chunk = tickets.slice(index, index + 4);
-      const settled = await Promise.all(chunk.map((ticket) => this.recoverTicket(ticket)));
-      for (const state of settled) result[state] += 1;
+      const settled = await Promise.allSettled(chunk.map((ticket) => this.recoverTicket(ticket)));
+      for (const outcome of settled) {
+        if (outcome.status === 'rejected') continue;
+        const state = outcome.value;
+        if (Object.hasOwn(result, state)) result[state] += 1;
+        else result.deferred += 1;
+      }
       result.pending -= chunk.length;
       this.lastResult = { ...result };
+      const failure = settled.find((outcome) => outcome.status === 'rejected');
+      if (failure) {
+        result.status = 'failed';
+        result.finishedAt = Date.now();
+        this.lastResult = { ...result };
+        throw failure.reason;
+      }
     }
-    result.status = 'completed';
+    result.status = this.stopping ? 'stopped' : 'completed';
     result.finishedAt = Date.now();
     this.lastResult = { ...result };
     return this.status();
   }
 
   async recoverTicket(ticket) {
+    if (this.stopping) return 'deferred';
     const descriptor = normalizeRunRecoveryDescriptor(ticket.attempt.metadata?.recovery);
     if (!descriptor) return this.interruptTicket(ticket, '恢复描述缺失或不受支持');
     const startedAt = Date.now();
-    this.database.appendRunEvent(ticket.run.id, {
+    const started = this.database.beginRunRecoveryAttempt({
+      runId: ticket.run.id,
+      runEntityUid: ticket.run.entityUid,
+      runRevision: ticket.run.revision,
       nodeRunId: ticket.nodeRun.id,
-      type: 'log',
-      payload: { phase: 'recovery.started', attemptId: ticket.attempt.id, provider: ticket.attempt.provider, kind: descriptor.kind },
-      createdAt: startedAt,
+      nodeRunEntityUid: ticket.nodeRun.entityUid,
+      nodeRunRevision: ticket.nodeRun.revision,
+      attemptId: ticket.attempt.id,
+      attemptEntityUid: ticket.attempt.entityUid,
+      attemptRevision: ticket.attempt.revision,
+      kind: descriptor.kind,
+      startedAt,
     });
-    this.database.updateNodeRun(ticket.nodeRun.id, { status: 'polling' });
-    this.database.updateAttempt(ticket.attempt.id, { status: 'polling', timestamps: { recoveryStartedAt: startedAt } });
-    this.broadcast.node?.(ticket.run, this.database.getNodeRun(ticket.nodeRun.id));
+    let startedNodeRun = started.nodeRun;
+    let startedAttempt = started.attempt;
+    if (!started.duplicate) {
+      // This synchronous hook exists only to freeze the otherwise
+      // unobservable commit-to-broadcast hard-crash boundary in node:test.
+      // Production must ignore an accidentally injected callback after the
+      // durable start transaction has already committed.
+      if (process.env.NODE_TEST_CONTEXT) {
+        this.afterRunRecoveryStartCommit?.({ ticket, started });
+      }
+      this.broadcast.node?.(started.run, startedNodeRun);
+    }
 
     let lastError = null;
     for (let index = 0; index < descriptor.maxPolls; index += 1) {
-      if (index > 0) await this.wait(descriptor.pollIntervalMs);
+      if (this.stopping) return 'deferred';
+      if (index > 0) {
+        await this.wait(descriptor.pollIntervalMs, this.lifecycleAbortController.signal);
+        if (this.stopping) return 'deferred';
+      }
+      let probe;
       try {
-        const probe = await this.queryRecovery(descriptor, ticket, index);
-        const pollCount = ticket.attempt.pollCount + index + 1;
-        this.database.updateAttempt(ticket.attempt.id, {
+        probe = await this.queryRecovery(descriptor, ticket, index, {
+          signal: this.lifecycleAbortController.signal,
+        });
+      } catch (error) {
+        if (this.stopping) return 'deferred';
+        lastError = error;
+        if (error?.retryable === false || (Number(error?.httpStatus) >= 400 && Number(error?.httpStatus) < 500 && Number(error?.httpStatus) !== 408 && Number(error?.httpStatus) !== 429)) break;
+        continue;
+      }
+      if (this.stopping) return 'deferred';
+      const pollCount = ticket.attempt.pollCount + index + 1;
+      this.database.withProjectDatabaseWrite('run.recovery.poll', () => {
+        assertRecoveryTicketCurrent(this.database, ticket, {
+          runRevision: ticket.run.revision,
+          nodeRunRevision: startedNodeRun.revision,
+          attemptRevision: startedAttempt.revision,
+        });
+        const updatedAttempt = this.database.updateAttempt(ticket.attempt.id, {
           status: 'polling',
           pollCount,
           timestamps: { lastPolledAt: Date.now() },
           usage: probe.usage,
           metadata: { recovery: descriptor, recoveryProviderStatus: probe.providerStatus },
-        });
+        }, { runId: ticket.run.id, nodeRunId: ticket.nodeRun.id });
+        if (!updatedAttempt) {
+          throw runRecoveryStateConflict('恢复轮询状态已变化，未提交部分轮询记录');
+        }
         this.database.appendRunEvent(ticket.run.id, {
           nodeRunId: ticket.nodeRun.id,
           type: 'provider.polling',
           payload: { recovered: true, provider: ticket.attempt.provider, model: ticket.attempt.model, pollCount, status: probe.providerStatus },
         });
-        if (probe.state === 'pending') continue;
-        if (probe.state === 'failed') return this.failTicket(ticket, probe.error || '上游恢复查询返回失败');
-        return await this.succeedTicket(ticket, probe.outputs, probe.usage);
-      } catch (error) {
-        lastError = error;
-        if (error?.retryable === false || (Number(error?.httpStatus) >= 400 && Number(error?.httpStatus) < 500 && Number(error?.httpStatus) !== 408 && Number(error?.httpStatus) !== 429)) break;
-      }
+        startedAttempt = updatedAttempt;
+      });
+      if (probe.state === 'pending') continue;
+      if (probe.state === 'failed') return this.failTicket(ticket, probe.error || '上游恢复查询返回失败');
+      return await this.succeedTicket(ticket, probe.outputs, probe.usage);
     }
     return this.interruptTicket(ticket, lastError?.message || '恢复轮询达到上限');
   }
 
   async succeedTicket(ticket, outputs, usage) {
-    let nodeRun = this.database.getNodeRun(ticket.nodeRun.id);
+    if (this.stopping) return 'deferred';
+    const now = Date.now();
+    const recoveryTerminal = {
+      runId: ticket.run.id,
+      runEntityUid: ticket.run.entityUid,
+      nodeRunId: ticket.nodeRun.id,
+      nodeRunEntityUid: ticket.nodeRun.entityUid,
+      attemptId: ticket.attempt.id,
+      attemptEntityUid: ticket.attempt.entityUid,
+      status: 'succeeded',
+      usage: usage && typeof usage === 'object' ? usage : {},
+      finishedAt: now,
+      recoveredAt: now,
+    };
+    let terminal;
     if (Array.isArray(outputs) && outputs.length > 0) {
-      const recorded = await this.recordRunOutputAssets({
+      if (!this.commitRunOutputArtifacts) {
+        throw Object.assign(new Error('恢复产物缺少 host artifact 权威提交器'), {
+          code: 'host_artifact_committer_missing',
+          retryable: false,
+        });
+      }
+      const recorded = await this.commitRunOutputArtifacts({
         runId: ticket.run.id,
         nodeRunId: ticket.nodeRun.id,
         attemptId: ticket.attempt.id,
         outputs,
+        recoveryTerminal,
+        signal: this.lifecycleAbortController.signal,
       });
-      nodeRun = recorded.nodeRun;
-      this.database.appendRunEvent(ticket.run.id, {
-        nodeRunId: ticket.nodeRun.id,
-        type: 'node.output',
-        payload: { recovered: true, outputRefs: nodeRun.outputRefs, assets: recorded.assets.map((asset) => ({ id: asset.id, kind: asset.kind, filename: asset.filename })) },
-      });
-      this.broadcast.output?.(ticket.run, nodeRun, recorded.assets);
+      if (this.stopping) return 'deferred';
+      terminal = recorded?.recoveryTerminal;
+      if (!terminal?.run || !terminal?.nodeRun || !terminal?.attempt) {
+        throw Object.assign(new Error('host artifact 恢复提交未返回同事务终态证据'), {
+          code: 'run_recovery_terminal_missing',
+          retryable: false,
+        });
+      }
+      if (!recorded.duplicate) {
+        this.broadcast.output?.(terminal.run, terminal.nodeRun, recorded.assets);
+      }
+    } else {
+      terminal = this.database.completeRecoveredRunAttempt(recoveryTerminal);
     }
-    const now = Date.now();
-    this.database.updateAttempt(ticket.attempt.id, { status: 'succeeded', usage, timestamps: { finishedAt: now, recoveredAt: now }, error: null });
-    nodeRun = this.database.updateNodeRun(ticket.nodeRun.id, { status: 'succeeded', outputRefs: nodeRun.outputRefs });
-    this.database.appendRunEvent(ticket.run.id, { nodeRunId: ticket.nodeRun.id, type: 'provider.response', payload: { recovered: true, status: 'succeeded' } });
-    this.database.appendRunEvent(ticket.run.id, { nodeRunId: ticket.nodeRun.id, type: 'node.succeeded', payload: { recovered: true, outputRefs: nodeRun.outputRefs } });
-    this.broadcast.node?.(ticket.run, nodeRun);
-    this.finalizeRun(ticket.run.id);
+    this.broadcastTerminal(terminal);
     return 'recovered';
   }
 
   failTicket(ticket, message) {
+    if (this.stopping) return 'deferred';
     const now = Date.now();
     const error = { kind: 'upstream', code: 'RUN_RECOVERY_UPSTREAM_FAILED', message: boundedText(message, 4000), retryable: false };
-    this.database.updateAttempt(ticket.attempt.id, { status: 'failed', timestamps: { finishedAt: now, recoveryFailedAt: now }, error });
-    const nodeRun = this.database.updateNodeRun(ticket.nodeRun.id, { status: 'failed' });
-    this.database.appendRunEvent(ticket.run.id, { nodeRunId: ticket.nodeRun.id, type: 'provider.response', payload: { recovered: true, status: 'failed', error } });
-    this.database.appendRunEvent(ticket.run.id, { nodeRunId: ticket.nodeRun.id, type: 'node.failed', payload: { recovered: true, error } });
-    this.broadcast.node?.(ticket.run, nodeRun);
-    this.finalizeRun(ticket.run.id);
+    const terminal = this.database.completeRecoveredRunAttempt({
+      runId: ticket.run.id,
+      runEntityUid: ticket.run.entityUid,
+      nodeRunId: ticket.nodeRun.id,
+      nodeRunEntityUid: ticket.nodeRun.entityUid,
+      attemptId: ticket.attempt.id,
+      attemptEntityUid: ticket.attempt.entityUid,
+      status: 'failed',
+      usage: {},
+      error,
+      finishedAt: now,
+      recoveredAt: now,
+    });
+    this.broadcastTerminal(terminal);
     return 'failed';
   }
 
   interruptTicket(ticket, message) {
+    if (this.stopping) return 'deferred';
     const now = Date.now();
     const error = { kind: 'protocol', code: 'RUN_RECOVERY_UNAVAILABLE', message: boundedText(message, 4000), retryable: true };
-    this.database.updateAttempt(ticket.attempt.id, { status: 'interrupted', timestamps: { finishedAt: now, recoveryInterruptedAt: now }, error });
-    const nodeRun = this.database.updateNodeRun(ticket.nodeRun.id, { status: 'interrupted' });
-    this.database.appendRunEvent(ticket.run.id, { nodeRunId: ticket.nodeRun.id, type: 'node.interrupted', payload: { recovered: true, error } });
-    this.broadcast.node?.(ticket.run, nodeRun);
-    this.finalizeRun(ticket.run.id);
+    const terminal = this.database.completeRecoveredRunAttempt({
+      runId: ticket.run.id,
+      runEntityUid: ticket.run.entityUid,
+      nodeRunId: ticket.nodeRun.id,
+      nodeRunEntityUid: ticket.nodeRun.entityUid,
+      attemptId: ticket.attempt.id,
+      attemptEntityUid: ticket.attempt.entityUid,
+      status: 'interrupted',
+      usage: {},
+      error,
+      finishedAt: now,
+      recoveredAt: now,
+    });
+    this.broadcastTerminal(terminal);
     return 'interrupted';
   }
 
-  finalizeRun(runId) {
-    const finalize = this.database.db.transaction(() => {
-      const run = this.database.getRun(runId);
-      if (!run || !ACTIVE_STATUSES.has(run.status)) {
-        return { run, intent: null, finalized: false };
-      }
-      const nodeRuns = this.database.listNodeRuns(run.id);
-      if (nodeRuns.some((nodeRun) => ACTIVE_STATUSES.has(nodeRun.status))) {
-        return { run, intent: null, finalized: false };
-      }
-      const statuses = new Set(nodeRuns.map((nodeRun) => nodeRun.status));
-      const status = statuses.has('failed') ? 'failed' : statuses.has('interrupted') ? 'interrupted' : statuses.has('stopped') ? 'stopped' : 'succeeded';
-      const finished = this.database.updateRun(run.id, {
-        status,
-        finishedAt: Date.now(),
-        summary: { recoveredAfterRestart: true },
-      });
-      this.database.appendRunEvent(run.id, {
-        type: `run.${status}`,
-        payload: { status, recoveredAfterRestart: true },
-      });
-      const intent = this.database.finishRunIntentForRun(
-        run.id,
-        status,
-        explicitRunCost(this.database.listRunAttempts(run.id)),
-      );
-      return { run: finished, intent, finalized: true };
-    });
-    const result = finalize.immediate();
-    if (result.finalized) {
-      this.broadcast.run?.(result.run);
-      if (result.intent) this.broadcast.intent?.(result.intent);
+  broadcastTerminal(terminal) {
+    if (!terminal || terminal.duplicate) return;
+    this.broadcast.node?.(terminal.run, terminal.nodeRun);
+    if (terminal.runChanged) {
+      this.broadcast.run?.(terminal.run);
+      if (terminal.intent) this.broadcast.intent?.(terminal.intent);
     }
-    return result.run;
   }
 }
 

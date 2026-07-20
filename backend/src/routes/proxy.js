@@ -5,6 +5,7 @@
  * 3. 图像生成结果自动转存到 /output 并返回本地 URL
  */
 const express = require('express');
+const crypto = require('node:crypto');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
@@ -20,11 +21,526 @@ const {
   missingRhKeyError,
 } = require('../providers/runninghubSite');
 const { runLocalHooks } = require('../extensions/runtimeHooks');
+const { redactLocalPaths } = require('../services/assetPublicView');
+const { detectBinaryKind } = require('../collaboration/gatewaySecurity');
+const {
+  assertJsonComplexity,
+  safeRemoteJsonFetch,
+  safeRemoteMediaFetch,
+  safeRemoteUpload,
+} = require('../utils/safeRemoteMediaFetch');
 
 const router = express.Router();
 
+function diagnosticDigest(value) {
+  return crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex').slice(0, 12);
+}
+
+function opaqueDiagnosticSummary(label, value) {
+  const text = String(value ?? '');
+  return `${label}Length=${text.length} ${label}Sha256=${diagnosticDigest(text)}`;
+}
+
+function safeDiagnosticText(value, maximum = 240, exactSecrets = []) {
+  let text = String(value ?? '');
+  for (const secret of new Set((Array.isArray(exactSecrets) ? exactSecrets : [exactSecrets])
+    .map((entry) => String(entry || ''))
+    .filter((entry) => entry.length >= 4))) {
+    text = text.split(secret).join('[redacted-secret]');
+  }
+  return redactLocalPaths(text)
+    .replace(/(["']?\b(?:authorization|proxy-authorization|api[_-]?key|x-api-key|x-auth-token|access[_-]?token|refresh[_-]?token|session[_-]?token|token|secret|cookie|set-cookie|password|credential|signature)\b["']?)\s*[:=]\s*(?:"[^"]*"|'[^']*'|(?:bearer|basic)\s+[^\s,;]+|[^\s,;}\]]+)/gi, '$1=[redacted]')
+    .replace(/\b(?:bearer|basic)\s+[^\s,;]+/gi, '[redacted-credential]')
+    .replace(/\b(?:github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9]+)\b/g, '[redacted-token]')
+    .replace(/https?:\/\/[^\s"'<>]+/gi, '[redacted-url]')
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, Math.max(1, maximum));
+}
+
+function boundedProxyInteger(value, fallback, minimum, maximum) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(minimum, Math.min(maximum, Math.trunc(numeric)));
+}
+
+const PROXY_IMAGE_REFERENCE_MAX_BYTES = boundedProxyInteger(
+  process.env.T8_PROXY_IMAGE_REFERENCE_MAX_BYTES,
+  64 * 1024 * 1024,
+  1024 * 1024,
+  512 * 1024 * 1024,
+);
+const PROXY_AUDIO_REFERENCE_MAX_BYTES = boundedProxyInteger(
+  process.env.T8_PROXY_AUDIO_REFERENCE_MAX_BYTES,
+  64 * 1024 * 1024,
+  1024 * 1024,
+  256 * 1024 * 1024,
+);
+const PROXY_MEDIA_REFERENCE_MAX_BYTES = boundedProxyInteger(
+  process.env.T8_PROXY_MEDIA_REFERENCE_MAX_BYTES,
+  512 * 1024 * 1024,
+  1024 * 1024,
+  1024 * 1024 * 1024,
+);
+const PROXY_PROVIDER_JSON_MAX_BYTES = boundedProxyInteger(
+  process.env.T8_PROXY_PROVIDER_JSON_MAX_BYTES,
+  2 * 1024 * 1024,
+  64 * 1024,
+  8 * 1024 * 1024,
+);
+const PROXY_PROVIDER_JSON_MAX_DEPTH = 64;
+const PROXY_PROVIDER_JSON_MAX_NODES = 50_000;
+const PROXY_PROVIDER_SSE_MAX_BYTES = 32 * 1024 * 1024;
+const PROXY_PROVIDER_SSE_MAX_LINE_BYTES = 2 * 1024 * 1024;
+const FAL_GLTF_JSON_MAX_BYTES = 16 * 1024 * 1024;
+const PROXY_REMOTE_DEADLINE_MS = boundedProxyInteger(
+  process.env.T8_PROXY_REMOTE_DEADLINE_MS,
+  90_000,
+  1_000,
+  5 * 60_000,
+);
+const PROXY_REMOTE_IDLE_TIMEOUT_MS = boundedProxyInteger(
+  process.env.T8_PROXY_REMOTE_IDLE_TIMEOUT_MS,
+  15_000,
+  1_000,
+  60_000,
+);
+const FAL_POLL_MAX_BYTES = 2 * 1024 * 1024;
+const FAL_POLL_MAX_JSON_DEPTH = 64;
+const FAL_POLL_MAX_JSON_NODES = 50_000;
+let proxySafeRemoteTestOptions = null;
+const providerResponseTimings = new WeakMap();
+
+function proxySafeRemoteOptions(base) {
+  if (!proxySafeRemoteTestOptions) return base;
+  return {
+    ...base,
+    ...proxySafeRemoteTestOptions,
+    headers: {
+      ...(base.headers || {}),
+      ...(proxySafeRemoteTestOptions.headers || {}),
+    },
+  };
+}
+
+function setProxySafeRemoteTestOptions(options) {
+  proxySafeRemoteTestOptions = options && typeof options === 'object' ? { ...options } : null;
+}
+
+function providerFetchDeadlineMs() {
+  return boundedProxyInteger(
+    proxySafeRemoteTestOptions?.providerDeadlineMs,
+    PROXY_REMOTE_DEADLINE_MS,
+    10,
+    5 * 60_000,
+  );
+}
+
+async function fetchProviderResponse(url, init = {}, label = 'Provider') {
+  const deadlineMs = providerFetchDeadlineMs();
+  const deadlineAt = Date.now() + deadlineMs;
+  const controller = new AbortController();
+  const upstreamSignal = init?.signal;
+  const abortFromUpstream = () => controller.abort(upstreamSignal?.reason);
+  if (upstreamSignal?.aborted) abortFromUpstream();
+  else upstreamSignal?.addEventListener?.('abort', abortFromUpstream, { once: true });
+
+  let timeout;
+  let timeoutError = null;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeout = setTimeout(() => {
+      timeoutError = providerResponseTimeout(label, 'deadline');
+      controller.abort(timeoutError);
+      reject(timeoutError);
+    }, deadlineMs);
+  });
+  try {
+    const response = await Promise.race([
+      fetch(url, { ...init, signal: controller.signal }),
+      timeoutPromise,
+    ]);
+    if (response && typeof response === 'object') {
+      providerResponseTimings.set(response, { deadlineAt, label });
+    }
+    return response;
+  } catch (error) {
+    if (timeoutError) throw timeoutError;
+    throw error;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    upstreamSignal?.removeEventListener?.('abort', abortFromUpstream);
+  }
+}
+
+function proxyErrorStatus(error, fallback = 500) {
+  const status = Number(error?.status);
+  return status >= 400 && status < 600 ? status : fallback;
+}
+
+function proxyRouteError(label, error, exactSecrets = []) {
+  console.error(`${label}:`, safeDiagnosticText(error?.message || error || 'unknown error', 240, exactSecrets));
+}
+
+function proxyPublicError(error, fallback = '请求失败', exactSecrets = []) {
+  const safe = safeDiagnosticText(error?.message || '', 300, exactSecrets);
+  return safe || fallback;
+}
+
+function normalizedContentType(value) {
+  const normalized = String(value || '').trim().toLowerCase().split(';')[0];
+  if (normalized === 'image/jpg') return 'image/jpeg';
+  if (['audio/x-wav', 'audio/vnd.wave'].includes(normalized)) return 'audio/wav';
+  if (['audio/mp3', 'audio/x-mp3'].includes(normalized)) return 'audio/mpeg';
+  if (normalized === 'audio/x-m4a') return 'audio/mp4';
+  if (normalized === 'audio/x-flac') return 'audio/flac';
+  if (normalized === 'application/ogg') return 'audio/ogg';
+  return normalized;
+}
+
+const ISO_BMFF_CONTAINER_BOXES = new Set([
+  'moov', 'trak', 'mdia', 'minf', 'stbl', 'edts', 'dinf', 'udta', 'meta',
+]);
+
+function inspectIsoBmffHandlerTypes(buffer) {
+  const handlers = new Set();
+  let visited = 0;
+  const walk = (start, end, depth) => {
+    if (depth > 8 || visited > 10_000) return;
+    let offset = start;
+    while (offset + 8 <= end && visited <= 10_000) {
+      visited += 1;
+      let size = buffer.readUInt32BE(offset);
+      const type = buffer.toString('ascii', offset + 4, offset + 8);
+      let headerBytes = 8;
+      if (size === 1) {
+        if (offset + 16 > end) return;
+        const extended = buffer.readBigUInt64BE(offset + 8);
+        if (extended > BigInt(Number.MAX_SAFE_INTEGER)) return;
+        size = Number(extended);
+        headerBytes = 16;
+      } else if (size === 0) {
+        size = end - offset;
+      }
+      if (size < headerBytes || offset + size > end) return;
+      if (type === 'hdlr' && size >= headerBytes + 12) {
+        handlers.add(buffer.toString('ascii', offset + headerBytes + 8, offset + headerBytes + 12));
+      }
+      if (ISO_BMFF_CONTAINER_BOXES.has(type)) {
+        const fullBoxBytes = type === 'meta' ? 4 : 0;
+        const childStart = offset + headerBytes + fullBoxBytes;
+        if (childStart <= offset + size) walk(childStart, offset + size, depth + 1);
+      }
+      offset += size;
+    }
+  };
+  walk(0, buffer.length, 0);
+  return handlers;
+}
+
+function detectProxyMediaMime(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 4) return '';
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
+  if (buffer.subarray(0, 6).toString('ascii') === 'GIF87a' || buffer.subarray(0, 6).toString('ascii') === 'GIF89a') return 'image/gif';
+  if (buffer.subarray(0, 2).toString('ascii') === 'BM') return 'image/bmp';
+  if ((buffer.subarray(0, 4).equals(Buffer.from([0x49, 0x49, 0x2a, 0x00])))
+    || buffer.subarray(0, 4).equals(Buffer.from([0x4d, 0x4d, 0x00, 0x2a]))) return 'image/tiff';
+  if (buffer.length >= 12 && buffer.subarray(0, 4).toString('ascii') === 'RIFF') {
+    const riffKind = buffer.subarray(8, 12).toString('ascii');
+    if (riffKind === 'WEBP') return 'image/webp';
+    if (riffKind === 'WAVE') return 'audio/wav';
+    if (riffKind === 'AVI ') return 'video/x-msvideo';
+  }
+  if (buffer.subarray(0, 4).toString('ascii') === 'OggS') return 'audio/ogg';
+  if (buffer.subarray(0, 4).toString('ascii') === 'fLaC') return 'audio/flac';
+  if (buffer.length >= 16 && buffer.subarray(0, 16).equals(Buffer.from([
+    0x30, 0x26, 0xb2, 0x75, 0x8e, 0x66, 0xcf, 0x11,
+    0xa6, 0xd9, 0x00, 0xaa, 0x00, 0x62, 0xce, 0x6c,
+  ]))) return 'audio/x-ms-wma';
+  if (buffer[0] === 0xff && (buffer[1] & 0xf6) === 0xf0) return 'audio/aac';
+  if (buffer.subarray(0, 3).toString('ascii') === 'ID3'
+    || (buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0)) return 'audio/mpeg';
+  if (buffer.length >= 12 && buffer.subarray(4, 8).toString('ascii') === 'ftyp') {
+    const brand = buffer.subarray(8, 12).toString('ascii').toLowerCase();
+    const handlers = inspectIsoBmffHandlerTypes(buffer);
+    if (handlers.has('soun') && !handlers.has('vide')) return 'audio/mp4';
+    if (handlers.has('vide')) return brand === 'qt  ' ? 'video/quicktime' : 'video/mp4';
+    if (['avif', 'avis', 'heic', 'heix', 'hevc', 'mif1', 'msf1'].includes(brand)) return 'image/avif';
+    if (['m4a ', 'm4b ', 'm4p '].includes(brand)) return 'audio/mp4';
+    if (brand === 'qt  ') return 'video/quicktime';
+    return 'video/mp4';
+  }
+  if (buffer.length >= 12 && buffer.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))) {
+    const ebmlHeader = buffer.subarray(0, Math.min(buffer.length, 4096)).toString('latin1').toLowerCase();
+    if (ebmlHeader.includes('matroska')) return 'video/x-matroska';
+    if (ebmlHeader.includes('webm')) return 'video/webm';
+  }
+  return '';
+}
+
+function detectProxyMediaKind(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 2) return null;
+  const mime = detectProxyMediaMime(buffer);
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('audio/')) return 'audio';
+  return detectBinaryKind(buffer);
+}
+
+function mediaKindAllowed(detectedKind, allowedKinds) {
+  if (allowedKinds.has(detectedKind)) return true;
+  return detectedKind === 'video-audio' && (allowedKinds.has('video') || allowedKinds.has('audio'));
+}
+
+function declaredMediaKind(contentType) {
+  const normalized = normalizedContentType(contentType);
+  if (normalized.startsWith('image/')) return 'image';
+  if (normalized.startsWith('video/')) return 'video';
+  if (normalized.startsWith('audio/')) return 'audio';
+  if (!normalized || normalized === 'application/octet-stream' || normalized === 'binary/octet-stream') return null;
+  return 'unsupported';
+}
+
+function validateProxyMediaBuffer(buffer, contentType, options = {}) {
+  const allowedKinds = new Set(options.allowedKinds || ['image', 'video', 'audio']);
+  const maximum = Number(options.maxBytes) || PROXY_MEDIA_REFERENCE_MAX_BYTES;
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error('远程素材为空');
+  if (buffer.length > maximum) throw new Error(`远程素材超过 ${maximum} bytes 限制`);
+  const detectedKind = detectProxyMediaKind(buffer);
+  const detectedMime = detectProxyMediaMime(buffer);
+  if (detectedKind === 'archive') throw new Error('远程素材不能是 ZIP/归档容器');
+  if (!mediaKindAllowed(detectedKind, allowedKinds)) throw new Error('远程素材魔数不是允许的媒体类型');
+  const declaredKind = declaredMediaKind(contentType);
+  if (declaredKind === 'unsupported' || (declaredKind && !mediaKindAllowed(detectedKind, new Set([declaredKind])))) {
+    throw new Error('远程素材 Content-Type 与文件魔数不一致');
+  }
+  if (declaredKind && !allowedKinds.has(declaredKind)) throw new Error('远程素材 Content-Type 不在允许范围内');
+  const declaredMime = normalizedContentType(contentType);
+  if (declaredMime && declaredMime !== 'application/octet-stream' && declaredMime !== 'binary/octet-stream'
+    && detectedMime && declaredMime !== detectedMime) {
+    throw new Error('远程素材 Content-Type 与文件魔数子类型不一致');
+  }
+  return { detectedKind, detectedMime, contentType: detectedMime || declaredMime };
+}
+
+async function fetchProxyRemoteMedia(url, options = {}) {
+  const maximum = Number(options.maxBytes) || PROXY_MEDIA_REFERENCE_MAX_BYTES;
+  const remote = await safeRemoteMediaFetch(url, proxySafeRemoteOptions({
+    maxBytes: maximum,
+    deadlineMs: PROXY_REMOTE_DEADLINE_MS,
+    idleTimeoutMs: PROXY_REMOTE_IDLE_TIMEOUT_MS,
+    maxRedirects: 4,
+    accept: options.accept || 'image/*,video/*,audio/*,application/octet-stream;q=0.5',
+    userAgent: 'T8-PenguinCanvas-ProviderProxy/1.0',
+  }));
+  const verified = validateProxyMediaBuffer(remote.buffer, remote.contentType, {
+    allowedKinds: options.allowedKinds,
+    maxBytes: maximum,
+  });
+  return { ...remote, ...verified };
+}
+
+async function fetchFalPollJson(url, apiKey) {
+  return safeRemoteJsonFetch(url, proxySafeRemoteOptions({
+    maxBytes: FAL_POLL_MAX_BYTES,
+    maxJsonDepth: FAL_POLL_MAX_JSON_DEPTH,
+    maxJsonNodes: FAL_POLL_MAX_JSON_NODES,
+    deadlineMs: PROXY_REMOTE_DEADLINE_MS,
+    idleTimeoutMs: PROXY_REMOTE_IDLE_TIMEOUT_MS,
+    maxRedirects: 4,
+    accept: 'application/json',
+    userAgent: 'T8-PenguinCanvas-FAL-Poll/1.0',
+    headers: { Authorization: `Bearer ${apiKey}` },
+  }));
+}
+
+function comparableFilesystemPath(value) {
+  const normalized = path.resolve(value);
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+}
+
+function pathIsStrictlyInside(root, target) {
+  const comparableRoot = comparableFilesystemPath(root);
+  const comparableTarget = comparableFilesystemPath(target);
+  return comparableTarget !== comparableRoot && comparableTarget.startsWith(`${comparableRoot}${path.sep}`);
+}
+
+function pathChainContainsSymbolicLink(root, target) {
+  const relative = path.relative(path.resolve(root), path.resolve(target));
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return true;
+  let current = path.resolve(root);
+  for (const segment of relative.split(path.sep)) {
+    current = path.join(current, segment);
+    if (fs.lstatSync(current).isSymbolicLink()) return true;
+  }
+  return false;
+}
+
+function realpathInsideRoot(root, target) {
+  try {
+    const rootResolved = path.resolve(root);
+    const targetResolved = path.resolve(target);
+    if (!pathIsStrictlyInside(rootResolved, targetResolved)) return null;
+    // Mounted media references never need symlinks/junctions. Rejecting the
+    // complete path chain removes reparse-point escapes before opening a file.
+    if (pathChainContainsSymbolicLink(rootResolved, targetResolved)) return null;
+    const rootReal = fs.realpathSync(rootResolved);
+    const targetReal = fs.realpathSync(targetResolved);
+    if (!pathIsStrictlyInside(rootReal, targetReal)) return null;
+    const stat = fs.statSync(targetReal);
+    return stat.isFile() ? {
+      filename: targetReal,
+      root: rootReal,
+      size: stat.size,
+      identity: { dev: stat.dev, ino: stat.ino },
+    } : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function sameFileIdentity(left, right) {
+  if (!left || !right) return false;
+  return String(left.dev) === String(right.dev) && String(left.ino) === String(right.ino);
+}
+
+function readResolvedFile(resolved, maximum = PROXY_MEDIA_REFERENCE_MAX_BYTES) {
+  if (!resolved?.filename || !resolved?.root) return null;
+  const maxBytes = Math.max(1, Number(maximum) || PROXY_MEDIA_REFERENCE_MAX_BYTES);
+  let fd;
+  try {
+    const noFollow = Number(fs.constants.O_NOFOLLOW) || 0;
+    fd = fs.openSync(resolved.filename, fs.constants.O_RDONLY | noFollow);
+    const opened = fs.fstatSync(fd);
+    if (!opened.isFile() || opened.size <= 0 || opened.size > maxBytes) return null;
+
+    // Verify that the opened handle still names the same in-root file that was
+    // resolved. This closes the stat/realpath -> read symlink-swap window.
+    const currentReal = fs.realpathSync(resolved.filename);
+    if (!pathIsStrictlyInside(resolved.root, currentReal)) return null;
+    const current = fs.statSync(currentReal);
+    if (!sameFileIdentity(opened, current) || !sameFileIdentity(opened, resolved.identity)) return null;
+
+    const chunks = [];
+    const scratch = Buffer.allocUnsafe(Math.min(64 * 1024, maxBytes + 1));
+    let total = 0;
+    while (total <= maxBytes) {
+      const remaining = Math.min(scratch.length, (maxBytes + 1) - total);
+      const read = fs.readSync(fd, scratch, 0, remaining, total);
+      if (read === 0) break;
+      chunks.push(Buffer.from(scratch.subarray(0, read)));
+      total += read;
+    }
+    if (total <= 0 || total > maxBytes) return null;
+    const after = fs.fstatSync(fd);
+    if (!after.isFile() || after.size <= 0 || after.size > maxBytes || !sameFileIdentity(opened, after)) return null;
+    return { ...resolved, filename: currentReal, size: total, buffer: Buffer.concat(chunks, total) };
+  } catch (_) {
+    return null;
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch (_) {}
+    }
+  }
+}
+
+function resolveMountedFileReference(value, mounts, maximum = PROXY_MEDIA_REFERENCE_MAX_BYTES) {
+  const raw = String(value || '').trim().split(/[?#]/)[0];
+  if (!raw || raw.includes('\0')) return null;
+  for (const mount of mounts) {
+    const prefix = (mount.prefixes || []).find((candidate) => raw.startsWith(candidate));
+    if (!prefix) continue;
+    const encodedTail = raw.slice(prefix.length);
+    let relative;
+    try { relative = decodeURIComponent(encodedTail); } catch (_) { return null; }
+    if (!relative || relative.includes('\\') || relative.includes('\0') || path.isAbsolute(relative)) return null;
+    const segments = relative.split('/');
+    if (segments.some((segment) => !segment || segment === '.' || segment === '..')) return null;
+    const resolved = realpathInsideRoot(mount.root, path.join(mount.root, ...segments));
+    if (!resolved || resolved.size <= 0 || resolved.size > maximum) return null;
+    return resolved;
+  }
+  return null;
+}
+
+function readMountedFileReference(value, mounts, maximum = PROXY_MEDIA_REFERENCE_MAX_BYTES) {
+  const resolved = resolveMountedFileReference(value, mounts, maximum);
+  return readResolvedFile(resolved, maximum);
+}
+
 // 音频文件上传中间件(内存存储, 50MB)
 const audioUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+
+function safeMultipartFilename(value) {
+  const name = path.basename(String(value || 'audio.bin'))
+    .replace(/[\r\n"\\]/g, '_')
+    .slice(0, 240);
+  return name || 'audio.bin';
+}
+
+function safeAudioUploadFilename(value, extension) {
+  const original = path.basename(String(value || 'audio'));
+  const originalExt = path.extname(original);
+  const stem = path.basename(original, originalExt)
+    .replace(/[\u0000-\u001f<>:"/\\|?*]+/g, '_')
+    .replace(/[. ]+$/g, '')
+    .trim()
+    .slice(0, 180) || 'audio';
+  return `${stem}.${safeOutputExt(extension, 'mp3')}`;
+}
+
+function buildSignedAudioMultipart(fields, audioBuffer, contentType, filename) {
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) throw new Error('上传表单 fields 格式无效');
+  const entries = Object.entries(fields);
+  if (entries.length > 128) throw new Error('上传表单 fields 数量过多');
+  const boundary = `----T8PenguinCanvas${crypto.randomBytes(18).toString('hex')}`;
+  const parts = [];
+  let metadataBytes = 0;
+  for (const [rawName, rawValue] of entries) {
+    const name = String(rawName || '');
+    if (!/^[A-Za-z0-9_.-]{1,256}$/.test(name)) throw new Error('上传表单字段名无效');
+    const value = String(rawValue ?? '');
+    const part = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`);
+    metadataBytes += part.length;
+    if (metadataBytes > 1024 * 1024) throw new Error('上传表单字段总大小超过限制');
+    parts.push(part);
+  }
+  const safeName = safeMultipartFilename(filename);
+  parts.push(Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${safeName}"\r\nContent-Type: ${contentType}\r\n\r\n`,
+  ));
+  parts.push(audioBuffer);
+  parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+  return { boundary, parts };
+}
+
+async function uploadAudioToSignedUrl({ uploadUrl, fields, audioBuffer, contentType, filename }) {
+  const common = {
+    deadlineMs: PROXY_REMOTE_DEADLINE_MS,
+    idleTimeoutMs: PROXY_REMOTE_IDLE_TIMEOUT_MS,
+    maxResponseBytes: 64 * 1024,
+    maxRequestBytes: 52 * 1024 * 1024,
+    userAgent: 'T8-PenguinCanvas-SignedUpload/1.0',
+    accept: 'application/json,text/plain,*/*;q=0.1',
+    protocols: ['https:'],
+  };
+  if (fields && typeof fields === 'object' && !Array.isArray(fields) && Object.keys(fields).length > 0) {
+    const multipart = buildSignedAudioMultipart(fields, audioBuffer, contentType, filename);
+    return safeRemoteUpload(uploadUrl, proxySafeRemoteOptions({
+      ...common,
+      method: 'POST',
+      headers: { 'Content-Type': `multipart/form-data; boundary=${multipart.boundary}` },
+      bodyParts: multipart.parts,
+    }));
+  }
+  return safeRemoteUpload(uploadUrl, proxySafeRemoteOptions({
+    ...common,
+    method: 'PUT',
+    headers: { 'Content-Type': contentType },
+    bodyParts: [audioBuffer],
+  }));
+}
 
 function safeOutputExt(ext, fallback = 'png') {
   const s = String(ext || '')
@@ -45,39 +561,207 @@ function extFromContentType(contentType) {
     'image/gif': 'gif',
     'image/bmp': 'bmp',
     'image/avif': 'avif',
+    'image/tiff': 'tif',
     'video/mp4': 'mp4',
     'video/webm': 'webm',
     'video/quicktime': 'mov',
+    'video/x-m4v': 'm4v',
+    'video/x-matroska': 'mkv',
+    'video/x-msvideo': 'avi',
     'audio/mpeg': 'mp3',
     'audio/wav': 'wav',
     'audio/ogg': 'ogg',
     'audio/mp4': 'm4a',
     'audio/flac': 'flac',
+    'audio/aac': 'aac',
+    'audio/x-ms-wma': 'wma',
   };
   return map[ct] || '';
 }
 
-async function parseJsonResponse(response, label) {
-  const text = await response.text();
-  const trimmed = String(text || '').trim();
-  if (!trimmed) return {};
+function verifiedProxyMediaExtension(media) {
+  const extension = extFromContentType(media?.detectedMime || media?.contentType);
+  if (!extension) throw new Error('远程素材魔数没有安全的落盘扩展映射');
+  return extension;
+}
+
+function mimeTypeForProxyFilename(filename) {
+  const ext = path.extname(String(filename || '')).toLowerCase();
+  const map = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp',
+    '.gif': 'image/gif',
+    '.bmp': 'image/bmp',
+    '.avif': 'image/avif',
+    '.tif': 'image/tiff',
+    '.tiff': 'image/tiff',
+    '.mp4': 'video/mp4',
+    '.webm': 'video/webm',
+    '.mov': 'video/quicktime',
+    '.m4v': 'video/x-m4v',
+    '.mkv': 'video/x-matroska',
+    '.mp3': 'audio/mpeg',
+    '.wav': 'audio/wav',
+    '.ogg': 'audio/ogg',
+    '.m4a': 'audio/mp4',
+    '.flac': 'audio/flac',
+    '.aac': 'audio/aac',
+    '.wma': 'audio/x-ms-wma',
+  };
+  return map[ext] || 'application/octet-stream';
+}
+
+function providerResponseError(code, message, details = {}) {
+  const error = new Error(message);
+  error.code = code;
+  Object.assign(error, details);
+  return error;
+}
+
+async function cancelProviderResponseBody(body) {
   try {
-    return JSON.parse(trimmed);
-  } catch (error) {
-    const contentType = response.headers?.get?.('content-type') || 'unknown';
-    const preview = trimmed.replace(/\s+/g, ' ').slice(0, 240);
-    const err = new Error(`${label} 返回非 JSON：HTTP ${response.status} ${contentType} · ${preview}`);
-    err.status = response.status;
-    err.contentType = contentType;
-    err.preview = preview;
-    throw err;
+    if (typeof body?.cancel === 'function') await body.cancel();
+    else if (typeof body?.destroy === 'function') body.destroy();
+  } catch (_) {}
+}
+
+function providerResponseTimeout(label, timeoutKind) {
+  return providerResponseError(
+    'provider_response_timeout',
+    `${label} 响应读取${timeoutKind === 'deadline' ? '超过总时限' : '长时间无数据'}`,
+    { status: 504 },
+  );
+}
+
+async function waitForProviderBodyStep(promise, timing, label) {
+  const remaining = timing.deadlineAt - Date.now();
+  if (remaining <= 0) throw providerResponseTimeout(label, 'deadline');
+  const waitMs = Math.max(1, Math.min(remaining, timing.idleTimeoutMs));
+  const timeoutKind = remaining <= timing.idleTimeoutMs ? 'deadline' : 'idle';
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(providerResponseTimeout(label, timeoutKind)), waitMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
-function inferRemoteOutputExt(url, contentType) {
-  const tail = String(url || '').split(/[?#]/)[0];
-  const m = tail.match(/\.([a-z0-9]{2,8})$/i);
-  return safeOutputExt(m ? m[1] : extFromContentType(contentType), 'png');
+async function readBoundedProviderResponse(response, label, options = {}) {
+  const maximum = boundedProxyInteger(
+    options.maxBytes,
+    PROXY_PROVIDER_JSON_MAX_BYTES,
+    1,
+    8 * 1024 * 1024,
+  );
+  const deadlineMs = boundedProxyInteger(options.deadlineMs, PROXY_REMOTE_DEADLINE_MS, 10, 5 * 60_000);
+  const idleTimeoutMs = boundedProxyInteger(options.idleTimeoutMs, PROXY_REMOTE_IDLE_TIMEOUT_MS, 10, 60_000);
+  const inheritedDeadlineAt = Number(options.deadlineAt || providerResponseTimings.get(response)?.deadlineAt);
+  const timing = {
+    deadlineAt: Number.isFinite(inheritedDeadlineAt) && inheritedDeadlineAt > 0
+      ? inheritedDeadlineAt
+      : Date.now() + deadlineMs,
+    idleTimeoutMs,
+  };
+  if (timing.deadlineAt <= Date.now()) {
+    await cancelProviderResponseBody(response.body);
+    throw providerResponseTimeout(label, 'deadline');
+  }
+  const declaredLength = Number(response.headers?.get?.('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > maximum) {
+    await cancelProviderResponseBody(response.body);
+    throw providerResponseError(
+      'provider_response_too_large',
+      `${label} 响应超过 ${maximum} bytes 限制`,
+      { status: Number(response.status || 0) },
+    );
+  }
+  const chunks = [];
+  let total = 0;
+  const append = (value) => {
+    const chunk = Buffer.isBuffer(value)
+      ? value
+      : (value instanceof Uint8Array
+        ? Buffer.from(value.buffer, value.byteOffset, value.byteLength)
+        : Buffer.from(value));
+    total += chunk.length;
+    if (total > maximum) {
+      throw providerResponseError(
+        'provider_response_too_large',
+        `${label} 响应超过 ${maximum} bytes 限制`,
+        { status: Number(response.status || 0) },
+      );
+    }
+    chunks.push(chunk);
+  };
+  try {
+    if (response.body && typeof response.body.getReader === 'function') {
+      const reader = response.body.getReader();
+      try {
+        while (true) {
+          const { done, value } = await waitForProviderBodyStep(reader.read(), timing, label);
+          if (done) break;
+          append(value);
+        }
+      } catch (error) {
+        try { await reader.cancel(error); } catch (_) {}
+        throw error;
+      } finally {
+        reader.releaseLock?.();
+      }
+    } else if (response.body && typeof response.body[Symbol.asyncIterator] === 'function') {
+      const iterator = response.body[Symbol.asyncIterator]();
+      try {
+        while (true) {
+          const { done, value } = await waitForProviderBodyStep(iterator.next(), timing, label);
+          if (done) break;
+          append(value);
+        }
+      } catch (error) {
+        // A Node Readable can keep iterator.return() pending while next() is
+        // outstanding. Destroy first so the pending read wakes and releases
+        // the socket before awaiting iterator cleanup.
+        await cancelProviderResponseBody(response.body);
+        try { await iterator.return?.(); } catch (_) {}
+        throw error;
+      }
+    } else if (typeof response.arrayBuffer === 'function') {
+      append(Buffer.from(await waitForProviderBodyStep(response.arrayBuffer(), timing, label)));
+    } else {
+      append(Buffer.from(await waitForProviderBodyStep(response.text(), timing, label), 'utf8'));
+    }
+  } catch (error) {
+    await cancelProviderResponseBody(response.body);
+    throw error;
+  }
+  return Buffer.concat(chunks, total);
+}
+
+async function parseJsonResponse(response, label, options = {}) {
+  const buffer = await readBoundedProviderResponse(response, label, options);
+  const trimmed = buffer.toString('utf8').trim();
+  if (!trimmed) return {};
+  try {
+    return assertJsonComplexity(JSON.parse(trimmed), {
+      maxJsonDepth: options.maxJsonDepth || PROXY_PROVIDER_JSON_MAX_DEPTH,
+      maxJsonNodes: options.maxJsonNodes || PROXY_PROVIDER_JSON_MAX_NODES,
+    });
+  } catch (error) {
+    if (error?.code === 'json_too_complex') throw error;
+    const contentType = response.headers?.get?.('content-type') || 'unknown';
+    const bodySummary = opaqueDiagnosticSummary('body', trimmed);
+    const err = new Error(`${label} 返回非 JSON：HTTP ${response.status} ${contentType} · ${bodySummary}`);
+    err.status = response.status;
+    err.contentType = contentType;
+    err.bodySummary = bodySummary;
+    throw err;
+  }
 }
 
 function isRunningHubOutputUrl(value) {
@@ -166,7 +850,9 @@ function summarizeRunningHubOutputShape(value, depth = 0, seen = new WeakSet()) 
   if (type !== 'object') {
     if (type === 'string') {
       const text = value.trim();
-      return isRunningHubOutputUrl(text) ? `url(${text.slice(0, 48)})` : `string(${text.length})`;
+      return isRunningHubOutputUrl(text)
+        ? `url(${opaqueDiagnosticSummary('ref', text)})`
+        : `string(${text.length})`;
     }
     return type;
   }
@@ -320,18 +1006,193 @@ function ensureDefaultZhenzhenKey(settings, res, label = '贞贞工坊') {
 // query/status 阶段优先从该 Map 恢复 key，
 // 防止前端未透传 model 时轮询错误 fallback 到通用 key 导致“令牌不合法”。
 // 30 分钟过期自清。
+const TASK_KEY_REGISTRY_MAX_ENTRIES = 4096;
+const FAL_TASK_REGISTRY_MAX_ENTRIES = 4096;
+const FAL_TASK_REGISTRY_TTL_MS = 2 * 60 * 60 * 1000;
 const taskKeyMap = new Map();
+function setBoundedRegistryEntry(registry, key, entry, maximum) {
+  if (registry.has(key)) registry.delete(key);
+  while (registry.size >= maximum) {
+    const oldest = registry.keys().next().value;
+    if (oldest === undefined) break;
+    registry.delete(oldest);
+  }
+  registry.set(key, entry);
+}
+function taskKeyMapKey(taskId, authorityScope) {
+  const id = String(taskId || '').trim();
+  const scope = String(authorityScope || '').trim();
+  return id && scope ? `${scope}:${id}` : '';
+}
 function rememberTaskKey(taskId, apiKey, meta = {}) {
   if (!taskId || !apiKey) return;
-  taskKeyMap.set(String(taskId), { apiKey, ...meta });
-  const timer = setTimeout(() => taskKeyMap.delete(String(taskId)), 30 * 60 * 1000);
+  const authorityScope = String(meta.authorityScope || meta.provider || '').trim();
+  const key = taskKeyMapKey(taskId, authorityScope);
+  if (!key) return;
+  const entry = { apiKey, ...meta, authorityScope };
+  setBoundedRegistryEntry(taskKeyMap, key, entry, TASK_KEY_REGISTRY_MAX_ENTRIES);
+  const timer = setTimeout(() => {
+    if (taskKeyMap.get(key) === entry) taskKeyMap.delete(key);
+  }, 30 * 60 * 1000);
   timer.unref?.();
 }
-function recallTaskMeta(taskId) {
-  if (!taskId) return null;
-  const item = taskKeyMap.get(String(taskId));
+function recallTaskMeta(taskId, authorityScope) {
+  const key = taskKeyMapKey(taskId, authorityScope);
+  if (!key) return null;
+  const item = taskKeyMap.get(key);
   if (!item) return null;
   return typeof item === 'string' ? { apiKey: item } : item;
+}
+
+// FAL poll authority is kept separately from the legacy provider key cache.
+// Composite keys prevent a task id from another route/provider overwriting the
+// URL that is allowed to receive the host's Bearer credential.
+const falTaskRegistry = new Map();
+const FAL_TASK_REGISTRY_SCHEMA = 't8-fal-task-registry-v1';
+const FAL_TASK_REGISTRY_FILENAME = 'fal-task-registry.private.json';
+const FAL_TASK_REGISTRY_MAX_FILE_BYTES = 4 * 1024 * 1024;
+let falTaskRegistryLoadedFile = '';
+
+function falTaskRegistryFilename() {
+  const directory = config.SETTINGS_FILE ? path.dirname(config.SETTINGS_FILE) : config.DATA_DIR;
+  return path.join(directory, FAL_TASK_REGISTRY_FILENAME);
+}
+
+function falTaskRegistryKey(route, taskId) {
+  const safeRoute = String(route || '').trim();
+  const safeTaskId = safeFalRequestId(taskId);
+  return safeRoute && safeTaskId ? `${safeRoute}:${safeTaskId}` : '';
+}
+
+function falTaskRegistryPayload(route, taskId, meta, expiresAt) {
+  const payload = {
+    route: String(route || '').trim(),
+    requestId: safeFalRequestId(taskId),
+    endpoint: String(meta?.endpoint || '').trim().slice(0, 1024),
+    responseUrl: String(meta?.responseUrl || '').trim().slice(0, 8192),
+    expiresAt: Number(expiresAt),
+  };
+  const model = String(meta?.model || '').trim().slice(0, 240);
+  const toolId = String(meta?.toolId || '').trim().slice(0, 240);
+  const statusUrl = String(meta?.statusUrl || '').trim().slice(0, 8192);
+  const statusPath = String(meta?.statusPath || '').trim().slice(0, 80);
+  if (model) payload.model = model;
+  if (toolId) payload.toolId = toolId;
+  if (statusUrl) payload.statusUrl = statusUrl;
+  if (statusPath) payload.statusPath = statusPath;
+  if (Array.isArray(meta?.outputSchema)) payload.outputSchema = meta.outputSchema;
+  return payload;
+}
+
+function falTaskRegistryMac(payload, apiKey) {
+  return crypto.createHmac('sha256', String(apiKey || ''))
+    .update(JSON.stringify(payload), 'utf8')
+    .digest('hex');
+}
+
+function validFalTaskRegistryRecord(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const key = falTaskRegistryKey(value.route, value.requestId);
+  const expiresAt = Number(value.expiresAt);
+  const mac = String(value.mac || '');
+  if (!key || !Number.isFinite(expiresAt) || expiresAt <= Date.now() || !/^[a-f0-9]{64}$/.test(mac)) return null;
+  const payload = falTaskRegistryPayload(value.route, value.requestId, value, expiresAt);
+  if (!payload.endpoint || !payload.responseUrl) return null;
+  return Object.freeze({ ...payload, mac });
+}
+
+function persistFalTaskRegistry() {
+  const filename = falTaskRegistryFilename();
+  if (falTaskRegistryLoadedFile !== filename) return;
+  const now = Date.now();
+  const records = [];
+  for (const [key, record] of falTaskRegistry) {
+    if (Number(record?.expiresAt) <= now) {
+      falTaskRegistry.delete(key);
+      continue;
+    }
+    records.push(record);
+  }
+  fs.mkdirSync(path.dirname(filename), { recursive: true });
+  const temporary = `${filename}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;
+  try {
+    fs.writeFileSync(temporary, `${JSON.stringify({
+      schema: FAL_TASK_REGISTRY_SCHEMA,
+      version: 1,
+      records,
+    })}\n`, { encoding: 'utf8', mode: 0o600 });
+    try { fs.chmodSync(temporary, 0o600); } catch (_) {}
+    fs.renameSync(temporary, filename);
+    try { fs.chmodSync(filename, 0o600); } catch (_) {}
+  } finally {
+    try { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); } catch (_) {}
+  }
+}
+
+function ensureFalTaskRegistryLoaded() {
+  const filename = falTaskRegistryFilename();
+  if (falTaskRegistryLoadedFile === filename) return;
+  falTaskRegistry.clear();
+  falTaskRegistryLoadedFile = filename;
+  try {
+    const stat = fs.statSync(filename);
+    if (!stat.isFile() || stat.size <= 0 || stat.size > FAL_TASK_REGISTRY_MAX_FILE_BYTES) return;
+    const parsed = JSON.parse(fs.readFileSync(filename, 'utf8'));
+    if (parsed?.schema !== FAL_TASK_REGISTRY_SCHEMA || !Array.isArray(parsed.records)) return;
+    for (const raw of parsed.records.slice(0, FAL_TASK_REGISTRY_MAX_ENTRIES)) {
+      const record = validFalTaskRegistryRecord(raw);
+      if (!record) continue;
+      setBoundedRegistryEntry(
+        falTaskRegistry,
+        falTaskRegistryKey(record.route, record.requestId),
+        record,
+        FAL_TASK_REGISTRY_MAX_ENTRIES,
+      );
+    }
+  } catch (error) {
+    if (error?.code !== 'ENOENT') console.warn('[fal] 私有任务注册读取失败，已按空注册表处理');
+  }
+}
+
+function rememberFalTask(route, taskId, apiKey, meta = {}) {
+  ensureFalTaskRegistryLoaded();
+  const key = falTaskRegistryKey(route, taskId);
+  if (!key || !apiKey) return null;
+  const payload = falTaskRegistryPayload(route, taskId, meta, Date.now() + FAL_TASK_REGISTRY_TTL_MS);
+  if (!payload.endpoint || !payload.responseUrl) return null;
+  const entry = Object.freeze({ ...payload, mac: falTaskRegistryMac(payload, apiKey) });
+  setBoundedRegistryEntry(falTaskRegistry, key, entry, FAL_TASK_REGISTRY_MAX_ENTRIES);
+  try { persistFalTaskRegistry(); } catch (_) { return null; }
+  const timer = setTimeout(() => {
+    if (falTaskRegistry.get(key) === entry) {
+      falTaskRegistry.delete(key);
+      try { persistFalTaskRegistry(); } catch (_) {}
+    }
+  }, FAL_TASK_REGISTRY_TTL_MS);
+  timer.unref?.();
+  return Object.freeze({ apiKey, ...payload });
+}
+function recallFalTask(route, taskId) {
+  ensureFalTaskRegistryLoaded();
+  const key = falTaskRegistryKey(route, taskId);
+  const entry = key ? falTaskRegistry.get(key) || null : null;
+  if (!entry) return null;
+  if (Number(entry.expiresAt) <= Date.now()) {
+    falTaskRegistry.delete(key);
+    try { persistFalTaskRegistry(); } catch (_) {}
+    return null;
+  }
+  const apiKey = String(loadRawSettings()?.zhenzhenApiKey || '');
+  if (!apiKey) return null;
+  const { mac, ...payload } = entry;
+  const expected = Buffer.from(falTaskRegistryMac(payload, apiKey), 'hex');
+  const actual = Buffer.from(String(mac || ''), 'hex');
+  if (expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) return null;
+  return Object.freeze({ apiKey, ...payload });
+}
+function resetFalTaskRegistryMemoryForTests() {
+  falTaskRegistry.clear();
+  falTaskRegistryLoadedFile = '';
 }
 function normalizeProviderParams(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -423,38 +1284,58 @@ async function invalidateZhenzhenProviderKey(providerContext, apiKey, errorText)
 }
 
 // ========== 工具:保存上游返回的图像到本地 ==========
-async function saveRemoteImage(url, fetchImpl = fetch) {
+async function saveRemoteImage(url, _providerFetchImpl) {
   try {
-    const res = await fetchImpl(url);
-    if (!res.ok) throw new Error(`下载失败: ${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    const contentExt = extFromContentType(res.headers?.get?.('content-type'));
-    const ext = (contentExt || url.match(/\.(png|jpe?g|webp|gif)/i)?.[1] || 'png').toLowerCase();
+    const remote = await fetchProxyRemoteMedia(url, {
+      allowedKinds: ['image'],
+      maxBytes: PROXY_IMAGE_REFERENCE_MAX_BYTES,
+      accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif,image/bmp,image/tiff;q=0.9',
+    });
+    const buf = remote.buffer;
+    const ext = verifiedProxyMediaExtension(remote);
     const filename = `img_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
     const filePath = path.join(config.OUTPUT_DIR, filename);
     fs.mkdirSync(config.OUTPUT_DIR, { recursive: true });
     fs.writeFileSync(filePath, buf);
     return `/files/output/${filename}`;
   } catch (e) {
-    console.error('⚠ 转存图像失败:', e.message);
-    return url; // 退化:返回原 URL
+    proxyRouteError('转存图像失败', e);
+    return null;
   }
+}
+
+async function boundedProviderHttpError(response, label) {
+  try {
+    await readBoundedProviderResponse(response, label);
+  } catch (_) {
+    // The public error intentionally exposes only the HTTP status; bounded
+    // consumption/cancellation above prevents a Provider body from lingering.
+  }
+  return providerResponseError(
+    'provider_http_error',
+    `${label}: HTTP ${Number(response.status || 0)}`,
+    { status: Number(response.status || 0) },
+  );
 }
 
 // ========== 工具:保存上游返回的音频到本地 ==========
 async function saveRemoteAudio(url) {
   try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`下载失败: ${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    const ext = (url.match(/\.(mp3|wav|m4a|ogg|flac|aac)/i)?.[1] || 'mp3').toLowerCase();
+    const remote = await fetchProxyRemoteMedia(url, {
+      allowedKinds: ['audio'],
+      maxBytes: PROXY_AUDIO_REFERENCE_MAX_BYTES,
+      accept: 'audio/mpeg,audio/mp4,audio/wav,audio/ogg,audio/flac;q=0.9',
+    });
+    const buf = remote.buffer;
+    const ext = verifiedProxyMediaExtension(remote);
     const filename = `audio_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
     const filePath = path.join(config.OUTPUT_DIR, filename);
+    fs.mkdirSync(config.OUTPUT_DIR, { recursive: true });
     fs.writeFileSync(filePath, buf);
     return `/files/output/${filename}`;
   } catch (e) {
-    console.error('⚠ 转存音频失败:', e.message);
-    return url; // 退化:返回原 URL
+    proxyRouteError('转存音频失败', e);
+    return null;
   }
 }
 
@@ -463,9 +1344,18 @@ function saveBase64Image(b64) {
   try {
     const raw = String(b64 || '');
     const clean = raw.includes(',') ? raw.split(',').pop() : raw;
+    if (!clean || clean.length > Math.ceil(PROXY_IMAGE_REFERENCE_MAX_BYTES * 4 / 3) + 8) {
+      throw new Error('Base64 图像为空或超过大小限制');
+    }
     const buf = Buffer.from(clean || '', 'base64');
-    const filename = `img_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.png`;
+    const verified = validateProxyMediaBuffer(buf, '', {
+      allowedKinds: ['image'],
+      maxBytes: PROXY_IMAGE_REFERENCE_MAX_BYTES,
+    });
+    const ext = extFromContentType(verified.contentType) || 'png';
+    const filename = `img_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
     const filePath = path.join(config.OUTPUT_DIR, filename);
+    fs.mkdirSync(config.OUTPUT_DIR, { recursive: true });
     fs.writeFileSync(filePath, buf);
     return `/files/output/${filename}`;
   } catch (e) {
@@ -540,8 +1430,20 @@ function toLocalPathnameIfSameApp(url) {
   try {
     const u = new URL(raw);
     const host = String(u.hostname || '').toLowerCase();
-    if (host === '127.0.0.1' || host === 'localhost' || host === '::1') {
-      return decodeURIComponent(u.pathname || '');
+    const localHost = host === '127.0.0.1' || host === 'localhost' || host === '::1';
+    const expectedPort = String(Number(config.PORT) || 18766);
+    const actualPort = u.port || (u.protocol === 'http:' ? '80' : u.protocol === 'https:' ? '443' : '');
+    if (
+      localHost
+      && u.protocol === 'http:'
+      && actualPort === expectedPort
+      && !u.username
+      && !u.password
+      && !raw.includes('\\')
+    ) {
+      // Keep percent encoding intact. resolveMountedFileReference performs the
+      // sole decode so double-encoded dot segments cannot become traversal.
+      return u.pathname || '';
     }
   } catch {
     // Relative app URLs stay on the normal path below.
@@ -551,27 +1453,30 @@ function toLocalPathnameIfSameApp(url) {
 
 function resolveStaticImagePath(ref) {
   const raw = toLocalPathnameIfSameApp(ref);
-  const candidates = [
-    ['/files/input/', config.INPUT_DIR],
-    ['/input/', config.INPUT_DIR],
-    ['/files/output/', config.OUTPUT_DIR],
-    ['/output/', config.OUTPUT_DIR],
-    ['/files/thumbnails/', config.THUMBNAILS_DIR],
-  ];
-  for (const [prefix, root] of candidates) {
-    if (!raw.startsWith(prefix)) continue;
-    const rel = decodeURIComponent(raw.slice(prefix.length).split('?')[0].split('#')[0]);
-    return assertInsideDir(root, path.join(root, rel));
-  }
-  return null;
+  return resolveMountedFileReference(raw, [
+    { prefixes: ['/files/input/', '/input/'], root: config.INPUT_DIR },
+    { prefixes: ['/files/output/', '/output/'], root: config.OUTPUT_DIR },
+    { prefixes: ['/files/thumbnails/'], root: config.THUMBNAILS_DIR },
+  ], PROXY_IMAGE_REFERENCE_MAX_BYTES)?.filename || null;
 }
 
 function readLocalImageRefBuffer(ref) {
-  const full = resolveStaticImagePath(ref);
-  if (!full || !fs.existsSync(full)) return null;
+  const raw = toLocalPathnameIfSameApp(ref);
+  const local = readMountedFileReference(raw, [
+    { prefixes: ['/files/input/', '/input/'], root: config.INPUT_DIR },
+    { prefixes: ['/files/output/', '/output/'], root: config.OUTPUT_DIR },
+    { prefixes: ['/files/thumbnails/'], root: config.THUMBNAILS_DIR },
+  ], PROXY_IMAGE_REFERENCE_MAX_BYTES);
+  if (!local) return null;
+  const full = local.filename;
   const mime = imageMimeFromLocalPath(full);
+  const buf = local.buffer;
+  validateProxyMediaBuffer(buf, mime, {
+    allowedKinds: ['image'],
+    maxBytes: PROXY_IMAGE_REFERENCE_MAX_BYTES,
+  });
   return {
-    buf: fs.readFileSync(full),
+    buf,
     mime,
     ext: safeOutputExt(path.extname(full), 'png'),
   };
@@ -610,10 +1515,12 @@ function resolveResourceImageRef(ref) {
     const item = items.find((entry) => entry?.id === id);
     const fileRel = String(item?.fileRel || '').trim();
     if (!item || !fileRel) return null;
-    const full = assertInsideDir(root, path.join(root, fileRel));
-    if (!full) return null;
+    const resolved = realpathInsideRoot(root, path.join(root, fileRel));
+    if (!resolved || resolved.size > PROXY_IMAGE_REFERENCE_MAX_BYTES) return null;
+    const full = resolved.filename;
     return {
       full,
+      resolved,
       mime: item.mime || imageMimeFromLocalPath(full),
       ext: safeOutputExt(path.extname(full), 'png'),
     };
@@ -626,10 +1533,12 @@ function resolveResourceImageRef(ref) {
   const child = Number.isFinite(index) ? children[index] : null;
   const fileRel = String(child?.fileRel || '').trim();
   if (!child || !fileRel) return null;
-  const full = assertInsideDir(root, path.join(root, fileRel));
-  if (!full) return null;
+  const resolved = realpathInsideRoot(root, path.join(root, fileRel));
+  if (!resolved || resolved.size > PROXY_IMAGE_REFERENCE_MAX_BYTES) return null;
+  const full = resolved.filename;
   return {
     full,
+    resolved,
     mime: child.mime || imageMimeFromLocalPath(full),
     ext: safeOutputExt(path.extname(full), 'png'),
   };
@@ -637,11 +1546,17 @@ function resolveResourceImageRef(ref) {
 
 function readResourceImageRefBuffer(ref) {
   const resolved = resolveResourceImageRef(ref);
-  if (!resolved || !fs.existsSync(resolved.full)) return null;
+  const opened = readResolvedFile(resolved?.resolved, PROXY_IMAGE_REFERENCE_MAX_BYTES);
+  if (!resolved || !opened) return null;
   const mime = String(resolved.mime || imageMimeFromLocalPath(resolved.full)).toLowerCase();
   if (mime && !mime.startsWith('image/')) return null;
+  const buf = opened.buffer;
+  validateProxyMediaBuffer(buf, mime, {
+    allowedKinds: ['image'],
+    maxBytes: PROXY_IMAGE_REFERENCE_MAX_BYTES,
+  });
   return {
-    buf: fs.readFileSync(resolved.full),
+    buf,
     mime: resolved.mime || imageMimeFromLocalPath(resolved.full),
     ext: resolved.ext || safeOutputExt(path.extname(resolved.full), 'png'),
   };
@@ -655,6 +1570,10 @@ async function refToBuffer(ref) {
     if (!m) return null;
     const mime = m[1] || 'image/png';
     const buf = Buffer.from(m[2], 'base64');
+    validateProxyMediaBuffer(buf, mime, {
+      allowedKinds: ['image'],
+      maxBytes: PROXY_IMAGE_REFERENCE_MAX_BYTES,
+    });
     const ext = (mime.split('/')[1] || 'png').replace('jpeg', 'jpg');
     return { buf, mime, ext };
   }
@@ -669,12 +1588,14 @@ async function refToBuffer(ref) {
     if (local) return local;
     const resource = readResourceImageRefBuffer(ref);
     if (resource) return resource;
-    // /files/* 是本地静态,走 127.0.0.1:18766
-    const url = ref.startsWith('/') ? `http://127.0.0.1:${config.PORT}${ref}` : ref;
-    const r = await fetch(url);
-    if (!r.ok) return null;
-    const ct = r.headers.get('content-type') || 'image/png';
-    const buf = Buffer.from(await r.arrayBuffer());
+    if (ref.startsWith('/')) return null;
+    const remote = await fetchProxyRemoteMedia(ref, {
+      allowedKinds: ['image'],
+      maxBytes: PROXY_IMAGE_REFERENCE_MAX_BYTES,
+      accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif,image/bmp,image/tiff;q=0.9',
+    });
+    const ct = remote.contentType || 'image/png';
+    const buf = remote.buffer;
     const ext = (ct.split('/')[1] || 'png').replace('jpeg', 'jpg');
     return { buf, mime: ct, ext };
   }
@@ -688,7 +1609,7 @@ function summarizeImageRef(ref, index) {
     const mime = text.match(/^data:([^;,]+)/)?.[1] || 'image';
     return `#${index + 1} data:${mime};base64,...`;
   }
-  return `#${index + 1} ${text.length > 140 ? `${text.slice(0, 96)}...${text.slice(-24)}` : text}`;
+  return `#${index + 1} ${opaqueDiagnosticSummary('ref', text)}`;
 }
 
 async function collectConvertedImageRefs(refs, label = '参考图') {
@@ -761,25 +1682,21 @@ async function localImageRefToDataUrl(ref) {
 
 async function refToBananaImage(ref) {
   if (typeof ref !== 'string' || !ref) return null;
-  if (ref.startsWith('data:')) return ref;
-  if (ref.startsWith('http://') || ref.startsWith('https://')) return ref;
-  if (
-    ref.startsWith('/files/') ||
-    ref.startsWith('/api/resources/file/') ||
-    ref.startsWith('/api/resources/set-file/')
-  ) {
-    // 本地资源 → 转 base64
-    try {
-      return await localImageRefToDataUrl(ref);
-    } catch { return null; }
+  try {
+    const converted = await refToBuffer(ref);
+    return converted ? `data:${converted.mime};base64,${converted.buf.toString('base64')}` : null;
+  } catch {
+    return null;
   }
-  return null;
 }
 
 // Grok Image 默认按 gpt-image-2-web 的 Base64 方式传参考图,最多 4 张。
 async function refToGrokImage(ref) {
   if (typeof ref !== 'string' || !ref) return null;
-  if (ref.startsWith('data:')) return ref.startsWith('data:image') ? ref : null;
+  if (ref.startsWith('data:')) {
+    const converted = await refToBuffer(ref);
+    return converted ? `data:${converted.mime};base64,${converted.buf.toString('base64')}` : null;
+  }
   if (
     ref.startsWith('http://') ||
     ref.startsWith('https://') ||
@@ -789,16 +1706,17 @@ async function refToGrokImage(ref) {
   ) {
     try {
       if (isLocalImageDataRef(ref)) return await localImageRefToDataUrl(ref);
-      const url = ref.startsWith('/') ? `http://127.0.0.1:${config.PORT}${ref}` : ref;
-      const r = await fetch(url);
-      if (!r.ok) return ref.startsWith('http') ? ref : null;
-      const ct = r.headers.get('content-type') || 'image/png';
-      const buf = Buffer.from(await r.arrayBuffer());
-      if (!String(ct).toLowerCase().startsWith('image/')) return null;
+      if (ref.startsWith('/')) return null;
+      const remote = await fetchProxyRemoteMedia(ref, {
+        allowedKinds: ['image'],
+        maxBytes: PROXY_IMAGE_REFERENCE_MAX_BYTES,
+        accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif,image/bmp,image/tiff;q=0.9',
+      });
+      const ct = remote.contentType || 'image/png';
+      const buf = remote.buffer;
       return `data:${ct};base64,${buf.toString('base64')}`;
     } catch {
-      // 外网图片转 base64 失败时保留 URL,避免破坏已有可公网访问的上游图。
-      return ref.startsWith('http') ? ref : null;
+      return null;
     }
   }
   return null;
@@ -926,7 +1844,7 @@ async function saveImageItemsFromResult(result) {
       if (u) urls.push(u);
     } else if (it?.url) {
       const u = await saveRemoteImage(it.url);
-      urls.push(u);
+      if (u) urls.push(u);
     }
   }
   return urls;
@@ -1026,7 +1944,7 @@ async function callImageUpstreamAsync({ apiKey, finalApiModel, paramKind, prompt
     };
     const url = `${config.ZHENZHEN_BASE_URL}/v1/models/${encodeURIComponent(finalApiModel)}:generateContent`;
     console.log('[upstream] Gemini official JSON → generateContent model:', finalApiModel, 'aspectRatio:', imageConfig.aspectRatio, 'imageSize:', imageConfig.imageSize || '', { refs: refs?.length || 0 });
-    return await fetch(url, {
+    return await fetchProviderResponse(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1067,7 +1985,7 @@ async function callImageUpstreamAsync({ apiKey, finalApiModel, paramKind, prompt
     if (seedreamRefs.length) body.image = seedreamRefs;
     const url = `${upstreamBase}/generations`;
     console.log('[upstream] Seedream JSON → /generations model:', finalApiModel, 'size:', body.size, 'output_format:', body.output_format, { requested: refs?.length || 0, converted: seedreamRefs.length });
-    return await fetch(url, {
+    return await fetchProviderResponse(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: auth },
       body: JSON.stringify(body),
@@ -1090,7 +2008,7 @@ async function callImageUpstreamAsync({ apiKey, finalApiModel, paramKind, prompt
     if (grokRefs.length) body.image = grokRefs;
     const url = `${upstreamBase}/generations?async=true`;
     console.log('[upstream] Grok Image JSON → /generations?async=true model:', finalApiModel, 'aspect_ratio:', body.aspect_ratio, { requested: refs?.length || 0, converted: grokRefs.length });
-    return await fetch(url, {
+    return await fetchProviderResponse(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: auth },
       body: JSON.stringify(body),
@@ -1123,7 +2041,7 @@ async function callImageUpstreamAsync({ apiKey, finalApiModel, paramKind, prompt
 
     const url = `${upstreamBase}/edits?async=true`;
     console.log('[upstream] GPT2 multipart → /edits?async=true model:', finalApiModel, 'size:', px, 'aspectRatio:', ar, 'resolution:', lvlLower, { requested: refs.length, converted: convertedRefs.length });
-    return await fetch(url, { method: 'POST', headers: { Authorization: auth }, body: form });
+    return await fetchProviderResponse(url, { method: 'POST', headers: { Authorization: auth }, body: form });
   }
 
   // ===== nano-banana 路径 =====
@@ -1138,14 +2056,14 @@ async function callImageUpstreamAsync({ apiKey, finalApiModel, paramKind, prompt
     appendConvertedImagesToForm(form, convertedRefs);
     const url = `${upstreamBase}/edits?async=true`;
     console.log('[upstream] nano-banana multipart → /edits?async=true model:', finalApiModel, 'aspect_ratio:', ar, 'image_size:', lvlUpper, { requested: refs.length, converted: convertedRefs.length });
-    return await fetch(url, { method: 'POST', headers: { Authorization: auth }, body: form });
+    return await fetchProviderResponse(url, { method: 'POST', headers: { Authorization: auth }, body: form });
   }
   // 文生图 → JSON /generations?async=true
   const body = { prompt, model: finalApiModel, aspect_ratio: isAuto ? '1:1' : ar };
   body.image_size = lvlUpper;
   const url = `${upstreamBase}/generations?async=true`;
   console.log('[upstream] nano-banana JSON → /generations?async=true model:', finalApiModel, 'aspect_ratio:', body.aspect_ratio, 'image_size:', body.image_size);
-  return await fetch(url, {
+  return await fetchProviderResponse(url, {
     method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: auth },
     body: JSON.stringify(body),
   });
@@ -1207,16 +2125,15 @@ router.post('/image/seedance-nz/submit', async (req, res) => {
         progress: '0%',
         model: result.model,
         taskProvider: 'seedance-nz-image',
-        raw: result.raw,
         ...seedanceNzTrace(result),
       },
     });
   } catch (error) {
     const status = Number(error?.status || 500);
-    console.error('proxy/image/seedance-nz/submit 错误:', error?.message || error);
+    proxyRouteError('proxy/image/seedance-nz/submit 错误', error, [apiKey]);
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
-      error: error?.message || 'seedance.nz Seedream 请求失败',
+      error: proxyPublicError(error, 'seedance.nz Seedream 请求失败', [apiKey]),
       ...seedanceNzTrace(error),
     });
   }
@@ -1224,7 +2141,7 @@ router.post('/image/seedance-nz/submit', async (req, res) => {
 
 router.get('/image/seedance-nz/status/:tid', async (req, res) => {
   const settings = loadRawSettings();
-  const remembered = recallTaskMeta(req.params.tid);
+  const remembered = recallTaskMeta(req.params.tid, 'seedance-nz-image');
   const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
   if (!apiKey) {
     return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
@@ -1233,17 +2150,16 @@ router.get('/image/seedance-nz/status/:tid', async (req, res) => {
     const result = await seedanceNz.queryImageTask(req.params.tid, apiKey);
     if (result.status === 'succeeded') {
       if (!result.imageUrl) {
-        return res.status(502).json({ success: false, error: 'Seedream 任务成功但未返回图片 URL', raw: result.raw, ...seedanceNzTrace(result) });
+        return res.status(502).json({ success: false, error: 'Seedream 任务成功但未返回图片 URL', ...seedanceNzTrace(result) });
       }
       const localUrl = await saveRemoteImage(result.imageUrl, seedanceNz.fetchRemote);
+      if (!localUrl) return res.status(502).json({ success: false, error: 'Seedream 输出素材未通过安全下载校验' });
       return res.json({
         success: true,
         data: {
           status: 'completed',
           progress: '100%',
           urls: [localUrl],
-          remoteUrls: [result.imageUrl],
-          raw: result.raw,
           ...seedanceNzTrace(result),
         },
       });
@@ -1253,9 +2169,8 @@ router.get('/image/seedance-nz/status/:tid', async (req, res) => {
         success: false,
         data: {
           status: 'failed',
-          progress: seedreamNzProgress(result.progress, '100%'),
-          error: result.failReason || 'Seedream 任务失败',
-          raw: result.raw,
+          progress: safeDiagnosticText(seedreamNzProgress(result.progress, '100%'), 80, [apiKey]),
+          error: safeDiagnosticText(result.failReason || 'Seedream 任务失败', 240, [apiKey]),
           ...seedanceNzTrace(result),
         },
       });
@@ -1264,17 +2179,16 @@ router.get('/image/seedance-nz/status/:tid', async (req, res) => {
       success: true,
       data: {
         status: result.status,
-        progress: seedreamNzProgress(result.progress),
-        raw: result.raw,
+        progress: safeDiagnosticText(seedreamNzProgress(result.progress), 80, [apiKey]),
         ...seedanceNzTrace(result),
       },
     });
   } catch (error) {
     const status = Number(error?.status || 500);
-    console.error('proxy/image/seedance-nz/status 错误:', error?.message || error);
+    proxyRouteError('proxy/image/seedance-nz/status 错误', error, [apiKey]);
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
-      error: error?.message || 'seedance.nz Seedream 查询失败',
+      error: proxyPublicError(error, 'seedance.nz Seedream 查询失败', [apiKey]),
       ...seedanceNzTrace(error),
     });
   }
@@ -1299,16 +2213,15 @@ router.post('/video/happyhorse/submit', async (req, res) => {
         taskId: result.taskId,
         model: result.model,
         taskType: result.taskType,
-        raw: result.raw,
         ...seedanceNzTrace(result),
       },
     });
   } catch (error) {
     const status = Number(error?.status || 500);
-    console.error('proxy/video/happyhorse/submit 错误:', error?.message || error);
+    proxyRouteError('proxy/video/happyhorse/submit 错误', error, [apiKey]);
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
-      error: error?.message || 'Happy Horse 请求失败',
+      error: proxyPublicError(error, 'Happy Horse 请求失败', [apiKey]),
       ...seedanceNzTrace(error),
     });
   }
@@ -1316,34 +2229,36 @@ router.post('/video/happyhorse/submit', async (req, res) => {
 
 router.get('/video/happyhorse/status/:tid', async (req, res) => {
   const settings = loadRawSettings();
-  const remembered = recallTaskMeta(req.params.tid);
+  const remembered = recallTaskMeta(req.params.tid, 'happyhorse-nz');
   const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
   if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
   try {
     const result = await seedanceNz.queryTask(req.params.tid, apiKey);
-    let videoUrl = result.videoUrl;
-    if (result.status === 'succeeded' && videoUrl) {
-      videoUrl = await saveRemoteVideo(videoUrl, seedanceNz.fetchRemote);
+    let videoUrl = '';
+    if (result.status === 'succeeded' && result.videoUrl) {
+      videoUrl = await saveRemoteVideo(result.videoUrl, seedanceNz.fetchRemote);
+      if (!videoUrl) return res.status(502).json({ success: false, error: 'Happy Horse 输出素材未通过安全下载校验' });
     }
     return res.json({
       success: true,
       data: {
         status: result.status,
-        progress: result.progress,
+        progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
         videoUrl,
-        failReason: result.failReason,
+        failReason: result.status === 'failed'
+          ? safeDiagnosticText(result.failReason || 'Happy Horse 任务失败', 240, [apiKey])
+          : '',
         model: remembered?.model || '',
         taskType: remembered?.taskType || '',
-        raw: result.raw,
         ...seedanceNzTrace(result),
       },
     });
   } catch (error) {
     const status = Number(error?.status || 500);
-    console.error('proxy/video/happyhorse/status 错误:', error?.message || error);
+    proxyRouteError('proxy/video/happyhorse/status 错误', error, [apiKey]);
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
-      error: error?.message || 'Happy Horse 查询失败',
+      error: proxyPublicError(error, 'Happy Horse 查询失败', [apiKey]),
       ...seedanceNzTrace(error),
     });
   }
@@ -1368,16 +2283,15 @@ router.post('/video/wan/submit', async (req, res) => {
         taskId: result.taskId,
         model: result.model,
         taskType: result.taskType,
-        raw: result.raw,
         ...seedanceNzTrace(result),
       },
     });
   } catch (error) {
     const status = Number(error?.status || 500);
-    console.error('proxy/video/wan/submit 错误:', error?.message || error);
+    proxyRouteError('proxy/video/wan/submit 错误', error, [apiKey]);
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
-      error: error?.message || 'Wan 2.7 Spicy 请求失败',
+      error: proxyPublicError(error, 'Wan 2.7 Spicy 请求失败', [apiKey]),
       ...seedanceNzTrace(error),
     });
   }
@@ -1385,34 +2299,36 @@ router.post('/video/wan/submit', async (req, res) => {
 
 router.get('/video/wan/status/:tid', async (req, res) => {
   const settings = loadRawSettings();
-  const remembered = recallTaskMeta(req.params.tid);
+  const remembered = recallTaskMeta(req.params.tid, 'wan-nz');
   const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
   if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
   try {
     const result = await seedanceNz.queryTask(req.params.tid, apiKey);
-    let videoUrl = result.videoUrl;
-    if (result.status === 'succeeded' && videoUrl) {
-      videoUrl = await saveRemoteVideo(videoUrl, seedanceNz.fetchRemote);
+    let videoUrl = '';
+    if (result.status === 'succeeded' && result.videoUrl) {
+      videoUrl = await saveRemoteVideo(result.videoUrl, seedanceNz.fetchRemote);
+      if (!videoUrl) return res.status(502).json({ success: false, error: 'Wan 输出素材未通过安全下载校验' });
     }
     return res.json({
       success: true,
       data: {
         status: result.status,
-        progress: result.progress,
+        progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
         videoUrl,
-        failReason: result.failReason,
+        failReason: result.status === 'failed'
+          ? safeDiagnosticText(result.failReason || 'Wan 任务失败', 240, [apiKey])
+          : '',
         model: remembered?.model || '',
         taskType: remembered?.taskType || '',
-        raw: result.raw,
         ...seedanceNzTrace(result),
       },
     });
   } catch (error) {
     const status = Number(error?.status || 500);
-    console.error('proxy/video/wan/status 错误:', error?.message || error);
+    proxyRouteError('proxy/video/wan/status 错误', error, [apiKey]);
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
-      error: error?.message || 'Wan 2.7 Spicy 查询失败',
+      error: proxyPublicError(error, 'Wan 2.7 Spicy 查询失败', [apiKey]),
       ...seedanceNzTrace(error),
     });
   }
@@ -1430,13 +2346,13 @@ router.post('/audio/seed-audio/submit', async (req, res) => {
       provider: 'seed-audio-nz',
       model: result.model,
     });
-    return res.json({ success: true, data: { taskId: result.taskId, model: result.model, raw: result.raw, ...seedanceNzTrace(result) } });
+    return res.json({ success: true, data: { taskId: result.taskId, model: result.model, ...seedanceNzTrace(result) } });
   } catch (error) {
     const status = Number(error?.status || 500);
-    console.error('proxy/audio/seed-audio/submit 错误:', error?.message || error);
+    proxyRouteError('proxy/audio/seed-audio/submit 错误', error, [apiKey]);
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
-      error: error?.message || 'Seed Audio 请求失败',
+      error: proxyPublicError(error, 'Seed Audio 请求失败', [apiKey]),
       ...seedanceNzTrace(error),
     });
   }
@@ -1444,32 +2360,35 @@ router.post('/audio/seed-audio/submit', async (req, res) => {
 
 router.get('/audio/seed-audio/status/:tid', async (req, res) => {
   const settings = loadRawSettings();
-  const remembered = recallTaskMeta(req.params.tid);
+  const remembered = recallTaskMeta(req.params.tid, 'seed-audio-nz');
   const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
   if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
   try {
     const result = await seedanceNz.queryAudioTask(req.params.tid, apiKey);
-    let audioUrl = result.audioUrl;
-    if (result.status === 'succeeded' && audioUrl) audioUrl = await saveRemoteAudio(audioUrl);
+    let audioUrl = '';
+    if (result.status === 'succeeded' && result.audioUrl) {
+      audioUrl = await saveRemoteAudio(result.audioUrl);
+      if (!audioUrl) return res.status(502).json({ success: false, error: 'Seed Audio 输出素材未通过安全下载校验' });
+    }
     return res.json({
       success: true,
       data: {
         status: result.status,
-        progress: result.progress,
+        progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
         audioUrl,
-        remoteAudioUrl: result.audioUrl,
-        failReason: result.failReason,
+        failReason: result.status === 'failed'
+          ? safeDiagnosticText(result.failReason || 'Seed Audio 任务失败', 240, [apiKey])
+          : '',
         model: remembered?.model || '',
-        raw: result.raw,
         ...seedanceNzTrace(result),
       },
     });
   } catch (error) {
     const status = Number(error?.status || 500);
-    console.error('proxy/audio/seed-audio/status 错误:', error?.message || error);
+    proxyRouteError('proxy/audio/seed-audio/status 错误', error, [apiKey]);
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
-      error: error?.message || 'Seed Audio 查询失败',
+      error: proxyPublicError(error, 'Seed Audio 查询失败', [apiKey]),
       ...seedanceNzTrace(error),
     });
   }
@@ -1495,6 +2414,7 @@ router.post('/image', async (req, res) => {
   const refs = Array.isArray(images) ? images.filter(Boolean) : [];
   if (typeof image === 'string' && image && !refs.includes(image)) refs.unshift(image);
 
+  let apiKey = String(settings?.zhenzhenApiKey || '');
   try {
     const providerContext = await applyZhenzhenProviderContext(settings, {
       route: 'image',
@@ -1503,40 +2423,45 @@ router.post('/image', async (req, res) => {
       hint: apiModel || model || '',
       providerParams,
     });
+    apiKey = String(settings.zhenzhenApiKey || '');
     const r = await callImageUpstreamAsync({
-      apiKey: settings.zhenzhenApiKey, finalApiModel, paramKind,
+      apiKey, finalApiModel, paramKind,
       prompt, n, aspect_ratio, image_size: gptImage2ForcedSize || image_size, refs, size: gptImage2ForcedSize ? undefined : size, quality, response_format, output_format,
     });
-    const text = await r.text();
-    let data; try { data = JSON.parse(text); } catch {
-      return res.status(500).json({ success: false, error: '上游响应非 JSON: ' + text.slice(0, 300) });
-    }
     if (!r.ok) {
-      const errorText = data?.error?.message || data?.message || `上游 HTTP ${r.status}`;
-      await invalidateZhenzhenProviderKey(providerContext, settings.zhenzhenApiKey, errorText);
+      const providerError = await boundedProviderHttpError(r, 'Image generation failed');
+      await invalidateZhenzhenProviderKey(
+        providerContext,
+        apiKey,
+        Number(r.status) === 401 ? 'unauthorized' : providerError.message,
+      );
       return res.status(r.status).json({
         success: false,
-        error: errorText,
+        error: providerError.message,
       });
     }
+    const data = await parseJsonResponse(r, 'Image generation');
     const norm = await normalizeImageResponse(data);
     if (norm.kind === 'failed') {
-      await invalidateZhenzhenProviderKey(providerContext, settings.zhenzhenApiKey, norm.error);
-      return res.status(500).json({ success: false, error: norm.error || '上游图像任务失败', raw: data });
+      await invalidateZhenzhenProviderKey(providerContext, apiKey, norm.error);
+      return res.status(502).json({
+        success: false,
+        error: proxyPublicError({ message: norm.error }, '上游图像任务失败', [apiKey]),
+      });
     }
     if (norm.kind === 'sync') {
-      return res.json({ success: true, data: { urls: norm.urls, raw: data, model: finalApiModel, prompt } });
+      return res.json({ success: true, data: { urls: norm.urls, model: finalApiModel, prompt } });
     }
     if (norm.kind === 'async') {
       // 同步接口需要同步返回结果 → 内部轮询
-      const url = await pollImageTask(norm.taskId, settings.zhenzhenApiKey);
+      const url = await pollImageTask(norm.taskId, apiKey);
       if (!url) return res.status(500).json({ success: false, error: '异步任务轮询超时/失败', taskId: norm.taskId });
-      return res.json({ success: true, data: { urls: [url], raw: data, taskId: norm.taskId, model: finalApiModel, prompt } });
+      return res.json({ success: true, data: { urls: [url], taskId: norm.taskId, model: finalApiModel, prompt } });
     }
-    return res.status(500).json({ success: false, error: '上游未返回图片也未返 task_id: ' + JSON.stringify(data).slice(0, 300) });
+    return res.status(502).json({ success: false, error: '上游未返回图片或 task_id' });
   } catch (e) {
-    console.error('proxy/image 错误:', e);
-    res.status(500).json({ success: false, error: e.message || '请求失败' });
+    proxyRouteError('proxy/image 错误', e, [apiKey]);
+    res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e, '请求失败', [apiKey]) });
   }
 });
 
@@ -1547,11 +2472,13 @@ router.post('/image', async (req, res) => {
 // ========================================================================
 router.post('/image/submit', async (req, res) => {
   const settings = loadRawSettings();
+  let apiKey = String(settings?.zhenzhenApiKey || '');
   try {
     const { model, apiModel, paramKind: paramKindIn, prompt, n,
             aspect_ratio, image_size, images, image, size, quality, response_format, output_format, providerParams } = req.body || {};
     // v1.2.9.15: 一体化「专属优先 fallback 通用」校验
     if (!ensureKeyOrSelectedGroup(settings, res, apiModel || model || '', '图像', providerParams)) return;
+    apiKey = String(settings.zhenzhenApiKey || '');
     if (!prompt) return res.status(400).json({ success: false, error: 'prompt 不得为空' });
     const originalApiModel = String(apiModel || model || '');
     const gptImage2ForcedSize = gptImage2ZhenzhenVariantSize(originalApiModel);
@@ -1570,34 +2497,41 @@ router.post('/image/submit', async (req, res) => {
       hint: apiModel || model || '',
       providerParams,
     });
+    apiKey = String(settings.zhenzhenApiKey || '');
     const r = await callImageUpstreamAsync({
-      apiKey: settings.zhenzhenApiKey, finalApiModel, paramKind,
+      apiKey, finalApiModel, paramKind,
       prompt, n, aspect_ratio, image_size: gptImage2ForcedSize || image_size, refs, size: gptImage2ForcedSize ? undefined : size, quality, response_format, output_format,
     });
-    const text = await r.text();
-    let data; try { data = JSON.parse(text); } catch { data = { _raw: text }; }
     if (!r.ok) {
-      const errorText = data?.error?.message || data?.message || `上游 HTTP ${r.status}`;
-      await invalidateZhenzhenProviderKey(providerContext, settings.zhenzhenApiKey, errorText);
-      return res.status(r.status).json({ success: false, error: errorText, raw: data });
+      const providerError = await boundedProviderHttpError(r, 'Image submit failed');
+      await invalidateZhenzhenProviderKey(
+        providerContext,
+        apiKey,
+        Number(r.status) === 401 ? 'unauthorized' : providerError.message,
+      );
+      return res.status(r.status).json({ success: false, error: providerError.message });
     }
+    const data = await parseJsonResponse(r, 'Image submit');
 
     const norm = await normalizeImageResponse(data);
     if (norm.kind === 'failed') {
-      await invalidateZhenzhenProviderKey(providerContext, settings.zhenzhenApiKey, norm.error);
-      return res.status(500).json({ success: false, error: norm.error || '上游图像任务失败', raw: data });
+      await invalidateZhenzhenProviderKey(providerContext, apiKey, norm.error);
+      return res.status(502).json({
+        success: false,
+        error: proxyPublicError({ message: norm.error }, '上游图像任务失败', [apiKey]),
+      });
     }
     if (norm.kind === 'sync') {
-      return res.json({ success: true, data: { sync: true, status: 'completed', progress: '100%', urls: norm.urls, raw: data } });
+      return res.json({ success: true, data: { sync: true, status: 'completed', progress: '100%', urls: norm.urls } });
     }
     if (norm.kind === 'async') {
-      rememberTaskKey(norm.taskId, settings.zhenzhenApiKey, { model: finalApiModel, ...providerContext.taskMeta });
-      return res.json({ success: true, data: { sync: false, taskId: norm.taskId, status: 'pending', progress: '0%', raw: data } });
+      rememberTaskKey(norm.taskId, apiKey, { authorityScope: 'zhenzhen-image', model: finalApiModel, ...providerContext.taskMeta });
+      return res.json({ success: true, data: { sync: false, taskId: norm.taskId, status: 'pending', progress: '0%' } });
     }
-    return res.status(500).json({ success: false, error: '未获取到 task_id 且无同步结果: ' + JSON.stringify(data).slice(0, 300) });
+    return res.status(502).json({ success: false, error: '上游未返回图片或 task_id' });
   } catch (e) {
-    console.error('proxy/image/submit 错误:', e);
-    res.status(500).json({ success: false, error: e.message || '请求失败' });
+    proxyRouteError('proxy/image/submit 错误', e, [apiKey]);
+    res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e, '请求失败', [apiKey]) });
   }
 });
 
@@ -1605,7 +2539,7 @@ router.post('/image/submit', async (req, res) => {
 router.get('/image/status/:tid', async (req, res) => {
   const settings = loadRawSettings();
   // 优先从 submit 阶段记录的 (taskId → key) 映射恢复，防止前端未传 model 导致 fallback 错 key。
-  const rememberedMeta = recallTaskMeta(req.params.tid);
+  const rememberedMeta = recallTaskMeta(req.params.tid, 'zhenzhen-image');
   if (rememberedMeta?.apiKey) {
     if (settings) settings.zhenzhenApiKey = rememberedMeta.apiKey;
     else return res.status(400).json({ success: false, error: '未找到 settings' });
@@ -1614,20 +2548,27 @@ router.get('/image/status/:tid', async (req, res) => {
     if (!ensureKey(settings, res, String(req.query.model || ''), '图像')) return;
   }
   const tid = req.params.tid;
+  const apiKey = String(settings.zhenzhenApiKey || '');
   try {
     const url = `${config.ZHENZHEN_BASE_URL}/v1/images/tasks/${encodeURIComponent(tid)}`;
-    const r = await fetch(url, { headers: { Authorization: `Bearer ${settings.zhenzhenApiKey}` } });
-    const text = await r.text();
-    let data; try { data = JSON.parse(text); } catch { data = { _raw: text }; }
+    const r = await fetchProviderResponse(url, { headers: { Authorization: `Bearer ${apiKey}` } });
     if (!r.ok) {
-      const errorText = data?.error?.message || data?.message || `上游 HTTP ${r.status}`;
-      await invalidateZhenzhenProviderKey({ taskMeta: rememberedMeta || {} }, settings.zhenzhenApiKey, errorText);
-      return res.status(r.status).json({ success: false, error: errorText, raw: data });
+      const providerError = await boundedProviderHttpError(r, 'Image status failed');
+      await invalidateZhenzhenProviderKey(
+        { taskMeta: rememberedMeta || {} },
+        apiKey,
+        Number(r.status) === 401 ? 'unauthorized' : providerError.message,
+      );
+      return res.status(r.status).json({ success: false, error: providerError.message });
     }
+    const data = await parseJsonResponse(r, 'Image status');
     if (imageApiFailed(data)) {
       const errorText = imageError(data) || '任务失败';
-      await invalidateZhenzhenProviderKey({ taskMeta: rememberedMeta || {} }, settings.zhenzhenApiKey, errorText);
-      return res.json({ success: false, data: { status: 'failed', progress: '0%', error: errorText, raw: data } });
+      await invalidateZhenzhenProviderKey({ taskMeta: rememberedMeta || {} }, apiKey, errorText);
+      return res.json({
+        success: false,
+        data: { status: 'failed', progress: '0%', error: proxyPublicError({ message: errorText }, '任务失败', [apiKey]) },
+      });
     }
     const statusRaw = imageStatus(data);
     const status = String(statusRaw || '').toLowerCase();
@@ -1637,15 +2578,22 @@ router.get('/image/status/:tid', async (req, res) => {
     const FAILURE = ['failure', 'failed', 'error', 'cancelled', 'canceled'];
     const urls = await saveImageItemsFromResult(data);
     if (SUCCESS.includes(status) || urls.length) {
-      return res.json({ success: true, data: { status: 'completed', progress: '100%', urls, raw: data } });
+      return res.json({ success: true, data: { status: 'completed', progress: '100%', urls } });
     }
     if (FAILURE.includes(status)) {
-      return res.json({ success: false, data: { status: 'failed', progress, error: imageError(data) || inner.fail_reason || '任务失败', raw: data } });
+      return res.json({
+        success: false,
+        data: {
+          status: 'failed',
+          progress,
+          error: proxyPublicError({ message: imageError(data) || inner.fail_reason }, '任务失败', [apiKey]),
+        },
+      });
     }
-    res.json({ success: true, data: { status: status || 'pending', progress, raw: data } });
+    res.json({ success: true, data: { status: status || 'pending', progress } });
   } catch (e) {
-    console.error('proxy/image/status 错误:', e);
-    res.status(500).json({ success: false, error: e.message || '查询失败' });
+    proxyRouteError('proxy/image/status 错误', e, [apiKey]);
+    res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e, '查询失败', [apiKey]) });
   }
 });
 
@@ -1657,21 +2605,23 @@ async function pollImageTask(taskId, apiKey, maxRetries = 1800, interval = 2000)
   for (let i = 0; i < maxRetries; i++) {
     await new Promise(r => setTimeout(r, interval));
     try {
-      const r = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
-      const text = await r.text();
-      let data; try { data = JSON.parse(text); } catch { continue; }
-      if (!r.ok) continue;
+      const r = await fetchProviderResponse(url, { headers: { Authorization: `Bearer ${apiKey}` } });
+      if (!r.ok) {
+        await boundedProviderHttpError(r, 'Image poll failed');
+        continue;
+      }
+      const data = await parseJsonResponse(r, 'Image poll');
       const st = String(imageStatus(data) || '').toLowerCase();
       const urls = await saveImageItemsFromResult(data);
       if (['success', 'completed', 'complete', 'done', 'finished'].includes(st) || urls.length) {
         return urls[0] || null;
       }
       if (['failure', 'failed', 'error', 'cancelled', 'canceled'].includes(st) || imageApiFailed(data)) {
-        console.error('[poll] 任务失败:', imageError(data) || st);
+        console.error('[poll] 任务失败:', opaqueDiagnosticSummary('reason', imageError(data) || st));
         return null;
       }
     } catch (e) {
-      console.warn('[poll] 轮询异常:', e.message);
+      console.warn('[poll] 轮询异常:', safeDiagnosticText(e?.message || e, 200, [apiKey]));
     }
   }
   return null;
@@ -1682,8 +2632,8 @@ async function pollImageTask(taskId, apiKey, maxRetries = 1800, interval = 2000)
 // 不破坏原有 /image · /image/submit · /image/status/:tid 三个路由。
 //
 // 核心路由:
-//   POST /api/proxy/image/fal/submit   -> { sync, urls?, requestId?, responseUrl?, endpoint? }
-//   POST /api/proxy/image/fal/query    -> { status, images?, error? }   body: { responseUrl, endpoint, requestId }
+//   POST /api/proxy/image/fal/submit   -> { sync, urls?, requestId?, endpoint? }
+//   POST /api/proxy/image/fal/query    -> { status, images?, error? }   body: { endpoint, requestId }
 //
 // 主项目上游协议(index.html line 2890 runGPTFal / line 3587 runNanoFal):
 //   URL: ${baseUrl}/fal/${endpoint}
@@ -1718,6 +2668,32 @@ const FAL_REGISTRY = {
   },
 };
 
+function falRegistryEndpoints(registry) {
+  const endpoints = new Set();
+  for (const entry of Object.values(registry || {})) {
+    for (const key of ['endpoint', 'editEndpoint', 'i2vEndpoint', 'referenceEndpoint']) {
+      if (entry?.[key]) endpoints.add(String(entry[key]));
+    }
+  }
+  return endpoints;
+}
+
+function resolveFalQueryTarget(options = {}) {
+  const requestId = safeFalRequestId(options.requestId);
+  if (!requestId) throw new Error('FAL requestId 格式无效');
+  const remembered = options.rememberedMeta;
+  if (!remembered || remembered.route !== options.route) {
+    throw Object.assign(new Error('FAL 任务注册已失效，请重新提交任务'), { status: 409 });
+  }
+  const endpoint = String(remembered.endpoint || '');
+  const target = trustedFalPollUrl(remembered.responseUrl, options.baseUrl)
+    || constructedFalPollUrl(options.baseUrl, endpoint, requestId);
+  if (!target) throw new Error('FAL 轮询地址无法从服务端任务注册恢复');
+  const supplied = String(options.suppliedUrl || '').trim();
+  if (supplied) throw new Error('FAL 轮询地址只能由服务端任务注册恢复');
+  return { endpoint, responseUrl: target };
+}
+
 // 按 16 倍数对齐(主项目 line 2904)
 function snap16(v, fallback) {
   const n = parseInt(v, 10);
@@ -1725,19 +2701,67 @@ function snap16(v, fallback) {
   return Math.max(256, Math.min(3840, Math.round(n / 16) * 16));
 }
 
-// 修复 response_url 域名(主项目 line 2954)
+function safeFalRequestId(value) {
+  const requestId = String(value || '').trim();
+  if (requestId === '.' || requestId === '..') return '';
+  return /^[a-z0-9._:-]{1,256}$/i.test(requestId) ? requestId : '';
+}
+
+function falBaseUrl(baseUrl) {
+  const parsed = new URL(String(baseUrl || ''));
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
+    throw new Error('FAL Provider Base URL 配置无效');
+  }
+  parsed.search = '';
+  parsed.hash = '';
+  parsed.pathname = `${parsed.pathname.replace(/\/+$/, '')}/fal/`;
+  return parsed;
+}
+
+function trustedFalPollUrl(value, baseUrl) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const providerBase = falBaseUrl(baseUrl);
+  const parsed = new URL(raw);
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.hash) {
+    throw new Error('FAL 轮询地址格式无效');
+  }
+  let candidate = parsed;
+  if (parsed.origin === 'https://queue.fal.run' || parsed.origin === 'https://fal.run') {
+    candidate = new URL(providerBase.toString());
+    candidate.pathname = `${providerBase.pathname}${parsed.pathname.replace(/^\/+/, '')}`;
+    candidate.search = parsed.search;
+  }
+  if (candidate.origin !== providerBase.origin || !candidate.pathname.startsWith(providerBase.pathname)) {
+    throw new Error('FAL 轮询地址不属于已配置 Provider');
+  }
+  let decodedPath;
+  try { decodedPath = decodeURIComponent(candidate.pathname); } catch (_) { throw new Error('FAL 轮询地址编码无效'); }
+  if (decodedPath.includes('\\') || decodedPath.includes('\0')
+    || decodedPath.split('/').some((segment) => segment === '.' || segment === '..')) {
+    throw new Error('FAL 轮询地址路径无效');
+  }
+  return candidate.toString();
+}
+
+function constructedFalPollUrl(baseUrl, endpoint, requestId) {
+  const normalizedEndpoint = String(endpoint || '').trim();
+  const normalizedRequestId = safeFalRequestId(requestId);
+  if (!isFalToolboxEndpoint(normalizedEndpoint) || !normalizedRequestId) return '';
+  const providerBase = falBaseUrl(baseUrl);
+  providerBase.pathname = `${providerBase.pathname}${normalizedEndpoint}/requests/${encodeURIComponent(normalizedRequestId)}`;
+  return trustedFalPollUrl(providerBase.toString(), baseUrl);
+}
+
+// Provider response URLs are accepted only from the exact configured FAL
+// origin/path (or queue.fal.run, which is rewritten onto that trusted path).
 function fixFalResponseUrl(responseUrl, baseUrl, endpoint, requestId) {
-  let url = String(responseUrl || '');
-  if (url.includes('queue.fal.run')) {
-    url = url.replace('https://queue.fal.run', `${baseUrl}/fal`);
-  }
-  if (!url) {
-    const requestEndpoint = String(endpoint || '').startsWith('fal-ai/sora-2/')
-      ? 'fal-ai/sora-2'
-      : endpoint;
-    url = `${baseUrl}/fal/${requestEndpoint}/requests/${requestId}`;
-  }
-  return url;
+  const supplied = String(responseUrl || '').trim();
+  if (supplied) return trustedFalPollUrl(supplied, baseUrl);
+  const requestEndpoint = String(endpoint || '').startsWith('fal-ai/sora-2/')
+    ? 'fal-ai/sora-2'
+    : endpoint;
+  return constructedFalPollUrl(baseUrl, requestEndpoint, requestId);
 }
 
 // POST /api/proxy/image/fal/submit
@@ -1843,24 +2867,23 @@ router.post('/image/fal/submit', async (req, res) => {
     const falUrl = `${baseUrl}/fal/${endpoint}`;
     console.log('[fal/submit]', apiModel, '→', falUrl, '| payload keys:', Object.keys(payload), '| refs:', trimmedRefs.length);
 
-    const resp = await fetch(falUrl, {
+    const resp = await fetchProviderResponse(falUrl, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    const text = await resp.text();
-    let data; try { data = JSON.parse(text); } catch { data = { _raw: text }; }
+    const data = await parseJsonResponse(resp, 'FAL image submit');
     if (!resp.ok) {
       return res.status(resp.status).json({
         success: false,
-        error: data?.error || data?.detail || data?.message || `FAL HTTP ${resp.status}: ${text.slice(0, 300)}`,
+        error: `FAL HTTP ${resp.status}`,
       });
     }
     if (Array.isArray(data)) {
-      return res.status(400).json({ success: false, error: `FAL 参数校验错误: ${JSON.stringify(data).slice(0, 300)}` });
+      return res.status(400).json({ success: false, error: 'FAL 参数校验错误' });
     }
     if (data?.detail && !data?.images && !data?.request_id) {
-      return res.status(400).json({ success: false, error: `FAL 错误: ${JSON.stringify(data.detail).slice(0, 300)}` });
+      return res.status(400).json({ success: false, error: 'FAL 请求被 Provider 拒绝' });
     }
 
     // 同步返回
@@ -1869,66 +2892,74 @@ router.post('/image/fal/submit', async (req, res) => {
       for (const it of data.images) {
         if (it?.url) {
           const local = await saveRemoteImage(it.url);
-          urls.push(local);
+          if (local) urls.push(local);
         }
       }
-      return res.json({ success: true, data: { sync: true, urls, endpoint, raw: data } });
+      if (!urls.length) return res.status(502).json({ success: false, error: 'FAL 图像输出未通过安全下载校验' });
+      return res.json({ success: true, data: { sync: true, urls, endpoint } });
     }
 
     // 异步
-    const requestId = data?.request_id;
+    const requestId = safeFalRequestId(data?.request_id);
     let responseUrl = data?.response_url || '';
     if (!requestId) {
-      return res.status(500).json({ success: false, error: '未获取到 request_id: ' + JSON.stringify(data).slice(0, 300) });
+      return res.status(502).json({ success: false, error: 'FAL 返回的 request_id 无效' });
     }
     responseUrl = fixFalResponseUrl(responseUrl, baseUrl, endpoint, requestId);
-    rememberTaskKey(requestId, apiKey, { model: apiModel, endpoint });
+    if (!responseUrl) return res.status(502).json({ success: false, error: 'FAL 未返回可验证的轮询地址' });
+    const registered = rememberFalTask('image-fal', requestId, apiKey, {
+      model: apiModel,
+      endpoint,
+      responseUrl,
+    });
+    if (!registered) return res.status(502).json({ success: false, error: 'FAL 任务注册失败' });
     return res.json({
       success: true,
-      data: { sync: false, requestId, responseUrl, endpoint, raw: data },
+      data: { sync: false, requestId, endpoint },
     });
   } catch (e) {
-    console.error('proxy/image/fal/submit 错误:', e);
-    return res.status(500).json({ success: false, error: e.message || '请求失败' });
+    proxyRouteError('proxy/image/fal/submit 错误', e);
+    return res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e) });
   }
 });
 
 // POST /api/proxy/image/fal/query
-//   body: { responseUrl, endpoint, requestId }
+//   body: { endpoint, requestId }
 //   返回: { status: 'pending'|'completed'|'failed', urls?, error? }
 router.post('/image/fal/query', async (req, res) => {
   const settings = loadRawSettings();
   const { responseUrl: rawUrl, endpoint, requestId } = req.body || {};
-  const rememberedMeta = recallTaskMeta(requestId);
-  if (rememberedMeta?.apiKey) {
-    if (settings) settings.zhenzhenApiKey = rememberedMeta.apiKey;
-    else return res.status(400).json({ success: false, error: '未找到 settings' });
-  } else {
-    // FAL 查询和提交保持同一策略：只用通用贞贞 API Key。
-    if (!ensureDefaultZhenzhenKey(settings, res, '图像 FAL')) return;
-  }
+  const rememberedMeta = recallFalTask('image-fal', requestId);
+  if (!rememberedMeta) return res.status(409).json({ success: false, error: 'FAL 图像任务注册已失效，请重新提交任务' });
+  if (settings) settings.zhenzhenApiKey = rememberedMeta.apiKey;
+  else return res.status(400).json({ success: false, error: '未找到 settings' });
   const apiKey = settings.zhenzhenApiKey;
   const baseUrl = config.ZHENZHEN_BASE_URL;
-  const responseUrl = fixFalResponseUrl(rawUrl, baseUrl, endpoint, requestId);
-  if (!responseUrl) return res.status(400).json({ success: false, error: 'responseUrl 或 (endpoint+requestId) 必填' });
 
   try {
-    const pr = await fetch(responseUrl, { headers: { Authorization: `Bearer ${apiKey}` } });
-    const text = await pr.text();
-    let data; try { data = JSON.parse(text); } catch { data = null; }
+    const target = resolveFalQueryTarget({
+      route: 'image-fal',
+      requestId,
+      endpoint,
+      suppliedUrl: rawUrl,
+      rememberedMeta,
+      baseUrl,
+    });
+    const responseUrl = target.responseUrl;
+    const pr = await fetchFalPollJson(responseUrl, apiKey);
+    const data = pr.data;
     // HTTP 非200: 主项目规范 - body 中 status=IN_QUEUE/IN_PROGRESS 视为继续等待,其他报错
     if (!pr.ok) {
       if (data && (data.status === 'IN_QUEUE' || data.status === 'IN_PROGRESS')) {
-        return res.json({ success: true, data: { status: 'pending', raw: data } });
+        return res.json({ success: true, data: { status: 'pending', falStatus: String(data.status) } });
       }
       return res.status(pr.status).json({
         success: false,
-        error: `FAL Poll HTTP ${pr.status}: ${text.slice(0, 300)}`,
-        raw: data,
+        error: `FAL Poll HTTP ${pr.status}`,
       });
     }
     if (!data) {
-      return res.status(500).json({ success: false, error: 'FAL Poll 响应非 JSON: ' + text.slice(0, 200) });
+      return res.status(502).json({ success: false, error: 'FAL Poll 响应非 JSON' });
     }
     // 完成
     if (Array.isArray(data.images) && data.images.length) {
@@ -1936,23 +2967,24 @@ router.post('/image/fal/query', async (req, res) => {
       for (const it of data.images) {
         if (it?.url) {
           const local = await saveRemoteImage(it.url);
-          urls.push(local);
+          if (local) urls.push(local);
         }
       }
-      return res.json({ success: true, data: { status: 'completed', urls, raw: data } });
+      if (!urls.length) return res.status(502).json({ success: false, error: 'FAL 图像输出未通过安全下载校验' });
+      return res.json({ success: true, data: { status: 'completed', urls } });
     }
     const st = String(data.status || '').toUpperCase();
     if (st === 'FAILED' || st === 'CANCELLED') {
       return res.json({
         success: false,
-        data: { status: 'failed', error: data.error || data.detail || `FAL ${st}` },
+        data: { status: 'failed', error: `FAL ${st}` },
       });
     }
     // IN_QUEUE / IN_PROGRESS / 空 => pending
-    return res.json({ success: true, data: { status: 'pending', falStatus: st || 'IN_QUEUE', raw: data } });
+    return res.json({ success: true, data: { status: 'pending', falStatus: st || 'IN_QUEUE' } });
   } catch (e) {
-    console.error('proxy/image/fal/query 错误:', e);
-    return res.status(500).json({ success: false, error: e.message || '查询失败' });
+    proxyRouteError('proxy/image/fal/query 错误', e);
+    return res.status(Number(e?.status) || 400).json({ success: false, error: proxyPublicError(e, '查询失败') });
   }
 });
 
@@ -1966,6 +2998,43 @@ router.post('/image/fal/query', async (req, res) => {
 const MJ_SPEED_MAP = { turbo: 'mj-turbo', fast: 'mj-fast', relax: 'mj-relax' };
 function mjSpeedSeg(speed) {
   return MJ_SPEED_MAP[String(speed || '').toLowerCase()] || 'mj-fast';
+}
+
+function safeMjTaskId(value) {
+  const taskId = String(value || '').trim();
+  return /^[A-Za-z0-9._:-]{1,512}$/.test(taskId) ? taskId : '';
+}
+
+function mjImageReferences(data) {
+  const values = [];
+  let list = data?.image_urls ?? data?.imageUrls;
+  if (typeof list === 'string') {
+    try { list = JSON.parse(list); } catch (_) { list = []; }
+  }
+  if (Array.isArray(list)) {
+    for (const item of list.slice(0, 8)) {
+      const value = typeof item === 'string' ? item : item?.url || item?.image_url || item?.imageUrl;
+      if (value) values.push(String(value));
+    }
+  }
+  const single = data?.image_url || data?.imageUrl;
+  if (single) values.unshift(String(single));
+  return [...new Set(values)].slice(0, 8);
+}
+
+function safeProviderReferenceUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw || raw.length > 4096) return '';
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.hash) return '';
+    for (const key of parsed.searchParams.keys()) {
+      if (/token|secret|signature|credential|api[_-]?key|authorization|password/i.test(key)) return '';
+    }
+    return parsed.toString();
+  } catch (_) {
+    return '';
+  }
 }
 
 // ---- POST /api/proxy/mj/imagine ----
@@ -2001,8 +3070,8 @@ router.post('/mj/imagine', async (req, res) => {
     seed: body.seed || null,
   };
   try {
-    console.log(`[mj/imagine] -> ${url}\n  prompt: ${payload.prompt.slice(0, 200)}`);
-    const r = await fetch(url, {
+    console.log(`[mj/imagine] -> ${url} ${opaqueDiagnosticSummary('prompt', payload.prompt)}`);
+    const r = await fetchProviderResponse(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2010,14 +3079,20 @@ router.post('/mj/imagine', async (req, res) => {
       },
       body: JSON.stringify(payload),
     });
-    const text = await r.text();
-    let data;
-    try { data = JSON.parse(text); } catch { return res.status(500).json({ success: false, error: '上游响应非 JSON: ' + text.slice(0, 200) }); }
-    if (!r.ok) return res.status(r.status).json({ success: false, error: data?.error || data?.description || `上游 HTTP ${r.status}` });
-    return res.json({ success: true, data });
+    if (!r.ok) {
+      const providerError = await boundedProviderHttpError(r, 'MJ imagine failed');
+      return res.status(r.status).json({ success: false, error: providerError.message });
+    }
+    const data = await parseJsonResponse(r, 'MJ imagine');
+    const taskId = safeMjTaskId(data?.result || data?.task_id || data?.taskId);
+    if (data?.code !== undefined && Number(data.code) !== 1) {
+      return res.status(502).json({ success: false, error: 'MJ Provider 拒绝了生成任务' });
+    }
+    if (!taskId) return res.status(502).json({ success: false, error: 'MJ 未返回有效 taskId' });
+    return res.json({ success: true, data: { taskId } });
   } catch (e) {
-    console.error('proxy/mj/imagine 错误:', e);
-    return res.status(500).json({ success: false, error: e.message || '提交失败' });
+    proxyRouteError('proxy/mj/imagine 错误', e, [settings.zhenzhenApiKey]);
+    return res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e, '提交失败', [settings.zhenzhenApiKey]) });
   }
 });
 
@@ -2032,22 +3107,43 @@ router.get('/mj/task/:id', async (req, res) => {
   if (!taskId) return res.status(400).json({ success: false, error: 'taskId 必填' });
   const url = `${config.ZHENZHEN_BASE_URL}/${speedSeg}/mj/task/${encodeURIComponent(taskId)}/fetch`;
   try {
-    const r = await fetch(url, {
+    const r = await fetchProviderResponse(url, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${settings.zhenzhenApiKey}`,
       },
     });
-    const raw = await r.text();
-    let data;
-    try { data = JSON.parse(raw); } catch { return res.status(500).json({ success: false, error: '上游响应非 JSON: ' + raw.slice(0, 200) }); }
-    if (!r.ok) return res.status(r.status).json({ success: false, error: data?.error || data?.description || `上游 HTTP ${r.status}` });
-    // image_urls 可能是 JSON 字符串也可能已是数组，透传，让前端统一处理
-    return res.json({ success: true, data });
+    if (!r.ok) {
+      const providerError = await boundedProviderHttpError(r, 'MJ task failed');
+      return res.status(r.status).json({ success: false, error: providerError.message });
+    }
+    const data = await parseJsonResponse(r, 'MJ task');
+    const upstreamStatus = String(data?.status || '').toUpperCase();
+    const status = ['SUBMITTED', 'IN_PROGRESS', 'SUCCESS', 'FAILURE'].includes(upstreamStatus)
+      ? upstreamStatus
+      : 'IN_PROGRESS';
+    const imageUrls = [];
+    if (status === 'SUCCESS') {
+      for (const ref of mjImageReferences(data)) {
+        const local = await saveRemoteImage(ref);
+        if (local) imageUrls.push(local);
+      }
+      if (!imageUrls.length) return res.status(502).json({ success: false, error: 'MJ 输出未通过安全下载校验' });
+    }
+    return res.json({
+      success: true,
+      data: {
+        status,
+        progress: safeDiagnosticText(data?.progress || '', 80, [settings.zhenzhenApiKey]),
+        imageUrl: imageUrls[0] || '',
+        imageUrls,
+        ...(status === 'FAILURE' ? { failReason: 'MJ 任务失败' } : {}),
+      },
+    });
   } catch (e) {
-    console.error('proxy/mj/task 错误:', e);
-    return res.status(500).json({ success: false, error: e.message || '查询失败' });
+    proxyRouteError('proxy/mj/task 错误', e, [settings.zhenzhenApiKey]);
+    return res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e, '查询失败', [settings.zhenzhenApiKey]) });
   }
 });
 
@@ -2064,7 +3160,7 @@ router.post('/mj/upload', async (req, res) => {
   const url = `${config.ZHENZHEN_BASE_URL}/${speedSeg}/mj/submit/upload-discord-images`;
   const payload = { base64Array: [base64Data], instanceId: '', notifyHook: '' };
   try {
-    const r = await fetch(url, {
+    const r = await fetchProviderResponse(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2072,19 +3168,21 @@ router.post('/mj/upload', async (req, res) => {
       },
       body: JSON.stringify(payload),
     });
-    const text = await r.text();
-    let data;
-    try { data = JSON.parse(text); } catch { return res.status(500).json({ success: false, error: '上游响应非 JSON: ' + text.slice(0, 200) }); }
-    if (!r.ok) return res.status(r.status).json({ success: false, error: data?.error || data?.description || `上游 HTTP ${r.status}` });
-    if (data.status === 'FAILURE') return res.status(500).json({ success: false, error: data.fail_reason || data.failReason || 'MJ upload failed' });
+    if (!r.ok) {
+      const providerError = await boundedProviderHttpError(r, 'MJ upload failed');
+      return res.status(r.status).json({ success: false, error: providerError.message });
+    }
+    const data = await parseJsonResponse(r, 'MJ upload');
+    if (data.status === 'FAILURE') return res.status(502).json({ success: false, error: 'MJ 参考图上传失败' });
     let imgUrl = '';
     if (Array.isArray(data.result)) imgUrl = data.result[0] || '';
     else if (typeof data.result === 'string') imgUrl = data.result;
-    if (!imgUrl) return res.status(500).json({ success: false, error: '上游未返回 URL: ' + JSON.stringify(data).slice(0, 200) });
-    return res.json({ success: true, data: { url: imgUrl, raw: data } });
+    imgUrl = safeProviderReferenceUrl(imgUrl);
+    if (!imgUrl) return res.status(502).json({ success: false, error: 'MJ 未返回安全的参考图 URL' });
+    return res.json({ success: true, data: { url: imgUrl } });
   } catch (e) {
-    console.error('proxy/mj/upload 错误:', e);
-    return res.status(500).json({ success: false, error: e.message || '上传失败' });
+    proxyRouteError('proxy/mj/upload 错误', e, [settings.zhenzhenApiKey]);
+    return res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e, '上传失败', [settings.zhenzhenApiKey]) });
   }
 });
 
@@ -2094,6 +3192,156 @@ function hasLlmVideoParts(messages) {
   return messages.some((msg) => Array.isArray(msg?.content) && msg.content.some((part) => (
     part?.type === 'video_url' || part?.type === 'input_video' || !!part?.video_url || !!part?.input_video
   )));
+}
+
+function redactExactSecrets(value, exactSecrets = []) {
+  let text = String(value ?? '');
+  for (const secret of new Set((Array.isArray(exactSecrets) ? exactSecrets : [exactSecrets])
+    .map((entry) => String(entry || ''))
+    .filter((entry) => entry.length >= 4))) {
+    text = text.split(secret).join('[redacted-secret]');
+  }
+  return text;
+}
+
+function normalizeLlmUsage(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const output = {};
+  for (const [key, raw] of Object.entries(value).slice(0, 32)) {
+    if (!/^(?:total|prompt|completion|input|output|cached|reasoning)[_-]?tokens?(?:[_-]?count)?$/i.test(key)) continue;
+    const number = Number(raw);
+    if (Number.isFinite(number) && number >= 0) output[key] = number;
+  }
+  return Object.keys(output).length ? output : undefined;
+}
+
+function sanitizedLlmSseEvent(rawLine, exactSecrets) {
+  const line = String(rawLine || '').trim();
+  if (!line || line.startsWith(':')) return line.startsWith(':') ? ':\n\n' : '';
+  if (!line.startsWith('data:')) return '';
+  const rawData = line.slice(5).trim();
+  if (rawData === '[DONE]') return 'data: [DONE]\n\n';
+  let parsed;
+  try { parsed = JSON.parse(rawData); } catch (_) { return ''; }
+  const sourceChoice = parsed?.choices?.[0];
+  const safeChoice = {};
+  const deltaContent = sourceChoice?.delta?.content;
+  if (typeof deltaContent === 'string') {
+    safeChoice.delta = { content: redactExactSecrets(deltaContent, exactSecrets) };
+  }
+  const finishReason = safeDiagnosticText(
+    sourceChoice?.finish_reason || sourceChoice?.finishReason || '',
+    80,
+    exactSecrets,
+  );
+  if (finishReason) safeChoice.finish_reason = finishReason;
+  const usage = normalizeLlmUsage(parsed?.usage);
+  if (!safeChoice.delta && !safeChoice.finish_reason && !usage) return '';
+  return `data: ${JSON.stringify({
+    ...(Object.keys(safeChoice).length ? { choices: [safeChoice] } : {}),
+    ...(usage ? { usage } : {}),
+  })}\n\n`;
+}
+
+async function pipeSanitizedProviderSse(req, res, response, label, exactSecrets = []) {
+  const contentType = String(response.headers?.get?.('content-type') || '').toLowerCase();
+  if (!contentType.includes('text/event-stream')) {
+    await readBoundedProviderResponse(response, label);
+    throw providerResponseError('provider_stream_invalid_type', `${label} 未返回 SSE`, { status: 502 });
+  }
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    throw providerResponseError('provider_stream_missing', `${label} 未返回可读流`, { status: 502 });
+  }
+  const inheritedDeadlineAt = Number(providerResponseTimings.get(response)?.deadlineAt);
+  const timing = {
+    deadlineAt: Number.isFinite(inheritedDeadlineAt) && inheritedDeadlineAt > 0
+      ? inheritedDeadlineAt
+      : Date.now() + providerFetchDeadlineMs(),
+    idleTimeoutMs: boundedProxyInteger(
+      proxySafeRemoteTestOptions?.idleTimeoutMs,
+      PROXY_REMOTE_IDLE_TIMEOUT_MS,
+      10,
+      60_000,
+    ),
+  };
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let total = 0;
+  let providerDone = false;
+  let clientClosedReject;
+  const clientClosed = new Promise((_, reject) => { clientClosedReject = reject; });
+  const onClientClose = () => {
+    if (!res.writableEnded) {
+      clientClosedReject(providerResponseError('client_stream_closed', '客户端已关闭流式响应'));
+    }
+  };
+  res.once('close', onClientClose);
+  const ensureHeaders = () => {
+    if (res.headersSent || res.destroyed) return;
+    res.status(200);
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    const requestId = safeMjTaskId(response.headers?.get?.('x-request-id'));
+    if (requestId) res.setHeader('X-Request-Id', requestId);
+  };
+  const emitLine = (line) => {
+    const safeEvent = sanitizedLlmSseEvent(line, exactSecrets);
+    if (!safeEvent) return false;
+    ensureHeaders();
+    res.write(safeEvent);
+    return safeEvent.includes('data: [DONE]');
+  };
+  try {
+    while (!providerDone) {
+      const step = await waitForProviderBodyStep(
+        Promise.race([reader.read(), clientClosed]),
+        timing,
+        label,
+      );
+      if (step.done) break;
+      const value = step.value instanceof Uint8Array ? step.value : Buffer.from(step.value || []);
+      total += value.byteLength;
+      if (total > PROXY_PROVIDER_SSE_MAX_BYTES) {
+        throw providerResponseError(
+          'provider_response_too_large',
+          `${label} 响应超过 ${PROXY_PROVIDER_SSE_MAX_BYTES} bytes 限制`,
+          { status: 502 },
+        );
+      }
+      buffer += decoder.decode(value, { stream: true });
+      if (Buffer.byteLength(buffer, 'utf8') > PROXY_PROVIDER_SSE_MAX_LINE_BYTES) {
+        throw providerResponseError('provider_sse_line_too_large', `${label} SSE 行超过限制`, { status: 502 });
+      }
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (emitLine(line)) {
+          providerDone = true;
+          break;
+        }
+      }
+    }
+    buffer += decoder.decode();
+    if (!providerDone && buffer) providerDone = emitLine(buffer);
+    if (providerDone) {
+      try { await reader.cancel(); } catch (_) {}
+    }
+    ensureHeaders();
+    res.end();
+  } catch (error) {
+    try { await reader.cancel(error); } catch (_) {}
+    if (res.headersSent) {
+      res.destroy();
+      return;
+    }
+    throw error;
+  } finally {
+    res.removeListener('close', onClientClose);
+    reader.releaseLock?.();
+  }
 }
 
 // body: { model, messages, temperature?, max_tokens?, stream?, llmVideoMode? }
@@ -2121,7 +3369,7 @@ router.post('/llm', async (req, res) => {
       baseUrl: `http://127.0.0.1:${config.PORT}`,
     });
   } catch (e) {
-    return res.status(400).json({ success: false, error: e.message || '多模态素材预处理失败' });
+    return res.status(400).json({ success: false, error: proxyPublicError(e, '多模态素材预处理失败') });
   }
 
   const upstream = `${config.ZHENZHEN_BASE_URL}/v1/chat/completions`;
@@ -2134,7 +3382,7 @@ router.post('/llm', async (req, res) => {
   };
 
   try {
-    const r = await fetch(upstream, {
+    const r = await fetchProviderResponse(upstream, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2146,81 +3394,71 @@ router.post('/llm', async (req, res) => {
     // ===== 流式分支:SSE pass-through =====
     if (payload.stream) {
       if (!r.ok) {
-        const errText = await r.text();
-        return res.status(r.status).json({
-          success: false,
-          error: `上游 HTTP ${r.status}: ${errText.slice(0, 300)}`,
-        });
+        const providerError = await boundedProviderHttpError(r, 'LLM stream failed');
+        return res.status(r.status).json({ success: false, error: providerError.message });
       }
-      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-      res.setHeader('Cache-Control', 'no-cache, no-transform');
-      res.setHeader('Connection', 'keep-alive');
-      res.setHeader('X-Accel-Buffering', 'no');
-      // Node 18+ fetch response.body 为 ReadableStream
-      try {
-        const reader = r.body.getReader();
-        const decoder = new TextDecoder();
-        // 透传上游字节,前端按 SSE 解析
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          res.write(decoder.decode(value, { stream: true }));
-        }
-      } catch (streamErr) {
-        console.error('proxy/llm SSE 转发异常:', streamErr);
-      }
-      return res.end();
+      await pipeSanitizedProviderSse(req, res, r, 'LLM stream', [settings.llmApiKey]);
+      return;
     }
 
     // ===== 非流式分支(gpt-image-2-all 等) =====
-    const text = await r.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      return res.status(500).json({ success: false, error: '上游响应非 JSON: ' + text.slice(0, 200) });
-    }
     if (!r.ok) {
-      return res.status(r.status).json({
-        success: false,
-        error: data?.error?.message || `上游 HTTP ${r.status}`,
-      });
+      const providerError = await boundedProviderHttpError(r, 'LLM request failed');
+      return res.status(r.status).json({ success: false, error: providerError.message });
     }
+    const data = await parseJsonResponse(r, 'LLM response');
     // 处理 content 可能是字符串或多模态数组(gpt-image-2-all 出图)
     const choice = data?.choices?.[0];
     let content = choice?.message?.content || '';
-    const imageUrls = [];
+    const imageReferences = [];
     if (Array.isArray(content)) {
       let textParts = '';
       content.forEach((part) => {
         if (part?.type === 'text') textParts += part.text || '';
-        else if (part?.type === 'image_url' && part.image_url?.url) imageUrls.push(part.image_url.url);
-        else if (part?.type === 'image' && part.image_url?.url) imageUrls.push(part.image_url.url);
+        else if (part?.type === 'image_url' && part.image_url?.url) imageReferences.push(part.image_url.url);
+        else if (part?.type === 'image' && part.image_url?.url) imageReferences.push(part.image_url.url);
       });
       content = textParts;
     }
     if (Array.isArray(data?.data)) {
       data.data.forEach((d) => {
-        if (d?.url) imageUrls.push(d.url);
-        else if (d?.b64_json) imageUrls.push('data:image/png;base64,' + d.b64_json);
+        if (d?.url) imageReferences.push(d.url);
+        else if (d?.b64_json) imageReferences.push(`data:image/png;base64,${d.b64_json}`);
       });
     }
-    const finishReason = choice?.finish_reason || choice?.finishReason || '';
+    const imageUrls = [];
+    for (const reference of [...new Set(imageReferences)].slice(0, 16)) {
+      const local = String(reference || '').startsWith('data:')
+        ? saveBase64Image(reference)
+        : await saveRemoteImage(reference);
+      if (local) imageUrls.push(local);
+    }
+    if (imageReferences.length && !imageUrls.length) {
+      return res.status(502).json({ success: false, error: 'LLM 图像输出未通过安全下载校验' });
+    }
+    const finishReason = safeDiagnosticText(
+      choice?.finish_reason || choice?.finishReason || '',
+      80,
+      [settings.llmApiKey],
+    );
+    const usage = normalizeLlmUsage(data?.usage);
+    const requestId = safeMjTaskId(data?.id || r.headers?.get?.('x-request-id'));
     res.json({
       success: true,
       data: {
-        content,
+        content: redactExactSecrets(typeof content === 'string' ? content : '', [settings.llmApiKey]),
         imageUrls,
-        raw: data,
-        model,
+        model: String(model).slice(0, 240),
         finishReason,
         truncated: ['length', 'max_tokens', 'content_length'].includes(String(finishReason || '').toLowerCase()),
+        ...(usage ? { usage } : {}),
+        ...(requestId ? { requestId } : {}),
       },
     });
   } catch (e) {
-    console.error('proxy/llm 错误:', e);
-    res.status(500).json({ success: false, error: e.message || '请求失败' });
+    if (res.headersSent || res.destroyed) return;
+    proxyRouteError('proxy/llm 错误', e, [settings.llmApiKey]);
+    res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e, '请求失败', [settings.llmApiKey]) });
   }
 });
 
@@ -2250,6 +3488,10 @@ async function uploadRefToZhenzhen(ref, apiKey, label = '参考素材') {
     if (!m) throw new Error(`${label} 上传失败: data URL 格式无效`);
     mime = m[1] || 'image/png';
     buf = Buffer.from(m[2], 'base64');
+    validateProxyMediaBuffer(buf, mime, {
+      allowedKinds: ['image', 'video', 'audio'],
+      maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
+    });
     ext = extFromContentType(mime) || (mime.split('/')[1] || 'png').replace('jpeg', 'jpg');
   } else if (
     trimmed.startsWith('http://') ||
@@ -2258,12 +3500,40 @@ async function uploadRefToZhenzhen(ref, apiKey, label = '参考素材') {
     trimmed.startsWith('/api/resources/file/') ||
     trimmed.startsWith('/api/resources/set-file/')
   ) {
-    const url = trimmed.startsWith('/') ? `http://127.0.0.1:${config.PORT}${trimmed}` : trimmed;
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`${label} 上传失败: 读取素材 HTTP ${r.status}`);
-    mime = r.headers.get('content-type') || 'image/png';
-    buf = Buffer.from(await r.arrayBuffer());
-    const tailExt = url.split(/[?#]/)[0].match(/\.([a-z0-9]{2,8})$/i)?.[1];
+    let sourceName = trimmed;
+    if (trimmed.startsWith('/api/resources/')) {
+      const resource = readResourceImageRefBuffer(trimmed);
+      if (!resource) throw new Error(`${label} 上传失败: 本地资源不存在或越出授权目录`);
+      buf = resource.buf;
+      mime = resource.mime;
+      ext = resource.ext;
+      validateProxyMediaBuffer(buf, mime, {
+        allowedKinds: ['image'],
+        maxBytes: PROXY_IMAGE_REFERENCE_MAX_BYTES,
+      });
+    } else if (trimmed.startsWith('/')) {
+      const local = readMountedFileReference(trimmed, [
+        { prefixes: ['/files/input/', '/input/'], root: config.INPUT_DIR },
+        { prefixes: ['/files/output/', '/output/'], root: config.OUTPUT_DIR },
+        { prefixes: ['/files/thumbnails/'], root: config.THUMBNAILS_DIR },
+      ], PROXY_MEDIA_REFERENCE_MAX_BYTES);
+      if (!local) throw new Error(`${label} 上传失败: 本地资源不存在或越出授权目录`);
+      sourceName = local.filename;
+      buf = local.buffer;
+      mime = mimeTypeForProxyFilename(local.filename);
+      validateProxyMediaBuffer(buf, mime, {
+        allowedKinds: ['image', 'video', 'audio'],
+        maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
+      });
+    } else {
+      const remote = await fetchProxyRemoteMedia(trimmed, {
+        allowedKinds: ['image', 'video', 'audio'],
+        maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
+      });
+      buf = remote.buffer;
+      mime = remote.contentType || 'application/octet-stream';
+    }
+    const tailExt = sourceName.split(/[?#]/)[0].match(/\.([a-z0-9]{2,8})$/i)?.[1];
     ext = extFromContentType(mime) || tailExt || (mime.split('/')[1] || 'png').replace('jpeg', 'jpg');
   } else {
     throw new Error(`${label} 上传失败: 不支持的引用地址`);
@@ -2271,25 +3541,18 @@ async function uploadRefToZhenzhen(ref, apiKey, label = '参考素材') {
   const fd = new FormData();
   const blob = new Blob([buf], { type: mime });
   fd.append('file', blob, `ref_${Date.now()}.${ext}`);
-  const upR = await fetch(`${config.ZHENZHEN_BASE_URL}/v1/files`, {
+  const upR = await fetchProviderResponse(`${config.ZHENZHEN_BASE_URL}/v1/files`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}` },
     body: fd,
   });
-  const upText = await upR.text();
-  const preview = String(upText || '').replace(/\s+/g, ' ').slice(0, 300);
   if (!upR.ok) {
-    console.warn('[video] /v1/files 上传失败', label, 'status=', upR.status, preview);
-    throw new Error(`${label} 上传失败: /v1/files HTTP ${upR.status} ${preview}`);
+    const providerError = await boundedProviderHttpError(upR, `${label} /v1/files upload failed`);
+    throw providerError;
   }
-  let j;
-  try {
-    j = upText ? JSON.parse(upText) : {};
-  } catch {
-    throw new Error(`${label} 上传失败: /v1/files 返回非 JSON ${preview}`);
-  }
+  const j = await parseJsonResponse(upR, `${label} /v1/files upload`);
   const uploadedUrl = j?.url || j?.file_url || j?.data?.url || j?.data?.file_url || null;
-  if (!uploadedUrl) throw new Error(`${label} 上传失败: /v1/files 未返回 url ${preview}`);
+  if (!uploadedUrl) throw new Error(`${label} 上传失败: /v1/files 未返回 url`);
   return uploadedUrl;
 }
 
@@ -2297,8 +3560,8 @@ async function uploadRefToZhenzhen(ref, apiKey, label = '参考素材') {
 // Video FAL 渠道 — 完全对齐 gpt-image-2-web runVeo3Fal / runGrokFal
 // 不破坏原有 /video/submit · /video/query 路由。
 //
-// POST /api/proxy/video/fal/submit  → { sync, videoUrl?, requestId?, responseUrl?, endpoint? }
-// POST /api/proxy/video/fal/query   → { status, videoUrl?, error? }   body: { responseUrl, endpoint, requestId }
+// POST /api/proxy/video/fal/submit  → { sync, videoUrl?, requestId?, endpoint? }
+// POST /api/proxy/video/fal/query   → { status, videoUrl?, error? }   body: { endpoint, requestId }
 // ========================================================================
 
 const VIDEO_FAL_REGISTRY = {
@@ -2456,19 +3719,23 @@ function getUpstreamErrorMessage(data, text, status) {
 }
 
 // 保存远程视频到本地
-async function saveRemoteVideo(url, fetchImpl = fetch) {
+async function saveRemoteVideo(url, _providerFetchImpl) {
   try {
-    const res = await fetchImpl(url);
-    if (!res.ok) throw new Error(`下载失败: ${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    const ext = (url.match(/\.(mp4|webm|mov)/i)?.[1] || 'mp4').toLowerCase();
+    const remote = await fetchProxyRemoteMedia(url, {
+      allowedKinds: ['video'],
+      maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
+      accept: 'video/mp4,video/webm,video/quicktime,video/x-matroska;q=0.9',
+    });
+    const buf = remote.buffer;
+    const ext = verifiedProxyMediaExtension(remote);
     const filename = `vid_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
     const filePath = path.join(config.OUTPUT_DIR, filename);
+    fs.mkdirSync(config.OUTPUT_DIR, { recursive: true });
     fs.writeFileSync(filePath, buf);
     return `/files/output/${filename}`;
   } catch (e) {
-    console.error('⚠ 转存视频失败:', e.message);
-    return url;
+    proxyRouteError('转存视频失败', e);
+    return null;
   }
 }
 
@@ -2623,106 +3890,114 @@ router.post('/video/fal/submit', async (req, res) => {
     const falUrl = `${baseUrl}/fal/${endpoint}`;
     console.log('[video/fal/submit]', effectiveApiModel, '→', falUrl, '| payload keys:', Object.keys(payload), '| refs:', trimmedRefs.length);
 
-    const resp = await fetch(falUrl, {
+    const resp = await fetchProviderResponse(falUrl, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    const text = await resp.text();
-    let data; try { data = JSON.parse(text); } catch { data = { _raw: text }; }
+    const data = await parseJsonResponse(resp, 'FAL video submit');
     if (!resp.ok) {
       return res.status(resp.status).json({
         success: false,
-        error: data?.error || data?.detail || data?.message || `FAL HTTP ${resp.status}: ${text.slice(0, 300)}`,
+        error: `FAL HTTP ${resp.status}`,
       });
     }
     if (Array.isArray(data)) {
-      return res.status(400).json({ success: false, error: `FAL 参数校验错误: ${JSON.stringify(data).slice(0, 300)}` });
+      return res.status(400).json({ success: false, error: 'FAL 参数校验错误' });
     }
     if (data?.detail && !data?.video && !data?.request_id) {
-      return res.status(400).json({ success: false, error: `FAL 错误: ${JSON.stringify(data.detail).slice(0, 300)}` });
+      return res.status(400).json({ success: false, error: 'FAL 请求被 Provider 拒绝' });
     }
 
     // 同步返回: result.video.url 或同类 video_url/url 字段
     const syncVideoUrl = getFalVideoUrl(data);
     if (syncVideoUrl) {
       const local = await saveRemoteVideo(syncVideoUrl);
-      return res.json({ success: true, data: { sync: true, videoUrl: local, endpoint, raw: data } });
+      if (!local) return res.status(502).json({ success: false, error: 'FAL 视频输出未通过安全下载校验' });
+      return res.json({ success: true, data: { sync: true, videoUrl: local, endpoint } });
     }
 
     // 异步: request_id + response_url
-    const requestId = data?.request_id;
+    const requestId = safeFalRequestId(data?.request_id);
     let responseUrl = data?.response_url || '';
     if (!requestId) {
-      return res.status(500).json({ success: false, error: '未获取到 request_id: ' + JSON.stringify(data).slice(0, 300) });
+      return res.status(502).json({ success: false, error: 'FAL 返回的 request_id 无效' });
     }
     responseUrl = fixFalResponseUrl(responseUrl, baseUrl, endpoint, requestId);
-    rememberTaskKey(requestId, apiKey, { model: effectiveApiModel, endpoint });
+    if (!responseUrl) return res.status(502).json({ success: false, error: 'FAL 未返回可验证的轮询地址' });
+    const registered = rememberFalTask('video-fal', requestId, apiKey, {
+      model: effectiveApiModel,
+      endpoint,
+      responseUrl,
+    });
+    if (!registered) return res.status(502).json({ success: false, error: 'FAL 任务注册失败' });
     return res.json({
       success: true,
-      data: { sync: false, requestId, responseUrl, endpoint, raw: data },
+      data: { sync: false, requestId, endpoint },
     });
   } catch (e) {
-    console.error('proxy/video/fal/submit 错误:', e);
-    return res.status(500).json({ success: false, error: e.message || '请求失败' });
+    proxyRouteError('proxy/video/fal/submit 错误', e);
+    return res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e) });
   }
 });
 
 // POST /api/proxy/video/fal/query
-//   body: { responseUrl, endpoint, requestId }
+//   body: { endpoint, requestId }
 //   完成标志: data.video.url (区别于图像的 data.images[])
 router.post('/video/fal/query', async (req, res) => {
   const settings = loadRawSettings();
   const { responseUrl: rawUrl, endpoint, requestId } = req.body || {};
-  const rememberedMeta = recallTaskMeta(requestId);
-  if (rememberedMeta?.apiKey) {
-    if (settings) settings.zhenzhenApiKey = rememberedMeta.apiKey;
-    else return res.status(400).json({ success: false, error: '未找到 settings' });
-  } else {
-    // FAL 查询和提交保持同一策略：只用通用贞贞 API Key。
-    if (!ensureDefaultZhenzhenKey(settings, res, '视频 FAL')) return;
-  }
+  const rememberedMeta = recallFalTask('video-fal', requestId);
+  if (!rememberedMeta) return res.status(409).json({ success: false, error: 'FAL 视频任务注册已失效，请重新提交任务' });
+  if (settings) settings.zhenzhenApiKey = rememberedMeta.apiKey;
+  else return res.status(400).json({ success: false, error: '未找到 settings' });
   const apiKey = settings.zhenzhenApiKey;
   const baseUrl = config.ZHENZHEN_BASE_URL;
-  const responseUrl = fixFalResponseUrl(rawUrl, baseUrl, endpoint, requestId);
-  if (!responseUrl) return res.status(400).json({ success: false, error: 'responseUrl 或 (endpoint+requestId) 必填' });
 
   try {
-    const pr = await fetch(responseUrl, { headers: { Authorization: `Bearer ${apiKey}` } });
-    const text = await pr.text();
-    let data; try { data = JSON.parse(text); } catch { data = null; }
+    const target = resolveFalQueryTarget({
+      route: 'video-fal',
+      requestId,
+      endpoint,
+      suppliedUrl: rawUrl,
+      rememberedMeta,
+      baseUrl,
+    });
+    const responseUrl = target.responseUrl;
+    const pr = await fetchFalPollJson(responseUrl, apiKey);
+    const data = pr.data;
     // HTTP 非200: 主项目规范 - body 中 status=IN_QUEUE/IN_PROGRESS 视为继续等待
     if (!pr.ok) {
       if (data && (data.status === 'IN_QUEUE' || data.status === 'IN_PROGRESS')) {
-        return res.json({ success: true, data: { status: 'pending', raw: data } });
+        return res.json({ success: true, data: { status: 'pending', falStatus: String(data.status) } });
       }
       return res.status(pr.status).json({
         success: false,
-        error: `FAL Poll HTTP ${pr.status}: ${text.slice(0, 300)}`,
-        raw: data,
+        error: `FAL Poll HTTP ${pr.status}`,
       });
     }
     if (!data) {
-      return res.status(500).json({ success: false, error: 'FAL Poll 响应非 JSON: ' + text.slice(0, 200) });
+      return res.status(502).json({ success: false, error: 'FAL Poll 响应非 JSON' });
     }
     // 完成: video.url 或同类 video_url/url 字段
     const finishedVideoUrl = getFalVideoUrl(data);
     if (finishedVideoUrl) {
       const local = await saveRemoteVideo(finishedVideoUrl);
-      return res.json({ success: true, data: { status: 'completed', videoUrl: local, raw: data } });
+      if (!local) return res.status(502).json({ success: false, error: 'FAL 视频输出未通过安全下载校验' });
+      return res.json({ success: true, data: { status: 'completed', videoUrl: local } });
     }
     const st = String(data.status || '').toUpperCase();
     if (st === 'FAILED' || st === 'CANCELLED') {
       return res.json({
         success: false,
-        data: { status: 'failed', error: data.error || data.detail || `FAL ${st}` },
+        data: { status: 'failed', error: `FAL ${st}` },
       });
     }
     // IN_QUEUE / IN_PROGRESS / 空 => pending
-    return res.json({ success: true, data: { status: 'pending', falStatus: st || 'IN_QUEUE', raw: data } });
+    return res.json({ success: true, data: { status: 'pending', falStatus: st || 'IN_QUEUE' } });
   } catch (e) {
-    console.error('proxy/video/fal/query 错误:', e);
-    return res.status(500).json({ success: false, error: e.message || '查询失败' });
+    proxyRouteError('proxy/video/fal/query 错误', e);
+    return res.status(Number(e?.status) || 400).json({ success: false, error: proxyPublicError(e, '查询失败') });
   }
 });
 
@@ -2776,11 +4051,9 @@ function falToolboxErrorMessage(data, fallback = 'FAL 任务失败') {
 }
 
 function fixFalToolboxUrl(url, baseUrl, endpoint, requestId) {
-  let value = String(url || '').trim();
-  if (value.includes('queue.fal.run')) value = value.replace('https://queue.fal.run', `${baseUrl}/fal`);
-  if (value.includes('fal.run')) value = value.replace('https://fal.run', `${baseUrl}/fal`);
-  if (!value && endpoint && requestId) value = `${baseUrl}/fal/${endpoint}/requests/${requestId}`;
-  return value;
+  const value = String(url || '').trim();
+  if (value) return trustedFalPollUrl(value, baseUrl);
+  return constructedFalPollUrl(baseUrl, endpoint, requestId);
 }
 
 function getByPath(data, pathText) {
@@ -2836,24 +4109,49 @@ function collectFalToolboxText(value, out = []) {
 }
 
 async function saveRemoteFalToolboxFile(url, kind) {
-  if (/^\/(files|output|input)\//i.test(String(url || ''))) return url;
+  if (/^\/(files|output|input)\//i.test(String(url || ''))) return null;
   if (kind === 'image') return saveRemoteImage(url);
   if (kind === 'video') return saveRemoteVideo(url);
   if (kind === 'audio') return saveRemoteAudio(url);
   try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`下载失败: ${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
     const cleanUrl = String(url || '').split(/[?#]/)[0];
     const match = cleanUrl.match(/\.([a-z0-9]{2,8})$/i);
     const ext = safeOutputExt(match?.[1], kind === 'model3d' ? 'glb' : 'bin');
+    if (kind !== 'model3d' || !new Set(['glb', 'gltf', 'obj', 'fbx', 'stl', 'usdz', 'zip']).has(ext)) {
+      throw new Error('FAL 文件类型不在服务端允许列表');
+    }
+    const remote = await safeRemoteMediaFetch(url, {
+      maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
+      deadlineMs: PROXY_REMOTE_DEADLINE_MS,
+      idleTimeoutMs: PROXY_REMOTE_IDLE_TIMEOUT_MS,
+      maxRedirects: 4,
+      accept: 'model/gltf-binary,model/gltf+json,application/octet-stream,application/zip;q=0.8',
+      userAgent: 'T8-PenguinCanvas-ProviderProxy/1.0',
+    });
+    const buf = remote.buffer;
+    if (!buf.length) throw new Error('FAL 模型文件为空');
+    const contentType = normalizedContentType(remote.contentType);
+    if (contentType === 'text/html' || contentType === 'application/xhtml+xml') throw new Error('FAL 模型响应类型无效');
+    if (ext === 'glb' && buf.subarray(0, 4).toString('ascii') !== 'glTF') throw new Error('FAL GLB 魔数无效');
+    if ((ext === 'zip' || ext === 'usdz') && !buf.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]))) {
+      throw new Error('FAL ZIP/USDZ 魔数无效');
+    }
+    if (ext === 'fbx' && !buf.subarray(0, 20).toString('ascii').startsWith('Kaydara FBX Binary')) throw new Error('FAL FBX 魔数无效');
+    if (ext === 'gltf') {
+      if (buf.length > FAL_GLTF_JSON_MAX_BYTES) throw new Error('FAL glTF JSON 超过安全大小限制');
+      let parsed;
+      try { parsed = JSON.parse(buf.toString('utf8')); } catch (_) { throw new Error('FAL glTF JSON 无效'); }
+      assertJsonComplexity(parsed, { maxJsonDepth: 64, maxJsonNodes: 200_000 });
+      if (!parsed?.asset?.version) throw new Error('FAL glTF 结构无效');
+    }
     const prefix = kind === 'model3d' ? 'model3d' : 'fal';
     const filename = `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
+    fs.mkdirSync(config.OUTPUT_DIR, { recursive: true });
     fs.writeFileSync(path.join(config.OUTPUT_DIR, filename), buf);
     return `/files/output/${filename}`;
   } catch (e) {
-    console.error('⚠ 转存 FAL 文件失败:', e.message);
-    return url;
+    proxyRouteError('转存 FAL 文件失败', e);
+    return null;
   }
 }
 
@@ -2893,6 +4191,7 @@ async function extractFalToolboxOutputs(data, outputSchema) {
       const found = collectFalToolboxUrls(value, []);
       for (const remote of found) {
         const local = await saveRemoteFalToolboxFile(remote, kind);
+        if (!local) continue;
         urls.push(local);
         if (kind === 'image') imageUrls.push(local);
         else if (kind === 'video') videoUrls.push(local);
@@ -2917,6 +4216,104 @@ function falToolboxHasOutput(result) {
   return Boolean(result.urls.length || result.textOutputs.length || result.jsonOutputs.length);
 }
 
+const FAL_TOOLBOX_OUTPUT_TEMPLATES = Object.freeze({
+  image: Object.freeze({ key: 'images', kind: 'image', pathCandidates: ['images', 'data.images', 'image', 'data.image', 'image.url', 'url'] }),
+  video: Object.freeze({ key: 'video', kind: 'video', pathCandidates: ['video', 'data.video', 'video.url', 'data.video.url', 'video_url', 'url'] }),
+  audio: Object.freeze({ key: 'audio', kind: 'audio', pathCandidates: ['audio', 'audios', 'data.audio', 'data.audios', 'audio.url', 'data.audio.url', 'audio_url', 'url'] }),
+  text: Object.freeze({ key: 'output', kind: 'text', pathCandidates: ['output', 'data.output', 'text', 'data.text', 'transcript', 'data.transcript'] }),
+  model3d: Object.freeze({ key: 'model', kind: 'model3d', pathCandidates: ['model_mesh', 'model_meshes', 'model_glb', 'model_urls', 'model', 'mesh', 'file', 'files', 'url'] }),
+});
+
+function falTool(endpoint, fields = [], outputKinds = [], statusPath = '') {
+  return Object.freeze({
+    endpoint,
+    mediaFields: Object.freeze(fields.map(([key, kind, multiple, upload, mediaMode]) => Object.freeze({ key, kind, multiple, upload, mediaMode }))),
+    outputSchema: Object.freeze(outputKinds.map((kind) => FAL_TOOLBOX_OUTPUT_TEMPLATES[kind]).filter(Boolean)),
+    statusPath,
+  });
+}
+
+// Security authority copied from the shipped Fal toolbox manifest. The client
+// may choose a toolId and payload values, but cannot choose its Provider route,
+// media handling, output extraction schema, or polling mode.
+const FAL_TOOLBOX_AUTHORITY = Object.freeze({
+  'gpt-image-2-fal': falTool('openai/gpt-image-2', [], ['image']),
+  'gpt-image-2-fal-edit': falTool('openai/gpt-image-2/edit', [['image_urls', 'image', true, true, 'base64']], ['image']),
+  'zhenzhen-luma-uni-1-v1-fal': falTool('luma/agent/uni-1/v1/text-to-image', [['reference_image_urls', 'image', true, true, 'base64']], ['image']),
+  'zhenzhen-luma-uni-1-v1-max-fal': falTool('luma/agent/uni-1/v1/max', [['reference_image_urls', 'image', true, true, 'base64']], ['image']),
+  'zhenzhen-bernini-r-edit-image-fal': falTool('fal-ai/bernini-r/edit-image', [['image_url', 'image', false, true, 'base64']], ['image']),
+  'zhenzhen-luma-uni-1-v1-edit-fal': falTool('luma/agent/uni-1/v1/edit', [['image_url', 'image', false, true, 'base64'], ['reference_image_urls', 'image', true, true, 'base64']], ['image']),
+  'zhenzhen-luma-uni-1-v1-edit-max-fal': falTool('luma/agent/uni-1/v1/max/edit', [['image_url', 'image', false, true, 'base64'], ['reference_image_urls', 'image', true, true, 'base64']], ['image']),
+  'zhenzhen-bria-genfill-v2-fal': falTool('bria/genfill/v2', [['image_url', 'image', false, true, 'base64'], ['mask_url', 'image', false, true, 'base64']], ['image']),
+  'ideogram-v4-fal': falTool('ideogram/v4', [], ['image']),
+  'mai-image-2-5-fal': falTool('microsoft/mai-image-2.5', [], ['image']),
+  'cosmos-3-super-text-image-fal': falTool('nvidia/cosmos-3-super/text-to-image', [], ['image']),
+  'recraft-v4-1-fal': falTool('fal-ai/recraft/v4.1/text-to-image', [], ['image']),
+  'krea-v2-medium-fal': falTool('krea/v2/medium/text-to-image', [], ['image']),
+  'krea-v2-medium-turbo-fal': falTool('krea/v2/medium/turbo/text-to-image', [], ['image']),
+  'krea-v2-large-fal': falTool('krea/v2/large/text-to-image', [], ['image']),
+  'nano-banana-2-fal': falTool('fal-ai/nano-banana/edit', [['image_urls', 'image', true, true, 'url']], ['image']),
+  'nano-banana-pro-fal': falTool('fal-ai/nano-banana-pro/edit', [['image_urls', 'image', true, true, 'url']], ['image']),
+  'seedream-v5-lite-edit-fal': falTool('fal-ai/bytedance/seedream/v5/lite/edit', [['image_urls', 'image', true, true, 'url']], ['image']),
+  'mai-image-2-5-edit-fal': falTool('microsoft/mai-image-2.5/edit', [['image_urls', 'image', true, true, 'base64']], ['image']),
+  'flux-pro-vto-fal': falTool('fal-ai/flux-pro/v1/vto', [['human_image_url', 'image', false, true, 'base64'], ['garment_image_url', 'image', false, true, 'base64']], ['image']),
+  'bria-fibo-edit-fal': falTool('bria/fibo-edit/edit', [['image_url', 'image', false, true, 'base64'], ['mask_url', 'image', false, true, 'base64']], ['image']),
+  'topaz-image-upscale-fal': falTool('fal-ai/topaz/upscale/image', [['image_url', 'image', false, true, 'base64']], ['image']),
+  'zhenzhen-bernini-r-video-fal': falTool('fal-ai/bernini-r/reference-to-video', [['reference_image_urls', 'image', true, true, 'base64']], ['video']),
+  'zhenzhen-bernini-r-edit-video-fal': falTool('fal-ai/bernini-r/edit-video', [['video_url', 'video', false, true, 'url']], ['video']),
+  'zhenzhen-bernini-r-reference-edit-video-fal': falTool('fal-ai/bernini-r/reference-edit-video', [['video_url', 'video', false, true, 'url'], ['reference_image_urls', 'image', true, true, 'base64']], ['video']),
+  'zhenzhen-luma-ray-v3.2-fal': falTool('luma/agent/ray/v3.2/text-to-video', [['reference_image_urls', 'image', true, true, 'base64']], ['video']),
+  'zhenzhen-luma-ray-v3.2-image-to-video-fal': falTool('luma/agent/ray/v3.2/image-to-video', [['image_url', 'image', false, true, 'base64'], ['end_image_url', 'image', false, true, 'base64'], ['reference_image_urls', 'image', true, true, 'base64']], ['video']),
+  'zhenzhen-luma-ray-v3.2-video-to-video-fal': falTool('luma/agent/ray/v3.2/video-to-video', [['video_url', 'video', false, true, 'url'], ['start_image_url', 'image', false, true, 'base64']], ['video']),
+  'zhenzhen-bria-video-background-removal-v3-fal': falTool('bria/video/background-removal/v3', [['video_url', 'video', false, true, 'url']], ['video']),
+  'zhenzhen-pixelcut-video-background-removal-fal': falTool('pixelcut/video-background-removal', [['video_url', 'video', false, true, 'url']], ['video']),
+  'veo3-1-fal': falTool('fal-ai/veo3.1/fast/reference-to-video', [['image_urls', 'image', true, true, 'url']], ['video']),
+  'seedance2-fal': falTool('bytedance/seedance-2.0/reference-to-video', [['image_urls', 'image', true, true, 'url'], ['video_urls', 'video', true, true, 'url'], ['audio_urls', 'audio', true, true, 'url']], ['video']),
+  'cosmos-3-super-image-video-fal': falTool('nvidia/cosmos-3-super/image-to-video', [['image_url', 'image', false, true, 'base64']], ['video']),
+  'grok-video-text-fal': falTool('xai/grok-imagine-video/text-to-video', [], ['video']),
+  'grok-video-fal': falTool('xai/grok-imagine-video/image-to-video', [['image_url', 'image', false, true, 'base64']], ['video']),
+  'grok-video-reference-fal': falTool('xai/grok-imagine-video/reference-to-video', [['image_urls', 'image', true, true, 'base64']], ['video']),
+  'grok-video-1-5-fal': falTool('xai/grok-imagine-video/v1.5/image-to-video', [['image_url', 'image', false, true, 'base64']], ['video']),
+  'grok-video-edit-fal': falTool('xai/grok-imagine-video/edit-video', [['video_url', 'video', false, true, 'url']], ['video']),
+  'grok-video-extend-fal': falTool('xai/grok-imagine-video/extend-video', [['video_url', 'video', false, true, 'url']], ['video']),
+  'pixverse-v6-fal': falTool('fal-ai/pixverse/v6/image-to-video', [['image_url', 'image', false, true, 'base64']], ['video']),
+  'heygen-avatar4-i2v-fal': falTool('fal-ai/heygen/avatar4/image-to-video', [['image_url', 'image', false, true, 'base64'], ['audio_url', 'audio', false, true, 'url']], ['video']),
+  'creatify-aurora-fal': falTool('fal-ai/creatify/aurora', [['image_url', 'image', false, true, 'base64'], ['audio_url', 'audio', false, true, 'url']], ['video']),
+  'veed-fabric-1-0-fal': falTool('veed/fabric-1.0', [['image_url', 'image', false, true, 'base64'], ['audio_url', 'audio', false, true, 'url']], ['video']),
+  'topaz-video-upscale-fal': falTool('fal-ai/topaz/upscale/video', [['video_url', 'video', false, true, 'url']], ['video']),
+  'sora2-fal-text': falTool('fal-ai/sora-2/text-to-video', [], ['video']),
+  'sora2-fal-image': falTool('fal-ai/sora-2/image-to-video', [['image_url', 'image', false, true, 'base64']], ['video']),
+  'zhenzhen-nemotron-asr-multilingual-fal': falTool('nvidia/nemotron-asr-multilingual/asr', [['audio_url', 'audio', false, true, 'url']], ['text']),
+  'sonilo-video-to-music-fal': falTool('sonilo/v1.1/video-to-music', [['video_url', 'video', false, true, 'url']], ['audio']),
+  'seed-speech-tts-v2-fal': falTool('fal-ai/bytedance/seed-speech/tts/v2', [], ['audio']),
+  'minimax-speech-2-8-turbo-fal': falTool('fal-ai/minimax/speech-2.8-turbo', [], ['audio']),
+  'minimax-speech-2-8-hd-fal': falTool('fal-ai/minimax/speech-2.8-hd', [], ['audio']),
+  'lyria2-fal': falTool('fal-ai/lyria2', [], ['audio']),
+  'heygen-avatar5-fal': falTool('fal-ai/heygen/avatar5/digital-twin', [['audio_url', 'audio', false, true, 'url']], ['video']),
+  'hyper3d-rodin-v2-5-text-fal': falTool('fal-ai/hyper3d/rodin/v2.5/text-to-3d', [], ['model3d']),
+  'hyper3d-rodin-v2-5-image-fal': falTool('fal-ai/hyper3d/rodin/v2.5', [['image_urls', 'image', true, true, 'base64']], ['model3d']),
+  'hunyuan-3d-v3-1-pro-text-fal': falTool('fal-ai/hunyuan-3d/v3.1/pro/text-to-3d', [], ['model3d']),
+  'hunyuan-3d-v3-1-pro-image-fal': falTool('fal-ai/hunyuan-3d/v3.1/pro/image-to-3d', [['input_image_url', 'image', false, true, 'base64'], ['back_image_url', 'image', false, true, 'base64'], ['left_image_url', 'image', false, true, 'base64'], ['right_image_url', 'image', false, true, 'base64']], ['model3d']),
+  'trellis-2-fal': falTool('fal-ai/trellis-2', [['image_urls', 'image', true, true, 'base64']], ['model3d']),
+});
+
+function falPayloadContainsUnboundMedia(value) {
+  if (typeof value === 'string') return /^(https?:\/\/|data:|\/(?:files|output|input|api\/resources)\/)/i.test(value.trim());
+  if (Array.isArray(value)) return value.some(falPayloadContainsUnboundMedia);
+  if (value && typeof value === 'object') return Object.values(value).some(falPayloadContainsUnboundMedia);
+  return false;
+}
+
+function assertFalToolboxPayloadAuthority(payload, mediaFields) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('FAL payload 必须是对象');
+  const mediaKeys = new Set((mediaFields || []).map((field) => field.key));
+  for (const [key, value] of Object.entries(payload)) {
+    if (!mediaKeys.has(key) && falPayloadContainsUnboundMedia(value)) {
+      throw new Error(`FAL payload 字段 ${key} 含未注册媒体引用`);
+    }
+  }
+}
+
 async function resolveFalToolboxMediaPayload(payload, mediaFields, apiKey) {
   const next = { ...(payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {}) };
   const fields = Array.isArray(mediaFields) ? mediaFields : [];
@@ -2932,11 +4329,11 @@ async function resolveFalToolboxMediaPayload(payload, mediaFields, apiKey) {
         resolved.push(value);
       } else if (field?.kind === 'image' && field?.mediaMode === 'base64') {
         const dataUrl = await refToBananaImage(value);
-        if (!dataUrl) throw new Error(`FAL 图片读取失败: ${value.slice(0, 80)}`);
+        if (!dataUrl) throw new Error(`FAL 图片读取失败 (${opaqueDiagnosticSummary('ref', value)})`);
         resolved.push(dataUrl);
       } else {
         const url = await uploadRefToZhenzhen(value, apiKey);
-        if (!url) throw new Error(`FAL 素材上传失败: ${value.slice(0, 80)}`);
+        if (!url) throw new Error(`FAL 素材上传失败 (${opaqueDiagnosticSummary('ref', value)})`);
         resolved.push(url);
       }
     }
@@ -2953,99 +4350,104 @@ router.post('/fal-toolbox/submit', async (req, res) => {
   const baseUrl = config.ZHENZHEN_BASE_URL;
   const {
     toolId,
-    title,
-    endpoint,
+    endpoint: requestedEndpoint,
     payload,
-    mediaFields,
-    outputSchema,
-    statusPath,
   } = req.body || {};
-  if (!isFalToolboxEndpoint(endpoint)) {
-    return res.status(400).json({ success: false, error: `非法 FAL endpoint: ${endpoint || ''}` });
+  const toolAuthority = FAL_TOOLBOX_AUTHORITY[String(toolId || '').trim()];
+  if (!toolAuthority) return res.status(400).json({ success: false, error: 'Fal超市 toolId 未在服务端注册' });
+  if (requestedEndpoint && String(requestedEndpoint).trim() !== toolAuthority.endpoint) {
+    return res.status(400).json({ success: false, error: 'Fal超市 endpoint 与服务端工具注册不一致' });
   }
+  const { endpoint, mediaFields, outputSchema, statusPath } = toolAuthority;
   try {
+    assertFalToolboxPayloadAuthority(payload, mediaFields);
     const finalPayload = await resolveFalToolboxMediaPayload(payload, mediaFields, apiKey);
     const falUrl = `${baseUrl}/fal/${endpoint}`;
-    console.log('[fal-toolbox/submit]', toolId || title || endpoint, '→', falUrl, '| payload keys:', Object.keys(finalPayload));
-    const upstream = await fetch(falUrl, {
+    console.log('[fal-toolbox/submit]', toolId, '→', falUrl, '| payload keys:', Object.keys(finalPayload));
+    const upstream = await fetchProviderResponse(falUrl, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(finalPayload),
     });
-    const text = await upstream.text();
-    let data; try { data = JSON.parse(text); } catch { data = { _raw: text }; }
+    const data = await parseJsonResponse(upstream, 'FAL toolbox submit');
     if (!upstream.ok) {
       return res.status(upstream.status).json({
         success: false,
-        error: falToolboxErrorMessage(data, `FAL HTTP ${upstream.status}: ${text.slice(0, 300)}`),
-        raw: data,
+        error: `FAL HTTP ${upstream.status}`,
       });
     }
     if (Array.isArray(data)) {
-      return res.status(400).json({ success: false, error: `FAL 参数校验错误: ${JSON.stringify(data).slice(0, 500)}` });
+      return res.status(400).json({ success: false, error: 'FAL 参数校验错误' });
     }
     const st = falToolboxStatusValue(data);
     if (FAL_TOOLBOX_FAILED.has(st)) {
-      return res.json({ success: false, data: { status: 'failed', error: falToolboxErrorMessage(data, `FAL ${st}`), raw: data } });
+      return res.json({ success: false, data: { status: 'failed', error: `FAL ${st}` } });
     }
 
     const output = await extractFalToolboxOutputs(data, outputSchema);
     if (falToolboxHasOutput(output)) {
-      return res.json({ success: true, data: { sync: true, endpoint, ...output, raw: data } });
+      return res.json({ success: true, data: { sync: true, endpoint, ...output } });
     }
 
-    const requestId = data?.request_id || data?.requestId;
+    const requestId = safeFalRequestId(data?.request_id || data?.requestId);
     if (!requestId) {
-      return res.status(500).json({ success: false, error: 'FAL 未返回 request_id: ' + JSON.stringify(data).slice(0, 400), raw: data });
+      return res.status(502).json({ success: false, error: 'FAL 返回的 request_id 无效' });
     }
     const responseUrl = fixFalToolboxUrl(data?.response_url || data?.responseUrl, baseUrl, endpoint, requestId);
     const rawStatusUrl = data?.status_url || data?.statusUrl || (statusPath === 'result-only' ? '' : `${responseUrl}/status`);
     const statusUrl = rawStatusUrl ? fixFalToolboxUrl(rawStatusUrl, baseUrl, endpoint, requestId) : '';
-    rememberTaskKey(requestId, apiKey, {
-      route: 'fal-toolbox',
+    const registered = rememberFalTask('fal-toolbox', requestId, apiKey, {
       toolId,
-      title,
       endpoint,
       outputSchema,
       responseUrl,
       statusUrl,
       statusPath,
     });
+    if (!registered) return res.status(502).json({ success: false, error: 'FAL 工具箱任务注册失败' });
     return res.json({
       success: true,
-      data: { sync: false, requestId, responseUrl, statusUrl, endpoint, raw: data },
+      data: { sync: false, requestId, endpoint },
     });
   } catch (e) {
-    console.error('proxy/fal-toolbox/submit 错误:', e);
-    return res.status(500).json({ success: false, error: e.message || '请求失败' });
+    proxyRouteError('proxy/fal-toolbox/submit 错误', e);
+    return res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e) });
   }
 });
 
 router.post('/fal-toolbox/query', async (req, res) => {
   const settings = loadRawSettings();
-  const { responseUrl: rawResponseUrl, statusUrl: rawStatusUrl, endpoint: rawEndpoint, requestId, outputSchema: bodyOutputSchema, statusPath: rawStatusPath } = req.body || {};
-  const rememberedMeta = recallTaskMeta(requestId);
+  const { requestId } = req.body || {};
+  if (req.body?.responseUrl || req.body?.statusUrl) {
+    return res.status(400).json({ success: false, error: 'FAL 轮询地址只能由服务端任务注册恢复' });
+  }
+  const rememberedMeta = recallFalTask('fal-toolbox', requestId);
   if (rememberedMeta?.apiKey) {
     if (settings) settings.zhenzhenApiKey = rememberedMeta.apiKey;
     else return res.status(400).json({ success: false, error: '未找到 settings' });
   } else {
-    if (!ensureDefaultZhenzhenKey(settings, res, 'Fal超市')) return;
+    return res.status(409).json({ success: false, error: 'FAL 工具箱任务注册已失效，请重新提交任务' });
   }
   const apiKey = settings.zhenzhenApiKey;
   const baseUrl = config.ZHENZHEN_BASE_URL;
-  const endpoint = rememberedMeta?.endpoint || rawEndpoint;
-  const outputSchema = rememberedMeta?.outputSchema || bodyOutputSchema;
-  const statusPath = rememberedMeta?.statusPath || rawStatusPath;
-  const responseUrl = fixFalToolboxUrl(rawResponseUrl || rememberedMeta?.responseUrl, baseUrl, endpoint, requestId);
-  const rawEffectiveStatusUrl = rawStatusUrl || rememberedMeta?.statusUrl || (statusPath === 'result-only' ? '' : (responseUrl ? `${responseUrl}/status` : ''));
-  const statusUrl = rawEffectiveStatusUrl ? fixFalToolboxUrl(rawEffectiveStatusUrl, baseUrl, endpoint, requestId) : '';
-  if (!responseUrl && !statusUrl) return res.status(400).json({ success: false, error: 'responseUrl/statusUrl 或 requestId 必填' });
+  const endpoint = rememberedMeta.endpoint;
+  const outputSchema = rememberedMeta.outputSchema;
+  const statusPath = rememberedMeta.statusPath;
+  let responseUrl;
+  let statusUrl;
+  try {
+    responseUrl = trustedFalPollUrl(rememberedMeta.responseUrl, baseUrl)
+      || constructedFalPollUrl(baseUrl, endpoint, requestId);
+    statusUrl = rememberedMeta.statusUrl ? trustedFalPollUrl(rememberedMeta.statusUrl, baseUrl) : '';
+  } catch (error) {
+    proxyRouteError('proxy/fal-toolbox/query authority 错误', error);
+    return res.status(400).json({ success: false, error: proxyPublicError(error, 'FAL 工具箱轮询地址无效') });
+  }
+  if (!responseUrl && !statusUrl) return res.status(409).json({ success: false, error: 'FAL 工具箱任务注册缺少轮询地址，请重新提交任务' });
 
   const fetchJson = async (url) => {
-    const r = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
-    const text = await r.text();
-    let data; try { data = JSON.parse(text); } catch { data = null; }
-    return { r, text, data };
+    const r = await fetchFalPollJson(url, apiKey);
+    return { r, data: r.data };
   };
 
   try {
@@ -3056,23 +4458,23 @@ router.post('/fal-toolbox/query', async (req, res) => {
       if (!statusResp.r.ok) {
         const st = falToolboxStatusValue(statusData);
         if (FAL_TOOLBOX_PENDING.has(st)) {
-          return res.json({ success: true, data: { status: 'pending', falStatus: st, requestId, responseUrl, statusUrl, raw: statusData } });
+          return res.json({ success: true, data: { status: 'pending', falStatus: st, requestId } });
         }
         return res.status(statusResp.r.status).json({
           success: false,
-          data: { status: 'failed', error: falToolboxErrorMessage(statusData, `FAL Poll HTTP ${statusResp.r.status}: ${statusResp.text.slice(0, 300)}`), raw: statusData },
+          data: { status: 'failed', error: `FAL Poll HTTP ${statusResp.r.status}` },
         });
       }
       const st = falToolboxStatusValue(statusData);
       if (FAL_TOOLBOX_FAILED.has(st)) {
-        return res.json({ success: false, data: { status: 'failed', error: falToolboxErrorMessage(statusData, `FAL ${st}`), falStatus: st, requestId, responseUrl, statusUrl, raw: statusData } });
+        return res.json({ success: false, data: { status: 'failed', error: `FAL ${st}`, falStatus: st, requestId } });
       }
       const statusOutput = await extractFalToolboxOutputs(statusData, outputSchema);
       if (falToolboxHasOutput(statusOutput)) {
-        return res.json({ success: true, data: { status: 'completed', requestId, responseUrl, statusUrl, ...statusOutput, raw: statusData } });
+        return res.json({ success: true, data: { status: 'completed', requestId, ...statusOutput } });
       }
       if (st && !FAL_TOOLBOX_COMPLETED.has(st)) {
-        return res.json({ success: true, data: { status: 'pending', falStatus: st, requestId, responseUrl, statusUrl, raw: statusData } });
+        return res.json({ success: true, data: { status: 'pending', falStatus: st, requestId } });
       }
     }
 
@@ -3080,28 +4482,28 @@ router.post('/fal-toolbox/query', async (req, res) => {
     if (!resultResp.r.ok) {
       const st = falToolboxStatusValue(resultResp.data);
       if (FAL_TOOLBOX_PENDING.has(st)) {
-        return res.json({ success: true, data: { status: 'pending', falStatus: st, requestId, responseUrl, statusUrl, raw: resultResp.data } });
+        return res.json({ success: true, data: { status: 'pending', falStatus: st, requestId } });
       }
       return res.status(resultResp.r.status).json({
         success: false,
-        data: { status: 'failed', error: falToolboxErrorMessage(resultResp.data, `FAL Result HTTP ${resultResp.r.status}: ${resultResp.text.slice(0, 300)}`), raw: resultResp.data },
+        data: { status: 'failed', error: `FAL Result HTTP ${resultResp.r.status}` },
       });
     }
     if (!resultResp.data) {
-      return res.status(500).json({ success: false, data: { status: 'failed', error: 'FAL 响应非 JSON: ' + resultResp.text.slice(0, 200) } });
+      return res.status(502).json({ success: false, data: { status: 'failed', error: 'FAL 响应非 JSON' } });
     }
     const resultStatus = falToolboxStatusValue(resultResp.data);
     if (FAL_TOOLBOX_FAILED.has(resultStatus)) {
-      return res.json({ success: false, data: { status: 'failed', error: falToolboxErrorMessage(resultResp.data, `FAL ${resultStatus}`), falStatus: resultStatus, requestId, responseUrl, statusUrl, raw: resultResp.data } });
+      return res.json({ success: false, data: { status: 'failed', error: `FAL ${resultStatus}`, falStatus: resultStatus, requestId } });
     }
     const output = await extractFalToolboxOutputs(resultResp.data, outputSchema);
     if (falToolboxHasOutput(output)) {
-      return res.json({ success: true, data: { status: 'completed', requestId, responseUrl, statusUrl, ...output, raw: resultResp.data } });
+      return res.json({ success: true, data: { status: 'completed', requestId, ...output } });
     }
-    return res.json({ success: true, data: { status: 'pending', falStatus: resultStatus || falToolboxStatusValue(statusData) || 'IN_PROGRESS', requestId, responseUrl, statusUrl, raw: resultResp.data || statusData } });
+    return res.json({ success: true, data: { status: 'pending', falStatus: resultStatus || falToolboxStatusValue(statusData) || 'IN_PROGRESS', requestId } });
   } catch (e) {
-    console.error('proxy/fal-toolbox/query 错误:', e);
-    return res.status(500).json({ success: false, data: { status: 'failed', error: e.message || '查询失败' } });
+    proxyRouteError('proxy/fal-toolbox/query 错误', e);
+    return res.status(proxyErrorStatus(e)).json({ success: false, data: { status: 'failed', error: proxyPublicError(e, '查询失败') } });
   }
 });
 
@@ -3128,6 +4530,7 @@ router.post('/video/submit', async (req, res) => {
   const isSoraZhenzhen = lowerModel === 'sora-2-zhenzhen';
   const isVeo = lowerModel.includes('veo');
   let body;
+  let apiKey = String(settings?.zhenzhenApiKey || '');
 
   try {
     const providerContext = await applyZhenzhenProviderContext(settings, {
@@ -3137,7 +4540,7 @@ router.post('/video/submit', async (req, res) => {
       hint: model || '',
       providerParams,
     });
-    const apiKey = settings.zhenzhenApiKey;
+    apiKey = String(settings.zhenzhenApiKey || '');
     if (isVeoOmni) {
       // ===== Veo Omni 协议(参考 Comfly_veo_omini): POST /v1/videos multipart =====
       const refs = Array.isArray(images) ? images.slice(0, 1) : [];
@@ -3160,25 +4563,25 @@ router.post('/video/submit', async (req, res) => {
 
       const upstream = `${config.ZHENZHEN_BASE_URL}/v1/videos`;
       console.log('[upstream] Veo Omni → /v1/videos model:', VEO_OMNI_UPSTREAM_MODEL, 'size:', size, 'seconds:', seconds, 'refs:', refs.length);
-      const r = await fetch(upstream, {
+      const r = await fetchProviderResponse(upstream, {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}` },
         body: form,
       });
-      const text = await r.text();
-      let data;
-      try { data = JSON.parse(text); } catch {
-        return res.status(500).json({ success: false, error: '上游响应非 JSON: ' + text.slice(0, 200) });
-      }
       if (!r.ok) {
-        const errorText = getUpstreamErrorMessage(data, text, r.status);
-        await invalidateZhenzhenProviderKey(providerContext, apiKey, errorText);
-        return res.status(r.status).json({ success: false, error: errorText, raw: data });
+        const providerError = await boundedProviderHttpError(r, 'Veo Omni submit failed');
+        await invalidateZhenzhenProviderKey(
+          providerContext,
+          apiKey,
+          Number(r.status) === 401 ? 'unauthorized' : providerError.message,
+        );
+        return res.status(r.status).json({ success: false, error: providerError.message });
       }
+      const data = await parseJsonResponse(r, 'Veo Omni submit');
       const taskId = data?.task_id || data?.id;
-      if (!taskId) return res.status(500).json({ success: false, error: '未获取到 task_id: ' + text.slice(0, 200) });
-      rememberTaskKey(taskId, apiKey, { model: VEO_OMNI_PUBLIC_MODEL, ...providerContext.taskMeta });
-      return res.json({ success: true, data: { taskId, raw: data } });
+      if (!taskId) return res.status(502).json({ success: false, error: 'Veo Omni 未返回 task_id' });
+      rememberTaskKey(taskId, apiKey, { model: VEO_OMNI_PUBLIC_MODEL, authorityScope: 'zhenzhen-video', ...providerContext.taskMeta });
+      return res.json({ success: true, data: { taskId } });
     } else if (isGrokVideo15New) {
       // ===== Grok Video 1.5 New 协议(参考 Comfly_grok_video_1_5): POST /v1/videos multipart =====
       const refs = Array.isArray(images) ? images.slice(0, 1) : [];
@@ -3196,25 +4599,25 @@ router.post('/video/submit', async (req, res) => {
 
       const upstream = `${config.ZHENZHEN_BASE_URL}/v1/videos`;
       console.log('[upstream] Grok Video 1.5 New → /v1/videos model:', model, 'size:', grokVideo15NewSizeFromRatio(size || aspect_ratio || ratio || '16:9'), 'refs:', refs.length);
-      const r = await fetch(upstream, {
+      const r = await fetchProviderResponse(upstream, {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}` },
         body: form,
       });
-      const text = await r.text();
-      let data;
-      try { data = JSON.parse(text); } catch {
-        return res.status(500).json({ success: false, error: '上游响应非 JSON: ' + text.slice(0, 200) });
-      }
       if (!r.ok) {
-        const errorText = getUpstreamErrorMessage(data, text, r.status);
-        await invalidateZhenzhenProviderKey(providerContext, apiKey, errorText);
-        return res.status(r.status).json({ success: false, error: errorText, raw: data });
+        const providerError = await boundedProviderHttpError(r, 'Grok Video submit failed');
+        await invalidateZhenzhenProviderKey(
+          providerContext,
+          apiKey,
+          Number(r.status) === 401 ? 'unauthorized' : providerError.message,
+        );
+        return res.status(r.status).json({ success: false, error: providerError.message });
       }
+      const data = await parseJsonResponse(r, 'Grok Video submit');
       const taskId = data?.task_id || data?.id;
-      if (!taskId) return res.status(500).json({ success: false, error: '未获取到 task_id: ' + text.slice(0, 200) });
-      rememberTaskKey(taskId, apiKey, { model, ...providerContext.taskMeta });
-      return res.json({ success: true, data: { taskId, raw: data } });
+      if (!taskId) return res.status(502).json({ success: false, error: 'Grok Video 未返回 task_id' });
+      rememberTaskKey(taskId, apiKey, { model, authorityScope: 'zhenzhen-video', ...providerContext.taskMeta });
+      return res.json({ success: true, data: { taskId } });
     } else if (isSoraZhenzhen) {
       // ===== Sora2 Zhenzhen API 协议(参考 gpt-image-2-web runSora2) =====
       body = {
@@ -3263,7 +4666,7 @@ router.post('/video/submit', async (req, res) => {
     }
 
     const upstream = `${config.ZHENZHEN_BASE_URL}/v2/videos/generations`;
-    const r = await fetch(upstream, {
+    const r = await fetchProviderResponse(upstream, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -3271,30 +4674,30 @@ router.post('/video/submit', async (req, res) => {
       },
       body: JSON.stringify(body),
     });
-    const text = await r.text();
-    let data;
-    try { data = JSON.parse(text); } catch {
-      return res.status(500).json({ success: false, error: '上游响应非 JSON: ' + text.slice(0, 200) });
-    }
     if (!r.ok) {
-      const errorText = getUpstreamErrorMessage(data, text, r.status);
-      await invalidateZhenzhenProviderKey(providerContext, apiKey, errorText);
-      return res.status(r.status).json({ success: false, error: errorText, raw: data });
+      const providerError = await boundedProviderHttpError(r, 'Video submit failed');
+      await invalidateZhenzhenProviderKey(
+        providerContext,
+        apiKey,
+        Number(r.status) === 401 ? 'unauthorized' : providerError.message,
+      );
+      return res.status(r.status).json({ success: false, error: providerError.message });
     }
+    const data = await parseJsonResponse(r, 'Video submit');
     const taskId = data?.task_id || data?.id;
-    if (!taskId) return res.status(500).json({ success: false, error: '未获取到 task_id: ' + text.slice(0, 200) });
-    rememberTaskKey(taskId, apiKey, { model, ...providerContext.taskMeta });
-    res.json({ success: true, data: { taskId, raw: data } });
+    if (!taskId) return res.status(502).json({ success: false, error: '视频 Provider 未返回 task_id' });
+    rememberTaskKey(taskId, apiKey, { model, authorityScope: 'zhenzhen-video', ...providerContext.taskMeta });
+    res.json({ success: true, data: { taskId } });
   } catch (e) {
-    console.error('proxy/video/submit 错误:', e);
-    res.status(500).json({ success: false, error: e.message || '请求失败' });
+    proxyRouteError('proxy/video/submit 错误', e, [apiKey]);
+    res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e, '请求失败', [apiKey]) });
   }
 });
 
 router.get('/video/query', async (req, res) => {
   const settings = loadRawSettings();
   const taskId = String(req.query.taskId || '').trim();
-  const rememberedMeta = recallTaskMeta(taskId);
+  const rememberedMeta = recallTaskMeta(taskId, 'zhenzhen-video');
   const queryModel = String(req.query.model || rememberedMeta?.model || '').trim();
   // 优先从 submit 阶段记录的 (taskId → key) 映射恢复，防止前端未传 model 导致 fallback 错 key。
   if (rememberedMeta?.apiKey) {
@@ -3309,41 +4712,44 @@ router.get('/video/query', async (req, res) => {
   const upstream = usesV1VideoQuery
     ? `${config.ZHENZHEN_BASE_URL}/v1/videos/${encodeURIComponent(taskId)}`
     : `${config.ZHENZHEN_BASE_URL}/v2/videos/generations/${encodeURIComponent(taskId)}`;
+  const apiKey = String(settings.zhenzhenApiKey || '');
   try {
-    const r = await fetch(upstream, {
-      headers: { Authorization: `Bearer ${settings.zhenzhenApiKey}` },
+    const r = await fetchProviderResponse(upstream, {
+      headers: { Authorization: `Bearer ${apiKey}` },
     });
-    const text = await r.text();
-    let data;
-    try { data = JSON.parse(text); } catch {
-      return res.status(500).json({ success: false, error: '上游响应非 JSON: ' + text.slice(0, 200) });
-    }
     if (!r.ok) {
-      const errorText = getUpstreamErrorMessage(data, text, r.status);
-      await invalidateZhenzhenProviderKey({ taskMeta: rememberedMeta || {} }, settings.zhenzhenApiKey, errorText);
-      return res.status(r.status).json({ success: false, error: errorText, raw: data });
+      const providerError = await boundedProviderHttpError(r, 'Video query failed');
+      await invalidateZhenzhenProviderKey(
+        { taskMeta: rememberedMeta || {} },
+        apiKey,
+        Number(r.status) === 401 ? 'unauthorized' : providerError.message,
+      );
+      return res.status(r.status).json({ success: false, error: providerError.message });
     }
+    const data = await parseJsonResponse(r, 'Video query');
     const st = normalizeVideoTaskStatus(data?.status);
     let videoUrl = null;
     if (st === 'SUCCESS') {
       const remote = getFalVideoUrl(data);
       if (remote) {
         videoUrl = await saveRemoteVideo(remote);
+        if (!videoUrl) return res.status(502).json({ success: false, error: '视频输出未通过安全下载校验' });
       }
     }
     res.json({
       success: true,
       data: {
         status: st || 'PENDING',
-        progress: data?.progress == null ? '' : String(data.progress),
+        progress: data?.progress == null ? '' : safeDiagnosticText(data.progress, 64, [apiKey]),
         videoUrl,
-        failReason: data?.fail_reason || data?.failure_details || data?.error || data?.message || null,
-        raw: data,
+        failReason: data?.fail_reason || data?.failure_details || data?.error || data?.message
+          ? '视频任务失败'
+          : null,
       },
     });
   } catch (e) {
-    console.error('proxy/video/query 错误:', e);
-    res.status(500).json({ success: false, error: e.message || '请求失败' });
+    proxyRouteError('proxy/video/query 错误', e, [apiKey]);
+    res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e, '请求失败', [apiKey]) });
   }
 });
 
@@ -3397,14 +4803,17 @@ router.post('/seedance/submit', async (req, res) => {
           taskProvider: seedanceNz.PROVIDER_ID,
           model: result.model,
           taskType: result.taskType,
-          raw: result.raw,
           ...seedanceNzTrace(result),
         },
       });
     } catch (e) {
-      console.error('proxy/seedance/submit seedance.nz 错误:', e?.message || e);
+      proxyRouteError('proxy/seedance/submit seedance.nz 错误', e, [settings?.zhenzhenSd2ApiKey || '']);
       const status = Number(e?.status);
-      return res.status(status >= 400 && status < 600 ? status : 500).json({ success: false, error: e?.message || 'seedance.nz 请求失败', ...seedanceNzTrace(e) });
+      return res.status(status >= 400 && status < 600 ? status : 500).json({
+        success: false,
+        error: proxyPublicError(e, 'seedance.nz 请求失败', [settings?.zhenzhenSd2ApiKey || '']),
+        ...seedanceNzTrace(e),
+      });
     }
   }
 
@@ -3497,28 +4906,28 @@ router.post('/seedance/submit', async (req, res) => {
       'duration:', payload.duration, 'ratio:', payload.ratio, 'resolution:', payload.resolution,
       'content_items:', content.length);
 
-    const r = await fetch(`${baseUrl}/seedance/v3/contents/generations/tasks`, {
+    const r = await fetchProviderResponse(`${baseUrl}/seedance/v3/contents/generations/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(payload),
     });
-    const text = await r.text();
-    let data;
-    try { data = JSON.parse(text); } catch {
-      return res.status(500).json({ success: false, error: '上游响应非 JSON: ' + text.slice(0, 200) });
-    }
     if (!r.ok) {
-      const errorText = data?.error?.message || data?.message || `上游 HTTP ${r.status}`;
-      await invalidateZhenzhenProviderKey(providerContext, apiKey, errorText);
-      return res.status(r.status).json({ success: false, error: errorText });
+      const providerError = await boundedProviderHttpError(r, 'Seedance submit failed');
+      await invalidateZhenzhenProviderKey(
+        providerContext,
+        apiKey,
+        Number(r.status) === 401 ? 'unauthorized' : providerError.message,
+      );
+      return res.status(r.status).json({ success: false, error: providerError.message });
     }
+    const data = await parseJsonResponse(r, 'Seedance submit');
     const taskId = data?.id || data?.task_id;
-    if (!taskId) return res.status(500).json({ success: false, error: '未获取到 task_id: ' + text.slice(0, 200) });
+    if (!taskId) return res.status(502).json({ success: false, error: 'Seedance 未返回 task_id' });
     rememberTaskKey(taskId, apiKey, { provider: 'zhenzhen-legacy', model, ...providerContext.taskMeta });
-    res.json({ success: true, data: { taskId, taskProvider: 'zhenzhen-legacy', model, raw: data } });
+    res.json({ success: true, data: { taskId, taskProvider: 'zhenzhen-legacy', model } });
   } catch (e) {
-    console.error('proxy/seedance/submit 错误:', e);
-    res.status(500).json({ success: false, error: e.message || '请求失败' });
+    proxyRouteError('proxy/seedance/submit 错误', e, [apiKey]);
+    res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e, '请求失败', [apiKey]) });
   }
 });
 
@@ -3526,31 +4935,50 @@ router.get('/seedance/query', async (req, res) => {
   const settings = loadRawSettings();
   const taskId = String(req.query.taskId || '').trim();
   if (!taskId) return res.status(400).json({ success: false, error: 'taskId 必填' });
-  const rememberedMeta = recallTaskMeta(taskId);
-  const requestedTaskProvider = String(req.query.taskProvider || rememberedMeta?.provider || 'zhenzhen-legacy').trim();
+  const providerHint = String(req.query.taskProvider || '').trim();
+  let rememberedMeta = null;
+  if (providerHint === seedanceNz.PROVIDER_ID || providerHint === 'zhenzhen-legacy') {
+    rememberedMeta = recallTaskMeta(taskId, providerHint);
+  } else if (!providerHint) {
+    const nzMeta = recallTaskMeta(taskId, seedanceNz.PROVIDER_ID);
+    const legacyMeta = recallTaskMeta(taskId, 'zhenzhen-legacy');
+    if (nzMeta && legacyMeta) return res.status(409).json({ success: false, error: 'Seedance taskId 在多个 Provider 范围冲突，请重新提交任务' });
+    rememberedMeta = nzMeta || legacyMeta;
+  }
+  const requestedTaskProvider = String(providerHint || rememberedMeta?.provider || 'zhenzhen-legacy').trim();
 
   if (requestedTaskProvider === seedanceNz.PROVIDER_ID) {
     const apiKey = rememberedMeta?.apiKey || settings?.zhenzhenSd2ApiKey || '';
     try {
       const result = await seedanceNz.queryTask(taskId, apiKey);
-      let videoUrl = result.videoUrl;
-      if (result.status === 'succeeded' && videoUrl) {
-        videoUrl = await saveRemoteVideo(videoUrl, seedanceNz.fetchRemote);
+      let videoUrl = '';
+      if (result.status === 'succeeded' && result.videoUrl) {
+        videoUrl = await saveRemoteVideo(result.videoUrl, seedanceNz.fetchRemote);
+        if (!videoUrl) return res.status(502).json({ success: false, error: 'Seedance 输出素材未通过安全下载校验' });
       }
       return res.json({
         success: true,
         data: {
-          ...result,
+          status: result.status,
+          progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
           videoUrl,
+          failReason: result.status === 'failed'
+            ? safeDiagnosticText(result.failReason || 'Seedance 任务失败', 240, [apiKey])
+            : '',
           taskProvider: seedanceNz.PROVIDER_ID,
           model: rememberedMeta?.model || '',
           taskType: rememberedMeta?.taskType || '',
+          ...seedanceNzTrace(result),
         },
       });
     } catch (e) {
-      console.error('proxy/seedance/query seedance.nz 错误:', e?.message || e);
+      proxyRouteError('proxy/seedance/query seedance.nz 错误', e, [apiKey]);
       const status = Number(e?.status);
-      return res.status(status >= 400 && status < 600 ? status : 500).json({ success: false, error: e?.message || 'seedance.nz 查询失败', ...seedanceNzTrace(e) });
+      return res.status(status >= 400 && status < 600 ? status : 500).json({
+        success: false,
+        error: proxyPublicError(e, 'seedance.nz 查询失败', [apiKey]),
+        ...seedanceNzTrace(e),
+      });
     }
   }
 
@@ -3570,17 +4998,17 @@ router.get('/seedance/query', async (req, res) => {
   const upstream = `${baseUrl}/seedance/v3/contents/generations/tasks/${encodeURIComponent(taskId)}`;
 
   try {
-    const r = await fetch(upstream, { headers: { Authorization: `Bearer ${apiKey}` } });
-    const text = await r.text();
-    let data;
-    try { data = JSON.parse(text); } catch {
-      return res.status(500).json({ success: false, error: '上游响应非 JSON: ' + text.slice(0, 200) });
-    }
+    const r = await fetchProviderResponse(upstream, { headers: { Authorization: `Bearer ${apiKey}` } });
     if (!r.ok) {
-      const errorText = data?.error?.message || data?.message || `上游 HTTP ${r.status}`;
-      await invalidateZhenzhenProviderKey({ taskMeta: rememberedMeta || {} }, apiKey, errorText);
-      return res.status(r.status).json({ success: false, error: errorText });
+      const providerError = await boundedProviderHttpError(r, 'Seedance query failed');
+      await invalidateZhenzhenProviderKey(
+        { taskMeta: rememberedMeta || {} },
+        apiKey,
+        Number(r.status) === 401 ? 'unauthorized' : providerError.message,
+      );
+      return res.status(r.status).json({ success: false, error: providerError.message });
     }
+    const data = await parseJsonResponse(r, 'Seedance query');
     // 状态归一(对齐主项目)
     let st = String(data?.status || '').toLowerCase();
     if (st === 'success') st = 'succeeded';
@@ -3621,6 +5049,7 @@ router.get('/seedance/query', async (req, res) => {
       if (vUrl) {
         // 转存到本地
         videoUrl = await saveRemoteVideo(vUrl);
+        if (!videoUrl) return res.status(502).json({ success: false, error: 'Seedance 输出素材未通过安全下载校验' });
       }
     }
 
@@ -3628,16 +5057,15 @@ router.get('/seedance/query', async (req, res) => {
       success: true,
       data: {
         status: st || 'pending',
-        progress: data?.progress || '',
+        progress: data?.progress ? safeDiagnosticText(data.progress, 64, [apiKey]) : '',
         videoUrl,
-        failReason: data?.fail_reason || data?.failReason || null,
+        failReason: data?.fail_reason || data?.failReason ? 'Seedance 任务失败' : null,
         taskProvider: 'zhenzhen-legacy',
-        raw: data,
       },
     });
   } catch (e) {
-    console.error('proxy/seedance/query 错误:', e);
-    res.status(500).json({ success: false, error: e.message || '查询失败' });
+    proxyRouteError('proxy/seedance/query 错误', e, [apiKey]);
+    res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e, '查询失败', [apiKey]) });
   }
 });
 
@@ -3673,6 +5101,7 @@ router.post('/audio/submit', async (req, res) => {
     return res.status(400).json({ success: false, error: 'prompt 必填' });
   }
   const mv = resolveSunoMv(version);
+  let apiKey = String(settings?.zhenzhenApiKey || '');
   try {
     const providerContext = await applyZhenzhenProviderContext(settings, {
       route: 'audio/submit',
@@ -3681,44 +5110,50 @@ router.post('/audio/submit', async (req, res) => {
       hint: 'suno',
       providerParams,
     });
-    const apiKey = settings.zhenzhenApiKey;
+    apiKey = String(settings.zhenzhenApiKey || '');
     const auth = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
     if (m === 'generate') {
       const body = { prompt: prompt || '', tags: tags || '', mv, title: title || '' };
       if (seed && seed > 0) body.seed = seed;
-      const r = await fetch(`${config.ZHENZHEN_BASE_URL}/suno/generate`, { method: 'POST', headers: auth, body: JSON.stringify(body) });
-      const text = await r.text();
-      let data; try { data = JSON.parse(text); } catch { return res.status(500).json({ success: false, error: '上游响应非 JSON: ' + text.slice(0, 200) }); }
+      const r = await fetchProviderResponse(`${config.ZHENZHEN_BASE_URL}/suno/generate`, { method: 'POST', headers: auth, body: JSON.stringify(body) });
       if (!r.ok) {
-        const errorText = data?.error?.message || data?.message || `上游 HTTP ${r.status}`;
-        await invalidateZhenzhenProviderKey(providerContext, apiKey, errorText);
-        return res.status(r.status).json({ success: false, error: errorText });
+        const providerError = await boundedProviderHttpError(r, 'Suno generate failed');
+        await invalidateZhenzhenProviderKey(
+          providerContext,
+          apiKey,
+          Number(r.status) === 401 ? 'unauthorized' : providerError.message,
+        );
+        return res.status(r.status).json({ success: false, error: providerError.message });
       }
+      const data = await parseJsonResponse(r, 'Suno generate');
       const taskId = data?.id;
       const clipIds = (data?.clips || []).map((c) => c.id).filter(Boolean);
-      if (!taskId || clipIds.length < 1) return res.status(500).json({ success: false, error: '未获取到 task/clip: ' + text.slice(0, 200) });
-      rememberTaskKey(taskId, apiKey, { model: `suno-${version || 'v5.5'}`, ...providerContext.taskMeta });
-      for (const clipId of clipIds) rememberTaskKey(clipId, apiKey, { model: `suno-${version || 'v5.5'}`, taskId, ...providerContext.taskMeta });
-      return res.json({ success: true, data: { taskId, clipIds, raw: data } });
+      if (!taskId || clipIds.length < 1) return res.status(502).json({ success: false, error: 'Suno 未返回有效 task/clip' });
+      rememberTaskKey(taskId, apiKey, { authorityScope: 'zhenzhen-audio', model: `suno-${version || 'v5.5'}`, ...providerContext.taskMeta });
+      for (const clipId of clipIds) rememberTaskKey(clipId, apiKey, { authorityScope: 'zhenzhen-audio', model: `suno-${version || 'v5.5'}`, taskId, ...providerContext.taskMeta });
+      return res.json({ success: true, data: { taskId, clipIds } });
     }
     if (m === 'extend') {
       if (!continue_clip_id) return res.status(400).json({ success: false, error: 'extend 模式需 continue_clip_id' });
       const body = { prompt: prompt || '', tags: tags || '', mv, title: title || '', task: 'upload_extend', continue_clip_id, continue_at: continue_at ?? 28 };
       if (seed && seed > 0) body.seed = seed;
-      const r = await fetch(`${config.ZHENZHEN_BASE_URL}/suno/generate`, { method: 'POST', headers: auth, body: JSON.stringify(body) });
-      const text = await r.text();
-      let data; try { data = JSON.parse(text); } catch { return res.status(500).json({ success: false, error: '上游响应非 JSON: ' + text.slice(0, 200) }); }
+      const r = await fetchProviderResponse(`${config.ZHENZHEN_BASE_URL}/suno/generate`, { method: 'POST', headers: auth, body: JSON.stringify(body) });
       if (!r.ok) {
-        const errorText = data?.error?.message || data?.message || `上游 HTTP ${r.status}`;
-        await invalidateZhenzhenProviderKey(providerContext, apiKey, errorText);
-        return res.status(r.status).json({ success: false, error: errorText });
+        const providerError = await boundedProviderHttpError(r, 'Suno extend failed');
+        await invalidateZhenzhenProviderKey(
+          providerContext,
+          apiKey,
+          Number(r.status) === 401 ? 'unauthorized' : providerError.message,
+        );
+        return res.status(r.status).json({ success: false, error: providerError.message });
       }
+      const data = await parseJsonResponse(r, 'Suno extend');
       const taskId = data?.id;
       const clipIds = (data?.clips || []).map((c) => c.id).filter(Boolean);
-      if (!taskId) return res.status(500).json({ success: false, error: '未获取 task' });
-      rememberTaskKey(taskId, apiKey, { model: `suno-${version || 'v5.5'}`, ...providerContext.taskMeta });
-      for (const clipId of clipIds) rememberTaskKey(clipId, apiKey, { model: `suno-${version || 'v5.5'}`, taskId, ...providerContext.taskMeta });
-      return res.json({ success: true, data: { taskId, clipIds, raw: data } });
+      if (!taskId) return res.status(502).json({ success: false, error: 'Suno 未返回有效 task' });
+      rememberTaskKey(taskId, apiKey, { authorityScope: 'zhenzhen-audio', model: `suno-${version || 'v5.5'}`, ...providerContext.taskMeta });
+      for (const clipId of clipIds) rememberTaskKey(clipId, apiKey, { authorityScope: 'zhenzhen-audio', model: `suno-${version || 'v5.5'}`, taskId, ...providerContext.taskMeta });
+      return res.json({ success: true, data: { taskId, clipIds } });
     }
     if (m === 'cover') {
       if (!cover_clip_id) return res.status(400).json({ success: false, error: 'cover 模式需 cover_clip_id' });
@@ -3729,25 +5164,28 @@ router.post('/audio/submit', async (req, res) => {
         infill_start_s: null, infill_end_s: null,
       };
       if (seed && seed > 0) body.seed = seed;
-      const r = await fetch(`${config.ZHENZHEN_BASE_URL}/suno/submit/music`, { method: 'POST', headers: auth, body: JSON.stringify(body) });
-      const text = await r.text();
-      let data; try { data = JSON.parse(text); } catch { return res.status(500).json({ success: false, error: '上游响应非 JSON: ' + text.slice(0, 200) }); }
+      const r = await fetchProviderResponse(`${config.ZHENZHEN_BASE_URL}/suno/submit/music`, { method: 'POST', headers: auth, body: JSON.stringify(body) });
       if (!r.ok) {
-        const errorText = data?.error?.message || data?.message || `上游 HTTP ${r.status}`;
-        await invalidateZhenzhenProviderKey(providerContext, apiKey, errorText);
-        return res.status(r.status).json({ success: false, error: errorText });
+        const providerError = await boundedProviderHttpError(r, 'Suno cover failed');
+        await invalidateZhenzhenProviderKey(
+          providerContext,
+          apiKey,
+          Number(r.status) === 401 ? 'unauthorized' : providerError.message,
+        );
+        return res.status(r.status).json({ success: false, error: providerError.message });
       }
+      const data = await parseJsonResponse(r, 'Suno cover');
       const taskId = (typeof data?.data === 'string' ? data.data : data?.id) || '';
       const clipIds = Array.isArray(data?.data) ? data.data.map((c) => c.id || c.clip_id).filter(Boolean) : (data?.clips || []).map((c) => c.id);
-      if (!taskId) return res.status(500).json({ success: false, error: '未获取 task: ' + text.slice(0, 200) });
-      rememberTaskKey(taskId, apiKey, { model: `suno-${version || 'v5.5'}`, ...providerContext.taskMeta });
-      for (const clipId of clipIds) rememberTaskKey(clipId, apiKey, { model: `suno-${version || 'v5.5'}`, taskId, ...providerContext.taskMeta });
-      return res.json({ success: true, data: { taskId, clipIds, raw: data } });
+      if (!taskId) return res.status(502).json({ success: false, error: 'Suno 未返回有效 task' });
+      rememberTaskKey(taskId, apiKey, { authorityScope: 'zhenzhen-audio', model: `suno-${version || 'v5.5'}`, ...providerContext.taskMeta });
+      for (const clipId of clipIds) rememberTaskKey(clipId, apiKey, { authorityScope: 'zhenzhen-audio', model: `suno-${version || 'v5.5'}`, taskId, ...providerContext.taskMeta });
+      return res.json({ success: true, data: { taskId, clipIds } });
     }
     return res.status(400).json({ success: false, error: `未知模式: ${m}` });
   } catch (e) {
-    console.error('proxy/audio/submit 错误:', e);
-    res.status(500).json({ success: false, error: e.message || '请求失败' });
+    proxyRouteError('proxy/audio/submit 错误', e, [apiKey]);
+    res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e, '请求失败', [apiKey]) });
   }
 });
 
@@ -3755,7 +5193,7 @@ router.get('/audio/query', async (req, res) => {
   const settings = loadRawSettings();
   const ids = String(req.query.clipIds || req.query.taskId || '').trim();
   if (!ids) return res.status(400).json({ success: false, error: 'clipIds 或 taskId 必填' });
-  const rememberedMeta = recallTaskMeta(ids.split(',')[0]?.trim() || ids);
+  const rememberedMeta = recallTaskMeta(ids.split(',')[0]?.trim() || ids, 'zhenzhen-audio');
   if (rememberedMeta?.apiKey) {
     if (settings) settings.zhenzhenApiKey = rememberedMeta.apiKey;
     else return res.status(400).json({ success: false, error: '未找到 settings' });
@@ -3763,33 +5201,38 @@ router.get('/audio/query', async (req, res) => {
     // v1.2.9.15: 一体化「专属优先 fallback 通用」校验
     if (!ensureKey(settings, res, 'suno', 'Suno')) return;
   }
-  // 是否将完成的音频转存到本地 output 目录(默认 true)
-  const saveLocal = String(req.query.saveLocal ?? 'true').toLowerCase() !== 'false';
+  // 兼容旧客户端保留 saveLocal 查询参数，但完成品必须先转存到本地。
+  // Provider 签名 URL 只能留在服务端瞬时使用，不能写入响应或画布状态。
+  const apiKey = String(settings.zhenzhenApiKey || '');
   try {
-    const r = await fetch(`${config.ZHENZHEN_BASE_URL}/suno/feed/${encodeURIComponent(ids)}`, {
-      headers: { Authorization: `Bearer ${settings.zhenzhenApiKey}` },
+    const r = await fetchProviderResponse(`${config.ZHENZHEN_BASE_URL}/suno/feed/${encodeURIComponent(ids)}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
     });
-    const text = await r.text();
-    let data; try { data = JSON.parse(text); } catch { return res.status(500).json({ success: false, error: '上游响应非 JSON: ' + text.slice(0, 200) }); }
     if (!r.ok) {
-      const errorText = data?.error?.message || data?.message || `上游 HTTP ${r.status}`;
-      await invalidateZhenzhenProviderKey({ taskMeta: rememberedMeta || {} }, settings.zhenzhenApiKey, errorText);
-      return res.status(r.status).json({ success: false, error: errorText });
+      const providerError = await boundedProviderHttpError(r, 'Suno query failed');
+      await invalidateZhenzhenProviderKey(
+        { taskMeta: rememberedMeta || {} },
+        apiKey,
+        Number(r.status) === 401 ? 'unauthorized' : providerError.message,
+      );
+      return res.status(r.status).json({ success: false, error: providerError.message });
     }
+    const data = await parseJsonResponse(r, 'Suno query');
     const clips = Array.isArray(data) ? data : (data?.clips || []);
     const tracks = [];
     for (const c of clips) {
       if (c?.status === 'complete' && c?.audio_url) {
-        const remoteUrl = c.audio_url;
-        const localUrl = saveLocal ? await saveRemoteAudio(remoteUrl) : remoteUrl;
+        const localUrl = await saveRemoteAudio(c.audio_url);
+        if (!localUrl) continue;
+        const coverSource = c.image_large_url || c.image_url || '';
+        const localImageUrl = coverSource ? await saveRemoteImage(coverSource) : '';
         tracks.push({
           id: c.id || c.clip_id,
           clipId: c.clip_id || c.id,
           audioUrl: localUrl,
-          remoteUrl,
-          imageUrl: c.image_large_url || c.image_url || '',
-          title: c.title || '',
-          tags: c.tags || '',
+          imageUrl: localImageUrl || '',
+          title: safeDiagnosticText(c.title || '', 240, [apiKey]),
+          tags: safeDiagnosticText(c.tags || '', 500, [apiKey]),
           duration: c.metadata?.duration || 0,
         });
       }
@@ -3802,12 +5245,11 @@ router.get('/audio/query', async (req, res) => {
         tracks,
         total: clips.length,
         completed: tracks.length,
-        raw: data,
       },
     });
   } catch (e) {
-    console.error('proxy/audio/query 错误:', e);
-    res.status(500).json({ success: false, error: e.message || '请求失败' });
+    proxyRouteError('proxy/audio/query 错误', e, [apiKey]);
+    res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e, '请求失败', [apiKey]) });
   }
 });
 
@@ -3826,15 +5268,30 @@ router.post('/audio/upload', audioUpload.single('file'), async (req, res) => {
   // 导致 Suno cover/extend 上传步骤即使配置了 sunoApiKey 也始终用通用 zhenzhenApiKey，
   // 与 audio/submit · audio/query 的 key 不一致。改用 ensureKey 统一「专属优先 fallback 通用」。
   if (!req.file) return res.status(400).json({ success: false, error: '未接收到音频文件 (field=file)' });
+  const audioBuf = req.file.buffer;
+  let verifiedAudio;
+  try {
+    verifiedAudio = validateProxyMediaBuffer(audioBuf, req.file.mimetype, {
+      allowedKinds: ['audio'],
+      maxBytes: 50 * 1024 * 1024,
+    });
+  } catch (_) {
+    return res.status(400).json({
+      success: false,
+      code: 'invalid_audio_upload',
+      error: '上传文件不是受支持的音频内容，或声明类型与文件内容不一致',
+    });
+  }
+  const ext = extFromContentType(verifiedAudio.detectedMime);
+  if (!ext || !new Set(['mp3', 'wav', 'm4a', 'ogg', 'flac', 'aac', 'wma']).has(ext)) {
+    return res.status(400).json({ success: false, code: 'invalid_audio_upload', error: '上传音频格式不受支持' });
+  }
+  const ct = verifiedAudio.detectedMime;
+  const filename = safeAudioUploadFilename(req.file.originalname, ext);
   const providerParams = parseProviderParams(req.body?.providerParams);
   if (!ensureKeyOrSelectedGroup(settings, res, 'suno', 'Suno', providerParams)) return;
   let apiKey = settings.zhenzhenApiKey;
   const baseUrl = config.ZHENZHEN_BASE_URL;
-  const audioBuf = req.file.buffer;
-  const filename = req.file.originalname || 'audio.mp3';
-  const ext = (filename.split('.').pop() || 'mp3').toLowerCase();
-  const mimeMap = { mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', ogg: 'audio/ogg', flac: 'audio/flac', aac: 'audio/aac', wma: 'audio/x-ms-wma' };
-  const ct = mimeMap[ext] || req.file.mimetype || 'audio/mpeg';
   try {
     const providerContext = await applyZhenzhenProviderContext(settings, {
       route: 'audio/upload',
@@ -3845,81 +5302,82 @@ router.post('/audio/upload', audioUpload.single('file'), async (req, res) => {
     });
     apiKey = settings.zhenzhenApiKey;
     // 1) init
-    const r1 = await fetch(`${baseUrl}/suno/uploads/audio`, {
+    const r1 = await fetchProviderResponse(`${baseUrl}/suno/uploads/audio`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ extension: ext }),
     });
     if (!r1.ok) {
-      const errorText = `Upload init failed: ${r1.status} ${await r1.text()}`;
-      await invalidateZhenzhenProviderKey(providerContext, apiKey, errorText);
-      return res.status(r1.status).json({ success: false, error: errorText });
+      const providerError = await boundedProviderHttpError(r1, 'Upload init failed');
+      await invalidateZhenzhenProviderKey(providerContext, apiKey, providerError.message);
+      return res.status(r1.status).json({ success: false, error: providerError.message });
     }
-    const r1Json = await r1.json();
+    const r1Json = await parseJsonResponse(r1, 'Upload init');
     const upData = (r1Json.code && r1Json.data) ? r1Json.data : r1Json;
     const uploadId = upData.id;
     const uploadUrl = upData.url;
     const fields = upData.fields;
     if (!uploadId || !uploadUrl) return res.status(500).json({ success: false, error: 'Upload init 返回无效: missing id/url' });
     // 2) S3 upload
-    let r2;
-    if (fields && Object.keys(fields).length > 0) {
-      const fd = new FormData();
-      Object.keys(fields).forEach((k) => fd.append(k, fields[k]));
-      fd.append('file', new Blob([audioBuf], { type: ct }), filename);
-      r2 = await fetch(uploadUrl, { method: 'POST', body: fd });
-    } else {
-      r2 = await fetch(uploadUrl, { method: 'PUT', body: audioBuf, headers: { 'Content-Type': ct } });
-    }
+    const r2 = await uploadAudioToSignedUrl({
+      uploadUrl,
+      fields,
+      audioBuffer: audioBuf,
+      contentType: ct,
+      filename,
+    });
     if (r2.status !== 204 && r2.status !== 200 && !r2.ok) {
       return res.status(500).json({ success: false, error: `S3 upload failed: ${r2.status}` });
     }
     // 3) finish
-    const r3 = await fetch(`${baseUrl}/suno/uploads/audio/${uploadId}/upload-finish`, {
+    const r3 = await fetchProviderResponse(`${baseUrl}/suno/uploads/audio/${uploadId}/upload-finish`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ upload_type: 'file_upload', upload_filename: filename }),
     });
     if (!r3.ok) {
-      const errorText = `Upload finish failed: ${r3.status} ${await r3.text()}`;
-      await invalidateZhenzhenProviderKey(providerContext, apiKey, errorText);
-      return res.status(500).json({ success: false, error: errorText });
+      const providerError = await boundedProviderHttpError(r3, 'Upload finish failed');
+      await invalidateZhenzhenProviderKey(providerContext, apiKey, providerError.message);
+      return res.status(502).json({ success: false, error: providerError.message });
     }
+    await readBoundedProviderResponse(r3, 'Upload finish', { maxBytes: 64 * 1024 });
     // 4) poll status
     let clipId = '';
     for (let i = 0; i < 30; i++) {
       await new Promise((resolve) => setTimeout(resolve, 2000));
-      const sr = await fetch(`${baseUrl}/suno/uploads/audio/${uploadId}`, { headers: { Authorization: `Bearer ${apiKey}` } });
-      if (!sr.ok) continue;
-      const srJson = await sr.json();
+      const sr = await fetchProviderResponse(`${baseUrl}/suno/uploads/audio/${uploadId}`, { headers: { Authorization: `Bearer ${apiKey}` } });
+      if (!sr.ok) {
+        await boundedProviderHttpError(sr, 'Upload status failed');
+        continue;
+      }
+      const srJson = await parseJsonResponse(sr, 'Upload status');
       const sd = (srJson.code && srJson.data) ? srJson.data : srJson;
       const st = sd.status || sd.state || '';
       if (st === 'complete') {
         // 5) initialize-clip
-        const r4 = await fetch(`${baseUrl}/suno/uploads/audio/${uploadId}/initialize-clip`, {
+        const r4 = await fetchProviderResponse(`${baseUrl}/suno/uploads/audio/${uploadId}/initialize-clip`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({}),
         });
         if (!r4.ok) {
-          const errorText = `Initialize clip failed: ${r4.status} ${await r4.text()}`;
-          await invalidateZhenzhenProviderKey(providerContext, apiKey, errorText);
-          return res.status(500).json({ success: false, error: errorText });
+          const providerError = await boundedProviderHttpError(r4, 'Initialize clip failed');
+          await invalidateZhenzhenProviderKey(providerContext, apiKey, providerError.message);
+          return res.status(502).json({ success: false, error: providerError.message });
         }
-        const r4Json = await r4.json();
+        const r4Json = await parseJsonResponse(r4, 'Initialize clip');
         const initData = (r4Json.code && r4Json.data) ? r4Json.data : r4Json;
         clipId = initData.clip_id || initData.id || '';
         break;
       } else if (st === 'failed' || st === 'error') {
-        const errMsg = sd.error_message || sd.error || sd.detail || sd.message || st;
-        return res.status(500).json({ success: false, error: `音频处理失败: ${errMsg}` });
+        return res.status(502).json({ success: false, error: `音频处理失败（Provider 状态：${st}）` });
       }
     }
     if (!clipId) return res.status(504).json({ success: false, error: 'Upload timeout - no clip_id (60s)' });
     return res.json({ success: true, data: { clipId, uploadId, filename, size: req.file.size, mime: ct } });
   } catch (e) {
-    console.error('proxy/audio/upload 错误:', e);
-    res.status(500).json({ success: false, error: e.message || '请求失败' });
+    proxyRouteError('proxy/audio/upload 错误', e, [apiKey]);
+    res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e, '请求失败', [apiKey]) });
   }
 });
 
@@ -3939,7 +5397,50 @@ function isRhTaskStateCode(code) {
 }
 
 function logRhSiteFallback(stage, from, to, detail = '') {
-  console.warn(`[RH/${stage}] ${from.id} -> ${to.id} 自动切换站点${detail ? ` · ${detail}` : ''}`);
+  const summary = detail ? opaqueDiagnosticSummary('reason', detail) : '';
+  console.warn(`[RH/${stage}] ${from.id} -> ${to.id} 自动切换站点${summary ? ` · ${summary}` : ''}`);
+}
+
+function safeRhAppInfoValue(value, exactSecrets, depth = 0) {
+  if (depth > 4 || value == null) return value == null ? value : null;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string') {
+    return redactExactSecrets(value, exactSecrets)
+      .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+      .slice(0, 4000);
+  }
+  if (Array.isArray(value)) return value.slice(0, 100).map((item) => safeRhAppInfoValue(item, exactSecrets, depth + 1));
+  if (typeof value !== 'object') return null;
+  const output = {};
+  for (const key of ['label', 'name', 'value']) {
+    if (Object.hasOwn(value, key)) output[key] = safeRhAppInfoValue(value[key], exactSecrets, depth + 1);
+  }
+  return output;
+}
+
+function normalizeRhAppInfo(data, webappId, exactSecrets) {
+  const allowedItemKeys = [
+    'nodeId', 'fieldName', 'fieldValue', 'fieldType', 'fieldData',
+    'options', 'list', 'values', 'enum', 'choices', 'items', 'selectOptions', 'dropdown',
+    'required', 'min', 'max', 'step', 'description', 'name', 'label',
+  ];
+  const nodeInfoList = Array.isArray(data?.nodeInfoList)
+    ? data.nodeInfoList.slice(0, 1000).map((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+      const normalized = {};
+      for (const key of allowedItemKeys) {
+        if (Object.hasOwn(item, key)) normalized[key] = safeRhAppInfoValue(item[key], exactSecrets);
+      }
+      return normalized;
+    }).filter(Boolean)
+    : [];
+  return {
+    webappId: String(webappId || '').trim().slice(0, 256),
+    appName: redactExactSecrets(String(data?.appName || '').trim().slice(0, 240), exactSecrets),
+    name: redactExactSecrets(String(data?.name || '').trim().slice(0, 240), exactSecrets),
+    nodeInfoList,
+  };
 }
 
 router.post('/runninghub/submit', async (req, res) => {
@@ -3956,7 +5457,7 @@ router.post('/runninghub/submit', async (req, res) => {
       const candidate = candidates[index];
       const body = { apiKey: candidate.apiKey, webappId, nodeInfoList: nodeInfoList || [] };
       if (instanceType) body.instanceType = instanceType;
-      const r = await fetch(`${candidate.baseUrl}/task/openapi/ai-app/run`, {
+      const r = await fetchProviderResponse(`${candidate.baseUrl}/task/openapi/ai-app/run`, {
         method: 'POST',
         headers: { Host: candidate.host, 'Content-Type': 'application/json', Authorization: `Bearer ${candidate.apiKey}` },
         body: JSON.stringify(body),
@@ -3975,21 +5476,21 @@ router.post('/runninghub/submit', async (req, res) => {
         console.log(`[RH/submit] site=${candidate.id} webappId=${webappId} fields=${Array.isArray(nodeInfoList) ? nodeInfoList.length : 0} instance=${instanceType || 'default'} taskId=${taskId}`);
         return res.json({
           success: true,
-          data: { taskId, site: candidate.id, fallbackUsed: candidate.id !== requestedSite, raw: data },
+          data: { taskId, site: candidate.id, fallbackUsed: candidate.id !== requestedSite },
         });
       }
       const next = candidates[index + 1];
       if (!next || !shouldRetryRhSiteResponse(r, data)) break;
       logRhSiteFallback('submit', candidate, next, data?.msg || `HTTP ${r.status}`);
     }
-    console.warn(`[RH/submit] failed webappId=${webappId} code=${lastData?.code} msg=${lastData?.msg || ''}`);
+    console.warn(`[RH/submit] failed webappId=${webappId} code=${lastData?.code} ${opaqueDiagnosticSummary('response', JSON.stringify(lastData || {}))}`);
     return res.status(lastResponse?.status === 401 || lastResponse?.status === 403 ? lastResponse.status : 400).json({
       success: false,
-      error: lastData?.msg || `RH 提交失败 code=${lastData?.code}`,
+      error: `RH 提交失败 code=${lastData?.code}`,
     });
   } catch (e) {
-    console.error('proxy/rh/submit 错误:', e);
-    res.status(500).json({ success: false, error: e.message || '请求失败' });
+    proxyRouteError('proxy/rh/submit 错误', e);
+    res.status(502).json({ success: false, error: 'RunningHub 提交请求失败' });
   }
 });
 
@@ -3997,7 +5498,7 @@ router.get('/runninghub/query', async (req, res) => {
   const settings = loadRawSettings();
   const taskId = String(req.query.taskId || '').trim();
   if (!taskId) return res.status(400).json({ success: false, error: 'taskId 必填' });
-  const taskMeta = recallTaskMeta(taskId);
+  const taskMeta = recallTaskMeta(taskId, 'runninghub');
   const requestedSite = rhRequestedSite(taskMeta?.rhSite || req.query.site);
   const candidates = buildRhSiteCandidates(settings, requestedSite, taskMeta?.apiKey || '');
   if (candidates.length === 0) return res.status(400).json({ success: false, error: missingRhKeyError(requestedSite) });
@@ -4006,7 +5507,7 @@ router.get('/runninghub/query', async (req, res) => {
     let selectedData = null;
     for (let index = 0; index < candidates.length; index += 1) {
       const candidate = candidates[index];
-      const r = await fetch(`${candidate.baseUrl}/task/openapi/outputs`, {
+      const r = await fetchProviderResponse(`${candidate.baseUrl}/task/openapi/outputs`, {
         method: 'POST',
         headers: { Host: candidate.host, 'Content-Type': 'application/json', Authorization: `Bearer ${candidate.apiKey}` },
         body: JSON.stringify({ apiKey: candidate.apiKey, taskId }),
@@ -4043,34 +5544,40 @@ router.get('/runninghub/query', async (req, res) => {
         const remote = it?.fileUrl || it?.file_url || it?.downloadUrl || it?.download_url || it?.resultUrl || it?.result_url || it?.outputUrl || it?.output_url || it?.signedUrl || it?.signed_url || it?.publicUrl || it?.public_url || it?.previewUrl || it?.preview_url || it?.url;
         if (!remote) continue;
         try {
-          const fr = await fetch(remote);
-          if (fr.ok) {
-            let buf = Buffer.from(await fr.arrayBuffer());
-            let ext = inferRemoteOutputExt(remote, fr.headers.get('content-type'));
-            const duck = await tryDecodeDuckPayload(buf);
-            if (duck?.decoded && duck.buffer) {
-              buf = duck.buffer;
-              ext = safeOutputExt(duck.ext, ext);
-              console.log(
-                '[RH/query][duck] decoded',
-                `bits=${duck.lsbBits}`,
-                `${duck.originalExt} -> ${ext}`,
-                `kind=${duck.kind}`,
-                `bytes=${buf.length}`,
-              );
-            } else if (duck?.passwordProtected) {
-              console.log('[RH/query][duck] password protected payload detected, keep original duck image');
-            }
-            const filename = `rh_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
-            fs.writeFileSync(path.join(config.OUTPUT_DIR, filename), buf);
-            urls.push(`/files/output/${filename}`);
-          } else {
-            urls.push(remote);
+          const downloaded = await fetchProxyRemoteMedia(remote, {
+            allowedKinds: ['image', 'video', 'audio'],
+            maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
+          });
+          let buf = downloaded.buffer;
+          let ext = verifiedProxyMediaExtension(downloaded);
+          const duck = await tryDecodeDuckPayload(buf);
+          if (duck?.decoded && duck.buffer) {
+            const decoded = validateProxyMediaBuffer(duck.buffer, '', {
+              allowedKinds: ['image', 'video', 'audio'],
+              maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
+            });
+            buf = duck.buffer;
+            ext = verifiedProxyMediaExtension(decoded);
+            console.log(
+              '[RH/query][duck] decoded',
+              `bits=${duck.lsbBits}`,
+              `${duck.originalExt} -> ${ext}`,
+              `kind=${duck.kind}`,
+              `bytes=${buf.length}`,
+            );
+          } else if (duck?.passwordProtected) {
+            console.log('[RH/query][duck] password protected payload detected, keep original duck image');
           }
+          const filename = `rh_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
+          fs.mkdirSync(config.OUTPUT_DIR, { recursive: true });
+          fs.writeFileSync(path.join(config.OUTPUT_DIR, filename), buf);
+          urls.push(`/files/output/${filename}`);
         } catch (downloadError) {
-          console.warn(`[RH/query] save output failed taskId=${taskId} url=${String(remote).slice(0, 140)} error=${downloadError?.message || downloadError}`);
-          urls.push(remote);
+          console.warn(`[RH/query] save output failed taskId=${taskId} ${opaqueDiagnosticSummary('url', remote)} error=${safeDiagnosticText(downloadError?.message || downloadError, 200)}`);
         }
+      }
+      if (arr.length > 0 && urls.length === 0) {
+        return res.status(502).json({ success: false, error: 'RunningHub 输出均未通过安全下载校验' });
       }
     } else if (taskCode === '804') status = 'RUNNING';
     else if (taskCode === '813') status = 'QUEUED';
@@ -4089,22 +5596,21 @@ router.get('/runninghub/query', async (req, res) => {
         failReasonStr = String(failReasonRaw);
       }
     }
-    console.log(`[RH/query] site=${selectedCandidate.id} taskId=${taskId} status=${status} code=${data.code} urls=${urls.length}${failReasonStr ? ` fail=${String(failReasonStr).slice(0, 160)}` : ''}`);
+    console.log(`[RH/query] site=${selectedCandidate.id} taskId=${taskId} status=${status} code=${data.code} urls=${urls.length}${failReasonStr ? ` ${opaqueDiagnosticSummary('fail', failReasonStr)}` : ''}`);
     res.json({
       success: true,
       data: {
         status,
         urls,
-        failReason: failReasonStr,
+        failReason: failReasonStr ? 'RunningHub 任务失败' : null,
         code: data.code,
         site: selectedCandidate.id,
         fallbackUsed: selectedCandidate.id !== requestedSite,
-        raw: data,
       },
     });
   } catch (e) {
-    console.error('proxy/rh/query 错误:', e);
-    res.status(500).json({ success: false, error: e.message || '请求失败' });
+    proxyRouteError('proxy/rh/query 错误', e);
+    res.status(502).json({ success: false, error: 'RunningHub 查询请求失败' });
   }
 });
 
@@ -4112,7 +5618,7 @@ router.post('/runninghub/cancel', async (req, res) => {
   const settings = loadRawSettings();
   const taskId = String(req.body?.taskId || '').trim();
   if (!taskId) return res.status(400).json({ success: false, error: 'taskId 必填' });
-  const taskMeta = recallTaskMeta(taskId);
+  const taskMeta = recallTaskMeta(taskId, 'runninghub');
   const requestedSite = rhRequestedSite(taskMeta?.rhSite || req.body?.site);
   const candidates = buildRhSiteCandidates(settings, requestedSite, taskMeta?.apiKey || '');
   if (candidates.length === 0) return res.status(400).json({ success: false, error: missingRhKeyError(requestedSite) });
@@ -4122,7 +5628,7 @@ router.post('/runninghub/cancel', async (req, res) => {
     let lastCandidate = candidates[0];
     for (let index = 0; index < candidates.length; index += 1) {
       const candidate = candidates[index];
-      const r = await fetch(`${candidate.baseUrl}/task/openapi/cancel`, {
+      const r = await fetchProviderResponse(`${candidate.baseUrl}/task/openapi/cancel`, {
         method: 'POST',
         headers: { Host: candidate.host, 'Content-Type': 'application/json', Authorization: `Bearer ${candidate.apiKey}` },
         body: JSON.stringify({ apiKey: candidate.apiKey, taskId }),
@@ -4131,30 +5637,22 @@ router.post('/runninghub/cancel', async (req, res) => {
       lastResponse = r;
       lastData = data;
       lastCandidate = candidate;
-      console.log(`[RH/cancel] site=${candidate.id} taskId=${taskId} http=${r.status} code=${data?.code} msg=${data?.msg || ''}`);
+      console.log(`[RH/cancel] site=${candidate.id} taskId=${taskId} http=${r.status} code=${data?.code}${data?.msg ? ` ${opaqueDiagnosticSummary('message', data.msg)}` : ''}`);
       if (String(data?.code) === '0') {
         rememberTaskKey(taskId, candidate.apiKey, { ...(taskMeta || {}), provider: 'runninghub', rhSite: candidate.id });
-        return res.json({ success: true, data: { taskId, site: candidate.id, fallbackUsed: candidate.id !== requestedSite, raw: data } });
+        return res.json({ success: true, data: { taskId, site: candidate.id, fallbackUsed: candidate.id !== requestedSite } });
       }
       const next = candidates[index + 1];
       if (!next || !shouldRetryRhSiteResponse(r, data)) break;
       logRhSiteFallback('cancel', candidate, next, data?.msg || `HTTP ${r.status}`);
     }
     try {
-      console.warn(`[RH/cancel] failed site=${lastCandidate.id} taskId=${taskId} raw=${JSON.stringify(lastData).slice(0, 500)}`);
+      console.warn(`[RH/cancel] failed site=${lastCandidate.id} taskId=${taskId} ${opaqueDiagnosticSummary('response', JSON.stringify(lastData))}`);
     } catch {}
-    return res.status(lastResponse?.status === 401 || lastResponse?.status === 403 ? lastResponse.status : 400).json({ success: false, error: lastData?.msg || `RH 取消失败 code=${lastData?.code}` });
+    return res.status(lastResponse?.status === 401 || lastResponse?.status === 403 ? lastResponse.status : 400).json({ success: false, error: `RH 取消失败 code=${lastData?.code}` });
   } catch (e) {
-    console.error('proxy/rh/cancel 错误:', e);
-    res.status(502).json({
-      success: false,
-      error: e.message || '请求失败',
-      data: {
-        taskId,
-        contentType: e.contentType || '',
-        preview: e.preview || '',
-      },
-    });
+    proxyRouteError('proxy/rh/cancel 错误', e);
+    res.status(502).json({ success: false, error: 'RunningHub 取消请求失败', data: { taskId } });
   }
 });
 
@@ -4167,52 +5665,54 @@ router.post('/runninghub/cancel', async (req, res) => {
 //       提交工作流前先把 url 转成 RH 内部 fileName，再写入 nodeInfoList.fieldValue。
 // 协议: POST {RH}/task/openapi/upload  (multipart: apiKey, fileType=input, file)
 // ----------------------------------------------------------------
-router.post('/runninghub/upload-asset', express.json({ limit: '20mb' }), async (req, res) => {
+router.post('/runninghub/upload-asset', express.json({ limit: '64kb', strict: true }), async (req, res) => {
   const settings = loadRawSettings();
   const requestedSite = rhRequestedSite(req.body?.site);
   const candidates = buildRhSiteCandidates(settings, requestedSite);
   if (candidates.length === 0) return res.status(400).json({ success: false, error: missingRhKeyError(requestedSite) });
   const url = String(req.body?.url || '').trim();
   if (!url) return res.status(400).json({ success: false, error: 'url 必填' });
+  if (Buffer.byteLength(url, 'utf8') > 16_384) return res.status(400).json({ success: false, error: 'url 过长' });
   try {
     // 1) 拿到 buffer + mime + filename
     let buf;
     let mime = 'application/octet-stream';
     let baseName = 'asset';
-    if (url.startsWith('/files/output/') || url.startsWith('/output/')) {
-      // 本地静态资源 - 输出目录
-      const rel = url.replace(/^\/files\/output\//, '').replace(/^\/output\//, '');
-      const full = path.join(config.OUTPUT_DIR, rel);
-      if (!fs.existsSync(full)) return res.status(404).json({ success: false, error: '本地文件不存在: ' + url });
-      buf = fs.readFileSync(full);
-      baseName = path.basename(full);
-    } else if (url.startsWith('/files/input/') || url.startsWith('/input/')) {
-      // 本地静态资源 - 上传目录（视频/音频/参考图上传节点的产物）
-      const rel = url.replace(/^\/files\/input\//, '').replace(/^\/input\//, '');
-      const full = path.join(config.INPUT_DIR, rel);
-      if (!fs.existsSync(full)) return res.status(404).json({ success: false, error: '本地文件不存在: ' + url });
-      buf = fs.readFileSync(full);
-      baseName = path.basename(full);
+    if (url.startsWith('/files/output/') || url.startsWith('/output/')
+      || url.startsWith('/files/input/') || url.startsWith('/input/')) {
+      const local = readMountedFileReference(url, [
+        { prefixes: ['/files/output/', '/output/'], root: config.OUTPUT_DIR },
+        { prefixes: ['/files/input/', '/input/'], root: config.INPUT_DIR },
+      ], PROXY_MEDIA_REFERENCE_MAX_BYTES);
+      if (!local) {
+        return res.status(404).json({ success: false, error: '本地素材不存在、超限或越出允许目录' });
+      }
+      buf = local.buffer;
+      mime = mimeTypeForProxyFilename(local.filename);
+      const verified = validateProxyMediaBuffer(buf, mime, {
+        allowedKinds: ['image', 'video', 'audio'],
+        maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
+      });
+      mime = verified.contentType || mime;
+      baseName = path.basename(local.filename);
     } else if (/^https?:\/\//i.test(url)) {
-      const fr = await fetch(url);
-      if (!fr.ok) return res.status(400).json({ success: false, error: `下载素材失败 HTTP ${fr.status}` });
-      buf = Buffer.from(await fr.arrayBuffer());
-      mime = fr.headers.get('content-type') || mime;
+      const remote = await fetchProxyRemoteMedia(url, {
+        allowedKinds: ['image', 'video', 'audio'],
+        maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
+      });
+      buf = remote.buffer;
+      mime = remote.contentType || mime;
       const tail = url.split(/[?#]/)[0];
       baseName = tail.split('/').pop() || baseName;
     } else {
       return res.status(400).json({ success: false, error: '不支持的 url: ' + url });
     }
-    // 2) 根据扩展名校正 mime
+    // 2) MIME 只服从已验证的响应类型/魔数，扩展名不能反向覆盖它。
     const extMatch = baseName.match(/\.([a-zA-Z0-9]+)$/);
     const ext = extMatch ? extMatch[1].toLowerCase() : '';
-    const mimeMap = {
-      png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp',
-      mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', m4v: 'video/x-m4v', mkv: 'video/x-matroska',
-      mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4', flac: 'audio/flac',
-    };
-    if (mimeMap[ext]) mime = mimeMap[ext];
-    if (!ext) baseName += '.bin';
+    const verifiedExt = extFromContentType(mime);
+    if (verifiedExt && verifiedExt !== ext) baseName = `${path.basename(baseName, path.extname(baseName))}.${verifiedExt}`;
+    else if (!ext) baseName += verifiedExt ? `.${verifiedExt}` : '.bin';
     // 3) FormData 上传到 RH
     let lastData = null;
     for (let index = 0; index < candidates.length; index += 1) {
@@ -4221,7 +5721,7 @@ router.post('/runninghub/upload-asset', express.json({ limit: '20mb' }), async (
       fd.append('apiKey', candidate.apiKey);
       fd.append('fileType', 'input');
       fd.append('file', new Blob([buf], { type: mime }), baseName);
-      const r = await fetch(`${candidate.baseUrl}/task/openapi/upload`, {
+      const r = await fetchProviderResponse(`${candidate.baseUrl}/task/openapi/upload`, {
         method: 'POST',
         headers: { Host: candidate.host, Authorization: `Bearer ${candidate.apiKey}` },
         body: fd,
@@ -4236,10 +5736,10 @@ router.post('/runninghub/upload-asset', express.json({ limit: '20mb' }), async (
       if (!next || !shouldRetryRhSiteResponse(r, data)) break;
       logRhSiteFallback('upload', candidate, next, data?.msg || `HTTP ${r.status}`);
     }
-    return res.status(400).json({ success: false, error: lastData?.msg || `RH 上传失败 code=${lastData?.code}` });
+    return res.status(400).json({ success: false, error: `RH 上传失败 code=${lastData?.code}` });
   } catch (e) {
-    console.error('proxy/rh/upload-asset 错误:', e);
-    res.status(500).json({ success: false, error: e.message || '请求失败' });
+    proxyRouteError('proxy/rh/upload-asset 错误', e);
+    res.status(Number(e?.status) || 400).json({ success: false, error: proxyPublicError(e, '素材上传失败') });
   }
 });
 
@@ -4256,23 +5756,50 @@ router.get('/runninghub/app-info', async (req, res) => {
     for (let index = 0; index < candidates.length; index += 1) {
       const candidate = candidates[index];
       const url = `${candidate.baseUrl}/api/webapp/apiCallDemo?apiKey=${encodeURIComponent(candidate.apiKey)}&webappId=${encodeURIComponent(webappId)}`;
-      const r = await fetch(url, { method: 'GET', headers: { Host: candidate.host, Authorization: `Bearer ${candidate.apiKey}` } });
+      const r = await fetchProviderResponse(url, { method: 'GET', headers: { Host: candidate.host, Authorization: `Bearer ${candidate.apiKey}` } });
       const data = await parseJsonResponse(r, `RH ${candidate.label}应用参数接口`);
       lastData = data;
       if (String(data?.code) === '0') {
         return res.json({
           success: true,
-          data: { ...(data.data || {}), rhSite: candidate.id, rhFallbackUsed: candidate.id !== requestedSite },
+          data: {
+            ...normalizeRhAppInfo(data.data || {}, webappId, [candidate.apiKey]),
+            rhSite: candidate.id,
+            rhFallbackUsed: candidate.id !== requestedSite,
+          },
         });
       }
       const next = candidates[index + 1];
       if (!next || !shouldRetryRhSiteResponse(r, data)) break;
       logRhSiteFallback('app-info', candidate, next, data?.msg || `HTTP ${r.status}`);
     }
-    return res.status(400).json({ success: false, error: lastData?.msg || `RH 查询失败 code=${lastData?.code}` });
+    const code = String(lastData?.code ?? '').replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 32) || 'unknown';
+    return res.status(400).json({ success: false, error: `RH 查询失败 code=${code}` });
   } catch (e) {
-    res.status(500).json({ success: false, error: e.message || '请求失败' });
+    const exactSecrets = candidates.map((candidate) => candidate.apiKey);
+    proxyRouteError('proxy/rh/app-info 错误', e, exactSecrets);
+    res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e, '请求失败', exactSecrets) });
   }
 });
 
 module.exports = router;
+module.exports._test = Object.freeze({
+  diagnosticDigest,
+  FAL_TOOLBOX_AUTHORITY,
+  fetchProxyRemoteMedia,
+  fetchFalPollJson,
+  fetchProviderResponse,
+  opaqueDiagnosticSummary,
+  parseJsonResponse,
+  resetFalTaskRegistryMemoryForTests,
+  resolveMountedFileReference,
+  safeDiagnosticText,
+  safeFalRequestId,
+  setProxySafeRemoteTestOptions,
+  summarizeImageRef,
+  summarizeRunningHubOutputShape,
+  trustedFalPollUrl,
+  uploadAudioToSignedUrl,
+  validateProxyMediaBuffer,
+  verifiedProxyMediaExtension,
+});

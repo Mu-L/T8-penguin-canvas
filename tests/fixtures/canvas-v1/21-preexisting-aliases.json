@@ -1,0 +1,18 @@
+{
+  "canvasId": "alias-history-board",
+  "projectId": "migration-project",
+  "name": "已有旧别名链",
+  "updatedAt": 1704067200021,
+  "nodes": [
+    { "id": "current-display-a", "entityUid": "old-non-uuid-identity-a", "legacyAliases": ["node-1", "标题节点", "current-display-a"], "type": "text", "position": { "x": 40, "y": 40 }, "data": { "label": "改过两次名的节点" } },
+    { "id": "current-display-b", "legacyAliases": ["node-2", "输出节点"], "type": "output", "position": { "x": 380, "y": 40 }, "data": { "label": "输出" } }
+  ],
+  "edges": [
+    { "id": "current-edge", "legacyAliases": ["edge-1", "旧连线"], "source": "node-1", "target": "输出节点", "label": "引用历史别名" }
+  ],
+  "viewport": { "x": 30, "y": 30, "zoom": 0.92 },
+  "renameHistory": [
+    { "from": "node-1", "to": "标题节点" },
+    { "from": "标题节点", "to": "current-display-a" }
+  ]
+}

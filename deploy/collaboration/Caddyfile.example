@@ -1,0 +1,29 @@
+{
+    admin off
+}
+
+canvas.example.com {
+    request_body {
+        # Match T8_COLLAB_MAX_UPLOAD_BYTES when that setting is changed.
+        max_size 512MB
+    }
+
+    reverse_proxy 127.0.0.1:18767 {
+        # Caddy already forwards WebSocket upgrades and maintains a safe
+        # X-Forwarded-For chain. Freeze the externally observed scheme/host.
+        header_up Host {host}
+        header_up X-Forwarded-Host {host}
+        header_up X-Forwarded-Proto https
+
+        transport http {
+            read_timeout 5m
+            write_timeout 5m
+        }
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "same-origin"
+    }
+}

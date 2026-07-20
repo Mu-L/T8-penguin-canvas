@@ -1,6 +1,7 @@
 'use strict';
 
 const { spawnSync } = require('child_process');
+const { evaluateWorktreeRole } = require('./worktree-role.cjs');
 
 const DEFAULT_ALLOWED_PACKAGING_DIRTY_PATHS = new Set([
   'tools/ffmpeg-runtime/ffmpeg.exe',
@@ -43,11 +44,33 @@ function readReleaseWorktreeStatus(root) {
   return String(result.stdout || '').replace(/\r?\n$/, '');
 }
 
+function readReleaseWorktreeBranch(root) {
+  const result = spawnSync('git', ['branch', '--show-current'], {
+    cwd: root,
+    encoding: 'utf8',
+    stdio: 'pipe',
+    windowsHide: true,
+  });
+  if (result.error || result.status !== 0) {
+    const detail = `${result.stdout || ''}${result.stderr || ''}`.trim();
+    throw new Error(`cannot inspect release branch${detail ? `: ${detail}` : ''}`);
+  }
+  return String(result.stdout || '').trim();
+}
+
+function assertReleaseWorktreeRole(root) {
+  const branch = readReleaseWorktreeBranch(root);
+  const result = evaluateWorktreeRole({ root, branch, mode: 'release' });
+  if (!result.ok) throw new Error(`invalid release worktree role:\n${result.errors.join('\n')}`);
+  return result;
+}
+
 function assertReleaseWorktreeClean({
   root,
   allowedPackagingDirtyPaths = DEFAULT_ALLOWED_PACKAGING_DIRTY_PATHS,
   log = console.log,
 } = {}) {
+  assertReleaseWorktreeRole(root);
   const status = readReleaseWorktreeStatus(root);
   const classified = classifyReleaseWorktreeStatus(status, allowedPackagingDirtyPaths);
   if (classified.unexpected.length > 0) {
@@ -62,7 +85,9 @@ function assertReleaseWorktreeClean({
 
 module.exports = {
   DEFAULT_ALLOWED_PACKAGING_DIRTY_PATHS,
+  assertReleaseWorktreeRole,
   assertReleaseWorktreeClean,
   classifyReleaseWorktreeStatus,
+  readReleaseWorktreeBranch,
   readReleaseWorktreeStatus,
 };

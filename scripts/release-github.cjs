@@ -13,6 +13,7 @@ const {
 } = require('./release-provenance.cjs');
 const { assertReleaseWorktreeClean } = require('./release-worktree.cjs');
 const { assertLatestYamlArtifact } = require('./latest-yml.cjs');
+const { assertCollaborationReleaseEvidence } = require('./collaboration-release-evidence.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
 const pkg = require(path.join(ROOT, 'package.json'));
@@ -647,6 +648,18 @@ function main() {
   console.log(`[release] repo=${repo} tag=${tag}`);
   const releaseTarget = getGitTarget();
   assertReleaseGitState(releaseTarget);
+
+  if (!dryRun) {
+    const evidence = assertCollaborationReleaseEvidence({
+      root: ROOT,
+      version,
+      target: releaseTarget,
+    });
+    console.log(
+      `[release] collaboration evidence: ${evidence.checkCount} checks, `
+      + `${evidence.artifactCount} artifacts, manifest ${evidence.manifestSha256}`,
+    );
+  }
 
   let sealedRecovery;
   if (!dryRun) {

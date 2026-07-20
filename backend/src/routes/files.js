@@ -18,11 +18,35 @@ const {
   MAX_IMAGE_INPUT_PIXELS,
 } = require('../services/assetIndexer');
 const { getAssetPreviewPipeline, sanitizePreviewError } = require('../services/assetPreviewPipeline');
+const { safeRemoteMediaDownload } = require('../utils/safeRemoteMediaFetch');
 
 const router = express.Router();
-const projectDatabase = getProjectDatabase(config);
-const previewPipeline = getAssetPreviewPipeline(config, projectDatabase);
-const assetIndexer = getBackgroundAssetIndexer(config, projectDatabase, previewPipeline);
+let projectDatabase = null;
+let previewPipeline = null;
+let assetIndexer = null;
+
+function getFilesProjectDatabase() {
+  if (!projectDatabase) projectDatabase = getProjectDatabase(config);
+  return projectDatabase;
+}
+
+function getFilesPreviewPipeline() {
+  if (!previewPipeline) {
+    previewPipeline = getAssetPreviewPipeline(config, getFilesProjectDatabase());
+  }
+  return previewPipeline;
+}
+
+function getFilesAssetIndexer() {
+  if (!assetIndexer) {
+    assetIndexer = getBackgroundAssetIndexer(
+      config,
+      getFilesProjectDatabase(),
+      getFilesPreviewPipeline(),
+    );
+  }
+  return assetIndexer;
+}
 const THUMBNAIL_IMAGE_RE = /\.(png|jpe?g|webp|gif|bmp|avif|tiff?)(?:$|\?)/i;
 const thumbnailInflight = new Map();
 const LOCAL_IMPORT_EXTENSIONS = new Map([
@@ -42,6 +66,25 @@ const LOCAL_IMPORT_EXTENSIONS = new Map([
   ['.avi', { kind: 'video', mime: 'video/x-msvideo' }],
   ['.m4v', { kind: 'video', mime: 'video/x-m4v' }],
 ]);
+const DEFAULT_FILE_UPLOAD_MAX_BYTES = 512 * 1024 * 1024;
+const DEFAULT_FILE_SAVE_MAX_BYTES = 512 * 1024 * 1024;
+const DEFAULT_DUCK_DECODE_MAX_BYTES = 128 * 1024 * 1024;
+const MAX_FILE_ROUTE_BYTES = 4 * 1024 * 1024 * 1024;
+const FILE_COPY_CHUNK_BYTES = 64 * 1024;
+const FILE_MEDIA_PREFIX_BYTES = 64 * 1024;
+const FILE_SAVE_TEST_OPTIONS = Object.create(null);
+
+function boundedFileBytes(value, fallback) {
+  const parsed = Math.trunc(Number(value));
+  return Number.isSafeInteger(parsed) && parsed > 0
+    ? Math.min(parsed, MAX_FILE_ROUTE_BYTES)
+    : fallback;
+}
+
+const FILE_UPLOAD_MAX_BYTES = boundedFileBytes(
+  config.FILE_UPLOAD_MAX_BYTES,
+  boundedFileBytes(config.COLLAB_MAX_UPLOAD_BYTES, DEFAULT_FILE_UPLOAD_MAX_BYTES),
+);
 
 // 配置 multer
 const storage = multer.diskStorage({
@@ -54,14 +97,22 @@ const storage = multer.diskStorage({
 });
 const upload = multer({
   storage,
+  limits: {
+    fileSize: FILE_UPLOAD_MAX_BYTES,
+    files: 1,
+    fields: 32,
+    fieldSize: 64 * 1024,
+    parts: 40,
+  },
 });
 
 function sendUploadError(res, err) {
   if (err instanceof multer.MulterError) {
-    return res.status(400).json({
+    const tooLarge = err.code === 'LIMIT_FILE_SIZE';
+    return res.status(tooLarge ? 413 : 400).json({
       success: false,
       code: err.code || 'upload_error',
-      error: err.message || '文件上传失败',
+      error: tooLarge ? '上传文件超过允许大小' : (err.message || '文件上传失败'),
     });
   }
   console.error('文件上传错误:', err);
@@ -84,7 +135,7 @@ router.post('/upload', (req, res) => {
     let asset = null;
     let indexError = null;
     try {
-      asset = await assetIndexer.indexFile(req.file.path, {
+      asset = await getFilesAssetIndexer().indexFile(req.file.path, {
         projectId: req.body?.projectId,
         rootName: 'input',
         rootPath: config.INPUT_DIR,
@@ -163,7 +214,7 @@ router.post('/import-local', express.json({ limit: '1mb' }), async (req, res) =>
     let asset = null;
     let indexError = null;
     try {
-      asset = await assetIndexer.indexFile(data.path, {
+      asset = await getFilesAssetIndexer().indexFile(data.path, {
         projectId: req.body?.projectId,
         rootName: 'input',
         rootPath: config.INPUT_DIR,
@@ -349,7 +400,7 @@ async function ensureThumbnailFile(sourcePath, target, size) {
   if (fs.existsSync(target)) return target;
   const inflight = thumbnailInflight.get(target);
   if (inflight) return inflight;
-  const promise = previewPipeline.runEphemeral(async () => {
+  const promise = getFilesPreviewPipeline().runEphemeral(async () => {
     if (fs.existsSync(target)) return target;
     await writeAtomicTarget(target, async (temporary) => {
       await sharp(sourcePath, {
@@ -428,13 +479,14 @@ router.post('/duck-decode', express.json({ limit: '256kb' }), async (req, res) =
     const items = [];
     for (let i = 0; i < limited.length; i += 1) {
       const sourceUrl = limited[i];
+      let openedSource = null;
       try {
-        const fp = resolveLocalFileUrl(sourceUrl);
-        if (!fp || !fs.existsSync(fp)) {
+        openedSource = await openMountedLocalSource(sourceUrl, fileSaveOptions().duckMaxBytes);
+        if (!openedSource) {
           items.push({ sourceUrl, decoded: false, reason: 'local_file_not_found' });
           continue;
         }
-        const decoded = await tryDecodeDuckPayload(fs.readFileSync(fp));
+        const decoded = await tryDecodeDuckPayload(await openedSource.handle.readFile());
         if (!decoded?.decoded || !decoded.buffer) {
           items.push({
             sourceUrl,
@@ -467,7 +519,14 @@ router.post('/duck-decode', express.json({ limit: '256kb' }), async (req, res) =
           lsbBits: decoded.lsbBits,
         });
       } catch (e) {
-        items.push({ sourceUrl, decoded: false, reason: e?.message || 'decode_failed' });
+        const reason = e?.code === 'media_too_large'
+          ? 'file_too_large'
+          : (e?.code === 'unsafe_local_source' ? 'unsafe_local_source' : 'decode_failed');
+        items.push({ sourceUrl, decoded: false, reason });
+      } finally {
+        if (openedSource?.handle) {
+          try { await openedSource.handle.close(); } catch (_) {}
+        }
       }
     }
     res.json({
@@ -580,97 +639,632 @@ router.post('/open-local-path', express.json({ limit: '64kb' }), async (req, res
   }
 });
 
-// v1.2.10.2: 全局生成素材自动保存到本地路径
-// POST /api/files/save-to-disk
-//   body: { url: string, filename?: string, kind?: 'image'|'video'|'audio' }
-//   url 支持:
-//     - /files/output/xxx       → 从 OUTPUT_DIR 复制
-//     - /files/input/xxx        → 从 INPUT_DIR 复制
-//     - http(s)://...           → fetch 拉取后写入
-//   读取当前 settings.fileSavePath, 不存在则 mkdir -p。
-//   冲突防护: 同名文件已存在 → 跳过并返回 exist:true(不覆盖)。
+function fileSaveError(code, message, status = 400, details = {}) {
+  return Object.assign(new Error(message), { code, status, ...details });
+}
+
+function fileSaveOptions() {
+  return {
+    maxBytes: boundedFileBytes(
+      FILE_SAVE_TEST_OPTIONS.maxBytes ?? config.FILE_SAVE_MAX_BYTES,
+      DEFAULT_FILE_SAVE_MAX_BYTES,
+    ),
+    duckMaxBytes: boundedFileBytes(
+      FILE_SAVE_TEST_OPTIONS.duckMaxBytes ?? config.DUCK_DECODE_MAX_BYTES,
+      DEFAULT_DUCK_DECODE_MAX_BYTES,
+    ),
+    deadlineMs: boundedFileBytes(
+      FILE_SAVE_TEST_OPTIONS.deadlineMs ?? config.FILE_SAVE_REMOTE_DEADLINE_MS,
+      10 * 60 * 1000,
+    ),
+    idleTimeoutMs: boundedFileBytes(
+      FILE_SAVE_TEST_OPTIONS.idleTimeoutMs ?? config.FILE_SAVE_REMOTE_IDLE_TIMEOUT_MS,
+      30 * 1000,
+    ),
+    maxRedirects: Number.isSafeInteger(Number(FILE_SAVE_TEST_OPTIONS.maxRedirects))
+      ? Math.max(0, Math.min(8, Number(FILE_SAVE_TEST_OPTIONS.maxRedirects)))
+      : 4,
+    allowPrivateForTests: FILE_SAVE_TEST_OPTIONS.allowPrivateForTests,
+    lookupImpl: FILE_SAVE_TEST_OPTIONS.lookupImpl,
+  };
+}
+
+function setFileSaveRouteTestOptions(options = {}) {
+  for (const key of Object.keys(FILE_SAVE_TEST_OPTIONS)) delete FILE_SAVE_TEST_OPTIONS[key];
+  if (!options || typeof options !== 'object') return;
+  for (const key of [
+    'maxBytes',
+    'duckMaxBytes',
+    'deadlineMs',
+    'idleTimeoutMs',
+    'maxRedirects',
+    'allowPrivateForTests',
+    'lookupImpl',
+  ]) {
+    if (Object.hasOwn(options, key)) FILE_SAVE_TEST_OPTIONS[key] = options[key];
+  }
+}
+
+function pathIsInside(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return relative !== ''
+    && relative !== '..'
+    && !relative.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(relative);
+}
+
+function sameFileIdentity(left, right) {
+  if (!left || !right) return false;
+  if (typeof left.dev === 'number' && typeof right.dev === 'number'
+    && typeof left.ino === 'number' && typeof right.ino === 'number') {
+    return left.dev === right.dev && left.ino === right.ino;
+  }
+  return left.size === right.size && left.mtimeMs === right.mtimeMs;
+}
+
+function decodeMountedSegment(encoded) {
+  if (!encoded || /%(?:2f|5c)/i.test(encoded)) {
+    throw fileSaveError('unsafe_local_source', '本地素材地址不安全', 400);
+  }
+  let decoded;
+  try {
+    decoded = decodeURIComponent(encoded).normalize('NFKC');
+  } catch (_) {
+    throw fileSaveError('unsafe_local_source', '本地素材地址不安全', 400);
+  }
+  // A still-encoded octet after one decode makes the path interpretation
+  // ambiguous (for example %252e%252e). Fail closed instead of decoding twice.
+  if (/%[0-9a-f]{2}/i.test(decoded)
+    || !decoded
+    || decoded === '.'
+    || decoded === '..'
+    || /[\\/\0:\u0000-\u001f\u007f]/.test(decoded)) {
+    throw fileSaveError('unsafe_local_source', '本地素材地址不安全', 400);
+  }
+  return decoded;
+}
+
+function parseMountedFileUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const pathname = raw.split(/[?#]/, 1)[0];
+  const mounts = [
+    { prefix: '/files/output/', root: config.OUTPUT_DIR },
+    { prefix: '/files/input/', root: config.INPUT_DIR },
+  ];
+  const mount = mounts.find((candidate) => pathname.startsWith(candidate.prefix));
+  if (!mount) return null;
+  const encodedSegments = pathname.slice(mount.prefix.length).split('/');
+  if (!encodedSegments.length || encodedSegments.some((segment) => !segment)) {
+    throw fileSaveError('unsafe_local_source', '本地素材地址不安全', 400);
+  }
+  return {
+    root: mount.root,
+    segments: encodedSegments.map(decodeMountedSegment),
+  };
+}
+
+async function ensureSafeSaveDirectory(rawSavePath) {
+  const raw = String(rawSavePath || '').trim();
+  if (!raw || raw.includes('\0') || !path.isAbsolute(raw)) {
+    throw fileSaveError('save_directory_unavailable', '文件自动保存目录不可用', 400);
+  }
+  const resolved = path.resolve(raw);
+  const parsed = path.parse(resolved);
+  let current = parsed.root;
+  try {
+    const rootStat = await fs.promises.lstat(current);
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+      throw fileSaveError('save_directory_unsafe', '文件自动保存目录不安全', 400);
+    }
+    const relative = path.relative(current, resolved);
+    const segments = relative ? relative.split(path.sep).filter(Boolean) : [];
+    for (const segment of segments) {
+      current = path.join(current, segment);
+      let stat;
+      try {
+        stat = await fs.promises.lstat(current);
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+        try {
+          await fs.promises.mkdir(current, { mode: 0o700 });
+        } catch (mkdirError) {
+          if (mkdirError?.code !== 'EEXIST') throw mkdirError;
+        }
+        stat = await fs.promises.lstat(current);
+      }
+      if (!stat.isDirectory() || stat.isSymbolicLink()) {
+        throw fileSaveError('save_directory_unsafe', '文件自动保存目录不安全', 400);
+      }
+    }
+    return await fs.promises.realpath(resolved);
+  } catch (error) {
+    if (error?.status) throw error;
+    throw fileSaveError('save_directory_unavailable', '文件自动保存目录不可用', 400);
+  }
+}
+
+async function openMountedLocalSource(value, maxBytes) {
+  const parsed = parseMountedFileUrl(value);
+  if (!parsed) return null;
+  const root = path.resolve(String(parsed.root || ''));
+  let handle = null;
+  try {
+    const rootStat = await fs.promises.lstat(root);
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+      throw fileSaveError('unsafe_local_source', '本地素材地址不安全', 400);
+    }
+    const realRoot = await fs.promises.realpath(root);
+    let current = root;
+    let lastStat = null;
+    for (let index = 0; index < parsed.segments.length; index += 1) {
+      current = path.join(current, parsed.segments[index]);
+      try {
+        lastStat = await fs.promises.lstat(current);
+      } catch (error) {
+        if (error?.code === 'ENOENT') {
+          throw fileSaveError('local_source_not_found', '本地素材不存在', 404);
+        }
+        throw error;
+      }
+      const isLast = index === parsed.segments.length - 1;
+      if (lastStat.isSymbolicLink()
+        || (isLast ? !lastStat.isFile() : !lastStat.isDirectory())) {
+        throw fileSaveError('unsafe_local_source', '本地素材地址不安全', 400);
+      }
+    }
+    const absolute = path.resolve(root, ...parsed.segments);
+    if (!pathIsInside(root, absolute)) {
+      throw fileSaveError('unsafe_local_source', '本地素材地址不安全', 400);
+    }
+    const realSource = await fs.promises.realpath(absolute);
+    if (!pathIsInside(realRoot, realSource)) {
+      throw fileSaveError('unsafe_local_source', '本地素材地址不安全', 400);
+    }
+    handle = await fs.promises.open(absolute, 'r');
+    const stat = await handle.stat();
+    if (!stat.isFile() || !sameFileIdentity(lastStat, stat)) {
+      throw fileSaveError('unsafe_local_source', '本地素材地址不安全', 400);
+    }
+    if (stat.size <= 0) throw fileSaveError('unsupported_media', '素材不是允许的媒体文件', 415);
+    if (stat.size > maxBytes) throw fileSaveError('media_too_large', '素材超过允许大小', 413);
+    return {
+      handle,
+      stat,
+      sourceName: parsed.segments.at(-1),
+    };
+  } catch (error) {
+    if (handle) {
+      try { await handle.close(); } catch (_) {}
+    }
+    if (error?.status) throw error;
+    throw fileSaveError('unsafe_local_source', '本地素材不可读取', 400);
+  }
+}
+
+function mediaType(kind, mime, extension, extensions = []) {
+  return {
+    kind,
+    mime,
+    extension,
+    extensions: new Set([extension, ...extensions].map((item) => String(item).toLowerCase())),
+  };
+}
+
+function bufferHas(buffer, signature, offset = 0) {
+  return Buffer.isBuffer(buffer)
+    && buffer.length >= offset + signature.length
+    && buffer.subarray(offset, offset + signature.length).equals(signature);
+}
+
+function detectSavedMediaType(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 2) return null;
+  if (bufferHas(buffer, Buffer.from('89504e470d0a1a0a', 'hex'))) return mediaType('image', 'image/png', 'png');
+  if (bufferHas(buffer, Buffer.from('ffd8ff', 'hex'))) return mediaType('image', 'image/jpeg', 'jpg', ['jpeg']);
+  if (bufferHas(buffer, Buffer.from('GIF87a')) || bufferHas(buffer, Buffer.from('GIF89a'))) return mediaType('image', 'image/gif', 'gif');
+  if (bufferHas(buffer, Buffer.from('BM'))) return mediaType('image', 'image/bmp', 'bmp');
+  if (bufferHas(buffer, Buffer.from('49492a00', 'hex')) || bufferHas(buffer, Buffer.from('4d4d002a', 'hex'))) {
+    return mediaType('image', 'image/tiff', 'tiff', ['tif']);
+  }
+  if (bufferHas(buffer, Buffer.from('RIFF')) && buffer.subarray(8, 12).toString('ascii') === 'WEBP') {
+    return mediaType('image', 'image/webp', 'webp');
+  }
+  if (bufferHas(buffer, Buffer.from('RIFF')) && buffer.subarray(8, 12).toString('ascii') === 'WAVE') {
+    return mediaType('audio', 'audio/wav', 'wav', ['wave']);
+  }
+  if (bufferHas(buffer, Buffer.from('RIFF')) && buffer.subarray(8, 12).toString('ascii') === 'AVI ') {
+    return mediaType('video', 'video/x-msvideo', 'avi');
+  }
+  if (bufferHas(buffer, Buffer.from('OggS'))) return mediaType('audio', 'audio/ogg', 'ogg', ['oga', 'opus']);
+  if (bufferHas(buffer, Buffer.from('fLaC'))) return mediaType('audio', 'audio/flac', 'flac');
+  if (bufferHas(buffer, Buffer.from([
+    0x30, 0x26, 0xb2, 0x75, 0x8e, 0x66, 0xcf, 0x11,
+    0xa6, 0xd9, 0x00, 0xaa, 0x00, 0x62, 0xce, 0x6c,
+  ]))) return mediaType('audio', 'audio/x-ms-wma', 'wma');
+  if (buffer.length >= 2 && buffer[0] === 0xff && (buffer[1] & 0xf6) === 0xf0) {
+    return mediaType('audio', 'audio/aac', 'aac');
+  }
+  if (bufferHas(buffer, Buffer.from('ID3'))
+    || (buffer.length >= 2 && buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0)) {
+    return mediaType('audio', 'audio/mpeg', 'mp3', ['mpga']);
+  }
+  if (buffer.length >= 12 && buffer.subarray(4, 8).toString('ascii') === 'ftyp') {
+    const brand = buffer.subarray(8, 12).toString('ascii').toLowerCase();
+    if (['avif', 'avis', 'heic', 'heix', 'hevc', 'mif1', 'msf1'].includes(brand)) {
+      return mediaType('image', 'image/avif', 'avif', ['heic', 'heif']);
+    }
+    if (['m4a ', 'm4b ', 'm4p '].includes(brand)) {
+      return mediaType('audio', 'audio/mp4', 'm4a', ['m4b', 'mp4']);
+    }
+    const isoPrefix = buffer.toString('latin1').toLowerCase();
+    if (isoPrefix.includes('soun') && !isoPrefix.includes('vide')) {
+      return mediaType('audio', 'audio/mp4', 'm4a', ['mp4']);
+    }
+    if (brand === 'qt  ') return mediaType('video', 'video/quicktime', 'mov', ['qt']);
+    return mediaType('video', 'video/mp4', 'mp4', ['m4v']);
+  }
+  if (bufferHas(buffer, Buffer.from('1a45dfa3', 'hex'))) {
+    const ebmlPrefix = buffer.toString('latin1').toLowerCase();
+    if (ebmlPrefix.includes('matroska')) return mediaType('video', 'video/x-matroska', 'mkv');
+    return mediaType('video', 'video/webm', 'webm');
+  }
+  return null;
+}
+
+const CONTENT_TYPE_ALIASES = new Map([
+  ['image/jpg', 'image/jpeg'],
+  ['audio/mp3', 'audio/mpeg'],
+  ['audio/x-wav', 'audio/wav'],
+  ['audio/wave', 'audio/wav'],
+  ['application/ogg', 'audio/ogg'],
+  ['audio/x-m4a', 'audio/mp4'],
+  ['video/x-m4v', 'video/mp4'],
+]);
+
+function normalizedMediaContentType(value) {
+  const normalized = String(value || '').split(';', 1)[0].trim().toLowerCase();
+  return CONTENT_TYPE_ALIASES.get(normalized) || normalized;
+}
+
+async function readFilePrefix(handle, size) {
+  const length = Math.min(Number(size) || 0, FILE_MEDIA_PREFIX_BYTES);
+  const prefix = Buffer.alloc(length);
+  let offset = 0;
+  while (offset < length) {
+    const result = await handle.read(prefix, offset, length - offset, offset);
+    if (!result.bytesRead) break;
+    offset += result.bytesRead;
+  }
+  return offset === prefix.length ? prefix : prefix.subarray(0, offset);
+}
+
+async function validateSavedMedia(handle, stat, contentType, expectedKind) {
+  const prefix = await readFilePrefix(handle, stat.size);
+  const detected = detectSavedMediaType(prefix);
+  if (!detected) throw fileSaveError('unsupported_media', '素材不是允许的媒体文件', 415);
+  const requestedKind = String(expectedKind || '').trim().toLowerCase();
+  if (requestedKind && !['image', 'video', 'audio'].includes(requestedKind)) {
+    throw fileSaveError('unsupported_media_kind', '素材类型不受支持', 400);
+  }
+  if (requestedKind && requestedKind !== detected.kind) {
+    throw fileSaveError('media_kind_mismatch', '素材类型与文件内容不一致', 415);
+  }
+  const declared = normalizedMediaContentType(contentType);
+  if (declared && declared !== 'application/octet-stream' && declared !== 'binary/octet-stream') {
+    const declaredKind = declared.split('/', 1)[0];
+    if (!['image', 'video', 'audio'].includes(declaredKind)
+      || declaredKind !== detected.kind
+      || declared !== detected.mime) {
+      throw fileSaveError('media_type_mismatch', '素材 Content-Type 与文件内容不一致', 415);
+    }
+  }
+  return detected;
+}
+
+function inferredRemoteFilename(value) {
+  try {
+    const target = new URL(String(value || ''));
+    const encoded = target.pathname.split('/').filter(Boolean).at(-1) || '';
+    if (!encoded) return '';
+    const decoded = decodeURIComponent(encoded).normalize('NFKC');
+    return /%[0-9a-f]{2}/i.test(decoded) ? '' : decoded;
+  } catch (_) {
+    return '';
+  }
+}
+
+function safeSavedFilename(requested, fallbackName, detected) {
+  const raw = typeof requested === 'string' && requested.trim() ? requested : fallbackName;
+  let leaf = String(raw || '').normalize('NFKC').split(/[\\/]/).at(-1) || '';
+  leaf = leaf.replace(/[\u0000-\u001f\u007f<>:"|?*]/g, '_').replace(/[. ]+$/g, '').trim();
+  const parsed = path.parse(leaf);
+  let stem = String(parsed.name || '')
+    .replace(/[^\p{L}\p{N}._()\[\] -]+/gu, '_')
+    .replace(/^\.+/, '')
+    .replace(/[. ]+$/g, '')
+    .trim();
+  if (!stem || stem === '.' || stem === '..') stem = `out_${Date.now()}`;
+  if (/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(stem)) stem = `_${stem}`;
+  const requestedExt = String(parsed.ext || '').slice(1).toLowerCase();
+  const extension = detected.extensions.has(requestedExt) ? requestedExt : detected.extension;
+  const maximumStemLength = Math.max(16, 180 - extension.length - 1);
+  stem = stem.slice(0, maximumStemLength).replace(/[. ]+$/g, '') || `out_${Date.now()}`;
+  return `${stem}.${extension}`;
+}
+
+async function existingSafeTarget(target) {
+  try {
+    const stat = await fs.promises.lstat(target);
+    if (stat.isSymbolicLink() || !stat.isFile()) {
+      throw fileSaveError('save_target_unsafe', '自动保存目标不安全', 409);
+    }
+    return true;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+async function removeOwnedTarget(target, identity) {
+  try {
+    const current = await fs.promises.lstat(target);
+    if (!current.isSymbolicLink() && sameFileIdentity(current, identity)) {
+      await fs.promises.unlink(target);
+    }
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+}
+
+async function writeWholeFileChunk(handle, chunk) {
+  let offset = 0;
+  while (offset < chunk.length) {
+    const result = await handle.write(chunk, offset, chunk.length - offset, null);
+    if (!result.bytesWritten) throw fileSaveError('save_write_failed', '自动保存文件写入失败', 500);
+    offset += result.bytesWritten;
+  }
+}
+
+async function copyHandleExclusive(sourceHandle, sourceStat, target, maxBytes) {
+  let targetHandle = null;
+  let targetIdentity = null;
+  try {
+    targetHandle = await fs.promises.open(target, 'wx', 0o600);
+    targetIdentity = await targetHandle.stat();
+    await targetHandle.chmod(0o600);
+    const buffer = Buffer.allocUnsafe(FILE_COPY_CHUNK_BYTES);
+    let offset = 0;
+    while (true) {
+      const result = await sourceHandle.read(buffer, 0, buffer.length, offset);
+      if (!result.bytesRead) break;
+      if (offset + result.bytesRead > maxBytes || offset + result.bytesRead > sourceStat.size) {
+        throw fileSaveError('media_changed', '素材在保存过程中发生变化', 409);
+      }
+      await writeWholeFileChunk(targetHandle, buffer.subarray(0, result.bytesRead));
+      offset += result.bytesRead;
+    }
+    if (offset !== sourceStat.size) {
+      throw fileSaveError('media_changed', '素材在保存过程中发生变化', 409);
+    }
+    await targetHandle.sync();
+    await targetHandle.close();
+    targetHandle = null;
+    return offset;
+  } catch (error) {
+    if (targetHandle) {
+      try { await targetHandle.close(); } catch (_) {}
+    }
+    if (targetIdentity) {
+      try { await removeOwnedTarget(target, targetIdentity); } catch (_) {}
+    }
+    if (error?.code === 'EEXIST' || error?.code === 'ELOOP') {
+      throw fileSaveError('save_target_exists', '自动保存目标已存在', 409);
+    }
+    if (error?.status) throw error;
+    throw fileSaveError('save_write_failed', '自动保存文件写入失败', 500);
+  }
+}
+
+function readConfiguredSavePath() {
+  let savePath = config.DEFAULT_LOCAL_SAVE_DIR;
+  try {
+    if (fs.existsSync(config.SETTINGS_FILE)) {
+      const settings = JSON.parse(fs.readFileSync(config.SETTINGS_FILE, 'utf8'));
+      if (typeof settings?.fileSavePath === 'string' && settings.fileSavePath.trim()) {
+        savePath = settings.fileSavePath.trim();
+      }
+    }
+  } catch (_) {
+    // A malformed optional settings file falls back to the configured default.
+  }
+  if (!savePath) throw fileSaveError('save_directory_unavailable', '未配置文件自动保存目录', 400);
+  return savePath;
+}
+
+function targetForSavedMedia(saveDirectory, requestedFilename, fallbackName, detected) {
+  const filename = safeSavedFilename(requestedFilename, fallbackName, detected);
+  const target = path.resolve(saveDirectory, filename);
+  if (!pathIsInside(saveDirectory, target)) {
+    throw fileSaveError('save_target_unsafe', '自动保存目标不安全', 400);
+  }
+  return { filename, target };
+}
+
+function publicRemoteSaveError(error) {
+  const mappings = {
+    invalid_url: ['remote_url_invalid', '远程素材地址无效', 400],
+    invalid_protocol: ['remote_url_invalid', '远程素材地址无效', 400],
+    url_credentials_forbidden: ['remote_url_invalid', '远程素材地址无效', 400],
+    private_address: ['remote_address_forbidden', '远程素材地址不允许访问', 400],
+    item_too_large: ['media_too_large', '素材超过允许大小', 413],
+    invalid_content_length: ['remote_body_invalid', '远程素材响应无效', 502],
+    content_length_mismatch: ['remote_body_incomplete', '远程素材响应不完整', 502],
+    fetch_timeout: ['remote_timeout', '远程素材下载超时', 504],
+    too_many_redirects: ['remote_redirect_rejected', '远程素材重定向不安全', 502],
+    invalid_redirect: ['remote_redirect_rejected', '远程素材重定向不安全', 502],
+    remote_http_error: ['remote_http_error', '远程素材下载失败', 502],
+    remote_response_aborted: ['remote_body_incomplete', '远程素材响应不完整', 502],
+    download_target_exists: ['save_target_exists', '自动保存目标已存在', 409],
+    download_target_open_failed: ['save_write_failed', '自动保存文件写入失败', 500],
+    download_write_failed: ['save_write_failed', '自动保存文件写入失败', 500],
+  };
+  const mapped = mappings[error?.code];
+  if (mapped) return fileSaveError(mapped[0], mapped[1], mapped[2]);
+  return fileSaveError('remote_download_failed', '远程素材下载失败', 502);
+}
+
+function sendFileSaveError(res, error) {
+  const status = Number(error?.status);
+  return res.status(Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500).json({
+    success: false,
+    code: typeof error?.code === 'string' ? error.code : 'file_save_failed',
+    error: error?.status ? error.message : '文件自动保存失败',
+  });
+}
+
+async function saveMountedMediaToDisk(source, saveDirectory, requestedFilename, expectedKind, maxBytes) {
+  try {
+    const detected = await validateSavedMedia(source.handle, source.stat, '', expectedKind);
+    const { filename, target } = targetForSavedMedia(
+      saveDirectory,
+      requestedFilename,
+      source.sourceName,
+      detected,
+    );
+    if (await existingSafeTarget(target)) {
+      return { path: target, filename, exist: true, source: 'copy', size: source.stat.size };
+    }
+    try {
+      await copyHandleExclusive(source.handle, source.stat, target, maxBytes);
+    } catch (error) {
+      if (error?.code === 'save_target_exists' && await existingSafeTarget(target)) {
+        return { path: target, filename, exist: true, source: 'copy', size: source.stat.size };
+      }
+      throw error;
+    }
+    return {
+      path: target,
+      filename,
+      exist: false,
+      source: 'copy',
+      size: source.stat.size,
+      kind: detected.kind,
+      mime: detected.mime,
+    };
+  } finally {
+    try { await source.handle.close(); } catch (_) {}
+  }
+}
+
+async function saveRemoteMediaToDisk(url, saveDirectory, requestedFilename, expectedKind, options) {
+  const staging = path.join(saveDirectory, `.t8-save-${crypto.randomUUID()}.part`);
+  let handle = null;
+  try {
+    let remote;
+    try {
+      remote = await safeRemoteMediaDownload(url, staging, {
+        protocols: ['http:', 'https:'],
+        maxBytes: options.maxBytes,
+        maxRedirects: options.maxRedirects,
+        deadlineMs: options.deadlineMs,
+        idleTimeoutMs: options.idleTimeoutMs,
+        accept: 'image/*,video/*,audio/*,application/octet-stream;q=0.5',
+        userAgent: 'T8-PenguinCanvas-FileSave/1.0',
+        ...(options.allowPrivateForTests === undefined
+          ? {}
+          : { allowPrivateForTests: options.allowPrivateForTests }),
+        ...(typeof options.lookupImpl === 'function' ? { lookupImpl: options.lookupImpl } : {}),
+      });
+    } catch (error) {
+      throw publicRemoteSaveError(error);
+    }
+    handle = await fs.promises.open(staging, 'r');
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.size !== remote.byteSize || stat.size <= 0) {
+      throw fileSaveError('remote_body_invalid', '远程素材响应无效', 502);
+    }
+    const detected = await validateSavedMedia(handle, stat, remote.contentType, expectedKind);
+    const { filename, target } = targetForSavedMedia(
+      saveDirectory,
+      requestedFilename,
+      inferredRemoteFilename(url),
+      detected,
+    );
+    if (await existingSafeTarget(target)) {
+      return { path: target, filename, exist: true, source: 'fetch', size: stat.size };
+    }
+    try {
+      await copyHandleExclusive(handle, stat, target, options.maxBytes);
+    } catch (error) {
+      if (error?.code === 'save_target_exists' && await existingSafeTarget(target)) {
+        return { path: target, filename, exist: true, source: 'fetch', size: stat.size };
+      }
+      throw error;
+    }
+    return {
+      path: target,
+      filename,
+      exist: false,
+      source: 'fetch',
+      size: stat.size,
+      kind: detected.kind,
+      mime: detected.mime,
+    };
+  } finally {
+    if (handle) {
+      try { await handle.close(); } catch (_) {}
+    }
+    try { await fs.promises.rm(staging, { force: true }); } catch (_) {}
+  }
+}
+
+// v1.2.10.2: 全局生成素材自动保存到本地路径。
+// 本地 URL 只接受真实位于 input/output mount 内且不经过符号链接/目录联接的媒体；
+// 远端 URL 使用 DNS 固定、逐跳重验和有界流式下载。目标始终 exclusive 创建且不覆盖。
 router.post('/save-to-disk', express.json({ limit: '2mb' }), async (req, res) => {
   try {
-    const { url, filename } = req.body || {};
+    const { url, filename, kind } = req.body || {};
     if (!url || typeof url !== 'string') {
-      return res.status(400).json({ success: false, error: '缺少 url' });
+      throw fileSaveError('missing_url', '缺少素材地址', 400);
     }
-    // 读取 settings
-    let savePath = config.DEFAULT_LOCAL_SAVE_DIR;
-    try {
-      if (fs.existsSync(config.SETTINGS_FILE)) {
-        const s = JSON.parse(fs.readFileSync(config.SETTINGS_FILE, 'utf-8'));
-        if (typeof s?.fileSavePath === 'string' && s.fileSavePath.trim()) {
-          savePath = s.fileSavePath.trim();
-        }
-      }
-    } catch { /* ignore */ }
-    if (!savePath) {
-      return res.status(400).json({ success: false, error: '未配置 fileSavePath' });
+    const options = fileSaveOptions();
+    const localDescriptor = parseMountedFileUrl(url);
+    const isRemote = /^https?:\/\//i.test(url.trim());
+    if (!localDescriptor && !isRemote) {
+      throw fileSaveError('unsupported_url', '不支持的素材地址', 400);
     }
-    if (!fs.existsSync(savePath)) {
-      fs.mkdirSync(savePath, { recursive: true });
-    }
-
-    // 推断目标文件名
-    const inferName = () => {
-      if (filename && typeof filename === 'string') return filename.replace(/[\\\/:*?"<>|]/g, '_');
-      try {
-        const u = url.startsWith('http') ? new URL(url) : new URL(url, 'http://x');
-        const base = path.basename(u.pathname || '') || `out_${Date.now()}`;
-        return base.replace(/[\\\/:*?"<>|]/g, '_');
-      } catch {
-        return `out_${Date.now()}`;
-      }
-    };
-    const target = path.join(savePath, inferName());
-
-    // 已存在不覆盖 (防重复保存/面板多实例并发)
-    if (fs.existsSync(target)) {
-      return res.json({ success: true, data: { path: target, exist: true } });
-    }
-
-    // 本地 /files/output/* 或 /files/input/* → 直接 copyFile
-    const localCopy = (srcAbs) => {
-      if (!fs.existsSync(srcAbs)) {
-        return res.status(404).json({ success: false, error: `源文件不存在: ${srcAbs}` });
-      }
-      fs.copyFileSync(srcAbs, target);
-      return res.json({ success: true, data: { path: target, exist: false, source: 'copy' } });
-    };
-    if (url.startsWith('/files/output/')) {
-      const rel = decodeURIComponent(url.replace('/files/output/', ''));
-      return localCopy(path.join(config.OUTPUT_DIR, rel));
-    }
-    if (url.startsWith('/files/input/')) {
-      const rel = decodeURIComponent(url.replace('/files/input/', ''));
-      return localCopy(path.join(config.INPUT_DIR, rel));
-    }
-
-    // 远端 http(s) → fetch 拉取
-    if (/^https?:\/\//i.test(url)) {
-      try {
-        const resp = await fetch(url);
-        if (!resp.ok) {
-          return res.status(502).json({ success: false, error: `拉取远端资源失败: HTTP ${resp.status}` });
-        }
-        const ab = await resp.arrayBuffer();
-        fs.writeFileSync(target, Buffer.from(ab));
-        return res.json({ success: true, data: { path: target, exist: false, source: 'fetch' } });
-      } catch (e) {
-        return res.status(502).json({ success: false, error: '拉取远端资源出错: ' + (e?.message || e) });
-      }
-    }
-
-    return res.status(400).json({ success: false, error: '不支持的 url 协议' });
-  } catch (e) {
-    return res.status(500).json({ success: false, error: e?.message || String(e) });
+    const saveDirectory = await ensureSafeSaveDirectory(readConfiguredSavePath());
+    const localSource = localDescriptor ? await openMountedLocalSource(url, options.maxBytes) : null;
+    const data = localSource
+      ? await saveMountedMediaToDisk(localSource, saveDirectory, filename, kind, options.maxBytes)
+      : await saveRemoteMediaToDisk(url.trim(), saveDirectory, filename, kind, options);
+    return res.json({ success: true, data });
+  } catch (error) {
+    return sendFileSaveError(res, error);
   }
 });
 
 module.exports = router;
-module.exports.assetIndexer = assetIndexer;
-module.exports.previewPipeline = previewPipeline;
+Object.defineProperties(module.exports, {
+  assetIndexer: {
+    configurable: true,
+    enumerable: true,
+    get: getFilesAssetIndexer,
+  },
+  previewPipeline: {
+    configurable: true,
+    enumerable: true,
+    get: getFilesPreviewPipeline,
+  },
+});
 module.exports.importLocalFile = importLocalFile;
 module.exports.resolveOpenLocalTarget = resolveOpenLocalTarget;
 module.exports.resolveOpenLocalDirectory = (targetPath) => resolveOpenLocalTarget(targetPath).path;
+module.exports._test = {
+  detectSavedMediaType,
+  openMountedLocalSource,
+  parseMountedFileUrl,
+  safeSavedFilename,
+  setFileSaveRouteTestOptions,
+  validateSavedMedia,
+};

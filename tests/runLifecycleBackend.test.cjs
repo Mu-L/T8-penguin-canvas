@@ -50,12 +50,13 @@ test('project run routes force queued creation, redact payloads and map running 
   assert.match(source, /normalizeRunEventType\(req\.body\?\.type\)/);
   assert.match(source, /nodeRunEventTypeForStatus\(requestedStatus\)/);
   assert.match(source, /eventPayload/);
-  assert.match(source, /recordRunOutputAssets/);
-  assert.match(source, /await assetIndexer\.recordRunOutputAssets/);
-  assert.match(source, /const \{ publicAsset \} = require\('\.\.\/services\/assetPublicView'\)/);
+  assert.match(source, /commitRunOutputArtifacts/);
+  assert.match(source, /assetIndexer\.commitHostRunOutputAssets/);
+  assert.match(source, /const \{ publicAsset, redactLocalPaths \} = require\('\.\.\/services\/assetPublicView'\)/);
   assert.match(source, /assets: result\.assets\.map\(publicAsset\)/);
   assert.match(source, /metadata: redactAndScanRunValue/);
-  assert.match(source, /redactAndScanRunValue\(\{/);
+  assert.match(source, /function authoritativeRunEventPayload[\s\S]*redactAndScanRunValue/);
+  assert.match(source, /delete userPayload\[key\]/);
   assert.match(source, /database\.claimRunIntent/);
   assert.match(source, /database\.finishRunIntentForRun/);
   assert.match(source, /broadcastHostRunState/);
@@ -63,7 +64,8 @@ test('project run routes force queued creation, redact payloads and map running 
   assert.match(source, /getRunRecoveryManager/);
   assert.match(source, /router\.get\('\/recovery'/);
   assert.match(source, /recoveryManager\.recoverPendingRuns\(\)/);
-  assert.match(server, /getRunRecoveryManager\(\{\}\)\.recoverPendingRuns\(\)/);
+  assert.match(server, /startupRunRecoveryPromise = runRecoveryManager\.recoverPendingRuns\(\)/);
+  assert.match(server, /await shutdownRunRecoveryLifecycle\(\)/);
   assert.match(runHook, /inferRunRecoveryDescriptor/);
   assert.match(runHook, /metadata: \{ lastProviderEvent: 'provider\.polling', \.\.\.\(recovery \? \{ recovery \} : \{\}\) \}/);
   assert.match(runHook, /type === 'provider\.submitted' \|\| type === 'provider\.polling'/);

@@ -6,6 +6,7 @@ const { spawnSync } = require('node:child_process');
 const express = require('express');
 const config = require('../backend/src/config');
 const videoOpsRouter = require('../backend/src/routes/videoOps');
+const { ProjectDatabase } = require('../backend/src/services/projectDatabase');
 const { resolveBundledFfmpeg, resolveBundledFfprobe } = require('../backend/src/providers/llmMedia');
 
 function runFfmpeg(args) {
@@ -1480,6 +1481,9 @@ test('videoOps async compose starts a cancellable job and exposes final result f
     clip,
   ]);
 
+  const database = new ProjectDatabase(':memory:', { autoBackup: false });
+  videoOpsRouter._test.setExecutionDatabaseForTests(database);
+  videoOpsRouter._test.clearJobsForTests();
   const { server, baseUrl } = await listenVideoOps();
   let outputFile = '';
   try {
@@ -1504,6 +1508,21 @@ test('videoOps async compose starts a cancellable job and exposes final result f
     assert.equal(startJson.success, true);
     assert.match(startJson.data.id, /^video-edit-/);
     assert.equal(startJson.data.status, 'running');
+    assert.equal(startJson.data.durableEvidence.projectId, 'system-local-video-ops');
+    assert.equal(startJson.data.durableEvidence.canvasId, 'system-local-video-ops');
+    assert.equal(startJson.data.durableEvidence.nodeId, 'system-local-video-edit');
+    assert.equal(startJson.data.durableEvidence.actionId, 'video-edit.compose');
+    assert.match(startJson.data.durableEvidence.inputDigest, /^sha256:[a-f0-9]{64}$/);
+
+    const evidence = startJson.data.durableEvidence;
+    const acceptedRun = database.getRun(evidence.runId);
+    const acceptedNodeRun = database.getNodeRun(evidence.nodeRunId);
+    const acceptedAttempt = database.getAttempt(evidence.attemptId);
+    assert.equal(acceptedRun.status, 'running');
+    assert.equal(acceptedRun.summary.syntheticVideoOperation, true);
+    assert.equal(acceptedRun.summary.secondaryProviderActionInputDigest, evidence.inputDigest);
+    assert.equal(acceptedNodeRun.runId, evidence.runId);
+    assert.equal(acceptedAttempt.nodeRunId, evidence.nodeRunId);
 
     let job = startJson.data;
     for (let i = 0; i < 40 && job.status === 'running'; i += 1) {
@@ -1520,8 +1539,14 @@ test('videoOps async compose starts a cancellable job and exposes final result f
     assert.equal(job.result.height, 1280);
     outputFile = path.join(config.OUTPUT_DIR, path.basename(job.result.videoUrl));
     assert.ok(fs.existsSync(outputFile));
+    assert.equal(database.getRun(evidence.runId).status, 'succeeded');
+    assert.equal(database.getNodeRun(evidence.nodeRunId).status, 'succeeded');
+    assert.equal(database.getAttempt(evidence.attemptId).status, 'succeeded');
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    videoOpsRouter._test.clearJobsForTests();
+    videoOpsRouter._test.resetExecutionDatabaseForTests();
+    database.close();
     try { fs.unlinkSync(clip); } catch (_) {}
     if (outputFile) {
       try { fs.unlinkSync(outputFile); } catch (_) {}

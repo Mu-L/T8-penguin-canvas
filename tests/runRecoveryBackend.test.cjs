@@ -1,5 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { AssetBlobStore } = require('../backend/src/services/assetBlobStore');
+const { AssetIndexer } = require('../backend/src/services/assetIndexer');
+const { stableEntityUuid } = require('../backend/src/collaboration/protocol');
 const { ProjectDatabase } = require('../backend/src/services/projectDatabase');
 const {
   RunRecoveryManager,
@@ -8,9 +14,29 @@ const {
 } = require('../backend/src/services/runRecovery');
 
 function createActiveRecovery(db, options = {}) {
-  db.ensureCanvas('recovery-canvas', { nodes: [], edges: [] }, 'recovery-project');
-  const run = db.createRun({ projectId: 'recovery-project', canvasId: 'recovery-canvas', status: 'running' });
-  const nodeRun = db.createNodeRun({ runId: run.id, nodeId: options.nodeId || 'async-node', status: 'polling' });
+  const nodeId = options.nodeId || 'async-node';
+  const node = {
+    id: nodeId,
+    entityUid: stableEntityUuid('t8-run-recovery-test-node-v1', nodeId),
+    entityRevision: 1,
+    type: 'image',
+    position: { x: 0, y: 0 },
+    data: { seed: 1 },
+  };
+  let document = db.ensureCanvas('recovery-canvas', { nodes: [node], edges: [] }, 'recovery-project');
+  if (!document.nodes.some((item) => item.id === nodeId)) {
+    document = db.saveCanvasSnapshot('recovery-canvas', {
+      ...document,
+      nodes: [...document.nodes, node],
+    }, { expectedRevision: document.revision });
+  }
+  const run = db.createRun({
+    projectId: 'recovery-project',
+    canvasId: 'recovery-canvas',
+    canvasRevision: document.revision,
+    status: 'running',
+  });
+  const nodeRun = db.createNodeRun({ runId: run.id, nodeId, status: 'polling' });
   const attempt = db.createAttempt({
     nodeRunId: nodeRun.id,
     provider: options.provider || 'seedance-nz',
@@ -59,6 +85,7 @@ test('recovery descriptors map only allowlisted kinds to fixed loopback routes',
 });
 
 test('restart keeps allowlisted provider polling recoverable and manager finishes the authoritative Run', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-run-recovery-host-artifact-'));
   const db = new ProjectDatabase(':memory:');
   try {
     const active = createActiveRecovery(db);
@@ -69,23 +96,45 @@ test('restart keeps allowlisted provider polling recoverable and manager finishe
     assert.equal(db.listPendingRunRecoveries().length, 1);
     const probes = [
       { state: 'pending', outputs: [], usage: { credits: 1 }, error: null, providerStatus: 'running' },
-      { state: 'succeeded', outputs: [{ kind: 'video', sourceUrl: '/files/output/recovered.mp4', filename: 'recovered.mp4' }], usage: { costUsd: 0.5, credits: 1 }, error: null, providerStatus: 'succeeded' },
+      { state: 'succeeded', outputs: [{ kind: 'text', sourceUrl: 'https://provider.example/recovered.txt', filename: 'recovered.txt' }], usage: { costUsd: 0.5, credits: 1 }, error: null, providerStatus: 'succeeded' },
     ];
-    const recordedOutputInputs = [];
-    const broadcasts = { runs: [], nodes: [], outputs: [] };
+    const committedOutputInputs = [];
+    const broadcasts = { runs: [], nodes: [], outputs: [], intents: [] };
+    const config = {
+      INPUT_DIR: path.join(directory, 'input'),
+      OUTPUT_DIR: path.join(directory, 'output'),
+      ASSET_BLOB_DIR: path.join(directory, 'cas'),
+      ASSET_INDEX_STABILITY_ATTEMPTS: 1,
+    };
+    fs.mkdirSync(config.INPUT_DIR, { recursive: true });
+    fs.mkdirSync(config.OUTPUT_DIR, { recursive: true });
+    const indexer = new AssetIndexer(config, db, {
+      blobStore: new AssetBlobStore(config.ASSET_BLOB_DIR),
+      remoteMediaDownload: async (url, targetPath) => {
+        const buffer = Buffer.from('recovered provider output');
+        fs.writeFileSync(targetPath, buffer, { flag: 'wx', mode: 0o600 });
+        return {
+          contentType: 'text/plain',
+          finalUrl: url,
+          status: 200,
+          byteSize: buffer.length,
+        };
+      },
+    });
     const manager = new RunRecoveryManager({
       database: db,
       baseUrl: 'http://127.0.0.1:1',
       wait: async () => undefined,
       queryRecovery: async () => probes.shift(),
-      recordRunOutputAssets: async (input) => {
-        recordedOutputInputs.push(input);
-        return db.recordRunOutputAssets(input);
+      commitRunOutputArtifacts: async (input) => {
+        committedOutputInputs.push(input);
+        return indexer.commitHostRunOutputAssets(input);
       },
       broadcast: {
         run: (run) => broadcasts.runs.push(run),
         node: (_run, nodeRun) => broadcasts.nodes.push(nodeRun),
         output: (_run, _nodeRun, assets) => broadcasts.outputs.push(...assets),
+        intent: (value) => broadcasts.intents.push(value),
       },
     });
     const result = await manager.recoverPendingRuns();
@@ -102,16 +151,114 @@ test('restart keeps allowlisted provider polling recoverable and manager finishe
     assert.equal(db.getRunIntent(intent.id).status, 'completed');
     assert.equal(db.getRunIntent(intent.id).actualCost, 0.5);
     assert.equal(broadcasts.outputs.length, 1);
-    assert.equal(recordedOutputInputs.length, 1);
-    assert.equal(recordedOutputInputs[0].outputs[0].sourceUrl, '/files/output/recovered.mp4');
+    assert.equal(committedOutputInputs.length, 1);
+    assert.equal(committedOutputInputs[0].outputs[0].sourceUrl, 'https://provider.example/recovered.txt');
+    assert.equal(committedOutputInputs[0].recoveryTerminal.runEntityUid, active.run.entityUid);
+    assert.equal(committedOutputInputs[0].recoveryTerminal.nodeRunEntityUid, active.nodeRun.entityUid);
+    assert.equal(committedOutputInputs[0].recoveryTerminal.attemptEntityUid, active.attempt.entityUid);
     assert.equal(broadcasts.runs.at(-1).status, 'succeeded');
+    assert.equal(broadcasts.intents.at(-1).status, 'completed');
     const eventTypes = db.getRunEvents(active.run.id).map((event) => event.type);
     assert.equal(eventTypes.includes('provider.polling'), true);
     assert.equal(eventTypes.includes('node.output'), true);
     assert.equal(eventTypes.includes('node.succeeded'), true);
     assert.equal(eventTypes.includes('run.succeeded'), true);
+    assert.equal(eventTypes.filter((type) => type === 'node.output').length, 1);
+    assert.equal(eventTypes.filter((type) => type === 'provider.response').length, 1);
+    assert.equal(eventTypes.filter((type) => type === 'node.succeeded').length, 1);
+    assert.equal(eventTypes.filter((type) => type === 'run.succeeded').length, 1);
+    assert.equal(db.db.prepare('SELECT COUNT(*) AS count FROM run_output_commits').get().count, 1);
+    assert.equal(db.db.prepare('SELECT COUNT(*) AS count FROM collaboration_common_operation_batches').get().count, 1);
+    assert.equal(db.db.prepare('SELECT COUNT(*) AS count FROM collaboration_domain_operation_idempotency').get().count, 1);
+    assert.equal(db.db.prepare("SELECT COUNT(*) AS count FROM audit_events WHERE action='host.artifact.commit'").get().count, 1);
+    assert.equal(fs.readdirSync(path.join(config.OUTPUT_DIR, '.host-artifact-staging')).length, 0);
   } finally {
     db.close();
+    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
+});
+
+test('host artifact recovery and every terminal write share one rollback boundary and exact retry does not duplicate evidence', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-run-recovery-artifact-atomic-'));
+  let failBeforeComplete = true;
+  const db = new ProjectDatabase(':memory:', {
+    beforeRunRecoveryTerminalStep: ({ step }) => {
+      if (failBeforeComplete && step === 'before-complete') throw new Error('forced-artifact-terminal-failure');
+    },
+  });
+  try {
+    const active = createActiveRecovery(db, { nodeId: 'artifact-terminal-atomic' });
+    const intent = linkRunningIntent(db, active.run, 'artifact-terminal-atomic');
+    const config = {
+      INPUT_DIR: path.join(directory, 'input'),
+      OUTPUT_DIR: path.join(directory, 'output'),
+      ASSET_BLOB_DIR: path.join(directory, 'cas'),
+      ASSET_INDEX_STABILITY_ATTEMPTS: 1,
+    };
+    fs.mkdirSync(config.INPUT_DIR, { recursive: true });
+    fs.mkdirSync(config.OUTPUT_DIR, { recursive: true });
+    fs.writeFileSync(path.join(config.OUTPUT_DIR, 'atomic-recovered.txt'), 'atomic recovered artifact');
+    const indexer = new AssetIndexer(config, db, {
+      blobStore: new AssetBlobStore(config.ASSET_BLOB_DIR),
+    });
+    const broadcasts = { runs: 0, nodes: 0, outputs: 0, intents: 0 };
+    const manager = new RunRecoveryManager({
+      database: db,
+      baseUrl: 'http://127.0.0.1:1',
+      commitRunOutputArtifacts: (input) => indexer.commitHostRunOutputAssets(input),
+      broadcast: {
+        run: () => { broadcasts.runs += 1; },
+        node: () => { broadcasts.nodes += 1; },
+        output: () => { broadcasts.outputs += 1; },
+        intent: () => { broadcasts.intents += 1; },
+      },
+    });
+    const outputs = [{
+      kind: 'text',
+      sourceUrl: '/files/output/atomic-recovered.txt',
+      filename: 'atomic-recovered.txt',
+    }];
+
+    await assert.rejects(
+      manager.succeedTicket(active, outputs, { costUsd: 0.25 }),
+      /forced-artifact-terminal-failure/,
+    );
+    assert.equal(db.db.prepare('SELECT COUNT(*) AS count FROM run_output_commits').get().count, 0);
+    assert.equal(db.db.prepare('SELECT COUNT(*) AS count FROM run_output_slot_reservations').get().count, 0);
+    assert.equal(db.db.prepare('SELECT COUNT(*) AS count FROM collaboration_common_operation_batches').get().count, 0);
+    assert.equal(db.db.prepare('SELECT COUNT(*) AS count FROM assets').get().count, 0);
+    assert.equal(db.getRun(active.run.id).status, 'running');
+    assert.equal(db.getNodeRun(active.nodeRun.id).status, 'polling');
+    assert.equal(db.getNodeRun(active.nodeRun.id).outputRefs.length, 0);
+    assert.equal(db.getAttempt(active.attempt.id).status, 'polling');
+    assert.equal(db.getRunIntent(intent.id).status, 'running');
+    assert.equal(db.getRunEvents(active.run.id).some((event) => event.type === 'node.output'), false);
+    assert.deepEqual(broadcasts, { runs: 0, nodes: 0, outputs: 0, intents: 0 });
+
+    failBeforeComplete = false;
+    assert.equal(await manager.succeedTicket(active, outputs, { costUsd: 0.25 }), 'recovered');
+    assert.equal(db.getRun(active.run.id).status, 'succeeded');
+    assert.equal(db.getNodeRun(active.nodeRun.id).outputRefs.length, 1);
+    assert.equal(db.getRunIntent(intent.id).actualCost, 0.25);
+    const revisions = {
+      run: db.getRun(active.run.id).revision,
+      nodeRun: db.getNodeRun(active.nodeRun.id).revision,
+      attempt: db.getAttempt(active.attempt.id).revision,
+    };
+    assert.equal(await manager.succeedTicket(active, outputs, { costUsd: 0.25 }), 'recovered');
+    assert.deepEqual({
+      run: db.getRun(active.run.id).revision,
+      nodeRun: db.getNodeRun(active.nodeRun.id).revision,
+      attempt: db.getAttempt(active.attempt.id).revision,
+    }, revisions);
+    const eventTypes = db.getRunEvents(active.run.id).map((event) => event.type);
+    for (const type of ['node.output', 'provider.response', 'node.succeeded', 'run.succeeded']) {
+      assert.equal(eventTypes.filter((item) => item === type).length, 1, `${type} must remain unique`);
+    }
+    assert.deepEqual(broadcasts, { runs: 1, nodes: 1, outputs: 1, intents: 1 });
+  } finally {
+    db.close();
+    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -154,52 +301,87 @@ test('startup interruption finishes the linked RunIntent in the same immediate t
   }
 });
 
-test('recovery finalization commits Run, terminal event, and RunIntent atomically and a failed finish can be retried', () => {
-  const db = new ProjectDatabase(':memory:');
+test('no-output recovery terminal rolls back every hierarchy write, survives reopen, and exact retry is event-idempotent', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-run-recovery-terminal-'));
+  const filename = path.join(directory, 'projects.sqlite3');
+  let failBeforeComplete = true;
+  const db = new ProjectDatabase(filename, {
+    autoBackup: false,
+    beforeRunRecoveryTerminalStep: ({ step }) => {
+      if (failBeforeComplete && step === 'before-complete') {
+        throw new Error('forced recovery intent finish failure');
+      }
+    },
+  });
   try {
     const active = createActiveRecovery(db, { nodeId: 'finalize-atomic' });
     const intent = linkRunningIntent(db, active.run, 'finalize-atomic');
-    db.updateAttempt(active.attempt.id, {
+    const terminal = {
+      runId: active.run.id,
+      runEntityUid: active.run.entityUid,
+      nodeRunId: active.nodeRun.id,
+      nodeRunEntityUid: active.nodeRun.entityUid,
+      attemptId: active.attempt.id,
+      attemptEntityUid: active.attempt.entityUid,
       status: 'succeeded',
       usage: { costUsd: 0.75 },
-      timestamps: { finishedAt: 1234, recoveredAt: 1234 },
-    });
-    db.updateNodeRun(active.nodeRun.id, { status: 'succeeded' });
-    const broadcasts = { runs: [], intents: [] };
-    const manager = new RunRecoveryManager({
-      database: db,
-      baseUrl: 'http://127.0.0.1:1',
-      broadcast: {
-        run: (run) => broadcasts.runs.push(run),
-        intent: (value) => broadcasts.intents.push(value),
-      },
-    });
-    const finishRunIntentForRun = db.finishRunIntentForRun.bind(db);
-    db.finishRunIntentForRun = (runId, ...args) => {
-      if (runId === active.run.id) throw new Error('forced recovery intent finish failure');
-      return finishRunIntentForRun(runId, ...args);
+      finishedAt: 1234,
+      recoveredAt: 1234,
     };
 
-    assert.throws(() => manager.finalizeRun(active.run.id), /forced recovery intent finish failure/);
+    assert.throws(() => db.completeRecoveredRunAttempt(terminal), /forced recovery intent finish failure/);
     assert.equal(db.getRun(active.run.id).status, 'running');
     assert.equal(db.getRun(active.run.id).finishedAt, null);
+    assert.equal(db.getNodeRun(active.nodeRun.id).status, 'polling');
+    assert.equal(db.getAttempt(active.attempt.id).status, 'polling');
     assert.equal(db.getRunIntent(intent.id).status, 'running');
+    assert.equal(db.getRunEvents(active.run.id).some((event) => event.type === 'provider.response'), false);
+    assert.equal(db.getRunEvents(active.run.id).some((event) => event.type === 'node.succeeded'), false);
     assert.equal(db.getRunEvents(active.run.id).some((event) => event.type === 'run.succeeded'), false);
-    assert.deepEqual(broadcasts, { runs: [], intents: [] });
-
-    db.finishRunIntentForRun = finishRunIntentForRun;
-    const finished = manager.finalizeRun(active.run.id);
-    assert.equal(finished.status, 'succeeded');
-    assert.equal(db.getRunIntent(intent.id).status, 'completed');
-    assert.equal(db.getRunIntent(intent.id).actualCost, 0.75);
-    assert.equal(
-      db.getRunEvents(active.run.id).filter((event) => event.type === 'run.succeeded').length,
-      1,
-    );
-    assert.equal(broadcasts.runs.length, 1);
-    assert.equal(broadcasts.intents.length, 1);
-  } finally {
+    failBeforeComplete = false;
     db.close();
+
+    const reopened = new ProjectDatabase(filename, { autoBackup: false });
+    try {
+      const completed = reopened.completeRecoveredRunAttempt(terminal);
+      assert.equal(completed.duplicate, false);
+      assert.equal(completed.finalized, true);
+      assert.equal(completed.run.status, 'succeeded');
+      assert.equal(completed.nodeRun.status, 'succeeded');
+      assert.equal(completed.attempt.status, 'succeeded');
+      assert.equal(completed.intent.status, 'completed');
+      assert.equal(completed.intent.actualCost, 0.75);
+      const revisions = {
+        run: completed.run.revision,
+        nodeRun: completed.nodeRun.revision,
+        attempt: completed.attempt.revision,
+      };
+      const firstEvents = reopened.getRunEvents(active.run.id);
+      assert.equal(firstEvents.filter((event) => event.type === 'provider.response').length, 1);
+      assert.equal(firstEvents.filter((event) => event.type === 'node.succeeded').length, 1);
+      assert.equal(firstEvents.filter((event) => event.type === 'run.succeeded').length, 1);
+
+      const replay = reopened.completeRecoveredRunAttempt({
+        ...terminal,
+        finishedAt: 9999,
+        recoveredAt: 9999,
+      });
+      assert.equal(replay.duplicate, true);
+      assert.deepEqual({
+        run: replay.run.revision,
+        nodeRun: replay.nodeRun.revision,
+        attempt: replay.attempt.revision,
+      }, revisions);
+      const replayEvents = reopened.getRunEvents(active.run.id);
+      assert.equal(replayEvents.filter((event) => event.type === 'provider.response').length, 1);
+      assert.equal(replayEvents.filter((event) => event.type === 'node.succeeded').length, 1);
+      assert.equal(replayEvents.filter((event) => event.type === 'run.succeeded').length, 1);
+    } finally {
+      reopened.close();
+    }
+  } finally {
+    if (db.db?.open) db.close();
+    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -227,5 +409,50 @@ test('restart archives unsupported or non-queryable tasks as interrupted instead
     assert.equal(db.getAttempt(retryable.attempt.id).error.code, 'RUN_RECOVERY_UNAVAILABLE');
   } finally {
     db.close();
+  }
+});
+
+test('shutdown fences a signal-ignoring recovery probe before ProjectDatabase close', async () => {
+  const db = new ProjectDatabase(':memory:');
+  let releaseProbe;
+  let markProbeStarted;
+  const probeGate = new Promise((resolve) => { releaseProbe = resolve; });
+  const probeStarted = new Promise((resolve) => { markProbeStarted = resolve; });
+  const broadcasts = [];
+  try {
+    createActiveRecovery(db, { taskId: 'shutdown-ignored-signal' });
+    db.recoverInterruptedRuns();
+    let receivedSignal = null;
+    const manager = new RunRecoveryManager({
+      database: db,
+      baseUrl: 'http://127.0.0.1:1',
+      queryRecovery: async (_descriptor, _ticket, _index, context) => {
+        receivedSignal = context.signal;
+        markProbeStarted();
+        await probeGate; // Intentionally ignores AbortSignal.
+        return { state: 'succeeded', outputs: [], usage: {}, providerStatus: 'succeeded' };
+      },
+      broadcast: {
+        run: (value) => broadcasts.push(value),
+        node: (value) => broadcasts.push(value),
+        output: (value) => broadcasts.push(value),
+        intent: (value) => broadcasts.push(value),
+      },
+    });
+    const recovery = manager.recoverPendingRuns();
+    await probeStarted;
+    const shutdown = await manager.shutdown({ timeoutMs: 100 });
+    assert.deepEqual(shutdown, { drained: false, forced: true });
+    assert.equal(receivedSignal.aborted, true);
+
+    await db.close();
+    releaseProbe();
+    const result = await recovery;
+    assert.equal(result.status, 'stopped');
+    assert.equal(result.deferred, 1);
+    assert.equal(broadcasts.length, 1, 'only the pre-query polling broadcast may occur');
+  } finally {
+    releaseProbe();
+    try { await db.close(); } catch (_) {}
   }
 });

@@ -31,7 +31,7 @@ import {
   X,
 } from 'lucide-react';
 import { uploadFileBlob } from '../../services/imageOps';
-import { cancelVideoEditJob, composeVideoEditAsync, getVideoEditJob, loadVideoTimelinePreviewAsync, probeVideo, separateVideoAudioAsync, snapshotVideoFrameAsync, type VideoComposeResult, type VideoSnapshotResult } from '../../services/videoOps';
+import { cancelVideoEditJob, composeVideoEditAsync, getVideoEditJob, loadVideoTimelinePreviewAsync, probeVideo, separateVideoAudioAsync, snapshotVideoFrameAsync, type VideoComposeResult, type VideoOperationExecutionEvidence, type VideoSnapshotResult } from '../../services/videoOps';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useUpstreamMaterials } from './useUpstreamMaterials';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
@@ -103,12 +103,21 @@ import {
   createSecondaryProviderActionForNode,
   executeRegisteredSecondaryProviderAction,
   requestCanvasSecondaryProviderAction,
+  registerSecondaryProviderActionExecutor,
   resolveSecondaryProviderActionForRun,
   secondaryProviderActionFromNodeData,
   secondaryProviderActionNodePatch,
   type QueueSecondaryProviderAction,
+  type SecondaryProviderActionExecution,
 } from '../../utils/secondaryProviderAction';
+import {
+  createVideoEditExecutionInputSnapshot,
+  videoEditExecutionInputDigest,
+  videoEditExecutionInputMatchesDigest,
+  type VideoEditExecutionInputSnapshot,
+} from '../../utils/videoEditExecution';
 import type { RunNodeLifecycleReporter } from '../../types/project';
+import { isRunExecutionCancelled } from '../../stores/runBus';
 import { useThemeStore } from '../../stores/theme';
 
 const ASPECT_OPTIONS: Array<{ value: VideoEditSettings['aspect']; label: string }> = [
@@ -827,6 +836,10 @@ function VideoEditNode({ id, data, selected }: NodeProps) {
   const previewPipDragRef = useRef<VideoEditPipDrag | null>(null);
   const previewPipDragDocumentCleanupRef = useRef<(() => void) | null>(null);
   const pollTokenRef = useRef(0);
+  const pendingVideoExecutionInputsRef = useRef(new Map<string, VideoEditExecutionInputSnapshot>());
+  const executeAuthorizedVideoEditActionRef = useRef<(execution: SecondaryProviderActionExecution) => Promise<void>>(
+    async () => { throw new Error('视频编辑执行器尚未就绪'); },
+  );
   const importCleanupUndoRef = useRef<VideoEditClip[] | null>(null);
   const [busy, setBusy] = useState('');
   const [localError, setLocalError] = useState('');
@@ -864,9 +877,10 @@ function VideoEditNode({ id, data, selected }: NodeProps) {
     update(secondaryProviderActionNodePatch(action));
     queueMicrotask(() => {
       if (!requestCanvasSecondaryProviderAction(action)) {
+        pendingVideoExecutionInputsRef.current.delete(action.requestId);
         const current = secondaryProviderActionFromNodeData(rf.getNode(id)?.data);
         if (current?.requestId === action.requestId) update(secondaryProviderActionNodePatch(null));
-        setLocalError('无法请求视频编辑器 RH 抠图运行体检');
+        setLocalError('无法请求视频编辑器运行体检');
       }
     });
     return action;
@@ -885,6 +899,7 @@ function VideoEditNode({ id, data, selected }: NodeProps) {
     try {
       await executeRegisteredSecondaryProviderAction(action, reporter);
     } finally {
+      pendingVideoExecutionInputsRef.current.delete(action.requestId);
       const current = secondaryProviderActionFromNodeData(rf.getNode(id)?.data);
       if (current?.requestId === action.requestId) update(secondaryProviderActionNodePatch(null));
     }
@@ -5784,7 +5799,7 @@ function VideoEditNode({ id, data, selected }: NodeProps) {
     }
   };
 
-  const applyComposeResult = (result: VideoComposeResult) => {
+  const applyComposeResult = (result: VideoComposeResult, outputSettings: VideoEditSettings = settings) => {
     const output = {
       videoUrl: result.videoUrl,
       directVideoUrl: result.directVideoUrl || result.videoUrl,
@@ -5801,7 +5816,7 @@ function VideoEditNode({ id, data, selected }: NodeProps) {
     const nextVersions = pushVideoEditOutputVersion(
       (rf.getNode(id)?.data as any)?.outputVersions || d.outputVersions,
       { ...output, label: `成片 ${formatSeconds(result.duration || totalDuration)}`, jobId: result.jobId },
-      settings,
+      outputSettings,
     );
     const patch = {
       status: 'success',
@@ -5914,7 +5929,7 @@ function VideoEditNode({ id, data, selected }: NodeProps) {
           setBusy('');
           return;
         }
-        if (job.status === 'failed' || job.status === 'cancelled') {
+        if (job.status === 'failed' || job.status === 'cancelled' || job.status === 'interrupted') {
           const message = job.error || job.message || (job.status === 'cancelled' ? '视频合成已取消' : '视频合成失败');
           setLocalError(message);
           setBusy('');
@@ -5929,25 +5944,291 @@ function VideoEditNode({ id, data, selected }: NodeProps) {
     }
   };
 
+  const buildVideoOperationEvidence = (
+    execution: SecondaryProviderActionExecution,
+    inputDigest: string,
+    operationIndex: number,
+  ): VideoOperationExecutionEvidence => {
+    const { reporter, action } = execution;
+    const context = reporter.runContext;
+    if (!context || !reporter.nodeRunId || !reporter.attemptId) {
+      throw new Error('视频任务缺少持久 Run/NodeRun/Attempt identity，已停止本地合成');
+    }
+    if (action.actionId !== 'video-edit.compose' && action.actionId !== 'video-edit.platform-export') {
+      throw new Error('视频任务 action 不在执行白名单内');
+    }
+    return {
+      schema: 't8-video-operation-execution-v1',
+      projectId: context.projectId,
+      canvasId: context.canvasId,
+      runId: context.runId,
+      nodeRunId: reporter.nodeRunId,
+      attemptId: reporter.attemptId,
+      nodeId: id,
+      requestId: action.requestId,
+      actionId: action.actionId,
+      actionTarget: action.target,
+      actionDigest: action.digest,
+      inputDigest,
+      operationIndex,
+    };
+  };
+
+  const awaitVideoOperationTerminal = async (input: {
+    jobId: string;
+    label: string;
+    operationIndex: number;
+    operationCount: number;
+    token: number;
+    reporter: RunNodeLifecycleReporter;
+  }): Promise<VideoComposeResult> => {
+    for (;;) {
+      await wait(900);
+      if (pollTokenRef.current !== input.token || isRunExecutionCancelled(input.reporter.executionToken)) {
+        await cancelVideoEditJob(input.jobId).catch(() => undefined);
+        throw new Error('视频任务已取消');
+      }
+      const status = await getVideoEditJob(input.jobId);
+      const overallProgress = Math.min(99, Math.round(
+        (input.operationIndex / input.operationCount) * 100 + (status.progress || 0) / input.operationCount,
+      ));
+      const trace = {
+        provider: 'local-video-ops',
+        model: 'ffmpeg-compose',
+        upstreamTaskId: input.jobId,
+        requestId: input.reporter.runContext?.requestId || undefined,
+        operationIndex: input.operationIndex,
+        operationCount: input.operationCount,
+        progress: status.progress,
+        status: status.status,
+        message: status.message,
+      };
+      await input.reporter.providerPolling(trace);
+      await input.reporter.progress({ phase: 'video-ops-polling', ...trace, progress: overallProgress });
+      update({
+        status: 'running',
+        error: '',
+        job: {
+          id: status.id,
+          status: status.status,
+          progress: overallProgress,
+          message: `${input.label} · ${status.message || status.status}`,
+        },
+      });
+      if (status.status === 'done') {
+        if (!status.result?.videoUrl) throw new Error(`${input.label} 没有返回视频结果`);
+        await input.reporter.providerResponse({ ...trace, status: 'succeeded' });
+        return status.result;
+      }
+      if (status.status === 'failed' || status.status === 'cancelled' || status.status === 'interrupted') {
+        const message = status.error || status.message || `${input.label} 失败`;
+        await input.reporter.providerResponse({ ...trace, status: status.status, error: { message } });
+        throw new Error(message);
+      }
+    }
+  };
+
+  const executeAuthorizedVideoEditAction = async (execution: SecondaryProviderActionExecution) => {
+    const { action, reporter } = execution;
+    if (action.actionId !== 'video-edit.compose' && action.actionId !== 'video-edit.platform-export') {
+      throw new Error('视频编辑器收到不支持的 action');
+    }
+    const snapshot = pendingVideoExecutionInputsRef.current.get(action.requestId);
+    if (!snapshot || !videoEditExecutionInputMatchesDigest(snapshot, action.params.inputDigest)) {
+      throw new Error('视频任务输入快照缺失或摘要不匹配，已停止本地合成');
+    }
+    const expectedMode = action.actionId === 'video-edit.compose' ? 'compose' : 'platform-export';
+    if (snapshot.mode !== expectedMode
+      || JSON.stringify(snapshot.packageIds) !== JSON.stringify(action.params.packageIds)) {
+      throw new Error('视频任务 action 与不可篡改输入快照不一致');
+    }
+
+    const token = pollTokenRef.current + 1;
+    pollTokenRef.current = token;
+    const packages = VIDEO_EDIT_PLATFORM_EXPORT_PACKAGES.filter((pkg) => snapshot.packageIds.includes(pkg.id));
+    const operationCount = expectedMode === 'compose' ? 1 : packages.length;
+    if (operationCount !== action.params.operationCount) throw new Error('视频任务 operation 数量已变化');
+    setBusy(expectedMode);
+    setLocalError('');
+    setPlatformExportStatus(expectedMode === 'platform-export' ? `套餐队列 0/${operationCount}` : '');
+    update({ status: 'running', error: '', job: { status: 'running', progress: 1, message: '等待持久执行证据' } });
+
+    let activeJobId = '';
+    const submit = async (operationIndex: number, label: string, operationSettings: VideoEditSettings) => {
+      const evidence = buildVideoOperationEvidence(execution, action.params.inputDigest, operationIndex);
+      await reporter.providerRequest({
+        provider: 'local-video-ops',
+        model: 'ffmpeg-compose',
+        requestId: action.requestId,
+        actionId: action.actionId,
+        actionDigest: action.digest,
+        inputDigest: action.params.inputDigest,
+        operationIndex,
+        operationCount,
+      });
+      const job = await composeVideoEditAsync(snapshot.clips, operationSettings, {
+        timelineV2: snapshot.timelineV2,
+        renderPlan: snapshot.renderPlan,
+        executionEvidence: evidence,
+        executionInput: snapshot,
+      });
+      activeJobId = job.id;
+      try {
+        await reporter.providerSubmitted({
+          provider: 'local-video-ops',
+          model: 'ffmpeg-compose',
+          upstreamTaskId: job.id,
+          requestId: action.requestId,
+          actionDigest: action.digest,
+          inputDigest: action.params.inputDigest,
+          operationIndex,
+          operationCount,
+          status: job.status,
+        });
+      } catch (error) {
+        await cancelVideoEditJob(job.id).catch(() => undefined);
+        throw error;
+      }
+      update({ status: 'running', error: '', job: { id: job.id, status: job.status, progress: job.progress || 2, message: job.message || label } });
+      return awaitVideoOperationTerminal({ jobId: job.id, label, operationIndex, operationCount, token, reporter });
+    };
+
+    try {
+      if (expectedMode === 'compose') {
+        const result = await submit(0, '视频合成', snapshot.settings);
+        await reporter.output({
+          status: 'succeeded',
+          outputCount: 1,
+          inputDigest: action.params.inputDigest,
+          assets: [{
+            kind: 'video',
+            sourceUrl: result.videoUrl,
+            filename: result.fileName,
+            mimeType: result.mime || 'video/mp4',
+            metadata: { jobId: result.jobId, actionDigest: action.digest, inputDigest: action.params.inputDigest },
+          }],
+        });
+        applyComposeResult(result, snapshot.settings);
+        return;
+      }
+
+      let versions = normalizeVideoEditOutputVersions((rf.getNode(id)?.data as any)?.outputVersions || d.outputVersions);
+      const platformResults: Array<{ result: VideoComposeResult; label: string; packageId: string; settings: VideoEditSettings }> = [];
+      const failures: string[] = [];
+      for (const [index, pkg] of packages.entries()) {
+        if (pollTokenRef.current !== token || isRunExecutionCancelled(reporter.executionToken)) throw new Error('视频任务已取消');
+        const packageSettings = snapshot.operationSettings[index];
+        if (!packageSettings) throw new Error(`${pkg.label} 缺少已确认的规格设置`);
+        setPlatformExportStatus(`套餐队列 ${index + 1}/${packages.length} · ${pkg.label}`);
+        try {
+          const result = await submit(index, `多规格导出 · ${pkg.label}`, packageSettings);
+          platformResults.push({ result, label: pkg.label, packageId: pkg.id, settings: packageSettings });
+          versions = pushVideoEditOutputVersion(versions, {
+            videoUrl: result.videoUrl,
+            directVideoUrl: result.directVideoUrl || result.videoUrl,
+            name: result.fileName,
+            duration: result.duration,
+            width: result.width,
+            height: result.height,
+            size: result.size,
+            label: `套餐 ${pkg.label}`,
+            jobId: result.jobId,
+          }, packageSettings);
+        } catch (error: any) {
+          if (isRunExecutionCancelled(reporter.executionToken) || pollTokenRef.current !== token) throw error;
+          failures.push(`${pkg.label}: ${error?.message || '导出失败'}`);
+        }
+      }
+      if (!platformResults.length) throw new Error(failures.length ? `套餐导出失败：${failures.join('；')}` : '没有生成任何套餐结果');
+
+      await reporter.output({
+        status: 'succeeded',
+        outputCount: platformResults.length,
+        inputDigest: action.params.inputDigest,
+        assets: platformResults.map(({ result, label, packageId }) => ({
+          kind: 'video',
+          sourceUrl: result.videoUrl,
+          filename: result.fileName,
+          mimeType: result.mime || 'video/mp4',
+          metadata: { jobId: result.jobId, packageId, label, actionDigest: action.digest, inputDigest: action.params.inputDigest },
+        })),
+      });
+      const finalResults = platformResults.filter((item) => item.packageId !== 'draft-preview');
+      const downstream = finalResults.length ? finalResults : platformResults;
+      const latest = downstream[downstream.length - 1].result;
+      const warning = failures.length ? `部分套餐失败：${failures.join('；')}` : '';
+      update({
+        status: 'success',
+        error: warning,
+        videoUrl: latest.videoUrl,
+        videoUrls: downstream.map((item) => item.result.videoUrl),
+        directVideoUrl: latest.directVideoUrl || latest.videoUrl,
+        directVideoUrls: downstream.map((item) => item.result.directVideoUrl || item.result.videoUrl),
+        draftVideoUrls: platformResults.filter((item) => item.packageId === 'draft-preview').map((item) => item.result.videoUrl),
+        directDraftVideoUrls: platformResults.filter((item) => item.packageId === 'draft-preview').map((item) => item.result.directVideoUrl || item.result.videoUrl),
+        fileName: latest.fileName,
+        fileSize: latest.size || 0,
+        mime: latest.mime || 'video/mp4',
+        output: { videoUrl: latest.videoUrl, directVideoUrl: latest.directVideoUrl || latest.videoUrl, name: latest.fileName, duration: latest.duration, width: latest.width, height: latest.height, size: latest.size },
+        outputVersions: versions,
+        job: { id: activeJobId, status: 'done', progress: 100, message: warning || `多规格导出完成：${platformResults.length}/${packages.length}` },
+      });
+      if (snapshot.settings.autoCreateOutputNode) {
+        const createdVersions = normalizeVideoEditOutputVersions(versions);
+        for (let index = 0; index < Math.min(platformResults.length, createdVersions.length); index += 1) {
+          addOutputNodeFromVersion(createdVersions[index], 'video');
+        }
+      }
+      setLocalError(warning);
+    } catch (error: any) {
+      const message = error?.message || '视频任务执行失败';
+      setLocalError(message);
+      update({ status: 'error', error: message, job: { id: activeJobId || undefined, status: 'failed', progress: 0, message } });
+      throw error;
+    } finally {
+      setBusy('');
+      setPlatformExportStatus('');
+    }
+  };
+
+  executeAuthorizedVideoEditActionRef.current = executeAuthorizedVideoEditAction;
+
+  useEffect(() => {
+    const unregister = [
+      registerSecondaryProviderActionExecutor(id, 'video-edit.compose', 'compose', (execution) => executeAuthorizedVideoEditActionRef.current(execution)),
+      registerSecondaryProviderActionExecutor(id, 'video-edit.platform-export', 'platform-export', (execution) => executeAuthorizedVideoEditActionRef.current(execution)),
+    ];
+    return () => {
+      unregister.reverse().forEach((dispose) => dispose());
+      pendingVideoExecutionInputsRef.current.clear();
+    };
+  }, [id]);
+
   const handleCompose = async () => {
     if (composeBlockedMessage) {
       setLocalError(composeBlockedMessage);
       return;
     }
-    setBusy('compose');
-    setLocalError('');
-    update({ status: 'running', error: '', job: { status: 'running', progress: 3, message: '创建合成任务' } });
     try {
-      const job = await composeVideoEditAsync(timelineComposeClips, settings, { timelineV2, renderPlan: timelineRenderPlan });
-      const token = pollTokenRef.current + 1;
-      pollTokenRef.current = token;
-      update({ status: 'running', error: '', job: { id: job.id, status: job.status, progress: job.progress || 5, message: job.message || '合成中' } });
-      void pollComposeJob(job.id, token);
+      const snapshot = createVideoEditExecutionInputSnapshot({
+        mode: 'compose',
+        clips: timelineComposeClips,
+        settings,
+        timelineV2,
+        renderPlan: timelineRenderPlan,
+        operationSettings: [settings],
+      });
+      const inputDigest = videoEditExecutionInputDigest(snapshot);
+      const action = queueSecondaryAction({
+        actionId: 'video-edit.compose',
+        target: 'compose',
+        params: { inputDigest, packageIds: [], operationCount: 1 },
+      });
+      pendingVideoExecutionInputsRef.current.set(action.requestId, snapshot);
+      setLocalError('');
     } catch (error: any) {
-      const message = error?.message || '视频合成失败';
+      const message = error?.message || '无法创建视频合成执行请求';
       setLocalError(message);
-      update({ status: 'error', error: message, job: { status: 'failed', progress: 0, message } });
-      setBusy('');
     }
   };
 
@@ -5969,121 +6250,33 @@ function VideoEditNode({ id, data, selected }: NodeProps) {
       setLocalError('请至少选择一个导出套餐');
       return;
     }
-    setBusy('platform-export');
-    setLocalError('');
-    setPlatformExportStatus(`套餐队列 0/${packages.length}`);
-    const token = pollTokenRef.current + 1;
-    pollTokenRef.current = token;
-    update({ status: 'running', error: '', job: { status: 'running', progress: 2, message: `多规格导出：0/${packages.length}` } });
-
-    let versions = normalizeVideoEditOutputVersions((rf.getNode(id)?.data as any)?.outputVersions || d.outputVersions);
-    const platformResults: VideoComposeResult[] = [];
-    const draftPlatformResults: VideoComposeResult[] = [];
-    const finalPlatformResults: VideoComposeResult[] = [];
-    const failures: string[] = [];
-
-    for (const [index, pkg] of packages.entries()) {
-      if (pollTokenRef.current !== token) return;
-      const packageSettings = normalizeVideoEditSettings(applyVideoEditOutputPreset({
+    try {
+      const packageIds = packages.map((pkg) => pkg.id);
+      const operationSettings = packages.map((pkg) => normalizeVideoEditSettings(applyVideoEditOutputPreset({
         ...settings,
         aspect: pkg.aspect,
         resolution: pkg.resolution,
-      }, pkg.presetId || 'custom'));
-      setPlatformExportStatus(`套餐队列 ${index + 1}/${packages.length} · ${pkg.label}`);
-      try {
-        const job = await composeVideoEditAsync(timelineComposeClips, packageSettings, { timelineV2, renderPlan: timelineRenderPlan });
-        let result: VideoComposeResult | undefined;
-        for (;;) {
-          await wait(900);
-          if (pollTokenRef.current !== token) return;
-          const status = await getVideoEditJob(job.id);
-          const overallProgress = Math.min(98, Math.round((index / packages.length) * 100 + (status.progress || 0) / packages.length));
-          update({
-            status: 'running',
-            error: '',
-            job: {
-              id: status.id,
-              status: status.status,
-              progress: overallProgress,
-              message: `多规格导出 · 套餐 ${pkg.label} · ${status.message || status.status}`,
-            },
-          });
-          if (status.status === 'done') {
-            result = status.result;
-            break;
-          }
-          if (status.status === 'failed' || status.status === 'cancelled') {
-            throw new Error(status.error || status.message || `${pkg.label} 导出失败`);
-          }
-        }
-        if (!result?.videoUrl) throw new Error(`${pkg.label} 没有返回视频结果`);
-        platformResults.push(result);
-        if (pkg.id === 'draft-preview') {
-          draftPlatformResults.push(result);
-        } else {
-          finalPlatformResults.push(result);
-        }
-        versions = pushVideoEditOutputVersion(
-          versions,
-          {
-            videoUrl: result.videoUrl,
-            directVideoUrl: result.directVideoUrl || result.videoUrl,
-            name: result.fileName,
-            duration: result.duration,
-            width: result.width,
-            height: result.height,
-            size: result.size,
-            label: `套餐 ${pkg.label}`,
-            jobId: result.jobId,
-          },
-          packageSettings,
-        );
-        update({ outputVersions: versions });
-        if (settings.autoCreateOutputNode) addOutputNodeFromVersion(versions[0], 'video');
-      } catch (error: any) {
-        failures.push(`${pkg.label}: ${error?.message || '导出失败'}`);
-      }
+      }, pkg.presetId || 'custom')));
+      const snapshot = createVideoEditExecutionInputSnapshot({
+        mode: 'platform-export',
+        clips: timelineComposeClips,
+        settings,
+        timelineV2,
+        renderPlan: timelineRenderPlan,
+        packageIds,
+        operationSettings,
+      });
+      const inputDigest = videoEditExecutionInputDigest(snapshot);
+      const action = queueSecondaryAction({
+        actionId: 'video-edit.platform-export',
+        target: 'platform-export',
+        params: { inputDigest, packageIds, operationCount: packageIds.length },
+      });
+      pendingVideoExecutionInputsRef.current.set(action.requestId, snapshot);
+      setLocalError('');
+    } catch (error: any) {
+      setLocalError(error?.message || '无法创建多规格导出执行请求');
     }
-
-    if (!platformResults.length) {
-      const message = failures.length ? `套餐导出失败：${failures.join('；')}` : '没有生成任何套餐结果';
-      setLocalError(message);
-      update({ status: 'error', error: message, job: { status: 'failed', progress: 0, message } });
-      setBusy('');
-      setPlatformExportStatus('');
-      return;
-    }
-
-    const downstreamPlatformResults = finalPlatformResults.length ? finalPlatformResults : platformResults;
-    const latest = downstreamPlatformResults[downstreamPlatformResults.length - 1];
-    const warning = failures.length ? `部分套餐失败：${failures.join('；')}` : '';
-    update({
-      status: 'success',
-      error: warning,
-      videoUrl: latest.videoUrl,
-      videoUrls: downstreamPlatformResults.map((result) => result.videoUrl),
-      directVideoUrl: latest.directVideoUrl || latest.videoUrl,
-      directVideoUrls: downstreamPlatformResults.map((result) => result.directVideoUrl || result.videoUrl),
-      draftVideoUrls: draftPlatformResults.map((result) => result.videoUrl),
-      directDraftVideoUrls: draftPlatformResults.map((result) => result.directVideoUrl || result.videoUrl),
-      fileName: latest.fileName,
-      fileSize: latest.size || 0,
-      mime: latest.mime || 'video/mp4',
-      output: {
-        videoUrl: latest.videoUrl,
-        directVideoUrl: latest.directVideoUrl || latest.videoUrl,
-        name: latest.fileName,
-        duration: latest.duration,
-        width: latest.width,
-        height: latest.height,
-        size: latest.size,
-      },
-      outputVersions: versions,
-      job: { status: 'done', progress: 100, message: warning || `多规格导出完成：${platformResults.length}/${packages.length}` },
-    });
-    setLocalError(warning);
-    setBusy('');
-    setPlatformExportStatus('');
   };
 
   const exportVideoEditRecipe = () => {

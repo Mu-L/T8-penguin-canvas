@@ -12,6 +12,12 @@ const EXECUTABLE_NODE_TYPES = new Set(
     .filter(Boolean),
 );
 
+const REMOTE_UNSUPPORTED_HOST_ONLY_NODE_TYPES = new Set([
+  'remove-ai-watermark',
+  'topaz-image-upscale',
+  'topaz-video-upscale',
+]);
+
 const LOCAL_EXECUTION_NODE_TYPES = new Set([
   'upload',
   'drawing-board',
@@ -28,14 +34,11 @@ const LOCAL_EXECUTION_NODE_TYPES = new Set([
   'grid-crop',
   'grid-editor',
   'edit',
-  'remove-ai-watermark',
   'cinematic',
   'video-motion',
   'multi-angle-visual',
   'portrait-master',
   'pose-master',
-  'topaz-image-upscale',
-  'topaz-video-upscale',
   'face-expression-3d',
 ]);
 
@@ -262,6 +265,16 @@ function hasAuthoritativeImageReference(node, context) {
 function providerDeclarationForNode(node, context = {}) {
   const type = boundedString(node?.type, 120);
   const data = isRecord(node?.data) ? node.data : {};
+
+  if (REMOTE_UNSUPPORTED_HOST_ONLY_NODE_TYPES.has(type)) {
+    throw authorityError(
+      'intent_host_only_remote_unsupported',
+      'Host-only 节点不支持远程协作 RunIntent（remote unsupported）',
+      [node.id],
+      403,
+    );
+  }
+
   const explicit = explicitProviderFields(type, data);
 
   if (explicit.source && explicit.source !== 'zhenzhen') {

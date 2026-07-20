@@ -19,6 +19,8 @@ export const SECONDARY_PROVIDER_ACTION_IDS = [
   'rh-image.capability',
   'rh-video.frames',
   'rh-video.capability',
+  'video-edit.compose',
+  'video-edit.platform-export',
   'panorama-3d.ai-action-plan',
 ] as const;
 
@@ -36,6 +38,8 @@ export type SecondaryProviderActionTarget =
   | 'annotation-edit'
   | 'editor-cutout'
   | 'frames'
+  | 'compose'
+  | 'platform-export'
   | 'action-plan'
   | RhImageCapabilityPresetId
   | RhVideoCapabilityPresetId;
@@ -113,6 +117,12 @@ export interface PanoramaAiActionPlanActionParams {
   activeAvatarId?: string;
 }
 
+export interface VideoEditExecutionActionParams {
+  inputDigest: string;
+  packageIds: string[];
+  operationCount: number;
+}
+
 interface SecondaryProviderActionBase {
   schema: typeof SECONDARY_PROVIDER_ACTION_SCHEMA;
   digestAlgorithm: typeof SECONDARY_PROVIDER_ACTION_DIGEST_ALGORITHM;
@@ -130,6 +140,8 @@ export type SecondaryProviderActionEnvelope = SecondaryProviderActionBase & (
   | { actionId: 'rh-image.capability'; target: RhImageCapabilityPresetId; params: RhImageCapabilityActionParams }
   | { actionId: 'rh-video.frames'; target: 'frames'; params: RhVideoFramesActionParams }
   | { actionId: 'rh-video.capability'; target: RhVideoCapabilityPresetId; params: RhVideoCapabilityActionParams }
+  | { actionId: 'video-edit.compose'; target: 'compose'; params: VideoEditExecutionActionParams }
+  | { actionId: 'video-edit.platform-export'; target: 'platform-export'; params: VideoEditExecutionActionParams }
   | { actionId: 'panorama-3d.ai-action-plan'; target: 'action-plan'; params: PanoramaAiActionPlanActionParams }
 );
 
@@ -140,6 +152,8 @@ export type SecondaryProviderActionDraft =
   | { actionId: 'rh-image.capability'; target: RhImageCapabilityPresetId; params: RhImageCapabilityActionParams }
   | { actionId: 'rh-video.frames'; target: 'frames'; params: RhVideoFramesActionParams }
   | { actionId: 'rh-video.capability'; target: RhVideoCapabilityPresetId; params: RhVideoCapabilityActionParams }
+  | { actionId: 'video-edit.compose'; target: 'compose'; params: VideoEditExecutionActionParams }
+  | { actionId: 'video-edit.platform-export'; target: 'platform-export'; params: VideoEditExecutionActionParams }
   | { actionId: 'panorama-3d.ai-action-plan'; target: 'action-plan'; params: PanoramaAiActionPlanActionParams };
 
 export type SecondaryProviderActionRequest =
@@ -149,6 +163,7 @@ export type SecondaryProviderActionRequest =
   | ({ nodeId: string; nodeType: 'output' | 'upload' } & Extract<SecondaryProviderActionDraft, { actionId: 'rh-image.capability' }>)
   | ({ nodeId: string; nodeType: 'output' | 'upload' } & Extract<SecondaryProviderActionDraft, { actionId: 'rh-video.frames' }>)
   | ({ nodeId: string; nodeType: 'output' | 'upload' } & Extract<SecondaryProviderActionDraft, { actionId: 'rh-video.capability' }>)
+  | ({ nodeId: string; nodeType: 'video-edit' } & Extract<SecondaryProviderActionDraft, { actionId: 'video-edit.compose' | 'video-edit.platform-export' }>)
   | ({ nodeId: string; nodeType: 'panorama-3d' } & Extract<SecondaryProviderActionDraft, { actionId: 'panorama-3d.ai-action-plan' }>);
 
 export type QueueSecondaryProviderAction = (draft: SecondaryProviderActionDraft) => SecondaryProviderActionEnvelope;
@@ -464,6 +479,30 @@ function normalizePanoramaParams(value: unknown): PanoramaAiActionPlanActionPara
   };
 }
 
+const VIDEO_EDIT_PLATFORM_PACKAGE_IDS = new Set([
+  'douyin-kuaishou',
+  'bilibili-youtube',
+  'xiaohongshu-square',
+  'vertical-poster',
+  'wide-display',
+  'draft-preview',
+]);
+
+function normalizeVideoEditExecutionParams(
+  value: unknown,
+  target: 'compose' | 'platform-export',
+): VideoEditExecutionActionParams | null {
+  if (!ownRecord(value) || !hasOnlyKeys(value, ['inputDigest', 'packageIds', 'operationCount'])) return null;
+  const inputDigest = boundedString(value.inputDigest, 72);
+  const packageIds = cleanStringArray(value.packageIds, { maxItems: VIDEO_EDIT_PLATFORM_PACKAGE_IDS.size, maxLength: 64 });
+  const operationCount = boundedInteger(value.operationCount, 1, VIDEO_EDIT_PLATFORM_PACKAGE_IDS.size);
+  if (!inputDigest || !/^sha256:[a-f0-9]{64}$/.test(inputDigest) || !packageIds || operationCount === null) return null;
+  if (target === 'compose' && (packageIds.length !== 0 || operationCount !== 1)) return null;
+  if (target === 'platform-export'
+    && (packageIds.length === 0 || operationCount !== packageIds.length || packageIds.some((id) => !VIDEO_EDIT_PLATFORM_PACKAGE_IDS.has(id)))) return null;
+  return { inputDigest, packageIds, operationCount };
+}
+
 function normalizeActionVariant(
   actionId: unknown,
   nodeType: unknown,
@@ -500,6 +539,14 @@ function normalizeActionVariant(
     const presetId = target as RhVideoCapabilityPresetId;
     const normalized = normalizeRhVideoParams(params, presetId);
     return normalized ? { actionId, nodeType, target: presetId, params: normalized } : null;
+  }
+  if (actionId === 'video-edit.compose' && nodeType === 'video-edit' && target === 'compose') {
+    const normalized = normalizeVideoEditExecutionParams(params, target);
+    return normalized ? { actionId, nodeType, target, params: normalized } : null;
+  }
+  if (actionId === 'video-edit.platform-export' && nodeType === 'video-edit' && target === 'platform-export') {
+    const normalized = normalizeVideoEditExecutionParams(params, target);
+    return normalized ? { actionId, nodeType, target, params: normalized } : null;
   }
   if (actionId === 'panorama-3d.ai-action-plan' && nodeType === 'panorama-3d' && target === 'action-plan') {
     const normalized = normalizePanoramaParams(params);

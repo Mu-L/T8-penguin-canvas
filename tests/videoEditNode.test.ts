@@ -500,10 +500,12 @@ test('video edit can batch export multiple platform packages from one timeline',
   assert.match(node, /套餐/);
   assert.match(node, /输出与分离/);
   assert.match(node, /套餐队列/);
-  assert.match(node, /composeVideoEditAsync\(timelineComposeClips, packageSettings, \{ timelineV2, renderPlan: timelineRenderPlan \}\)/);
+  assert.match(node, /actionId: 'video-edit\.platform-export'/);
+  assert.match(node, /pendingVideoExecutionInputsRef\.current\.set\(action\.requestId, snapshot\)/);
+  assert.match(node, /composeVideoEditAsync\(snapshot\.clips, operationSettings/);
   assert.match(node, /platformResults/);
-  assert.match(node, /videoUrls:\s*downstreamPlatformResults\.map/);
-  assert.match(node, /directVideoUrls:\s*downstreamPlatformResults\.map/);
+  assert.match(node, /videoUrls:\s*downstream\.map/);
+  assert.match(node, /directVideoUrls:\s*downstream\.map/);
   assert.match(node, /label:\s*`套餐 \$\{pkg\.label\}`/);
 });
 
@@ -516,13 +518,10 @@ test('video edit platform draft exports do not replace final downstream video ou
   assert.match(videoEdit, /draftVideoUrls:\s*\[\]/);
   assert.match(videoEdit, /directDraftVideoUrls:\s*\[\]/);
 
-  assert.match(node, /draftPlatformResults/);
-  assert.match(node, /finalPlatformResults/);
-  assert.match(node, /pkg\.id === 'draft-preview'/);
-  assert.match(node, /finalPlatformResults\.length \? finalPlatformResults : platformResults/);
-  assert.match(node, /draftVideoUrls:\s*draftPlatformResults\.map/);
-  assert.match(node, /directDraftVideoUrls:\s*draftPlatformResults\.map/);
-  assert.match(node, /finalPlatformResults\.length \? finalPlatformResults : platformResults/);
+  assert.match(node, /finalResults = platformResults\.filter\(\(item\) => item\.packageId !== 'draft-preview'\)/);
+  assert.match(node, /finalResults\.length \? finalResults : platformResults/);
+  assert.match(node, /draftVideoUrls:\s*platformResults\.filter\(\(item\) => item\.packageId === 'draft-preview'\)/);
+  assert.match(node, /directDraftVideoUrls:\s*platformResults\.filter\(\(item\) => item\.packageId === 'draft-preview'\)/);
 });
 
 test('video edit recipes can be exported and imported without embedding media files', () => {
@@ -1585,8 +1584,8 @@ test('video edit compose requests use timeline render plan as the export source'
   assert.match(node, /const timelineRenderPlan = useMemo\(\(\) => buildVideoEditTimelineRenderPlan\(timelineV2\), \[timelineV2\]\)/);
   assert.match(node, /const timelineComposeClips = useMemo\(\(\) => videoEditClipsFromTimelineRenderPlan\(timelineRenderPlan\), \[timelineRenderPlan\]\)/);
   assert.match(node, /const canCompose = timelineComposeClips\.length > 0/);
-  assert.match(node, /composeVideoEditAsync\(timelineComposeClips, settings, \{ timelineV2, renderPlan: timelineRenderPlan \}\)/);
-  assert.match(node, /composeVideoEditAsync\(timelineComposeClips, packageSettings, \{ timelineV2, renderPlan: timelineRenderPlan \}\)/);
+  assert.match(node, /createVideoEditExecutionInputSnapshot\(\{[\s\S]*clips: timelineComposeClips[\s\S]*renderPlan: timelineRenderPlan/);
+  assert.match(node, /composeVideoEditAsync\(snapshot\.clips, operationSettings,[\s\S]*timelineV2: snapshot\.timelineV2,[\s\S]*renderPlan: snapshot\.renderPlan/);
   assert.match(node, /separateVideoAudioAsync\(timelineComposeClips, settings, mode, \{ timelineV2, renderPlan: timelineRenderPlan \}\)/);
   assert.match(node, /if \(!timelineComposeClips\.length \|\| running \|\| busy === 'upload'\) return/);
   assert.match(service, /interface VideoComposeOptions/);
@@ -1596,6 +1595,27 @@ test('video edit compose requests use timeline render plan as the export source'
   assert.match(backend, /resolveVideoEditRenderPlanPayload/);
   assert.match(backend, /buildSubtitleDrawtextFilters/);
   assert.match(backend, /renderPlanClips = Array\.isArray\(body\?\.renderPlan\?\.clips\)/);
+});
+
+test('video edit compose and platform export run through durable secondary-action evidence', () => {
+  const node = read('src/components/nodes/VideoEditNode.tsx');
+  const service = read('src/services/videoOps.ts');
+  const backend = read('backend/src/routes/videoOps.js');
+  const canvas = read('src/components/Canvas.tsx');
+
+  assert.match(node, /actionId: 'video-edit\.compose'/);
+  assert.match(node, /actionId: 'video-edit\.platform-export'/);
+  assert.match(node, /registerSecondaryProviderActionExecutor\(id, 'video-edit\.compose', 'compose'/);
+  assert.match(node, /reporter\.providerRequest[\s\S]*composeVideoEditAsync[\s\S]*reporter\.providerSubmitted/);
+  assert.match(node, /awaitVideoOperationTerminal/);
+  assert.match(node, /reporter\.providerPolling/);
+  assert.match(node, /reporter\.output/);
+  assert.match(service, /executionEvidence\?: VideoOperationExecutionEvidence/);
+  assert.match(service, /executionInput\?: VideoEditExecutionInputSnapshot/);
+  assert.match(backend, /validateVideoOperationInputBinding/);
+  assert.match(backend, /reconstructDurableVideoOperationJob/);
+  assert.match(canvas, /secondaryProviderActionInputDigest/);
+  assert.doesNotMatch(node, /handleCompose[\s\S]{0,900}composeVideoEditAsync/);
 });
 
 test('video edit workbench uses a creator-first multitrack layout instead of legacy stacked panels', () => {

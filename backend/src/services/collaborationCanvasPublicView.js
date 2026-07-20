@@ -337,6 +337,37 @@ function publicCanvasMutationResult(result) {
   return envelope;
 }
 
+function indexAuthoritativeSyncEntities(entities, tombstones) {
+  const indexed = new Map();
+  (Array.isArray(entities) ? entities : []).forEach((entity) => {
+    if (!entity || typeof entity !== 'object' || Array.isArray(entity)) return;
+    if (entity.id != null) indexed.set(String(entity.id), entity);
+    if (entity.entityUid != null) indexed.set(String(entity.entityUid), entity);
+  });
+  Object.entries(tombstones && typeof tombstones === 'object' && !Array.isArray(tombstones)
+    ? tombstones
+    : {}).forEach(([id, tombstone]) => {
+    if (!tombstone || typeof tombstone !== 'object' || Array.isArray(tombstone)) return;
+    indexed.set(String(id), tombstone);
+    if (tombstone.entityUid != null) indexed.set(String(tombstone.entityUid), tombstone);
+  });
+  return indexed;
+}
+
+function authoritativeSyncEntity(indexed, entity) {
+  if (!entity || typeof entity !== 'object' || Array.isArray(entity)) return null;
+  return indexed.get(String(entity.id || ''))
+    || indexed.get(String(entity.entityUid || ''))
+    || null;
+}
+
+function authoritativeSyncEntityUid(indexed, entity) {
+  const authoritative = authoritativeSyncEntity(indexed, entity);
+  return typeof authoritative?.entityUid === 'string' && authoritative.entityUid
+    ? authoritative.entityUid
+    : null;
+}
+
 function publicCanvasSync(sync, document = null) {
   if (!sync || typeof sync !== 'object' || Array.isArray(sync)) {
     return publicCollaborationCanvasValue(sync);
@@ -352,11 +383,14 @@ function publicCanvasSync(sync, document = null) {
     return snapshot;
   }
   if (!Array.isArray(sync.operations)) return publicCollaborationCanvasValue(sync);
-  const nodesById = new Map();
-  (Array.isArray(document?.nodes) ? document.nodes : []).forEach((node) => {
-    if (node?.id != null) nodesById.set(String(node.id), node);
-    if (node?.entityUid != null) nodesById.set(String(node.entityUid), node);
-  });
+  const nodesById = indexAuthoritativeSyncEntities(
+    document?.nodes,
+    document?.tombstones?.nodes,
+  );
+  const edgesById = indexAuthoritativeSyncEntities(
+    document?.edges,
+    document?.tombstones?.edges,
+  );
   const envelope = publicCollaborationCanvasValue({ ...sync, operations: [] });
   envelope.operations = sync.operations.map((operation) => {
     const payload = operation?.payload && typeof operation.payload === 'object' && !Array.isArray(operation.payload)
@@ -377,6 +411,58 @@ function publicCanvasSync(sync, document = null) {
     const canonicalPayload = {};
     for (const key of OPERATION_PAYLOAD_KEYS[operationType] || []) {
       if (Object.prototype.hasOwnProperty.call(payload, key)) canonicalPayload[key] = payload[key];
+    }
+    if (['node.add', 'node.restore'].includes(operationType) && addedNode) {
+      const authoritativeNode = authoritativeSyncEntity(nodesById, addedNode);
+      const entityUid = authoritativeSyncEntityUid(nodesById, addedNode);
+      const publicNode = { ...addedNode };
+      delete publicNode.entityUid;
+      delete publicNode.entityRevision;
+      delete publicNode.legacyAliases;
+      canonicalPayload.node = {
+        ...publicNode,
+        ...(entityUid ? { entityUid } : {}),
+        ...(Array.isArray(authoritativeNode?.legacyAliases)
+          ? { legacyAliases: [...authoritativeNode.legacyAliases] }
+          : {}),
+        ...(Number.isSafeInteger(Number(operation?.revision))
+          ? { entityRevision: Number(operation.revision) }
+          : {}),
+      };
+    }
+    const addedEdge = ['edge.add', 'edge.restore'].includes(operationType)
+      && payload.edge
+      && typeof payload.edge === 'object'
+      && !Array.isArray(payload.edge)
+      ? payload.edge
+      : null;
+    if (addedEdge) {
+      const authoritativeEdge = authoritativeSyncEntity(edgesById, addedEdge);
+      const entityUid = authoritativeSyncEntityUid(edgesById, addedEdge);
+      const publicEdge = { ...addedEdge };
+      delete publicEdge.entityUid;
+      delete publicEdge.entityRevision;
+      delete publicEdge.legacyAliases;
+      delete publicEdge.sourceEntityUid;
+      delete publicEdge.targetEntityUid;
+      canonicalPayload.edge = {
+        ...publicEdge,
+        ...(entityUid ? { entityUid } : {}),
+        ...(Array.isArray(authoritativeEdge?.legacyAliases)
+          ? { legacyAliases: [...authoritativeEdge.legacyAliases] }
+          : {}),
+        ...(typeof authoritativeEdge?.sourceEntityUid === 'string'
+          && authoritativeEdge.sourceEntityUid
+          ? { sourceEntityUid: authoritativeEdge.sourceEntityUid }
+          : {}),
+        ...(typeof authoritativeEdge?.targetEntityUid === 'string'
+          && authoritativeEdge.targetEntityUid
+          ? { targetEntityUid: authoritativeEdge.targetEntityUid }
+          : {}),
+        ...(Number.isSafeInteger(Number(operation?.revision))
+          ? { entityRevision: Number(operation.revision) }
+          : {}),
+      };
     }
     return publicCollaborationCanvasValue(
       { ...operation, payload: canonicalPayload },

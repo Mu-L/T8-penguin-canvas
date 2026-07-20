@@ -12,6 +12,7 @@ const {
 } = require('../backend/src/collaboration/protocol');
 const {
   ProjectDatabase,
+  ProjectDatabaseRecoveryError,
   PROJECT_DATABASE_SCHEMA_VERSION,
   RevisionConflictError,
   SubflowRevisionConflictError,
@@ -120,6 +121,90 @@ test('deleted nodes and edges require explicit restore operations', () => {
   assert.equal(restoredEdge.tombstones.nodes.a, undefined);
   assert.equal(restoredEdge.tombstones.edges.e1, undefined);
   assert.equal(restoredNode.nodes.find((node) => node.id === 'a').entityUid, base.nodes.find((node) => node.id === 'a').entityUid);
+});
+
+test('edge tombstones bind named handles exactly and preserve legacy restore compatibility', () => {
+  const base = normalizeCanvasDocument('canvas-handles', {
+    nodes: [{ id: 'a' }, { id: 'b' }],
+    edges: [{
+      id: 'e1',
+      source: 'a',
+      target: 'b',
+      sourceHandle: 'text-out',
+      targetHandle: 'text-in',
+    }],
+  });
+  const originalEdge = base.edges[0];
+  const deleted = applyCanvasOperation(base, {
+    opId: 'delete-named-edge',
+    type: 'edge.delete',
+    payload: { edgeId: 'e1' },
+  }).document;
+  assert.equal(deleted.tombstones.edges.e1.sourceHandle, 'text-out');
+  assert.equal(deleted.tombstones.edges.e1.targetHandle, 'text-in');
+  assert.throws(() => applyCanvasOperation(deleted, {
+    opId: 'forge-source-handle',
+    type: 'edge.restore',
+    payload: { edge: { ...originalEdge, sourceHandle: 'image-out' } },
+  }), /sourceHandle 与删除记录不一致/);
+  assert.throws(() => applyCanvasOperation(deleted, {
+    opId: 'omit-target-handle',
+    type: 'edge.restore',
+    payload: {
+      edge: {
+        id: originalEdge.id,
+        entityUid: originalEdge.entityUid,
+        source: originalEdge.source,
+        target: originalEdge.target,
+        sourceHandle: originalEdge.sourceHandle,
+      },
+    },
+  }), /targetHandle 与删除记录不一致/);
+  const restored = applyCanvasOperation(deleted, {
+    opId: 'restore-named-edge',
+    type: 'edge.restore',
+    payload: { edge: originalEdge },
+  }).document;
+  assert.equal(restored.edges[0].sourceHandle, 'text-out');
+  assert.equal(restored.edges[0].targetHandle, 'text-in');
+
+  const legacyInput = structuredClone(deleted);
+  delete legacyInput.tombstones.edges.e1.sourceHandle;
+  delete legacyInput.tombstones.edges.e1.targetHandle;
+  const legacy = normalizeCanvasDocument('canvas-handles', legacyInput, {
+    projectId: legacyInput.projectId,
+    revision: legacyInput.revision,
+  });
+  assert.equal(Object.hasOwn(legacy.tombstones.edges.e1, 'sourceHandle'), false);
+  assert.equal(Object.hasOwn(legacy.tombstones.edges.e1, 'targetHandle'), false);
+  const legacyRestored = applyCanvasOperation(legacy, {
+    opId: 'restore-legacy-named-edge',
+    type: 'edge.restore',
+    payload: { edge: originalEdge },
+  }).document;
+  assert.equal(legacyRestored.edges[0].sourceHandle, 'text-out');
+
+  const unnamedBase = normalizeCanvasDocument('canvas-unnamed-handles', {
+    nodes: [{ id: 'a' }, { id: 'b' }],
+    edges: [{ id: 'e1', source: 'a', target: 'b' }],
+  });
+  const unnamedEdge = unnamedBase.edges[0];
+  const unnamedDeleted = applyCanvasOperation(unnamedBase, {
+    opId: 'delete-unnamed-edge', type: 'edge.delete', payload: { edgeId: 'e1' },
+  }).document;
+  assert.equal(Object.hasOwn(unnamedDeleted.tombstones.edges.e1, 'sourceHandle'), true);
+  assert.equal(unnamedDeleted.tombstones.edges.e1.sourceHandle, null);
+  assert.throws(() => applyCanvasOperation(unnamedDeleted, {
+    opId: 'forge-handle-on-unnamed-edge',
+    type: 'edge.restore',
+    payload: { edge: { ...unnamedEdge, sourceHandle: 'text-out' } },
+  }), /sourceHandle 与删除记录不一致/);
+
+  const cascaded = applyCanvasOperation(base, {
+    opId: 'delete-node-with-named-edge', type: 'node.delete', payload: { nodeId: 'a' },
+  }).document;
+  assert.equal(cascaded.tombstones.edges.e1.sourceHandle, 'text-out');
+  assert.equal(cascaded.tombstones.edges.e1.targetHandle, 'text-in');
 });
 
 test('UUID deletes preserve tombstone identity and require explicit UUID-aware restore', () => {
@@ -313,7 +398,7 @@ test('concurrent subflow writers allocate unique monotonic immutable versions', 
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-subflow-version-race-'));
   const filename = path.join(directory, 'projects.sqlite3');
   const seed = new ProjectDatabase(filename, { autoBackup: false });
-  seed.close();
+  await seed.close();
   const workerCount = 8;
   const shared = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 2);
   const barrier = new Int32Array(shared);
@@ -322,7 +407,13 @@ test('concurrent subflow writers allocate unique monotonic immutable versions', 
     const { parentPort, workerData } = require('node:worker_threads');
     const { ProjectDatabase } = require(workerData.modulePath);
     const barrier = new Int32Array(workerData.shared);
-    const db = new ProjectDatabase(workerData.filename, { autoBackup: false });
+    // This is an intentionally unreachable-in-production low-level SQLite CAS
+    // fixture. Production defaults reject the second owner; the independent
+    // process proof is frozen in projectDatabaseOwnerB2.test.cjs.
+    const db = new ProjectDatabase(workerData.filename, {
+      autoBackup: false,
+      unsafeDisableOwnerGuardForTests: true,
+    });
     parentPort.postMessage({ ready: true });
     Atomics.wait(barrier, 1, 0);
     try {
@@ -477,7 +568,7 @@ test('canvas snapshots can be listed and restored without rewriting history in p
   }
 });
 
-test('subflow parameter overrides and fixed definition survive database close and reopen', () => {
+test('subflow parameter overrides and fixed definition survive database close and reopen', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-subflow-override-'));
   const databasePath = path.join(directory, 'project.sqlite');
   const definition = {
@@ -509,7 +600,7 @@ test('subflow parameter overrides and fixed definition survive database close an
         edges: [],
       }, { expectedRevision: 1 });
     } finally {
-      first.close();
+      await first.close();
     }
 
     const reopened = new ProjectDatabase(databasePath);
@@ -522,14 +613,14 @@ test('subflow parameter overrides and fixed definition survive database close an
         prompt: 'persisted after reload', enabled: true, steps: 28,
       });
     } finally {
-      reopened.close();
+      await reopened.close();
     }
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
 
-test('subflow library metadata and independent copy survive database close and reopen', () => {
+test('subflow library metadata and independent copy survive database close and reopen', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-subflow-library-'));
   const databasePath = path.join(directory, 'project.sqlite');
   const projectId = 'project-subflow-library';
@@ -552,7 +643,7 @@ test('subflow library metadata and independent copy survive database close and r
         expectedRevision: created.revision, actorId: 'owner-a', changeSummary: '更新子工作流分类与标签',
       });
       const {
-        version: _version, revision: _revision, changeSummary: _summary, publishedBy: _publisher,
+        entityUid: _entityUid, version: _version, revision: _revision, changeSummary: _summary, publishedBy: _publisher,
         publishedAt: _publishedAt, createdAt: _createdAt, updatedAt: _updatedAt, ...copyContent
       } = categorized;
       const copied = first.saveSubflowDefinition({
@@ -565,7 +656,7 @@ test('subflow library metadata and independent copy survive database close and r
       assert.equal(copied.version, 1);
       assert.equal(copied.revision, 1);
     } finally {
-      first.close();
+      await first.close();
     }
 
     const reopened = new ProjectDatabase(databasePath);
@@ -582,6 +673,7 @@ test('subflow library metadata and independent copy survive database close and r
       assert.deepEqual(copied.tags, ['角色', '常用']);
       assert.deepEqual(copied.nodes, sourceV2.nodes);
       assert.notEqual(copied.id, sourceV2.id);
+      assert.notEqual(copied.entityUid, sourceV2.entityUid);
       assert.deepEqual(
         reopened.listSubflowDefinitions({ projectId }).map((item) => [item.id, item.version]).sort(),
         [['library-independent-copy', 1], ['library-source', 2]],
@@ -595,14 +687,14 @@ test('subflow library metadata and independent copy survive database close and r
         ['library-independent-copy', 'library-source'],
       );
     } finally {
-      reopened.close();
+      await reopened.close();
     }
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
 
-test('three-level multi-port subflow graph survives database close and reopen unchanged', () => {
+test('three-level multi-port subflow graph survives database close and reopen unchanged', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-subflow-production-matrix-'));
   const databasePath = path.join(directory, 'project.sqlite');
   const canvasId = 'canvas-subflow-production-matrix';
@@ -666,7 +758,7 @@ test('three-level multi-port subflow graph survives database close and reopen un
       first.ensureCanvas(canvasId, { nodes: [], edges: [] });
       first.saveCanvasSnapshot(canvasId, snapshot, { expectedRevision: 1 });
     } finally {
-      first.close();
+      await first.close();
     }
 
     const reopened = new ProjectDatabase(databasePath);
@@ -683,7 +775,7 @@ test('three-level multi-port subflow graph survives database close and reopen un
         ['leave-right', 'right', 'text-in'],
       ]);
     } finally {
-      reopened.close();
+      await reopened.close();
     }
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
@@ -813,7 +905,13 @@ test('run secret scanner catches raw leaks and accepts recursively redacted payl
 test('run hierarchy persists node attempts and redacts credentials and large payloads', () => {
   const db = new ProjectDatabase(':memory:');
   try {
-    const run = db.createRun({ canvasId: 'canvas-a', canvasRevision: 3, status: 'running' });
+    const canvas = db.ensureCanvas('canvas-a', { nodes: [], edges: [] }, 'project-local');
+    const run = db.createRun({
+      projectId: canvas.projectId,
+      canvasId: canvas.canvasId,
+      canvasRevision: canvas.revision,
+      status: 'running',
+    });
     const snapshot = redactRunValue({
       prompt: 'hello',
       apiKey: 'sk-should-not-survive',
@@ -835,7 +933,11 @@ test('run hierarchy persists node attempts and redacts credentials and large pay
       usage: { totalTokens: 12 },
       metadata: { transport: 'local-backend' },
     });
-    db.updateNodeRun(nodeRun.id, { status: 'succeeded', outputRefs: ['asset-a'] });
+    db.updateNodeRun(
+      nodeRun.id,
+      { status: 'succeeded', outputRefs: ['asset-a'] },
+      { allowOutputRefs: true },
+    );
     db.updateRun(run.id, { status: 'succeeded' });
 
     const storedNodeRun = db.getNodeRun(nodeRun.id);
@@ -861,6 +963,37 @@ test('run hierarchy persists node attempts and redacts credentials and large pay
     assert.deepEqual(db.listAttempts(nodeRun.id)[0].usage, { totalTokens: 12 });
     assert.deepEqual(db.listAttempts(nodeRun.id)[0].metadata, { transport: 'local-backend' });
     assert.deepEqual(db.listNodeRuns(run.id).find((item) => item.id === nodeRun.id).outputRefs, ['asset-a']);
+  } finally {
+    db.close();
+  }
+});
+
+test('NodeRun outputRefs reject every default write and require the explicit internal authority option', () => {
+  const db = new ProjectDatabase(':memory:');
+  try {
+    const run = db.createRun({ projectId: 'project-output-authority', canvasId: 'canvas-output-authority' });
+    assert.throws(
+      () => db.createNodeRun({ runId: run.id, nodeId: 'forged-create', outputRefs: [] }),
+      (error) => error?.code === 'host_artifact_authority_required' && error?.status === 409,
+    );
+    assert.throws(
+      () => db.createNodeRun(Object.assign(
+        Object.create({ outputRefs: ['prototype-forged-asset'] }),
+        { runId: run.id, nodeId: 'prototype-forged-create' },
+      )),
+      (error) => error?.code === 'host_artifact_authority_required',
+    );
+    const nodeRun = db.createNodeRun({ runId: run.id, nodeId: 'trusted-node' });
+    assert.throws(
+      () => db.updateNodeRun(nodeRun.id, { outputRefs: ['forged-asset'] }),
+      (error) => error?.code === 'host_artifact_authority_required' && error?.status === 409,
+    );
+    const internallyUpdated = db.updateNodeRun(
+      nodeRun.id,
+      { outputRefs: ['trusted-asset'] },
+      { allowOutputRefs: true },
+    );
+    assert.deepEqual(internallyUpdated.outputRefs, ['trusted-asset']);
   } finally {
     db.close();
   }
@@ -988,7 +1121,13 @@ test('run output lineage binds the exact node, Attempt, prompt, parent asset, ca
 test('canonical RunContext lifecycle events persist in causal order with one node identity', () => {
   const db = new ProjectDatabase(':memory:');
   try {
-    const run = db.createRun({ canvasId: 'canvas-lifecycle', canvasRevision: 4, status: 'queued' });
+    const canvas = db.ensureCanvas('canvas-lifecycle', { nodes: [], edges: [] }, 'project-local');
+    const run = db.createRun({
+      projectId: canvas.projectId,
+      canvasId: canvas.canvasId,
+      canvasRevision: canvas.revision,
+      status: 'queued',
+    });
     db.appendRunEvent(run.id, { type: 'run.queued', payload: { status: 'queued', contextId: `run-context-${run.id}` } });
     db.updateRun(run.id, { status: 'running' });
     db.appendRunEvent(run.id, { type: 'run.running', payload: { status: 'running' } });
@@ -1090,7 +1229,10 @@ test('run retention removes old unreferenced history but preserves referenced ru
     const protectedRun = db.createRun({ projectId, canvasId: 'canvas-retention', status: 'succeeded' });
     const currentRun = db.createRun({ projectId, canvasId: 'canvas-retention', status: 'succeeded' });
     const asset = db.upsertAsset({ projectId, kind: 'image', filename: 'kept.png', createdBy: 'owner-a' });
-    db.createNodeRun({ runId: protectedRun.id, nodeId: 'image-output', status: 'succeeded', outputRefs: [asset.id] });
+    db.createNodeRun(
+      { runId: protectedRun.id, nodeId: 'image-output', status: 'succeeded', outputRefs: [asset.id] },
+      { allowOutputRefs: true },
+    );
     const oldTimestamp = Date.now() - 3 * 24 * 60 * 60 * 1000;
     db.db.prepare('UPDATE runs SET created_at = ? WHERE id IN (?, ?)').run(oldTimestamp, oldRun.id, protectedRun.id);
     const policy = db.setRunRetentionPolicy(projectId, { maxDays: 1, maxRuns: 100, keepReferenced: true });
@@ -1117,7 +1259,10 @@ test('run retention enforces Run and output-reference limits without deleting as
     for (let index = 0; index < 3; index += 1) {
       const run = db.createRun({ projectId, canvasId: 'canvas-retention-limits', status: 'succeeded' });
       const asset = db.upsertAsset({ projectId, kind: 'image', filename: `kept-${index}.png` });
-      db.createNodeRun({ runId: run.id, nodeId: `output-${index}`, status: 'succeeded', outputRefs: [asset.id] });
+      db.createNodeRun(
+        { runId: run.id, nodeId: `output-${index}`, status: 'succeeded', outputRefs: [asset.id] },
+        { allowOutputRefs: true },
+      );
       db.db.prepare('UPDATE runs SET created_at = ? WHERE id = ?').run(Date.now() - 10000 + index, run.id);
       referencedRuns.push(run);
       assets.push(asset);
@@ -1152,7 +1297,10 @@ test('run retention reports when protected or non-Run data prevents a byte targe
     const projectId = 'project-retention-blocked';
     const run = db.createRun({ projectId, canvasId: 'canvas-retention-blocked', status: 'succeeded' });
     const asset = db.upsertAsset({ projectId, kind: 'image', filename: 'protected.png' });
-    db.createNodeRun({ runId: run.id, nodeId: 'protected-output', status: 'succeeded', outputRefs: [asset.id] });
+    db.createNodeRun(
+      { runId: run.id, nodeId: 'protected-output', status: 'succeeded', outputRefs: [asset.id] },
+      { allowOutputRefs: true },
+    );
     db.setRunRetentionPolicy(projectId, { maxDays: 3650, maxRuns: 10, maxAssetRefs: 0, keepReferenced: true });
     db.db.prepare('UPDATE run_retention_policies SET max_db_bytes = 1 WHERE project_id = ?').run(projectId);
     const result = db.pruneRuns(projectId);
@@ -1171,6 +1319,8 @@ test('run-center list and Attempt detail queries stay bounded on large histories
   const db = new ProjectDatabase(':memory:');
   try {
     const projectId = 'project-large-run-history';
+    db.ensureCanvas('load-canvas', { nodes: [], edges: [] }, projectId);
+    db.ensureCanvas('detail-canvas', { nodes: [], edges: [] }, projectId);
     const insertRun = db.db.prepare(`INSERT INTO runs(id, project_id, canvas_id, canvas_revision, initiator_id, parent_run_id, status, summary_json, created_at, started_at, finished_at) VALUES (?, ?, ?, 1, 'load-test', NULL, 'succeeded', '{}', ?, ?, ?)`);
     const insertNode = db.db.prepare(`INSERT INTO node_runs(id, run_id, node_id, parent_node_run_id, original_node_id, definition_id, definition_version, subflow_path_json, status, input_json, output_refs_json, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, NULL, NULL, '[]', 'succeeded', '{}', '[]', ?, ?)`);
     const insertAttempt = db.db.prepare(`INSERT INTO run_attempts(id, node_run_id, provider, model, upstream_task_id, request_id, http_status, poll_count, status, timestamps_json, usage_json, metadata_json, error_json, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, NULL, 200, 1, 'succeeded', '{}', '{}', '{}', NULL, ?, ?)`);
@@ -1213,16 +1363,35 @@ test('run-center list and Attempt detail queries stay bounded on large histories
 test('host claims one accepted run intent exactly once and finalizes it from the authoritative Run', () => {
   const db = new ProjectDatabase(':memory:');
   try {
+    const canvas = db.ensureCanvas('intent-canvas', { nodes: [], edges: [] }, 'intent-project');
     const intent = db.createRunIntent({
-      projectId: 'intent-project', canvasId: 'intent-canvas', canvasRevision: 7,
+      projectId: 'intent-project', canvasId: 'intent-canvas', canvasRevision: canvas.revision,
       idempotencyKey: 'intent-authoritative-0001', requestedBy: 'remote-editor', estimatedCost: 1.5,
     });
-    db.updateRunIntent(intent.id, { status: 'accepted' });
-    const run = db.createRun({ projectId: 'intent-project', canvasId: 'intent-canvas', canvasRevision: 7, initiatorId: 'remote-editor', status: 'queued' });
-    const claimed = db.claimRunIntent(intent.id, run);
+    const accepted = db.acceptRunIntentForDispatch(intent.id, {
+      projectId: intent.projectId,
+      canvasId: intent.canvasId,
+      expectedQueueRevision: intent.queueRevision,
+      confirmedBy: 'local-owner',
+    });
+    const leased = db.leaseRunIntentForDispatch(
+      { projectId: intent.projectId, canvasId: intent.canvasId },
+      { workerId: 'project-database-test-worker', canvasConcurrencyLimit: 1 },
+    );
+    assert.equal(leased.intent.id, accepted.id);
+    const run = db.createRun({ projectId: 'intent-project', canvasId: 'intent-canvas', canvasRevision: canvas.revision, initiatorId: 'remote-editor', status: 'queued' });
+    const claimed = db.claimRunIntent(intent.id, run, {
+      expectedQueueRevision: leased.intent.queueRevision,
+      leaseOwner: 'project-database-test-worker',
+      leaseToken: leased.leaseToken,
+    });
     assert.equal(claimed.status, 'running');
     assert.equal(claimed.runId, run.id);
-    assert.throws(() => db.claimRunIntent(intent.id, run), /已被处理|另一主机/);
+    assert.throws(() => db.claimRunIntent(intent.id, run, {
+      expectedQueueRevision: claimed.queueRevision,
+      leaseOwner: 'project-database-test-worker',
+      leaseToken: leased.leaseToken,
+    }), /已消费|请求取消|另一主机/);
     const finished = db.finishRunIntentForRun(run.id, 'succeeded', 0.75);
     assert.equal(finished.status, 'completed');
     assert.equal(finished.actualCost, 0.75);
@@ -1259,6 +1428,9 @@ test('asset collections, tags, lineage and duplicate detection keep project boun
     assert.equal(lineage[0].relation, 'upscaled-from');
     assert.equal(db.getAssetLineage(parent.id)[0].childAssetId, similar.id);
 
+    db.refreshAssetDuplicateCandidates(parent.id, {
+      expectedCatalogRevision: db.getAssetCatalogRevision(parent.projectId),
+    });
     const duplicates = db.findAssetDuplicates(parent.id, 2);
     assert.deepEqual(duplicates.map((item) => [item.asset.id, item.match, item.distance]), [[exact.id, 'exact', 0], [similar.id, 'perceptual', 1]]);
     assert.equal(duplicates.some((item) => item.asset.id === otherProject.id), false);
@@ -1272,25 +1444,67 @@ test('asset collections, tags, lineage and duplicate detection keep project boun
   }
 });
 
-test('corrupt primary database is quarantined and restored from backup', async () => {
+test('corrupt primary and hot journal fail closed when the schema32 backup is stale', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-project-db-'));
   const filename = path.join(directory, 'projects.sqlite3');
   const backupFilename = `${filename}.backup`;
+  const generationFilename = `${filename}.recovery-generation.json`;
   try {
     const first = new ProjectDatabase(filename, { backupFilename, autoBackup: false });
     first.ensureCanvas('canvas-restored', { nodes: [{ id: 'kept' }], edges: [] });
     await first.createBackup();
-    first.close();
-    fs.writeFileSync(filename, Buffer.from('this is not a sqlite database'));
+    first.saveCanvasSnapshot('canvas-restored', {
+      nodes: [{ id: 'kept' }, { id: 'post-backup-write' }],
+      edges: [],
+    }, { expectedRevision: 1 });
+    await first.close();
+    const backupBefore = fs.readFileSync(backupFilename);
+    const generationBefore = fs.readFileSync(generationFilename);
+    const brokenPrimary = Buffer.from('this is not a sqlite database');
+    const hotJournal = Buffer.from('untrusted-hot-journal-evidence');
+    fs.writeFileSync(filename, brokenPrimary);
+    fs.writeFileSync(`${filename}-journal`, hotJournal);
 
-    const restored = new ProjectDatabase(filename, { backupFilename, autoBackup: false });
+    let failure = null;
+    assert.throws(
+      () => new ProjectDatabase(filename, { backupFilename, autoBackup: false }),
+      (error) => {
+        failure = error;
+        return error instanceof ProjectDatabaseRecoveryError
+          && error.code === 'project_database_recovery_failed'
+          && error.status === 503
+          && error.details?.phase === 'backup_freshness_rejected'
+          && error.details?.freshnessStatus === 'rejected'
+          && error.details?.capturedWriteSequence < error.details?.acknowledgedWriteSequence;
+      },
+    );
+    assert.deepEqual(fs.readFileSync(filename), brokenPrimary);
+    assert.deepEqual(fs.readFileSync(`${filename}-journal`), hotJournal);
+    assert.deepEqual(fs.readFileSync(backupFilename), backupBefore);
+    assert.deepEqual(fs.readFileSync(generationFilename), generationBefore);
+    assert.equal(failure.details.backupEvidence, backupFilename);
+    assert.equal(fs.existsSync(failure.details.restoreTemp), true);
+    const evidence = failure.details.primaryEvidence.map((entry) => fs.readFileSync(entry));
+    assert.equal(evidence.some((value) => value.equals(brokenPrimary)), true);
+    assert.equal(evidence.some((value) => value.equals(hotJournal)), true);
+
+    const candidate = new BetterSqlite3(failure.details.restoreTemp, {
+      readonly: true,
+      fileMustExist: true,
+    });
     try {
-      assert.equal(restored.getCanvas('canvas-restored').nodes[0].id, 'kept');
-      assert.equal(fs.readdirSync(directory).some((name) => name.includes('.corrupt-')), true);
+      assert.equal(JSON.parse(candidate.prepare(`
+        SELECT snapshot_json FROM canvas_documents WHERE canvas_id = ?
+      `).get('canvas-restored').snapshot_json).nodes[0].id, 'kept');
     } finally {
-      restored.close();
+      candidate.close();
     }
   } finally {
-    fs.rmSync(directory, { recursive: true, force: true });
+    fs.rmSync(directory, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 50,
+    });
   }
 });

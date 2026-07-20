@@ -1,0 +1,18 @@
+{
+  "canvasId": "image-pipeline-light",
+  "projectId": "portfolio-2024",
+  "name": "商品图增强流程",
+  "theme": { "mode": "light", "accent": "cyan", "grid": "dots" },
+  "modifiedAt": 1704067200002,
+  "nodes": [
+    { "id": "upload-7", "type": "upload", "position": { "x": -120, "y": 60 }, "data": { "label": "原始商品图", "mediaKind": "image" } },
+    { "id": "resize-7", "type": "resize", "position": { "x": 220, "y": 60 }, "data": { "width": 1024, "height": 1024, "fit": "cover" } },
+    { "id": "output-7", "type": "output", "position": { "x": 560, "y": 60 }, "data": { "label": "方形主图" } }
+  ],
+  "edges": [
+    { "id": "upload-to-resize", "source": "upload-7", "target": "resize-7", "sourceHandle": "upload-out:image", "targetHandle": "resize-in:image" },
+    { "id": "resize-to-output", "source": "resize-7", "target": "output-7", "sourceHandle": "resize-out:image", "targetHandle": "output-in:image" }
+  ],
+  "viewport": { "x": 132.5, "y": 42.25, "zoom": 1.15 },
+  "panelState": { "sidebar": true, "terminal": false }
+}

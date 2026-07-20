@@ -2,6 +2,21 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { ProjectDatabase } = require('../backend/src/services/projectDatabase');
 
+function ensureCanvasRevision(db, projectId, canvasId, revision = 4) {
+  let document = db.ensureCanvas(canvasId, {
+    projectId,
+    nodes: [],
+    edges: [],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  }, projectId);
+  while (document.revision < revision) {
+    document = db.saveCanvasSnapshot(canvasId, document, {
+      expectedRevision: document.revision,
+    });
+  }
+  return document;
+}
+
 function createRun(db, id, overrides = {}) {
   return db.createRun({
     id,
@@ -55,6 +70,7 @@ function subflow(id, projectId, name) {
 test('E4 run evidence uses constant bounded SQL queries and reports exact pagination completeness', () => {
   const db = new ProjectDatabase(':memory:');
   try {
+    ensureCanvasRevision(db, 'project-a', 'canvas-a');
     const run = createRun(db, 'run-large');
     for (let index = 0; index < 51; index += 1) createNodeAndAttempts(db, run.id, index, 4);
 
@@ -85,11 +101,13 @@ test('E4 run evidence uses constant bounded SQL queries and reports exact pagina
 test('E4 exact Run/NodeRun/Attempt selection is scope-joined, complete, and preserves the real Attempt number', () => {
   const db = new ProjectDatabase(':memory:');
   try {
+    ensureCanvasRevision(db, 'project-a', 'canvas-a');
+    ensureCanvasRevision(db, 'project-b', 'canvas-b');
     const runA = createRun(db, 'run-a');
     const runB = createRun(db, 'run-b');
     const a = createNodeAndAttempts(db, runA.id, 1, 4);
     const b = createNodeAndAttempts(db, runB.id, 2, 2);
-    createRun(db, 'run-other-project', { projectId: 'project-b' });
+    createRun(db, 'run-other-project', { projectId: 'project-b', canvasId: 'canvas-b' });
 
     const exact = db.getRunEvidence({
       projectId: 'project-a',
@@ -172,6 +190,7 @@ test('E4 authoritative validation loads exact immutable subflow refs in one boun
 test('E4 database rejects cross-Run Attempt updates and RunEvent relationships without mutating either Run', () => {
   const db = new ProjectDatabase(':memory:');
   try {
+    ensureCanvasRevision(db, 'project-a', 'canvas-a');
     const runA = createRun(db, 'run-a');
     const runB = createRun(db, 'run-b');
     const a = createNodeAndAttempts(db, runA.id, 1, 1);

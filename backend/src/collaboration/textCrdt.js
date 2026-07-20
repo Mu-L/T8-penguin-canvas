@@ -26,6 +26,9 @@ function decodeUpdate(value) {
 
 class CollaborativeTextStore {
   constructor(database) {
+    if (!database || typeof database.withProjectDatabaseWrite !== 'function') {
+      throw new TypeError('协同文本存储需要统一 ProjectDatabase 写事务边界');
+    }
     this.database = database;
   }
 
@@ -60,21 +63,25 @@ class CollaborativeTextStore {
     }
     const state = Buffer.from(Y.encodeStateAsUpdate(document));
     if (state.length > MAX_TEXT_UPDATE_BYTES * 4) throw new Error('协同文本正文超过持久化上限');
-    const record = this.database.saveCollaborativeTextDocument({
-      ...key,
-      state,
-      updatedBy: context.actorId,
-    });
-    this.database.appendAuditEvent({
-      projectId: key.projectId,
-      canvasId: key.canvasId,
-      actorId: context.actorId,
-      sessionId: context.sessionId,
-      action: 'collaboration.text.update',
-      targetType: key.targetType,
-      targetId: key.targetId,
-      metadata: { field: key.field, updateBytes: update.length, stateBytes: state.length },
-    });
+    const commit = () => {
+      const record = this.database.saveCollaborativeTextDocument({
+        ...key,
+        state,
+        updatedBy: context.actorId,
+      });
+      this.database.appendAuditEvent({
+        projectId: key.projectId,
+        canvasId: key.canvasId,
+        actorId: context.actorId,
+        sessionId: context.sessionId,
+        action: 'collaboration.text.update',
+        targetType: key.targetType,
+        targetId: key.targetId,
+        metadata: { field: key.field, updateBytes: update.length, stateBytes: state.length },
+      });
+      return record;
+    };
+    const record = this.database.withProjectDatabaseWrite('collaboration.text.legacy-update', commit);
     return {
       ...key,
       state: state.toString('base64'),

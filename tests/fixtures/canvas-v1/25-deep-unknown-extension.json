@@ -1,0 +1,26 @@
+{
+  "canvasId": "opaque-extension-board",
+  "projectId": "plugin-project",
+  "name": "深层未知扩展数据",
+  "updatedAt": 1704067200025,
+  "nodes": [
+    {
+      "id": "opaque-plugin-node", "type": "drawing-board", "position": { "x": 50, "y": 70 },
+      "data": {
+        "label": "插件绘图",
+        "opaquePlugin": {
+          "version": "9.4-preview",
+          "layers": [
+            { "kind": "vector", "points": [[0, 0], [12.5, 8.25]], "style": { "stroke": "#fff", "blend": "screen" } },
+            { "kind": "metadata", "values": { "nullValue": null, "booleanValue": false, "unicode": "保留我" } }
+          ],
+          "futureCommands": [{ "op": "warp", "args": { "matrix": [1, 0, 0, 1, 4, 8] } }]
+        }
+      },
+      "opaqueNodeEnvelope": { "checksums": { "plugin": "fixture-digest" }, "flags": [1, "two", true] }
+    }
+  ],
+  "edges": [],
+  "viewport": { "x": 15, "y": 25, "zoom": 0.98 },
+  "opaqueRoot": { "namespaces": { "com.example.future": { "enabled": true, "records": [{ "id": "r1", "payload": { "a": 1 } }] } } }
+}

@@ -57,14 +57,14 @@ const CANVAS_REQUEST_COMPONENTS: ComponentAudit[] = [
   { file: 'RemoveAiWatermarkNode.tsx', types: ['remove-ai-watermark'], requestBoundaryCalls: 1, directClickHandlers: ['handleRun'] },
   { file: 'ToolboxParamNode.tsx', types: ['cinematic', 'video-motion', 'multi-angle-visual'], requestBoundaryCalls: 3, directClickHandlers: ['handleRun'] },
   { file: 'PortraitMasterNode.tsx', types: ['portrait-master'], requestBoundaryCalls: 2, directClickHandlers: ['handleRun'] },
-  { file: 'PoseMasterNode.tsx', types: ['pose-master'], requestBoundaryCalls: 1, directClickHandlers: ['runPose'] },
+  { file: 'PoseMasterNode.tsx', types: ['pose-master'], requestBoundaryCalls: 1, directClickHandlers: ['runPose', 'runBatchPose', 'runKeyframeSequence'] },
   { file: 'AggregateParserNode.tsx', types: ['aggregate-parser'], requestBoundaryCalls: 1, directClickHandlers: ['handleRun'] },
   { file: 'BatchProcessorNode.tsx', types: ['batch-processor'], requestBoundaryCalls: 1, directClickHandlers: ['runBatch'] },
   { file: 'BatchTaggerNode.tsx', types: ['batch-tagger'], requestBoundaryCalls: 1, directClickHandlers: ['runBatch'] },
   { file: 'TopazImageUpscaleNode.tsx', types: ['topaz-image-upscale'], requestBoundaryCalls: 1, directClickHandlers: ['handleRun'] },
   { file: 'TopazVideoUpscaleNode.tsx', types: ['topaz-video-upscale'], requestBoundaryCalls: 1, directClickHandlers: ['handleRun'] },
-  { file: 'FaceExpression3DNode.tsx', types: ['face-expression-3d'], requestBoundaryCalls: 1, directClickHandlers: ['runSingle'] },
-  { file: 'Panorama3DNode.tsx', types: ['panorama-3d'], requestBoundaryCalls: 1, directClickHandlers: ['generatePanorama'] },
+  { file: 'FaceExpression3DNode.tsx', types: ['face-expression-3d'], requestBoundaryCalls: 1, directClickHandlers: ['runSingle', 'runBatch'] },
+  { file: 'Panorama3DNode.tsx', types: ['panorama-3d'], requestBoundaryCalls: 1, directClickHandlers: ['generatePanorama', 'exportFrame', 'exportSceneSnapshot', 'exportControlSnapshot'] },
 ];
 
 const NO_NODE_PRIMARY_COMPONENTS: ComponentAudit[] = [
@@ -78,11 +78,13 @@ function readNode(file: string): string {
   return readFileSync(new URL(`../src/components/nodes/${file}`, import.meta.url), 'utf8');
 }
 
-function jsxHandlerTexts(source: string, file: string, attributeName: 'onClick' | 'onSubmit'): string[] {
+function jsxHandlerTexts(source: string, file: string, attributeName?: string): string[] {
   const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const texts: string[] = [];
   const visit = (node: ts.Node) => {
-    if (ts.isJsxAttribute(node) && node.name.getText(parsed) === attributeName && node.initializer) {
+    if (ts.isJsxAttribute(node)
+      && (!attributeName || node.name.getText(parsed) === attributeName)
+      && node.initializer) {
       texts.push(node.initializer.getText(parsed));
     }
     ts.forEachChild(node, visit);
@@ -95,6 +97,19 @@ function containsIdentifier(source: string, identifier: string): boolean {
   return new RegExp(`\\b${identifier.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`).test(source);
 }
 
+function callExpressionCount(source: string, file: string, identifier: string): number {
+  const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let count = 0;
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node)
+      && ts.isIdentifier(node.expression)
+      && node.expression.text === identifier) count += 1;
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  return count;
+}
+
 test('primary node run audit classifies every shared executable type exactly once', () => {
   assert.equal(containsIdentifier('{handleRun}', 'handleRun'), true, 'handler audit must detect exact identifiers');
   assert.equal(containsIdentifier('{handleRunner}', 'handleRun'), false, 'handler audit must not match identifier prefixes');
@@ -102,6 +117,22 @@ test('primary node run audit classifies every shared executable type exactly onc
   assert.equal(audited.length, 51, 'shared executable audit count changed; classify every new or removed type explicitly');
   assert.equal(new Set(audited).size, audited.length, 'audit matrix must not classify an executable type twice');
   assert.deepEqual([...audited].sort(), [...EXECUTABLE_NODE_TYPES].sort());
+});
+
+test('every executable renderer registers exactly one durable Run lifecycle listener', () => {
+  for (const entry of [...CANVAS_REQUEST_COMPONENTS, ...NO_NODE_PRIMARY_COMPONENTS]) {
+    const source = readNode(entry.file);
+    assert.match(
+      source,
+      /import \{[^}]*\buseRunTrigger\b[^}]*\} from '\.\.\/\.\.\/hooks\/useRunTrigger';/,
+      `${entry.file} must import the durable Run lifecycle listener`,
+    );
+    assert.equal(
+      callExpressionCount(source, entry.file, 'useRunTrigger'),
+      1,
+      `${entry.file} must register exactly one durable Run lifecycle listener`,
+    );
+  }
 });
 
 test('every audited primary idle entry requests the Canvas run pipeline', () => {
@@ -112,10 +143,13 @@ test('every audited primary idle entry requests the Canvas run pipeline', () => 
     const requestCalls = source.match(/\brequestCanvasNodeRun\s*\(/g)?.length || 0;
     assert.equal(requestCalls, entry.requestBoundaryCalls, `${entry.file} request boundary count changed; audit the rendered entries`);
 
-    const clickHandlers = jsxHandlerTexts(source, entry.file, 'onClick');
+    // Scan every rendered JSX callback, including callbacks passed to editor
+    // components. Limiting this audit to onClick previously missed secondary
+    // output surfaces such as onExport/onBatchExport.
+    const renderedHandlers = jsxHandlerTexts(source, entry.file);
     for (const handler of entry.directClickHandlers) {
-      assert.equal(clickHandlers.some((text) => containsIdentifier(text, handler)), false,
-        `${entry.file} primary onClick must not invoke ${handler} directly`);
+      assert.equal(renderedHandlers.some((text) => containsIdentifier(text, handler)), false,
+        `${entry.file} rendered JSX must not invoke or pass ${handler} directly`);
     }
     const submitHandlers = jsxHandlerTexts(source, entry.file, 'onSubmit');
     for (const handler of entry.directSubmitHandlers || []) {
@@ -165,6 +199,29 @@ test('every audited primary idle entry requests the Canvas run pipeline', () => 
   const anime = readNode('AnimeTagMasterNode.tsx');
   assert.match(anime, /const requestAnimeTagRun = useCallback\(\(mode: AnimeTagOutputMode\) => \{[\s\S]*?animeTagOutputMode: mode,[\s\S]*?requestCanvasNodeRun\(id\);/);
   assert.match(anime, /const liveData = rf\.getNode\(id\)\?\.data[\s\S]*?liveData\?\.animeTagOutputMode[\s\S]*?runAnimeTagOutput\(mode\)/);
+
+  const faceExpression = readNode('FaceExpression3DNode.tsx');
+  assert.match(faceExpression, /const requestFaceExpressionRun = \([\s\S]*?createCanvasNodeRunRequestId\(id, `face-expression-\$\{mode\}-\$\{target\}`\)[\s\S]*?faceExpressionRunMode: mode[\s\S]*?faceExpressionRunTarget: target[\s\S]*?faceExpressionRunRequestId: requestId[\s\S]*?requestCanvasNodeRun\(id, \{ requestId \}\)/);
+  assert.match(faceExpression, /const contextRequestId = String\(reporter\.runContext\?\.requestId[\s\S]*?contextRequestId !== persistedRequestId[\s\S]*?requestedMode === 'batch'[\s\S]*?runBatch\(targetViewport\)[\s\S]*?runSingle\(targetViewport\)[\s\S]*?faceExpressionRunRequestId: ''/);
+  assert.match(faceExpression, /onExport=\{\(viewport\) => requestFaceExpressionRun\('single', 'editor', viewport\)\}/);
+  assert.match(faceExpression, /onBatchExport=\{\(viewport\) => requestFaceExpressionRun\('batch', 'editor', viewport\)\}/);
+
+  const poseMaster = readNode('PoseMasterNode.tsx');
+  assert.match(poseMaster, /const requestPoseMasterRun = \(mode: PoseMasterRunMode\) => \{[\s\S]*?createCanvasNodeRunRequestId\(id, `pose-master-\$\{mode\}`\)[\s\S]*?poseMasterRunMode: mode[\s\S]*?poseMasterRunRequestId: requestId[\s\S]*?requestCanvasNodeRun\(id, \{ requestId \}\)/);
+  assert.match(poseMaster, /const contextRequestId = String\(reporter\.runContext\?\.requestId[\s\S]*?contextRequestId !== persistedRequestId[\s\S]*?case 'batch':[\s\S]*?runBatchPose\(\)[\s\S]*?case 'keyframes':[\s\S]*?runKeyframeSequence\(\)[\s\S]*?poseMasterRunRequestId: ''/);
+  assert.match(poseMaster, /const runPose = async \(\) => \{[\s\S]*?status: 'error'[\s\S]*?taskStatus: 'failed'[\s\S]*?throw error;/,
+    'PoseMaster single output must reject after persisting failure so Run cannot become a false success');
+
+  const panorama = readNode('Panorama3DNode.tsx');
+  assert.match(panorama, /const requestPanoramaRun = useCallback\(\(mode: PanoramaNodeRunMode\) => \{[\s\S]*?createCanvasNodeRunRequestId\(p\.id, `panorama-\$\{mode\}`\)[\s\S]*?panoramaRunMode: mode[\s\S]*?panoramaRunRequestId: requestId[\s\S]*?requestCanvasNodeRun\(p\.id, \{ requestId \}\)/);
+  assert.match(panorama, /const persistedRequestId = String\(liveData\?\.panoramaRunRequestId[\s\S]*?contextRequestId !== persistedRequestId[\s\S]*?case 'frame':[\s\S]*?exportFrame\(\)[\s\S]*?case 'scene-snapshot':[\s\S]*?exportSceneSnapshot\(\)[\s\S]*?case 'control-snapshot':[\s\S]*?exportControlSnapshot\(\)[\s\S]*?panoramaRunRequestId: ''/);
+  assert.equal((panorama.match(/requestPanoramaRun\('scene-snapshot'\)/g) || []).length, 3,
+    'both Panorama scene snapshot buttons and its keyboard shortcut must use the same persisted Run dispatcher');
+  assert.equal((panorama.match(/requestPanoramaRun\('control-snapshot'\)/g) || []).length, 2,
+    'both Panorama control snapshot surfaces must use the same persisted Run dispatcher');
+  assert.doesNotMatch(panorama, /key === 'e'[\s\S]{0,160}?exportSceneSnapshot\(/,
+    'Panorama keyboard export must not bypass the persisted Run dispatcher');
+  assert.match(panorama, /key === 'e'[\s\S]{0,160}?requestPanoramaRun\('scene-snapshot'\)/);
 });
 
 test('components without a rendered primary action keep provider execution off onClick', () => {
@@ -197,6 +254,18 @@ test('secondary run modes and targets participate in the execution graph digest'
     {
       id: 'codex', type: 'codex-image-conjure', position: { x: 300, y: 0 },
       data: { codexConjureRunMode: 'single' },
+    },
+    {
+      id: 'face', type: 'face-expression-3d', position: { x: 400, y: 0 },
+      data: { faceExpressionRunMode: 'single', faceExpressionRunTarget: 'node' },
+    },
+    {
+      id: 'pose', type: 'pose-master', position: { x: 500, y: 0 },
+      data: { poseMasterRunMode: 'single' },
+    },
+    {
+      id: 'panorama', type: 'panorama-3d', position: { x: 600, y: 0 },
+      data: { panoramaRunMode: 'generate' },
     },
   ];
   const preview = (nodes: Node[]) => prepareRunAction({
@@ -231,6 +300,18 @@ test('secondary run modes and targets participate in the execution graph digest'
       : node),
     fullNodes.map((node) => node.id === 'codex'
       ? { ...node, data: { ...node.data, codexConjureRunMode: 'queue' } }
+      : node),
+    fullNodes.map((node) => node.id === 'face'
+      ? { ...node, data: { ...node.data, faceExpressionRunMode: 'batch' } }
+      : node),
+    fullNodes.map((node) => node.id === 'face'
+      ? { ...node, data: { ...node.data, faceExpressionRunTarget: 'editor' } }
+      : node),
+    fullNodes.map((node) => node.id === 'pose'
+      ? { ...node, data: { ...node.data, poseMasterRunMode: 'keyframes' } }
+      : node),
+    fullNodes.map((node) => node.id === 'panorama'
+      ? { ...node, data: { ...node.data, panoramaRunMode: 'scene-snapshot' } }
       : node),
   ];
   for (const nodes of variants) {

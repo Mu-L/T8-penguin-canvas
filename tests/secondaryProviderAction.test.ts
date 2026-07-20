@@ -62,6 +62,8 @@ function runContextFor(action: SecondaryProviderActionEnvelope): RunContext {
 const reporter: RunNodeLifecycleReporter = {
   runContext: null,
   executionToken: 'token-secondary-0001',
+  nodeRunId: null,
+  attemptId: null,
   progress: async () => {},
   polling: async () => {},
   output: async () => {},
@@ -149,6 +151,20 @@ test('fixed whitelist accepts each supported secondary Provider action shape', (
         retryCount: 1, retryDelayMs: 500, continueOnError: false,
       },
     }],
+    ['video-edit-node', 'video-edit', {
+      actionId: 'video-edit.compose',
+      target: 'compose',
+      params: { inputDigest: `sha256:${'a'.repeat(64)}`, packageIds: [], operationCount: 1 },
+    }],
+    ['video-edit-node', 'video-edit', {
+      actionId: 'video-edit.platform-export',
+      target: 'platform-export',
+      params: {
+        inputDigest: `sha256:${'b'.repeat(64)}`,
+        packageIds: ['douyin-kuaishou', 'bilibili-youtube'],
+        operationCount: 2,
+      },
+    }],
     ['panorama-node', 'panorama-3d', {
       actionId: 'panorama-3d.ai-action-plan',
       target: 'action-plan',
@@ -179,6 +195,15 @@ test('tampering, secret-like params, embedded data, and wrong preset bindings ar
   const tampered = structuredClone(action) as any;
   tampered.params.prompt = 'changed after confirmation';
   assert.equal(validateSecondaryProviderAction(tampered), null);
+
+  const videoAction = createSecondaryProviderActionForNode('video-edit-node', 'video-edit', {
+    actionId: 'video-edit.compose',
+    target: 'compose',
+    params: { inputDigest: `sha256:${'c'.repeat(64)}`, packageIds: [], operationCount: 1 },
+  });
+  const tamperedVideoAction = structuredClone(videoAction) as any;
+  tamperedVideoAction.params.inputDigest = `sha256:${'d'.repeat(64)}`;
+  assert.equal(validateSecondaryProviderAction(tamperedVideoAction), null);
 
   assert.throws(() => createSecondaryProviderActionForNode('upload-node', 'upload', {
     actionId: 'rh-image.capability',

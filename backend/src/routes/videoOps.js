@@ -13,6 +13,15 @@ const crypto = require('crypto');
 const { spawn, spawnSync } = require('child_process');
 const config = require('../config');
 const { resolveBundledFfmpeg, resolveBundledFfprobe } = require('../providers/llmMedia');
+const {
+  getProjectDatabase,
+  translateProjectDatabaseStorageCapacityError,
+} = require('../services/projectDatabase');
+const {
+  PROJECT_DATABASE_STORAGE_CAPACITY_CODE,
+  sendProjectDatabaseStorageCapacityError,
+} = require('../services/projectDatabasePublicError');
+const { isLoopbackAddress, safeRemoteMediaDownload } = require('../utils/safeRemoteMediaFetch');
 
 function loadVideoTransitionCatalog() {
   const candidates = [];
@@ -38,10 +47,16 @@ const videoTransitionCatalog = loadVideoTransitionCatalog();
 const router = express.Router();
 const jobs = new Map();
 const MAX_CLIPS = 80;
-const MAX_REMOTE_VIDEO_BYTES = Math.max(20 * 1024 * 1024, Number(process.env.T8_VIDEO_OPS_MAX_REMOTE_BYTES || 512 * 1024 * 1024));
+const MAX_REMOTE_VIDEO_BYTES = Math.max(20 * 1024 * 1024, Number(process.env.T8_VIDEO_OPS_MAX_REMOTE_BYTES) || 512 * 1024 * 1024);
+const REMOTE_VIDEO_DEADLINE_MS = Math.max(30_000, Number(process.env.T8_VIDEO_OPS_REMOTE_DEADLINE_MS) || 5 * 60 * 1000);
+const REMOTE_VIDEO_IDLE_TIMEOUT_MS = Math.max(5_000, Number(process.env.T8_VIDEO_OPS_REMOTE_IDLE_TIMEOUT_MS) || 30_000);
 const FFMPEG_TIMEOUT_MS = Math.max(30_000, Number(process.env.T8_VIDEO_OPS_TIMEOUT_MS || 15 * 60 * 1000));
 const JOB_TTL_MS = Math.max(60_000, Number(process.env.T8_VIDEO_OPS_JOB_TTL_MS || 30 * 60 * 1000));
 const MAX_RETAINED_JOBS = Math.max(20, Number(process.env.T8_VIDEO_OPS_MAX_JOBS || 200));
+const VIDEO_OPS_SHUTDOWN_TIMEOUT_MS = Math.max(
+  100,
+  Math.min(30_000, Number(process.env.T8_VIDEO_OPS_SHUTDOWN_TIMEOUT_MS) || 5_000),
+);
 const VIDEO_TRANSITIONS = Array.isArray(videoTransitionCatalog.transitions) ? videoTransitionCatalog.transitions : [];
 const VIDEO_TRANSITIONS_BY_ID = new Map(VIDEO_TRANSITIONS.map((item) => [item.id, item]));
 const NO_TRANSITION_DEFINITION = { id: 'none', label: '无转场', category: 'basic', quality: 'cut' };
@@ -49,6 +64,581 @@ const AUDIO_VOLUME_CURVES = new Set(['flat', 'linear-up', 'linear-down', 'duck']
 let nativeXfadeSupportCache = null;
 
 const TERMINAL_JOB_STATUSES = new Set(['done', 'failed', 'cancelled']);
+const VIDEO_OPERATION_EXECUTION_SCHEMA = 't8-video-operation-execution-v1';
+const VIDEO_OPERATION_EVIDENCE_SCHEMA = 't8-video-operation-run-evidence-v1';
+const VIDEO_OPERATION_INPUT_SCHEMA = 't8-video-operation-input-v1';
+const VIDEO_OPERATION_ACTIONS = new Map([
+  ['video-edit.compose', 'compose'],
+  ['video-edit.platform-export', 'platform-export'],
+  ['video-edit.separate-audio', 'separate-audio'],
+  ['video-edit.snapshot', 'snapshot'],
+]);
+const SYNTHETIC_VIDEO_OPERATION_SCOPE = Object.freeze({
+  projectId: 'system-local-video-ops',
+  canvasId: 'system-local-video-ops',
+  nodeId: 'system-local-video-edit',
+  initiatorId: 'local-owner',
+});
+let executionDatabaseOverride;
+let asyncComposeExecutorOverride;
+const operationExecutorOverrides = new Map();
+let videoOperationsShutdownRequested = false;
+let videoOperationsShutdownPromise = null;
+const activeAsyncVideoOperations = new Set();
+const asyncVideoOperationDrainWaiters = new Set();
+
+function executionDatabase() {
+  return executionDatabaseOverride === undefined
+    ? getProjectDatabase(config)
+    : executionDatabaseOverride;
+}
+
+function withVideoOperationDatabaseWrite(database, operation, callback) {
+  try {
+    return database.withProjectDatabaseWrite(operation, callback);
+  } catch (error) {
+    throw translateProjectDatabaseStorageCapacityError(error, { operation });
+  }
+}
+
+function rethrowVideoOperationStorageCapacityError(error, operation) {
+  const translated = translateProjectDatabaseStorageCapacityError(error, { operation });
+  if (translated?.code === PROJECT_DATABASE_STORAGE_CAPACITY_CODE) throw translated;
+}
+
+function hasOwn(value, key) {
+  return !!value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function isLoopbackVideoOpsRequest(req) {
+  const address = String(req?.socket?.remoteAddress || '').trim().toLowerCase();
+  return address === '::1'
+    || /^127(?:\.\d{1,3}){3}$/.test(address)
+    || /^::ffff:127(?:\.\d{1,3}){3}$/.test(address);
+}
+
+function cloneCanonicalJson(value, fallback) {
+  const selected = value === undefined ? fallback : value;
+  return JSON.parse(JSON.stringify(selected));
+}
+
+function fnv1a32Hex(value) {
+  let hash = 0x811c9dc5;
+  for (const byte of Buffer.from(String(value), 'utf8')) {
+    hash ^= byte;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
+function syntheticExecutionError(message, statusCode = 503) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+function durableExecutionConflict(message = '视频任务持久执行证据发生碰撞') {
+  const error = syntheticExecutionError(message, 409);
+  error.code = 'video_operation_execution_conflict';
+  return error;
+}
+
+function evidenceString(value, pattern, label) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text || !pattern.test(text)) throw new Error(`视频任务缺少有效 ${label}`);
+  return text;
+}
+
+function normalizeVideoOperationExecutionEvidence(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.getPrototypeOf(value) !== Object.prototype) {
+    throw new Error('视频操作必须绑定持久 Run 执行证据');
+  }
+  const actionId = evidenceString(value.actionId, /^video-edit\.(?:compose|platform-export|separate-audio|snapshot)$/, 'actionId');
+  const actionTarget = evidenceString(value.actionTarget, /^(?:compose|platform-export|separate-audio|snapshot)$/, 'actionTarget');
+  if (VIDEO_OPERATION_ACTIONS.get(actionId) !== actionTarget) throw new Error('视频任务 actionId/target 不匹配');
+  const operationIndex = Number(value.operationIndex);
+  if (!Number.isSafeInteger(operationIndex) || operationIndex < 0 || operationIndex > 63) {
+    throw new Error('视频任务 operationIndex 无效');
+  }
+  return {
+    schema: evidenceString(value.schema, /^t8-video-operation-execution-v1$/, 'schema'),
+    projectId: evidenceString(value.projectId, /^[^\u0000-\u001f\u007f]{1,256}$/, 'projectId'),
+    canvasId: evidenceString(value.canvasId, /^[^\u0000-\u001f\u007f]{1,256}$/, 'canvasId'),
+    runId: evidenceString(value.runId, /^[^\u0000-\u001f\u007f]{1,256}$/, 'runId'),
+    nodeRunId: evidenceString(value.nodeRunId, /^[^\u0000-\u001f\u007f]{1,256}$/, 'nodeRunId'),
+    attemptId: evidenceString(value.attemptId, /^[^\u0000-\u001f\u007f]{1,256}$/, 'attemptId'),
+    nodeId: evidenceString(value.nodeId, /^[^\u0000-\u001f\u007f]{1,256}$/, 'nodeId'),
+    requestId: evidenceString(value.requestId, /^[a-zA-Z0-9._:-]{8,160}$/, 'requestId'),
+    actionId,
+    actionTarget,
+    actionDigest: evidenceString(value.actionDigest, /^fnv1a32:[a-f0-9]{8}$/, 'actionDigest'),
+    inputDigest: evidenceString(value.inputDigest, /^sha256:[a-f0-9]{64}$/, 'inputDigest'),
+    operationIndex,
+  };
+}
+
+function requireVideoOperationExecutionAuthority(evidence, options = {}) {
+  const database = executionDatabase();
+  if (!database) throw new Error('视频任务持久执行存储不可用');
+  const run = database.getRun(evidence.runId);
+  const nodeRun = database.getNodeRun(evidence.nodeRunId);
+  const attempt = database.getAttempt(evidence.attemptId);
+  if (!run || !nodeRun || !attempt) throw new Error('视频任务引用的 Run/NodeRun/Attempt 不存在');
+  if (run.projectId !== evidence.projectId || run.canvasId !== evidence.canvasId
+    || nodeRun.runId !== run.id || nodeRun.nodeId !== evidence.nodeId
+    || attempt.nodeRunId !== nodeRun.id) {
+    throw new Error('视频任务 Run/NodeRun/Attempt 关系不匹配');
+  }
+  if (options.allowTerminalRun !== true && ['succeeded', 'failed', 'stopped', 'interrupted'].includes(String(run.status))) {
+    throw new Error('视频任务不能绑定已终止 Run');
+  }
+  const summary = run.summary && typeof run.summary === 'object' ? run.summary : {};
+  if (summary.runRequestId !== evidence.requestId
+    || summary.secondaryProviderActionId !== evidence.actionId
+    || summary.secondaryProviderActionTarget !== evidence.actionTarget
+    || summary.secondaryProviderActionDigest !== evidence.actionDigest
+    || summary.secondaryProviderActionInputDigest !== evidence.inputDigest
+    || !Array.isArray(summary.plannedNodeIds) || summary.plannedNodeIds.length !== 1
+    || summary.plannedNodeIds[0] !== evidence.nodeId
+    || !Array.isArray(summary.authorizedNodeIds) || summary.authorizedNodeIds.length !== 1
+    || summary.authorizedNodeIds[0] !== evidence.nodeId) {
+    throw new Error('视频任务未绑定当前已确认的不可篡改 action');
+  }
+  return database;
+}
+
+function stableVideoOperationJson(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(stableVideoOperationJson).join(',')}]`;
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableVideoOperationJson(value[key])}`).join(',')}}`;
+}
+
+function normalizeSeparateAudioMode(value) {
+  return ['audio-only', 'mute-video', 'both'].includes(value) ? value : 'both';
+}
+
+function normalizeSnapshotTime(value) {
+  const time = Number(value);
+  return Number.isFinite(time) ? Math.max(0, time) : 0;
+}
+
+function normalizeSnapshotFormat(value) {
+  return String(value || 'png').toLowerCase() === 'jpg' ? 'jpg' : 'png';
+}
+
+function buildVideoOperationBinding(action, body = {}) {
+  if (action === 'compose') {
+    const renderPlan = cloneCanonicalJson(resolveVideoEditRenderPlanPayload(body), {});
+    const clips = cloneCanonicalJson(resolveVideoEditClipPayload({ ...body, renderPlan }), []);
+    const settings = cloneCanonicalJson(body?.settings, {});
+    const timelineV2 = cloneCanonicalJson(body?.timelineV2, null);
+    return {
+      action,
+      clips,
+      settings,
+      timelineV2,
+      renderPlan,
+      executionInput: {
+        schema: 't8-video-edit-execution-input-v1',
+        mode: 'compose',
+        clips,
+        settings,
+        timelineV2,
+        renderPlan,
+        packageIds: [],
+        operationSettings: [settings],
+      },
+    };
+  }
+  if (action === 'separate-audio') {
+    const renderPlan = cloneCanonicalJson(resolveVideoEditRenderPlanPayload(body), {});
+    const clips = cloneCanonicalJson(resolveVideoEditClipPayload({ ...body, renderPlan }), []);
+    const settings = cloneCanonicalJson(body?.settings, {});
+    const timelineV2 = cloneCanonicalJson(body?.timelineV2, null);
+    const mode = normalizeSeparateAudioMode(body?.mode);
+    return {
+      action,
+      clips,
+      settings,
+      timelineV2,
+      renderPlan,
+      mode,
+      executionInput: {
+        schema: VIDEO_OPERATION_INPUT_SCHEMA,
+        action,
+        clips,
+        settings,
+        timelineV2,
+        renderPlan,
+        mode,
+      },
+    };
+  }
+  if (action === 'snapshot') {
+    const clip = cloneCanonicalJson(body?.clip, null);
+    const time = normalizeSnapshotTime(body?.time);
+    const format = normalizeSnapshotFormat(body?.format);
+    const sourceLabel = String(body?.sourceLabel || clip?.name || clip?.sourceLabel || '视频截图');
+    return {
+      action,
+      clip,
+      time,
+      format,
+      sourceLabel,
+      executionInput: {
+        schema: VIDEO_OPERATION_INPUT_SCHEMA,
+        action,
+        clip,
+        time,
+        format,
+        sourceLabel,
+      },
+    };
+  }
+  throw new Error(`不支持持久执行的视频操作：${action}`);
+}
+
+function createSyntheticVideoOperationExecution(actionOrBody, maybeBody) {
+  const action = typeof actionOrBody === 'string' ? actionOrBody : 'compose';
+  const body = typeof actionOrBody === 'string' ? (maybeBody || {}) : (actionOrBody || {});
+  let database;
+  try {
+    database = executionDatabase();
+  } catch (error) {
+    rethrowVideoOperationStorageCapacityError(error, 'video.execution.open');
+    throw syntheticExecutionError(`本地视频任务持久执行存储不可用：${error?.message || String(error)}`);
+  }
+  if (!database) throw syntheticExecutionError('本地视频任务持久执行存储不可用');
+
+  // The compatibility bridge deliberately ignores every client-supplied
+  // identity. It binds a fixed local-system scope to the exact canonical
+  // ffmpeg input that this route will execute.
+  const binding = buildVideoOperationBinding(action, body);
+  const executionInput = binding.executionInput;
+  const inputDigest = `sha256:${crypto.createHash('sha256').update(stableVideoOperationJson(executionInput), 'utf8').digest('hex')}`;
+  const requestId = `video-edit-local:${action}:${crypto.randomUUID()}`;
+  const actionId = `video-edit.${action}`;
+  const actionTarget = action;
+  if (VIDEO_OPERATION_ACTIONS.get(actionId) !== actionTarget) {
+    throw syntheticExecutionError(`本地视频任务 action 不受支持：${action}`);
+  }
+  const actionDigest = `fnv1a32:${fnv1a32Hex(stableVideoOperationJson({
+    schema: VIDEO_OPERATION_EXECUTION_SCHEMA,
+    requestId,
+    actionId,
+    actionTarget,
+    inputDigest,
+  }))}`;
+  const runId = crypto.randomUUID();
+  const nodeRunId = crypto.randomUUID();
+  const attemptId = crypto.randomUUID();
+  const evidence = {
+    schema: VIDEO_OPERATION_EXECUTION_SCHEMA,
+    ...SYNTHETIC_VIDEO_OPERATION_SCOPE,
+    runId,
+    nodeRunId,
+    attemptId,
+    requestId,
+    actionId,
+    actionTarget,
+    actionDigest,
+    inputDigest,
+    operationIndex: 0,
+  };
+  const now = Date.now();
+
+  try {
+    withVideoOperationDatabaseWrite(database, 'video.execution.synthetic-create', () => {
+      database.createRun({
+        id: runId,
+        projectId: SYNTHETIC_VIDEO_OPERATION_SCOPE.projectId,
+        canvasId: SYNTHETIC_VIDEO_OPERATION_SCOPE.canvasId,
+        canvasRevision: 0,
+        initiatorId: SYNTHETIC_VIDEO_OPERATION_SCOPE.initiatorId,
+        status: 'running',
+        startedAt: now,
+        summary: {
+          runRequestId: requestId,
+          plannedNodeIds: [SYNTHETIC_VIDEO_OPERATION_SCOPE.nodeId],
+          authorizedNodeIds: [SYNTHETIC_VIDEO_OPERATION_SCOPE.nodeId],
+          secondaryProviderActionId: actionId,
+          secondaryProviderActionTarget: actionTarget,
+          secondaryProviderActionDigest: actionDigest,
+          secondaryProviderActionInputDigest: inputDigest,
+          syntheticVideoOperation: true,
+          syntheticScope: 'system/local-video-ops',
+        },
+      });
+      database.createNodeRun({
+        id: nodeRunId,
+        runId,
+        nodeId: SYNTHETIC_VIDEO_OPERATION_SCOPE.nodeId,
+        status: 'running',
+        inputSnapshot: executionInput,
+      });
+      database.createAttempt({
+        id: attemptId,
+        nodeRunId,
+        provider: 'local-video-ops',
+        model: `ffmpeg-${action}`,
+        requestId,
+        status: 'running',
+        timestamps: { queuedAt: now, startedAt: now },
+        metadata: {
+          syntheticVideoOperation: true,
+          actionDigest,
+          inputDigest,
+        },
+      });
+      return evidence;
+    });
+  } catch (error) {
+    rethrowVideoOperationStorageCapacityError(error, 'video.execution.synthetic-create');
+    throw syntheticExecutionError(
+      `无法原子建立本地视频 Run/NodeRun/Attempt，已停止 ffmpeg：${error?.message || String(error)}`,
+    );
+  }
+
+  return { evidence, ...binding };
+}
+
+function syntheticTerminalStatus(job) {
+  if (job?.status === 'done') return 'succeeded';
+  if (job?.status === 'cancelled') return 'stopped';
+  if (job?.status === 'interrupted') return 'interrupted';
+  return 'failed';
+}
+
+function finalizeSyntheticVideoOperationExecution(job, persistenceError, phase = 'terminal-fallback') {
+  if (!job?.syntheticExecution || !job.executionEvidence) return null;
+  const database = requireVideoOperationExecutionAuthority(job.executionEvidence, { allowTerminalRun: true });
+  const evidence = job.executionEvidence;
+  const status = syntheticTerminalStatus(job);
+  const now = Date.now();
+  const message = String(
+    job.error
+      || persistenceError?.message
+      || (status === 'succeeded' ? '本地视频任务完成' : '本地视频任务失败'),
+  ).slice(0, 2048);
+  const error = status === 'succeeded' ? null : {
+    kind: status === 'stopped' ? 'cancelled' : status === 'interrupted' ? 'protocol' : 'persistence',
+    code: status === 'stopped'
+      ? 'VIDEO_OPERATION_STOPPED'
+      : status === 'interrupted'
+        ? 'VIDEO_OPERATION_INTERRUPTED'
+        : 'VIDEO_OPERATION_EVIDENCE_FAILED',
+    message,
+    retryable: status !== 'succeeded',
+  };
+  withVideoOperationDatabaseWrite(database, 'video.execution.synthetic-finalize', () => {
+    database.updateAttempt(evidence.attemptId, {
+      status,
+      timestamps: { finishedAt: now, respondedAt: now },
+      error,
+      metadata: { lastProviderEvent: 'provider.response', syntheticTerminalFallback: phase },
+    }, { runId: evidence.runId, nodeRunId: evidence.nodeRunId });
+    database.updateNodeRun(evidence.nodeRunId, { status });
+    database.updateRun(evidence.runId, {
+      status,
+      finishedAt: now,
+      summary: {
+        syntheticVideoOperationTerminal: phase,
+        ...(error ? { syntheticVideoOperationError: error } : {}),
+      },
+    });
+  });
+
+  // Status durability has priority. Preserve a reconstructable job event when
+  // the event writer itself was only transiently unavailable, without rolling
+  // the terminal trio back if that second write also fails.
+  let eventPersistence = { ok: true };
+  try {
+    withVideoOperationDatabaseWrite(database, 'video.execution.synthetic-fallback-event', () => {
+      database.appendRunEvent(evidence.runId, {
+        nodeRunId: evidence.nodeRunId,
+        type: 'log',
+        payload: videoOperationEventPayload(job, phase, {
+          persistenceError: persistenceError?.message || String(persistenceError || ''),
+        }),
+      });
+    });
+  } catch (eventError) {
+    const translated = translateProjectDatabaseStorageCapacityError(eventError, {
+      operation: 'video.execution.synthetic-fallback-event',
+    });
+    eventPersistence = translated?.code === PROJECT_DATABASE_STORAGE_CAPACITY_CODE
+      ? {
+        ok: false,
+        code: translated.code,
+        reason: translated.reason,
+        retryable: translated.retryable,
+      }
+      : {
+        ok: false,
+        code: 'video_operation_fallback_event_failed',
+        retryable: true,
+      };
+    job.persistenceWarning = eventPersistence;
+  }
+  return {
+    status,
+    runId: evidence.runId,
+    nodeRunId: evidence.nodeRunId,
+    attemptId: evidence.attemptId,
+    eventPersistence,
+  };
+}
+
+function validateVideoOperationInputBinding(body, rawEvidence, expectedAction = null) {
+  const evidence = normalizeVideoOperationExecutionEvidence(rawEvidence);
+  const evidenceAction = evidence.actionTarget === 'platform-export' ? 'compose' : evidence.actionTarget;
+  if (expectedAction && evidenceAction !== expectedAction) {
+    throw new Error('视频任务 executionEvidence 与当前路由 action 不匹配');
+  }
+  const snapshot = body?.executionInput;
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    throw new Error('视频任务缺少不可篡改 executionInput');
+  }
+  const digest = `sha256:${crypto.createHash('sha256').update(stableVideoOperationJson(snapshot), 'utf8').digest('hex')}`;
+  if (digest !== evidence.inputDigest) throw new Error('视频任务 executionInput 摘要不匹配');
+  if (evidenceAction === 'separate-audio' || evidenceAction === 'snapshot') {
+    if (snapshot.schema !== VIDEO_OPERATION_INPUT_SCHEMA || snapshot.action !== evidenceAction) {
+      throw new Error('视频任务 executionInput 结构与 action 不匹配');
+    }
+    const canonical = buildVideoOperationBinding(evidenceAction, body).executionInput;
+    if (stableVideoOperationJson(snapshot) !== stableVideoOperationJson(canonical)) {
+      throw new Error('视频任务实际操作参数与已确认输入快照不一致');
+    }
+    return evidence;
+  }
+  if (snapshot.schema !== 't8-video-edit-execution-input-v1') {
+    throw new Error('视频任务 executionInput 结构与 action 不匹配');
+  }
+  const expectedMode = evidence.actionId === 'video-edit.compose' ? 'compose' : 'platform-export';
+  if (snapshot.mode !== expectedMode || !Array.isArray(snapshot.clips)
+    || !Array.isArray(snapshot.packageIds) || !Array.isArray(snapshot.operationSettings)
+    || snapshot.operationSettings.length !== (expectedMode === 'compose' ? 1 : snapshot.packageIds.length)
+    || evidence.operationIndex >= snapshot.operationSettings.length) {
+    throw new Error('视频任务 executionInput 结构与 action 不匹配');
+  }
+  if (stableVideoOperationJson(body?.clips) !== stableVideoOperationJson(snapshot.clips)
+    || stableVideoOperationJson(body?.settings) !== stableVideoOperationJson(snapshot.operationSettings[evidence.operationIndex])
+    || stableVideoOperationJson(body?.timelineV2) !== stableVideoOperationJson(snapshot.timelineV2)
+    || stableVideoOperationJson(body?.renderPlan) !== stableVideoOperationJson(snapshot.renderPlan)) {
+    throw new Error('视频任务实际合成参数与已确认输入快照不一致');
+  }
+  return evidence;
+}
+
+function videoOperationEventPayload(job, phase, patch = {}) {
+  return {
+    schema: VIDEO_OPERATION_EVIDENCE_SCHEMA,
+    phase,
+    videoOperation: {
+      jobId: job.id,
+      action: job.action,
+      status: job.status,
+      progress: Number(job.progress || 0),
+      message: job.message || '',
+      syntheticExecution: job.syntheticExecution === true,
+      executionEvidence: job.executionEvidence,
+      ...(job.result ? { result: job.result } : {}),
+      ...(job.error ? { error: job.error, errorCode: job.errorCode || 'video-ops-failed' } : {}),
+      ...patch,
+    },
+  };
+}
+
+function persistVideoOperationEvent(job, phase, patch = {}) {
+  if (!job?.executionEvidence) return null;
+  const database = requireVideoOperationExecutionAuthority(job.executionEvidence, {
+    allowTerminalRun: phase !== 'accepted',
+  });
+  const evidence = job.executionEvidence;
+  const event = withVideoOperationDatabaseWrite(database, 'video.execution.event-persist', () => {
+    const event = database.appendRunEvent(evidence.runId, {
+      nodeRunId: evidence.nodeRunId,
+      type: 'log',
+      payload: videoOperationEventPayload(job, phase, patch),
+    });
+    const currentAttempt = database.getAttempt(evidence.attemptId);
+    const terminalStatus = job.syntheticExecution && (phase === 'terminal' || phase === 'interrupted')
+      ? syntheticTerminalStatus(job)
+      : null;
+    const terminalError = terminalStatus && terminalStatus !== 'succeeded'
+      ? {
+          kind: terminalStatus === 'stopped' ? 'cancelled' : terminalStatus === 'interrupted' ? 'protocol' : 'execution',
+          code: terminalStatus === 'stopped'
+            ? 'VIDEO_OPERATION_STOPPED'
+            : terminalStatus === 'interrupted'
+              ? 'VIDEO_OPERATION_INTERRUPTED'
+              : 'VIDEO_OPERATION_FAILED',
+          message: String(job.error || job.message || '本地视频任务失败').slice(0, 2048),
+          retryable: terminalStatus !== 'succeeded',
+        }
+      : undefined;
+    database.updateAttempt(evidence.attemptId, {
+      provider: 'local-video-ops',
+      model: `ffmpeg-${job.action}`,
+      upstreamTaskId: job.id,
+      requestId: evidence.requestId,
+      pollCount: phase === 'progress' ? Number(currentAttempt?.pollCount || 0) + 1 : undefined,
+      status: terminalStatus || undefined,
+      timestamps: {
+        ...(phase === 'accepted' ? { submittedAt: Date.now() } : {}),
+        ...(phase === 'progress' ? { lastPolledAt: Date.now() } : {}),
+        ...(phase === 'terminal' || phase === 'interrupted' ? { respondedAt: Date.now(), finishedAt: Date.now() } : {}),
+      },
+      ...(terminalError !== undefined ? { error: terminalError } : {}),
+      metadata: {
+        lastProviderEvent: phase === 'accepted' ? 'provider.submitted' : phase === 'progress' ? 'provider.polling' : 'provider.response',
+        videoOperationBridge: {
+          schema: VIDEO_OPERATION_EVIDENCE_SCHEMA,
+          jobId: job.id,
+          action: job.action,
+          status: job.status,
+          operationIndex: evidence.operationIndex,
+          actionDigest: evidence.actionDigest,
+          inputDigest: evidence.inputDigest,
+        },
+      },
+    }, { runId: evidence.runId, nodeRunId: evidence.nodeRunId });
+    if (terminalStatus) {
+      const finishedAt = Date.now();
+      database.updateNodeRun(evidence.nodeRunId, { status: terminalStatus });
+      database.updateRun(evidence.runId, {
+        status: terminalStatus,
+        finishedAt,
+        summary: {
+          syntheticVideoOperationTerminal: phase,
+          ...(terminalError ? { syntheticVideoOperationError: terminalError } : {}),
+        },
+      });
+    }
+    return event;
+  });
+  job._lastDurableFingerprint = `${job.status}:${Math.round(Number(job.progress || 0))}:${job.message || ''}`;
+  return event;
+}
+
+function persistVideoOperationEventFailClosed(job, phase, patch = {}) {
+  try {
+    return persistVideoOperationEvent(job, phase, patch);
+  } catch (error) {
+    if (job?.syntheticExecution && (phase === 'terminal' || phase === 'interrupted')) {
+      job.status = 'failed';
+      job.message = `视频任务终态证据写入失败：${error?.message || String(error)}`;
+      job.error = job.message;
+      job.errorCode = 'video-ops-failed';
+      job.finishedAt = Date.now();
+      job.updatedAt = job.finishedAt;
+      delete job.result;
+      finalizeSyntheticVideoOperationExecution(job, error, 'terminal-persistence-failed');
+    }
+    throw error;
+  }
+}
 
 function isTerminalJob(job) {
   return !!job && TERMINAL_JOB_STATUSES.has(job.status);
@@ -98,7 +688,59 @@ function finishJob(job, message = '完成', result = undefined, now = Date.now()
   job.child = null;
   delete job.error;
   delete job.errorCode;
+  persistVideoOperationEventFailClosed(job, 'terminal');
   return job;
+}
+
+function videoOperationLifecycleError() {
+  const error = new Error('视频处理服务正在关闭，请稍后重试');
+  error.code = 'video_operations_shutting_down';
+  error.statusCode = 503;
+  return error;
+}
+
+function asyncVideoOperationStatus() {
+  return { activeTasks: activeAsyncVideoOperations.size };
+}
+
+function resolveAsyncVideoOperationDrainWaiters() {
+  if (activeAsyncVideoOperations.size !== 0) return;
+  for (const waiter of asyncVideoOperationDrainWaiters) {
+    clearTimeout(waiter.timer);
+    waiter.resolve({ drained: true, ...asyncVideoOperationStatus() });
+  }
+  asyncVideoOperationDrainWaiters.clear();
+}
+
+function trackAsyncVideoOperation(task) {
+  activeAsyncVideoOperations.add(task);
+  const release = () => {
+    activeAsyncVideoOperations.delete(task);
+    resolveAsyncVideoOperationDrainWaiters();
+  };
+  Promise.resolve(task).then(release, release);
+  return task;
+}
+
+function waitForAsyncVideoOperations(timeoutMs = null) {
+  if (activeAsyncVideoOperations.size === 0) {
+    return Promise.resolve({ drained: true, ...asyncVideoOperationStatus() });
+  }
+  const hasTimeout = timeoutMs !== null && timeoutMs !== undefined;
+  const requestedTimeout = hasTimeout ? Number(timeoutMs) : Number.NaN;
+  if (hasTimeout && Number.isFinite(requestedTimeout) && requestedTimeout <= 0) {
+    return Promise.resolve({ drained: false, ...asyncVideoOperationStatus() });
+  }
+  return new Promise((resolve) => {
+    const waiter = { resolve, timer: null };
+    if (hasTimeout && Number.isFinite(requestedTimeout)) {
+      waiter.timer = setTimeout(() => {
+        asyncVideoOperationDrainWaiters.delete(waiter);
+        resolve({ drained: false, ...asyncVideoOperationStatus() });
+      }, requestedTimeout);
+    }
+    asyncVideoOperationDrainWaiters.add(waiter);
+  });
 }
 
 function failJob(job, error, fallbackMessage = '视频处理失败', now = Date.now()) {
@@ -112,6 +754,7 @@ function failJob(job, error, fallbackMessage = '视频处理失败', now = Date.
   job.finishedAt = now;
   job.updatedAt = now;
   job.child = null;
+  persistVideoOperationEventFailClosed(job, 'terminal');
   return job;
 }
 
@@ -126,11 +769,24 @@ function cancelJob(job, message = '已取消', now = Date.now()) {
   job.finishedAt = now;
   job.updatedAt = now;
   job.child = null;
+  persistVideoOperationEventFailClosed(job, 'terminal');
   return job;
 }
 
-function makeJob(action) {
+function makeJob(action, rawExecutionEvidence, options = {}) {
+  if (videoOperationsShutdownRequested) throw videoOperationLifecycleError();
   cleanupFinishedJobs();
+  const executionEvidence = rawExecutionEvidence == null
+    ? null
+    : normalizeVideoOperationExecutionEvidence(rawExecutionEvidence);
+  if (options.requireExecutionEvidence === true && !executionEvidence) {
+    throw new Error('视频操作必须绑定持久 Run 执行证据');
+  }
+  if (executionEvidence) {
+    const durableReplay = resolveDurableVideoOperationReplay(action, executionEvidence);
+    if (durableReplay) return durableReplay;
+    requireVideoOperationExecutionAuthority(executionEvidence);
+  }
   const job = {
     id: `video-edit-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
     action,
@@ -142,15 +798,166 @@ function makeJob(action) {
     finishedAt: null,
     child: null,
     cancelled: false,
+    executionEvidence,
+    syntheticExecution: options.syntheticExecution === true,
   };
   jobs.set(job.id, job);
+  if (executionEvidence) {
+    try {
+      persistVideoOperationEvent(job, 'accepted');
+    } catch (error) {
+      jobs.delete(job.id);
+      if (job.syntheticExecution) {
+        job.status = 'failed';
+        job.message = `视频任务入队证据写入失败：${error?.message || String(error)}`;
+        job.error = job.message;
+        job.errorCode = 'video-ops-failed';
+        job.finishedAt = Date.now();
+        job.updatedAt = job.finishedAt;
+        finalizeSyntheticVideoOperationExecution(job, error, 'enqueue-persistence-failed');
+      }
+      throw error;
+    }
+  }
   return job;
 }
 
 function publicJob(job) {
   if (!job) return null;
-  const { child, ...rest } = job;
-  return rest;
+  const {
+    child,
+    executionEvidence,
+    syntheticExecution,
+    _lastDurableFingerprint,
+    _reusedDurableExecution,
+    ...rest
+  } = job;
+  return {
+    ...rest,
+    ...(executionEvidence ? { durableEvidence: executionEvidence } : {}),
+  };
+}
+
+function durableVideoOperationSlotEvents(evidence) {
+  const database = requireVideoOperationExecutionAuthority(evidence, { allowTerminalRun: true });
+  const rows = database.db.prepare(`
+    SELECT id, payload_json
+    FROM run_events
+    WHERE run_id = ? AND node_run_id = ? AND type = 'log'
+    ORDER BY id ASC
+  `).all(evidence.runId, evidence.nodeRunId);
+  const matches = [];
+  for (const row of rows) {
+    let payload;
+    try {
+      payload = JSON.parse(row.payload_json || '{}');
+    } catch (_) {
+      continue;
+    }
+    if (payload?.schema !== VIDEO_OPERATION_EVIDENCE_SCHEMA) continue;
+    const operation = payload?.videoOperation;
+    const storedEvidence = operation?.executionEvidence;
+    if (String(storedEvidence?.attemptId || '') !== evidence.attemptId
+      || Number(storedEvidence?.operationIndex) !== evidence.operationIndex) continue;
+    matches.push({ rowId: row.id, operation, storedEvidence });
+  }
+  return matches;
+}
+
+function resolveDurableVideoOperationReplay(action, evidence) {
+  const events = durableVideoOperationSlotEvents(evidence);
+  if (!events.length) return null;
+  const expectedEvidence = stableVideoOperationJson(evidence);
+  const jobIds = new Set();
+  for (const event of events) {
+    let normalized;
+    try {
+      normalized = normalizeVideoOperationExecutionEvidence(event.storedEvidence);
+    } catch (_) {
+      throw durableExecutionConflict('视频任务持久执行槽包含无效证据，已拒绝重放');
+    }
+    if (stableVideoOperationJson(normalized) !== expectedEvidence
+      || String(event.operation?.action || '') !== String(action || '')) {
+      throw durableExecutionConflict('同一 Attempt/operationIndex 已绑定不同视频任务');
+    }
+    const jobId = String(event.operation?.jobId || '');
+    if (!jobId) throw durableExecutionConflict('视频任务持久执行槽缺少 jobId');
+    jobIds.add(jobId);
+  }
+  if (jobIds.size !== 1) {
+    throw durableExecutionConflict('同一视频执行证据已绑定多个 durable job');
+  }
+  const jobId = Array.from(jobIds)[0];
+  const existing = jobs.get(jobId) || reconstructDurableVideoOperationJob(jobId);
+  if (!existing || stableVideoOperationJson(existing.executionEvidence) !== expectedEvidence
+    || String(existing.action || '') !== String(action || '')) {
+    throw durableExecutionConflict('视频任务持久结果与执行证据不一致');
+  }
+  existing._reusedDurableExecution = true;
+  return existing;
+}
+
+function readDurableVideoOperationEvents(jobId) {
+  const database = executionDatabase();
+  if (!database) return [];
+  const rows = database.db.prepare(`
+    SELECT id, run_id, node_run_id, payload_json, created_at
+    FROM run_events
+    WHERE type = 'log' AND payload_json LIKE ?
+    ORDER BY id ASC
+  `).all(`%${String(jobId)}%`);
+  const out = [];
+  for (const row of rows) {
+    try {
+      const payload = JSON.parse(row.payload_json || '{}');
+      if (payload?.schema !== VIDEO_OPERATION_EVIDENCE_SCHEMA
+        || payload?.videoOperation?.jobId !== jobId) continue;
+      out.push({ ...row, payload });
+    } catch (_) {}
+  }
+  return out;
+}
+
+function reconstructDurableVideoOperationJob(jobId) {
+  const events = readDurableVideoOperationEvents(jobId);
+  if (!events.length) return null;
+  const latest = events[events.length - 1].payload.videoOperation;
+  const evidence = latest.executionEvidence;
+  const reconstructed = {
+    id: jobId,
+    action: latest.action,
+    status: latest.status,
+    progress: Number(latest.progress || 0),
+    message: latest.message || '',
+    createdAt: events[0].created_at,
+    updatedAt: events[events.length - 1].created_at,
+    finishedAt: TERMINAL_JOB_STATUSES.has(latest.status) || latest.status === 'interrupted'
+      ? events[events.length - 1].created_at
+      : null,
+    ...(latest.result ? { result: latest.result } : {}),
+    ...(latest.error ? { error: latest.error, errorCode: latest.errorCode || 'video-ops-failed' } : {}),
+    executionEvidence: evidence,
+    syntheticExecution: latest.syntheticExecution === true,
+    child: null,
+    cancelled: false,
+  };
+  if (!TERMINAL_JOB_STATUSES.has(reconstructed.status) && reconstructed.status !== 'interrupted') {
+    reconstructed.status = 'interrupted';
+    reconstructed.message = '视频任务在主机重启后中断';
+    reconstructed.error = reconstructed.message;
+    reconstructed.errorCode = 'video-ops-failed';
+    reconstructed.finishedAt = Date.now();
+    reconstructed.updatedAt = reconstructed.finishedAt;
+    persistVideoOperationEvent(reconstructed, 'interrupted');
+  }
+  return reconstructed;
+}
+
+function persistVideoOperationProgress(job) {
+  if (!job?.executionEvidence || isTerminalJob(job)) return;
+  const fingerprint = `${job.status}:${Math.round(Number(job.progress || 0))}:${job.message || ''}`;
+  if (fingerprint === job._lastDurableFingerprint) return;
+  persistVideoOperationEvent(job, 'progress');
 }
 
 function ensureDir(dir) {
@@ -218,8 +1025,7 @@ function resolveMountedPath(url) {
   if (isHttpUrl(clean)) {
     try {
       const parsed = new URL(clean);
-      const host = parsed.hostname.toLowerCase();
-      if (host !== '127.0.0.1' && host !== 'localhost') return null;
+      if (!isLoopbackAddress(parsed.hostname)) return null;
       clean = parsed.pathname;
     } catch {
       return null;
@@ -243,41 +1049,32 @@ function resolveMountedPath(url) {
   return null;
 }
 
-async function downloadRemoteVideo(url, targetDir) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`远程视频下载失败: HTTP ${res.status}`);
-  const contentType = String(res.headers.get('content-type') || '');
-  if (contentType && !/^video\//i.test(contentType) && !/octet-stream/i.test(contentType)) {
-    throw new Error(`远程地址不是视频文件: ${contentType}`);
-  }
-  const contentLength = Number(res.headers.get('content-length') || 0);
-  if (contentLength > MAX_REMOTE_VIDEO_BYTES) {
-    throw new Error(`远程视频超过 ${Math.round(MAX_REMOTE_VIDEO_BYTES / 1024 / 1024)}MB 限制`);
-  }
+async function downloadRemoteVideo(url, targetDir, remoteFetchOptions = {}) {
   const parsed = new URL(url);
-  const ext = path.extname(stripQuery(parsed.pathname)) || '.mp4';
+  const requestedExt = path.extname(stripQuery(parsed.pathname)).toLowerCase();
+  const ext = new Set(['.mp4', '.mov', '.m4v', '.webm', '.mkv', '.avi', '.mpeg', '.mpg', '.ts', '.mts', '.m2ts']).has(requestedExt)
+    ? requestedExt
+    : '.mp4';
   const target = path.join(targetDir, safeOutputName('remote_video', ext));
-  const reader = res.body?.getReader?.();
-  if (!reader) {
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > MAX_REMOTE_VIDEO_BYTES) throw new Error('远程视频过大');
-    await fsp.writeFile(target, buf);
-    return target;
-  }
-  const file = fs.createWriteStream(target);
-  let total = 0;
+  let keepTarget = false;
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > MAX_REMOTE_VIDEO_BYTES) throw new Error('远程视频过大');
-      file.write(Buffer.from(value));
+    const remote = await safeRemoteMediaDownload(url, target, {
+      maxBytes: MAX_REMOTE_VIDEO_BYTES,
+      deadlineMs: REMOTE_VIDEO_DEADLINE_MS,
+      idleTimeoutMs: REMOTE_VIDEO_IDLE_TIMEOUT_MS,
+      accept: 'video/*,application/octet-stream;q=0.8,*/*;q=0.1',
+      userAgent: 'T8-PenguinCanvas-VideoOps/1.0',
+      ...remoteFetchOptions,
+    });
+    const contentType = String(remote.contentType || '');
+    if (contentType && !/^video\//i.test(contentType) && !/octet-stream/i.test(contentType)) {
+      throw new Error(`远程地址不是视频文件: ${contentType}`);
     }
+    keepTarget = true;
+    return target;
   } finally {
-    await new Promise((resolve) => file.end(resolve));
+    if (!keepTarget) await fsp.rm(target, { force: true });
   }
-  return target;
 }
 
 async function resolveVideoSource(url, targetDir) {
@@ -1914,6 +2711,8 @@ async function burnSubtitleTextIntoVideo(input, output, textSegments, size, job)
 }
 
 router.post('/probe', async (req, res) => {
+  // Probe is an internal diagnostic trace. It must never mint a standalone
+  // durable Run/NodeRun/Attempt; the owning execution records it when needed.
   const job = makeJob('probe');
   try {
     const url = req.body?.videoUrl || req.body?.url;
@@ -1927,6 +2726,8 @@ router.post('/probe', async (req, res) => {
 });
 
 router.post('/timeline-preview', async (req, res) => {
+  // Timeline preview is an internal UI trace, not an independently executable
+  // workflow action and therefore intentionally has no durable Run evidence.
   const job = makeJob('timeline-preview');
   try {
     const data = await createTimelinePreview(req.body?.clip, req.body?.options || {}, job);
@@ -1937,91 +2738,330 @@ router.post('/timeline-preview', async (req, res) => {
   }
 });
 
-router.post('/compose', async (req, res) => {
-  const job = makeJob('compose');
-  const renderPlan = resolveVideoEditRenderPlanPayload(req.body);
-  if (req.body?.async === true) {
+function scheduleAsyncVideoCompose(clips, settings, job, renderPlan) {
+  const executor = asyncComposeExecutorOverride || composeVideoEdit;
+  return scheduleAsyncVideoOperation(job, () => executor(clips, settings, job, { renderPlan }), '视频合成失败');
+}
+
+function scheduleAsyncVideoOperation(job, executor, fallbackMessage) {
+  if (videoOperationsShutdownRequested) {
+    if (!isTerminalJob(job)) {
+      try { cancelJob(job, '应用正在退出，视频任务已取消'); } catch (_) {}
+    }
+    return Promise.resolve();
+  }
+  const task = new Promise((resolve) => {
     setImmediate(async () => {
       try {
-        await composeVideoEdit(resolveVideoEditClipPayload(req.body), req.body?.settings || {}, job, { renderPlan });
-      } catch (_) {
-        // composeVideoEdit records failure details on the job for polling clients.
+        if (videoOperationsShutdownRequested) throw videoOperationLifecycleError();
+        await executor();
+      } catch (error) {
+        // Normal executors record their own terminal failure. Keep the scheduling
+        // boundary fail-closed for injected executors and pre-executor failures.
+        if (!isTerminalJob(job)) {
+          try { failJob(job, error, fallbackMessage); } catch (_) {}
+        }
+      } finally {
+        resolve();
       }
     });
+  });
+  return trackAsyncVideoOperation(task);
+}
+
+function shutdownVideoOperationsLifecycle(options = {}) {
+  if (!videoOperationsShutdownPromise) {
+    videoOperationsShutdownRequested = true;
+    const cancelledJobIds = [];
+    const persistenceFailures = [];
+    for (const job of jobs.values()) {
+      if (isTerminalJob(job)) continue;
+      cancelledJobIds.push(job.id);
+      try {
+        cancelJob(job, '应用正在退出，视频任务已取消');
+      } catch (error) {
+        persistenceFailures.push({ jobId: job.id, code: String(error?.code || 'terminal-persistence-failed') });
+      }
+    }
+    const timeoutMs = Math.max(
+      100,
+      Math.min(30_000, Number(options.timeoutMs) || VIDEO_OPS_SHUTDOWN_TIMEOUT_MS),
+    );
+    videoOperationsShutdownPromise = waitForAsyncVideoOperations(timeoutMs).then((tasks) => ({
+      tasks,
+      cancelledJobIds,
+      persistenceFailures,
+      forced: !tasks.drained,
+    }));
+  }
+  return videoOperationsShutdownPromise;
+}
+
+function resetVideoOperationsLifecycleForTests() {
+  if (activeAsyncVideoOperations.size !== 0) throw new Error('仍有视频任务运行，不能重置 lifecycle');
+  videoOperationsShutdownRequested = false;
+  videoOperationsShutdownPromise = null;
+  asyncVideoOperationDrainWaiters.clear();
+}
+
+function prepareDurableVideoOperationRequest(req, action) {
+  const body = req?.body || {};
+  const hasEvidence = hasOwn(body, 'executionEvidence');
+  const hasExecutionInput = hasOwn(body, 'executionInput');
+  if (!hasEvidence && !hasExecutionInput) {
+    if (!isLoopbackVideoOpsRequest(req)) {
+      throw syntheticExecutionError('无持久证据的兼容视频任务仅允许私有 loopback 路由', 403);
+    }
+    const synthetic = createSyntheticVideoOperationExecution(action, body);
+    const evidence = validateVideoOperationInputBinding({
+      ...body,
+      ...synthetic,
+      executionInput: synthetic.executionInput,
+    }, synthetic.evidence, action);
+    return {
+      binding: synthetic,
+      job: makeJob(action, evidence, {
+        requireExecutionEvidence: true,
+        syntheticExecution: true,
+      }),
+    };
+  }
+  // A single supplied field is never treated as compatibility mode.
+  const evidence = validateVideoOperationInputBinding(body, body.executionEvidence, action);
+  return {
+    binding: buildVideoOperationBinding(action, body),
+    job: makeJob(action, evidence, { requireExecutionEvidence: true }),
+  };
+}
+
+function sendDurableReplayResponse(res, job, fallbackMessage) {
+  if (job?._reusedDurableExecution !== true) return false;
+  if (job.status === 'done' && job.result) {
+    res.json({ success: true, data: job.result, job: publicJob(job) });
+    return true;
+  }
+  if (!isTerminalJob(job) && job.status !== 'interrupted') {
+    res.status(202).json({ success: true, data: publicJob(job) });
+    return true;
+  }
+  const status = job.status === 'cancelled' ? 499 : job.status === 'interrupted' ? 503 : 500;
+  res.status(status).json({
+    success: false,
+    error: job.error || job.message || fallbackMessage,
+    job: publicJob(job),
+  });
+  return true;
+}
+
+async function executeSeparateAudioBinding(binding, job) {
+  try {
+    const override = operationExecutorOverrides.get('separate-audio');
+    const result = override
+      ? await override(binding, job)
+      : await separateVideoAudio(binding.clips, binding.settings, binding.mode, job, { renderPlan: binding.renderPlan });
+    if (!isTerminalJob(job)) finishJob(job, '音频处理完成', result);
+    return result;
+  } catch (error) {
+    if (!isTerminalJob(job)) failJob(job, error, '音频处理失败');
+    throw error;
+  }
+}
+
+async function executeSnapshotBinding(binding, job) {
+  try {
+    const override = operationExecutorOverrides.get('snapshot');
+    const result = override
+      ? await override(binding, job)
+      : await snapshotVideoFrame(binding.clip, binding.time, {
+          format: binding.format,
+          sourceLabel: binding.sourceLabel,
+        }, job);
+    if (!isTerminalJob(job)) finishJob(job, '截图完成', result);
+    return result;
+  } catch (error) {
+    if (!isTerminalJob(job)) failJob(job, error, '视频截图失败');
+    throw error;
+  }
+}
+
+router.post('/compose', async (req, res) => {
+  let job;
+  let renderPlan;
+  let composeClips;
+  let composeSettings;
+  let syntheticBridgeAttempted = false;
+  try {
+    if (req.body?.async === true) {
+      const hasEvidence = hasOwn(req.body, 'executionEvidence');
+      const hasExecutionInput = hasOwn(req.body, 'executionInput');
+      if (!hasEvidence && !hasExecutionInput) {
+        if (!isLoopbackVideoOpsRequest(req)) {
+          throw syntheticExecutionError('无持久证据的兼容视频任务仅允许私有 loopback 路由', 403);
+        }
+        syntheticBridgeAttempted = true;
+        const synthetic = createSyntheticVideoOperationExecution(req.body || {});
+        const executionEvidence = validateVideoOperationInputBinding({
+          clips: synthetic.clips,
+          settings: synthetic.settings,
+          timelineV2: synthetic.timelineV2,
+          renderPlan: synthetic.renderPlan,
+          executionInput: synthetic.executionInput,
+        }, synthetic.evidence, 'compose');
+        job = makeJob('compose', executionEvidence, {
+          requireExecutionEvidence: true,
+          syntheticExecution: true,
+        });
+        renderPlan = synthetic.renderPlan;
+        composeClips = synthetic.clips;
+        composeSettings = synthetic.settings;
+      } else {
+        // Partial evidence is never treated as legacy compatibility. Both
+        // fields must validate against an already-authoritative action.
+        const executionEvidence = validateVideoOperationInputBinding(req.body, req.body?.executionEvidence, 'compose');
+        job = makeJob('compose', executionEvidence, { requireExecutionEvidence: true });
+        renderPlan = resolveVideoEditRenderPlanPayload(req.body);
+        composeClips = resolveVideoEditClipPayload(req.body);
+        composeSettings = req.body?.settings || {};
+      }
+    } else {
+      job = makeJob('compose', req.body?.executionEvidence);
+      renderPlan = resolveVideoEditRenderPlanPayload(req.body);
+      composeClips = resolveVideoEditClipPayload(req.body);
+      composeSettings = req.body?.settings || {};
+    }
+  } catch (error) {
+    if (sendProjectDatabaseStorageCapacityError(res, error, { operation: 'video.compose.prepare' })) return;
+    const status = Number(error?.statusCode) || (syntheticBridgeAttempted ? 503 : 400);
+    return res.status(status).json({ success: false, error: error?.message || '视频任务执行证据无效' });
+  }
+  if (req.body?.async === true) {
+    if (job._reusedDurableExecution !== true) {
+      const task = scheduleAsyncVideoCompose(composeClips, composeSettings, job, renderPlan);
+      res.locals?.trackApplicationTask?.(task);
+    }
     return res.json({ success: true, data: publicJob(job) });
   }
+  if (sendDurableReplayResponse(res, job, '视频合成未成功完成')) return;
   try {
-    const data = await composeVideoEdit(resolveVideoEditClipPayload(req.body), req.body?.settings || {}, job, { renderPlan });
+    const data = await composeVideoEdit(composeClips, composeSettings, job, { renderPlan });
     res.json({ success: true, data });
   } catch (error) {
+    if (sendProjectDatabaseStorageCapacityError(res, error, { operation: 'video.compose.execute' })) return;
     const status = job.cancelled ? 499 : 500;
     res.status(status).json({ success: false, error: error?.message || '视频合成失败', job: publicJob(job) });
   }
 });
 
 router.post('/separate-audio', async (req, res) => {
-  const job = makeJob('separate-audio');
-  const renderPlan = resolveVideoEditRenderPlanPayload(req.body);
+  let prepared;
+  try {
+    prepared = prepareDurableVideoOperationRequest(req, 'separate-audio');
+  } catch (error) {
+    if (sendProjectDatabaseStorageCapacityError(res, error, { operation: 'video.separate-audio.prepare' })) return;
+    const status = Number(error?.statusCode) || 400;
+    return res.status(status).json({ success: false, error: error?.message || '音频任务执行证据无效' });
+  }
+  const { binding, job } = prepared;
   if (req.body?.async === true) {
-    setImmediate(async () => {
-      try {
-        await separateVideoAudio(resolveVideoEditClipPayload(req.body), req.body?.settings || {}, req.body?.mode || 'both', job, { renderPlan });
-      } catch (_) {
-        // separateVideoAudio records failure details on the job for polling clients.
-      }
-    });
+    if (job._reusedDurableExecution !== true) {
+      const task = scheduleAsyncVideoOperation(job, () => executeSeparateAudioBinding(binding, job), '音频处理失败');
+      res.locals?.trackApplicationTask?.(task);
+    }
     return res.json({ success: true, data: publicJob(job) });
   }
+  if (sendDurableReplayResponse(res, job, '音频处理未成功完成')) return;
   try {
-    const data = await separateVideoAudio(resolveVideoEditClipPayload(req.body), req.body?.settings || {}, req.body?.mode || 'both', job, { renderPlan });
-    res.json({ success: true, data });
+    const data = await executeSeparateAudioBinding(binding, job);
+    res.json({ success: true, data, job: publicJob(job) });
   } catch (error) {
+    if (sendProjectDatabaseStorageCapacityError(res, error, { operation: 'video.separate-audio.execute' })) return;
     const status = job.cancelled ? 499 : 500;
     res.status(status).json({ success: false, error: error?.message || '音频处理失败', job: publicJob(job) });
   }
 });
 
 router.post('/snapshot', async (req, res) => {
-  const job = makeJob('snapshot');
+  let prepared;
   try {
-    const data = await snapshotVideoFrame(
-      req.body?.clip,
-      req.body?.time,
-      {
-        format: req.body?.format,
-        sourceLabel: req.body?.sourceLabel,
-      },
-      job,
-    );
-    res.json({ success: true, data });
+    prepared = prepareDurableVideoOperationRequest(req, 'snapshot');
   } catch (error) {
+    if (sendProjectDatabaseStorageCapacityError(res, error, { operation: 'video.snapshot.prepare' })) return;
+    const status = Number(error?.statusCode) || 400;
+    return res.status(status).json({ success: false, error: error?.message || '截图任务执行证据无效' });
+  }
+  const { binding, job } = prepared;
+  if (sendDurableReplayResponse(res, job, '视频截图未成功完成')) return;
+  try {
+    const data = await executeSnapshotBinding(binding, job);
+    res.json({ success: true, data, job: publicJob(job) });
+  } catch (error) {
+    if (sendProjectDatabaseStorageCapacityError(res, error, { operation: 'video.snapshot.execute' })) return;
     const status = job.cancelled ? 499 : 500;
     res.status(status).json({ success: false, error: error?.message || '视频截图失败', job: publicJob(job) });
   }
 });
 
 router.get('/jobs/:id', (req, res) => {
-  cleanupFinishedJobs();
-  const job = jobs.get(req.params.id);
-  if (!job) return res.status(404).json({ success: false, error: '任务不存在' });
-  return res.json({ success: true, data: publicJob(job) });
+  try {
+    cleanupFinishedJobs();
+    const job = jobs.get(req.params.id) || reconstructDurableVideoOperationJob(req.params.id);
+    if (!job) return res.status(404).json({ success: false, error: '任务不存在' });
+    if (jobs.has(req.params.id)) persistVideoOperationProgress(job);
+    return res.json({ success: true, data: publicJob(job) });
+  } catch (error) {
+    if (sendProjectDatabaseStorageCapacityError(res, error, { operation: 'video.job.read-progress' })) return;
+    return res.status(503).json({ success: false, error: error?.message || '读取视频任务持久证据失败' });
+  }
 });
 
 router.post('/jobs/:id/cancel', (req, res) => {
-  cleanupFinishedJobs();
-  const job = jobs.get(req.params.id);
-  if (!job) return res.status(404).json({ success: false, error: '任务不存在' });
-  cancelJob(job);
-  return res.json({ success: true, data: publicJob(job) });
+  try {
+    cleanupFinishedJobs();
+    const job = jobs.get(req.params.id);
+    if (!job) return res.status(404).json({ success: false, error: '任务不存在' });
+    cancelJob(job);
+    return res.json({ success: true, data: publicJob(job) });
+  } catch (error) {
+    if (sendProjectDatabaseStorageCapacityError(res, error, { operation: 'video.job.cancel' })) return;
+    throw error;
+  }
 });
 
 router._test = {
   JOB_TTL_MS,
+  MAX_REMOTE_VIDEO_BYTES,
+  REMOTE_VIDEO_DEADLINE_MS,
+  REMOTE_VIDEO_IDLE_TIMEOUT_MS,
   makeJob,
   finishJob,
   failJob,
   cancelJob,
   cleanupFinishedJobs,
+  normalizeVideoOperationExecutionEvidence,
+  buildVideoOperationBinding,
+  validateVideoOperationInputBinding,
+  requireVideoOperationExecutionAuthority,
+  createSyntheticVideoOperationExecution,
+  finalizeSyntheticVideoOperationExecution,
+  isLoopbackVideoOpsRequest,
+  persistVideoOperationEvent,
+  readDurableVideoOperationEvents,
+  reconstructDurableVideoOperationJob,
+  resolveDurableVideoOperationReplay,
+  prepareDurableVideoOperationRequest,
+  scheduleAsyncVideoOperation,
+  shutdownVideoOperationsLifecycle,
+  waitForAsyncVideoOperations,
+  asyncVideoOperationStatus,
+  resetVideoOperationsLifecycleForTests,
+  setExecutionDatabaseForTests: (database) => { executionDatabaseOverride = database; },
+  resetExecutionDatabaseForTests: () => { executionDatabaseOverride = undefined; },
+  setAsyncComposeExecutorForTests: (executor) => { asyncComposeExecutorOverride = executor; },
+  resetAsyncComposeExecutorForTests: () => { asyncComposeExecutorOverride = undefined; },
+  setOperationExecutorForTests: (action, executor) => { operationExecutorOverrides.set(action, executor); },
+  resetOperationExecutorsForTests: () => { operationExecutorOverrides.clear(); },
+  clearJobsForTests: () => jobs.clear(),
+  jobCountForTests: () => jobs.size,
   getJobForTest: (id) => publicJob(jobs.get(id)) || null,
   parseProbe,
   parseProbeJson,
@@ -2049,9 +3089,14 @@ router._test = {
   shouldComposeTimelineVideoLayers,
   extractWaveformPeaks,
   createFilmstripFrames,
+  downloadRemoteVideo,
   resolveMountedPath,
+  resolveVideoSource,
   composeVideoEdit,
   probeVideoUrl,
 };
+
+router.shutdownLifecycle = shutdownVideoOperationsLifecycle;
+router.waitForShutdownDrain = waitForAsyncVideoOperations;
 
 module.exports = router;

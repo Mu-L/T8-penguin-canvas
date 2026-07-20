@@ -14,6 +14,7 @@ import {
 function definition(overrides: Partial<SubflowDefinition> = {}): SubflowDefinition {
   return {
     id: 'library-source',
+    entityUid: '10000000-0000-4000-8000-000000000001',
     version: 7,
     revision: 11,
     projectId: 'project-library',
@@ -95,6 +96,7 @@ test('independent copy resets immutable publication identity and deep-clones gra
   assert.equal(copy.baseRevision, 0);
   assert.equal(copy.changeSummary, '从 本地库源流程 v7 另存独立副本');
   assert.equal('version' in copy, false);
+  assert.equal('entityUid' in copy, false);
   assert.equal('revision' in copy, false);
   assert.equal('publishedBy' in copy, false);
   assert.equal('publishedAt' in copy, false);

@@ -6,6 +6,10 @@ const modal = readFileSync(
   new URL('../src/components/RunPreflightModal.tsx', import.meta.url),
   'utf8',
 ).replace(/\r\n?/g, '\n');
+const canvas = readFileSync(
+  new URL('../src/components/Canvas.tsx', import.meta.url),
+  'utf8',
+).replace(/\r\n?/g, '\n');
 
 function sourceBetween(source: string, start: string, end: string) {
   const startIndex = source.indexOf(start);
@@ -36,6 +40,11 @@ test('loading state explicitly remains read-only and cannot authorize execution'
   assert.match(modal, /role="status"/);
   assert.match(modal, /aria-live="polite"/);
   assert.doesNotMatch(modal, /\bfetch\s*\(|\baxios\b|createProjectRun|triggerProvider|localStorage|sessionStorage/);
+});
+
+test('ordinary background preflight never mounts a loading dialog before a preview requires attention', () => {
+  assert.doesNotMatch(canvas, /setRunPreflightModal\(\{\s*loading:\s*true/);
+  assert.match(canvas, /const presentRunPreflightPreview[\s\S]*setRunPreflightModal\(\{ loading: false, preview \}\)/);
 });
 
 test('preview renders exact action, scope, revision, evidence, cost, notices, and digest fields', () => {

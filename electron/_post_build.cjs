@@ -878,6 +878,9 @@ function main() {
   checkFile(path.join(RES, 'backend-enc', 'routes', 'collaboration.t8c'));
   checkFile(path.join(RES, 'backend-enc', 'routes', 'canvasAgentTools.t8c'));
   checkFile(path.join(RES, 'backend-enc', 'services', 'projectDatabase.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'projectDatabaseMigration23.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'projectDatabaseMigration29.t8c'));
+  checkFile(path.join(RES, 'backend-enc', 'services', 'projectDatabaseMigration30.t8c'));
   checkFile(path.join(RES, 'backend-enc', 'services', 'assetBlobStore.t8c'));
   checkFile(path.join(RES, 'backend-enc', 'services', 'assetUploadManager.t8c'));
   checkFile(path.join(RES, 'backend-enc', 'services', 'assetIndexer.t8c'));

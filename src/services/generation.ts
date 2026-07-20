@@ -304,7 +304,7 @@ export async function querySeedreamNz(taskId: string): Promise<ImageQueryResult>
 
 // ========================================================================
 // FAL 渠道(独立提交 + 轮询,对齐 gpt-image-2-web runGPTFal / runNanoFal)
-//   submitImageFal 返 { sync, urls? } 或 { sync:false, requestId, responseUrl, endpoint }
+//   submitImageFal 返 { sync, urls? } 或 { sync:false, requestId, endpoint }
 //   queryImageFal  返 { status: 'pending'|'completed'|'failed', urls?, error? }
 // ========================================================================
 export interface FalSubmitRequest {
@@ -351,7 +351,6 @@ export interface FalSubmitResult extends ProviderTransportTrace {
   sync: boolean;
   urls?: string[];
   requestId?: string;
-  responseUrl?: string;
   endpoint?: string;
 }
 
@@ -373,7 +372,7 @@ export interface FalQueryResult extends ProviderTransportTrace {
   falStatus?: string;
 }
 
-export async function queryImageFal(params: { responseUrl?: string; endpoint?: string; requestId?: string }): Promise<FalQueryResult> {
+export async function queryImageFal(params: { endpoint?: string; requestId?: string }): Promise<FalQueryResult> {
   const r = await fetch('/api/proxy/image/fal/query', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -440,7 +439,6 @@ export interface MjImagineRequest {
 
 export interface MjImagineResult extends ProviderTransportTrace {
   taskId: string;
-  raw: any;
 }
 
 export async function submitMjImagine(req: MjImagineRequest): Promise<MjImagineResult> {
@@ -451,14 +449,10 @@ export async function submitMjImagine(req: MjImagineRequest): Promise<MjImagineR
   });
   const data = await r.json();
   if (!r.ok || !data.success) throw providerResponseError(r, data);
-  const upstream = data.data || {};
-  // upstream.code === 1 表示提交成功(主项目 L4658)
-  if (upstream.code !== undefined && upstream.code !== 1) {
-    throw new Error(upstream.description || upstream.error || 'MJ imagine 提交失败');
-  }
-  const taskId = String(upstream.result || upstream.task_id || '');
-  if (!taskId) throw new Error('未拿到 MJ taskId: ' + JSON.stringify(upstream).slice(0, 200));
-  return { taskId, raw: upstream, ...providerTransportTrace(upstream, r) };
+  const result = data.data || {};
+  const taskId = String(result.taskId || '');
+  if (!taskId) throw new Error('MJ 未返回 taskId');
+  return { taskId, ...providerTransportTrace(result, r) };
 }
 
 export interface MjTaskResult extends ProviderTransportTrace {
@@ -467,7 +461,6 @@ export interface MjTaskResult extends ProviderTransportTrace {
   imageUrl?: string;
   imageUrls?: string[];   // 4 张子图
   failReason?: string;
-  raw: any;
 }
 
 export async function queryMjTask(taskId: string, speed: MjSpeed = 'fast'): Promise<MjTaskResult> {
@@ -497,7 +490,6 @@ export async function queryMjTask(taskId: string, speed: MjSpeed = 'fast'): Prom
     imageUrl: d.image_url || d.imageUrl,
     imageUrls,
     failReason: d.fail_reason || d.failReason,
-    raw: d,
     ...providerTransportTrace(d, r),
   };
 }
@@ -712,7 +704,7 @@ export async function uploadFile(file: File): Promise<{ url: string; filename: s
 
 // ========================================================================
 // Video FAL 渠道(独立提交 + 轮询,对齐 gpt-image-2-web runVeo3Fal / runGrokFal / runSora2Fal)
-//   submitVideoFal 返 { sync, videoUrl? } 或 { sync:false, requestId, responseUrl, endpoint }
+//   submitVideoFal 返 { sync, videoUrl? } 或 { sync:false, requestId, endpoint }
 //   queryVideoFal  返 { status: 'pending'|'completed'|'failed', videoUrl?, error? }
 // ========================================================================
 export interface VideoFalSubmitRequest {
@@ -762,7 +754,6 @@ export interface VideoFalSubmitResult extends ProviderTransportTrace {
   sync: boolean;
   videoUrl?: string;
   requestId?: string;
-  responseUrl?: string;
   endpoint?: string;
 }
 
@@ -784,7 +775,7 @@ export interface VideoFalQueryResult extends ProviderTransportTrace {
   falStatus?: string;
 }
 
-export async function queryVideoFal(params: { responseUrl?: string; endpoint?: string; requestId?: string }): Promise<VideoFalQueryResult> {
+export async function queryVideoFal(params: { endpoint?: string; requestId?: string }): Promise<VideoFalQueryResult> {
   const r = await fetch('/api/proxy/video/fal/query', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1064,8 +1055,6 @@ export interface AudioTrack {
   id: string;
   clipId?: string;
   audioUrl: string;
-  /** 上游原始 URL（后端 saveLocal=true 时同时返回） */
-  remoteUrl?: string;
   imageUrl?: string;
   title?: string;
   tags?: string;
@@ -1081,7 +1070,7 @@ export interface AudioQueryResult extends ProviderTransportTrace {
 /**
  * 轮询 Suno feed。
  * @param clipIds 任务中的 clip id 列表
- * @param saveLocal 是否让后端将完成的音频转存到本地 output（默认 true）
+ * @param saveLocal 旧版兼容参数；后端始终先将完成品安全转存到本地
  */
 export async function queryAudio(clipIds: string[], saveLocal: boolean = true): Promise<AudioQueryResult> {
   const ids = clipIds.join(',');

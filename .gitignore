@@ -106,11 +106,13 @@ userdata/
 backend/data/
 **/recharge.private.json
 **/feishu_bitable.private.json
+**/fal-task-registry.private.json
 
 # Env
 .env
 .env.local
 .env.*.local
+/.t8-collaboration-management-authority.json
 
 # OS
 Thumbs.db

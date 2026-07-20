@@ -37,7 +37,9 @@ test('near-duplicate cache refresh is atomic and later pages use revision-bound 
       WHEN NEW.right_asset_id = 'cache-target-0003'
       BEGIN SELECT RAISE(ABORT, 'injected duplicate cache failure'); END;
     `);
-    assert.throws(() => db.listAssetDuplicates(source.id, { mode: 'near', maxDistance: 0, limit: 73 }), /injected duplicate cache failure/);
+    assert.throws(() => db.refreshAssetDuplicateCandidates(source.id, {
+      expectedCatalogRevision: db.getAssetCatalogRevision(source.projectId),
+    }), /injected duplicate cache failure/);
     assert.equal(db.db.prepare('SELECT COUNT(*) AS count FROM asset_duplicate_candidates').get().count, 0);
     assert.equal(db.db.prepare('SELECT COUNT(*) AS count FROM asset_duplicate_scans').get().count, 0);
     db.db.exec('DROP TRIGGER fail_duplicate_cache_insert');
@@ -48,6 +50,12 @@ test('near-duplicate cache refresh is atomic and later pages use revision-bound 
       evidenceCalls += 1;
       return originalEvidence(...args);
     };
+    const refresh = db.refreshAssetDuplicateCandidates(source.id, {
+      expectedCatalogRevision: db.getAssetCatalogRevision(source.projectId),
+    });
+    assert.equal(refresh.refreshed, true);
+    assert.equal(evidenceCalls > 0, true);
+    evidenceCalls = 0;
     const seen = new Set();
     let cursor = null;
     let pages = 0;
@@ -57,9 +65,7 @@ test('near-duplicate cache refresh is atomic and later pages use revision-bound 
         assert.equal(seen.has(item.asset.id), false, `duplicate page item ${item.asset.id}`);
         seen.add(item.asset.id);
       });
-      if (pages === 0) assert.equal(evidenceCalls > 0, true);
-      else assert.equal(evidenceCalls, 0, 'cached pages must not rescore all fingerprints');
-      evidenceCalls = 0;
+      assert.equal(evidenceCalls, 0, 'pure cursor pages must not rescore fingerprints');
       cursor = page.nextCursor;
       pages += 1;
       assert.equal(pages < 20, true, 'near-duplicate cursor must converge');
@@ -116,6 +122,9 @@ test('duplicate decisions reject candidates whose catalog-bound evidence is stal
       perceptualHashAlgorithm: 'phash-dct64-v1',
       perceptualHashes: [{ hash: '0000000000000001' }],
     });
+    db.refreshAssetDuplicateCandidates(source.id, {
+      expectedCatalogRevision: db.getAssetCatalogRevision(source.projectId),
+    });
     const candidate = db.listAssetDuplicates(source.id, { mode: 'near', maxDistance: 2 }).items[0];
     assert.ok(candidate);
     db.upsertAsset({
@@ -129,7 +138,11 @@ test('duplicate decisions reject candidates whose catalog-bound evidence is stal
       perceptualHashes: [{ hash: 'ffffffffffffffff' }],
     });
     assert.throws(
-      () => db.setAssetDuplicateDecision(source.projectId, candidate.id, { decision: 'confirmed', expectedRevision: candidate.decisionRevision }),
+      () => db.setAssetDuplicateDecision(source.projectId, candidate.id, {
+        decision: 'confirmed',
+        expectedRevision: candidate.decisionRevision,
+        expectedCatalogRevision: db.getAssetCatalogRevision(source.projectId) - 1,
+      }),
       (error) => error.code === 'asset_catalog_revision_conflict' && error.current.catalogRevision === db.getAssetCatalogRevision(source.projectId),
     );
     assert.equal(db.db.prepare('SELECT decision FROM asset_duplicate_candidates WHERE id = ?').get(candidate.id).decision, 'pending');

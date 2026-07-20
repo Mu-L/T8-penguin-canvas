@@ -6,6 +6,7 @@ const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
 const SAFE_ROOT = ROOT.replace(/\\/g, '/');
+const MAX_GIT_OUTPUT_BYTES = 64 * 1024 * 1024;
 const allowedDiffFiles = new Set(['features.json']);
 const privateKeyword = ['re', 'charge'].join('');
 const privateModalName = ['Recharge', 'Modal'].join('');
@@ -28,18 +29,30 @@ const deniedPaths = [
 const deniedText = [
   privateModalName,
   ['/api', '/', privateKeyword].join(''),
-  ['/', 'pay'].join(''),
   ['RE', 'CHARGE'].join(''),
   ['DU', 'LUPAY'].join(''),
   ['AGENT', '_HMAC'].join(''),
   '\u5145\u503c',
 ];
+const deniedTextPatterns = [{
+  label: ['/', 'pay'].join(''),
+  pattern: new RegExp(['\\/', 'pay', '(?:[\\/?#\\s\'"`]|$)'].join('')),
+}];
+
+function findDeniedAddedText(addedText) {
+  const matches = deniedText.filter((token) => addedText.includes(token));
+  for (const entry of deniedTextPatterns) {
+    if (entry.pattern.test(addedText)) matches.push(entry.label);
+  }
+  return matches;
+}
 
 function git(args) {
   const result = spawnSync('git', ['-c', `safe.directory=${SAFE_ROOT}`, ...args], {
     cwd: ROOT,
     encoding: 'utf-8',
     windowsHide: true,
+    maxBuffer: MAX_GIT_OUTPUT_BYTES,
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
@@ -76,10 +89,8 @@ function main() {
       .split(/\r?\n/)
       .filter((line) => line.startsWith('+') && !line.startsWith('+++'))
       .join('\n');
-    for (const token of deniedText) {
-      if (addedText.includes(token)) {
-        failures.push(`blocked staged text token in ${normalized}: ${token}`);
-      }
+    for (const token of findDeniedAddedText(addedText)) {
+      failures.push(`blocked staged text token in ${normalized}: ${token}`);
     }
   }
 
@@ -91,4 +102,9 @@ function main() {
   console.log('[public-check] ok');
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = {
+  MAX_GIT_OUTPUT_BYTES,
+  findDeniedAddedText,
+};

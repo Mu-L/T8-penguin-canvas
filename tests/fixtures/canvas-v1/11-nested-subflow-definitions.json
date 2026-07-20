@@ -1,0 +1,32 @@
+{
+  "canvasId": "nested-subflow-board",
+  "projectId": "nested-project",
+  "name": "两层固定版本子工作流",
+  "updatedAt": 1704067200011,
+  "nodes": [
+    { "id": "outer-call", "type": "subflow", "position": { "x": 100, "y": 100 }, "data": { "definitionId": "outer-flow", "definitionVersion": 2 } }
+  ],
+  "edges": [],
+  "subflowDefinitions": [
+    {
+      "id": "inner-flow", "version": 1, "name": "内部文案",
+      "nodes": [{ "id": "inner-writer", "type": "llm", "position": { "x": 0, "y": 0 }, "data": { "model": "fixture-chat" } }],
+      "edges": [],
+      "inputs": [{ "id": "inner-prompt", "name": "要求", "type": "text", "internalNodeId": "inner-writer", "internalHandleId": "llm-in:text" }],
+      "outputs": [{ "id": "inner-copy", "name": "文案", "type": "text", "internalNodeId": "inner-writer", "internalHandleId": "llm-out:text" }],
+      "exposedParameters": [{ "id": "tone", "name": "语气", "nodeId": "inner-writer", "dataKey": "tone", "defaultValue": "温暖" }]
+    },
+    {
+      "id": "outer-flow", "version": 2, "name": "外层成片",
+      "nodes": [
+        { "id": "nested-copy", "type": "subflow", "position": { "x": 0, "y": 0 }, "data": { "definitionId": "inner-flow", "definitionVersion": 1 } },
+        { "id": "nested-video", "type": "video", "position": { "x": 360, "y": 0 }, "data": {} }
+      ],
+      "edges": [{ "id": "copy-to-video", "source": "nested-copy", "target": "nested-video", "sourceHandle": "subflow-out:text", "targetHandle": "video-in:text" }],
+      "inputs": [{ "id": "outer-prompt", "name": "主题", "type": "text", "internalNodeId": "nested-copy", "internalHandleId": "subflow-in:text" }],
+      "outputs": [{ "id": "outer-video", "name": "成片", "type": "video", "internalNodeId": "nested-video", "internalHandleId": "video-out:video" }],
+      "exposedParameters": []
+    }
+  ],
+  "viewport": { "x": 44, "y": 28, "zoom": 0.88 }
+}

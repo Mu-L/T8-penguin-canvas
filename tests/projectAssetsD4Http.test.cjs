@@ -168,8 +168,10 @@ test('D4 project-assets HTTP is loopback-managed, CAS-bound, project-isolated an
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-project-assets-d4-http-'));
   const previousPackaged = process.env.T8PC_PACKAGED;
   const previousUserData = process.env.T8PC_USER_DATA;
+  const previousManagementToken = process.env.T8_COLLAB_MANAGEMENT_TOKEN;
   process.env.T8PC_PACKAGED = '1';
   process.env.T8PC_USER_DATA = directory;
+  process.env.T8_COLLAB_MANAGEMENT_TOKEN = 'A'.repeat(43);
   fs.mkdirSync(path.join(directory, 'input'), { recursive: true });
   fs.mkdirSync(path.join(directory, 'output'), { recursive: true });
 
@@ -273,14 +275,36 @@ test('D4 project-assets HTTP is loopback-managed, CAS-bound, project-isolated an
       const formAttempt = await formAttemptResponse.json();
       assert.equal(formAttemptResponse.status, 415);
       assert.equal(formAttempt.code, 'semantic_json_required');
-      assert.equal(database.getAssetSemanticModel(embeddingModel.modelId, embeddingModel.revision).revision, embeddingStatus.revision);
+      assert.equal(
+        database.getAssetSemanticModel(embeddingModel.modelId, embeddingModel.revision),
+        null,
+        'status GET and a rejected form mutation must not materialize semantic model rows',
+      );
+      const refreshedModels = await requestJson(baseUrl, '/semantic/models/refresh', {
+        method: 'POST',
+        body: { projectId: projectA },
+      });
+      assert.equal(refreshedModels.response.status, 200);
+      assert.equal(refreshedModels.payload.data.project.projectId, projectA);
+      const refreshedEmbedding = refreshedModels.payload.data.models.find((model) => model.key === embeddingModel.modelId);
+      assert.equal(refreshedEmbedding.installed, true);
+      assert.equal(
+        database.getAssetSemanticModel(embeddingModel.modelId, embeddingModel.revision).revision,
+        refreshedEmbedding.revision,
+        'the explicit model refresh may atomically materialize observed model state',
+      );
       const localManagement = await requestJson(
         baseUrl,
         `/semantic/models/${encodeURIComponent(embeddingModel.modelId)}/download`,
-        { method: 'POST', body: { expectedRevision: embeddingStatus.revision, idempotencyKey: 'd4-http-installed-model' } },
+        { method: 'POST', body: { expectedRevision: refreshedEmbedding.revision, idempotencyKey: 'd4-http-installed-model' } },
       );
       assert.equal(localManagement.response.status, 202);
       assert.equal(localManagement.payload.data.key, embeddingModel.modelId);
+      assert.equal(
+        database.getAssetSemanticModel(embeddingModel.modelId, embeddingModel.revision).revision,
+        localManagement.payload.data.revision,
+        'the explicit download mutation may materialize its model row',
+      );
       assertPublicSemanticSafe(localManagement.payload, [privateRoot]);
 
       const missingCas = await requestJson(baseUrl, '/semantic/profile', {
@@ -719,24 +743,40 @@ test('D4 project-assets HTTP is loopback-managed, CAS-bound, project-isolated an
   } finally {
     await new Promise((resolve) => server.close(resolve));
     pipeline.close();
-    if (database?.db?.open) database.close();
+    if (database?.db?.open) await database.close();
     fs.rmSync(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
     if (previousPackaged == null) delete process.env.T8PC_PACKAGED;
     else process.env.T8PC_PACKAGED = previousPackaged;
     if (previousUserData == null) delete process.env.T8PC_USER_DATA;
     else process.env.T8PC_USER_DATA = previousUserData;
+    if (previousManagementToken == null) delete process.env.T8_COLLAB_MANAGEMENT_TOKEN;
+    else process.env.T8_COLLAB_MANAGEMENT_TOKEN = previousManagementToken;
   }
   assert.equal(worker.closed, true);
 });
 
-test('backend shutdown owns and closes the semantic pipeline singleton', () => {
+test('backend shutdown owns semantic close and drains preview work before ProjectDatabase close', () => {
   const serverSource = fs.readFileSync(path.resolve(__dirname, '../backend/src/server.js'), 'utf8');
   const routeSource = fs.readFileSync(path.resolve(__dirname, '../backend/src/routes/projectAssets.js'), 'utf8');
-  const pipelineSource = fs.readFileSync(path.resolve(__dirname, '../backend/src/services/assetSemanticPipeline.js'), 'utf8');
+  const semanticPipelineSource = fs.readFileSync(path.resolve(__dirname, '../backend/src/services/assetSemanticPipeline.js'), 'utf8');
+  const previewPipelineSource = fs.readFileSync(path.resolve(__dirname, '../backend/src/services/assetPreviewPipeline.js'), 'utf8');
   assert.match(routeSource, /module\.exports\.semanticPipeline\s*=\s*semanticPipeline/);
+  assert.match(routeSource, /module\.exports\.previewPipeline\s*=\s*previewPipeline/);
   assert.match(serverSource, /projectAssetsRouter\.semanticPipeline\?\.close\?\.\(\)/);
+  assert.match(
+    serverSource,
+    /await shutdownRunRecoveryLifecycle\(\);\s*await shutdownPreviewPipelineLifecycle\(\);\s*await shutdownVideoOperationsLifecycle\(\);\s*await shutdownCollaborationGatewayLifecycle\(\);\s*await videoOpsRouter\.waitForShutdownDrain\?\.\(\);\s*await collaborationGateway\.waitForApplicationRequests\?\.\(\);\s*await closeProjectDatabaseLifecycle\(\);/,
+  );
+  assert.match(
+    serverSource,
+    /const previewShutdown = shutdownPreviewPipelineLifecycle\(\);[\s\S]{0,800}const recoveryShutdown = shutdownRunRecoveryLifecycle\(\);/,
+  );
+  assert.match(serverSource, /await serverStartPromise/);
+  assert.match(serverSource, /await closeHttpServerLifecycle\(\);[\s\S]{0,300}await recoveryShutdown;[\s\S]{0,300}await previewShutdown;/);
   assert.match(serverSource, /process\.once\('SIGINT'/);
   assert.match(serverSource, /process\.once\('SIGTERM'/);
   assert.match(serverSource, /process\.once\('exit',\s*closeSemanticPipeline\)/);
-  assert.match(pipelineSource, /this\.worker\.close\(\)/);
+  assert.match(semanticPipelineSource, /this\.worker\.close\(\)/);
+  assert.match(previewPipelineSource, /shutdown\(options\s*=\s*\{\}\)/);
+  assert.match(previewPipelineSource, /!this\.shuttingDown/);
 });

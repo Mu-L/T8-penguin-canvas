@@ -1,0 +1,21 @@
+{
+  "id": "gallery-creative-desk",
+  "name": "创作台画廊",
+  "updatedAt": 1704067200013,
+  "nodes": [
+    { "id": "gallery-source", "type": "image", "position": { "x": 100, "y": 100 }, "data": { "label": "系列主图" } }
+  ],
+  "edges": [],
+  "viewport": { "x": -180, "y": -90, "zoom": 0.62 },
+  "creativeDesk": {
+    "version": 1,
+    "coordinateMode": "viewport",
+    "defaultOpacity": 0.85,
+    "items": [
+      { "id": "gallery-item-a", "kind": "image", "url": "/output/a.webp", "title": "春", "resourceId": "resource-a", "x": 30, "y": 40, "width": 260, "height": 360, "scale": 0.9, "rotation": -4, "opacity": 1, "frameId": "linen-mat", "frameColorId": "cream", "zIndex": 1, "locked": false, "visible": true, "createdAt": 1704067000001 },
+      { "id": "gallery-item-b", "kind": "image", "url": "/output/b.webp", "title": "夏", "resourceId": "resource-b", "x": 320, "y": 60, "width": 260, "height": 360, "scale": 1.05, "rotation": 3, "opacity": 0.88, "frameId": "shadow-float", "frameColorId": "white", "zIndex": 3, "locked": true, "visible": true, "createdAt": 1704067000002 }
+    ],
+    "selection": { "itemIds": ["gallery-item-b"], "tool": "select" }
+  },
+  "theme": { "style": "glass", "mode": "dark" }
+}

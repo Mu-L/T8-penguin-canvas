@@ -1442,6 +1442,7 @@ module.exports = {
   NODE_SCHEMA_DIGEST,
   CanvasAgentToolError,
   executeCanvasAgentTool,
+  exactConnectionPortsForNode,
   structuralValidation,
   simulateExecution,
 };

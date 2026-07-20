@@ -1,0 +1,25 @@
+{
+  "canvasId": "host-private-settings",
+  "projectId": "private-studio",
+  "name": "含主机私有字段的旧画布",
+  "updatedAt": 1704067200004,
+  "nodes": [
+    {
+      "id": "provider-node-old",
+      "type": "llm",
+      "position": { "x": 40, "y": 100 },
+      "data": {
+        "label": "本地主机模型",
+        "model": "fixture-model",
+        "privateData": { "scope": "host-only", "opaqueSetting": "fixture-private-value", "absolutePathHint": "hidden-by-public-view" },
+        "publicSummary": { "configured": true, "provider": "local" }
+      }
+    },
+    { "id": "text-result-old", "type": "text", "position": { "x": 430, "y": 100 }, "data": { "label": "公开结果" } }
+  ],
+  "edges": [
+    { "id": "private-provider-result", "source": "provider-node-old", "target": "text-result-old", "sourceHandle": "llm-out:text", "targetHandle": "text-in:text" }
+  ],
+  "viewport": { "x": 0, "y": 0, "zoom": 0.8 },
+  "hostOnly": { "providerProfile": "studio-a", "shouldRemainOpaque": true }
+}

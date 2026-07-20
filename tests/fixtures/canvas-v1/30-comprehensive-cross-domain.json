@@ -1,0 +1,63 @@
+{
+  "canvasId": "campaign-master-board",
+  "projectId": "campaign-project",
+  "name": "夏季活动全链路旧项目",
+  "revision": 9,
+  "updatedAt": 1704067200030,
+  "theme": { "name": "ocean-glass", "mode": "light", "customTokens": { "surface": "#E8FBFF", "accent": "#0077B6" } },
+  "assets": [
+    { "id": "campaign-product", "kind": "image", "filename": "product.png", "metadata": { "width": 2048, "height": 2048, "alpha": true }, "provenance": { "sourceType": "upload" } },
+    { "id": "campaign-result", "kind": "image", "filename": "campaign.webp", "parentAssetIds": ["campaign-product"], "metadata": { "width": 1920, "height": 1080 }, "provenance": { "sourceType": "run", "parentAssetIds": ["campaign-product"] } }
+  ],
+  "nodes": [
+    { "id": "campaign-upload", "type": "upload", "position": { "x": 0, "y": 80 }, "data": { "sourceAssetId": "campaign-product", "assetRefs": ["campaign-product"], "label": "商品" } },
+    { "id": "campaign-subflow", "type": "subflow", "position": { "x": 340, "y": 80 }, "data": { "definitionId": "campaign-layout-flow", "definitionVersion": 2, "assetRefs": ["campaign-product"] } },
+    { "id": "campaign-output", "type": "output", "position": { "x": 700, "y": 80 }, "data": { "sourceAssetId": "campaign-result", "label": "主视觉" } }
+  ],
+  "edges": [
+    { "id": "campaign-input-edge", "source": "campaign-upload", "target": "campaign-subflow", "sourceHandle": "upload-out:image", "targetHandle": "subflow-in:product:image" },
+    { "id": "campaign-output-edge", "source": "campaign-subflow", "target": "campaign-output", "sourceHandle": "subflow-out:poster:image", "targetHandle": "output-in:image" }
+  ],
+  "subflowDefinitions": [
+    {
+      "id": "campaign-layout-flow", "version": 2, "name": "活动主视觉布局", "description": "商品图与活动文案合成",
+      "nodes": [
+        { "id": "layout-image", "type": "image", "position": { "x": 0, "y": 0 }, "data": { "sourceAssetId": "campaign-product" } },
+        { "id": "layout-copy", "type": "text", "position": { "x": 0, "y": 180 }, "data": { "prompt": "夏季清凉上新" } },
+        { "id": "layout-combine", "type": "combine", "position": { "x": 380, "y": 80 }, "data": { "layout": "hero" } }
+      ],
+      "edges": [
+        { "id": "layout-image-edge", "source": "layout-image", "target": "layout-combine", "sourceHandle": "image-out:image", "targetHandle": "combine-in:image" },
+        { "id": "layout-copy-edge", "source": "layout-copy", "target": "layout-combine", "sourceHandle": "text-out:text", "targetHandle": "combine-in:text" }
+      ],
+      "inputs": [{ "id": "product", "name": "商品图", "type": "image", "internalNodeId": "layout-image", "internalHandleId": "image-in:image", "required": true }],
+      "outputs": [{ "id": "poster", "name": "活动图", "type": "image", "internalNodeId": "layout-combine", "internalHandleId": "combine-out:image" }],
+      "exposedParameters": [{ "id": "campaign-copy", "name": "活动文案", "nodeId": "layout-copy", "dataKey": "prompt", "defaultValue": "夏季清凉上新" }],
+      "assetRefs": ["campaign-product"],
+      "unknownDefinitionField": { "layoutEngine": "fixture-v2" }
+    }
+  ],
+  "subflowInstances": [
+    { "instanceId": "campaign-instance-old", "definitionId": "campaign-layout-flow", "definitionVersion": 2, "nodeId": "campaign-subflow", "parameterOverrides": { "campaign-copy": "清凉一夏" } }
+  ],
+  "runs": [
+    {
+      "id": "campaign-run-old", "status": "succeeded", "canvasRevision": 9, "nodeIds": ["campaign-subflow"], "outputRefs": ["campaign-result"],
+      "nodeRuns": [{ "id": "campaign-node-run", "nodeId": "campaign-subflow", "definitionId": "campaign-layout-flow", "definitionVersion": 2, "status": "succeeded", "outputRefs": ["campaign-result"], "attempts": [{ "id": "campaign-attempt", "status": "succeeded", "provider": "fixture", "model": "fixture-image" }] }],
+      "events": [{ "id": "campaign-event-output", "nodeRunId": "campaign-node-run", "type": "node.output", "payload": { "assetId": "campaign-result" } }]
+    }
+  ],
+  "reviewThreads": [
+    {
+      "id": "campaign-review-thread", "canvasRevision": 9, "anchor": { "kind": "asset", "assetId": "campaign-result", "x": 0.55, "y": 0.24 }, "status": "open", "severity": "normal", "createdBy": "campaign-reviewer",
+      "comments": [{ "id": "campaign-review-comment", "body": "主视觉可以交付，请再导出 4:5 版本。", "createdBy": "campaign-reviewer", "createdAt": 1704067100030 }]
+    }
+  ],
+  "viewport": { "x": 120, "y": 75, "zoom": 0.86, "bookmark": "campaign-overview" },
+  "creativeDesk": {
+    "version": 1, "coordinateMode": "flow", "defaultOpacity": 1,
+    "items": [{ "id": "campaign-desk-item", "kind": "image", "url": "/output/campaign.webp", "title": "夏季主视觉", "resourceId": "campaign-result", "x": 180, "y": 340, "width": 480, "height": 270, "scale": 1, "rotation": 0, "opacity": 1, "frameId": "ocean-glass", "frameColorId": "cyan", "zIndex": 1, "createdAt": 1704067120030 }]
+  },
+  "privateData": { "hostProfile": "campaign-studio", "opaque": { "preserve": true } },
+  "unknownRootField": { "futureApproval": { "expiresAtRevision": 10, "policy": "fixture" } }
+}

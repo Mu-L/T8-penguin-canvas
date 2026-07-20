@@ -1,0 +1,15 @@
+{
+  "id": "oldest-canvas-without-viewport",
+  "name": "最早期无视口存档",
+  "modifiedAt": 1609459200026,
+  "nodes": [
+    { "id": "legacy_text_001", "type": "text", "position": { "x": 0, "y": 0 }, "data": { "label": "旧文本", "value": "早期存档仍应自动打开" } },
+    { "id": "legacy_output_001", "type": "output", "position": { "x": 300, "y": 0 }, "data": { "label": "旧输出" } }
+  ],
+  "edges": [
+    { "id": "legacy_edge_001", "source": "legacy_text_001", "target": "legacy_output_001", "type": "default" }
+  ],
+  "background": "grid",
+  "legacyWindow": { "width": 1280, "height": 720, "deviceScaleFactor": 1 },
+  "autosave": { "enabled": true, "intervalSeconds": 30 }
+}

@@ -28,6 +28,7 @@ class HostExecutionPolicy {
   authorize(input = {}) {
     const projectId = String(input.projectId || 'project-local');
     const policy = this.database.getExecutionPolicy(projectId);
+    const evaluationNow = input.now == null ? Date.now() : input.now;
     const excludeIntentId = input.reservationAlreadyCounted === true
       ? String(input.intentId || '').trim()
       : null;
@@ -39,7 +40,10 @@ class HostExecutionPolicy {
         409,
       );
     }
-    const usage = this.database.getExecutionUsage(projectId, input.now, { excludeIntentId });
+    const reservationIntent = excludeIntentId && typeof this.database.getRunIntent === 'function'
+      ? this.database.getRunIntent(excludeIntentId)
+      : null;
+    const usage = this.database.getExecutionUsage(projectId, evaluationNow, { excludeIntentId });
     const estimatedCostKnown = input.estimatedCostKnown === true
       || (input.estimatedCostKnown !== false && input.estimatedCost != null && Number.isFinite(Number(input.estimatedCost)));
     const estimatedCost = estimatedCostKnown ? Math.max(0, Number(input.estimatedCost) || 0) : null;
@@ -89,10 +93,125 @@ class HostExecutionPolicy {
     if (policy.dailyCostLimit > 0 && usage.dailyCost + estimatedCost > policy.dailyCostLimit) {
       throw new ExecutionPolicyError('daily_cost_limit', '今日主机代执行额度已用尽', { limit: policy.dailyCostLimit, used: usage.dailyCost, estimatedCost });
     }
-    if (usage.activeCount >= policy.concurrencyLimit) {
+    if (input.enforceConcurrency !== false && usage.activeCount >= policy.concurrencyLimit) {
       throw new ExecutionPolicyError('concurrency_limit', '主机代执行并发已满', { limit: policy.concurrencyLimit, active: usage.activeCount });
     }
-    return { policy, usage, estimatedCost, estimatedCostKnown, declarations };
+
+    const canvasId = String(input.canvasId || '').trim();
+    const requestedBy = String(input.requestedBy || '').trim();
+    const requesterRole = String(input.requesterRole || '').trim().toLowerCase();
+    let roomPolicy = null;
+    let roomUsage = null;
+    let confirmation = {
+      required: false,
+      lowRisk: true,
+      reasons: [],
+    };
+    if (canvasId && typeof this.database.getRoomExecutionPolicy === 'function') {
+      roomPolicy = this.database.getRoomExecutionPolicy(projectId, canvasId);
+      if (requesterRole && !['owner', 'editor'].includes(requesterRole)) {
+        throw new ExecutionPolicyError(
+          'room_run_role_forbidden',
+          '当前成员角色不能提交主机代执行请求',
+          { role: requesterRole },
+          403,
+        );
+      }
+      if (requesterRole === 'editor' && roomPolicy.allowEditorRuns !== true) {
+        throw new ExecutionPolicyError(
+          'room_editor_runs_disabled',
+          '当前协作房间未允许编辑者提交主机代执行请求',
+          { canvasId },
+          403,
+        );
+      }
+      if (requestedBy && typeof this.database.getRoomExecutionUsage === 'function') {
+        roomUsage = this.database.getRoomExecutionUsage(projectId, canvasId, requestedBy, evaluationNow);
+        const exactRoomReservation = input.reservationAlreadyCounted === true
+          && reservationIntent
+          && reservationIntent.projectId === projectId
+          && reservationIntent.canvasId === canvasId
+          && reservationIntent.requestedBy === requestedBy;
+        const reservationCreatedAt = Number(reservationIntent?.createdAt);
+        const roomDayStart = Number(roomUsage?.dayStart);
+        const alreadyReserved = exactRoomReservation
+          && ['pending', 'accepted', 'dispatching', 'running'].includes(reservationIntent.status)
+          && Number.isSafeInteger(reservationCreatedAt)
+          && Number.isSafeInteger(roomDayStart)
+          && reservationCreatedAt >= roomDayStart
+          ? 1
+          : 0;
+        const activeReservationAlreadyCounted = exactRoomReservation
+          && (
+            reservationIntent.status === 'running'
+            || (reservationIntent.status === 'dispatching'
+              && Number(reservationIntent.leaseExpiresAt) > Number(evaluationNow))
+          )
+          ? 1
+          : 0;
+        const activeCount = Math.max(
+          0,
+          Number(roomUsage?.activeCount || 0) - activeReservationAlreadyCounted,
+        );
+        if (input.enforceConcurrency !== false
+          && activeCount >= roomPolicy.canvasConcurrencyLimit) {
+          throw new ExecutionPolicyError(
+            'concurrency_limit',
+            '当前协作房间的主机代执行并发已满',
+            {
+              scope: 'room',
+              canvasId,
+              limit: roomPolicy.canvasConcurrencyLimit,
+              active: activeCount,
+            },
+            429,
+          );
+        }
+        const requesterDailyCount = Math.max(
+          0,
+          Number(roomUsage?.requestedByDailyCount || 0) - alreadyReserved,
+        );
+        if (roomPolicy.memberDailyRunLimit > 0
+          && requesterDailyCount >= roomPolicy.memberDailyRunLimit) {
+          throw new ExecutionPolicyError(
+            'room_member_daily_run_limit',
+            '当前成员今日的主机代执行次数已达房间上限',
+            {
+              canvasId,
+              limit: roomPolicy.memberDailyRunLimit,
+              used: requesterDailyCount,
+            },
+            429,
+          );
+        }
+      }
+
+      const reasons = [];
+      if (!estimatedCostKnown && roomPolicy.requireUnknownCostConfirmation === true) {
+        reasons.push('cost_unknown');
+      }
+      if (estimatedCostKnown
+        && roomPolicy.highCostConfirmationThreshold > 0
+        && estimatedCost > roomPolicy.highCostConfirmationThreshold) {
+        reasons.push('high_cost');
+      }
+      const lowRisk = reasons.length === 0;
+      confirmation = {
+        required: !lowRisk || roomPolicy.autoApproveLowRisk !== true,
+        lowRisk,
+        reasons,
+      };
+    }
+    return {
+      policy,
+      usage,
+      roomPolicy,
+      roomUsage,
+      confirmation,
+      estimatedCost,
+      estimatedCostKnown,
+      declarations,
+    };
   }
 
   authorizeRunIntent(intentOrId, options = {}) {
@@ -136,8 +255,8 @@ class HostExecutionPolicy {
       );
     }
 
-    const canvas = this.database.getCanvas(intent.canvasId);
-    if (!canvas || canvas.projectId !== intent.projectId) {
+    const currentCanvas = this.database.getCanvas(intent.canvasId);
+    if (!currentCanvas || currentCanvas.projectId !== intent.projectId) {
       throw new ExecutionPolicyError(
         'intent_canvas_scope_invalid',
         '运行意图对应画布不存在或已离开当前项目',
@@ -145,11 +264,53 @@ class HostExecutionPolicy {
         409,
       );
     }
-    if (Number(canvas.revision) !== Number(intent.canvasRevision)) {
+    // Dispatch always re-opens the current recovery-generation fence, but the
+    // Provider authority belongs to the immutable revision that created the
+    // intent. A collaborator may legitimately persist rN+1 while an accepted
+    // rN request waits in FIFO; using the latest document here would either
+    // reject that request or silently change its Provider-facing input.
+    try {
+      this.database.getRecoveryGeneration();
+      this.database.requiresRecoveryGeneration();
+    } catch (error) {
       throw new ExecutionPolicyError(
-        'intent_canvas_stale',
-        '运行意图对应的画布版本已变化，请重新发起',
-        { expectedRevision: intent.canvasRevision, currentRevision: canvas.revision },
+        String(error?.code || 'project_database_recovery_generation_unavailable'),
+        '项目数据库 recovery generation 暂时不可用，已停止派发',
+        {},
+        Number(error?.statusCode ?? error?.status) || 503,
+      );
+    }
+
+    let canvas = null;
+    try {
+      canvas = this.database.getCanvasSnapshotDocument(
+        intent.canvasId,
+        intent.canvasRevision,
+      );
+    } catch (error) {
+      const snapshotIsInvalid = new Set([
+        'canvas_snapshot_integrity_conflict',
+        'collaboration_domain_review_snapshot_invalid',
+      ]).has(String(error?.code || ''));
+      throw new ExecutionPolicyError(
+        snapshotIsInvalid
+          ? 'intent_canvas_snapshot_unavailable'
+          : 'intent_canvas_snapshot_read_unavailable',
+        snapshotIsInvalid
+          ? '运行意图绑定的精确历史画布快照不可用，不能回退到最新版本'
+          : '运行意图绑定的历史画布快照暂时无法读取，已停止派发',
+        { canvasId: intent.canvasId, canvasRevision: intent.canvasRevision },
+        snapshotIsInvalid ? 409 : 503,
+      );
+    }
+    if (!canvas
+      || canvas.projectId !== intent.projectId
+      || canvas.canvasId !== intent.canvasId
+      || Number(canvas.revision) !== Number(intent.canvasRevision)) {
+      throw new ExecutionPolicyError(
+        'intent_canvas_snapshot_unavailable',
+        '运行意图绑定的精确历史画布快照不可用，不能回退到最新版本',
+        { canvasId: intent.canvasId, canvasRevision: intent.canvasRevision },
         409,
       );
     }
@@ -172,14 +333,38 @@ class HostExecutionPolicy {
 
     const authorization = this.authorize({
       projectId: intent.projectId,
+      canvasId: intent.canvasId,
+      requestedBy: intent.requestedBy,
+      requesterRole: member.role,
       declarations: authority.declarations,
       estimatedCost: authority.cost.known === true ? authority.cost.amount : null,
       estimatedCostKnown: authority.cost.known === true,
       intentId: intent.id,
       reservationAlreadyCounted: options.reservationAlreadyCounted === true,
+      enforceConcurrency: options.enforceConcurrency !== false,
       now: options.now,
     });
-    return { intent, member, canvas, authority, ...authorization };
+    const confirmationSatisfied = intent.confirmationRequired === true
+      && Number.isSafeInteger(Number(intent.confirmedAt))
+      && Number(intent.confirmedAt) >= 1
+      && Boolean(String(intent.confirmedBy || '').trim());
+    if (options.requireConfirmationSatisfied === true
+      && authorization.confirmation.required === true
+      && !confirmationSatisfied) {
+      throw new ExecutionPolicyError(
+        'intent_confirmation_required',
+        '最新执行策略要求人工确认，请确认后重新派发',
+        {
+          canvasId: intent.canvasId,
+          reasons: [...authorization.confirmation.reasons],
+          roomPolicyRevision: authorization.roomPolicy?.revision ?? null,
+          confirmationRequired: intent.confirmationRequired === true,
+          confirmationSatisfied: false,
+        },
+        409,
+      );
+    }
+    return { intent, member, canvas, currentCanvas, authority, ...authorization };
   }
 
 }

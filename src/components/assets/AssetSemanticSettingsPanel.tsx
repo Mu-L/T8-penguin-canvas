@@ -5,6 +5,7 @@ import {
   deleteProjectAssetSemanticModel,
   downloadProjectAssetSemanticModel,
   getProjectAssetSemanticStatus,
+  refreshProjectAssetSemanticModels,
   rebuildProjectAssetSemanticIndex,
   updateProjectAssetSemanticProfile,
 } from '../../services/api';
@@ -28,7 +29,8 @@ import {
 
 export interface AssetSemanticSettingsPanelProps {
   projectId: string;
-  onStatusChange?: (status: AssetSemanticStatus) => void;
+  externalRefreshToken?: number;
+  onStatusChange?: (status: AssetSemanticStatus, externalRefreshToken: number) => void;
 }
 
 const INSTALL_STATE_LABEL: Record<AssetSemanticModelStatus['installState'], string> = {
@@ -62,7 +64,11 @@ function modelForCapability(status: AssetSemanticStatus | null, capability: Asse
     || null;
 }
 
-export default function AssetSemanticSettingsPanel({ projectId, onStatusChange }: AssetSemanticSettingsPanelProps) {
+export default function AssetSemanticSettingsPanel({
+  projectId,
+  externalRefreshToken = 0,
+  onStatusChange,
+}: AssetSemanticSettingsPanelProps) {
   const [status, setStatus] = useState<AssetSemanticStatus | null>(null);
   const [draft, setDraft] = useState<AssetSemanticSettingsDraft | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -79,10 +85,16 @@ export default function AssetSemanticSettingsPanel({ projectId, onStatusChange }
   const readAbortRef = useRef<AbortController | null>(null);
   const mutationAbortRef = useRef<AbortController | null>(null);
   const onStatusChangeRef = useRef(onStatusChange);
+  const externalRefreshTokenRef = useRef(externalRefreshToken);
   currentProjectRef.current = projectId;
   onStatusChangeRef.current = onStatusChange;
+  externalRefreshTokenRef.current = externalRefreshToken;
 
-  const acceptStatus = useCallback((next: AssetSemanticStatus, resetDraft = false) => {
+  const acceptStatus = useCallback((
+    next: AssetSemanticStatus,
+    resetDraft: boolean,
+    sourceRefreshToken: number,
+  ) => {
     statusRef.current = next;
     setStatus(next);
     if (resetDraft || !dirtyRef.current) {
@@ -90,7 +102,7 @@ export default function AssetSemanticSettingsPanel({ projectId, onStatusChange }
       setDirty(false);
       setDraft(assetSemanticSettingsDraft(next));
     }
-    onStatusChangeRef.current?.(next);
+    onStatusChangeRef.current?.(next, sourceRefreshToken);
   }, []);
 
   useEffect(() => {
@@ -121,16 +133,21 @@ export default function AssetSemanticSettingsPanel({ projectId, onStatusChange }
     };
     const readStatus = async () => {
       if (disposed || generation !== projectGenerationRef.current || document.visibilityState === 'hidden') return;
+      if (mutationAbortRef.current) {
+        schedule(ASSET_SEMANTIC_IDLE_POLL_MS);
+        return;
+      }
       readAbortRef.current?.abort();
       const controller = new AbortController();
       readAbortRef.current = controller;
+      const sourceRefreshToken = externalRefreshToken;
       if (!statusRef.current) setLoading(true);
       try {
         const next = await getProjectAssetSemanticStatus(projectId, { signal: controller.signal });
         if (disposed || controller.signal.aborted || generation !== projectGenerationRef.current
           || currentProjectRef.current !== projectId) return;
         setError('');
-        acceptStatus(next);
+        acceptStatus(next, false, sourceRefreshToken);
         schedule(assetSemanticSettingsPollMs(next));
       } catch (caught) {
         if (disposed || controller.signal.aborted || isAbortError(caught)
@@ -160,7 +177,7 @@ export default function AssetSemanticSettingsPanel({ projectId, onStatusChange }
       readAbortRef.current?.abort();
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [acceptStatus, projectId, refreshToken]);
+  }, [acceptStatus, externalRefreshToken, projectId, refreshToken]);
 
   useEffect(() => () => mutationAbortRef.current?.abort(), [projectId]);
 
@@ -178,11 +195,15 @@ export default function AssetSemanticSettingsPanel({ projectId, onStatusChange }
   const runMutation = useCallback(async <T,>(
     action: string,
     requestMutation: (signal: AbortSignal) => Promise<T>,
-    applyResult: (result: T) => void,
+    applyResult: (result: T, sourceRefreshToken: number) => void,
   ) => {
+    // A GET started before an explicit mutation must not arrive afterwards and
+    // overwrite the mutation's authoritative response with its older snapshot.
+    readAbortRef.current?.abort();
     mutationAbortRef.current?.abort();
     const controller = new AbortController();
     mutationAbortRef.current = controller;
+    const sourceRefreshToken = externalRefreshTokenRef.current;
     const generation = projectGenerationRef.current;
     const expectedProjectId = projectId;
     setBusyAction(action);
@@ -191,7 +212,7 @@ export default function AssetSemanticSettingsPanel({ projectId, onStatusChange }
       const result = await requestMutation(controller.signal);
       if (controller.signal.aborted || generation !== projectGenerationRef.current
         || currentProjectRef.current !== expectedProjectId) return;
-      applyResult(result);
+      applyResult(result, sourceRefreshToken);
     } catch (caught) {
       if (controller.signal.aborted || isAbortError(caught) || generation !== projectGenerationRef.current
         || currentProjectRef.current !== expectedProjectId) return;
@@ -226,9 +247,18 @@ export default function AssetSemanticSettingsPanel({ projectId, onStatusChange }
     }
     void runMutation('profile-save',
       (signal) => updateProjectAssetSemanticProfile(input, { signal }),
-      (next) => {
-        acceptStatus(next, true);
+      (next, sourceRefreshToken) => {
+        acceptStatus(next, true, sourceRefreshToken);
         setMessage('配置已保存。模型不会自动下载；配置变化后请显式重建索引。');
+      });
+  };
+
+  const refreshLocalModelStatus = () => {
+    void runMutation('model-status-refresh',
+      (signal) => refreshProjectAssetSemanticModels(projectId, { signal }),
+      (next, sourceRefreshToken) => {
+        acceptStatus(next, false, sourceRefreshToken);
+        setMessage('已显式同步本机模型状态。后续自动轮询与立即刷新仍仅读取状态。');
       });
   };
 
@@ -290,7 +320,7 @@ export default function AssetSemanticSettingsPanel({ projectId, onStatusChange }
   const canRebuild = Boolean(status && !dirty && savedModelsReady && !indexBusy && !busyAction);
   const summaryMessage = assetSemanticSettingsIndexMessage(status);
 
-  return <details className="rounded-lg border border-[var(--border-primary)] bg-[var(--bg-secondary)] text-[var(--text-primary)]">
+  return <details className="rounded-lg border border-[var(--border-primary)] bg-[var(--bg-secondary)] text-[var(--text-primary)]" data-asset-semantic-settings>
     <summary className="cursor-pointer select-none px-3 py-2.5 text-xs font-semibold">
       <span className="flex items-center justify-between gap-3">
         <span>智能分析与自然语言检索（可选 · 本机）</span>
@@ -301,9 +331,9 @@ export default function AssetSemanticSettingsPanel({ projectId, onStatusChange }
       <span className="mt-1 block text-[10px] font-normal leading-4 text-[var(--text-secondary)]">{summaryMessage}</span>
     </summary>
 
-    <div className="space-y-3 border-t border-[var(--border-primary)] p-3">
+    <div className="max-h-[min(42vh,34rem)] space-y-3 overflow-y-auto overscroll-contain border-t border-[var(--border-primary)] p-3 [@media(max-height:820px)]:max-h-44" data-asset-semantic-settings-scroll-region>
       <div className="rounded border border-[var(--border-primary)] bg-[var(--bg-primary)] p-2 text-[10px] leading-4 text-[var(--text-secondary)]">
-        三项能力均为显式配置。本面板只读取状态，不会自动下载模型，也不会把“模型已安装”误报成“索引可用”。
+        三项能力均为显式配置。自动轮询和“立即刷新”只读取状态；只有点击“同步本机模型状态”才会执行一次本地对账。不会自动下载模型，也不会把“模型已安装”误报成“索引可用”。
       </div>
 
       {ASSET_SEMANTIC_CAPABILITIES.map(({ id, label, description }) => {
@@ -433,6 +463,15 @@ export default function AssetSemanticSettingsPanel({ projectId, onStatusChange }
         </button>
         <button
           type="button"
+          className="inline-flex items-center gap-1 rounded border border-[var(--border-primary)] px-2 py-1.5 text-[10px] text-[var(--text-secondary)] hover:border-[var(--accent-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={Boolean(busyAction)}
+          onClick={refreshLocalModelStatus}
+        >
+          {busyAction === 'model-status-refresh' ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+          同步本机模型状态
+        </button>
+        <button
+          type="button"
           className="ml-auto inline-flex items-center gap-1 rounded border border-[var(--border-primary)] px-2 py-1.5 text-[10px] text-[var(--text-secondary)] disabled:opacity-50"
           disabled={loading || Boolean(busyAction)}
           onClick={() => {
@@ -440,7 +479,7 @@ export default function AssetSemanticSettingsPanel({ projectId, onStatusChange }
             setRefreshToken((value) => value + 1);
           }}
         >
-          <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />立即刷新
+          <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />立即刷新（只读）
         </button>
       </div>
     </div>

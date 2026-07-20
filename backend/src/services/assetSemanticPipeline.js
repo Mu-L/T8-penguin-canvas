@@ -287,10 +287,6 @@ function isSkippableVisionSourceError(error) {
   return /(?:kind-unsupported|source-unavailable|preview-unavailable)$/.test(code);
 }
 
-function isSemanticRevisionConflict(error) {
-  return /revision[_-]conflict$/.test(String(error?.code || ''));
-}
-
 function semanticModelStateMatches(current, next) {
   if (!current) return false;
   const status = String(next.status || 'not-installed');
@@ -314,6 +310,37 @@ function semanticModelStateMatches(current, next) {
     && (current.installPath || null) === expected.installPath
     && (current.errorCode || null) === expected.errorCode
     && (current.errorMessage || null) === expected.errorMessage;
+}
+
+function virtualSemanticModelState(model) {
+  return {
+    modelKey: model.modelId,
+    modelVersion: model.revision,
+    capability: model.task,
+    status: 'not-installed',
+    revision: 1,
+    artifactDigest: null,
+    byteSize: null,
+    downloadedBytes: 0,
+    totalBytes: null,
+    installPath: null,
+    errorCode: null,
+    errorMessage: null,
+    installedAt: null,
+    downloadIdempotencyKey: null,
+    downloadRequestRevision: null,
+    createdAt: null,
+    updatedAt: null,
+    virtual: true,
+  };
+}
+
+function isActiveDurableModelVerificationOwner(task, model) {
+  return Boolean(task?.ownsDurableState === true
+    && task.controller?.signal?.aborted === false
+    && model
+    && Number(task.expectedRevision) === Number(model.revision)
+    && task.expectedStatuses?.has(model.status));
 }
 
 class AssetSemanticPipeline {
@@ -658,7 +685,10 @@ class AssetSemanticPipeline {
   }
 
   async setProfile(projectId, patch = {}, options = {}) {
-    await this.listModels();
+    // Profile rows reference the fixed model manifest. Materialize/reconcile
+    // those identities only from this explicit mutation path; status GETs stay
+    // pure and never create the foreign-key targets as a side effect.
+    await this.refreshModelStates();
     const current = this.database.getAssetSemanticProfile(projectId);
     const normalizedPatch = {};
     if (Object.hasOwn(patch, 'enabled')) normalizedPatch.enabled = Boolean(patch.enabled);
@@ -706,10 +736,16 @@ class AssetSemanticPipeline {
     return updated;
   }
 
-  async syncModelState(modelId, override = {}) {
+  async observeModelState(modelId, override = {}, expectedObservation = null) {
     const spec = getTrustedSemanticModelSpec(modelId);
+    const observation = expectedObservation
+      || (typeof this.database.getAssetSemanticModelObservation === 'function'
+        ? this.database.getAssetSemanticModelObservation(modelId, spec.revision)
+        : null);
     const workerStatus = await Promise.resolve(this.worker.getModelStatus(modelId));
-    const existing = this.database.getAssetSemanticModel(modelId, spec.revision);
+    const existing = observation && Object.hasOwn(observation, 'present')
+      ? observation.model
+      : (observation?.model ?? this.database.getAssetSemanticModel(modelId, spec.revision));
     if (existing?.status === 'deleting' && override.status === 'installed') {
       throw semanticError('asset-semantic-model-delete-in-progress', '模型正在删除，不能用于语义索引重建', { revision: existing.revision });
     }
@@ -717,6 +753,29 @@ class AssetSemanticPipeline {
       throw semanticError('asset-semantic-model-not-installed', '语义模型尚未安装并校验，不能标记为已安装', { revision: existing?.revision || 0 });
     }
     const workerState = String(workerStatus?.state || '').toLowerCase();
+    const workerVerifiedInstalled = Boolean(workerStatus?.installed && workerStatus?.verified);
+    const downloadTask = this.downloads.get(modelId);
+    const ownsDurableDownload = Boolean(downloadTask?.controller?.signal?.aborted === false && existing
+      && ['downloading', 'verifying'].includes(existing.status)
+      && existing.downloadIdempotencyKey === downloadTask.requestKey
+      && Number(existing.downloadRequestRevision) === Number(downloadTask.requestRevision));
+    const verificationTask = this.modelVerifications.get(modelId);
+    const ownsDurableVerification = isActiveDurableModelVerificationOwner(verificationTask, existing);
+    const ownsDurableTransfer = ownsDurableDownload || ownsDurableVerification;
+    const durableTransferOwnerFence = ownsDurableDownload
+      ? { kind: 'download', task: downloadTask }
+      : (ownsDurableVerification ? { kind: 'verification', task: verificationTask } : null);
+    // An in-memory worker snapshot cannot prove that another process/pipeline's
+    // durable operation has stopped. Until a durable owner/lease exists, a
+    // generic refresh must preserve the entire transient row. The owning
+    // download/remove promise is the only path allowed to write failure or
+    // completion; a positively verified install may still converge forward.
+    const preserveDurableTransient = !override.status && Boolean(existing) && (
+      existing.status === 'deleting'
+      || (['downloading', 'verifying'].includes(existing.status)
+        && !ownsDurableTransfer
+        && !workerVerifiedInstalled)
+    );
     const scheduleColdVerification = !override.status
       && workerState === 'verifying'
       && !this.downloads.has(modelId)
@@ -725,12 +784,12 @@ class AssetSemanticPipeline {
     const verificationTargetStatus = existing?.status === 'disabled' ? 'disabled' : 'installed';
     let status = override.status;
     let error = override.error || null;
-    if (scheduleColdVerification) status = 'verifying';
+    if (scheduleColdVerification && !preserveDurableTransient) status = 'verifying';
     if (!status) {
-      if (existing?.status === 'disabled' && workerStatus?.installed) status = 'disabled';
-      else if (existing?.status === 'deleting' && this.removals.has(modelId)) status = 'deleting';
-      else if (workerStatus?.installed) status = 'installed';
-      else if (this.downloads.has(modelId)
+      if (preserveDurableTransient) status = existing.status;
+      else if (existing?.status === 'disabled' && workerVerifiedInstalled) status = 'disabled';
+      else if (workerVerifiedInstalled) status = 'installed';
+      else if (ownsDurableDownload
         && ['downloading', 'verifying'].includes(existing?.status)
         && !['invalid', 'failed', 'cancelled'].includes(workerState)) {
         status = ['downloading', 'verifying'].includes(workerState) ? workerState : existing.status;
@@ -747,15 +806,13 @@ class AssetSemanticPipeline {
           code: existing.errorCode || 'asset-semantic-model-failed',
           message: existing.errorMessage || '语义模型安装失败，请显式重试',
         };
-      } else if (existing?.status === 'deleting') {
-        status = 'not-installed';
       } else {
         status = 'not-installed';
       }
     }
     const installed = status === 'installed' || status === 'disabled';
     const activeTransfer = ['downloading', 'verifying', 'deleting'].includes(status);
-    const state = {
+    const state = preserveDurableTransient ? { ...existing } : {
       modelKey: modelId,
       modelVersion: spec.revision,
       capability: spec.task,
@@ -771,64 +828,196 @@ class AssetSemanticPipeline {
         : Number(override.downloadedBytes ?? workerStatus?.downloadedBytes ?? existing?.downloadedBytes ?? 0),
       totalBytes: spec.downloadBytes || spec.weight.size,
     };
-    const finalize = (persisted) => {
-      if (scheduleColdVerification && persisted?.status === 'verifying') {
-        this.scheduleModelVerification(modelId, verificationTargetStatus, persisted.revision);
-      }
-      return persisted;
+    return {
+      modelId,
+      spec,
+      expected: observation || existing || null,
+      existing,
+      state,
+      scheduleColdVerification,
+      verificationTargetStatus,
+      verificationExpectedStatuses: preserveDurableTransient && existing
+        ? [existing.status]
+        : ['verifying'],
+      verificationPersistFailure: !preserveDurableTransient,
+      durableTransferOwnerFence,
     };
-    if (semanticModelStateMatches(existing, state)) return finalize(existing);
-    const explicitRevision = override.expectedRevision;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const current = attempt === 0 ? existing : this.database.getAssetSemanticModel(modelId, spec.revision);
-      const expectedRevision = explicitRevision == null ? (current?.revision || 0) : explicitRevision;
-      if (current?.status === 'deleting' && state.status === 'installed') {
-        if (override.status === 'installed') {
-          throw semanticError('asset-semantic-model-delete-in-progress', '模型正在删除，不能用于语义索引重建', { revision: current.revision });
-        }
-        if (this.removals.has(modelId)) return finalize(current);
-      }
-      if (semanticModelStateMatches(current, state)) return finalize(current);
-      try {
-        return finalize(this.database.setAssetSemanticModelState(state, { expectedRevision }));
-      } catch (writeError) {
-        if (explicitRevision != null || !isSemanticRevisionConflict(writeError) || attempt === 2) throw writeError;
-      }
-    }
-    return finalize(this.database.getAssetSemanticModel(modelId, spec.revision));
   }
 
-  scheduleModelVerification(modelId, targetStatus = 'installed', expectedRevision = null) {
+  revalidateModelObservationAuthority(observation) {
+    const fence = observation.durableTransferOwnerFence;
+    if (!fence) return observation;
+    const currentTask = fence.kind === 'download'
+      ? this.downloads.get(observation.modelId)
+      : this.modelVerifications.get(observation.modelId);
+    const active = currentTask === fence.task && (fence.kind === 'download'
+      ? fence.task?.controller?.signal?.aborted === false
+      : isActiveDurableModelVerificationOwner(fence.task, observation.existing));
+    if (active) return observation;
+    // The worker observation was authorized by one exact in-memory owner. If
+    // that owner is cancelled or replaced before the synchronous DB call, the
+    // observation loses all transition authority. Preserve the frozen durable
+    // row; a replacement task must obtain and commit its own observation.
+    return {
+      ...observation,
+      state: { ...observation.existing },
+      scheduleColdVerification: false,
+      verificationPersistFailure: false,
+      durableTransferOwnerFence: null,
+    };
+  }
+
+  finalizeModelObservation(observation, persisted, changed = false) {
+    if (observation.scheduleColdVerification
+      && observation.verificationExpectedStatuses.includes(persisted?.status)) {
+      const ownsDurableState = observation.verificationPersistFailure && changed;
+      this.scheduleModelVerification(
+        observation.modelId,
+        observation.verificationTargetStatus,
+        persisted.revision,
+        {
+          expectedStatuses: observation.verificationExpectedStatuses,
+          persistFailure: ownsDurableState,
+          ownsDurableState,
+        },
+      );
+    }
+    return persisted;
+  }
+
+  async syncModelState(modelId, override = {}) {
+    const observed = await this.observeModelState(modelId, override);
+    const observation = this.revalidateModelObservationAuthority(observed);
+    const { existing, state } = observation;
+    const finalize = (persisted, changed = false) => {
+      return this.finalizeModelObservation(observation, persisted, changed);
+    };
+    const actualRevision = existing?.revision || 0;
+    if (override.expectedRevision != null
+      && Math.trunc(Number(override.expectedRevision)) !== actualRevision) {
+      throw semanticError('asset-semantic-model-revision-conflict', '模型安装状态 revision 已变化', {
+        revision: existing?.revision || 1,
+      });
+    }
+    if (semanticModelStateMatches(existing, state)) return finalize(existing, false);
+    if (existing?.status === 'deleting' && state.status === 'installed') {
+      if (override.status === 'installed') {
+        throw semanticError('asset-semantic-model-delete-in-progress', '模型正在删除，不能用于语义索引重建', { revision: existing.revision });
+      }
+      return finalize(existing);
+    }
+    // Never retry a stale filesystem observation. A caller that wants another
+    // attempt must observe both the durable row and worker state again.
+    const committed = this.database.syncAssetSemanticModelObservations([{
+      expected: observation.expected,
+      state,
+    }]);
+    return finalize(committed.models[0], Boolean(committed.changed?.[0]));
+  }
+
+  async refreshModelStates() {
+    if (this.closed || this.lifecycleAbortController.signal.aborted) {
+      throw semanticAbortError('应用正在关闭，语义模型状态同步已取消');
+    }
+    const manifest = getPublicSemanticModelManifest();
+    const expected = manifest.map((model) => (
+      typeof this.database.getAssetSemanticModelObservation === 'function'
+        ? this.database.getAssetSemanticModelObservation(model.modelId, model.revision)
+        : this.database.getAssetSemanticModel(model.modelId, model.revision)
+    ));
+    const observed = await Promise.all(manifest.map((model, index) => (
+      this.observeModelState(model.modelId, {}, expected[index])
+    )));
+    if (this.closed || this.lifecycleAbortController.signal.aborted) {
+      throw semanticAbortError('应用正在关闭，语义模型状态同步已取消');
+    }
+    const observations = observed.map((observation) => (
+      this.revalidateModelObservationAuthority(observation)
+    ));
+    const committed = this.database.syncAssetSemanticModelObservations(
+      observations.map((observation) => ({
+        expected: observation.expected,
+        state: observation.state,
+      })),
+    );
+    observations.forEach((observation, index) => {
+      this.finalizeModelObservation(observation, committed.models[index], Boolean(committed.changed?.[index]));
+    });
+    return committed;
+  }
+
+  scheduleModelVerification(modelId, targetStatus = 'installed', expectedRevision = null, options = {}) {
     if (this.closed || this.downloads.has(modelId) || this.removals.has(modelId)) return null;
+    const expectedStatuses = new Set(
+      (Array.isArray(options.expectedStatuses) ? options.expectedStatuses : ['verifying'])
+        .map((status) => String(status || '').toLowerCase())
+        .filter((status) => ['downloading', 'verifying'].includes(status)),
+    );
+    if (expectedStatuses.size === 0) expectedStatuses.add('verifying');
+    const persistFailure = options.persistFailure !== false;
+    const ownsDurableState = options.ownsDurableState === true;
+    const expectedRevisionNumber = Number(expectedRevision);
+    const normalizedTargetStatus = targetStatus === 'disabled' ? 'disabled' : 'installed';
     const existingTask = this.modelVerifications.get(modelId);
-    if (existingTask) return existingTask.promise;
+    if (existingTask) {
+      const sameStatuses = existingTask.expectedStatuses instanceof Set
+        && existingTask.expectedStatuses.size === expectedStatuses.size
+        && [...expectedStatuses].every((status) => existingTask.expectedStatuses.has(status));
+      const sameIdentity = Number(existingTask.expectedRevision) === expectedRevisionNumber
+        && existingTask.targetStatus === normalizedTargetStatus
+        && sameStatuses;
+      const existingAuthorityIsSufficient = (!ownsDurableState || existingTask.ownsDurableState === true)
+        && (!persistFailure || existingTask.persistFailure === true);
+      if (sameIdentity && existingAuthorityIsSufficient) return existingTask.promise;
+      // A task for an old revision, status set or weaker read-only authority
+      // cannot consume a newly won durable transition. Abort it and serialize
+      // the replacement behind the existing verification tail.
+      existingTask.controller.abort();
+    }
     const controller = new AbortController();
-    const task = { controller, promise: null, started: false };
+    const task = {
+      controller,
+      promise: null,
+      started: false,
+      ownsDurableState,
+      persistFailure,
+      expectedRevision: expectedRevisionNumber,
+      expectedStatuses,
+      targetStatus: normalizedTargetStatus,
+    };
     const operation = async () => {
       task.started = true;
       if (controller.signal.aborted || this.closed) return null;
+      let workerVerified = false;
       try {
         const verified = await this.worker.verifyModel(modelId, { signal: controller.signal });
         if (!verified?.installed || !verified?.verified) {
           throw semanticError('asset-semantic-model-not-installed', '语义模型尚未安装或校验失败');
         }
+        workerVerified = true;
         if (this.closed || controller.signal.aborted || this.downloads.has(modelId) || this.removals.has(modelId)) return null;
         const spec = getTrustedSemanticModelSpec(modelId);
         const current = this.database.getAssetSemanticModel(modelId, spec.revision);
-        if (!current || current.status !== 'verifying' || Number(current.revision) !== Number(expectedRevision)) return current;
+        if (!current || !expectedStatuses.has(current.status)
+          || Number(current.revision) !== Number(expectedRevision)) return current;
         return await this.syncModelState(modelId, {
-          status: targetStatus === 'disabled' ? 'disabled' : 'installed',
+          status: normalizedTargetStatus,
           downloadedBytes: spec.downloadBytes || spec.weight.size,
           error: null,
           expectedRevision: current.revision,
         });
       } catch (verificationError) {
         if (this.closed || controller.signal.aborted || verificationError?.name === 'AbortError') return null;
+        if (workerVerified) {
+          console.warn('[asset-semantic] model verification state update failed:', sanitizeSemanticError(verificationError).message);
+          return null;
+        }
+        if (!persistFailure) return null;
         const safe = sanitizeSemanticError(verificationError);
         try {
           const spec = getTrustedSemanticModelSpec(modelId);
           const current = this.database.getAssetSemanticModel(modelId, spec.revision);
-          if (!current || current.status !== 'verifying' || Number(current.revision) !== Number(expectedRevision)
+          if (!current || !expectedStatuses.has(current.status) || Number(current.revision) !== Number(expectedRevision)
             || this.downloads.has(modelId) || this.removals.has(modelId)) return current;
           return await this.syncModelState(modelId, {
             status: 'failed',
@@ -862,10 +1051,22 @@ class AssetSemanticPipeline {
   }
 
   async listModels() {
+    // Capture the durable three-model baseline with one SELECT. Reading each
+    // identity separately could expose a group that never existed if another
+    // connection committed the atomic reconciliation between those reads.
+    const persistedByIdentity = new Map(
+      this.database.listAssetSemanticModels().map((model) => [
+        `${model.modelKey}\u0000${model.modelVersion}`,
+        model,
+      ]),
+    );
     const result = [];
     for (const model of getPublicSemanticModelManifest()) {
-      const persisted = await this.syncModelState(model.modelId);
-      const progress = await Promise.resolve(this.worker.getDownloadProgress(model.modelId));
+      const persisted = persistedByIdentity.get(`${model.modelId}\u0000${model.revision}`)
+        || virtualSemanticModelState(model);
+      const progress = ['downloading', 'verifying'].includes(persisted.status)
+        ? await Promise.resolve(this.worker.getDownloadProgress(model.modelId))
+        : null;
       result.push({
         ...model,
         version: model.revision,
@@ -905,18 +1106,29 @@ class AssetSemanticPipeline {
           revision: candidate.revision,
         });
       }
-      const synchronized = await this.syncModelState(modelId);
-      assertNotDeleting(synchronized);
-      return synchronized;
+      const active = this.downloads.get(modelId);
+      if (active?.requestKey === requestKey && active.requestRevision === requestRevision) return candidate;
+      if (['downloading', 'verifying'].includes(candidate.status)) {
+        return this.syncModelState(modelId, { expectedRevision: candidate.revision });
+      }
+      return candidate;
     };
-    const persistedReplay = await replayPersistedDownload(
-      this.database.getAssetSemanticModel(modelId, spec.revision),
-    );
-    if (persistedReplay) return persistedReplay;
-    const current = await this.syncModelState(modelId);
+    const persistedCandidate = this.database.getAssetSemanticModel(modelId, spec.revision);
+    if (persistedCandidate?.downloadIdempotencyKey === requestKey) {
+      const persistedReplay = await replayPersistedDownload(persistedCandidate);
+      if (persistedReplay) return persistedReplay;
+    }
+    const currentObservation = typeof this.database.getAssetSemanticModelObservation === 'function'
+      ? this.database.getAssetSemanticModelObservation(modelId, spec.revision)
+      : null;
+    const current = currentObservation?.model
+      || this.database.getAssetSemanticModel(modelId, spec.revision)
+      || virtualSemanticModelState({ modelId, revision: spec.revision, task: spec.task });
     assertNotDeleting(current);
-    const synchronizedReplay = await replayPersistedDownload(current);
-    if (synchronizedReplay) return synchronizedReplay;
+    if (current.downloadIdempotencyKey) {
+      const synchronizedReplay = await replayPersistedDownload(current);
+      if (synchronizedReplay) return synchronizedReplay;
+    }
     const inflight = this.downloads.get(modelId);
     if (inflight) {
       const concurrentReplay = await replayPersistedDownload(
@@ -927,6 +1139,14 @@ class AssetSemanticPipeline {
     }
     if (current.revision !== requestRevision) {
       throw semanticError('asset-semantic-model-revision-conflict', '模型安装状态 revision 已变化', { revision: current.revision });
+    }
+    const ownedVerification = this.modelVerifications.get(modelId);
+    const ownsCurrentVerification = current.status === 'verifying'
+      && isActiveDurableModelVerificationOwner(ownedVerification, current);
+    if (['downloading', 'verifying'].includes(current.status) && !ownsCurrentVerification) {
+      throw semanticError('asset-semantic-model-download-in-progress', '另一模型下载或校验操作仍在进行，不能替换其幂等身份', {
+        revision: current.revision,
+      });
     }
     if (current.status === 'installed') return current;
     const verificationCancellation = this.cancelModelVerification(modelId);
@@ -939,7 +1159,7 @@ class AssetSemanticPipeline {
       if (concurrentReplay) return concurrentReplay;
       throw semanticError('asset-semantic-model-download-in-progress', '该模型正在下载');
     }
-    const downloading = this.database.setAssetSemanticModelState({
+    const downloadingState = {
       modelKey: modelId,
       modelVersion: spec.revision,
       capability: spec.task,
@@ -949,7 +1169,18 @@ class AssetSemanticPipeline {
       totalBytes: spec.downloadBytes || spec.weight.size,
       downloadIdempotencyKey: requestKey,
       downloadRequestRevision: requestRevision,
-    }, { expectedRevision: current.revision });
+    };
+    const transition = this.database.syncAssetSemanticModelObservations([{
+      expected: currentObservation || (current.virtual ? null : current),
+      state: downloadingState,
+    }]);
+    const downloading = transition.models[0];
+    if (transition.changedCount === 0) {
+      // Another connection won the exact same idempotent transition. It owns
+      // the physical worker operation; this pipeline must only replay the
+      // durable acceptance and must not start a duplicate download.
+      return downloading;
+    }
     let lastProgressWrite = 0;
     const operation = {
       token: Symbol(`asset-semantic-download:${modelId}`),
@@ -991,19 +1222,32 @@ class AssetSemanticPipeline {
     }
     const promise = workerDownload.then(async () => {
       if (this.closed || this.downloads.get(modelId) !== operation) return this.database.getAssetSemanticModel(modelId, spec.revision);
+      const currentState = this.database.getAssetSemanticModel(modelId, spec.revision);
+      if (!currentState
+        || !['downloading', 'verifying'].includes(currentState.status)
+        || currentState.downloadIdempotencyKey !== requestKey
+        || Number(currentState.downloadRequestRevision) !== requestRevision) return currentState;
       return this.syncModelState(modelId, {
         status: 'installed',
         downloadedBytes: spec.downloadBytes || spec.weight.size,
         error: null,
+        expectedRevision: currentState.revision,
       });
-    }).catch(async (error) => {
+    }, async (error) => {
       const safe = sanitizeSemanticError(error);
       if (!this.closed && this.downloads.get(modelId) === operation) {
-        await this.syncModelState(modelId, {
-          status: 'failed',
-          downloadedBytes: Number(this.worker.getDownloadProgress(modelId)?.downloadedBytes || 0),
-          error: safe,
-        }).catch(() => {});
+        const currentState = this.database.getAssetSemanticModel(modelId, spec.revision);
+        if (currentState
+          && ['downloading', 'verifying'].includes(currentState.status)
+          && currentState.downloadIdempotencyKey === requestKey
+          && Number(currentState.downloadRequestRevision) === requestRevision) {
+          await this.syncModelState(modelId, {
+            status: 'failed',
+            downloadedBytes: Number(this.worker.getDownloadProgress(modelId)?.downloadedBytes || 0),
+            error: safe,
+            expectedRevision: currentState.revision,
+          }).catch(() => {});
+        }
       }
       throw error;
     }).finally(() => {
@@ -1017,9 +1261,20 @@ class AssetSemanticPipeline {
   async removeModel(modelId, input = {}) {
     assertSemanticModelId(modelId);
     const spec = getTrustedSemanticModelSpec(modelId);
-    const current = await this.syncModelState(modelId);
+    const persisted = this.database.getAssetSemanticModel(modelId, spec.revision);
+    const current = persisted
+      || virtualSemanticModelState({ modelId, revision: spec.revision, task: spec.task });
     if (String(current.revision) !== String(input.expectedRevision)) {
       throw semanticError('asset-semantic-model-revision-conflict', '模型安装状态 revision 已变化', { revision: current.revision });
+    }
+    if (!persisted) return current;
+    const ownedVerification = this.modelVerifications.get(modelId);
+    const ownsCurrentVerification = current.status === 'verifying'
+      && isActiveDurableModelVerificationOwner(ownedVerification, current);
+    if (['downloading', 'verifying'].includes(current.status) && !ownsCurrentVerification) {
+      throw semanticError('asset-semantic-model-download-in-progress', '模型下载或校验期间不能删除', {
+        revision: current.revision,
+      });
     }
     if (this.downloads.has(modelId)) throw semanticError('asset-semantic-model-download-in-progress', '模型下载期间不能删除');
     const verificationCancellation = this.cancelModelVerification(modelId);
@@ -1032,14 +1287,25 @@ class AssetSemanticPipeline {
     try {
       await this.worker.removeModel(modelId);
       this.queryEmbeddingCache.clear();
-      return await this.syncModelState(modelId, { status: 'not-installed', downloadedBytes: 0, error: null });
+      const deleting = this.database.getAssetSemanticModel(modelId, spec.revision);
+      if (!deleting || deleting.status !== 'deleting') return deleting;
+      return await this.syncModelState(modelId, {
+        status: 'not-installed',
+        downloadedBytes: 0,
+        error: null,
+        expectedRevision: deleting.revision,
+      });
     } catch (error) {
       const safe = sanitizeSemanticError(error);
-      await this.syncModelState(modelId, {
-        status: 'failed',
-        downloadedBytes: current.downloadedBytes,
-        error: safe,
-      }).catch(() => {});
+      const deleting = this.database.getAssetSemanticModel(modelId, spec.revision);
+      if (deleting?.status === 'deleting') {
+        await this.syncModelState(modelId, {
+          status: 'failed',
+          downloadedBytes: current.downloadedBytes,
+          error: safe,
+          expectedRevision: deleting.revision,
+        }).catch(() => {});
+      }
       throw error;
     } finally {
       this.removals.delete(modelId);

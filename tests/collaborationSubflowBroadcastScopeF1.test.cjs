@@ -100,6 +100,10 @@ test('local subflow publish and import routes use exact-grant-aware broadcasting
   assert.doesNotMatch(source, /collaborationGateway\.broadcastProject\s*\(/);
   assert.equal(
     [...source.matchAll(/collaborationGateway\.broadcastSubflowPublication\s*\(/g)].length,
+    1,
+  );
+  assert.equal(
+    [...source.matchAll(/const warnings = broadcastSubflowPublicationBestEffort\s*\(/g)].length,
     2,
   );
 });

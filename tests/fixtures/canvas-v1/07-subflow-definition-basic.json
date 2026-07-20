@@ -1,0 +1,35 @@
+{
+  "canvasId": "subflow-library-board",
+  "projectId": "workflow-project",
+  "name": "带旧子工作流定义的画布",
+  "updatedAt": 1704067200007,
+  "nodes": [
+    { "id": "subflow-call-old", "type": "subflow", "position": { "x": 160, "y": 120 }, "data": { "definitionId": "poster-flow-old", "definitionVersion": 1, "label": "海报子流程" } }
+  ],
+  "edges": [],
+  "subflowDefinitions": [
+    {
+      "id": "poster-flow-old",
+      "version": 1,
+      "name": "海报生成",
+      "description": "输入标题并输出海报图",
+      "nodes": [
+        { "id": "inner-text", "type": "text", "position": { "x": 0, "y": 0 }, "data": { "label": "标题" } },
+        { "id": "inner-image", "type": "image", "position": { "x": 320, "y": 0 }, "data": { "label": "海报图" } }
+      ],
+      "edges": [
+        { "id": "inner-title-image", "source": "inner-text", "target": "inner-image", "sourceHandle": "text-out:text", "targetHandle": "image-in:text" }
+      ],
+      "inputs": [
+        { "id": "title-input", "name": "标题", "type": "text", "internalNodeId": "inner-text", "internalHandleId": "text-in:text", "required": true }
+      ],
+      "outputs": [
+        { "id": "poster-output", "name": "海报", "type": "image", "internalNodeId": "inner-image", "internalHandleId": "image-out:image" }
+      ],
+      "exposedParameters": [],
+      "requiredCapabilities": ["image.generate"],
+      "assetRefs": []
+    }
+  ],
+  "viewport": { "x": 20, "y": 30, "zoom": 1 }
+}

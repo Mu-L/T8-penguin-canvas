@@ -6311,14 +6311,34 @@ test('canvas route persists sanitized farm canvas state and mirrors it in auto-s
     CANVAS_FILE: config.CANVAS_FILE,
     SETTINGS_FILE: config.SETTINGS_FILE,
     DEFAULT_CANVAS_AUTO_SAVE_DIR: config.DEFAULT_CANVAS_AUTO_SAVE_DIR,
+    PROJECT_DB_FILE: config.PROJECT_DB_FILE,
+    PROJECT_DB_BACKUP_FILE: config.PROJECT_DB_BACKUP_FILE,
   };
-  t.after(() => Object.assign(config, oldConfig));
-  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  let server: any = null;
+  t.after(async () => {
+    try {
+      server?.closeAllConnections?.();
+      if (server?.listening) {
+        await new Promise<void>((resolve, reject) => {
+          server.close((error?: Error) => (error ? reject(error) : resolve()));
+        });
+      }
+    } finally {
+      try {
+        await require('../backend/src/services/projectDatabase.js').closeProjectDatabase();
+      } finally {
+        Object.assign(config, oldConfig);
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    }
+  });
 
   config.DATA_DIR = dataDir;
   config.CANVAS_FILE = path.join(dataDir, 'canvas_list.json');
   config.SETTINGS_FILE = path.join(tmpDir, 'settings.json');
   config.DEFAULT_CANVAS_AUTO_SAVE_DIR = autoRoot;
+  config.PROJECT_DB_FILE = path.join(dataDir, 'projects.sqlite3');
+  config.PROJECT_DB_BACKUP_FILE = path.join(dataDir, 'projects.sqlite3.backup');
   fs.writeFileSync(
     config.CANVAS_FILE,
     JSON.stringify([{ id: 'canvas-farm-test', name: '牧场画布', nodeCount: 1, createdAt: 1, updatedAt: 1 }]),
@@ -6331,10 +6351,9 @@ test('canvas route persists sanitized farm canvas state and mirrors it in auto-s
   app.use(express.json({ limit: '50mb' }));
   app.use('/api/canvas', canvasRouter);
 
-  const server = await new Promise<any>((resolve) => {
+  server = await new Promise<any>((resolve) => {
     const s = app.listen(0, '127.0.0.1', () => resolve(s));
   });
-  t.after(() => server.close());
 
   const base = `http://127.0.0.1:${server.address().port}`;
   const body = {
@@ -6446,7 +6465,7 @@ test('canvas route persists sanitized farm canvas state and mirrors it in auto-s
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   }).then((res) => res.json());
-  assert.equal(saved.success, true);
+  assert.equal(saved.success, true, saved.error);
 
   const loaded = await fetch(`${base}/api/canvas/canvas-farm-test`).then((res) => res.json());
   assert.equal(loaded.success, true);

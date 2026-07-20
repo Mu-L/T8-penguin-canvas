@@ -6,12 +6,36 @@ const os = require('node:os');
 const path = require('node:path');
 const BetterSqlite3 = require('better-sqlite3');
 const { ProjectDatabase } = require('../backend/src/services/projectDatabase');
+const {
+  PROJECT_DATABASE_MIGRATION_29_DOWN_SQL,
+} = require('../backend/src/services/projectDatabaseMigration29');
+const {
+  PROJECT_DATABASE_MIGRATION_30_DOWN_SQL,
+} = require('../backend/src/services/projectDatabaseMigration30');
+const {
+  PROJECT_DATABASE_MIGRATION_31,
+} = require('../backend/src/services/projectDatabaseMigration31');
+const {
+  PROJECT_DATABASE_MIGRATION_31_DURABLE_LEDGER_OWNED_OBJECTS,
+} = require('../backend/src/services/projectDatabaseMigration31DurableLedgers');
+const {
+  PROJECT_DATABASE_MIGRATION_31_LEGACY_GAPS_DOWN_SQL,
+} = require('../backend/src/services/projectDatabaseMigration31LegacyGaps');
 const { CollaborationGateway } = require('../backend/src/collaboration/gateway');
 const { HostExecutionPolicy } = require('../backend/src/collaboration/executionPolicy');
 const {
   deriveRunIntentAuthority,
   summarizeRunIntentAuthority,
 } = require('../backend/src/collaboration/runIntentAuthority');
+const {
+  stripSchema32ForSyntheticSchema31,
+} = require('./helpers/projectDatabaseVersion.cjs');
+const MANAGEMENT_AUTHORITY_HEADER = 'x-t8-collaboration-management-token';
+const TEST_MANAGEMENT_AUTHORITY = Object.freeze({
+  token: 'test-collaboration-management-authority-token-run-intent-01',
+  actorId: 'test-run-intent-host-owner',
+  sessionId: 'test-run-intent-host-backend-session',
+});
 
 function installModuleMock(modulePath, exportsValue) {
   const resolved = require.resolve(modulePath);
@@ -86,6 +110,31 @@ async function closeServer(server) {
   await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 }
 
+function stripSchema31ForHistoricalFixture(database) {
+  stripSchema32ForSyntheticSchema31(database);
+  database.exec(PROJECT_DATABASE_MIGRATION_31_LEGACY_GAPS_DOWN_SQL);
+  const drop = (type, name) => database.exec(`DROP ${type} IF EXISTS "${name}"`);
+  PROJECT_DATABASE_MIGRATION_31_DURABLE_LEDGER_OWNED_OBJECTS.triggers
+    .forEach((name) => drop('TRIGGER', name));
+  PROJECT_DATABASE_MIGRATION_31_DURABLE_LEDGER_OWNED_OBJECTS.views
+    .forEach((name) => drop('VIEW', name));
+  PROJECT_DATABASE_MIGRATION_31_DURABLE_LEDGER_OWNED_OBJECTS.indexes
+    .forEach((name) => drop('INDEX', name));
+  [...PROJECT_DATABASE_MIGRATION_31_DURABLE_LEDGER_OWNED_OBJECTS.tables]
+    .reverse()
+    .forEach((name) => drop('TABLE', name));
+  database.prepare('DELETE FROM schema_migration_receipts WHERE version = ?')
+    .run(PROJECT_DATABASE_MIGRATION_31.version);
+  database.prepare('DELETE FROM schema_migrations WHERE version = ?')
+    .run(PROJECT_DATABASE_MIGRATION_31.version);
+}
+
+function managementFetch(url, init = {}) {
+  const headers = new Headers(init.headers || {});
+  headers.set(MANAGEMENT_AUTHORITY_HEADER, TEST_MANAGEMENT_AUTHORITY.token);
+  return fetch(url, { ...init, headers });
+}
+
 async function createRunServer(database, gateway) {
   const restores = [
     installModuleMock('../backend/src/services/projectDatabase', { getProjectDatabase: () => database }),
@@ -120,7 +169,10 @@ async function createCollaborationManagementServer(gateway) {
   const routePath = require.resolve('../backend/src/routes/collaboration');
   const previousRoute = require.cache[routePath];
   delete require.cache[routePath];
-  const router = require(routePath);
+  const routeModule = require(routePath);
+  const router = routeModule.createCollaborationRouter(gateway, {
+    managementAuthority: TEST_MANAGEMENT_AUTHORITY,
+  });
   restore();
   if (previousRoute) require.cache[routePath] = previousRoute;
   else delete require.cache[routePath];
@@ -145,7 +197,51 @@ function gatewayBroadcastStub(database) {
   };
 }
 
+async function acceptAndLeaseIntent(url, intent, workerId = 'authority-test-worker') {
+  let current = intent;
+  if (current.status === 'pending') {
+    const acceptResponse = await managementFetch(`${url}/run-intents/${encodeURIComponent(current.id)}/accept`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        projectId: current.projectId,
+        canvasId: current.canvasId,
+        expectedQueueRevision: current.queueRevision,
+      }),
+    });
+    const accepted = await acceptResponse.json();
+    assert.equal(acceptResponse.status, 200, JSON.stringify(accepted));
+    assert.equal(accepted.data.status, 'accepted');
+    current = accepted.data;
+  }
+
+  const leaseResponse = await managementFetch(`${url}/run-intents/lease`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      projectId: current.projectId,
+      canvasId: current.canvasId,
+      workerId,
+      expectedIntentId: current.id,
+    }),
+  });
+  const leased = await leaseResponse.json();
+  assert.equal(leaseResponse.status, 200, JSON.stringify(leased));
+  assert.ok(leased.data, 'expected the exact FIFO intent to receive a dispatch lease');
+  assert.equal(leased.data.intent.id, current.id);
+  assert.equal(leased.data.intent.status, 'dispatching');
+  assert.equal(leased.data.lease.owner, workerId);
+  assert.ok(leased.data.lease.token);
+  return leased.data;
+}
+
 async function postIntentRun(url, intentId, options = {}) {
+  const runIntentClaim = options.claim ? {
+    intentId,
+    expectedQueueRevision: options.claim.intent.queueRevision,
+    leaseToken: options.claim.lease.token,
+    leaseOwner: options.claim.lease.owner,
+  } : null;
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -156,8 +252,8 @@ async function postIntentRun(url, intentId, options = {}) {
       initiatorId: 'forged-initiator',
       summary: {
         runIntentId: intentId,
-        ...(options.legacyAcceptedRecovery ? { runIntentRecovery: 'legacy-accepted' } : {}),
       },
+      ...(runIntentClaim ? { runIntentClaim } : {}),
     }),
   });
   return { response, payload: await response.json() };
@@ -172,14 +268,14 @@ function configureImagePolicy(database, allowedModels = ['zhenzhen:gpt-image-2-a
   });
 }
 
-function createGatewayFixture(canvasData) {
+function createGatewayFixture(canvasData, canvasOptions = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-run-intent-authority-'));
   const input = path.join(directory, 'input');
   const output = path.join(directory, 'output');
   fs.mkdirSync(input, { recursive: true });
   fs.mkdirSync(output, { recursive: true });
   const database = new ProjectDatabase(':memory:');
-  imageCanvas(database, { data: canvasData });
+  imageCanvas(database, { data: canvasData, ...canvasOptions });
   const gateway = new CollaborationGateway({
     COLLAB_HOST: '127.0.0.1',
     COLLAB_PORT: 0,
@@ -207,8 +303,8 @@ async function redeemEditor(baseUrl, gateway, canvasId = 'canvas-a') {
   return response.headers.get('set-cookie').split(';')[0];
 }
 
-async function withRemoteGateway(canvasData, run) {
-  const fixture = createGatewayFixture(canvasData);
+async function withRemoteGateway(canvasData, run, canvasOptions = {}) {
+  const fixture = createGatewayFixture(canvasData, canvasOptions);
   try {
     const status = await fixture.gateway.start({ host: '127.0.0.1', port: 0 });
     const baseUrl = `http://127.0.0.1:${status.port}`;
@@ -221,11 +317,11 @@ async function withRemoteGateway(canvasData, run) {
   }
 }
 
-test('management API cannot pre-accept a pending intent and still lists legacy accepted intents as actionable', async (t) => {
+test('management API requires the explicit accept endpoint and lists actionable intents without insertion-order assumptions', async (t) => {
   const database = new ProjectDatabase(':memory:');
   t.after(() => database.close());
-  insertMember(database);
   imageCanvas(database);
+  insertMember(database);
   configureImagePolicy(database);
   const pending = authoritativeIntent(database, 'management-pending');
   const legacyAccepted = authoritativeIntent(database, 'management-accepted', { accepted: true });
@@ -233,25 +329,44 @@ test('management API cannot pre-accept a pending intent and still lists legacy a
   const { server, url } = await createCollaborationManagementServer(gateway);
   t.after(() => closeServer(server));
 
-  const actionableResponse = await fetch(
+  const actionableResponse = await managementFetch(
     `${url}/run-intents?projectId=project-local&canvasId=canvas-a&status=actionable`,
   );
   const actionable = await actionableResponse.json();
   assert.equal(actionableResponse.status, 200);
-  assert.deepEqual(
-    actionable.data.map((intent) => [intent.id, intent.status]),
-    [[pending.id, 'pending'], [legacyAccepted.id, 'accepted']],
-  );
+  assert.equal(actionable.data.length, 2);
+  const actionableStatuses = new Map(actionable.data.map((intent) => [intent.id, intent.status]));
+  assert.equal(actionableStatuses.get(pending.id), 'pending');
+  assert.equal(actionableStatuses.get(legacyAccepted.id), 'accepted');
 
-  const response = await fetch(`${url}/run-intents/${pending.id}`, {
+  const response = await managementFetch(`${url}/run-intents/${pending.id}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ projectId: 'project-local', canvasId: 'canvas-a', status: 'accepted' }),
+    body: JSON.stringify({
+      projectId: 'project-local',
+      canvasId: 'canvas-a',
+      expectedQueueRevision: pending.queueRevision,
+      status: 'accepted',
+    }),
   });
   const payload = await response.json();
-  assert.equal(response.status, 409);
-  assert.match(payload.error, /不能从 pending 变为 accepted/);
+  assert.equal(response.status, 400);
+  assert.equal(payload.code, 'run_intent_queue_transition_invalid');
   assert.equal(database.getRunIntent(pending.id).status, 'pending');
+
+  const acceptResponse = await managementFetch(`${url}/run-intents/${pending.id}/accept`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      projectId: 'project-local',
+      canvasId: 'canvas-a',
+      expectedQueueRevision: pending.queueRevision,
+    }),
+  });
+  const accepted = await acceptResponse.json();
+  assert.equal(acceptResponse.status, 200, JSON.stringify(accepted));
+  assert.equal(accepted.data.status, 'accepted');
+  assert.equal(accepted.data.queueRevision, pending.queueRevision + 1);
 });
 
 test('schema 22 recovers authoritative legacy accepted reservations to pending and stales unverifiable ones with audit', () => {
@@ -261,32 +376,48 @@ test('schema 22 recovers authoritative legacy accepted reservations to pending a
   try {
     database = new ProjectDatabase(filename, { autoBackup: false });
     imageCanvas(database);
+    insertMember(database);
     const recovered = authoritativeIntent(database, 'schema22-recovered', { accepted: true });
     const unverifiable = authoritativeIntent(database, 'schema22-stale', { accepted: true });
     database.close();
     database = null;
 
     const raw = new BetterSqlite3(filename);
-    raw.prepare('DELETE FROM schema_migrations WHERE version = 22').run();
-    raw.prepare(`
-      UPDATE run_intents
-      SET execution_authority_json = '{}',
-          estimated_cost_known = 0,
-          provider = 'forged-provider',
-          model = 'forged-model'
-      WHERE id IN (?, ?)
-    `).run(recovered.id, unverifiable.id);
-    raw.prepare('UPDATE run_intents SET canvas_revision = 999 WHERE id = ?').run(unverifiable.id);
-    raw.close();
+    try {
+      stripSchema31ForHistoricalFixture(raw);
+      raw.prepare('DELETE FROM schema_migration_receipts WHERE version = 30').run();
+      raw.prepare('DELETE FROM schema_migrations WHERE version = 30').run();
+      raw.exec(PROJECT_DATABASE_MIGRATION_30_DOWN_SQL);
+      raw.exec(PROJECT_DATABASE_MIGRATION_29_DOWN_SQL);
+      raw.prepare('DELETE FROM schema_migrations WHERE version >= 22').run();
+      raw.prepare(`
+        UPDATE run_intents
+        SET execution_authority_json = '{}',
+            estimated_cost_known = 0,
+            provider = 'forged-provider',
+            model = 'forged-model'
+        WHERE id IN (?, ?)
+      `).run(recovered.id, unverifiable.id);
+      raw.prepare('UPDATE run_intents SET canvas_revision = 999 WHERE id = ?').run(unverifiable.id);
+    } finally {
+      raw.close();
+    }
 
-    database = new ProjectDatabase(filename, { autoBackup: false });
+    database = new ProjectDatabase(filename, {
+      autoBackup: false,
+      preMigration23BackupFilename: path.join(directory, 'schema22-reopen.pre-migration23.sqlite'),
+      preMigrationBackupFilename: path.join(directory, 'schema22-reopen.pre-migration29.sqlite'),
+      preMigration30BackupFilename: path.join(directory, 'schema22-reopen.pre-migration30.sqlite'),
+      preMigration31BackupFilename: path.join(directory, 'schema22-reopen.pre-migration31.sqlite'),
+    });
     const recoveredAfter = database.getRunIntent(recovered.id);
-    assert.equal(recoveredAfter.status, 'pending');
+    assert.equal(recoveredAfter.status, 'accepted');
     assert.equal(recoveredAfter.provider, 'zhenzhen');
     assert.equal(recoveredAfter.model, 'gpt-image-2-all');
     assert.equal(recoveredAfter.executionAuthority.schema, 't8-run-intent-authority-v1');
     assert.equal(recoveredAfter.estimatedCost, null);
     assert.equal(recoveredAfter.estimatedCostKnown, false);
+    assert.equal(recoveredAfter.confirmationRequired, false);
     assert.equal(database.getRunIntent(unverifiable.id).status, 'stale');
 
     const auditRows = database.db.prepare(`
@@ -315,60 +446,73 @@ test('schema 22 recovers authoritative legacy accepted reservations to pending a
   }
 });
 
-test('atomic pending-intent Run claim revalidates the current requester role before inserting a Run', async (t) => {
+test('leased Run claim revalidates the current requester role before inserting a Run', async (t) => {
   const database = new ProjectDatabase(':memory:');
   t.after(() => database.close());
-  insertMember(database);
   imageCanvas(database);
+  insertMember(database);
   configureImagePolicy(database);
   const intent = authoritativeIntent(database, 'member-revoked');
+  const gateway = gatewayBroadcastStub(database);
+  const management = await createCollaborationManagementServer(gateway);
+  t.after(() => closeServer(management.server));
+  const claim = await acceptAndLeaseIntent(management.url, intent);
   database.updateMember('remote-editor', { role: 'reviewer', capabilities: [] });
-  const { server, url } = await createRunServer(database, gatewayBroadcastStub(database));
+  const { server, url } = await createRunServer(database, gateway);
   t.after(() => closeServer(server));
 
-  const result = await postIntentRun(url, intent.id);
+  const result = await postIntentRun(url, intent.id, { claim });
   assert.equal(result.response.status, 403);
   assert.equal(result.payload.code, 'intent_requester_not_authorized');
   assert.equal(database.listRuns({ projectId: 'project-local' }).length, 0);
-  assert.equal(database.getRunIntent(intent.id).status, 'pending');
+  assert.equal(database.getRunIntent(intent.id).status, 'dispatching');
   assert.equal(database.getRunIntent(intent.id).runId, null);
 });
 
-test('atomic pending-intent Run claim revalidates persisted authority and rolls back when host policy tightened', async (t) => {
+test('leased Run claim revalidates persisted authority and rolls back when host policy tightened', async (t) => {
   const database = new ProjectDatabase(':memory:');
   t.after(() => database.close());
-  insertMember(database);
   imageCanvas(database);
+  insertMember(database);
   configureImagePolicy(database);
   const intent = authoritativeIntent(database, 'policy-tightened');
+  const gateway = gatewayBroadcastStub(database);
+  const management = await createCollaborationManagementServer(gateway);
+  t.after(() => closeServer(management.server));
+  const claim = await acceptAndLeaseIntent(management.url, intent);
   configureImagePolicy(database, ['zhenzhen:nano-banana-pro']);
-  const { server, url } = await createRunServer(database, gatewayBroadcastStub(database));
+  const { server, url } = await createRunServer(database, gateway);
   t.after(() => closeServer(server));
 
-  const result = await postIntentRun(url, intent.id);
+  const result = await postIntentRun(url, intent.id, { claim });
   assert.equal(result.response.status, 429);
   assert.equal(result.payload.code, 'model_not_allowed');
   assert.equal(database.listRuns({ projectId: 'project-local' }).length, 0);
-  assert.equal(database.getRunIntent(intent.id).status, 'pending');
+  assert.equal(database.getRunIntent(intent.id).status, 'dispatching');
   assert.equal(database.getRunIntent(intent.id).runId, null);
 });
 
-test('Run creation, pending intent claim, and queued event commit in one immediate transaction with canonical scope', async (t) => {
+test('accept, lease, Run claim, and queued event use the strict top-level claim with canonical scope', async (t) => {
   const database = new ProjectDatabase(':memory:');
   t.after(() => database.close());
-  insertMember(database);
   const canvas = imageCanvas(database);
+  insertMember(database);
   configureImagePolicy(database);
   const intent = authoritativeIntent(database, 'atomic-success');
-  const { server, url } = await createRunServer(database, gatewayBroadcastStub(database));
+  const gateway = gatewayBroadcastStub(database);
+  const management = await createCollaborationManagementServer(gateway);
+  t.after(() => closeServer(management.server));
+  const claim = await acceptAndLeaseIntent(management.url, intent);
+  const { server, url } = await createRunServer(database, gateway);
   t.after(() => closeServer(server));
 
-  const result = await postIntentRun(url, intent.id);
+  const result = await postIntentRun(url, intent.id, { claim });
   assert.equal(result.response.status, 201, JSON.stringify(result.payload));
   assert.equal(result.payload.data.projectId, 'project-local');
   assert.equal(result.payload.data.canvasId, canvas.canvasId);
   assert.equal(result.payload.data.canvasRevision, canvas.revision);
   assert.equal(result.payload.data.initiatorId, 'remote-editor');
+  assert.deepEqual(result.payload.data.summary, { runIntentId: intent.id });
   const claimed = database.getRunIntent(intent.id);
   assert.equal(claimed.status, 'running');
   assert.equal(claimed.runId, result.payload.data.id);
@@ -378,11 +522,149 @@ test('Run creation, pending intent claim, and queued event commit in one immedia
   );
 });
 
-test('legacy accepted but unclaimed intent remains recoverable through the same atomic Run endpoint', async (t) => {
+test('confirmed rN intent reads its host-only pinned snapshot and still claims and executes after rN+1 is persisted', async (t) => {
   const database = new ProjectDatabase(':memory:');
   t.after(() => database.close());
+  const revisionN = imageCanvas(database, {
+    data: {
+      model: 'gpt-image-2',
+      apiModel: 'gpt-image-2-all',
+      prompt: 'provider-input-from-rN',
+    },
+  });
   insertMember(database);
+  configureImagePolicy(database);
+  const intent = authoritativeIntent(database, 'pinned-rn-execution', { canvas: revisionN });
+
+  const gateway = gatewayBroadcastStub(database);
+  const management = await createCollaborationManagementServer(gateway);
+  t.after(() => closeServer(management.server));
+  const acceptResponse = await managementFetch(
+    `${management.url}/run-intents/${encodeURIComponent(intent.id)}/accept`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        projectId: intent.projectId,
+        canvasId: intent.canvasId,
+        expectedQueueRevision: intent.queueRevision,
+      }),
+    },
+  );
+  const accepted = await acceptResponse.json();
+  assert.equal(acceptResponse.status, 200, JSON.stringify(accepted));
+
+  const revisionN1 = database.saveCanvasSnapshot(revisionN.canvasId, {
+    ...revisionN,
+    nodes: revisionN.nodes.map((entry) => entry.id === 'image-node'
+      ? { ...entry, data: { ...entry.data, prompt: 'visible-input-from-rN+1' } }
+      : entry),
+  }, {
+    expectedRevision: revisionN.revision,
+    projectId: revisionN.projectId,
+  });
+  assert.equal(revisionN1.revision, revisionN.revision + 1);
+
+  const snapshotQuery = new URLSearchParams({
+    projectId: intent.projectId,
+    canvasId: intent.canvasId,
+    canvasRevision: String(intent.canvasRevision),
+  });
+  const snapshotUrl = `${management.url}/run-intents/${encodeURIComponent(intent.id)}/snapshot?${snapshotQuery}`;
+  const unauthorized = await fetch(snapshotUrl);
+  assert.equal(unauthorized.status, 401, 'historical execution input must remain host-only');
+  assert.equal(unauthorized.headers.get('cache-control'), 'no-store');
+  const snapshotResponse = await managementFetch(snapshotUrl);
+  const snapshotPayload = await snapshotResponse.json();
+  assert.equal(snapshotResponse.status, 200, JSON.stringify(snapshotPayload));
+  assert.equal(snapshotResponse.headers.get('cache-control'), 'no-store');
+  assert.equal(snapshotPayload.data.revision, revisionN.revision);
+  assert.equal(snapshotPayload.data.nodes[0].data.prompt, 'provider-input-from-rN');
+  assert.equal(database.getCanvas(intent.canvasId).nodes[0].data.prompt, 'visible-input-from-rN+1');
+
+  const claim = await acceptAndLeaseIntent(management.url, accepted.data, 'pinned-rn-worker');
+  const runServer = await createRunServer(database, gateway);
+  t.after(() => closeServer(runServer.server));
+  const claimed = await postIntentRun(runServer.url, intent.id, { claim });
+  assert.equal(claimed.response.status, 201, JSON.stringify(claimed.payload));
+  assert.equal(claimed.payload.data.canvasRevision, revisionN.revision);
+
+  // This is the exact post-claim value the Canvas worker feeds into its frozen
+  // runtime before issuing a Provider token; the current rN+1 value is never
+  // consulted or substituted.
+  const providerFacingInput = snapshotPayload.data.nodes
+    .find((entry) => entry.id === 'image-node')?.data?.prompt;
+  assert.equal(providerFacingInput, 'provider-input-from-rN');
+});
+
+test('host snapshot read fails closed without fallback for missing rows and safely retries transient read errors', async (t) => {
+  const database = new ProjectDatabase(':memory:');
+  t.after(() => database.close());
+  const canvas = imageCanvas(database);
+  insertMember(database);
+  configureImagePolicy(database);
+  const intent = authoritativeIntent(database, 'missing-pinned-snapshot', { canvas });
+  const gateway = gatewayBroadcastStub(database);
+  const management = await createCollaborationManagementServer(gateway);
+  t.after(() => closeServer(management.server));
+
+  const originalSnapshotReader = database.getCanvasSnapshotDocument.bind(database);
+  database.getCanvasSnapshotDocument = (canvasId, revision) => (
+    String(canvasId) === intent.canvasId && Number(revision) === intent.canvasRevision
+      ? null
+      : originalSnapshotReader(canvasId, revision)
+  );
+  const snapshotQuery = new URLSearchParams({
+    projectId: intent.projectId,
+    canvasId: intent.canvasId,
+    canvasRevision: String(intent.canvasRevision),
+  });
+  const response = await managementFetch(
+    `${management.url}/run-intents/${encodeURIComponent(intent.id)}/snapshot?${snapshotQuery}`,
+  );
+  const payload = await response.json();
+  assert.equal(response.status, 409, JSON.stringify(payload));
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.equal(payload.code, 'intent_canvas_snapshot_unavailable');
+  assert.throws(
+    () => gateway.executionPolicy.authorizeRunIntent(intent.id, {
+      allowedStatuses: ['pending'],
+      reservationAlreadyCounted: true,
+    }),
+    (error) => error.code === 'intent_canvas_snapshot_unavailable',
+  );
+
+  database.getCanvasSnapshotDocument = () => {
+    const error = new Error('sensitive sqlite read detail');
+    error.code = 'SQLITE_BUSY';
+    throw error;
+  };
+  const transientResponse = await managementFetch(
+    `${management.url}/run-intents/${encodeURIComponent(intent.id)}/snapshot?${snapshotQuery}`,
+  );
+  const transientPayload = await transientResponse.json();
+  assert.equal(transientResponse.status, 503, JSON.stringify(transientPayload));
+  assert.equal(transientResponse.headers.get('cache-control'), 'no-store');
+  assert.equal(transientPayload.code, 'intent_canvas_snapshot_read_unavailable');
+  assert.doesNotMatch(transientPayload.error, /sensitive|sqlite/i);
+  assert.throws(
+    () => gateway.executionPolicy.authorizeRunIntent(intent.id, {
+      allowedStatuses: ['pending'],
+      reservationAlreadyCounted: true,
+    }),
+    (error) => error.code === 'intent_canvas_snapshot_read_unavailable'
+      && error.httpStatus === 503
+      && !/sensitive|sqlite/i.test(error.message),
+  );
+  assert.equal(database.getRunIntent(intent.id).status, 'pending');
+  database.getCanvasSnapshotDocument = originalSnapshotReader;
+});
+
+test('legacy accepted intent without a dispatch lease is rejected by the atomic Run endpoint', async (t) => {
+  const database = new ProjectDatabase(':memory:');
+  t.after(() => database.close());
   imageCanvas(database);
+  insertMember(database);
   configureImagePolicy(database);
   const intent = authoritativeIntent(database, 'legacy-recovery', { accepted: true });
   const { server, url } = await createRunServer(database, gatewayBroadcastStub(database));
@@ -390,37 +672,36 @@ test('legacy accepted but unclaimed intent remains recoverable through the same 
 
   const unmarked = await postIntentRun(url, intent.id);
   assert.equal(unmarked.response.status, 409);
-  assert.equal(unmarked.payload.code, 'intent_state_invalid');
+  assert.equal(unmarked.payload.code, 'run_intent_lease_required');
   assert.equal(database.getRunIntent(intent.id).status, 'accepted');
   assert.equal(database.listRuns({ projectId: 'project-local' }).length, 0);
-
-  const result = await postIntentRun(url, intent.id, { legacyAcceptedRecovery: true });
-  assert.equal(result.response.status, 201, JSON.stringify(result.payload));
-  assert.equal(database.getRunIntent(intent.id).status, 'running');
-  assert.equal(database.getRunIntent(intent.id).runId, result.payload.data.id);
 });
 
-test('forced claim or queued-event failure rolls back the new Run and leaves the intent pending', async (t) => {
+test('forced claim or queued-event failure rolls back the new Run while preserving the valid dispatch lease', async (t) => {
   for (const failure of ['claim', 'event']) {
     const database = new ProjectDatabase(':memory:');
     t.after(() => database.close());
-    insertMember(database);
     imageCanvas(database);
+    insertMember(database);
     configureImagePolicy(database);
     const intent = authoritativeIntent(database, `rollback-${failure}`);
+    const gateway = gatewayBroadcastStub(database);
+    const management = await createCollaborationManagementServer(gateway);
+    t.after(() => closeServer(management.server));
+    const claim = await acceptAndLeaseIntent(management.url, intent, `rollback-${failure}-worker`);
     if (failure === 'claim') {
       database.claimRunIntent = () => { throw new Error('forced claim failure'); };
     } else {
       database.appendRunEvent = () => { throw new Error('forced queued event failure'); };
     }
-    const { server, url } = await createRunServer(database, gatewayBroadcastStub(database));
+    const { server, url } = await createRunServer(database, gateway);
     t.after(() => closeServer(server));
 
-    const result = await postIntentRun(url, intent.id);
+    const result = await postIntentRun(url, intent.id, { claim });
     assert.equal(result.response.status, 400);
     assert.match(result.payload.error, new RegExp(`forced ${failure === 'claim' ? 'claim' : 'queued event'} failure`));
     assert.equal(database.listRuns({ projectId: 'project-local' }).length, 0);
-    assert.equal(database.getRunIntent(intent.id).status, 'pending');
+    assert.equal(database.getRunIntent(intent.id).status, 'dispatching');
     assert.equal(database.getRunIntent(intent.id).runId, null);
   }
 });
@@ -617,6 +898,57 @@ test('runtime authority normalizes stale raw model fields instead of trusting ap
   ]);
 });
 
+test('remote RunIntent rejects host-only media tools before local paths, private URLs, or executable paths persist', async () => {
+  const hostileNodes = [
+    node('watermark-file-url', 'remove-ai-watermark', {
+      items: [{ url: 'file:///C:/Users/host/private/source.png' }],
+    }),
+    node('watermark-absolute-path', 'remove-ai-watermark', {
+      items: [{ url: 'C:\\Users\\host\\private\\source.png' }],
+    }),
+    node('watermark-private-url', 'remove-ai-watermark', {
+      items: [{ url: 'http://127.0.0.1:18765/api/settings' }],
+    }),
+    node('topaz-image-host-path', 'topaz-image-upscale', {
+      imageUrl: 'http://169.254.169.254/latest/meta-data',
+      executablePath: 'C:\\Windows\\System32\\cmd.exe',
+      topazGigapixelPath: 'C:\\Windows\\System32\\cmd.exe',
+    }),
+    node('topaz-video-host-path', 'topaz-video-upscale', {
+      videoUrl: 'http://10.0.0.1/private/video.mp4',
+      executablePath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+      topazVideoPath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+    }),
+  ];
+
+  await withRemoteGateway(
+    {},
+    async ({ baseUrl, cookie, database }) => {
+      const canvas = database.getCanvas('canvas-a');
+      for (const hostileNode of hostileNodes) {
+        const response = await fetch(`${baseUrl}/api/collab/run-intents`, {
+          method: 'POST',
+          headers: { cookie, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            canvasId: canvas.canvasId,
+            canvasRevision: canvas.revision,
+            nodeIds: [hostileNode.id],
+            idempotencyKey: `host-only-${hostileNode.id}`,
+          }),
+        });
+        const payload = await response.json();
+        assert.equal(response.status, 403, JSON.stringify(payload));
+        assert.equal(payload.code, 'intent_host_only_remote_unsupported');
+        assert.match(payload.error, /host-only/i);
+        assert.match(payload.error, /remote unsupported/i);
+        assert.deepEqual(payload.data.nodeIds, [hostileNode.id]);
+      }
+      assert.equal(database.listRunIntents({ projectId: 'project-local' }).length, 0);
+    },
+    { nodes: hostileNodes },
+  );
+});
+
 test('authority provider names and specialized model fields match runtime tracing exactly', () => {
   const authority = deriveRunIntentAuthority({
     nodes: [
@@ -743,14 +1075,14 @@ test('scheduler scope expands every downstream executable branch while subflows 
 test('execution-usage API excludes one validated active same-project reservation and rejects invalid exclusions', async (t) => {
   const database = new ProjectDatabase(':memory:');
   t.after(() => database.close());
-  insertMember(database);
   imageCanvas(database);
+  insertMember(database);
   const intent = authoritativeIntent(database, 'usage-exclusion');
   const gateway = gatewayBroadcastStub(database);
   const { server, url } = await createCollaborationManagementServer(gateway);
   t.after(() => closeServer(server));
 
-  const validResponse = await fetch(
+  const validResponse = await managementFetch(
     `${url}/execution-policy?projectId=project-local&excludeIntentId=${encodeURIComponent(intent.id)}`,
   );
   const valid = await validResponse.json();
@@ -759,17 +1091,21 @@ test('execution-usage API excludes one validated active same-project reservation
   assert.equal(valid.data.usage.dailyCost, 0);
   assert.equal(valid.data.usage.unknownCostCount, 0);
 
+  const otherCanvas = imageCanvas(database, {
+    projectId: 'project-other',
+    canvasId: 'canvas-other',
+  });
   const otherProject = database.createRunIntent({
     projectId: 'project-other',
     canvasId: 'canvas-other',
-    canvasRevision: 1,
+    canvasRevision: otherCanvas.revision,
     idempotencyKey: 'other-project-reservation',
     requestedBy: 'other-member',
     provider: 'image',
     model: 'gpt-image-2-all',
     estimatedCost: 1,
   });
-  const crossResponse = await fetch(
+  const crossResponse = await managementFetch(
     `${url}/execution-policy?projectId=project-local&excludeIntentId=${encodeURIComponent(otherProject.id)}`,
   );
   const cross = await crossResponse.json();
@@ -777,7 +1113,7 @@ test('execution-usage API excludes one validated active same-project reservation
   assert.equal(cross.code, 'intent_reservation_invalid');
 
   database.updateRunIntent(intent.id, { status: 'completed' });
-  const inactiveResponse = await fetch(
+  const inactiveResponse = await managementFetch(
     `${url}/execution-policy?projectId=project-local&excludeIntentId=${encodeURIComponent(intent.id)}`,
   );
   const inactive = await inactiveResponse.json();

@@ -39,7 +39,7 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
-import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
+import { createCanvasNodeRunRequestId, requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { uploadDataUrl, uploadFileBlob } from '../../services/imageOps';
 import { generateLlm, queryImageStatus, submitImageAsync } from '../../services/generation';
 import type { RunNodeLifecycleReporter } from '../../types/project';
@@ -162,6 +162,7 @@ import SmartImage from '../SmartImage';
 import PromptTextarea from '../PromptTextarea';
 
 const COLOR = '#38bdf8';
+type PanoramaNodeRunMode = 'generate' | 'frame' | 'scene-snapshot' | 'control-snapshot';
 const STORYBOARD_PREVIEW_READABLE_TEXT_SHADOW =
   '0 0 0 #ffffff, 0 1px 0 #000000, 1px 0 0 #000000, -1px 0 0 #000000, 0 -1px 0 #000000, 0 0 4px rgba(0,0,0,.98)';
 const STORYBOARD_PREVIEW_LOCKED_WHITE_TEXT_STYLE: CSSProperties = {
@@ -1097,6 +1098,21 @@ const Panorama3DNode = (p: NodeProps) => {
   const viewRef = useRef({ yaw: 0, pitch: 0, fov: 75 });
   const avatarsRef = useRef<PanoramaAvatar[]>([]);
   const d = (p.data as any) || {};
+  const requestPanoramaRun = useCallback((mode: PanoramaNodeRunMode) => {
+    const requestId = createCanvasNodeRunRequestId(p.id, `panorama-${mode}`);
+    update({ panoramaRunMode: mode, panoramaRunRequestId: requestId });
+    window.requestAnimationFrame(() => {
+      if (requestCanvasNodeRun(p.id, { requestId })) return;
+      const liveData = rf.getNode(p.id)?.data as Record<string, unknown> | undefined;
+      if (liveData?.panoramaRunRequestId !== requestId) return;
+      update({
+        panoramaRunMode: 'generate',
+        panoramaRunRequestId: '',
+        status: 'error',
+        panoramaError: '无法提交画布运行请求，请重试。',
+      });
+    });
+  }, [p.id, rf, update]);
   const lockPanoramaStoryboardPreviewTextElement = useCallback((element: HTMLElement | null) => {
     if (!element) return;
     const style = element.style;
@@ -3157,8 +3173,9 @@ const Panorama3DNode = (p: NodeProps) => {
 
   const exportFrame = useCallback(async () => {
     if (textureStatus !== 'ready' || !canvasRef.current) {
-      update({ panoramaError: '请先连接并加载全景图' });
-      return;
+      const message = '请先连接并加载全景图';
+      update({ status: 'error', panoramaError: message });
+      throw new Error(message);
     }
     update({ status: 'generating', progress: '导出中', panoramaError: '' });
     try {
@@ -3195,6 +3212,7 @@ const Panorama3DNode = (p: NodeProps) => {
       const msg = e?.message || '导出全景画面失败';
       update({ status: 'error', panoramaError: msg });
       setError(msg);
+      throw e;
     }
   }, [activeCameraViewId, cameraViews.length, composeStoryboardSnapshotDataUrl, customH, customW, drawFrame, hotspots.length, ratioId, sourceUrl, textureStatus, update]);
 
@@ -3305,8 +3323,9 @@ const Panorama3DNode = (p: NodeProps) => {
 
   const exportSceneSnapshot = useCallback(async () => {
     if (textureStatus !== 'ready' || !canvasRef.current) {
-      update({ panoramaError: '请先连接并加载全景图' });
-      return;
+      const message = '请先连接并加载全景图';
+      update({ status: 'error', panoramaError: message });
+      throw new Error(message);
     }
     update({ status: 'generating', progress: '场景快照导出中', panoramaError: '' });
     try {
@@ -3353,13 +3372,15 @@ const Panorama3DNode = (p: NodeProps) => {
       const msg = e?.message || '导出场景快照失败';
       update({ status: 'error', panoramaError: msg });
       setError(msg);
+      throw e;
     }
   }, [avatarKeyframes, avatars, composeStoryboardSnapshotDataUrl, compositionGuide, d.panoramaControlSnapshotUrl, drawFrame, effectiveShotCamera, keyframeSequenceCount, occlusionMaskVisible, occlusionMasks, p.id, promptFinal, ratioId, renderSceneSequenceSnapshots, sceneLegendVisible, shotTarget, sourceUrl, syncSequenceMaterialSet, textureStatus, update]);
 
   const exportControlSnapshot = useCallback(async () => {
     if (textureStatus !== 'ready' || !canvasRef.current) {
-      update({ panoramaError: '请先连接并加载全景图' });
-      return;
+      const message = '请先连接并加载全景图';
+      update({ status: 'error', panoramaError: message });
+      throw new Error(message);
     }
     update({ status: 'generating', progress: '控制快照导出中', panoramaError: '' });
     try {
@@ -3403,6 +3424,7 @@ const Panorama3DNode = (p: NodeProps) => {
       const msg = e?.message || '导出控制快照失败';
       update({ status: 'error', panoramaError: msg });
       setError(msg);
+      throw e;
     }
   }, [avatarKeyframes, avatars, composeStoryboardSnapshotDataUrl, compositionGuide, d.panoramaSceneSnapshot?.snapshotUrl, effectiveShotCamera, keyframeSequenceCount, occlusionMasks, p.id, promptFinal, ratioId, renderControlSnapshotDataUrl, sourceUrl, textureStatus, update]);
 
@@ -3531,7 +3553,7 @@ const Panorama3DNode = (p: NodeProps) => {
         void copyScenePrompt();
         handled = true;
       } else if (key === 'e') {
-        void exportSceneSnapshot();
+        requestPanoramaRun('scene-snapshot');
         handled = true;
       } else if (event.key === '?' || (event.shiftKey && event.key === '/')) {
         setShortcutHelpOpen(true);
@@ -3570,12 +3592,12 @@ const Panorama3DNode = (p: NodeProps) => {
     cycleActivePose,
     cycleAvatar,
     directorFullscreenOpen,
-    exportSceneSnapshot,
     hotspotPickMode,
     occlusionMasks,
     p.selected,
     removeAvatar,
     removeOcclusionMask,
+    requestPanoramaRun,
     resetActivePoseParams,
     selectAvatarAtIndex,
     shortcutHelpOpen,
@@ -3635,7 +3657,7 @@ const Panorama3DNode = (p: NodeProps) => {
         panoramaPromptFinal: buildPromptFinalFor(prompt),
       });
       setError(validation.error);
-      return;
+      throw new Error(validation.error);
     }
     const request = buildPanoramaImageRequest({
       mode,
@@ -3703,6 +3725,7 @@ const Panorama3DNode = (p: NodeProps) => {
       });
       setError(msg);
       logBus.error(msg, `panorama:${p.id.slice(0, 6)}`);
+      throw e;
     }
   }, [applyGeneratedPanorama, buildPromptFinalFor, imageReferenceUrl, p.id, panelMode, sizeLevel, update, userPrompt, viewCenter, viewerPosition]);
 
@@ -3736,8 +3759,43 @@ const Panorama3DNode = (p: NodeProps) => {
     if (reporter.runContext?.secondaryProviderActionId) {
       throw new Error('3D 全景 AI 动作 action 已过期或被修改，已停止调用 Provider');
     }
-    await runNode();
-  }, [executeAiActionPlan, p.id, rf, runNode, update]);
+    const liveData = rf.getNode(p.id)?.data as Record<string, unknown> | undefined;
+    const contextRequestId = String(reporter.runContext?.requestId || '').trim();
+    const persistedRequestId = String(liveData?.panoramaRunRequestId || '').trim();
+    const requestedMode = String(liveData?.panoramaRunMode || 'generate') as PanoramaNodeRunMode;
+    try {
+      if (!persistedRequestId) {
+        await runNode();
+        return;
+      }
+      if (contextRequestId !== persistedRequestId) {
+        throw new Error('3D 全景运行请求已过期或被修改，已停止输出。');
+      }
+      switch (requestedMode) {
+        case 'generate':
+          await generatePanorama();
+          break;
+        case 'frame':
+          await exportFrame();
+          break;
+        case 'scene-snapshot':
+          await exportSceneSnapshot();
+          break;
+        case 'control-snapshot':
+          await exportControlSnapshot();
+          break;
+        default:
+          throw new Error('3D 全景运行模式无效，已停止输出。');
+      }
+    } finally {
+      if (contextRequestId) {
+        const latestData = rf.getNode(p.id)?.data as Record<string, unknown> | undefined;
+        if (latestData?.panoramaRunRequestId === contextRequestId) {
+          update({ panoramaRunMode: 'generate', panoramaRunRequestId: '' });
+        }
+      }
+    }
+  }, [executeAiActionPlan, exportControlSnapshot, exportFrame, exportSceneSnapshot, generatePanorama, p.id, rf, runNode, update]);
 
   const handleReferenceUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -4644,7 +4702,7 @@ const Panorama3DNode = (p: NodeProps) => {
               </details>
 
               <div className="grid grid-cols-4 gap-1.5">
-                <button type="button" className="t8-btn t8-btn-primary min-h-8 px-2 text-[11px]" onClick={() => requestCanvasNodeRun(p.id)} disabled={isGenerating}>
+                <button type="button" className="t8-btn t8-btn-primary min-h-8 px-2 text-[11px]" onClick={() => requestPanoramaRun('generate')} disabled={isGenerating}>
                   {isGenerating ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
                   {d.panoramaGeneratedUrl ? '重新生成' : '生成全景'}
                 </button>
@@ -4740,7 +4798,7 @@ const Panorama3DNode = (p: NodeProps) => {
             <button type="button" className={`t8-btn py-2 text-xs ${autoRotate ? 't8-btn-primary' : ''}`} onClick={() => update({ panoramaAutoRotate: !autoRotate })} title="自动旋转">
               {autoRotate ? <Pause size={14} /> : <Play size={14} />}
             </button>
-            <button type="button" className="t8-btn t8-btn-primary py-2 text-xs" onClick={exportFrame} disabled={textureStatus !== 'ready' || isGenerating} title="导出当前画面">
+            <button type="button" className="t8-btn t8-btn-primary py-2 text-xs" onClick={() => requestPanoramaRun('frame')} disabled={textureStatus !== 'ready' || isGenerating} title="导出当前画面">
               {isGenerating && d.progress === '导出中' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
             </button>
           </div>
@@ -4912,11 +4970,11 @@ const Panorama3DNode = (p: NodeProps) => {
                   <Crosshair size={13} />
                   放置
                 </button>
-                <button type="button" className="t8-btn h-8 min-w-0 justify-center px-2 text-[10px] whitespace-nowrap" onClick={exportSceneSnapshot} disabled={textureStatus !== 'ready' || isGenerating} title="导出场景快照；有关键帧时会按序列帧数输出 F01-Fxx">
+                <button type="button" className="t8-btn h-8 min-w-0 justify-center px-2 text-[10px] whitespace-nowrap" onClick={() => requestPanoramaRun('scene-snapshot')} disabled={textureStatus !== 'ready' || isGenerating} title="导出场景快照；有关键帧时会按序列帧数输出 F01-Fxx">
                   {isGenerating && d.progress === '场景快照导出中' ? <Loader2 size={13} className="animate-spin" /> : <ImageIcon size={13} />}
                   快照
                 </button>
-                <button type="button" className="t8-btn h-8 min-w-0 justify-center px-2 text-[10px] whitespace-nowrap" onClick={exportControlSnapshot} disabled={textureStatus !== 'ready' || isGenerating}>
+                <button type="button" className="t8-btn h-8 min-w-0 justify-center px-2 text-[10px] whitespace-nowrap" onClick={() => requestPanoramaRun('control-snapshot')} disabled={textureStatus !== 'ready' || isGenerating}>
                   {isGenerating && d.progress === '控制快照导出中' ? <Loader2 size={13} className="animate-spin" /> : <ScanLine size={13} />}
                   控图
                 </button>
@@ -6601,11 +6659,11 @@ const Panorama3DNode = (p: NodeProps) => {
                     </label>
                   </div>
                   <div className="grid grid-cols-5 gap-1.5">
-                    <button type="button" className="t8-btn h-8 px-2 text-[10px]" onClick={exportSceneSnapshot} disabled={textureStatus !== 'ready' || isGenerating} title="导出场景快照；有关键帧时会按序列帧数输出 F01-Fxx">
+                    <button type="button" className="t8-btn h-8 px-2 text-[10px]" onClick={() => requestPanoramaRun('scene-snapshot')} disabled={textureStatus !== 'ready' || isGenerating} title="导出场景快照；有关键帧时会按序列帧数输出 F01-Fxx">
                       <ImageIcon size={12} />
                       快照
                     </button>
-                    <button type="button" className="t8-btn h-8 px-2 text-[10px]" onClick={exportControlSnapshot} disabled={textureStatus !== 'ready' || isGenerating}>
+                    <button type="button" className="t8-btn h-8 px-2 text-[10px]" onClick={() => requestPanoramaRun('control-snapshot')} disabled={textureStatus !== 'ready' || isGenerating}>
                       <ScanLine size={12} />
                       控图
                     </button>

@@ -1,0 +1,22 @@
+{
+  "canvasId": "deleted-identity-board",
+  "projectId": "history-project",
+  "name": "旧删除记录",
+  "revision": 18,
+  "updatedAt": 1704067200029,
+  "nodes": [
+    { "id": "surviving-node", "type": "text", "position": { "x": 100, "y": 100 }, "data": { "label": "保留节点" } }
+  ],
+  "edges": [],
+  "tombstones": {
+    "nodes": {
+      "deleted-node-old": { "opId": "delete-op-old", "actorId": "editor-old", "sessionId": "session-old", "deletedAt": 1704067000029, "revision": 14, "entityType": "image", "privateRecoveryHint": { "plainTextOnly": true } }
+    },
+    "edges": {
+      "deleted-edge-old": { "opId": "delete-edge-op-old", "actorId": "editor-old", "sessionId": "session-old", "deletedAt": 1704067010029, "revision": 15, "source": "surviving-node", "target": "deleted-node-old", "sourceHandle": "text-out:text", "targetHandle": "image-in:text" }
+    },
+    "futureDomain": { "deleted-group-old": { "revision": 13, "reason": "plugin-owned" } }
+  },
+  "viewport": { "x": 40, "y": 20, "zoom": 1 },
+  "historyCursor": { "snapshotRevision": 12, "lastOperationRevision": 18 }
+}

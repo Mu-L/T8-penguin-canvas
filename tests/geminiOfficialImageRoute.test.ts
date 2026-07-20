@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
+import sharp from 'sharp';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -17,6 +18,9 @@ async function listen(app: any) {
 test('Gemini Pro Image uses official generateContent payload without changing nano-banana-pro legacy payload', async (t) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 't8-gemini-official-image-'));
   t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  const validPng = await sharp({
+    create: { width: 2, height: 2, channels: 4, background: { r: 32, g: 96, b: 224, alpha: 1 } },
+  }).png().toBuffer();
 
   const upstreamCalls: any[] = [];
   const upstreamApp = express();
@@ -34,7 +38,7 @@ test('Gemini Pro Image uses official generateContent payload without changing na
           content: {
             parts: [
               { text: 'ok' },
-              { inlineData: { mimeType: 'image/png', data: Buffer.from('GEMINIPNG').toString('base64') } },
+              { inlineData: { mimeType: 'image/png', data: validPng.toString('base64') } },
             ],
           },
         },
@@ -43,7 +47,7 @@ test('Gemini Pro Image uses official generateContent payload without changing na
   });
   upstreamApp.post('/v1/images/generations', (req, res) => {
     upstreamCalls.push({ path: req.path, body: req.body, auth: req.header('authorization') });
-    res.json({ data: [{ b64_json: Buffer.from('BANANAPNG').toString('base64'), mime_type: 'image/png' }] });
+    res.json({ data: [{ b64_json: validPng.toString('base64'), mime_type: 'image/png' }] });
   });
   const upstreamServer = await listen(upstreamApp);
   t.after(() => upstreamServer.close());
@@ -145,9 +149,13 @@ test('Gemini Pro Image uses official generateContent payload without changing na
 test('Gemini official async task results are polled and saved from nested OpenAI image data', async (t) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 't8-gemini-official-task-'));
   t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  const validPng = await sharp({
+    create: { width: 2, height: 2, channels: 4, background: { r: 20, g: 120, b: 220, alpha: 1 } },
+  }).png().toBuffer();
 
   let upstreamBase = '';
   let taskQueries = 0;
+  let outputDownloads = 0;
   const upstreamApp = express();
   upstreamApp.use(express.json({ limit: '4mb' }));
   upstreamApp.post(/^\/v1\/models\/([^/]+):generateContent$/, (_req, res) => {
@@ -168,7 +176,7 @@ test('Gemini official async task results are polled and saved from nested OpenAI
       data: {
         data: [
           {
-            url: `${upstreamBase}/output/lite.jpg`,
+            url: `${upstreamBase}/output/lite.png`,
             b64_json: '',
             revised_prompt: 'A tiny blue ceramic cup on a plain white table, simple product photo, no text',
           },
@@ -177,8 +185,9 @@ test('Gemini official async task results are polled and saved from nested OpenAI
       },
     });
   });
-  upstreamApp.get('/output/lite.jpg', (_req, res) => {
-    res.type('image/jpeg').send(Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+  upstreamApp.get('/output/lite.png', (_req, res) => {
+    outputDownloads += 1;
+    res.type('image/png').send(validPng);
   });
   const upstreamServer = await listen(upstreamApp);
   upstreamBase = `http://127.0.0.1:${upstreamServer.address().port}`;
@@ -201,6 +210,15 @@ test('Gemini official async task results are polled and saved from nested OpenAI
   }));
 
   const proxyRouter = require('../backend/src/routes/proxy.js');
+  const safeLookupHosts: string[] = [];
+  proxyRouter._test.setProxySafeRemoteTestOptions({
+    allowPrivateForTests: (hostname: string) => hostname === '127.0.0.1',
+    lookupImpl: async (hostname: string) => {
+      safeLookupHosts.push(hostname);
+      return [{ address: '127.0.0.1', family: 4 }];
+    },
+  });
+  t.after(() => proxyRouter._test.setProxySafeRemoteTestOptions(null));
   const app = express();
   app.use(express.json({ limit: '4mb' }));
   app.use('/api/proxy', proxyRouter);
@@ -224,4 +242,6 @@ test('Gemini official async task results are polled and saved from nested OpenAI
   assert.equal(result.success, true);
   assert.match(result.data.urls[0], /^\/files\/output\/img_/);
   assert.ok(taskQueries >= 1);
+  assert.equal(outputDownloads, 1);
+  assert.deepEqual(safeLookupHosts, ['127.0.0.1']);
 });

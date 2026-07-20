@@ -123,6 +123,23 @@ class InterruptedDownloadWorker {
   close() { this.closed = true; }
 }
 
+class MutableInterruptedDownloadWorker extends InterruptedDownloadWorker {
+  constructor() {
+    super();
+    this.statuses = new Map();
+  }
+
+  setModelStatus(modelId, status) {
+    this.statuses.set(modelId, status);
+  }
+
+  getModelStatus(modelId) {
+    return this.statuses.get(modelId) || super.getModelStatus(modelId);
+  }
+
+  getDownloadProgress(modelId) { return this.getModelStatus(modelId); }
+}
+
 class ColdVerificationWorker extends FakeSemanticWorker {
   constructor(failingModelId) {
     super();
@@ -205,6 +222,49 @@ class GatedColdVerificationWorker extends ColdVerificationWorker {
     this.downloadCalls += 1;
     this.verifiedModels.add(modelId);
     return Promise.resolve(installedStatus(modelId));
+  }
+}
+
+class DelayedAbortVerificationWorker extends ColdVerificationWorker {
+  constructor(modelId) {
+    super(null);
+    this.modelId = modelId;
+    this.abortReportedFailure = false;
+    this.reportFailure = false;
+    this.verifyStarted = new Promise((resolve) => { this.resolveVerifyStarted = resolve; });
+    this.abortObserved = new Promise((resolve) => { this.resolveAbortObserved = resolve; });
+    this.abortRelease = new Promise((resolve) => { this.resolveAbortRelease = resolve; });
+  }
+
+  getModelStatus(modelId) {
+    if (modelId !== this.modelId) return notInstalledStatus(modelId);
+    if (!this.abortReportedFailure && !this.reportFailure) return super.getModelStatus(modelId);
+    return {
+      ...notInstalledStatus(modelId),
+      state: 'failed',
+      error: {
+        code: 'asset-semantic-aborted-verification-reported-failed',
+        message: 'cancelled verification reported a late failure',
+      },
+    };
+  }
+
+  verifyModel(modelId, options = {}) {
+    this.verifyCalls.push(modelId);
+    this.resolveVerifyStarted();
+    return new Promise((resolve, reject) => {
+      const onAbort = () => {
+        this.abortReportedFailure = true;
+        this.resolveAbortObserved();
+        void this.abortRelease.then(() => {
+          const error = new Error('verification cancellation settled late');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      };
+      if (options.signal?.aborted) onAbort();
+      else options.signal?.addEventListener('abort', onAbort, { once: true });
+    });
   }
 }
 
@@ -318,6 +378,15 @@ function testConfig(root) {
   };
 }
 
+function concurrentProjectDatabaseTestOptions() {
+  return {
+    autoBackup: false,
+    ...(process.env.NODE_TEST_CONTEXT
+      ? { unsafeDisableOwnerGuardForTests: true }
+      : {}),
+  };
+}
+
 function finishReadyGeneration(database, projectId, idempotencyKey) {
   const profile = database.getAssetSemanticProfile(projectId);
   const generation = database.beginAssetSemanticRebuild(projectId, {
@@ -335,6 +404,671 @@ function finishReadyGeneration(database, projectId, idempotencyKey) {
     expectedGenerationRevision: sealed.revision,
   });
 }
+
+test('semantic status and model listing stay pure on a cold database', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 't8-semantic-status-pure-'));
+  const config = testConfig(root);
+  const database = new ProjectDatabase(path.join(root, 'projects.sqlite3'), { autoBackup: false });
+  const worker = new FakeSemanticWorker();
+  let modelStatusReads = 0;
+  let progressReads = 0;
+  const originalStatus = worker.getModelStatus.bind(worker);
+  worker.getModelStatus = (modelId) => {
+    modelStatusReads += 1;
+    return originalStatus(modelId);
+  };
+  worker.getDownloadProgress = (modelId) => {
+    progressReads += 1;
+    return originalStatus(modelId);
+  };
+  const pipeline = new AssetSemanticPipeline(config, database, {
+    worker,
+    autoStart: false,
+    recover: false,
+  });
+  try {
+    const beforeChanges = Number(database.db.prepare('SELECT total_changes() AS value').get().value);
+    database.db.pragma('query_only = ON');
+    const first = await pipeline.status('project-semantic-status-pure');
+    const second = await pipeline.status('project-semantic-status-pure');
+    const listed = await pipeline.listModels();
+
+    assert.equal(first.models.length, 3);
+    assert.deepEqual(first.models, second.models);
+    assert.deepEqual(first.models, listed);
+    assert.deepEqual(first.models.map((model) => [model.status, model.revision]), [
+      ['not-installed', 1],
+      ['not-installed', 1],
+      ['not-installed', 1],
+    ]);
+    assert.equal(database.db.prepare('SELECT COUNT(*) AS count FROM asset_semantic_models').get().count, 0);
+    assert.equal(Number(database.db.prepare('SELECT total_changes() AS value').get().value), beforeChanges);
+    assert.equal(modelStatusReads, 0, 'pure status must not inspect mutable model installation state');
+    assert.equal(progressReads, 0, 'cold virtual rows have no active progress to read');
+    assert.equal(pipeline.modelVerifications.size, 0);
+  } finally {
+    pipeline.close();
+    if (database.db.open) database.db.pragma('query_only = OFF');
+    database.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('model listing observes the fixed manifest from one durable SELECT snapshot', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 't8-semantic-status-model-snapshot-'));
+  const config = testConfig(root);
+  const filename = path.join(root, 'projects.sqlite3');
+  const reader = new ProjectDatabase(filename, concurrentProjectDatabaseTestOptions());
+  const writer = new ProjectDatabase(filename, concurrentProjectDatabaseTestOptions());
+  const pipeline = new AssetSemanticPipeline(config, reader, {
+    worker: new FakeSemanticWorker(),
+    autoStart: false,
+    recover: false,
+  });
+  const manifest = getPublicSemanticModelManifest();
+  const originalList = reader.listAssetSemanticModels.bind(reader);
+  const originalGet = reader.getAssetSemanticModel.bind(reader);
+  let listCalls = 0;
+  try {
+    reader.listAssetSemanticModels = () => {
+      listCalls += 1;
+      const snapshot = originalList();
+      writer.syncAssetSemanticModelObservations(manifest.map((model, index) => ({
+        expected: null,
+        state: {
+          modelKey: model.modelId,
+          modelVersion: model.revision,
+          capability: model.task,
+          status: 'installed',
+          artifactDigest: String(index + 1).repeat(64),
+          byteSize: model.downloadBytes,
+          downloadedBytes: model.downloadBytes,
+          totalBytes: model.downloadBytes,
+          installPath: path.join(config.ASSET_SEMANTIC_MODELS_DIR, model.modelId),
+        },
+      })));
+      return snapshot;
+    };
+    reader.getAssetSemanticModel = () => {
+      throw new Error('listModels must not perform per-model durable reads');
+    };
+
+    const oldSnapshot = await pipeline.listModels();
+    assert.equal(listCalls, 1);
+    assert.deepEqual(oldSnapshot.map((model) => [model.status, model.revision]), [
+      ['not-installed', 1],
+      ['not-installed', 1],
+      ['not-installed', 1],
+    ]);
+
+    reader.listAssetSemanticModels = originalList;
+    reader.getAssetSemanticModel = originalGet;
+    const newSnapshot = await pipeline.listModels();
+    assert.deepEqual(newSnapshot.map((model) => [model.status, model.revision]), [
+      ['installed', 2],
+      ['installed', 2],
+      ['installed', 2],
+    ]);
+  } finally {
+    reader.listAssetSemanticModels = originalList;
+    reader.getAssetSemanticModel = originalGet;
+    pipeline.close();
+    await writer.close();
+    await reader.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('explicit model refresh atomically materializes the fixed manifest and is a strict no-op when unchanged', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 't8-semantic-model-refresh-'));
+  const config = testConfig(root);
+  const database = new ProjectDatabase(path.join(root, 'projects.sqlite3'), { autoBackup: false });
+  const pipeline = new AssetSemanticPipeline(config, database, {
+    worker: new FakeSemanticWorker(),
+    autoStart: false,
+    recover: false,
+  });
+  try {
+    const first = await pipeline.refreshModelStates();
+    assert.equal(first.changedCount, 3);
+    assert.equal(first.models.length, 3);
+    assert.deepEqual(first.models.map((model) => model.status), ['installed', 'installed', 'installed']);
+    assert.deepEqual(first.models.map((model) => model.revision), [2, 2, 2]);
+    const before = first.models.map((model) => ({ revision: model.revision, updatedAt: model.updatedAt }));
+
+    const repeated = await pipeline.refreshModelStates();
+    assert.equal(repeated.changedCount, 0);
+    assert.deepEqual(
+      repeated.models.map((model) => ({ revision: model.revision, updatedAt: model.updatedAt })),
+      before,
+    );
+    assert.equal(database.db.prepare('SELECT COUNT(*) AS count FROM asset_semantic_models').get().count, 3);
+    assert.equal(pipeline.modelVerifications.size, 0);
+  } finally {
+    pipeline.close();
+    database.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('explicit model refresh never retries a stale worker observation over a concurrent download transition', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 't8-semantic-model-refresh-stale-'));
+  const config = testConfig(root);
+  const database = new ProjectDatabase(path.join(root, 'projects.sqlite3'), { autoBackup: false });
+  const worker = new InterruptedDownloadWorker();
+  const pipeline = new AssetSemanticPipeline(config, database, {
+    worker,
+    autoStart: false,
+    recover: false,
+  });
+  const models = getPublicSemanticModelManifest();
+  try {
+    const defaults = await pipeline.refreshModelStates();
+    assert.deepEqual(defaults.models.map((model) => [model.status, model.revision]), [
+      ['not-installed', 1],
+      ['not-installed', 1],
+      ['not-installed', 1],
+    ]);
+
+    let observations = 0;
+    worker.getModelStatus = (modelId) => {
+      observations += 1;
+      if (observations === 1) {
+        const target = models[1];
+        database.setAssetSemanticModelState({
+          modelKey: target.modelId,
+          modelVersion: target.revision,
+          capability: target.task,
+          status: 'downloading',
+          downloadedBytes: 0,
+          totalBytes: target.downloadBytes,
+          downloadIdempotencyKey: 'semantic-refresh-concurrent-download',
+          downloadRequestRevision: 1,
+        }, { expectedRevision: 1 });
+      }
+      return installedStatus(modelId);
+    };
+
+    await assert.rejects(
+      pipeline.refreshModelStates(),
+      (error) => error?.code === 'asset_semantic_model_revision_conflict',
+    );
+    assert.equal(observations, 3, 'stale observations must not be retried');
+    assert.deepEqual(models.map((model) => {
+      const state = database.getAssetSemanticModel(model.modelId, model.revision);
+      return [state.status, state.revision];
+    }), [
+      ['not-installed', 1],
+      ['downloading', 2],
+      ['not-installed', 1],
+    ]);
+    assert.equal(pipeline.modelVerifications.size, 0);
+  } finally {
+    pipeline.close();
+    database.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a second pipeline refresh preserves durable download and delete operations it does not own', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 't8-semantic-model-refresh-non-owner-'));
+  const config = testConfig(root);
+  const filename = path.join(root, 'projects.sqlite3');
+  const ownerDatabase = new ProjectDatabase(filename, concurrentProjectDatabaseTestOptions());
+  const observerDatabase = new ProjectDatabase(filename, concurrentProjectDatabaseTestOptions());
+  const ownerPipeline = new AssetSemanticPipeline(config, ownerDatabase, {
+    worker: new InterruptedDownloadWorker(),
+    autoStart: false,
+    recover: false,
+  });
+  const observerPipeline = new AssetSemanticPipeline(config, observerDatabase, {
+    worker: new InterruptedDownloadWorker(),
+    autoStart: false,
+    recover: false,
+  });
+  const models = getPublicSemanticModelManifest();
+  try {
+    const downloading = await ownerPipeline.startModelDownload(models[0].modelId, {
+      expectedRevision: 1,
+      idempotencyKey: 'semantic-refresh-owned-by-other-pipeline',
+    });
+    assert.equal(downloading.status, 'downloading');
+    assert.equal(downloading.revision, 2);
+
+    const installed = ownerDatabase.syncAssetSemanticModelObservations([{
+      expected: null,
+      state: {
+        modelKey: models[1].modelId,
+        modelVersion: models[1].revision,
+        capability: models[1].task,
+        status: 'installed',
+        artifactDigest: 'a'.repeat(64),
+        byteSize: models[1].downloadBytes,
+        downloadedBytes: models[1].downloadBytes,
+        totalBytes: models[1].downloadBytes,
+        installPath: path.join(config.ASSET_SEMANTIC_MODELS_DIR, models[1].modelId),
+      },
+    }]).models[0];
+    const deleting = ownerDatabase.beginAssetSemanticModelDelete(models[1].modelId, models[1].revision, {
+      expectedRevision: installed.revision,
+    });
+    assert.equal(deleting.status, 'deleting');
+
+    const beforeDownload = ownerDatabase.getAssetSemanticModelObservation(models[0].modelId, models[0].revision);
+    const beforeDelete = ownerDatabase.getAssetSemanticModelObservation(models[1].modelId, models[1].revision);
+    const refreshed = await observerPipeline.refreshModelStates();
+
+    assert.equal(refreshed.changedCount, 1, 'only the third missing manifest row may materialize');
+    assert.deepEqual(
+      observerDatabase.getAssetSemanticModelObservation(models[0].modelId, models[0].revision),
+      beforeDownload,
+      'a non-owner not-installed snapshot must not mark another pipeline download interrupted',
+    );
+    assert.deepEqual(
+      observerDatabase.getAssetSemanticModelObservation(models[1].modelId, models[1].revision),
+      beforeDelete,
+      'a non-owner not-installed snapshot must not complete another pipeline delete early',
+    );
+    assert.deepEqual(refreshed.models.map((model) => [model.status, model.revision]), [
+      ['downloading', beforeDownload.revision],
+      ['deleting', beforeDelete.revision],
+      ['not-installed', 1],
+    ]);
+  } finally {
+    observerPipeline.close();
+    ownerPipeline.close();
+    await observerDatabase.close();
+    await ownerDatabase.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('non-owner verification is read-only until positive proof and cannot overwrite a concurrent revision', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 't8-semantic-model-refresh-readonly-sha-'));
+  const config = testConfig(root);
+  const database = new ProjectDatabase(path.join(root, 'projects.sqlite3'), { autoBackup: false });
+  const model = getPublicSemanticModelManifest()[0];
+  let pipeline = null;
+  let failurePipeline = null;
+  try {
+    const seeded = database.syncAssetSemanticModelObservations([{
+      expected: null,
+      state: {
+        modelKey: model.modelId,
+        modelVersion: model.revision,
+        capability: model.task,
+        status: 'verifying',
+        byteSize: model.downloadBytes,
+        downloadedBytes: model.downloadBytes,
+        totalBytes: model.downloadBytes,
+        installPath: path.join(config.ASSET_SEMANTIC_MODELS_DIR, model.modelId),
+      },
+    }]).models[0];
+    assert.equal(seeded.revision, 2);
+    const before = database.getAssetSemanticModelObservation(model.modelId, model.revision);
+
+    const worker = new GatedColdVerificationWorker();
+    const targetStatus = worker.getModelStatus.bind(worker);
+    worker.getModelStatus = (modelId) => (
+      modelId === model.modelId ? targetStatus(modelId) : notInstalledStatus(modelId)
+    );
+    pipeline = new AssetSemanticPipeline(config, database, {
+      worker,
+      autoStart: false,
+      recover: false,
+    });
+    const refreshed = await pipeline.refreshModelStates();
+    assert.equal(refreshed.changedCount, 2, 'the durable verifying row must not change before SHA proof');
+    assert.deepEqual(
+      database.getAssetSemanticModelObservation(model.modelId, model.revision),
+      before,
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(worker.verifyCalls, [model.modelId]);
+    const verification = pipeline.modelVerifications.get(model.modelId);
+    assert.ok(verification);
+    assert.equal(verification.ownsDurableState, false);
+
+    const concurrent = database.setAssetSemanticModelState({
+      modelKey: model.modelId,
+      modelVersion: model.revision,
+      capability: model.task,
+      status: 'downloading',
+      downloadedBytes: 0,
+      totalBytes: model.downloadBytes,
+      downloadIdempotencyKey: 'semantic-readonly-sha-concurrent-download',
+      downloadRequestRevision: before.revision,
+    }, { expectedRevision: before.revision });
+    const concurrentObservation = database.getAssetSemanticModelObservation(model.modelId, model.revision);
+    worker.releaseVerification(model.modelId);
+    await verification.promise;
+    assert.deepEqual(
+      database.getAssetSemanticModelObservation(model.modelId, model.revision),
+      concurrentObservation,
+      'a positive late SHA result must not overwrite a newer download transition',
+    );
+
+    pipeline.close();
+    pipeline = null;
+    const verifyingAgain = database.setAssetSemanticModelState({
+      modelKey: model.modelId,
+      modelVersion: model.revision,
+      capability: model.task,
+      status: 'verifying',
+      downloadedBytes: model.downloadBytes,
+      totalBytes: model.downloadBytes,
+      downloadIdempotencyKey: null,
+      downloadRequestRevision: null,
+    }, { expectedRevision: concurrent.revision });
+    const beforeFailure = database.getAssetSemanticModelObservation(model.modelId, model.revision);
+    assert.equal(beforeFailure.revision, verifyingAgain.revision);
+
+    const failingWorker = new GatedColdVerificationWorker(model.modelId);
+    const failingTargetStatus = failingWorker.getModelStatus.bind(failingWorker);
+    failingWorker.getModelStatus = (modelId) => (
+      modelId === model.modelId ? failingTargetStatus(modelId) : notInstalledStatus(modelId)
+    );
+    failurePipeline = new AssetSemanticPipeline(config, database, {
+      worker: failingWorker,
+      autoStart: false,
+      recover: false,
+    });
+    const failureRefresh = await failurePipeline.refreshModelStates();
+    assert.equal(failureRefresh.changedCount, 0);
+    await new Promise((resolve) => setImmediate(resolve));
+    const failedVerification = failurePipeline.modelVerifications.get(model.modelId);
+    assert.ok(failedVerification);
+    assert.equal(failedVerification.ownsDurableState, false);
+    failingWorker.releaseVerification(model.modelId);
+    await failedVerification.promise;
+    assert.deepEqual(
+      database.getAssetSemanticModelObservation(model.modelId, model.revision),
+      beforeFailure,
+      'non-owner SHA failure is not authority to mark a durable operation failed',
+    );
+  } finally {
+    failurePipeline?.close();
+    pipeline?.close();
+    await database.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('an equivalent concurrent download has one physical owner and external transient state blocks replace or delete', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 't8-semantic-download-concurrent-owner-'));
+  const config = testConfig(root);
+  const filename = path.join(root, 'projects.sqlite3');
+  const observerDatabase = new ProjectDatabase(filename, concurrentProjectDatabaseTestOptions());
+  const winningDatabase = new ProjectDatabase(filename, concurrentProjectDatabaseTestOptions());
+  const worker = new InterruptedDownloadWorker();
+  const pipeline = new AssetSemanticPipeline(config, observerDatabase, {
+    worker,
+    autoStart: false,
+    recover: false,
+  });
+  const model = getPublicSemanticModelManifest()[0];
+  const request = {
+    expectedRevision: 1,
+    idempotencyKey: 'semantic-concurrent-download-owner',
+  };
+  const originalSync = observerDatabase.syncAssetSemanticModelObservations.bind(observerDatabase);
+  let winningTransition = null;
+  try {
+    observerDatabase.syncAssetSemanticModelObservations = (observations, options) => {
+      if (!winningTransition) {
+        winningTransition = winningDatabase.syncAssetSemanticModelObservations(observations, options);
+        assert.equal(winningTransition.changedCount, 1);
+      }
+      return originalSync(observations, options);
+    };
+
+    const replayed = await pipeline.startModelDownload(model.modelId, request);
+    assert.equal(replayed.status, 'downloading');
+    assert.equal(replayed.revision, 2);
+    assert.equal(worker.downloadCalls, 0, 'the equivalent batch loser must not start a second physical worker');
+    assert.equal(pipeline.downloads.has(model.modelId), false);
+    const durable = observerDatabase.getAssetSemanticModelObservation(model.modelId, model.revision);
+
+    observerDatabase.syncAssetSemanticModelObservations = originalSync;
+    const sameKeyReplay = await pipeline.startModelDownload(model.modelId, request);
+    assert.equal(sameKeyReplay.revision, durable.revision);
+    assert.equal(worker.downloadCalls, 0);
+
+    await assert.rejects(
+      pipeline.startModelDownload(model.modelId, {
+        expectedRevision: durable.revision,
+        idempotencyKey: 'semantic-concurrent-download-replacement',
+      }),
+      (error) => error.code === 'asset-semantic-model-download-in-progress',
+    );
+    await assert.rejects(
+      pipeline.removeModel(model.modelId, { expectedRevision: durable.revision }),
+      (error) => error.code === 'asset-semantic-model-download-in-progress',
+    );
+    assert.deepEqual(
+      observerDatabase.getAssetSemanticModelObservation(model.modelId, model.revision),
+      durable,
+    );
+    assert.equal(worker.downloadCalls, 0);
+  } finally {
+    observerDatabase.syncAssetSemanticModelObservations = originalSync;
+    pipeline.close();
+    await winningDatabase.close();
+    await observerDatabase.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('an equivalent verification batch loser never gains durable owner authority', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 't8-semantic-verification-concurrent-owner-'));
+  const config = testConfig(root);
+  const filename = path.join(root, 'projects.sqlite3');
+  const observerDatabase = new ProjectDatabase(filename, concurrentProjectDatabaseTestOptions());
+  const winningDatabase = new ProjectDatabase(filename, concurrentProjectDatabaseTestOptions());
+  const worker = new GatedColdVerificationWorker();
+  const pipeline = new AssetSemanticPipeline(config, observerDatabase, {
+    worker,
+    autoStart: false,
+    recover: false,
+  });
+  const model = getPublicSemanticModelManifest()[0];
+  const originalSync = observerDatabase.syncAssetSemanticModelObservations.bind(observerDatabase);
+  let winningTransition = null;
+  let losingChangedCount = null;
+  try {
+    observerDatabase.syncAssetSemanticModelObservations = (observations, options) => {
+      if (!winningTransition) {
+        winningTransition = winningDatabase.syncAssetSemanticModelObservations(observations, options);
+        assert.equal(winningTransition.changedCount, 1);
+      }
+      const losingTransition = originalSync(observations, options);
+      losingChangedCount = losingTransition.changedCount;
+      return losingTransition;
+    };
+
+    const replayed = await pipeline.syncModelState(model.modelId);
+    assert.equal(replayed.status, 'verifying');
+    assert.equal(replayed.revision, 2);
+    assert.equal(losingChangedCount, 0);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const verification = pipeline.modelVerifications.get(model.modelId);
+    assert.ok(verification, 'the loser may still perform a read-only SHA check');
+    assert.equal(verification.ownsDurableState, false, 'an equivalent no-op is not proof of durable ownership');
+    await assert.rejects(
+      pipeline.startModelDownload(model.modelId, {
+        expectedRevision: replayed.revision,
+        idempotencyKey: 'semantic-verification-loser-replacement',
+      }),
+      (error) => error.code === 'asset-semantic-model-download-in-progress',
+    );
+    await assert.rejects(
+      pipeline.removeModel(model.modelId, { expectedRevision: replayed.revision }),
+      (error) => error.code === 'asset-semantic-model-download-in-progress',
+    );
+    assert.equal(
+      observerDatabase.getAssetSemanticModel(model.modelId, model.revision).status,
+      'verifying',
+    );
+  } finally {
+    observerDatabase.syncAssetSemanticModelObservations = originalSync;
+    pipeline.close();
+    await winningDatabase.close();
+    await observerDatabase.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a new verification revision replaces an incompatible read-only task and retains owner failure authority', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 't8-semantic-verification-owner-revision-'));
+  const config = testConfig(root);
+  const filename = path.join(root, 'projects.sqlite3');
+  const databaseA = new ProjectDatabase(filename, concurrentProjectDatabaseTestOptions());
+  const databaseB = new ProjectDatabase(filename, concurrentProjectDatabaseTestOptions());
+  const model = getPublicSemanticModelManifest()[0];
+  const workerA = new GatedColdVerificationWorker(model.modelId);
+  const targetStatus = workerA.getModelStatus.bind(workerA);
+  workerA.getModelStatus = (modelId) => (
+    modelId === model.modelId ? targetStatus(modelId) : installedStatus(modelId)
+  );
+  const pipelineA = new AssetSemanticPipeline(config, databaseA, {
+    worker: workerA,
+    autoStart: false,
+    recover: false,
+  });
+  const pipelineB = new AssetSemanticPipeline(config, databaseB, {
+    worker: new FakeSemanticWorker(),
+    autoStart: false,
+    recover: false,
+  });
+  try {
+    const seeded = databaseB.syncAssetSemanticModelObservations([{
+      expected: null,
+      state: {
+        modelKey: model.modelId,
+        modelVersion: model.revision,
+        capability: model.task,
+        status: 'verifying',
+        downloadedBytes: model.downloadBytes,
+        totalBytes: model.downloadBytes,
+      },
+    }]).models[0];
+    assert.equal(seeded.revision, 2);
+
+    await pipelineA.refreshModelStates();
+    await new Promise((resolve) => setImmediate(resolve));
+    const oldReadOnlyTask = pipelineA.modelVerifications.get(model.modelId);
+    assert.ok(oldReadOnlyTask);
+    assert.equal(oldReadOnlyTask.ownsDurableState, false);
+    assert.equal(oldReadOnlyTask.expectedRevision, seeded.revision);
+
+    const installed = await pipelineB.refreshModelStates();
+    const installedModel = installed.models.find((candidate) => candidate.modelKey === model.modelId);
+    assert.equal(installedModel.status, 'installed');
+    assert.equal(installedModel.revision, 3);
+    const removed = await pipelineB.removeModel(model.modelId, { expectedRevision: installedModel.revision });
+    assert.equal(removed.status, 'not-installed');
+    assert.equal(removed.revision, 5);
+
+    const refreshed = await pipelineA.refreshModelStates();
+    const verifying = refreshed.models.find((candidate) => candidate.modelKey === model.modelId);
+    assert.equal(verifying.status, 'verifying');
+    assert.equal(verifying.revision, 6);
+    const ownerTask = pipelineA.modelVerifications.get(model.modelId);
+    assert.ok(ownerTask);
+    assert.notEqual(ownerTask, oldReadOnlyTask, 'a stale revision task must not swallow a new durable owner');
+    assert.equal(ownerTask.ownsDurableState, true);
+    assert.equal(ownerTask.expectedRevision, verifying.revision);
+
+    for (let attempt = 0; attempt < 20 && !workerA.verificationGates.has(model.modelId); attempt += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    assert.equal(workerA.verificationGates.has(model.modelId), true);
+    workerA.releaseVerification(model.modelId);
+    await ownerTask.promise;
+    const failed = databaseA.getAssetSemanticModel(model.modelId, model.revision);
+    assert.equal(failed.status, 'failed');
+    assert.equal(failed.revision, 7);
+    assert.equal(failed.errorCode, 'asset-semantic-model-hash-mismatch');
+  } finally {
+    pipelineB.close();
+    pipelineA.close();
+    await databaseB.close();
+    await databaseA.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a stale local download task cannot overwrite a newer durable owner identity', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 't8-semantic-download-owner-replaced-'));
+  const config = testConfig(root);
+  const filename = path.join(root, 'projects.sqlite3');
+  const databaseA = new ProjectDatabase(filename, concurrentProjectDatabaseTestOptions());
+  const databaseB = new ProjectDatabase(filename, concurrentProjectDatabaseTestOptions());
+  const workerA = new MutableInterruptedDownloadWorker();
+  const workerB = new LateProgressDownloadWorker();
+  const pipelineA = new AssetSemanticPipeline(config, databaseA, {
+    worker: workerA,
+    autoStart: false,
+    recover: false,
+  });
+  const pipelineB = new AssetSemanticPipeline(config, databaseB, {
+    worker: workerB,
+    autoStart: false,
+    recover: false,
+  });
+  const model = getPublicSemanticModelManifest()[0];
+  try {
+    const firstDownload = await pipelineA.startModelDownload(model.modelId, {
+      expectedRevision: 1,
+      idempotencyKey: 'semantic-download-old-owner-a',
+    });
+    assert.equal(firstDownload.status, 'downloading');
+    assert.equal(firstDownload.revision, 2);
+    assert.equal(pipelineA.downloads.has(model.modelId), true);
+
+    workerB.downloadedModels.add(model.modelId);
+    const installed = await pipelineB.refreshModelStates();
+    const installedModel = installed.models.find((candidate) => candidate.modelKey === model.modelId);
+    assert.equal(installedModel.status, 'installed');
+    assert.equal(installedModel.revision, 3);
+
+    const removed = await pipelineB.removeModel(model.modelId, { expectedRevision: installedModel.revision });
+    assert.equal(removed.status, 'not-installed');
+    assert.equal(removed.revision, 5);
+    workerB.downloadedModels.delete(model.modelId);
+
+    const replacement = await pipelineB.startModelDownload(model.modelId, {
+      expectedRevision: removed.revision,
+      idempotencyKey: 'semantic-download-new-owner-b',
+    });
+    assert.equal(replacement.status, 'downloading');
+    assert.equal(replacement.revision, 6);
+    assert.equal(pipelineB.downloads.has(model.modelId), true);
+    const beforeStaleRefresh = databaseB.getAssetSemanticModelObservation(model.modelId, model.revision);
+
+    workerA.setModelStatus(model.modelId, {
+      ...notInstalledStatus(model.modelId),
+      state: 'failed',
+      error: { code: 'asset-semantic-old-worker-failed', message: 'old worker failed after replacement' },
+    });
+    await pipelineA.refreshModelStates();
+
+    assert.deepEqual(
+      databaseB.getAssetSemanticModelObservation(model.modelId, model.revision),
+      beforeStaleRefresh,
+      'a stale in-memory task must not own a durable row with another key/revision identity',
+    );
+    assert.equal(pipelineA.downloads.has(model.modelId), true);
+    assert.equal(pipelineB.downloads.has(model.modelId), true);
+  } finally {
+    pipelineB.close();
+    pipelineA.close();
+    await databaseB.close();
+    await databaseA.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('pipeline persists an opt-in caption/OCR/embedding rebuild and searches the promoted project generation', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 't8-semantic-pipeline-'));
@@ -370,7 +1104,8 @@ test('pipeline persists an opt-in caption/OCR/embedding rebuild and searches the
     assert.equal(initial.profile.revision, 0);
     assert.equal(worker.downloadCalls, 0, 'reading status must never download an optional model');
     assert.equal(initial.models.length, 3);
-    assert.equal(initial.models.every((model) => model.status === 'installed'), true);
+    assert.equal(initial.models.every((model) => model.status === 'not-installed' && model.revision === 1), true);
+    assert.equal(database.listAssetSemanticModels().length, 0, 'reading status must not materialize model rows');
 
     const models = Object.fromEntries(getPublicSemanticModelManifest().map((model) => [model.task, model]));
     const profile = await pipeline.setProfile('project-semantic-a', {
@@ -380,6 +1115,7 @@ test('pipeline persists an opt-in caption/OCR/embedding rebuild and searches the
       embedding: { enabled: true, modelKey: models.embedding.modelId, modelVersion: models.embedding.revision },
     }, { expectedRevision: 0, updatedBy: 'test-owner' });
     assert.equal(profile.revision, 1);
+    assert.equal((await pipeline.status('project-semantic-a')).models.every((model) => model.status === 'installed'), true);
 
     const generation = await pipeline.rebuild('project-semantic-a', {
       expectedRevision: profile.revision,
@@ -1053,6 +1789,99 @@ test('background model verification cannot overwrite an explicit delete or downl
   }
 });
 
+test('an aborted verification loses durable authority before its promise settles', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 't8-semantic-aborted-verification-owner-'));
+  const config = testConfig(root);
+  const database = new ProjectDatabase(path.join(root, 'projects.sqlite3'), { autoBackup: false });
+  const model = getPublicSemanticModelManifest().find((candidate) => candidate.task === 'caption');
+  const worker = new DelayedAbortVerificationWorker(model.modelId);
+  const pipeline = new AssetSemanticPipeline(config, database, {
+    worker,
+    autoStart: false,
+    recover: false,
+  });
+  try {
+    const verifying = await pipeline.syncModelState(model.modelId);
+    assert.equal(verifying.status, 'verifying');
+    await worker.verifyStarted;
+
+    const removal = pipeline.removeModel(model.modelId, { expectedRevision: verifying.revision });
+    await worker.abortObserved;
+    const cancelledTask = pipeline.modelVerifications.get(model.modelId);
+    assert.ok(cancelledTask);
+    assert.equal(cancelledTask.controller.signal.aborted, true);
+
+    const refreshed = await pipeline.refreshModelStates();
+    const targetAfterRefresh = database.getAssetSemanticModel(model.modelId, model.revision);
+    assert.equal(targetAfterRefresh.status, 'verifying');
+    assert.equal(targetAfterRefresh.revision, verifying.revision);
+    assert.equal(
+      refreshed.models.find((candidate) => candidate.modelKey === model.modelId).revision,
+      verifying.revision,
+    );
+
+    worker.resolveAbortRelease();
+    const removed = await removal;
+    assert.equal(removed.status, 'not-installed');
+    assert.equal(database.getAssetSemanticModel(model.modelId, model.revision).status, 'not-installed');
+  } finally {
+    worker.resolveAbortRelease();
+    pipeline.close();
+    await database.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a verification observation loses its exact owner token when cancellation wins before commit', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 't8-semantic-verification-owner-toctou-'));
+  const config = testConfig(root);
+  const database = new ProjectDatabase(path.join(root, 'projects.sqlite3'), { autoBackup: false });
+  const model = getPublicSemanticModelManifest().find((candidate) => candidate.task === 'caption');
+  const worker = new DelayedAbortVerificationWorker(model.modelId);
+  const pipeline = new AssetSemanticPipeline(config, database, {
+    worker,
+    autoStart: false,
+    recover: false,
+  });
+  let removal = null;
+  try {
+    const verifying = await pipeline.syncModelState(model.modelId);
+    assert.equal(verifying.status, 'verifying');
+    await worker.verifyStarted;
+    worker.reportFailure = true;
+
+    const observeModelState = pipeline.observeModelState.bind(pipeline);
+    let cancelBeforeCommit = true;
+    pipeline.observeModelState = async (...args) => {
+      const observation = await observeModelState(...args);
+      if (cancelBeforeCommit && args[0] === model.modelId) {
+        cancelBeforeCommit = false;
+        queueMicrotask(() => {
+          removal = pipeline.removeModel(model.modelId, { expectedRevision: verifying.revision });
+        });
+      }
+      return observation;
+    };
+
+    const refreshed = await pipeline.syncModelState(model.modelId);
+    await worker.abortObserved;
+    assert.equal(refreshed.status, 'verifying');
+    assert.equal(refreshed.revision, verifying.revision);
+    assert.equal(database.getAssetSemanticModel(model.modelId, model.revision).revision, verifying.revision);
+
+    worker.resolveAbortRelease();
+    const removed = await removal;
+    assert.equal(removed.status, 'not-installed');
+    assert.equal(database.getAssetSemanticModel(model.modelId, model.revision).status, 'not-installed');
+  } finally {
+    worker.resolveAbortRelease();
+    pipeline.close();
+    if (removal) await removal.catch(() => {});
+    await database.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('a queued cold verification can be cancelled without waiting for an unrelated large-model SHA', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 't8-semantic-queued-verification-cancel-'));
   const config = testConfig(root);
@@ -1347,7 +2176,7 @@ test('model deletion and rebuild race has one atomic winner and never leaves a b
   }
 });
 
-test('model download idempotency survives the revision bump and a pipeline restart', async () => {
+test('model download idempotency survives restart without treating a missing in-memory owner as proof of interruption', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 't8-semantic-model-idempotency-'));
   const config = testConfig(root);
   const database = new ProjectDatabase(path.join(root, 'projects.sqlite3'), { autoBackup: false });
@@ -1404,20 +2233,22 @@ test('model download idempotency survives the revision bump and a pipeline resta
       expectedRevision: initial.revision,
       idempotencyKey: 'model-download/response-loss/request-1',
     });
-    assert.equal(restartReplay.status, 'failed');
-    assert.equal(restartReplay.errorCode, 'asset-semantic-download-interrupted');
+    assert.equal(restartReplay.status, 'downloading');
+    assert.equal(restartReplay.revision, accepted.revision);
+    assert.equal(restartReplay.errorCode, null);
     assert.equal(secondWorker.downloadCalls, 0, 'restart replay returns the persisted operation instead of duplicating it');
     assert.equal(restartReplay.downloadIdempotencyKey, 'model-download/response-loss/request-1');
     assert.equal(restartReplay.downloadRequestRevision, initial.revision);
 
-    const restarted = await secondPipeline.startModelDownload(model.modelId, {
-      expectedRevision: restartReplay.revision,
-      idempotencyKey: 'model-download/explicit-retry/request-2',
-    });
-    assert.equal(restarted.status, 'downloading');
-    assert.equal(secondWorker.downloadCalls, 1);
-    assert.equal(restarted.downloadIdempotencyKey, 'model-download/explicit-retry/request-2');
-    assert.equal(restarted.downloadRequestRevision, restartReplay.revision);
+    await assert.rejects(
+      secondPipeline.startModelDownload(model.modelId, {
+        expectedRevision: accepted.revision,
+        idempotencyKey: 'model-download/explicit-retry/request-2',
+      }),
+      (error) => error.code === 'asset-semantic-model-download-in-progress'
+        && error.current.revision === accepted.revision,
+    );
+    assert.equal(secondWorker.downloadCalls, 0, 'a new key cannot replace a durable operation without owner-death proof');
   } finally {
     firstPipeline.close();
     secondPipeline?.close();

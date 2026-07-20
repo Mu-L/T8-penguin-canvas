@@ -76,16 +76,95 @@ test('Electron bytecode compilation is pinned to the project-local locked runtim
 
 test('Electron does not open the renderer before the packaged backend is ready', () => {
   const main = read('../electron/main.cjs');
-  assert.match(main, /const backendReady = await waitForBackend\(backendPort, 30\)/);
+  assert.match(main, /const backendReady = await waitForBackend\(backendPort, backendInstanceId, 30\)/);
   assert.match(main, /if \(!backendReady\) throw new Error\(`后端未能在端口 \$\{backendPort\} 就绪`\)/);
+  assert.match(main, /const start = await backendModule\?\.serverStartPromise/);
+  assert.match(main, /start\.state !== 'listening'/);
+  assert.match(main, /status\?\.service === 't8-penguin-canvas-backend'/);
+  assert.match(main, /status\?\.instanceId === expectedInstanceId/);
+  assert.match(main, /function shutdownBackendForElectron\(reason = 'ELECTRON_QUIT'\)/);
+  assert.match(main, /const ELECTRON_BACKEND_SHUTDOWN_DEADLINE_MS = 15_000/);
+  assert.match(main, /settleWithinElectronDeadline\(\s+shutdownWork,\s+ELECTRON_BACKEND_SHUTDOWN_DEADLINE_MS,/);
+  assert.match(main, /Electron shutdown deadline reached/);
+  assert.match(main, /const outcome = await backendModule\?\.gracefulShutdown\?\.\(reason\)/);
+  assert.match(main, /bounded shutdown left tracked work deferred; waiting within the Electron cutoff/);
+  assert.match(main, /await backendModule\?\.waitForRuntimeStorageCloseLifecycle\?\.\(\)/);
+  assert.match(main, /await shutdownBackendForElectron\('STARTUP_FAILURE'\)/);
+  assert.match(main, /app\.on\('before-quit', \(event\) => \{/);
+  assert.match(main, /event\.preventDefault\(\)/);
+  assert.match(main, /shutdownBackendForElectron\('ELECTRON_QUIT'\)/);
+  assert.match(main, /electronQuitReady = true;\s+app\.quit\(\);/);
+  assert.match(main, /if \(electronQuitRequested \|\| pendingMainWindow\.isDestroyed\(\)\) return;/);
+  assert.match(main, /app\.whenReady\(\)\.then\(async \(\) => \{\s+if \(!ELECTRON_SINGLE_INSTANCE_OWNER \|\| electronQuitRequested\) return;\s+createLogWindow\(\);/);
   assert.ok(main.indexOf('if (!backendReady)') < main.indexOf('createMainWindow();', main.indexOf('app.whenReady()')));
+});
+
+test('Electron shutdown deadline settles a permanently pending owner without losing fast failures', async () => {
+  const main = read('../electron/main.cjs');
+  const start = main.indexOf('function settleWithinElectronDeadline(');
+  const end = main.indexOf('\n}\n\nfunction shutdownBackendForElectron', start) + 2;
+  assert.ok(start >= 0 && end > start);
+  const settleWithinElectronDeadline = Function(
+    `${main.slice(start, end)}; return settleWithinElectronDeadline;`,
+  )() as (work: Promise<unknown>, timeoutMs: number, onTimeout: () => unknown) => Promise<unknown>;
+
+  assert.equal(await settleWithinElectronDeadline(Promise.resolve('done'), 100, () => 'timeout'), 'done');
+  let timeoutCalls = 0;
+  const timeoutResult = await settleWithinElectronDeadline(new Promise(() => {}), 15, () => {
+    timeoutCalls += 1;
+    return { timedOut: true };
+  });
+  assert.deepEqual(timeoutResult, { timedOut: true });
+  assert.equal(timeoutCalls, 1);
+  await assert.rejects(
+    settleWithinElectronDeadline(Promise.reject(new Error('shutdown failed')), 100, () => null),
+    /shutdown failed/,
+  );
+});
+
+test('Electron injects a persistent host authority only into exact main-window management requests', () => {
+  const main = read('../electron/main.cjs');
+  const preload = read('../electron/preload.cjs');
+  const backendServer = read('../backend/src/server.js');
+  const backendConfig = read('../backend/src/config.js');
+  const vite = read('../vite.config.ts');
+  const ignore = read('../.gitignore');
+
+  assert.match(main, /electronManagementAuthorityPath\(\)[\s\S]*app\.getPath\('userData'\)[\s\S]*collaboration-management-authority\.json/);
+  assert.match(main, /safeStorage\.encryptString\(token\)\.toString\('base64'\)/);
+  assert.match(main, /safeStorage\.decryptString\(Buffer\.from\(record\.tokenEnc, 'base64'\)\)/);
+  assert.match(main, /details\.webContentsId !== webContentsId/);
+  assert.match(main, /isExactLocalCollaborationManagementUrl\(details\.url\)/);
+  assert.match(main, /requestHeaders\[COLLABORATION_MANAGEMENT_HEADER\] = collaborationManagementToken/);
+  const startBackend = main.slice(
+    main.indexOf('async function startBackend()'),
+    main.indexOf('// ---------- 创建主窗口 ----------'),
+  );
+  const injectIndex = startBackend.indexOf('process.env.T8_COLLAB_MANAGEMENT_TOKEN = collaborationManagementToken;');
+  const requireIndex = startBackend.indexOf('backendModule = require(entry);', injectIndex);
+  const clearIndex = startBackend.indexOf('delete process.env.T8_COLLAB_MANAGEMENT_TOKEN;', requireIndex);
+  assert.ok(injectIndex >= 0 && injectIndex < requireIndex && requireIndex < clearIndex);
+  assert.match(startBackend, /try \{\s+backendModule = require\(entry\);\s+\} finally \{\s+delete process\.env\.T8_COLLAB_MANAGEMENT_TOKEN;/);
+  assert.doesNotMatch(startBackend.slice(injectIndex, clearIndex), /\b(?:spawn|execFile|fork)\s*\(/);
+  assert.match(backendServer, /^const config = require\('\.\/config'\);/m);
+  assert.match(backendConfig, /COLLAB_MANAGEMENT_TOKEN: resolveManagementAuthorityToken\(\)/);
+  assert.match(backendConfig, /const injectedRaw = process\.env\.T8_COLLAB_MANAGEMENT_TOKEN;\s+if \(injectedRaw != null\) \{\s+delete process\.env\.T8_COLLAB_MANAGEMENT_TOKEN;/);
+  assert.ok(main.indexOf('installMainWindowManagementAuthority(mainWindow);')
+    < main.indexOf('mainWindow.loadURL(url);'));
+  assert.doesNotMatch(preload, /collaboration-management-token|T8_COLLAB_MANAGEMENT_TOKEN|managementAuthority/i);
+
+  assert.match(vite, /command === 'serve' \? ensureManagementAuthority\(\) : ''/);
+  assert.match(vite, /'\/api\/collaboration': collaborationManagementProxy\(managementToken\)/);
+  assert.match(vite, /proxyRequest\.setHeader\(MANAGEMENT_AUTHORITY_HEADER, token\)/);
+  assert.match(ignore, /^\/\.t8-collaboration-management-authority\.json$/m);
 });
 
 test('Electron package verifies the crash-recovery service used on backend startup', () => {
   const postBuild = read('../electron/_post_build.cjs');
   const server = read('../backend/src/server.js');
   assert.match(postBuild, /services['"], ['"]runRecovery\.t8c/);
-  assert.match(server, /getRunRecoveryManager\(\{\}\)\.recoverPendingRuns\(\)/);
+  assert.match(server, /startupRunRecoveryPromise = runRecoveryManager\.recoverPendingRuns\(\)/);
+  assert.match(server, /shutdownRunRecoveryLifecycle/);
   assert.match(server, /\[run-recovery\] startup failed/);
 });
 
@@ -152,6 +231,9 @@ test('Electron package verifies the intelligent asset center and picker media co
   assert.match(postBuild, /services['"], ['"]modelPreviewRenderer\.t8c/);
   assert.match(postBuild, /services['"], ['"]assetPublicView\.t8c/);
   assert.match(postBuild, /services['"], ['"]projectDatabase\.t8c/);
+  assert.match(postBuild, /services['"], ['"]projectDatabaseMigration23\.t8c/);
+  assert.match(postBuild, /services['"], ['"]projectDatabaseMigration29\.t8c/);
+  assert.match(postBuild, /services['"], ['"]projectDatabaseMigration30\.t8c/);
   assert.match(postBuild, /services['"], ['"]assetBlobStore\.t8c/);
   assert.match(postBuild, /services['"], ['"]assetUploadManager\.t8c/);
   assert.match(postBuild, /collaboration['"], ['"]gateway\.t8c/);

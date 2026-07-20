@@ -16,7 +16,8 @@ export type RunActionKind =
   | 'retry-node-run'
   | 'retry-attempt'
   | 'retry-subflow'
-  | 'run-intent';
+  | 'run-intent'
+  | 'run-intent-auto-approved';
 
 /**
  * A persisted evidence identity. The union deliberately prevents an Attempt
@@ -79,7 +80,7 @@ export interface PrepareRunActionInput {
   diagnosticCoverage?: Partial<Record<RunPreflightDiagnosticDomain, boolean>>;
   cost: RunCostEstimateInput;
   evidenceRefs?: readonly RunEvidenceRefInput[];
-  /** Required for run-intent so the confirmation is bound to one persisted request. */
+  /** Required for every run-intent so authorization binds one persisted request. */
   requestId?: string | null;
   /** Safe SHA-256 projection of the freshly read host capability/asset/policy state. */
   hostContextDigest: string;
@@ -729,7 +730,7 @@ export function prepareRunAction(input: PrepareRunActionInput): RunActionPreview
   validateRequiredEvidence(input.actionKind, evidenceRefs, blockers);
 
   const requestId = typeof input.requestId === 'string' ? input.requestId.trim() : '';
-  if (input.actionKind === 'run-intent' && !requestId) {
+  if ((input.actionKind === 'run-intent' || input.actionKind === 'run-intent-auto-approved') && !requestId) {
     blockers.push(notice('evidence', 'run-intent.request-id-missing', '接受远程运行意图必须绑定精确的请求 ID。'));
   }
 
@@ -755,7 +756,12 @@ export function prepareRunAction(input: PrepareRunActionInput): RunActionPreview
 
   const boundedBlockers = boundedNotices(blockers, 'blocker');
   const boundedWarnings = boundedNotices(warnings, 'warning');
-  const requiresExplicitConfirmation = CONTROLLED_ACTIONS.has(input.actionKind) || boundedWarnings.length > 0;
+  // Advisory diagnostics remain visible in the durable preview, but ordinary
+  // creation runs must not be interrupted for notices such as cost.unknown or
+  // a credential that can only be resolved by the host at dispatch time.
+  // Replay/retry and remote RunIntent actions retain explicit digest-bound
+  // confirmation because they act on historical or remote authority.
+  const requiresExplicitConfirmation = CONTROLLED_ACTIONS.has(input.actionKind);
   const status: RunActionPreviewStatus = boundedBlockers.length
     ? 'blocked'
     : requiresExplicitConfirmation

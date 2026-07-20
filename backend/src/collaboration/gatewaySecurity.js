@@ -4,6 +4,7 @@ const sharp = require('sharp');
 
 const MAX_JSON_DEPTH = 24;
 const MAX_JSON_KEYS = 12_000;
+const MAX_JSON_ASSET_BYTES = 8 * 1024 * 1024;
 const MAX_IMAGE_PIXELS = 100_000_000;
 
 function inspectJsonComplexity(value, limits = {}) {
@@ -24,19 +25,50 @@ function inspectJsonComplexity(value, limits = {}) {
 }
 
 function normalizeAllowedOrigins(value) {
-  const entries = Array.isArray(value) ? value : String(value || '').split(',');
-  return new Set(entries.map((entry) => String(entry).trim().replace(/\/$/, '')).filter(Boolean));
+  let entries;
+  if (typeof value === 'string') entries = value.split(',');
+  else if (value && typeof value[Symbol.iterator] === 'function') entries = Array.from(value);
+  else entries = value == null ? [] : [value];
+  const origins = new Set();
+  for (const entry of entries) {
+    try {
+      const parsed = new URL(String(entry || '').trim());
+      if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.origin === 'null') continue;
+      origins.add(parsed.origin);
+    } catch (_) {
+      // Invalid configured origins fail closed instead of becoming string matches.
+    }
+  }
+  return origins;
 }
 
-function originAllowed(origin, host, configuredOrigins) {
-  if (!origin) return true;
-  try {
-    const parsed = new URL(String(origin));
-    if (parsed.host === String(host || '')) return true;
-    return normalizeAllowedOrigins(configuredOrigins).has(parsed.origin);
-  } catch (_) {
-    return false;
+function buildCollaborationAllowedOrigins(options = {}) {
+  const result = new Set();
+  for (const source of [options.shareUrls, options.configuredOrigins, options.publicBaseUrl]) {
+    for (const origin of normalizeAllowedOrigins(source)) result.add(origin);
   }
+  return result;
+}
+
+function normalizeRequestOrigin(origin) {
+  const raw = String(origin || '').trim();
+  if (!raw || raw === 'null') return null;
+  try {
+    const parsed = new URL(raw);
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.origin === 'null') return null;
+    if ((parsed.pathname && parsed.pathname !== '/') || parsed.search || parsed.hash) return null;
+    return parsed.origin;
+  } catch (_) {
+    return null;
+  }
+}
+
+function originAllowed(origin, allowedOrigins) {
+  // CLI/native clients do not send Origin. They still cross the normal session,
+  // capability and SameSite/CSRF boundaries; browser-supplied Origin is exact-match.
+  if (!origin) return true;
+  const normalized = normalizeRequestOrigin(origin);
+  return Boolean(normalized && normalizeAllowedOrigins(allowedOrigins).has(normalized));
 }
 
 function startsWith(buffer, bytes, offset = 0) {
@@ -58,7 +90,9 @@ function detectBinaryKind(buffer) {
   if (ascii(buffer, 0, 4) === 'OggS' || ascii(buffer, 0, 4) === 'fLaC') return 'audio';
   if (ascii(buffer, 0, 4) === 'glTF') return 'model3d';
   if (ascii(buffer, 0, 18) === 'Kaydara FBX Binary') return 'model3d';
-  if (startsWith(buffer, [0x50, 0x4b, 0x03, 0x04])) return 'archive';
+  if (startsWith(buffer, [0x50, 0x4b, 0x03, 0x04])
+    || startsWith(buffer, [0x50, 0x4b, 0x05, 0x06])
+    || startsWith(buffer, [0x50, 0x4b, 0x07, 0x08])) return 'archive';
   return null;
 }
 
@@ -78,9 +112,21 @@ async function validateUploadedAsset(filename, info) {
   const detected = detectBinaryKind(buffer);
   const extension = String(info?.extension || path.extname(filename).slice(1)).toLowerCase();
   const expectedKind = String(info?.kind || 'other');
+  if (extension === 'zip' || detected === 'archive') {
+    throw new Error('协作上传不接受 ZIP/归档容器；请先解压并上传明确的素材文件');
+  }
   if (expectedKind === 'text') {
+    if (extension === 'json') {
+      const size = Number(fs.statSync(filename).size || 0);
+      if (size > MAX_JSON_ASSET_BYTES) {
+        throw new Error('JSON 素材超过 8 MiB 安全上限');
+      }
+    }
     if (!looksLikeText(buffer)) throw new Error('文件内容不是有效文本');
-    if (extension === 'json') JSON.parse(fs.readFileSync(filename, 'utf8'));
+    if (extension === 'json') {
+      const parsed = JSON.parse(fs.readFileSync(filename, 'utf8'));
+      inspectJsonComplexity(parsed);
+    }
     return { detectedKind: 'text' };
   }
   if (expectedKind === 'image') {
@@ -101,11 +147,14 @@ async function validateUploadedAsset(filename, info) {
 
 module.exports = {
   MAX_IMAGE_PIXELS,
+  MAX_JSON_ASSET_BYTES,
   MAX_JSON_DEPTH,
   MAX_JSON_KEYS,
   detectBinaryKind,
+  buildCollaborationAllowedOrigins,
   inspectJsonComplexity,
   normalizeAllowedOrigins,
+  normalizeRequestOrigin,
   originAllowed,
   validateUploadedAsset,
 };

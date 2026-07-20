@@ -1,0 +1,26 @@
+{
+  "canvasId": "review-board",
+  "projectId": "review-project",
+  "name": "节点审片评论",
+  "updatedAt": 1704067200010,
+  "nodes": [
+    { "id": "video-review-node", "type": "video", "position": { "x": 140, "y": 90 }, "data": { "label": "品牌短片", "duration": 8 } }
+  ],
+  "edges": [],
+  "reviewThreads": [
+    {
+      "id": "thread-video-opening",
+      "canvasRevision": 7,
+      "anchor": { "kind": "node", "nodeId": "video-review-node", "timeMs": 1250, "x": 0.42, "y": 0.31 },
+      "status": "open",
+      "severity": "normal",
+      "createdBy": "reviewer-old",
+      "comments": [
+        { "id": "comment-opening-1", "body": "开场节奏再快一点。", "createdBy": "reviewer-old", "createdAt": 1704067100000 },
+        { "id": "comment-opening-2", "parentId": "comment-opening-1", "body": "收到，会缩短前景停留。", "createdBy": "editor-old", "createdAt": 1704067110000 }
+      ]
+    }
+  ],
+  "viewport": { "x": 0, "y": 0, "zoom": 1.1 },
+  "reviewPanel": { "filter": "open", "sort": "timeline" }
+}

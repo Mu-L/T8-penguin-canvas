@@ -6,6 +6,7 @@ const { Agent, fetch: undiciFetch } = require('undici');
 const config = require('../config');
 const { mimeFromPath, resolveMediaRef } = require('./mediaResolver');
 const { providerTrace } = require('./providerTrace');
+const { safeRemoteMediaFetch } = require('../utils/safeRemoteMediaFetch');
 
 const PROVIDER_ID = 'seedance-nz';
 const BASE_URL = config.ZHENZHEN_SD2_BASE_URL;
@@ -34,6 +35,11 @@ const SEED_AUDIO_SAMPLE_RATES = new Set(['8000', '16000', '24000', '32000', '441
 const IMAGE_REFERENCE_MAX_BYTES = 10 * 1024 * 1024;
 const DEFAULT_UPLOAD_INTERVAL_MS = 6100;
 const DEFAULT_UPLOAD_CACHE_TTL_MS = 20 * 60 * 60 * 1000;
+const DEFAULT_PROVIDER_RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
+const DEFAULT_PROVIDER_DEADLINE_MS = 30 * 1000;
+const DEFAULT_PROVIDER_IDLE_TIMEOUT_MS = 10 * 1000;
+const SAFE_DIAGNOSTIC_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:@/+\-]{0,159}$/;
+const SENSITIVE_DIAGNOSTIC_TOKEN = /(?:api[-_]?key|authorization|cookie|token|secret|password|credential)/i;
 
 // api.seedance.nz currently serves the new Let's Encrypt Generation Y chain.
 // Electron's Node 20 CA bundle predates Root YR, so trust the official pinned
@@ -78,6 +84,7 @@ const seedanceDispatcher = new Agent({
 
 const uploadCache = new Map();
 const uploadQueues = new Map();
+const responseBoundaries = new WeakMap();
 
 function secureFetch(url, init = {}) {
   return undiciFetch(url, { ...init, dispatcher: seedanceDispatcher });
@@ -93,6 +100,309 @@ function cleanBaseUrl(value) {
 
 function hashKey(value) {
   return crypto.createHash('sha256').update(String(value || '')).digest('hex').slice(0, 20);
+}
+
+function boundedPositiveInteger(value, fallback, max = Number.MAX_SAFE_INTEGER) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(max, Math.max(1, Math.trunc(parsed)));
+}
+
+function providerBoundaryOptions(options = {}) {
+  return {
+    maxResponseBytes: boundedPositiveInteger(
+      options.providerMaxResponseBytes ?? options.maxResponseBytes,
+      DEFAULT_PROVIDER_RESPONSE_MAX_BYTES,
+      64 * 1024 * 1024,
+    ),
+    deadlineMs: boundedPositiveInteger(
+      options.providerDeadlineMs ?? options.deadlineMs,
+      DEFAULT_PROVIDER_DEADLINE_MS,
+      10 * 60 * 1000,
+    ),
+    idleTimeoutMs: boundedPositiveInteger(
+      options.providerIdleTimeoutMs ?? options.idleTimeoutMs,
+      DEFAULT_PROVIDER_IDLE_TIMEOUT_MS,
+      10 * 60 * 1000,
+    ),
+  };
+}
+
+function headerValue(headers, name) {
+  if (!headers) return '';
+  if (typeof headers.get === 'function') return String(headers.get(name) || '').trim();
+  const normalized = String(name).toLowerCase();
+  if (Array.isArray(headers)) {
+    const entry = headers.find(([key]) => String(key).toLowerCase() === normalized);
+    return String(entry?.[1] || '').trim();
+  }
+  const entry = Object.entries(headers).find(([key]) => key.toLowerCase() === normalized);
+  return String(entry?.[1] || '').trim();
+}
+
+function sensitiveValuesFromInit(init = {}) {
+  const values = [];
+  for (const name of ['authorization', 'x-api-key', 'api-key']) {
+    const value = headerValue(init.headers, name);
+    if (!value) continue;
+    values.push(value);
+    const withoutScheme = value.replace(/^(?:bearer|basic)\s+/i, '').trim();
+    if (withoutScheme) values.push(withoutScheme);
+  }
+  return [...new Set(values.filter((value) => value.length >= 4))];
+}
+
+function containsSensitiveValue(value, sensitiveValues = []) {
+  const text = String(value || '');
+  return sensitiveValues.some((sensitive) => sensitive && text.includes(sensitive));
+}
+
+function safeDiagnosticToken(value, sensitiveValues = []) {
+  const text = String(value || '').trim();
+  if (!SAFE_DIAGNOSTIC_TOKEN.test(text)) return '';
+  if (SENSITIVE_DIAGNOSTIC_TOKEN.test(text)) return '';
+  if (containsSensitiveValue(text, sensitiveValues)) return '';
+  return text;
+}
+
+function safeUsageValue(value, depth = 0) {
+  if (depth > 4) return undefined;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const output = {};
+  for (const [key, item] of Object.entries(value).slice(0, 40)) {
+    if (!/^[A-Za-z0-9_.-]{1,64}$/.test(key) || SENSITIVE_DIAGNOSTIC_TOKEN.test(key)) continue;
+    const safeValue = safeUsageValue(item, depth + 1);
+    if (safeValue !== undefined) output[key] = safeValue;
+  }
+  return Object.keys(output).length ? output : undefined;
+}
+
+function safeProviderTrace(response, data, extra = {}) {
+  const unsafe = providerTrace(response, data, extra);
+  const boundary = responseBoundaries.get(response);
+  const sensitiveValues = boundary?.sensitiveValues || [];
+  const requestId = safeDiagnosticToken(unsafe.requestId, sensitiveValues);
+  const usage = safeUsageValue(unsafe.usage);
+  return {
+    ...(unsafe.upstreamHttpStatus ? { upstreamHttpStatus: unsafe.upstreamHttpStatus } : {}),
+    ...(requestId ? { requestId } : {}),
+    ...(usage ? { usage } : {}),
+    ...(unsafe.pollCount !== undefined ? { pollCount: unsafe.pollCount } : {}),
+  };
+}
+
+function safeUpstreamCode(data, sensitiveValues = []) {
+  const candidates = [data?.error?.code, data?.code, data?.error_code, data?.errorCode];
+  for (const candidate of candidates) {
+    const code = safeDiagnosticToken(candidate, sensitiveValues);
+    if (code) return code;
+  }
+  return '';
+}
+
+function boundaryError(message, code, status, trace = {}) {
+  const error = new Error(message);
+  error.code = code;
+  error.status = status;
+  Object.assign(error, trace);
+  return error;
+}
+
+function upstreamTimeoutError(label, response) {
+  return boundaryError(
+    `${label}上游响应超时`,
+    'SEEDANCE_UPSTREAM_TIMEOUT',
+    504,
+    response ? safeProviderTrace(response, {}) : {},
+  );
+}
+
+function upstreamUnavailableError(label, response) {
+  return boundaryError(
+    `${label}上游暂时不可用`,
+    'SEEDANCE_UPSTREAM_UNAVAILABLE',
+    502,
+    response ? safeProviderTrace(response, {}) : {},
+  );
+}
+
+function responseTooLargeError(label, response, maxBytes) {
+  const error = boundaryError(
+    `${label}响应超过大小上限`,
+    'SEEDANCE_RESPONSE_TOO_LARGE',
+    502,
+    response ? safeProviderTrace(response, {}) : {},
+  );
+  error.maxBytes = maxBytes;
+  return error;
+}
+
+function invalidResponseError(label, response, body) {
+  const error = boundaryError(
+    `${label}返回无效响应`,
+    'SEEDANCE_INVALID_RESPONSE',
+    502,
+    response ? safeProviderTrace(response, {}) : {},
+  );
+  if (body) error.bodyDigest = `sha256:${crypto.createHash('sha256').update(body).digest('hex').slice(0, 16)}`;
+  return error;
+}
+
+function cancelBodyReader(reader, reason) {
+  try {
+    const cancellation = reader?.cancel?.(reason);
+    Promise.resolve(cancellation).catch(() => {});
+  } catch {}
+}
+
+function finishResponseBoundary(boundary) {
+  if (!boundary || boundary.finished) return;
+  boundary.finished = true;
+  boundary.cleanup?.();
+}
+
+async function fetchProviderResponse(fetchImpl, url, init = {}, options = {}, label = 'seedance.nz 请求') {
+  const limits = providerBoundaryOptions(options);
+  const controller = new AbortController();
+  const externalSignal = init?.signal;
+  let externalAborted = externalSignal?.aborted === true;
+  const forwardAbort = () => {
+    externalAborted = true;
+    controller.abort();
+  };
+  if (externalSignal?.addEventListener) {
+    if (externalAborted) controller.abort();
+    else externalSignal.addEventListener('abort', forwardAbort, { once: true });
+  }
+
+  const boundary = {
+    controller,
+    deadlineAt: Date.now() + limits.deadlineMs,
+    idleTimeoutMs: limits.idleTimeoutMs,
+    maxResponseBytes: limits.maxResponseBytes,
+    sensitiveValues: sensitiveValuesFromInit(init),
+    cleanup: () => externalSignal?.removeEventListener?.('abort', forwardAbort),
+    finished: false,
+  };
+  let timer;
+  let timedOut = false;
+  try {
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+        reject(upstreamTimeoutError(label));
+      }, limits.deadlineMs);
+    });
+    const response = await Promise.race([
+      Promise.resolve().then(() => fetchImpl(url, { ...init, signal: controller.signal })),
+      timeout,
+    ]);
+    if (!response || typeof response !== 'object') {
+      finishResponseBoundary(boundary);
+      throw invalidResponseError(label);
+    }
+    responseBoundaries.set(response, boundary);
+    return response;
+  } catch (error) {
+    finishResponseBoundary(boundary);
+    if (timedOut || error?.code === 'SEEDANCE_UPSTREAM_TIMEOUT') throw upstreamTimeoutError(label);
+    if (error?.code?.startsWith?.('SEEDANCE_')) throw error;
+    if (externalAborted) {
+      throw boundaryError(`${label}已取消`, 'SEEDANCE_REQUEST_ABORTED', 499);
+    }
+    throw upstreamUnavailableError(label);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function readBoundedResponse(response, label, maxBytesOverride) {
+  const boundary = responseBoundaries.get(response) || {
+    deadlineAt: Date.now() + DEFAULT_PROVIDER_DEADLINE_MS,
+    idleTimeoutMs: DEFAULT_PROVIDER_IDLE_TIMEOUT_MS,
+    maxResponseBytes: DEFAULT_PROVIDER_RESPONSE_MAX_BYTES,
+    sensitiveValues: [],
+    finished: false,
+  };
+  const maxBytes = boundedPositiveInteger(maxBytesOverride, boundary.maxResponseBytes, 64 * 1024 * 1024);
+  const rawAdvertisedLength = response?.headers?.get?.('content-length');
+  const advertisedLength = rawAdvertisedLength === null || rawAdvertisedLength === undefined || rawAdvertisedLength === ''
+    ? null
+    : Number(rawAdvertisedLength);
+  const contentEncoding = String(response?.headers?.get?.('content-encoding') || '').trim().toLowerCase();
+  const identityEncoded = !contentEncoding || contentEncoding === 'identity';
+  const reader = response?.body?.getReader?.();
+
+  if (advertisedLength !== null && (!Number.isSafeInteger(advertisedLength) || advertisedLength < 0)) {
+    cancelBodyReader(reader, 'invalid content length');
+    boundary.controller?.abort();
+    finishResponseBoundary(boundary);
+    throw invalidResponseError(label, response);
+  }
+  if (identityEncoded && Number.isFinite(advertisedLength) && advertisedLength >= 0 && advertisedLength > maxBytes) {
+    cancelBodyReader(reader, 'response too large');
+    boundary.controller?.abort();
+    finishResponseBoundary(boundary);
+    throw responseTooLargeError(label, response, maxBytes);
+  }
+  if (!reader) {
+    finishResponseBoundary(boundary);
+    if (advertisedLength > 0) throw invalidResponseError(label, response);
+    return Buffer.alloc(0);
+  }
+
+  const chunks = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const remainingMs = boundary.deadlineAt - Date.now();
+      if (remainingMs <= 0) throw upstreamTimeoutError(label, response);
+      const waitMs = Math.max(1, Math.min(boundary.idleTimeoutMs, remainingMs));
+      let timer;
+      let timedOut = false;
+      let result;
+      try {
+        result = await Promise.race([
+          reader.read(),
+          new Promise((_, reject) => {
+            timer = setTimeout(() => {
+              timedOut = true;
+              boundary.controller?.abort();
+              reject(upstreamTimeoutError(label, response));
+            }, waitMs);
+          }),
+        ]);
+      } catch (error) {
+        if (timedOut || error?.code === 'SEEDANCE_UPSTREAM_TIMEOUT') throw upstreamTimeoutError(label, response);
+        if (error?.code?.startsWith?.('SEEDANCE_')) throw error;
+        throw upstreamUnavailableError(label, response);
+      } finally {
+        clearTimeout(timer);
+      }
+      if (result.done) break;
+      const chunk = result.value;
+      if (!ArrayBuffer.isView(chunk)) throw invalidResponseError(label, response);
+      const byteLength = Number(chunk?.byteLength ?? chunk?.length ?? 0);
+      if (!Number.isFinite(byteLength) || byteLength < 0) throw invalidResponseError(label, response);
+      if (totalBytes + byteLength > maxBytes) throw responseTooLargeError(label, response, maxBytes);
+      if (byteLength > 0) {
+        chunks.push(Buffer.from(chunk.buffer, chunk.byteOffset || 0, byteLength));
+        totalBytes += byteLength;
+      }
+    }
+    if (identityEncoded && Number.isFinite(advertisedLength) && advertisedLength >= 0 && totalBytes !== advertisedLength) {
+      throw invalidResponseError(label, response);
+    }
+    return Buffer.concat(chunks, totalBytes);
+  } catch (error) {
+    cancelBodyReader(reader, error?.code || 'response rejected');
+    boundary.controller?.abort();
+    throw error;
+  } finally {
+    finishResponseBoundary(boundary);
+  }
 }
 
 function normalizeList(value) {
@@ -203,21 +513,6 @@ function ensureMediaLimits(taskType, request) {
   if (audioCount > 3) throw new Error('multi 任务最多支持 3 个音频');
 }
 
-function isPublicRemoteUrl(value) {
-  try {
-    const parsed = new URL(String(value || ''));
-    if (!['http:', 'https:'].includes(parsed.protocol)) return false;
-    const host = parsed.hostname.toLowerCase();
-    if (host === 'localhost' || host === '::1' || host.endsWith('.local')) return false;
-    if (/^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)) return false;
-    const private172 = host.match(/^172\.(\d+)\./);
-    if (private172 && Number(private172[1]) >= 16 && Number(private172[1]) <= 31) return false;
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function defaultMime(kind) {
   if (kind === 'image') return 'image/png';
   if (kind === 'video') return 'video/mp4';
@@ -246,37 +541,97 @@ function maxBytesForKind(kind) {
 function ensureSize(buffer, kind, maxBytes) {
   const max = Number(maxBytes) || maxBytesForKind(kind);
   if (buffer.length > max) {
-    throw new Error(`${kind === 'image' ? '图片' : kind === 'video' ? '视频' : '音频'}超过 seedance.nz ${max / 1024 / 1024}MB 上限`);
+    throw mediaTooLargeError(kind, max);
   }
 }
 
+function mediaTooLargeError(kind, maxBytes) {
+  const error = new Error(`${kind === 'image' ? '图片' : kind === 'video' ? '视频' : '音频'}超过 seedance.nz ${maxBytes / 1024 / 1024}MB 上限`);
+  error.code = 'SEEDANCE_MEDIA_TOO_LARGE';
+  error.status = 413;
+  error.maxBytes = maxBytes;
+  return error;
+}
+
+function readBoundedLocalFile(filePath, kind, maxBytes) {
+  const descriptor = fs.openSync(filePath, 'r');
+  try {
+    const size = fs.fstatSync(descriptor).size;
+    if (!Number.isSafeInteger(size) || size < 0 || size > maxBytes) throw mediaTooLargeError(kind, maxBytes);
+    const buffer = Buffer.allocUnsafe(size);
+    let offset = 0;
+    while (offset < size) {
+      const bytesRead = fs.readSync(descriptor, buffer, offset, size - offset, offset);
+      if (bytesRead <= 0) break;
+      offset += bytesRead;
+    }
+    const probe = Buffer.allocUnsafe(1);
+    if (fs.readSync(descriptor, probe, 0, 1, offset) > 0) throw mediaTooLargeError(kind, maxBytes);
+    return offset === size ? buffer : buffer.subarray(0, offset);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+function normalizeRemoteMediaError(error, kind, maxBytes) {
+  if (error?.code === 'item_too_large') return mediaTooLargeError(kind, maxBytes);
+  if (error?.code === 'fetch_timeout') {
+    return boundaryError(`读取待上传${kind}上游响应超时`, 'SEEDANCE_UPSTREAM_TIMEOUT', 504);
+  }
+  if (error?.code === 'private_address' || error?.code === 'url_credentials_forbidden') {
+    return boundaryError(`待上传${kind}远程地址未通过安全校验`, 'SEEDANCE_REMOTE_MEDIA_BLOCKED', 400);
+  }
+  if (error?.code === 'invalid_url' || error?.code === 'invalid_protocol') {
+    return boundaryError(`待上传${kind}远程地址无效`, 'SEEDANCE_REMOTE_MEDIA_INVALID', 400);
+  }
+  const remoteStatus = Number(error?.status);
+  if (error?.code === 'remote_http_error' && Number.isInteger(remoteStatus)) {
+    return boundaryError(`读取待上传${kind}失败（HTTP ${remoteStatus}）`, 'SEEDANCE_REMOTE_MEDIA_HTTP_ERROR', remoteStatus);
+  }
+  return boundaryError(`读取待上传${kind}失败`, 'SEEDANCE_REMOTE_MEDIA_UNAVAILABLE', 502);
+}
+
 async function responseJson(response, label) {
-  const text = await response.text();
+  const body = await readBoundedResponse(response, label);
+  const text = body.toString('utf8');
   if (!text.trim()) return {};
   try {
     return JSON.parse(text);
   } catch {
-    throw new Error(`${label} 返回非 JSON：HTTP ${response.status} · ${text.replace(/\s+/g, ' ').slice(0, 180)}`);
+    throw invalidResponseError(label, response, body);
   }
-}
-
-function upstreamError(data, status) {
-  return String(
-    data?.error?.message
-    || data?.error
-    || data?.message
-    || data?.detail
-    || `seedance.nz HTTP ${status}`,
-  );
 }
 
 function createUpstreamError(data, responseOrStatus) {
   const response = responseOrStatus && typeof responseOrStatus === 'object' ? responseOrStatus : null;
-  const status = Number(response?.status ?? responseOrStatus);
-  const error = new Error(upstreamError(data, status));
-  error.status = status;
-  Object.assign(error, providerTrace(response, data));
+  const rawStatus = Number(response?.status ?? responseOrStatus);
+  const status = Number.isInteger(rawStatus) && rawStatus >= 400 && rawStatus <= 599 ? rawStatus : 502;
+  const trace = response ? safeProviderTrace(response, data) : {};
+  const sensitiveValues = responseBoundaries.get(response)?.sensitiveValues || [];
+  const upstreamCode = safeUpstreamCode(data, sensitiveValues);
+  const error = boundaryError(
+    `seedance.nz 上游请求失败（HTTP ${status}）`,
+    'SEEDANCE_UPSTREAM_ERROR',
+    status,
+    trace,
+  );
+  if (upstreamCode) error.upstreamCode = upstreamCode;
   return error;
+}
+
+function safeProgress(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.min(100, value));
+  const text = String(value ?? '').trim();
+  return /^\d{1,3}%?$/.test(text) ? text.slice(0, 4) : '';
+}
+
+function requiredTaskId(value, label, response) {
+  const taskId = String(value || '').trim();
+  const sensitiveValues = responseBoundaries.get(response)?.sensitiveValues || [];
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:\-]{0,255}$/.test(taskId) || containsSensitiveValue(taskId, sensitiveValues)) {
+    throw invalidResponseError(label, response);
+  }
+  return taskId;
 }
 
 function uploadUrlFromResponse(data) {
@@ -315,11 +670,16 @@ async function withUploadQueue(apiKey, intervalMs, task) {
   }
 }
 
-async function mediaBuffer(source, kind, fetchImpl, maxBytes) {
+async function mediaBuffer(source, kind, maxBytes, options = {}) {
   const text = String(source || '').trim();
   const dataMatch = text.match(/^data:([^;,]+);base64,(.+)$/i);
   if (dataMatch) {
-    const buffer = Buffer.from(dataMatch[2], 'base64');
+    const max = Number(maxBytes) || maxBytesForKind(kind);
+    const encoded = dataMatch[2].replace(/\s+/g, '');
+    const padding = encoded.endsWith('==') ? 2 : encoded.endsWith('=') ? 1 : 0;
+    const decodedBytes = Math.max(0, Math.floor(encoded.length * 3 / 4) - padding);
+    if (decodedBytes > max) throw mediaTooLargeError(kind, max);
+    const buffer = Buffer.from(encoded, 'base64');
     ensureSize(buffer, kind, maxBytes);
     return {
       buffer,
@@ -328,10 +688,21 @@ async function mediaBuffer(source, kind, fetchImpl, maxBytes) {
     };
   }
 
-  const resolved = await resolveMediaRef(text, { target: 'url' });
+  let resolved;
+  try {
+    resolved = await resolveMediaRef(text, { target: 'url' });
+  } catch {
+    throw boundaryError(`待上传${kind}引用无效`, 'SEEDANCE_MEDIA_REFERENCE_INVALID', 400);
+  }
   if (resolved.kind === 'local-path') {
-    const buffer = fs.readFileSync(resolved.path);
-    ensureSize(buffer, kind, maxBytes);
+    const max = Number(maxBytes) || maxBytesForKind(kind);
+    let buffer;
+    try {
+      buffer = readBoundedLocalFile(resolved.path, kind, max);
+    } catch (error) {
+      if (error?.code === 'SEEDANCE_MEDIA_TOO_LARGE') throw error;
+      throw boundaryError(`待上传${kind}本地素材不可用`, 'SEEDANCE_MEDIA_REFERENCE_UNAVAILABLE', 400);
+    }
     return {
       buffer,
       mime: resolved.mime || mimeFromPath(resolved.path, defaultMime(kind)),
@@ -339,14 +710,28 @@ async function mediaBuffer(source, kind, fetchImpl, maxBytes) {
     };
   }
 
-  const response = await fetchImpl(resolved.url);
-  if (!response.ok) throw new Error(`读取待上传${kind}失败：HTTP ${response.status}`);
-  const buffer = Buffer.from(await response.arrayBuffer());
-  ensureSize(buffer, kind, maxBytes);
-  const mime = String(response.headers?.get?.('content-type') || defaultMime(kind)).split(';')[0];
+  const max = Number(maxBytes) || maxBytesForKind(kind);
+  const limits = providerBoundaryOptions(options);
+  let remote;
+  try {
+    remote = await safeRemoteMediaFetch(resolved.url, {
+      protocols: ['http:', 'https:'],
+      maxBytes: max,
+      deadlineMs: limits.deadlineMs,
+      idleTimeoutMs: limits.idleTimeoutMs,
+      maxRedirects: options.remoteMaxRedirects,
+      lookupImpl: options.lookupImpl,
+      allowPrivateForTests: options.allowPrivateForTests,
+    });
+  } catch (error) {
+    throw normalizeRemoteMediaError(error, kind, max);
+  }
+  const buffer = remote.buffer;
+  const rawMime = String(remote.contentType || defaultMime(kind)).split(';')[0].trim().toLowerCase();
+  const mime = /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(rawMime) ? rawMime : 'application/octet-stream';
   let fileName = `seedance-${kind}${extensionFromMime(mime, kind)}`;
   try {
-    const remoteName = path.basename(new URL(resolved.url).pathname);
+    const remoteName = path.basename(new URL(remote.finalUrl).pathname).slice(0, 180);
     if (remoteName) fileName = remoteName;
   } catch {}
   return { buffer, mime, fileName };
@@ -355,7 +740,6 @@ async function mediaBuffer(source, kind, fetchImpl, maxBytes) {
 async function uploadMedia(source, kind, apiKey, options = {}) {
   const text = String(source || '').trim();
   if (!text) throw new Error(`待上传${kind}为空`);
-  if (isPublicRemoteUrl(text)) return text;
 
   const fetchImpl = getFetchImpl(options);
   const baseUrl = cleanBaseUrl(options.baseUrl);
@@ -366,20 +750,20 @@ async function uploadMedia(source, kind, apiKey, options = {}) {
   if (cached && Date.now() - cached.createdAt < ttlMs) return cached.promise;
 
   const promise = withUploadQueue(apiKey, intervalMs, async () => {
-    const file = await mediaBuffer(text, kind, fetchImpl, options.maxBytes);
+    const file = await mediaBuffer(text, kind, options.maxBytes, options);
     if (Array.isArray(options.allowedMimes) && !options.allowedMimes.includes(String(file.mime || '').toLowerCase())) {
-      throw new Error(`seedance.nz 不支持该${kind}格式：${file.mime || 'unknown'}`);
+      throw new Error(`seedance.nz 不支持该${kind}格式`);
     }
     let lastError;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         const form = new FormData();
         form.append('file', new Blob([file.buffer], { type: file.mime }), file.fileName);
-        const response = await fetchImpl(`${baseUrl}/v1/files/upload`, {
+        const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/files/upload`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${apiKey}` },
           body: form,
-        });
+        }, options, 'seedance.nz 文件上传');
         const data = await responseJson(response, 'seedance.nz 文件上传');
         if (!response.ok) {
           throw createUpstreamError(data, response);
@@ -550,13 +934,10 @@ async function buildWanPayload(request, apiKey, options = {}) {
     throw new Error('Wan 2.7 Spicy 分辨率只支持 720p 或 1080p');
   }
   const audioUrl = String(request.audio_url || request.audioUrl || '').trim();
-  if (audioUrl && !/^https?:\/\//i.test(audioUrl)) {
-    throw new Error('Wan 2.7 Spicy audio_url 必须是 http(s) 公网 URL');
-  }
 
   const metadata = { resolution };
   if (negativePrompt) metadata.negative_prompt = negativePrompt;
-  if (audioUrl) metadata.audio_url = audioUrl;
+  if (audioUrl) metadata.audio_url = await uploadMedia(audioUrl, 'audio', apiKey, options);
   if (request.prompt_extend === true || request.promptExtend === true) metadata.prompt_extend = true;
   const seed = request.seed === undefined || request.seed === null || request.seed === ''
     ? -1
@@ -623,19 +1004,18 @@ async function submitHappyHorseTask(request, apiKey, options = {}) {
   const fetchImpl = getFetchImpl(options);
   const baseUrl = cleanBaseUrl(options.baseUrl);
   const built = await buildHappyHorsePayload(request, apiKey, options);
-  const response = await fetchImpl(`${baseUrl}/v1/videos`, {
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/videos`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(built.payload),
-  });
+  }, options, 'seedance.nz Happy Horse 任务提交');
   const data = await responseJson(response, 'seedance.nz Happy Horse 任务提交');
   if (!response.ok) throw createUpstreamError(data, response);
-  const taskId = String(data?.id || data?.task_id || data?.data?.id || '').trim();
-  if (!taskId) throw new Error('seedance.nz Happy Horse 未返回任务 ID');
-  return { taskId, model: built.model, taskType: built.taskType, raw: data, ...providerTrace(response, data, { pollCount: 0 }) };
+  const taskId = requiredTaskId(data?.id || data?.task_id || data?.data?.id, 'seedance.nz Happy Horse 任务提交', response);
+  return { taskId, model: built.model, taskType: built.taskType, ...safeProviderTrace(response, data, { pollCount: 0 }) };
 }
 
 async function submitWanTask(request, apiKey, options = {}) {
@@ -643,19 +1023,18 @@ async function submitWanTask(request, apiKey, options = {}) {
   const fetchImpl = getFetchImpl(options);
   const baseUrl = cleanBaseUrl(options.baseUrl);
   const built = await buildWanPayload(request, apiKey, options);
-  const response = await fetchImpl(`${baseUrl}/v1/videos`, {
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/videos`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(built.payload),
-  });
+  }, options, 'seedance.nz Wan 2.7 Spicy 任务提交');
   const data = await responseJson(response, 'seedance.nz Wan 2.7 Spicy 任务提交');
   if (!response.ok) throw createUpstreamError(data, response);
-  const taskId = String(data?.id || data?.task_id || data?.data?.id || '').trim();
-  if (!taskId) throw new Error('seedance.nz Wan 2.7 Spicy 未返回任务 ID');
-  return { taskId, model: built.model, taskType: built.taskType, raw: data, ...providerTrace(response, data, { pollCount: 0 }) };
+  const taskId = requiredTaskId(data?.id || data?.task_id || data?.data?.id, 'seedance.nz Wan 2.7 Spicy 任务提交', response);
+  return { taskId, model: built.model, taskType: built.taskType, ...safeProviderTrace(response, data, { pollCount: 0 }) };
 }
 
 async function buildAudioPayload(request, apiKey, options = {}) {
@@ -707,28 +1086,27 @@ async function submitAudioTask(request, apiKey, options = {}) {
   const fetchImpl = getFetchImpl(options);
   const baseUrl = cleanBaseUrl(options.baseUrl);
   const built = await buildAudioPayload(request, apiKey, options);
-  const response = await fetchImpl(`${baseUrl}/v1/audio/generations`, {
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/audio/generations`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(built.payload),
-  });
+  }, options, 'seedance.nz Seed Audio 任务提交');
   const data = await responseJson(response, 'seedance.nz Seed Audio 任务提交');
   if (!response.ok) throw createUpstreamError(data, response);
-  const taskId = String(data?.task_id || data?.id || data?.data?.task_id || '').trim();
-  if (!taskId) throw new Error('seedance.nz Seed Audio 未返回任务 ID');
-  return { taskId, model: built.model, raw: data, ...providerTrace(response, data, { pollCount: 0 }) };
+  const taskId = requiredTaskId(data?.task_id || data?.id || data?.data?.task_id, 'seedance.nz Seed Audio 任务提交', response);
+  return { taskId, model: built.model, ...safeProviderTrace(response, data, { pollCount: 0 }) };
 }
 
 async function queryAudioTask(taskId, apiKey, options = {}) {
   if (!String(apiKey || '').trim()) throw new Error('缺少贞贞的平价AI工坊（国内） API Key');
   const fetchImpl = getFetchImpl(options);
   const baseUrl = cleanBaseUrl(options.baseUrl);
-  const response = await fetchImpl(`${baseUrl}/v1/audio/generations/${encodeURIComponent(taskId)}`, {
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/audio/generations/${encodeURIComponent(taskId)}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
-  });
+  }, options, 'seedance.nz Seed Audio 任务查询');
   const data = await responseJson(response, 'seedance.nz Seed Audio 任务查询');
   if (!response.ok) throw createUpstreamError(data, response);
   const record = data?.data && typeof data.data === 'object' ? data.data : data;
@@ -740,13 +1118,10 @@ async function queryAudioTask(taskId, apiKey, options = {}) {
     : '';
   return {
     status,
-    progress: record?.progress ?? data?.progress ?? '',
+    progress: safeProgress(record?.progress ?? data?.progress),
     audioUrl: audioUrl || null,
-    failReason: status === 'failed'
-      ? String(record?.fail_reason || record?.error?.message || record?.error || data?.message || 'Seed Audio 任务失败')
-      : null,
-    raw: data,
-    ...providerTrace(response, data),
+    failReason: status === 'failed' ? 'Seed Audio 任务失败' : null,
+    ...safeProviderTrace(response, data),
   };
 }
 
@@ -755,19 +1130,22 @@ async function submitImageTask(request, apiKey, options = {}) {
   const fetchImpl = getFetchImpl(options);
   const baseUrl = cleanBaseUrl(options.baseUrl);
   const built = await buildImagePayload(request, apiKey, options);
-  const response = await fetchImpl(`${baseUrl}/v1/image/generations`, {
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/image/generations`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(built.payload),
-  });
+  }, options, 'seedance.nz Seedream 任务提交');
   const data = await responseJson(response, 'seedance.nz Seedream 任务提交');
   if (!response.ok) throw createUpstreamError(data, response);
-  const taskId = String(data?.task_id || data?.id || data?.data?.task_id || data?.data?.id || '').trim();
-  if (!taskId) throw new Error('seedance.nz Seedream 未返回任务 ID');
-  return { taskId, model: built.model, taskType: built.taskType, raw: data, ...providerTrace(response, data, { pollCount: 0 }) };
+  const taskId = requiredTaskId(
+    data?.task_id || data?.id || data?.data?.task_id || data?.data?.id,
+    'seedance.nz Seedream 任务提交',
+    response,
+  );
+  return { taskId, model: built.model, taskType: built.taskType, ...safeProviderTrace(response, data, { pollCount: 0 }) };
 }
 
 function normalizeImageTaskStatus(value) {
@@ -782,9 +1160,9 @@ async function queryImageTask(taskId, apiKey, options = {}) {
   if (!String(apiKey || '').trim()) throw new Error('缺少贞贞的平价AI工坊（国内） API Key');
   const fetchImpl = getFetchImpl(options);
   const baseUrl = cleanBaseUrl(options.baseUrl);
-  const response = await fetchImpl(`${baseUrl}/v1/image/generations/${encodeURIComponent(taskId)}`, {
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/image/generations/${encodeURIComponent(taskId)}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
-  });
+  }, options, 'seedance.nz Seedream 任务查询');
   const data = await responseJson(response, 'seedance.nz Seedream 任务查询');
   if (!response.ok) throw createUpstreamError(data, response);
   const record = data?.data && typeof data.data === 'object' ? data.data : data;
@@ -795,13 +1173,10 @@ async function queryImageTask(taskId, apiKey, options = {}) {
     : '';
   return {
     status,
-    progress: record?.progress ?? data?.progress ?? '',
+    progress: safeProgress(record?.progress ?? data?.progress),
     imageUrl: imageUrl || null,
-    failReason: status === 'failed'
-      ? String(record?.fail_reason || record?.error?.message || record?.error || data?.message || 'Seedream 任务失败')
-      : null,
-    raw: data,
-    ...providerTrace(response, data),
+    failReason: status === 'failed' ? 'Seedream 任务失败' : null,
+    ...safeProviderTrace(response, data),
   };
 }
 
@@ -810,19 +1185,18 @@ async function submitTask(request, apiKey, options = {}) {
   const fetchImpl = getFetchImpl(options);
   const baseUrl = cleanBaseUrl(options.baseUrl);
   const built = await buildPayload(request, apiKey, options);
-  const response = await fetchImpl(`${baseUrl}/v1/videos`, {
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/videos`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(built.payload),
-  });
+  }, options, 'seedance.nz 任务提交');
   const data = await responseJson(response, 'seedance.nz 任务提交');
   if (!response.ok) throw createUpstreamError(data, response);
-  const taskId = String(data?.id || data?.task_id || data?.data?.id || '').trim();
-  if (!taskId) throw new Error('seedance.nz 未返回任务 ID');
-  return { taskId, taskType: built.taskType, model: built.model, raw: data, ...providerTrace(response, data, { pollCount: 0 }) };
+  const taskId = requiredTaskId(data?.id || data?.task_id || data?.data?.id, 'seedance.nz 任务提交', response);
+  return { taskId, taskType: built.taskType, model: built.model, ...safeProviderTrace(response, data, { pollCount: 0 }) };
 }
 
 function normalizeStatus(value) {
@@ -837,24 +1211,21 @@ async function queryTask(taskId, apiKey, options = {}) {
   if (!String(apiKey || '').trim()) throw new Error('缺少贞贞的平价AI工坊（国内） API Key');
   const fetchImpl = getFetchImpl(options);
   const baseUrl = cleanBaseUrl(options.baseUrl);
-  const response = await fetchImpl(`${baseUrl}/v1/videos/${encodeURIComponent(taskId)}`, {
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/videos/${encodeURIComponent(taskId)}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
-  });
+  }, options, 'seedance.nz 任务查询');
   const data = await responseJson(response, 'seedance.nz 任务查询');
   if (!response.ok) throw createUpstreamError(data, response);
   const status = normalizeStatus(data?.status || data?.data?.status);
   const metadata = data?.metadata || data?.data?.metadata || {};
   return {
     status,
-    progress: data?.progress ?? data?.data?.progress ?? '',
+    progress: safeProgress(data?.progress ?? data?.data?.progress),
     videoUrl: status === 'succeeded'
       ? String(metadata?.url || data?.url || data?.data?.url || '').trim() || null
       : null,
-    failReason: status === 'failed'
-      ? String(data?.error?.message || data?.error || data?.fail_reason || data?.message || '任务失败')
-      : null,
-    raw: data,
-    ...providerTrace(response, data),
+    failReason: status === 'failed' ? 'Seedance 任务失败' : null,
+    ...safeProviderTrace(response, data),
   };
 }
 

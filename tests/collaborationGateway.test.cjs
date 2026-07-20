@@ -500,23 +500,29 @@ test('collaboration Agent tools require a session, force scope, honor asset ACL,
   });
 });
 
-test('corrupt collaboration models stay indexed but never enter the preview queue', async () => {
-  await withGateway(async ({ baseUrl, gateway, database }) => {
-    let enqueueCalls = 0;
-    gateway.previewPipeline = { enqueueAsset() { enqueueCalls += 1; throw new Error('corrupt asset must not enqueue'); } };
+test('legacy multipart uploads fail closed before concurrent oversized bodies can land on disk', async () => {
+  await withGateway(async ({ baseUrl, gateway, input }) => {
     const editor = await redeem(baseUrl, gateway, 'editor', '上传者');
-    const form = new FormData();
-    form.append('file', new Blob(['#'.repeat(1_048_577)], { type: 'model/obj' }), 'oversized-line.obj');
-    const response = await fetch(`${baseUrl}/api/collab/assets/upload`, {
-      method: 'POST', headers: { cookie: editor.cookie }, body: form,
-    });
-    const payload = await response.json();
-    assert.equal(response.status, 201, JSON.stringify(payload));
-    assert.equal(payload.data.availability, 'corrupt');
-    assert.equal(payload.data.metadata.health, 'corrupt');
-    assert.equal(payload.data.metadata.previewStatus, 'failed');
-    assert.equal(enqueueCalls, 0);
-    assert.equal(database.listAssetPreviewJobs({ assetId: payload.data.id }).length, 0);
+    gateway.uploadManager.maxUploadBytes = 1024;
+    const responses = await Promise.all(Array.from({ length: 4 }, async (_, index) => {
+      const form = new FormData();
+      form.append(
+        'file',
+        new Blob([Buffer.alloc(64 * 1024, index + 1)], { type: 'application/octet-stream' }),
+        `oversized-${index}.bin`,
+      );
+      const response = await fetch(`${baseUrl}/api/collab/assets/upload`, {
+        method: 'POST', headers: { cookie: editor.cookie }, body: form,
+      });
+      return { response, payload: await response.json() };
+    }));
+    for (const result of responses) {
+      assert.equal(result.response.status, 410, JSON.stringify(result.payload));
+      assert.equal(result.payload.code, 'asset_upload_legacy_disabled');
+    }
+    assert.equal(fs.existsSync(path.join(input, 'legacy')), false);
+    assert.deepEqual(fs.readdirSync(input), []);
+    assert.deepEqual(fs.readdirSync(gateway.uploadManager.tempRoot), []);
   });
 });
 
@@ -577,26 +583,43 @@ test('review roles, run intent idempotency and asset range stay capability scope
     scopeAssetToCanvas(database, 'asset-range');
     const editor = await redeem(baseUrl, gateway, 'editor', '编辑者');
     const reviewer = await redeem(baseUrl, gateway, 'reviewer', '审片者');
+    const reviewCanvasRevision = database.getCanvas('canvas-a').revision;
 
     const createReview = await fetch(`${baseUrl}/api/collab/reviews`, {
       method: 'POST',
       headers: { cookie: reviewer.cookie, 'content-type': 'application/json' },
-      body: JSON.stringify({ canvasId: 'canvas-a', anchor: { kind: 'node', nodeId: 'node-a' }, body: '这里需要修改' }),
+      body: JSON.stringify({
+        canvasId: 'canvas-a',
+        expectedCanvasRevision: reviewCanvasRevision,
+        anchor: { kind: 'node', nodeId: 'node-a' },
+        body: '这里需要修改',
+      }),
     });
     assert.equal(createReview.status, 201);
     const thread = (await createReview.json()).data;
+    const anchoredNode = database.getCanvas('canvas-a').nodes.find((node) => node.id === 'node-a');
+    assert.equal(thread.anchor.targetEntityUid, anchoredNode.entityUid);
+    assert.equal(Object.hasOwn(thread.anchor, 'nodeId'), false, 'legacy review API persists the stable node anchor only');
 
     const editorApprove = await fetch(`${baseUrl}/api/collab/reviews/${thread.id}`, {
       method: 'PATCH',
       headers: { cookie: editor.cookie, 'content-type': 'application/json' },
-      body: JSON.stringify({ status: 'approved' }),
+      body: JSON.stringify({
+        status: 'approved',
+        expectedCanvasRevision: reviewCanvasRevision,
+        expectedThreadRevision: thread.revision,
+      }),
     });
     assert.equal(editorApprove.status, 403);
 
     const reviewerApprove = await fetch(`${baseUrl}/api/collab/reviews/${thread.id}`, {
       method: 'PATCH',
       headers: { cookie: reviewer.cookie, 'content-type': 'application/json' },
-      body: JSON.stringify({ status: 'approved' }),
+      body: JSON.stringify({
+        status: 'approved',
+        expectedCanvasRevision: reviewCanvasRevision,
+        expectedThreadRevision: thread.revision,
+      }),
     });
     assert.equal(reviewerApprove.status, 200);
 
@@ -778,8 +801,10 @@ test('asset ACL filters list, detail, media and host broadcasts by current membe
       const outputA = waitForSocketMessage(socketA, 'run.output');
       const outputB = waitForSocketMessage(socketB, 'run.output');
       gateway.broadcastHostRunOutput(run, nodeRun, assets);
-      assert.deepEqual((await outputA).assets.map((asset) => asset.id), ['asset-shared-a']);
-      assert.deepEqual((await outputB).assets, []);
+      assert.deepEqual((await outputA).assets, [{
+        id: 'asset-shared-a', kind: 'video', filename: 'asset-shared-a.mp4', mimeType: 'video/mp4', mediaUrl: null,
+      }], 'preview ACL may expose safe output metadata but must not invent media when no derived preview exists');
+      assert.deepEqual((await outputB).assets, [], 'view-only ACL must not be promoted to preview output visibility');
 
       const nodeA = waitForSocketMessage(socketA, 'run.node-state');
       const nodeB = waitForSocketMessage(socketB, 'run.node-state');
@@ -1024,7 +1049,7 @@ test('collaboration operations require one authoritative top-level baseRevision'
         operations: [{
           opId: 'fresh-operation-before-stale',
           type: 'node.patch',
-          payload: { nodeId: 'node-a', dataPatch: { prompt: 'fresh update' } },
+          payload: { nodeId: 'node-a', dataPatch: { seed: 4242 } },
         }],
       }),
     });
@@ -1039,7 +1064,7 @@ test('collaboration operations require one authoritative top-level baseRevision'
           opId: 'stale-operation-without-batch-revision',
           baseRevision: 1,
           type: 'node.patch',
-          payload: { nodeId: 'node-a', dataPatch: { prompt: 'stale overwrite' } },
+          payload: { nodeId: 'node-a', dataPatch: { seed: 1111 } },
         }],
       }),
     });
@@ -1047,7 +1072,7 @@ test('collaboration operations require one authoritative top-level baseRevision'
     assert.equal(staleWithoutBatchRevision.status, 400, JSON.stringify(stalePayload));
     assert.equal(stalePayload.code, 'canvas_operation_revision_required');
     assert.equal(database.getCanvas('canvas-a').revision, 2);
-    assert.equal(database.getCanvas('canvas-a').nodes[0].data.prompt, 'fresh update');
+    assert.equal(database.getCanvas('canvas-a').nodes[0].data.seed, 4242);
 
     const mismatchedOperationRevision = await fetch(`${baseUrl}/api/collab/canvases/canvas-a/operations`, {
       method: 'POST',
@@ -1058,7 +1083,7 @@ test('collaboration operations require one authoritative top-level baseRevision'
           opId: 'stale-operation-with-conflicting-batch-revision',
           baseRevision: 1,
           type: 'node.patch',
-          payload: { nodeId: 'node-a', dataPatch: { prompt: 'conflicting overwrite' } },
+          payload: { nodeId: 'node-a', dataPatch: { seed: 2222 } },
         }],
       }),
     });
@@ -1066,7 +1091,7 @@ test('collaboration operations require one authoritative top-level baseRevision'
     assert.equal(mismatchedOperationRevision.status, 400, JSON.stringify(mismatchPayload));
     assert.equal(mismatchPayload.code, 'canvas_operation_revision_mismatch');
     assert.equal(database.getCanvas('canvas-a').revision, 2);
-    assert.equal(database.getCanvas('canvas-a').nodes[0].data.prompt, 'fresh update');
+    assert.equal(database.getCanvas('canvas-a').nodes[0].data.seed, 4242);
   });
 });
 
@@ -1701,9 +1726,8 @@ test('remote clients cannot forge run state or output while host broadcasts safe
           );
         } else if (message.type === 'run.output') {
           assert.deepEqual(message.assets, [{
-            id: 'asset-host-1', kind: 'image', filename: 'host.png', mimeType: 'image/png',
-            mediaUrl: '/api/collab/assets/asset-host-1/media',
-          }]);
+            id: 'asset-host-1', kind: 'image', filename: 'host.png', mimeType: 'image/png', mediaUrl: null,
+          }], 'safe output metadata remains visible but an untrusted source URL must not become media');
           assert.equal(JSON.stringify(message).includes('evil.example'), false);
           assert.equal(JSON.stringify(message).includes('secret'), false);
           clearTimeout(timer);

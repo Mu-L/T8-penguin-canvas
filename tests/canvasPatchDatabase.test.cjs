@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -30,12 +31,27 @@ const {
   normalizeCanvasPatchAuthority,
   safeCanvasPatchErrorMessage,
   scopedCanvasPatchOperationId,
+  stableJson,
 } = require('../backend/src/services/canvasPatch');
 const {
+  PROJECT_DATABASE_MIGRATIONS,
   PROJECT_DATABASE_SCHEMA_VERSION,
   ProjectDatabase,
   RevisionConflictError,
 } = require('../backend/src/services/projectDatabase');
+const {
+  PROJECT_DATABASE_MIGRATION_29_DOWN_SQL,
+} = require('../backend/src/services/projectDatabaseMigration29');
+const {
+  PROJECT_DATABASE_MIGRATION_30_DOWN_SQL,
+} = require('../backend/src/services/projectDatabaseMigration30');
+const {
+  PROJECT_DATABASE_SCHEMA_31_OWNED_OBJECTS,
+} = require('../backend/src/services/projectDatabaseMigration31');
+const {
+  assertCurrentProjectDatabaseRegistry,
+  stripSchema32ForSyntheticSchema31,
+} = require('./helpers/projectDatabaseVersion.cjs');
 
 const PATCH_ID = '11111111-1111-4111-8111-111111111111';
 const LOCAL_OWNER_PATCH_AUTHORITY = Object.freeze({
@@ -62,6 +78,100 @@ function patch(overrides = {}) {
     }],
     ...overrides,
   };
+}
+
+function sha256Stable(value) {
+  return crypto.createHash('sha256').update(stableJson(value)).digest('hex');
+}
+
+function quoteSqlIdentifier(value) {
+  return `"${String(value).replaceAll('"', '""')}"`;
+}
+
+// TEST-ONLY fixture teardown. Production schema31 DOWN remains backup-only;
+// this removes only source-controlled schema31 objects from a disposable DB.
+function removeSchema31ExtensionForSyntheticSchema30(database) {
+  stripSchema32ForSyntheticSchema31(database);
+  database.pragma('foreign_keys = OFF');
+  try {
+    database.transaction(() => {
+      for (const name of [...PROJECT_DATABASE_SCHEMA_31_OWNED_OBJECTS.triggers].reverse()) {
+        database.exec(`DROP TRIGGER IF EXISTS ${quoteSqlIdentifier(name)}`);
+      }
+      for (const name of [...PROJECT_DATABASE_SCHEMA_31_OWNED_OBJECTS.views].reverse()) {
+        database.exec(`DROP VIEW IF EXISTS ${quoteSqlIdentifier(name)}`);
+      }
+      for (const name of [...PROJECT_DATABASE_SCHEMA_31_OWNED_OBJECTS.indexes].reverse()) {
+        database.exec(`DROP INDEX IF EXISTS ${quoteSqlIdentifier(name)}`);
+      }
+      for (const name of [...PROJECT_DATABASE_SCHEMA_31_OWNED_OBJECTS.tables].reverse()) {
+        database.exec(`DROP TABLE IF EXISTS ${quoteSqlIdentifier(name)}`);
+      }
+      database.prepare('DELETE FROM schema_migration_receipts WHERE version = 31').run();
+      database.prepare('DELETE FROM schema_migrations WHERE version = 31').run();
+    }).immediate();
+  } finally {
+    database.pragma('foreign_keys = ON');
+  }
+  const ownedNames = Object.values(PROJECT_DATABASE_SCHEMA_31_OWNED_OBJECTS).flat();
+  const placeholders = ownedNames.map(() => '?').join(', ');
+  assert.equal(database.prepare(`
+    SELECT COUNT(*) AS count FROM sqlite_master WHERE name IN (${placeholders})
+  `).get(...ownedNames).count, 0);
+  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM schema_migration_receipts WHERE version = 31').get().count, 0);
+  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM schema_migrations WHERE version = 31').get().count, 0);
+  assert.equal(database.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 30);
+  assert.deepEqual(database.pragma('foreign_key_check'), []);
+}
+
+function rewriteAppliedPatchAsLegacyIdentityGuard(sqlite, context) {
+  const row = sqlite.prepare(`
+    SELECT * FROM canvas_patch_applications
+    WHERE project_id = ? AND canvas_id = ? AND patch_id = ?
+  `).get(context.projectId, context.canvasId, context.patchId);
+  assert.ok(row);
+  const operations = JSON.parse(row.forward_ops_json);
+  const inverseOperations = JSON.parse(row.inverse_ops_json);
+  const postconditions = JSON.parse(row.postconditions_json);
+  const strippedFields = [];
+  for (const condition of postconditions) {
+    if (condition?.kind === 'node.added') {
+      if (Object.prototype.hasOwnProperty.call(condition.node, 'legacyAliases')) {
+        delete condition.node.legacyAliases;
+        strippedFields.push('node.legacyAliases');
+      }
+    }
+    if (condition?.kind === 'edge.added') {
+      for (const key of ['legacyAliases', 'sourceEntityUid', 'targetEntityUid']) {
+        if (Object.prototype.hasOwnProperty.call(condition.edge, key)) {
+          delete condition.edge[key];
+          strippedFields.push(`edge.${key}`);
+        }
+      }
+    }
+  }
+  const guardDigest = sha256Stable({ operations, inverseOperations, postconditions });
+  const previewDigest = sha256Stable({
+    schema: row.schema,
+    requestDigest: row.request_digest,
+    projectId: row.project_id,
+    canvasId: row.canvas_id,
+    currentRevision: Number(row.base_revision),
+    guardDigest,
+  });
+  const updated = sqlite.prepare(`
+    UPDATE canvas_patch_applications
+    SET postconditions_json = ?, preview_digest = ?
+    WHERE project_id = ? AND canvas_id = ? AND patch_id = ?
+  `).run(
+    JSON.stringify(postconditions),
+    previewDigest,
+    row.project_id,
+    row.canvas_id,
+    row.patch_id,
+  );
+  assert.equal(updated.changes, 1);
+  return { postconditions, strippedFields };
 }
 
 function seed(db, canvasId = 'canvas-patch') {
@@ -1135,6 +1245,19 @@ test('all protocol operation kinds have preview, atomic apply and inverse-operat
     assert.equal(applied.document.nodes.some((node) => node.id === 'c'), true);
     assert.equal(applied.document.edges.some((edge) => edge.id === 'edge-bc'), true);
     assert.deepEqual(applied.document.viewport, { x: 10, y: 20, zoom: 1.5 });
+    const persisted = JSON.parse(db.db.prepare(`
+      SELECT snapshot_json FROM canvas_documents WHERE canvas_id = ?
+    `).get('canvas-patch').snapshot_json);
+    const loaded = db.getCanvas('canvas-patch');
+    assert.deepEqual(persisted, applied.document);
+    assert.deepEqual(loaded, applied.document);
+    const nodeB = loaded.nodes.find((node) => node.id === 'b');
+    const nodeC = loaded.nodes.find((node) => node.id === 'c');
+    const edgeBC = loaded.edges.find((edge) => edge.id === 'edge-bc');
+    assert.deepEqual(nodeC.legacyAliases, ['c']);
+    assert.deepEqual(edgeBC.legacyAliases, ['edge-bc']);
+    assert.equal(edgeBC.sourceEntityUid, nodeB.entityUid);
+    assert.equal(edgeBC.targetEntityUid, nodeC.entityUid);
 
     const reverted = db.revertCanvasPatch('canvas-patch', input.id, {
       actorId: 'member-a', expectedRevision: 5,
@@ -1144,6 +1267,199 @@ test('all protocol operation kinds have preview, atomic apply and inverse-operat
     assert.equal(reverted.document.nodes.some((node) => node.id === 'c'), false);
     assert.equal(reverted.document.edges.some((edge) => edge.id === 'edge-bc'), false);
     assert.deepEqual(reverted.document.viewport, { x: 0, y: 0, zoom: 1 });
+  } finally {
+    db.close();
+  }
+});
+
+test('project-only unverified references force snapshot fallback while exact deltas and stable aliases stay safe', () => {
+  const db = new ProjectDatabase(':memory:');
+  try {
+    const simpleBase = seed(db, 'canvas-simple-project-delta');
+    const simpleResult = db.applyOperations('canvas-simple-project-delta', [{
+      opId: 'simple-project-delta',
+      type: 'node.patch',
+      payload: { nodeId: 'a', dataPatch: { label: 'plain-text' } },
+    }], { expectedRevision: 1 });
+    assert.equal(db.db.prepare(`
+      SELECT requires_snapshot FROM canvas_operations WHERE op_id = ?
+    `).get('simple-project-delta').requires_snapshot, 0);
+    const simpleSync = db.syncCanvas('canvas-simple-project-delta', 1);
+    assert.equal(simpleSync.mode, 'operations');
+    const simpleReplay = applyCanvasOperation(simpleBase, simpleSync.operations[0]).document;
+    assert.deepEqual(simpleReplay.nodes, simpleResult.document.nodes);
+    assert.deepEqual(simpleReplay.edges, simpleResult.document.edges);
+
+    seed(db, 'canvas-derived-project-delta');
+    const derivedResult = db.applyOperations('canvas-derived-project-delta', [{
+      opId: 'derived-project-delta',
+      type: 'node.patch',
+      payload: { nodeId: 'a', dataPatch: { sourceAssetId: 'asset-x' } },
+    }], { expectedRevision: 1 });
+    const derivedNode = derivedResult.document.nodes.find((node) => node.id === 'a');
+    assert.equal(derivedNode.data.sourceAssetEntityUid, undefined);
+    assert.deepEqual(derivedNode.data.unverifiedIdentityReferences, [{
+      status: 'legacy-unverified',
+      kind: 'asset',
+      field: 'sourceAssetId',
+      stableField: 'sourceAssetEntityUid',
+      legacyReference: 'asset-x',
+    }]);
+    assert.equal(db.db.prepare(`
+      SELECT requires_snapshot FROM canvas_operations WHERE op_id = ?
+    `).get('derived-project-delta').requires_snapshot, 1);
+    const derivedSync = db.syncCanvas('canvas-derived-project-delta', 1);
+    assert.equal(derivedSync.mode, 'snapshot');
+    assert.equal(derivedSync.reason, 'snapshot_required');
+    assert.deepEqual(derivedSync.document, derivedResult.document);
+
+    seed(db, 'canvas-derived-add-project-delta');
+    const derivedAdd = db.applyOperations('canvas-derived-add-project-delta', [{
+      opId: 'derived-add-project-delta',
+      type: 'node.add',
+      payload: {
+        node: {
+          id: 'asset-node',
+          type: 'text',
+          position: { x: 300, y: 0 },
+          data: { sourceAssetId: 'asset-y' },
+        },
+      },
+    }], { expectedRevision: 1 });
+    assert.equal(db.db.prepare(`
+      SELECT requires_snapshot FROM canvas_operations WHERE op_id = ?
+    `).get('derived-add-project-delta').requires_snapshot, 1);
+    assert.equal(db.syncCanvas('canvas-derived-add-project-delta', 1).reason, 'snapshot_required');
+    const derivedAddNode = derivedAdd.document.nodes.find((node) => node.id === 'asset-node');
+    assert.equal(derivedAddNode.data.sourceAssetEntityUid, undefined);
+    assert.deepEqual(derivedAddNode.data.unverifiedIdentityReferences, [{
+      status: 'legacy-unverified',
+      kind: 'asset',
+      field: 'sourceAssetId',
+      stableField: 'sourceAssetEntityUid',
+      legacyReference: 'asset-y',
+    }]);
+
+    seed(db, 'canvas-protected-alias');
+    for (const [opId, payload] of [
+      ['patch-protected-alias', { nodeId: 'a', patch: { legacyAliases: ['forged-alias'] } }],
+      ['unset-protected-alias', { nodeId: 'a', unsetKeys: ['legacyAliases'] }],
+    ]) {
+      assert.throws(() => db.applyOperations('canvas-protected-alias', [{
+        opId,
+        type: 'node.patch',
+        payload,
+      }], { expectedRevision: 1 }));
+    }
+    assert.equal(db.getCanvas('canvas-protected-alias').revision, 1);
+    assert.equal(db.db.prepare(`
+      SELECT COUNT(*) AS count FROM canvas_operations WHERE canvas_id = ?
+    `).get('canvas-protected-alias').count, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('pre-schema26 guard-v1 added-entity postconditions lift to canonical project identity without weakening checks', () => {
+  let legacyRewrite = null;
+  const db = new ProjectDatabase(':memory:', {
+    beforeCanvasPatchCommit: (sqlite, context) => {
+      if (context.phase === 'apply') {
+        legacyRewrite = rewriteAppliedPatchAsLegacyIdentityGuard(sqlite, context);
+      }
+    },
+  });
+  try {
+    seed(db);
+    const input = patch({
+      id: 'doctor-patch-pre-schema26-guard-v1',
+      diagnosticsResolved: [],
+      operations: [
+        { type: 'node.add', payload: { node: { id: 'c', type: 'text', position: { x: 200, y: 0 }, data: { prompt: 'C' } } } },
+        { type: 'edge.add', payload: { edge: { id: 'edge-bc', source: 'b', target: 'c', type: 'default' } } },
+      ],
+    });
+    const preview = db.previewCanvasPatch('canvas-patch', input, {
+      authority: LOCAL_OWNER_PATCH_AUTHORITY,
+    });
+    const applied = db.applyCanvasPatch('canvas-patch', input, {
+      previewDigest: preview.previewDigest,
+      confirmed: true,
+      actorId: 'member-a',
+      authority: LOCAL_OWNER_PATCH_AUTHORITY,
+    });
+    assert.equal(applied.revision, 3);
+    assert.deepEqual(legacyRewrite.strippedFields.sort(), [
+      'edge.legacyAliases',
+      'edge.sourceEntityUid',
+      'edge.targetEntityUid',
+      'node.legacyAliases',
+    ]);
+    const storedLegacyConditions = JSON.parse(db.db.prepare(`
+      SELECT postconditions_json FROM canvas_patch_applications WHERE patch_id = ?
+    `).get(input.id).postconditions_json);
+    const legacyNode = storedLegacyConditions.find((condition) => condition.kind === 'node.added').node;
+    const legacyEdge = storedLegacyConditions.find((condition) => condition.kind === 'edge.added').edge;
+    assert.equal(Object.prototype.hasOwnProperty.call(legacyNode, 'legacyAliases'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(legacyEdge, 'legacyAliases'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(legacyEdge, 'sourceEntityUid'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(legacyEdge, 'targetEntityUid'), false);
+
+    const reverted = db.revertCanvasPatch('canvas-patch', input.id, {
+      actorId: 'member-a',
+      expectedRevision: 3,
+      authority: LOCAL_OWNER_PATCH_AUTHORITY,
+    });
+    assert.equal(reverted.revision, 5);
+    assert.equal(reverted.document.nodes.some((node) => node.id === 'c'), false);
+    assert.equal(reverted.document.edges.some((edge) => edge.id === 'edge-bc'), false);
+  } finally {
+    db.close();
+  }
+});
+
+test('pre-schema26 guard-v1 compatibility still rejects added-entity identity tampering', () => {
+  const db = new ProjectDatabase(':memory:', {
+    beforeCanvasPatchCommit: (sqlite, context) => {
+      if (context.phase === 'apply') rewriteAppliedPatchAsLegacyIdentityGuard(sqlite, context);
+    },
+  });
+  try {
+    seed(db);
+    const input = patch({
+      id: 'doctor-patch-pre-schema26-guard-v1-tamper',
+      diagnosticsResolved: [],
+      operations: [
+        { type: 'node.add', payload: { node: { id: 'c', type: 'text', position: { x: 200, y: 0 }, data: { prompt: 'C' } } } },
+        { type: 'edge.add', payload: { edge: { id: 'edge-bc', source: 'b', target: 'c', type: 'default' } } },
+      ],
+    });
+    const preview = db.previewCanvasPatch('canvas-patch', input, {
+      authority: LOCAL_OWNER_PATCH_AUTHORITY,
+    });
+    db.applyCanvasPatch('canvas-patch', input, {
+      previewDigest: preview.previewDigest,
+      confirmed: true,
+      actorId: 'member-a',
+      authority: LOCAL_OWNER_PATCH_AUTHORITY,
+    });
+    const tampered = db.getCanvas('canvas-patch');
+    const addedNode = tampered.nodes.find((node) => node.id === 'c');
+    addedNode.legacyAliases = [...addedNode.legacyAliases, 'attacker-alias'];
+    const update = db.db.prepare(`
+      UPDATE canvas_documents SET snapshot_json = ? WHERE canvas_id = ? AND revision = ?
+    `).run(JSON.stringify(tampered), 'canvas-patch', 3);
+    assert.equal(update.changes, 1);
+    assert.throws(() => db.revertCanvasPatch('canvas-patch', input.id, {
+      actorId: 'member-a',
+      expectedRevision: 3,
+      authority: LOCAL_OWNER_PATCH_AUTHORITY,
+    }), CanvasPatchRevertConflictError);
+    assert.equal(db.getCanvas('canvas-patch').nodes.find((node) => node.id === 'c')
+      .legacyAliases.includes('attacker-alias'), true);
+    assert.equal(db.db.prepare(`
+      SELECT status FROM canvas_patch_applications WHERE patch_id = ?
+    `).get(input.id).status, 'applied');
   } finally {
     db.close();
   }
@@ -1762,10 +2078,10 @@ test('durable field provenance rejects ABA but allows same-node unrelated fields
   }
 });
 
-test('latest schema 23 retains schema 22 project-scoped provenance, operation identity and stale preview rejection', () => {
+test('latest schema retains schema 22 project-scoped provenance, operation identity and stale preview rejection', () => {
   const db = new ProjectDatabase(':memory:');
   try {
-    assert.equal(PROJECT_DATABASE_SCHEMA_VERSION, 23);
+    assertCurrentProjectDatabaseRegistry(PROJECT_DATABASE_SCHEMA_VERSION, PROJECT_DATABASE_MIGRATIONS);
     assert.equal(db.db.prepare('SELECT 1 AS ok FROM schema_migrations WHERE version = 21').get().ok, 1);
     const columns = db.db.pragma('table_info(canvas_patch_applications)').map((row) => row.name);
     for (const column of [
@@ -1815,10 +2131,15 @@ test('concurrent generic operation writers serialize to one commit and stable re
     const workerSource = `
       const { parentPort, workerData } = require('node:worker_threads');
       const { ProjectDatabase } = require(workerData.modulePath);
-      const db = new ProjectDatabase(workerData.filename, { autoBackup: false });
+      const db = new ProjectDatabase(workerData.filename, {
+        autoBackup: false,
+        unsafeDisableOwnerGuardForTests: true,
+      });
       const gate = new Int32Array(workerData.gate);
-      const usesImmediate = String(ProjectDatabase.prototype.applyOperations).includes('.immediate(');
-      if (!usesImmediate) {
+      const writerSource = String(ProjectDatabase.prototype.applyOperations);
+      const usesSerializedWriter = writerSource.includes('.immediate(')
+        || writerSource.includes('withProjectDatabaseWrite(');
+      if (!usesSerializedWriter) {
         const getCanvas = db.getCanvas.bind(db);
         let barrierArmed = true;
         db.getCanvas = (canvasId) => {
@@ -1929,11 +2250,16 @@ test('snapshot save and restore serialize across two real sqlite connections wit
     const workerSource = `
       const { parentPort, workerData } = require('node:worker_threads');
       const { ProjectDatabase } = require(workerData.modulePath);
-      const db = new ProjectDatabase(workerData.filename, { autoBackup: false });
+      const db = new ProjectDatabase(workerData.filename, {
+        autoBackup: false,
+        unsafeDisableOwnerGuardForTests: true,
+      });
       const gate = new Int32Array(workerData.gate);
       const method = ProjectDatabase.prototype[workerData.method];
-      const usesImmediate = String(method).includes('.immediate(');
-      if (!usesImmediate) {
+      const writerSource = String(method);
+      const usesSerializedWriter = writerSource.includes('.immediate(')
+        || writerSource.includes('withProjectDatabaseWrite(');
+      if (!usesSerializedWriter) {
         const getCanvas = db.getCanvas.bind(db);
         let barrierArmed = true;
         db.getCanvas = (canvasId) => {
@@ -2095,7 +2421,10 @@ test('eight concurrent baseRevision writers yield one commit and stable revision
     const workerSource = `
       const { parentPort, workerData } = require('node:worker_threads');
       const { ProjectDatabase } = require(workerData.modulePath);
-      const db = new ProjectDatabase(workerData.filename, { autoBackup: false });
+      const db = new ProjectDatabase(workerData.filename, {
+        autoBackup: false,
+        unsafeDisableOwnerGuardForTests: true,
+      });
       parentPort.postMessage({ type: 'ready' });
       Atomics.wait(new Int32Array(workerData.gate), 0, 0);
       try {
@@ -2230,7 +2559,7 @@ test('patch apply, personal history, audit and revert survive two real sqlite re
   }
 });
 
-test('schema 19 through 23 migration is atomic, idempotent and preserves the existing canvas', () => {
+test('schema 19 bridge commits schema 28 before executable schema 29 rolls back atomically and retries idempotently', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-canvas-patch-schema21-'));
   const filename = path.join(directory, 'projects.sqlite3');
   try {
@@ -2241,28 +2570,33 @@ test('schema 19 through 23 migration is atomic, idempotent and preserves the exi
         unexpectedOpen = new ProjectDatabase(filename, {
           autoBackup: false,
           beforeMigrationCommit: (_db, version) => {
-            if (version === 23) throw new Error('schema23-injected-failure');
+            if (version === 29) throw new Error('schema-29-injected-failure');
           },
         });
-      }, /schema23-injected-failure/);
+      }, /schema-29-injected-failure/);
     } finally {
       unexpectedOpen?.close();
     }
     const rolledBack = new BetterSqlite3(filename, { readonly: true });
     try {
-      assert.equal(rolledBack.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 19);
-      assert.equal(rolledBack.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='canvas_mutation_provenance'").get(), undefined);
+      assert.equal(rolledBack.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 28);
+      assert.equal(rolledBack.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='canvas_mutation_provenance'").get().ok, 1);
+      assert.equal(rolledBack.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='schema_migration_receipts'").get(), undefined);
       const patchColumns = rolledBack.pragma('table_info(canvas_patch_applications)').map((row) => row.name);
-      assert.equal(patchColumns.includes('guard_version'), false);
+      assert.equal(patchColumns.includes('guard_version'), true);
       assert.equal(rolledBack.prepare('SELECT revision FROM canvas_documents WHERE canvas_id = ?').get('legacy-patch-canvas').revision, 7);
       assert.equal(rolledBack.pragma('quick_check', { simple: true }), 'ok');
+      assert.deepEqual(rolledBack.pragma('foreign_key_check'), []);
     } finally {
       rolledBack.close();
     }
 
     const migrated = new ProjectDatabase(filename, { autoBackup: false });
     try {
-      assert.equal(migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 23);
+      assert.equal(
+        migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version,
+        PROJECT_DATABASE_SCHEMA_VERSION,
+      );
       assert.equal(migrated.getCanvas('legacy-patch-canvas').revision, 7);
       assert.equal(migrated.getCanvas('legacy-patch-canvas').nodes[0].data.prompt, 'preserve-me');
       const patchColumns = migrated.db.pragma('table_info(canvas_patch_applications)').map((row) => row.name);
@@ -2280,7 +2614,10 @@ test('schema 19 through 23 migration is atomic, idempotent and preserves the exi
       assert.equal(migrated.db.pragma('quick_check', { simple: true }), 'ok');
       assert.deepEqual(migrated.db.pragma('foreign_key_check'), []);
       assert.doesNotThrow(() => migrated.migrate());
-      assert.equal(migrated.db.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get().count, 23);
+      assert.equal(
+        migrated.db.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get().count,
+        PROJECT_DATABASE_SCHEMA_VERSION,
+      );
     } finally {
       migrated.close();
     }
@@ -2289,9 +2626,17 @@ test('schema 19 through 23 migration is atomic, idempotent and preserves the exi
   }
 });
 
-test('schema 20 to 23 migration preserves schema 21 operation identity, rolls back atomically and is idempotent across reopen', () => {
+test('schema 20 bridge preserves operation identity at schema 28 when executable schema 29 rolls back and retries', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-canvas-operation-schema21-'));
   const filename = path.join(directory, 'projects.sqlite3');
+  const retryMigrationOptions = {
+    autoBackup: false,
+    // The fixture rewinds after adding business rows, so the simulated second
+    // upgrade must not reuse the first-open migration backup generation.
+    preMigrationBackupFilename: path.join(directory, 'retry-pre-migration-v28.sqlite3'),
+    preMigration30BackupFilename: path.join(directory, 'retry-pre-migration-v29.sqlite3'),
+    preMigration31BackupFilename: path.join(directory, 'retry-pre-migration-v30.sqlite3'),
+  };
   const operation = {
     opId: 'schema20-operation-to-backfill',
     projectId: 'project-patch',
@@ -2315,12 +2660,20 @@ test('schema 20 to 23 migration preserves schema 21 operation identity, rolls ba
 
     const downgrade = new BetterSqlite3(filename);
     try {
+      removeSchema31ExtensionForSyntheticSchema30(downgrade);
+      downgrade.prepare('DELETE FROM schema_migration_receipts WHERE version = 30').run();
+      downgrade.prepare('DELETE FROM schema_migrations WHERE version = 30').run();
+      downgrade.exec(PROJECT_DATABASE_MIGRATION_30_DOWN_SQL);
+      downgrade.exec(PROJECT_DATABASE_MIGRATION_29_DOWN_SQL);
+      downgrade.prepare('DELETE FROM schema_migrations WHERE version = 29').run();
+      assert.deepEqual(downgrade.pragma('foreign_key_check'), []);
       downgrade.exec(`
-        DELETE FROM schema_migrations WHERE version IN (21, 22, 23);
+        DELETE FROM schema_migrations WHERE version >= 21;
         DROP TABLE IF EXISTS canvas_operation_idempotency;
       `);
       assert.equal(downgrade.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 20);
       assert.equal(downgrade.prepare('SELECT 1 AS ok FROM canvas_operations WHERE op_id = ?').get(operation.opId).ok, 1);
+      assert.deepEqual(downgrade.pragma('foreign_key_check'), []);
     } finally {
       downgrade.close();
     }
@@ -2329,27 +2682,30 @@ test('schema 20 to 23 migration preserves schema 21 operation identity, rolls ba
     try {
       assert.throws(() => {
         failedOpen = new ProjectDatabase(filename, {
-          autoBackup: false,
+          ...retryMigrationOptions,
           beforeMigrationCommit: (_db, version) => {
-            if (version === 23) throw new Error('schema23-ledger-injected-failure');
+            if (version === 29) throw new Error('schema-29-ledger-injected-failure');
           },
         });
-      }, /schema23-ledger-injected-failure/);
+      }, /schema-29-ledger-injected-failure/);
     } finally {
       failedOpen?.close();
     }
 
     const rolledBack = new BetterSqlite3(filename, { readonly: true });
     try {
-      assert.equal(rolledBack.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 20);
-      assert.equal(rolledBack.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='canvas_operation_idempotency'").get(), undefined);
+      assert.equal(rolledBack.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version, 28);
+      assert.equal(rolledBack.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='canvas_operation_idempotency'").get().ok, 1);
+      assert.equal(rolledBack.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='schema_migration_receipts'").get(), undefined);
+      assert.equal(rolledBack.prepare('SELECT COUNT(*) AS count FROM canvas_operation_idempotency WHERE op_id = ?').get(operation.opId).count, 1);
       assert.equal(rolledBack.prepare('SELECT 1 AS ok FROM canvas_operations WHERE op_id = ?').get(operation.opId).ok, 1);
       assert.equal(rolledBack.prepare('SELECT revision FROM canvas_documents WHERE canvas_id = ?').get(operation.canvasId).revision, 2);
+      assert.deepEqual(rolledBack.pragma('foreign_key_check'), []);
     } finally {
       rolledBack.close();
     }
 
-    const migrated = new ProjectDatabase(filename, { autoBackup: false });
+    const migrated = new ProjectDatabase(filename, retryMigrationOptions);
     try {
       const identity = migrated.db.prepare('SELECT * FROM canvas_operation_idempotency WHERE op_id = ?').get(operation.opId);
       assert.equal(identity.project_id, operation.projectId);

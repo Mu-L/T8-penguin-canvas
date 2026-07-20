@@ -22,7 +22,7 @@ import {
   UserPlus,
 } from 'lucide-react';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
-import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
+import { createCanvasNodeRunRequestId, requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { PORT_COLOR } from '../../config/portTypes';
 import * as api from '../../services/api';
@@ -101,6 +101,7 @@ type PoseFavorite = PoseBackup & {
 };
 type PoseBatchMode = 'next' | 'random' | 'current';
 type PoseRenderMode = 'lineart' | 'openpose' | 'coco';
+type PoseMasterRunMode = 'single' | 'batch' | 'keyframes';
 type PoseDragMode = 'joint' | 'body';
 type PoseCanvasRatioId = 'default' | '1:1' | '4:3' | '3:4' | '16:9' | '9:16' | '3:2' | '2:3' | 'custom';
 type PoseCanvasBounds = {
@@ -2844,6 +2845,8 @@ const PoseMasterNode = (props: NodeProps) => {
       poseRenderMode: renderMode,
       metadata: allMetadata[0],
       poseMasterMetadata: items.length === 1 ? allMetadata[0] : allMetadata,
+      status: 'success',
+      taskStatus: 'completed',
       isRunning: false,
       runError: '',
     };
@@ -2939,14 +2942,15 @@ const PoseMasterNode = (props: NodeProps) => {
   const runPose = async () => {
     const modeLabel = POSE_RENDER_MODES.find((item) => item.id === renderMode)?.zh || '姿势参考';
     setStatus(`生成${modeLabel}中...`);
-    updateNodeData({ isRunning: true, runError: '' });
+    updateNodeData({ status: 'running', taskStatus: 'running', isRunning: true, runError: '', error: '' });
     try {
       const item = await renderPoseOutput(currentBackup('当前姿势'));
       writePoseOutputs([item], `已输出${modeLabel}和 prompt`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setStatus(message || '输出失败');
-      updateNodeData({ isRunning: false, runError: message || '输出失败' });
+      updateNodeData({ status: 'error', taskStatus: 'failed', isRunning: false, runError: message || '输出失败', error: message || '输出失败' });
+      throw error;
     }
   };
 
@@ -2986,7 +2990,7 @@ const PoseMasterNode = (props: NodeProps) => {
   const runBatchPose = async () => {
     const modeLabel = POSE_RENDER_MODES.find((item) => item.id === renderMode)?.zh || '姿势图';
     setStatus(`批量生成 ${batchCount} 个${modeLabel}中...`);
-    updateNodeData({ isRunning: true, runError: '' });
+    updateNodeData({ status: 'running', taskStatus: 'running', isRunning: true, runError: '', error: '' });
     try {
       const snapshots = buildBatchBackups();
       const items = [];
@@ -2997,13 +3001,59 @@ const PoseMasterNode = (props: NodeProps) => {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setStatus(message || '批量输出失败');
-      updateNodeData({ isRunning: false, runError: message || '批量输出失败' });
+      updateNodeData({ status: 'error', taskStatus: 'failed', isRunning: false, runError: message || '批量输出失败', error: message || '批量输出失败' });
+      throw error;
     }
   };
 
-  useRunTrigger(id, async () => {
-    await runPose();
-  });
+  const requestPoseMasterRun = (mode: PoseMasterRunMode) => {
+    const requestId = createCanvasNodeRunRequestId(id, `pose-master-${mode}`);
+    updateNodeData({ poseMasterRunMode: mode, poseMasterRunRequestId: requestId });
+    window.requestAnimationFrame(() => {
+      if (requestCanvasNodeRun(id, { requestId })) return;
+      const liveData = rf.getNode(id)?.data as Record<string, unknown> | undefined;
+      if (liveData?.poseMasterRunRequestId !== requestId) return;
+      updateNodeData({
+        poseMasterRunMode: 'single',
+        poseMasterRunRequestId: '',
+        status: 'error',
+        taskStatus: 'failed',
+        error: '无法提交画布运行请求，请重试。',
+      });
+    });
+  };
+
+  useRunTrigger(id, async (reporter) => {
+    const liveData = rf.getNode(id)?.data as Record<string, unknown> | undefined;
+    const contextRequestId = String(reporter.runContext?.requestId || '').trim();
+    const persistedRequestId = String(liveData?.poseMasterRunRequestId || '').trim();
+    const requestedMode = String(persistedRequestId ? liveData?.poseMasterRunMode || 'single' : 'single') as PoseMasterRunMode;
+    try {
+      if (persistedRequestId && contextRequestId !== persistedRequestId) {
+        throw new Error('姿势大师运行请求已过期或被修改，已停止输出。');
+      }
+      switch (requestedMode) {
+        case 'single':
+          await runPose();
+          break;
+        case 'batch':
+          await runBatchPose();
+          break;
+        case 'keyframes':
+          await runKeyframeSequence();
+          break;
+        default:
+          throw new Error('姿势大师运行模式无效，已停止输出。');
+      }
+    } finally {
+      if (contextRequestId) {
+        const latestData = rf.getNode(id)?.data as Record<string, unknown> | undefined;
+        if (latestData?.poseMasterRunRequestId === contextRequestId) {
+          updateNodeData({ poseMasterRunMode: 'single', poseMasterRunRequestId: '' });
+        }
+      }
+    }
+  }, 'pose-master', { lifecycleAware: true });
 
   const addPerson = () => {
     if (posePeople.length >= MAX_POSE_PEOPLE) {
@@ -3177,11 +3227,13 @@ const PoseMasterNode = (props: NodeProps) => {
   const runKeyframeSequence = async () => {
     const snapshots = buildKeyframeBackups();
     if (snapshots.length === 0) {
-      setStatus('请先保存 A / B 两个关键帧');
-      return;
+      const message = '请先保存 A / B 两个关键帧';
+      setStatus(message);
+      updateNodeData({ status: 'error', taskStatus: 'failed', isRunning: false, runError: message, error: message });
+      throw new Error(message);
     }
     setStatus(`正在输出 ${snapshots.length} 帧姿态序列...`);
-    updateNodeData({ isRunning: true, runError: '' });
+    updateNodeData({ status: 'running', taskStatus: 'running', isRunning: true, runError: '', error: '' });
     try {
       const items = [];
       for (const snapshot of snapshots) items.push(await renderPoseOutput(snapshot));
@@ -3189,7 +3241,8 @@ const PoseMasterNode = (props: NodeProps) => {
     } catch (error) {
       const message = error instanceof Error ? error.message : '关键帧输出失败';
       setStatus(message);
-      updateNodeData({ isRunning: false, runError: message });
+      updateNodeData({ status: 'error', taskStatus: 'failed', isRunning: false, runError: message, error: message });
+      throw error;
     }
   };
 
@@ -3828,7 +3881,7 @@ const PoseMasterNode = (props: NodeProps) => {
             <button
               type="button"
               className="t8-btn nodrag nopan col-span-2"
-              onClick={() => void runBatchPose()}
+              onClick={() => requestPoseMasterRun('batch')}
             >
               <Shuffle size={15} /> 批量输出分镜姿势
             </button>
@@ -3856,7 +3909,7 @@ const PoseMasterNode = (props: NodeProps) => {
               <div>A：{keyframeA ? keyframeA.name || '已保存' : '未设置'}</div>
               <div>B：{keyframeB ? keyframeB.name || '已保存' : '未设置'}</div>
             </div>
-            <button type="button" className="t8-btn nodrag nopan col-span-3" onClick={() => void runKeyframeSequence()}>
+            <button type="button" className="t8-btn nodrag nopan col-span-3" onClick={() => requestPoseMasterRun('keyframes')}>
               <Play size={15} /> 输出 A→B 关键帧序列
             </button>
           </div>
@@ -3881,7 +3934,7 @@ const PoseMasterNode = (props: NodeProps) => {
           <button
             type="button"
             className="t8-btn t8-btn-primary nodrag nopan h-12 w-full text-base font-bold"
-            onClick={() => requestCanvasNodeRun(id)}
+            onClick={() => requestPoseMasterRun('single')}
           >
             <Play size={16} /> 运行输出{renderModeLabel}
           </button>

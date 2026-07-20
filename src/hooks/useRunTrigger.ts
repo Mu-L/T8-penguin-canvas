@@ -21,7 +21,11 @@ import {
 import { normalizeRunError } from '../utils/runErrors';
 import { captureRunNodeInputSnapshot } from '../utils/runReplay';
 import { inferRunRecoveryDescriptor } from '../utils/runRecovery';
-import { createRunNodeLifecycleController, resolveRunExecutionDisposition } from '../utils/runLifecycle';
+import {
+  createRunNodeLifecycleController,
+  executeAfterRunLifecycleBarrier,
+  resolveRunExecutionDisposition,
+} from '../utils/runLifecycle';
 import {
   collectRunOutputAssets,
   extractRunProviderTrace,
@@ -72,6 +76,7 @@ export function useRunTrigger(
       const executionContext = binding?.nodeContext || getRunNodeExecutionContext(nodeId);
       let nodeRunId: string | undefined;
       let attemptId: string | undefined;
+      let executionCallbackStarted = false;
       let terminalWrite: Promise<void> | null = null;
       let acceptLifecycleEvents = true;
       let providerSubmittedRecorded = false;
@@ -105,6 +110,7 @@ export function useRunTrigger(
       const lifecycle = createRunNodeLifecycleController({
         runContext,
         executionToken: capturedExecutionToken,
+        executionEvidence: () => ({ nodeRunId, attemptId }),
         basePayload: {
           nodeId: executionContext?.runNodeId || nodeId,
           contextId: runContext?.contextId || null,
@@ -172,6 +178,10 @@ export function useRunTrigger(
               }
             } catch (error) {
               console.warn(`[run-center] failed to persist ${type}:`, error);
+              if (!executionCallbackStarted
+                || type === 'node.output'
+                || type === 'provider.request'
+                || type === 'provider.submitted') throw error;
             }
           },
         },
@@ -209,7 +219,14 @@ export function useRunTrigger(
               ...(normalizedError ? { error: normalizedError } : {}),
             });
           }
-          await lifecycle.flush();
+          try {
+            await lifecycle.flush();
+          } catch (lifecyclePersistenceError) {
+            // A successful run is not allowed to outrun its authoritative
+            // output evidence. Failed/stopped runs still need a durable
+            // terminal record even when an earlier output write failed.
+            if (status === 'succeeded') throw lifecyclePersistenceError;
+          }
           acceptLifecycleEvents = false;
           if (!runId || !nodeRunId || !attemptId) return;
           let lastPersistenceError: unknown = null;
@@ -300,12 +317,22 @@ export function useRunTrigger(
           return;
         }
 
-        await lifecycle.reporter.progress({ phase: 'executing', progress: 0 });
-        if (lifecycleAwareRef.current) {
-          await (runFnRef.current as (reporter: RunNodeLifecycleReporter) => Promise<void> | void)(lifecycle.reporter);
-        } else {
-          await (runFnRef.current as () => Promise<void> | void)();
-        }
+        await executeAfterRunLifecycleBarrier(
+          async () => {
+            // Keep the first executable callback behind an explicit durable
+            // lifecycle write. If this write fails, runFn (and therefore the
+            // Provider/ffmpeg call it owns) must remain at zero invocations.
+            await lifecycle.reporter.progress({ phase: 'executing', progress: 0 });
+          },
+          async () => {
+            executionCallbackStarted = true;
+            if (lifecycleAwareRef.current) {
+              await (runFnRef.current as (reporter: RunNodeLifecycleReporter) => Promise<void> | void)(lifecycle.reporter);
+            } else {
+              await (runFnRef.current as () => Promise<void> | void)();
+            }
+          },
+        );
         if (disposition() !== 'active') {
           await persistTerminal('stopped', new Error('节点运行已停止或被新任务替代'));
           markDone(nodeId, capturedExecutionToken, false, 'stopped');

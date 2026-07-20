@@ -131,7 +131,9 @@ test('Sora2 Zhenzhen API channel maps to upstream sora-2 without touching FAL so
   assert.match(proxyRoute, /model: 'sora-2'/);
   assert.match(proxyRoute, /private: privateVideo !== false && is_private !== false/);
   assert.match(proxyRoute, /images\.slice\(0,\s*1\)\.map\(stripDataUrlPrefix\)/);
-  assert.match(proxyRoute, /getUpstreamErrorMessage\(data, text, r\.status\)/);
+  assert.match(proxyRoute, /const providerError = await boundedProviderHttpError\(r, 'Video submit failed'\)/);
+  assert.match(proxyRoute, /return res\.status\(r\.status\)\.json\(\{ success: false, error: providerError\.message \}\)/);
+  assert.doesNotMatch(proxyRoute, /getUpstreamErrorMessage\(data, text, r\.status\)/);
 });
 
 test('Veo Omni uses the Comfly /v1/videos multipart protocol', () => {

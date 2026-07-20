@@ -14,6 +14,12 @@ const PROJECT_B = 'project-f1-b';
 const CANVAS_A = 'canvas-f1-a';
 const CANVAS_A_SIBLING = 'canvas-f1-a-sibling';
 const CANVAS_B = 'canvas-f1-b';
+const MANAGEMENT_AUTHORITY_HEADER = 'x-t8-collaboration-management-token';
+const TEST_MANAGEMENT_AUTHORITY = Object.freeze({
+  token: 'test-collaboration-management-authority-token-f1-000001',
+  actorId: 'test-f1-host-owner',
+  sessionId: 'test-f1-host-backend-session',
+});
 const LOOPBACK_INTERFACES = Object.freeze([
   {
     id: 'loopback:127.0.0.1',
@@ -90,7 +96,9 @@ async function createFixture() {
   const createCollaborationRouter = loadRouterFactory(gateway);
   const app = express();
   app.use(express.json({ strict: true }));
-  app.use('/api/collaboration', createCollaborationRouter(gateway));
+  app.use('/api/collaboration', createCollaborationRouter(gateway, {
+    managementAuthority: TEST_MANAGEMENT_AUTHORITY,
+  }));
   const managementServer = await new Promise((resolve) => {
     const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
   });
@@ -120,8 +128,18 @@ async function cleanupFixture(fixture, sockets = []) {
   fs.rmSync(fixture.directory, { recursive: true, force: true });
 }
 
-async function requestJson(url, init) {
-  const response = await fetch(url, init);
+async function requestJson(url, init = {}, options = {}) {
+  const requestOptions = { ...init };
+  const pathname = new URL(String(url)).pathname;
+  if (pathname === '/api/collaboration' || pathname.startsWith('/api/collaboration/')) {
+    const token = Object.hasOwn(options, 'managementToken')
+      ? options.managementToken
+      : TEST_MANAGEMENT_AUTHORITY.token;
+    const headers = new Headers(init.headers || {});
+    if (token != null) headers.set(MANAGEMENT_AUTHORITY_HEADER, String(token));
+    requestOptions.headers = headers;
+  }
+  const response = await fetch(url, requestOptions);
   const text = await response.text();
   return {
     response,
@@ -204,6 +222,98 @@ function waitForSocketMessage(socket, predicate, timeoutMessage, timeoutMs = 300
     socket.on('message', onMessage);
   });
 }
+
+test('B3 loopback management rejects cross-site browser authority while preserving local clients', async (t) => {
+  const fixture = await createFixture();
+  t.after(() => cleanupFixture(fixture));
+
+  const localCli = await requestJson(`${fixture.managementBase}/status`);
+  assert.equal(localCli.response.status, 200, JSON.stringify(localCli.payload));
+
+  const localBrowser = await requestJson(`${fixture.managementBase}/status`, {
+    headers: {
+      origin: 'http://localhost:11422',
+      'sec-fetch-site': 'same-origin',
+    },
+  });
+  assert.equal(localBrowser.response.status, 200, JSON.stringify(localBrowser.payload));
+
+  const unrelatedLoopbackSite = await requestJson(`${fixture.managementBase}/stop`, {
+    method: 'POST',
+    headers: {
+      origin: 'http://localhost:45678',
+      'sec-fetch-site': 'same-site',
+    },
+  });
+  assert.equal(unrelatedLoopbackSite.response.status, 403, JSON.stringify(unrelatedLoopbackSite.payload));
+  assert.equal(unrelatedLoopbackSite.payload.code, 'collaboration_management_origin_forbidden');
+  assert.equal(fixture.gateway.status().running, true);
+
+  const evilOrigin = await requestJson(`${fixture.managementBase}/stop`, {
+    method: 'POST',
+    headers: {
+      origin: 'https://evil.example',
+      'content-type': 'application/x-www-form-urlencoded',
+    },
+    body: '',
+  });
+  assert.equal(evilOrigin.response.status, 403, JSON.stringify(evilOrigin.payload));
+  assert.equal(evilOrigin.payload.code, 'collaboration_management_origin_forbidden');
+  assert.equal(fixture.gateway.status().running, true);
+
+  const fetchMetadataCrossSite = await requestJson(`${fixture.managementBase}/stop`, {
+    method: 'POST',
+    headers: { 'sec-fetch-site': 'cross-site' },
+  });
+  assert.equal(fetchMetadataCrossSite.response.status, 403, JSON.stringify(fetchMetadataCrossSite.payload));
+  assert.equal(fixture.gateway.status().running, true);
+});
+
+test('B3 management authority rejects missing or wrong tokens and ignores forged invite audit principals', async (t) => {
+  const fixture = await createFixture();
+  t.after(() => cleanupFixture(fixture));
+
+  const missing = await requestJson(
+    `${fixture.managementBase}/status`,
+    {},
+    { managementToken: null },
+  );
+  assert.equal(missing.response.status, 401, JSON.stringify(missing.payload));
+  assert.equal(missing.payload.code, 'collaboration_management_auth_required');
+
+  const wrong = await requestJson(
+    `${fixture.managementBase}/status`,
+    {},
+    { managementToken: 'wrong-management-authority-token-000000000000000000' },
+  );
+  assert.equal(wrong.response.status, 401, JSON.stringify(wrong.payload));
+  assert.equal(wrong.payload.code, 'collaboration_management_auth_required');
+
+  const forged = await requestJson(`${fixture.managementBase}/invites`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      projectId: PROJECT_A,
+      canvasId: CANVAS_A,
+      role: 'viewer',
+      maxUses: 1,
+      createdBy: 'forged-request-actor',
+      sessionId: 'forged-request-session',
+    }),
+  });
+  assert.equal(forged.response.status, 200, JSON.stringify(forged.payload));
+  const audits = fixture.database.listAuditEvents({
+    projectId: PROJECT_A,
+    canvasId: CANVAS_A,
+    action: 'collaboration.invite.create',
+    limit: 20,
+  });
+  assert.equal(audits.length, 1);
+  assert.equal(audits[0].actorId, TEST_MANAGEMENT_AUTHORITY.actorId);
+  assert.equal(audits[0].sessionId, TEST_MANAGEMENT_AUTHORITY.sessionId);
+  assert.notEqual(audits[0].actorId, 'forged-request-actor');
+  assert.notEqual(audits[0].sessionId, 'forged-request-session');
+});
 
 test('F1 router factory creates room-scoped non-default-project invites and rejects cross-room revocation', async (t) => {
   const fixture = await createFixture();
@@ -518,6 +628,7 @@ test('F1 canvas-scoped invite cannot list, read, join, or review a sibling canva
     headers: { ...headers, 'content-type': 'application/json' },
     body: JSON.stringify({
       canvasId: CANVAS_A,
+      expectedCanvasRevision: fixture.database.getCanvas(CANVAS_A).revision,
       anchor: { kind: 'canvas', x: 0, y: 0 },
       body: 'Allowed review on bound canvas',
     }),
@@ -737,6 +848,7 @@ test('F1 run-intent management rejects cross-room patches without mutating targe
       body: JSON.stringify({
         projectId: PROJECT_A,
         canvasId: CANVAS_A,
+        expectedQueueRevision: intentASiblingBeforeCrossCanvasPatch.queueRevision,
         status: 'rejected',
       }),
     },
@@ -757,6 +869,7 @@ test('F1 run-intent management rejects cross-room patches without mutating targe
       body: JSON.stringify({
         projectId: PROJECT_A,
         canvasId: CANVAS_A,
+        expectedQueueRevision: intentBBeforeCrossProjectPatch.queueRevision,
         status: 'rejected',
       }),
     },
@@ -774,6 +887,7 @@ test('F1 run-intent management rejects cross-room patches without mutating targe
       body: JSON.stringify({
         projectId: PROJECT_B,
         canvasId: CANVAS_B,
+        expectedQueueRevision: fixture.database.getRunIntent(intentB.id).queueRevision,
         status: 'rejected',
       }),
     },

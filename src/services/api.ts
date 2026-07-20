@@ -7,6 +7,8 @@ import type { ThemeTemplate } from '../theme/types';
 import type { MediaKind } from '../utils/mediaCollection';
 import type { RhToolboxManifest } from '../utils/rhToolbox';
 import type {
+  AssetAvailabilityRefreshInput,
+  AssetAvailabilityRefreshResult,
   AssetIndexResult,
   AssetPipelineStatus,
   AssetRef,
@@ -19,6 +21,7 @@ import type {
   AssetDuplicateDecision,
   AssetDuplicateKind,
   AssetDuplicatePage,
+  AssetDuplicateRefreshResult,
   AssetExactDuplicateGroup,
   AssetExactDuplicateGroupPage,
   AssetLineagePage,
@@ -56,9 +59,21 @@ import type {
   CanvasPatchRevertResult,
   CanvasOperation,
   CanvasSyncData,
+  CollaborationAuditPage,
+  CollaborationExecutionPolicy,
+  CollaborationExecutionPolicyInput,
+  CollaborationRoomExecutionPolicy,
+  CollaborationRoomExecutionPolicyInput,
+  CollaborationRoomExecutionPolicySnapshot,
+  CollaborationRunIntentQueueMutationInput,
+  CollaborationReviewVisibilityPolicy,
+  CollaborationReviewVisibilityPolicyInput,
   CollaborationMember,
   CollaborationInvite,
   CollaborationExecutionPolicySnapshot,
+  CollaborationPublicExposurePolicy,
+  CollaborationPublicSelfCheck,
+  CollaborationPublicSelfCheckId,
   CollaborationSession,
   CollaborationSessionRevocationResult,
   CollaborationResourceScopeStatus,
@@ -73,6 +88,7 @@ import type {
   RunRetentionPolicy,
   RunRetentionResult,
   VersionedCanvasData,
+  WorkspaceCapability,
   WorkspaceRole,
 } from '../types/project';
 import type { SubflowDefinition } from '../utils/subflows';
@@ -95,6 +111,34 @@ export class ApiRequestError extends Error {
     this.status = status;
     this.data = data;
   }
+}
+
+export interface ProjectRunIntentClaimInput {
+  intentId: string;
+  expectedQueueRevision: number;
+  leaseToken: string;
+  leaseOwner: string;
+}
+
+export interface CollaborationRunIntentDispatchLease {
+  intent: RunIntent;
+  lease: {
+    token: string;
+    owner: string;
+    expiresAt: number;
+  };
+}
+
+export interface CollaborationParticipantSession {
+  id: string;
+  projectId: string;
+  canvasId: string;
+  memberId: string;
+  displayName: string;
+  role: WorkspaceRole;
+  capabilities: WorkspaceCapability[];
+  authorizationEpoch: number;
+  expiresAt: number;
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -184,9 +228,10 @@ export async function executeCanvasAgentTool<K extends CanvasAgentToolName>(
   return parseCanvasAgentToolResult(res.data, body);
 }
 
-export async function syncCanvasData(id: string, afterRevision = 0): Promise<CanvasSyncData> {
+export async function syncCanvasData(id: string, afterRevision = 0, generation: string | null = null): Promise<CanvasSyncData> {
+  const generationQuery = generation ? `&generation=${encodeURIComponent(generation)}` : '';
   const res = await request<{ success: boolean; data: CanvasSyncData }>(
-    `${BASE}/canvas/${encodeURIComponent(id)}/sync?afterRevision=${Math.max(0, Math.trunc(afterRevision))}`,
+    `${BASE}/canvas/${encodeURIComponent(id)}/sync?afterRevision=${Math.max(0, Math.trunc(afterRevision))}${generationQuery}`,
   );
   return res.data;
 }
@@ -801,12 +846,14 @@ export async function listProjectRuns(filters: { projectId?: string; canvasId?: 
 }
 
 export async function createProjectRun(input: {
+  id?: string;
   canvasId: string;
   canvasRevision?: number;
   initiatorId?: string;
   status?: RunSummary['status'];
   summary?: Record<string, unknown>;
   parentRunId?: string;
+  runIntentClaim?: ProjectRunIntentClaimInput;
 }): Promise<RunSummary> {
   const res = await request<{ success: boolean; data: RunSummary }>(`${BASE}/project-runs`, {
     method: 'POST',
@@ -896,17 +943,231 @@ export async function listProjectAssets(filters: {
   };
 }
 
-export async function scanProjectAssets(projectId?: string): Promise<AssetIndexResult> {
-  const res = await request<{ success: boolean; data: AssetIndexResult }>(`${BASE}/project-assets/scan`, {
-    method: 'POST',
-    body: JSON.stringify({ projectId }),
-  });
-  return res.data;
+function requireAssetProjectId(projectId: string): string {
+  const normalized = String(projectId || '').trim();
+  if (!normalized) throw new ApiRequestError('素材请求缺少项目身份。', 400, null);
+  return normalized;
 }
 
-export async function getProjectAssetPipelineStatus(options: { signal?: AbortSignal } = {}): Promise<AssetPipelineStatus> {
-  const res = await request<{ success: boolean; data: AssetPipelineStatus }>(`${BASE}/project-assets/status`, { signal: options.signal });
-  return res.data;
+function normalizeAssetIndexResult(value: unknown, expectedProjectId: string): AssetIndexResult {
+  const raw = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const projectId = String(raw.projectId || '');
+  const catalogRevision = Number(raw.catalogRevision);
+  if (projectId !== expectedProjectId
+    || !Number.isSafeInteger(catalogRevision)
+    || catalogRevision < 1) {
+    throw new ApiRequestError('素材扫描响应的项目身份无效。', 502, null);
+  }
+  const availabilityRaw = raw.availability && typeof raw.availability === 'object' && !Array.isArray(raw.availability)
+    ? raw.availability as Record<string, unknown>
+    : null;
+  const previewJobsRaw = raw.previewJobs && typeof raw.previewJobs === 'object' && !Array.isArray(raw.previewJobs)
+    ? raw.previewJobs as Record<string, unknown>
+    : null;
+  const count = (input: unknown) => Math.max(0, Math.trunc(Number(input) || 0));
+  return {
+    projectId,
+    catalogRevision,
+    total: count(raw.total),
+    indexed: count(raw.indexed),
+    failed: count(raw.failed),
+    ...(availabilityRaw ? { availability: {
+      checked: count(availabilityRaw.checked),
+      changed: count(availabilityRaw.changed),
+      missing: count(availabilityRaw.missing),
+      restored: count(availabilityRaw.restored),
+      sourceChanged: count(availabilityRaw.sourceChanged),
+      indeterminate: count(availabilityRaw.indeterminate),
+    } } : {}),
+    ...(previewJobsRaw ? { previewJobs: {
+      queued: count(previewJobsRaw.queued),
+      succeeded: count(previewJobsRaw.succeeded),
+      failed: count(previewJobsRaw.failed),
+    } } : {}),
+    startedAt: Number(raw.startedAt) || 0,
+    finishedAt: Number(raw.finishedAt) || 0,
+  };
+}
+
+export async function scanProjectAssets(
+  projectId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<AssetIndexResult> {
+  const expectedProjectId = requireAssetProjectId(projectId);
+  const res = await request<{ success: boolean; data: unknown }>(`${BASE}/project-assets/scan`, {
+    method: 'POST',
+    body: JSON.stringify({ projectId: expectedProjectId }),
+    signal: options.signal,
+  });
+  return normalizeAssetIndexResult(res.data, expectedProjectId);
+}
+
+export async function getProjectAssetPipelineStatus(
+  projectId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<AssetPipelineStatus> {
+  const expectedProjectId = requireAssetProjectId(projectId);
+  const res = await request<{ success: boolean; data: unknown }>(
+    `${BASE}/project-assets/status?projectId=${encodeURIComponent(expectedProjectId)}`,
+    { signal: options.signal },
+  );
+  const raw = res.data && typeof res.data === 'object' && !Array.isArray(res.data)
+    ? res.data as Record<string, unknown>
+    : {};
+  const scan = raw.scan && typeof raw.scan === 'object' && !Array.isArray(raw.scan)
+    ? raw.scan as Record<string, unknown>
+    : {};
+  const previews = raw.previews && typeof raw.previews === 'object' && !Array.isArray(raw.previews)
+    ? raw.previews as Record<string, unknown>
+    : {};
+  if (String(raw.projectId || '') !== expectedProjectId
+    || String(scan.projectId || '') !== expectedProjectId
+    || String(previews.projectId || '') !== expectedProjectId
+    || previews.concurrencyScope !== 'global') {
+    throw new ApiRequestError('素材任务状态响应的项目身份无效。', 502, null);
+  }
+  const lastResult = scan.lastResult == null
+    ? null
+    : normalizeAssetIndexResult(scan.lastResult, expectedProjectId);
+  const previewCount = (value: unknown) => {
+    const numeric = Math.trunc(Number(value));
+    return Number.isSafeInteger(numeric) && numeric > 0 ? numeric : 0;
+  };
+  const previewCounts = previews.counts && typeof previews.counts === 'object' && !Array.isArray(previews.counts)
+    ? previews.counts as Record<string, unknown>
+    : {};
+  const pending = previews.pending && typeof previews.pending === 'object' && !Array.isArray(previews.pending)
+    ? previews.pending as Record<string, unknown>
+    : {};
+  const storagePressureRaw = previews.storagePressure && typeof previews.storagePressure === 'object'
+    && !Array.isArray(previews.storagePressure)
+    ? previews.storagePressure as Record<string, unknown>
+    : null;
+  const databaseBusyRaw = previews.databaseBusy && typeof previews.databaseBusy === 'object'
+    && !Array.isArray(previews.databaseBusy)
+    ? previews.databaseBusy as Record<string, unknown>
+    : null;
+  if ((storagePressureRaw && storagePressureRaw.scope !== 'global')
+    || (databaseBusyRaw && databaseBusyRaw.scope !== 'global')
+    || (previews.shuttingDown === true && previews.shuttingDownScope !== 'global')) {
+    throw new ApiRequestError('素材任务状态响应的全局工作器范围无效。', 502, null);
+  }
+  return {
+    projectId: expectedProjectId,
+    scan: {
+      projectId: expectedProjectId,
+      running: scan.running === true,
+      lastResult,
+    },
+    previews: {
+      projectId: expectedProjectId,
+      active: previewCount(previews.active),
+      activeModel3d: previewCount(previews.activeModel3d),
+      concurrency: Math.max(1, previewCount(previews.concurrency)),
+      concurrencyScope: 'global',
+      counts: {
+        queued: previewCount(previewCounts.queued),
+        running: previewCount(previewCounts.running),
+        retrying: previewCount(previewCounts.retrying),
+        succeeded: previewCount(previewCounts.succeeded),
+        failed: previewCount(previewCounts.failed),
+      },
+      pending: {
+        completions: previewCount(pending.completions),
+        reschedules: previewCount(pending.reschedules),
+        reruns: previewCount(pending.reruns),
+      },
+      ...(Number(previews.nextAttemptAt) > 0 ? { nextAttemptAt: Number(previews.nextAttemptAt) } : {}),
+      ...(previews.databaseStatusStale === true ? { databaseStatusStale: true } : {}),
+      ...(previews.shuttingDown === true ? { shuttingDown: true, shuttingDownScope: 'global' as const } : {}),
+      ...(previews.globalRecoveryPending === true ? { globalRecoveryPending: true } : {}),
+      ...(storagePressureRaw?.active === true ? { storagePressure: {
+        active: true,
+        reason: String(storagePressureRaw.reason || 'storage-pressure').slice(0, 80),
+        retryable: storagePressureRaw.retryable === true,
+        ...(Number(storagePressureRaw.nextRetryAt) > 0
+          ? { nextRetryAt: Number(storagePressureRaw.nextRetryAt) }
+          : {}),
+        scope: 'global' as const,
+      } } : {}),
+      ...(databaseBusyRaw?.active === true ? { databaseBusy: {
+        active: true,
+        code: String(databaseBusyRaw.code || 'project_database_busy').slice(0, 80),
+        ...(Number(databaseBusyRaw.nextRetryAt) > 0
+          ? { nextRetryAt: Number(databaseBusyRaw.nextRetryAt) }
+          : {}),
+        scope: 'global' as const,
+      } } : {}),
+    },
+  };
+}
+
+export async function refreshProjectAssetAvailability(
+  assetId: string,
+  input: AssetAvailabilityRefreshInput,
+  options: { signal?: AbortSignal } = {},
+): Promise<AssetAvailabilityRefreshResult> {
+  const expectedAssetId = String(assetId || '').trim();
+  const projectId = requireAssetProjectId(input.projectId);
+  const expectedCatalogRevision = Number(input.expectedCatalogRevision);
+  const entityUid = String(input.entityUid || '').trim().toLowerCase();
+  const contentRevision = Number(input.contentRevision);
+  const organizationRevision = Number(input.organizationRevision);
+  const contentHash = String(input.contentHash || '').trim().toLowerCase();
+  if (!expectedAssetId
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(entityUid)
+    || !/^[a-f0-9]{64}$/.test(contentHash)
+    || !Number.isSafeInteger(expectedCatalogRevision) || expectedCatalogRevision < 1
+    || !Number.isSafeInteger(contentRevision) || contentRevision < 1
+    || !Number.isSafeInteger(organizationRevision) || organizationRevision < 1) {
+    throw new ApiRequestError('素材可用性校验缺少有效的冻结身份。', 400, null);
+  }
+  const res = await request<{ success: boolean; data: unknown }>(
+    `${BASE}/project-assets/${encodeURIComponent(expectedAssetId)}/availability/refresh`,
+    {
+      method: 'POST',
+      signal: options.signal,
+      body: JSON.stringify({
+        projectId,
+        expectedCatalogRevision,
+        entityUid,
+        contentRevision,
+        organizationRevision,
+        contentHash,
+      }),
+    },
+  );
+  const raw = res.data && typeof res.data === 'object' && !Array.isArray(res.data)
+    ? res.data as Record<string, unknown>
+    : {};
+  const state = String(raw.state || '');
+  const availability = String(raw.availability || '');
+  const responseOrganizationRevision = Number(raw.organizationRevision);
+  const responseCatalogRevision = Number(raw.catalogRevision);
+  const changed = raw.changed === true;
+  if (String(raw.assetId || '') !== expectedAssetId
+    || String(raw.projectId || '') !== projectId
+    || !['available', 'missing', 'source-changed', 'indeterminate'].includes(state)
+    || !['available', 'missing', 'corrupt', 'unverified'].includes(availability)
+    || typeof raw.changed !== 'boolean'
+    || !Number.isSafeInteger(responseOrganizationRevision) || responseOrganizationRevision < 1
+    || !Number.isSafeInteger(responseCatalogRevision) || responseCatalogRevision < 1
+    || responseOrganizationRevision !== organizationRevision + (changed ? 1 : 0)
+    || responseCatalogRevision !== expectedCatalogRevision + (changed ? 1 : 0)) {
+    throw new ApiRequestError('素材可用性校验响应无效。', 502, null);
+  }
+  return {
+    assetId: expectedAssetId,
+    projectId,
+    state: state as AssetAvailabilityRefreshResult['state'],
+    reason: String(raw.reason || '').slice(0, 80),
+    changed,
+    availability: availability as AssetRef['availability'],
+    organizationRevision: responseOrganizationRevision,
+    catalogRevision: responseCatalogRevision,
+  };
 }
 
 export async function retryProjectAssetPreview(assetId: string): Promise<unknown> {
@@ -1149,25 +1410,59 @@ export async function listProjectAssetDuplicates(
   const res = await request<{
     success: boolean;
     data: Array<Record<string, unknown>>;
-    meta?: { nextCursor?: string | null; hasMore?: boolean };
+    meta?: { nextCursor?: string | null; hasMore?: boolean; catalogRevision?: AssetRevision };
   }>(`${BASE}/project-assets/${encodeURIComponent(assetId)}/duplicates?${params}`, { signal: options.signal });
+  const catalogRevision = Number(res.meta?.catalogRevision);
+  if (!Number.isSafeInteger(catalogRevision) || catalogRevision < 1) {
+    throw new ApiRequestError('重复候选响应缺少有效的素材目录 revision。', 409, {
+      code: 'asset_duplicate_catalog_revision_missing',
+    });
+  }
   return {
     items: (res.data || []).map(normalizeDuplicateCandidate),
     cursor: res.meta?.nextCursor || null,
     hasMore: Boolean(res.meta?.hasMore),
     limit: Number(params.get('limit')),
+    catalogRevision,
+  };
+}
+
+export async function refreshProjectAssetDuplicates(
+  assetId: string,
+  options: { expectedCatalogRevision: AssetRevision; signal?: AbortSignal },
+): Promise<AssetDuplicateRefreshResult> {
+  const res = await request<{
+    success: boolean;
+    data: AssetDuplicateRefreshResult;
+  }>(`${BASE}/project-assets/${encodeURIComponent(assetId)}/duplicates/refresh`, {
+    method: 'POST',
+    body: JSON.stringify({ expectedCatalogRevision: options.expectedCatalogRevision }),
+    signal: options.signal,
+  });
+  return {
+    refreshed: Boolean(res.data?.refreshed),
+    assetId: String(res.data?.assetId || assetId),
+    projectId: String(res.data?.projectId || ''),
+    catalogRevision: res.data?.catalogRevision ?? options.expectedCatalogRevision,
+    candidateCount: res.data?.candidateCount == null ? undefined : Number(res.data.candidateCount),
   };
 }
 
 export async function decideProjectAssetDuplicate(
   candidateId: string,
   decision: AssetDuplicateDecision,
-  expectedRevision: AssetRevision = 0,
-  projectId?: string,
+  options: {
+    expectedRevision: AssetRevision;
+    expectedCatalogRevision: AssetRevision;
+    projectId?: string;
+  },
 ): Promise<Pick<AssetDuplicateCandidate, 'id' | 'decision' | 'revision' | 'updatedAt'>> {
   const res = await request<{ success: boolean; data: Record<string, unknown> }>(
     `${BASE}/project-assets/duplicate-candidates/${encodeURIComponent(candidateId)}/decision`,
-    { method: 'PUT', body: JSON.stringify({ decision, expectedRevision, projectId }) },
+    {
+      method: 'PUT',
+      body: JSON.stringify({ decision, ...options }),
+    },
   );
   const data = res.data || {};
   return {
@@ -1327,6 +1622,10 @@ export async function setProjectAssetPermissions(
   return res.data;
 }
 
+/**
+ * Pure compatibility read. Call refreshProjectAssetDuplicates explicitly with
+ * the current catalog revision before requesting the default all/near page.
+ */
 export async function findProjectAssetDuplicates(assetId: string, maxDistance = 8): Promise<Array<{ asset: AssetRef; match: 'exact' | 'perceptual'; distance: number }>> {
   const page = await listProjectAssetDuplicates(assetId, { maxDistance, limit: 100 });
   return page.items.map((candidate) => ({
@@ -1374,8 +1673,105 @@ export async function removeProjectAssetIndex(assetId: string): Promise<void> {
   await request(`${BASE}/project-assets/${encodeURIComponent(assetId)}/index`, { method: 'DELETE' });
 }
 
-export async function deleteProjectAssetFile(assetId: string, confirmFilename: string): Promise<void> {
-  await request(`${BASE}/project-assets/${encodeURIComponent(assetId)}/file`, { method: 'DELETE', body: JSON.stringify({ deleteFile: true, confirmFilename }) });
+export type ProjectAssetDeleteCleanupPhase = 'cas-file-delete' | 'cas-record-finalize' | 'legacy-file-delete';
+
+export interface ProjectAssetDeletePersistenceWarning {
+  code: 'asset_delete_cleanup_pending';
+  committed: true;
+  phase: ProjectAssetDeleteCleanupPhase;
+  reconciliationPending: true;
+  retryable: false;
+}
+
+export interface ProjectAssetDeleteResult {
+  id: string;
+  indexRemoved: true;
+  fileDeleted: boolean;
+  blobRetained?: boolean;
+  persistenceWarning?: ProjectAssetDeletePersistenceWarning;
+}
+
+export interface ProjectAssetDeleteExpectedIdentity {
+  entityUid: string;
+  contentRevision: number;
+  contentHash: string;
+}
+
+const PROJECT_ASSET_DELETE_CLEANUP_PHASES = new Set<ProjectAssetDeleteCleanupPhase>([
+  'cas-file-delete',
+  'cas-record-finalize',
+  'legacy-file-delete',
+]);
+
+function normalizeProjectAssetDeleteWarning(value: unknown): ProjectAssetDeletePersistenceWarning | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const warning = value as Record<string, unknown>;
+  const phase = typeof warning.phase === 'string' && PROJECT_ASSET_DELETE_CLEANUP_PHASES.has(warning.phase as ProjectAssetDeleteCleanupPhase)
+    ? warning.phase as ProjectAssetDeleteCleanupPhase
+    : null;
+  if (warning.code !== 'asset_delete_cleanup_pending'
+    || warning.committed !== true
+    || !phase
+    || warning.reconciliationPending !== true
+    || warning.retryable !== false) return undefined;
+  return {
+    code: 'asset_delete_cleanup_pending',
+    committed: true,
+    phase,
+    reconciliationPending: true,
+    retryable: false,
+  };
+}
+
+function normalizeProjectAssetDeleteResult(value: unknown, assetId: string): ProjectAssetDeleteResult {
+  const data = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const hasWarning = Object.hasOwn(data, 'persistenceWarning');
+  const persistenceWarning = normalizeProjectAssetDeleteWarning(data.persistenceWarning);
+  if (data.indexRemoved !== true
+    || typeof data.fileDeleted !== 'boolean'
+    || (Object.hasOwn(data, 'blobRetained') && typeof data.blobRetained !== 'boolean')
+    || (hasWarning && !persistenceWarning)
+    || (data.fileDeleted !== true && data.blobRetained !== true && !persistenceWarning)
+    || (data.fileDeleted === true && data.blobRetained === true && !persistenceWarning)) {
+    throw new Error('素材删除响应无效，请刷新素材库确认当前状态');
+  }
+  const result: ProjectAssetDeleteResult = {
+    id: assetId,
+    indexRemoved: true,
+    fileDeleted: data.fileDeleted === true,
+  };
+  if (typeof data.blobRetained === 'boolean') result.blobRetained = data.blobRetained;
+  if (persistenceWarning) result.persistenceWarning = persistenceWarning;
+  return result;
+}
+
+export async function deleteProjectAssetFile(
+  assetId: string,
+  confirmFilename: string,
+  expectedIdentity: ProjectAssetDeleteExpectedIdentity,
+): Promise<ProjectAssetDeleteResult> {
+  const entityUid = String(expectedIdentity?.entityUid || '').trim().toLowerCase();
+  const contentRevision = Number(expectedIdentity?.contentRevision);
+  const contentHash = String(expectedIdentity?.contentHash || '').trim().toLowerCase();
+  if (!entityUid || !Number.isSafeInteger(contentRevision) || contentRevision < 1 || !/^[a-f0-9]{64}$/.test(contentHash)) {
+    throw new Error('素材缺少可验证的删除身份，请刷新后重试');
+  }
+  const response = await request<unknown>(`${BASE}/project-assets/${encodeURIComponent(assetId)}/file`, {
+    method: 'DELETE',
+    body: JSON.stringify({
+      deleteFile: true,
+      confirmFilename,
+      expectedEntityUid: entityUid,
+      expectedContentRevision: contentRevision,
+      expectedContentHash: contentHash,
+    }),
+  });
+  const envelope = response && typeof response === 'object' && !Array.isArray(response)
+    ? response as Record<string, unknown>
+    : {};
+  return normalizeProjectAssetDeleteResult(envelope.data, assetId);
 }
 
 // ========== 智能素材：Caption / OCR / Embedding ==========
@@ -1578,6 +1974,21 @@ export async function getProjectAssetSemanticStatus(
   const res = await request<{ success: boolean; data: unknown }>(
     `${BASE}/project-assets/semantic/status?projectId=${encodeURIComponent(projectId)}`,
     { signal: options.signal },
+  );
+  return normalizeSemanticStatus(res.data);
+}
+
+export async function refreshProjectAssetSemanticModels(
+  projectId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<AssetSemanticStatus> {
+  const res = await request<{ success: boolean; data: unknown }>(
+    `${BASE}/project-assets/semantic/models/refresh`,
+    {
+      method: 'POST',
+      signal: options.signal,
+      body: JSON.stringify({ projectId }),
+    },
   );
   return normalizeSemanticStatus(res.data);
 }
@@ -1833,6 +2244,104 @@ export async function retryProjectAssetSemanticJob(
 }
 
 // ========== 本机协作网关管理 ==========
+const COLLABORATION_PUBLIC_SELF_CHECK_IDS = new Set<CollaborationPublicSelfCheckId>([
+  'health',
+  'invite',
+  'websocket',
+  'upload',
+  'range',
+]);
+
+function normalizeCollaborationPublicExposure(value: unknown): CollaborationPublicExposurePolicy | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = value as Partial<CollaborationPublicExposurePolicy>;
+  const exposure = ['loopback', 'lan', 'public'].includes(String(raw.exposure))
+    ? raw.exposure as CollaborationPublicExposurePolicy['exposure']
+    : 'public';
+  const protocol = raw.protocol === 'https' ? 'https' : 'http';
+  return {
+    baseUrl: String(raw.baseUrl || ''),
+    origin: String(raw.origin || ''),
+    exposure,
+    protocol,
+    https: raw.https === true,
+    insecurePublic: raw.insecurePublic === true,
+    ownerManagementAllowed: raw.ownerManagementAllowed !== false,
+    sensitiveOriginalDownloadAllowed: raw.sensitiveOriginalDownloadAllowed !== false,
+    warning: raw.warning == null ? null : String(raw.warning),
+  };
+}
+
+function normalizeCollaborationPublicExposureConfiguration(
+  value: unknown,
+): CollaborationStatus['publicExposureConfiguration'] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const raw = value as NonNullable<CollaborationStatus['publicExposureConfiguration']>;
+  const status = ['configured', 'unconfigured', 'invalid'].includes(String(raw.status))
+    ? raw.status
+    : 'invalid';
+  const source = ['persisted', 'environment', 'runtime', 'none'].includes(String(raw.source))
+    ? raw.source
+    : 'none';
+  return {
+    status,
+    source,
+    durable: raw.durable === true,
+    failClosed: raw.failClosed !== false,
+    canClearPersisted: raw.canClearPersisted === true,
+    updatedAt: raw.updatedAt != null
+      && Number.isSafeInteger(Number(raw.updatedAt))
+      && Number(raw.updatedAt) > 0
+      ? Number(raw.updatedAt)
+      : null,
+    errorCode: raw.errorCode == null ? null : String(raw.errorCode),
+    warning: raw.warning == null ? null : String(raw.warning),
+  };
+}
+
+function normalizeCollaborationPublicSelfCheck(value: unknown): CollaborationPublicSelfCheck {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('公网自检结果格式无效');
+  }
+  const raw = value as Partial<CollaborationPublicSelfCheck>;
+  const policy = normalizeCollaborationPublicExposure(raw);
+  const checks = (Array.isArray(raw.checks) ? raw.checks : []).flatMap((check) => {
+    if (!check || typeof check !== 'object' || Array.isArray(check)) return [];
+    const entry = check as CollaborationPublicSelfCheck['checks'][number];
+    if (!COLLABORATION_PUBLIC_SELF_CHECK_IDS.has(entry.id)) return [];
+    return [{
+      id: entry.id,
+      status: entry.status === 'passed' ? 'passed' as const : 'failed' as const,
+      latencyMs: Math.max(0, Number(entry.latencyMs) || 0),
+      ...(Number(entry.httpStatus) ? { httpStatus: Number(entry.httpStatus) } : {}),
+      ...(entry.errorCode ? { errorCode: String(entry.errorCode) } : {}),
+      ...(entry.message ? { message: String(entry.message) } : {}),
+      hint: String(entry.hint || ''),
+    }];
+  });
+  if (raw.contractVersion !== 't8-collaboration-public-self-check-v1'
+    || !policy
+    || checks.length !== COLLABORATION_PUBLIC_SELF_CHECK_IDS.size
+    || new Set(checks.map((check) => check.id)).size !== COLLABORATION_PUBLIC_SELF_CHECK_IDS.size) {
+    throw new Error('公网自检结果不完整');
+  }
+  return {
+    contractVersion: 't8-collaboration-public-self-check-v1',
+    baseUrl: policy.baseUrl,
+    exposure: policy.exposure,
+    protocol: policy.protocol,
+    https: policy.https,
+    insecurePublic: policy.insecurePublic,
+    ownerManagementAllowed: policy.ownerManagementAllowed,
+    sensitiveOriginalDownloadAllowed: policy.sensitiveOriginalDownloadAllowed,
+    warning: policy.warning,
+    allChecksPassed: raw.allChecksPassed === true,
+    status: raw.status === 'passed' || raw.status === 'degraded' ? raw.status : 'failed',
+    completedAt: Math.max(0, Number(raw.completedAt) || 0),
+    checks,
+  };
+}
+
 function normalizeCollaborationStatus(value: CollaborationStatus): CollaborationStatus {
   const legacy = value as Partial<CollaborationStatus> & { connections?: number };
   const rawResourceScope = legacy.room?.resourceScope;
@@ -1878,6 +2387,14 @@ function normalizeCollaborationStatus(value: CollaborationStatus): Collaboration
       : [],
     defaultHost: String(legacy.defaultHost || '127.0.0.1'),
     defaultPort: Number.isInteger(Number(legacy.defaultPort)) ? Number(legacy.defaultPort) : 18767,
+    publicBaseUrl: legacy.publicBaseUrl == null ? null : String(legacy.publicBaseUrl),
+    publicExposure: normalizeCollaborationPublicExposure(legacy.publicExposure),
+    publicExposureConfiguration: normalizeCollaborationPublicExposureConfiguration(
+      legacy.publicExposureConfiguration,
+    ),
+    lastPublicSelfCheck: legacy.lastPublicSelfCheck
+      ? normalizeCollaborationPublicSelfCheck(legacy.lastPublicSelfCheck)
+      : null,
     room,
   };
 }
@@ -1911,6 +2428,29 @@ export async function stopCollaborationGateway(): Promise<CollaborationStatus> {
   return normalizeCollaborationStatus(res.data);
 }
 
+export async function runCollaborationPublicSelfCheck(
+  baseUrl: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<CollaborationPublicSelfCheck> {
+  const res = await request<{ success: boolean; data: CollaborationPublicSelfCheck }>(
+    `${BASE}/collaboration/public-self-check`,
+    {
+      method: 'POST',
+      signal: options.signal,
+      body: JSON.stringify({ baseUrl }),
+    },
+  );
+  return normalizeCollaborationPublicSelfCheck(res.data);
+}
+
+export async function clearCollaborationPublicBaseUrl(): Promise<CollaborationStatus> {
+  const res = await request<{ success: boolean; data: CollaborationStatus }>(
+    `${BASE}/collaboration/public-base-url`,
+    { method: 'DELETE' },
+  );
+  return normalizeCollaborationStatus(res.data);
+}
+
 export async function initializeCollaborationResourceScope(
   projectId: string,
   canvasId: string,
@@ -1936,6 +2476,125 @@ export async function getCollaborationExecutionPolicy(
   const res = await request<{ success: boolean; data: CollaborationExecutionPolicySnapshot }>(
     `${BASE}/collaboration/execution-policy${suffix}`,
     { signal: options.signal },
+  );
+  return res.data;
+}
+
+export async function updateCollaborationExecutionPolicy(
+  projectId: string,
+  input: CollaborationExecutionPolicyInput,
+): Promise<CollaborationExecutionPolicy> {
+  const res = await request<{ success: boolean; data: CollaborationExecutionPolicy }>(
+    `${BASE}/collaboration/execution-policy`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ projectId, ...input }),
+    },
+  );
+  return res.data;
+}
+
+export async function getCollaborationRoomExecutionPolicy(
+  projectId: string,
+  canvasId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<CollaborationRoomExecutionPolicySnapshot> {
+  const params = new URLSearchParams({ projectId, canvasId });
+  const res = await request<{ success: boolean; data: CollaborationRoomExecutionPolicySnapshot }>(
+    `${BASE}/collaboration/room-execution-policy?${params.toString()}`,
+    { signal: options.signal },
+  );
+  return res.data;
+}
+
+export async function updateCollaborationRoomExecutionPolicy(
+  projectId: string,
+  canvasId: string,
+  input: CollaborationRoomExecutionPolicyInput,
+): Promise<CollaborationRoomExecutionPolicy> {
+  const res = await request<{ success: boolean; data: CollaborationRoomExecutionPolicy }>(
+    `${BASE}/collaboration/room-execution-policy`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ projectId, canvasId, ...input }),
+    },
+  );
+  return res.data;
+}
+
+export async function getCollaborationReviewVisibilityPolicy(
+  projectId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<CollaborationReviewVisibilityPolicy> {
+  const params = new URLSearchParams({ projectId });
+  const res = await request<{ success: boolean; data: CollaborationReviewVisibilityPolicy }>(
+    `${BASE}/collaboration/review-visibility-policy?${params.toString()}`,
+    { signal: options.signal },
+  );
+  return res.data;
+}
+
+export async function updateCollaborationReviewVisibilityPolicy(
+  projectId: string,
+  input: CollaborationReviewVisibilityPolicyInput,
+): Promise<CollaborationReviewVisibilityPolicy> {
+  const res = await request<{ success: boolean; data: CollaborationReviewVisibilityPolicy }>(
+    `${BASE}/collaboration/review-visibility-policy`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ projectId, ...input }),
+    },
+  );
+  return res.data;
+}
+
+export async function listCollaborationAuditEvents(
+  input: {
+    projectId: string;
+    canvasId?: string | null;
+    action?: string;
+    actorId?: string;
+    targetType?: string;
+    offset?: number;
+    limit?: number;
+  },
+  options: { signal?: AbortSignal } = {},
+): Promise<CollaborationAuditPage> {
+  const params = new URLSearchParams({ projectId: input.projectId });
+  if (input.canvasId) params.set('canvasId', input.canvasId);
+  if (input.action) params.set('action', input.action);
+  if (input.actorId) params.set('actorId', input.actorId);
+  if (input.targetType) params.set('targetType', input.targetType);
+  if (input.offset != null) params.set('offset', String(input.offset));
+  if (input.limit != null) params.set('limit', String(input.limit));
+  const res = await request<{ success: boolean; data: CollaborationAuditPage }>(
+    `${BASE}/collaboration/audit-events?${params.toString()}`,
+    { signal: options.signal },
+  );
+  return res.data;
+}
+
+export async function logoutCurrentCollaborationSession(): Promise<void> {
+  await request<{ success: boolean }>(`${BASE}/collab/logout`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    body: '{}',
+  });
+}
+
+export async function rotateCurrentCollaborationSession(
+  recoveryGeneration: string | null = null,
+): Promise<CollaborationParticipantSession> {
+  const res = await request<{ success: boolean; data: CollaborationParticipantSession }>(
+    `${BASE}/collab/session/rotate`,
+    {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: recoveryGeneration
+        ? { 'X-T8-Canvas-Generation': recoveryGeneration }
+        : undefined,
+      body: '{}',
+    },
   );
   return res.data;
 }
@@ -2065,15 +2724,120 @@ export async function listCollaborationRunIntents(
   return res.data || [];
 }
 
+export async function getCollaborationRunIntent(
+  intentId: string,
+  projectId: string,
+  canvasId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<RunIntent> {
+  const params = new URLSearchParams({ projectId, canvasId });
+  const res = await request<{ success: boolean; data: RunIntent }>(
+    `${BASE}/collaboration/run-intents/${encodeURIComponent(intentId)}?${params.toString()}`,
+    { signal: options.signal },
+  );
+  return res.data;
+}
+
+export async function getCollaborationRunIntentSnapshot(
+  intentId: string,
+  projectId: string,
+  canvasId: string,
+  canvasRevision: number,
+  options: { signal?: AbortSignal } = {},
+): Promise<CanvasData> {
+  const params = new URLSearchParams({
+    projectId,
+    canvasId,
+    canvasRevision: String(canvasRevision),
+  });
+  const res = await request<{ success: boolean; data: CanvasData }>(
+    `${BASE}/collaboration/run-intents/${encodeURIComponent(intentId)}/snapshot?${params.toString()}`,
+    { signal: options.signal },
+  );
+  return res.data;
+}
+
 export async function updateCollaborationRunIntent(
   intentId: string,
   projectId: string,
   canvasId: string,
-  patch: { status: 'rejected' | 'stale' | 'failed' },
+  patch: CollaborationRunIntentQueueMutationInput & { status: 'rejected' | 'stale' },
 ): Promise<RunIntent> {
   const res = await request<{ success: boolean; data: RunIntent }>(`${BASE}/collaboration/run-intents/${encodeURIComponent(intentId)}`, {
     method: 'PATCH', body: JSON.stringify({ ...patch, projectId, canvasId }),
   });
+  return res.data;
+}
+
+export async function acceptCollaborationRunIntent(
+  intentId: string,
+  projectId: string,
+  canvasId: string,
+  input: CollaborationRunIntentQueueMutationInput,
+): Promise<RunIntent> {
+  const res = await request<{ success: boolean; data: RunIntent }>(
+    `${BASE}/collaboration/run-intents/${encodeURIComponent(intentId)}/accept`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ projectId, canvasId, ...input }),
+    },
+  );
+  return res.data;
+}
+
+export async function cancelCollaborationRunIntent(
+  intentId: string,
+  projectId: string,
+  canvasId: string,
+  input: CollaborationRunIntentQueueMutationInput,
+): Promise<RunIntent> {
+  const res = await request<{ success: boolean; data: RunIntent }>(
+    `${BASE}/collaboration/run-intents/${encodeURIComponent(intentId)}/cancel`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ projectId, canvasId, ...input }),
+    },
+  );
+  return res.data;
+}
+
+export async function leaseCollaborationRunIntent(input: {
+  projectId: string;
+  canvasId: string;
+  workerId: string;
+  expectedIntentId?: string;
+  leaseDurationMs?: number;
+}): Promise<CollaborationRunIntentDispatchLease | null> {
+  const res = await request<{ success: boolean; data: CollaborationRunIntentDispatchLease | null }>(
+    `${BASE}/collaboration/run-intents/lease`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
+  return res.data || null;
+}
+
+export async function releaseCollaborationRunIntentLease(
+  intentId: string,
+  input: {
+    projectId: string;
+    canvasId: string;
+    expectedQueueRevision: number;
+    workerId: string;
+    leaseToken: string;
+    retryable?: boolean;
+    errorCode?: string;
+    errorMessage?: string;
+  },
+): Promise<RunIntent> {
+  const res = await request<{ success: boolean; data: RunIntent }>(
+    `${BASE}/collaboration/run-intents/${encodeURIComponent(intentId)}/lease/release`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  );
   return res.data;
 }
 
@@ -2116,7 +2880,6 @@ export async function createProjectNodeRun(runId: string, input: {
 
 export async function updateProjectNodeRun(runId: string, nodeRunId: string, patch: {
   status?: string;
-  outputRefs?: string[];
   eventPayload?: Record<string, unknown>;
 }): Promise<NodeRunSummary> {
   const res = await request<{ success: boolean; data: NodeRunSummary }>(

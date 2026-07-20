@@ -237,7 +237,19 @@ async function redeemEditor(fixture) {
     body: JSON.stringify({ code: invite.code, displayName: '100MB acceptance editor' }),
   }));
   assert.equal(result.response.status, 200, result.text);
-  return { cookie: result.response.headers.get('set-cookie').split(';')[0], member: result.payload.data };
+  return {
+    cookie: result.response.headers.get('set-cookie').split(';')[0],
+    member: result.payload.data,
+    recoveryGeneration: fixture.database.getRecoveryGeneration(),
+  };
+}
+
+function uploadMutationHeaders(actor, headers = {}) {
+  return {
+    cookie: actor.cookie,
+    'x-t8-canvas-generation': actor.recoveryGeneration,
+    ...headers,
+  };
 }
 
 async function readSlice(handle, start, length) {
@@ -260,12 +272,11 @@ async function putChunk(fixture, actor, sourceHandle, session, index, memory) {
     `${fixture.baseUrl}/api/collab/assets/uploads/${encodeURIComponent(session.id)}/chunks/${index}`,
     {
       method: 'PUT',
-      headers: {
-        cookie: actor.cookie,
+      headers: uploadMutationHeaders(actor, {
         'content-type': 'application/octet-stream',
         'content-range': `bytes ${start}-${start + length - 1}/${session.expectedSize}`,
         'x-chunk-sha256': sha256Buffer(bytes),
-      },
+      }),
       body: bytes,
     },
   ));
@@ -318,7 +329,7 @@ test('a ffprobe-valid 100MB+ MP4 resumes after a cold restart, commits by full S
     const editor = await redeemEditor(fixture);
     const begin = await jsonResponse(await fetch(`${fixture.baseUrl}/api/collab/assets/uploads`, {
       method: 'POST',
-      headers: { cookie: editor.cookie, 'content-type': 'application/json' },
+      headers: uploadMutationHeaders(editor, { 'content-type': 'application/json' }),
       body: JSON.stringify({
         filename: 'valid-101mb.mp4',
         mimeType: 'video/mp4',
@@ -373,7 +384,7 @@ test('a ffprobe-valid 100MB+ MP4 resumes after a cold restart, commits by full S
       `${fixture.baseUrl}/api/collab/assets/uploads/${encodeURIComponent(session.id)}/complete`,
       {
         method: 'POST',
-        headers: { cookie: editor.cookie, 'content-type': 'application/json' },
+        headers: uploadMutationHeaders(editor, { 'content-type': 'application/json' }),
         body: JSON.stringify({ sha256: digest }),
       },
     ));

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
+import sharp from 'sharp';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -17,6 +18,9 @@ async function listen(app: any) {
 test('Seedream uses one synchronous JSON endpoint for text-to-image and image editing', async (t) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 't8-seedream-image-'));
   t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  const validPng = await sharp({
+    create: { width: 2, height: 2, channels: 4, background: { r: 40, g: 180, b: 120, alpha: 1 } },
+  }).png().toBuffer();
 
   const upstreamCalls: any[] = [];
   const upstreamApp = express();
@@ -29,7 +33,7 @@ test('Seedream uses one synchronous JSON endpoint for text-to-image and image ed
       auth: req.header('authorization'),
     });
     res.json({
-      data: [{ b64_json: Buffer.from(`SEEDREAM-${upstreamCalls.length}`).toString('base64') }],
+      data: [{ b64_json: validPng.toString('base64') }],
     });
   });
   const upstreamServer = await listen(upstreamApp);
@@ -84,7 +88,7 @@ test('Seedream uses one synchronous JSON endpoint for text-to-image and image ed
     output_format: 'png',
   });
 
-  const reference = `data:image/png;base64,${Buffer.from('REFERENCE').toString('base64')}`;
+  const reference = `data:image/png;base64,${validPng.toString('base64')}`;
   const imageEdit = await fetch(`${base}/api/proxy/image/submit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

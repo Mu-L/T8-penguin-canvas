@@ -1,6 +1,7 @@
 const express = require('express');
 const config = require('../config');
 const { getProjectDatabase } = require('../services/projectDatabase');
+const { sendProjectDatabaseStorageCapacityError } = require('../services/projectDatabasePublicError');
 const { safeCanvasPatchErrorMessage } = require('../services/canvasPatch');
 const { CanvasAgentToolError, executeCanvasAgentTool } = require('../services/canvasAgentTools');
 
@@ -27,6 +28,8 @@ function createCanvasAgentToolsRouter(options = {}) {
       });
       return res.json({ success: true, data });
     } catch (error) {
+      if (!(error instanceof CanvasAgentToolError)
+        && sendProjectDatabaseStorageCapacityError(res, error, { operation: 'canvas-agent.tool' })) return;
       const status = error instanceof CanvasAgentToolError ? error.status : 400;
       const code = error instanceof CanvasAgentToolError ? error.code : 'agent_tool_failed';
       return res.status(status).json({

@@ -387,6 +387,88 @@ test('local canvas patch routes pin identity, persist authoritative documents, a
   assert.deepEqual(JSON.parse(fs.readFileSync(canvasFile, 'utf8')), mirrorFailureDocument, 'authoritative GET repairs the stale compatibility mirror');
 });
 
+test('legacy hydration routes preserve canvas_identity_retained as a stable 409 response', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-canvas-retained-routes-'));
+  const dataDir = path.join(directory, 'data');
+  const autoSaveRoot = path.join(directory, 'auto-save');
+  const canvasId = 'canvas-retained';
+  const canvasFile = path.join(dataDir, `canvas_${canvasId}.json`);
+  const listFile = path.join(dataDir, 'canvas_list.json');
+  const settingsFile = path.join(directory, 'settings.json');
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(canvasFile, JSON.stringify({ nodes: [], edges: [] }), 'utf8');
+  fs.writeFileSync(listFile, JSON.stringify([{ id: canvasId, name: 'Retained' }]), 'utf8');
+  fs.writeFileSync(settingsFile, JSON.stringify({ canvasAutoSavePath: autoSaveRoot }), 'utf8');
+
+  const retainedError = () => Object.assign(
+    new Error('该画布 ID 仍被保留历史证据占用，请使用新的画布 ID'),
+    { code: 'canvas_identity_retained', status: 409, statusCode: 409 },
+  );
+  const database = {
+    getCanvas() { return null; },
+    ensureCanvas() { throw retainedError(); },
+  };
+  const servicePath = require.resolve('../backend/src/services/projectDatabase.js');
+  const routePath = require.resolve('../backend/src/routes/canvas.js');
+  const previousServiceModule = require.cache[servicePath];
+  const previousRouteModule = require.cache[routePath];
+  require.cache[servicePath] = {
+    id: servicePath,
+    filename: servicePath,
+    loaded: true,
+    exports: { getProjectDatabase: () => database },
+  };
+  delete require.cache[routePath];
+
+  const config = require('../backend/src/config.js');
+  const previousConfig = {
+    DATA_DIR: config.DATA_DIR,
+    CANVAS_FILE: config.CANVAS_FILE,
+    SETTINGS_FILE: config.SETTINGS_FILE,
+  };
+  Object.assign(config, { DATA_DIR: dataDir, CANVAS_FILE: listFile, SETTINGS_FILE: settingsFile });
+
+  const app = express();
+  app.use(express.json({ limit: '2mb' }));
+  app.use('/api/canvas', require(routePath));
+  const server = await new Promise((resolve) => {
+    const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
+  });
+  const baseUrl = `http://127.0.0.1:${server.address().port}/api/canvas/${canvasId}`;
+
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    Object.assign(config, previousConfig);
+    delete require.cache[routePath];
+    if (previousRouteModule) require.cache[routePath] = previousRouteModule;
+    if (previousServiceModule) require.cache[servicePath] = previousServiceModule;
+    else delete require.cache[servicePath];
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+
+  const syncResponse = await fetch(`${baseUrl}/sync`);
+  const syncPayload = await syncResponse.json();
+  assert.equal(syncResponse.status, 409, JSON.stringify(syncPayload));
+  assert.equal(syncResponse.headers.get('cache-control'), 'no-store');
+  assert.equal(syncPayload.code, 'canvas_sync_materialization_required');
+
+  const requests = [
+    fetch(baseUrl),
+    fetch(`${baseUrl}/history`),
+    fetch(`${baseUrl}/auto-save`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ nodes: [], edges: [] }),
+    }),
+  ];
+  for (const response of await Promise.all(requests)) {
+    const payload = await response.json();
+    assert.equal(response.status, 409, JSON.stringify(payload));
+    assert.equal(payload.code, 'canvas_identity_retained');
+    assert.equal(payload.success, false);
+  }
+});
+
 test('local patch HTTP routes complete a real SQLite lifecycle and keep SQLite authoritative on mirror failure', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-canvas-patch-routes-real-'));
   const dataDir = path.join(directory, 'data');
@@ -440,7 +522,7 @@ test('local patch HTTP routes complete a real SQLite lifecycle and keep SQLite a
 
   t.after(async () => {
     await new Promise((resolve) => server.close(resolve));
-    database.close();
+    await database.close();
     Object.assign(config, previousConfig);
     delete require.cache[routePath];
     delete require.cache[servicePath];

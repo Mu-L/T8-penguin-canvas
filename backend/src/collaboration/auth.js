@@ -40,33 +40,6 @@ class CollaborationAuth {
     const now = Date.now();
     const projectId = String(input.projectId || 'project-local').trim() || 'project-local';
     const canvasId = String(input.canvasId || '').trim();
-    const canvas = canvasId ? this.database.getCanvas(canvasId) : null;
-    if (!canvas || String(canvas.projectId) !== projectId) {
-      throw new Error('邀请必须绑定当前项目中的有效画布');
-    }
-    const resourceState = this.database.ensureCanvasResourceGrantState(projectId, canvasId);
-    if (!resourceState || Number(resourceState.initializedAt) <= 0) {
-      const error = new Error('首次共享该画布前，需要主机确认并初始化协作资源范围');
-      error.code = 'canvas_resource_scope_confirmation_required';
-      error.status = 409;
-      throw error;
-    }
-    if (Number(resourceState.trustedRevision) !== Number(canvas.revision)) {
-      const error = new Error('画布资源范围已过期，需要主机重新同步后再创建邀请');
-      error.code = 'canvas_resource_scope_stale';
-      error.status = 409;
-      throw error;
-    }
-    const resolvedResources = this.database.resolveCanvasDocumentResources(canvas);
-    if (resolvedResources.truncated
-      || resolvedResources.subflowPinMismatches.length > 0
-      || resolvedResources.subflowContentMismatches.length > 0
-      || resolvedResources.missingSubflows.length > 0) {
-      const error = new Error('画布资源范围无法安全共享，需要主机修复后重新初始化');
-      error.code = 'canvas_resource_scope_invalid';
-      error.status = 409;
-      throw error;
-    }
     const requestedMaxUses = input.maxUses == null || input.maxUses === '' ? 1 : Number(input.maxUses);
     if (!Number.isInteger(requestedMaxUses) || requestedMaxUses < 1 || requestedMaxUses > 100) {
       throw new Error('邀请使用次数必须是 1-100 的整数');
@@ -88,17 +61,49 @@ class CollaborationAuth {
       createdBy: String(input.createdBy || 'local-owner'),
       sessionId: String(input.sessionId || 'local-session'),
     };
-    this.database.createInvite(record);
-    return {
-      id: record.id,
-      code,
-      projectId: record.projectId,
-      canvasId: record.canvasId,
-      role: record.role,
-      capabilities: record.capabilities,
-      expiresAt: record.expiresAt,
-      maxUses: record.maxUses,
-    };
+    return this.database.withProjectDatabaseWrite('collaboration.invite.create', () => {
+      const canvas = canvasId ? this.database.getCanvas(canvasId) : null;
+      if (!canvas || String(canvas.projectId) !== projectId) {
+        throw new Error('邀请必须绑定当前项目中的有效画布');
+      }
+      // Invitation is authorization, not repair. Missing or uninitialized
+      // resource state must remain fail-closed until the host explicitly
+      // confirms the current canvas resource scope.
+      const resourceState = this.database.getCanvasResourceGrantState(projectId, canvasId);
+      if (!resourceState || Number(resourceState.initializedAt) <= 0) {
+        const error = new Error('首次共享该画布前，需要主机确认并初始化协作资源范围');
+        error.code = 'canvas_resource_scope_confirmation_required';
+        error.status = 409;
+        throw error;
+      }
+      if (Number(resourceState.trustedRevision) !== Number(canvas.revision)) {
+        const error = new Error('画布资源范围已过期，需要主机重新同步后再创建邀请');
+        error.code = 'canvas_resource_scope_stale';
+        error.status = 409;
+        throw error;
+      }
+      const resolvedResources = this.database.resolveCanvasDocumentResources(canvas);
+      if (resolvedResources.truncated
+        || resolvedResources.subflowPinMismatches.length > 0
+        || resolvedResources.subflowContentMismatches.length > 0
+        || resolvedResources.missingSubflows.length > 0) {
+        const error = new Error('画布资源范围无法安全共享，需要主机修复后重新初始化');
+        error.code = 'canvas_resource_scope_invalid';
+        error.status = 409;
+        throw error;
+      }
+      this.database.createInvite(record);
+      return {
+        id: record.id,
+        code,
+        projectId: record.projectId,
+        canvasId: record.canvasId,
+        role: record.role,
+        capabilities: record.capabilities,
+        expiresAt: record.expiresAt,
+        maxUses: record.maxUses,
+      };
+    });
   }
 
   redeemInvite(code, displayName, options = {}) {
@@ -118,6 +123,11 @@ class CollaborationAuth {
   authenticate(token) {
     if (!token || String(token).length < 24) return null;
     return this.database.getSession(hashSecret(token));
+  }
+
+  heartbeat(token, expectedIdentity) {
+    if (!token || String(token).length < 24) return null;
+    return this.database.heartbeatSession(hashSecret(token), expectedIdentity);
   }
 
   revoke(sessionId, options = {}) {

@@ -69,7 +69,7 @@ test('subflow import persists licensed assets in managed input and export reads 
     assert.equal(bundled[0].assetRef, indexed.id);
     assert.equal(bundled[0].content.equals(png), true);
   } finally {
-    database.close();
+    await database.close();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -113,7 +113,7 @@ test('subflow asset import rolls back files and indexes when a later asset fails
     const importedRoot = path.join(runtimeConfig.INPUT_DIR, 'subflows', imported.archiveSha256.slice(0, 16));
     assert.deepEqual(fs.existsSync(importedRoot) ? fs.readdirSync(importedRoot).filter((name) => !name.startsWith('.')) : [], []);
   } finally {
-    database.close();
+    await database.close();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -143,7 +143,7 @@ test('corrupt subflow models remain honest failed assets and never enter the pre
     assert.equal(enqueueCalls, 0);
     assert.equal(database.listAssetPreviewJobs({ assetId: indexed.id }).length, 0);
   } finally {
-    database.close();
+    await database.close();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -184,7 +184,7 @@ test('the same subflow archive imported into two projects keeps distinct asset i
     assert.equal(database.getAsset(firstId).metadata.thumbnailUrl, '/files/thumbnails/restored-import.webp');
     assert.equal(database.getAsset(firstId).perceptualHash, 'fedcba9876543210');
   } finally {
-    database.close();
+    await database.close();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

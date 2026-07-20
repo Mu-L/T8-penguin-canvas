@@ -37,6 +37,7 @@ const ACTION_LABELS: Record<RunActionKind, string> = {
   'retry-attempt': '重试 Attempt',
   'retry-subflow': '重试子工作流',
   'run-intent': '接受远程运行请求',
+  'run-intent-auto-approved': '执行已自动批准的远程请求',
 };
 
 const DOMAIN_LABELS: Record<RunPreflightNoticeDomain, string> = {

@@ -59,6 +59,21 @@ test('run-all, run-group, and run-single can be ready only with exact revision a
   }
 });
 
+test('an auto-approved RunIntent keeps exact request binding without opening a second confirmation gate', () => {
+  const preview = prepareRunAction(input({
+    actionKind: 'run-intent-auto-approved',
+    requestId: 'intent-auto-a',
+  }));
+  assert.equal(preview.status, 'ready');
+  assert.equal(preview.requiresExplicitConfirmation, false);
+  assert.equal(preview.scope.requestId, 'intent-auto-a');
+  assert.equal(preview.warnings.some((warning) => warning.code === 'action.explicit-confirmation-required'), false);
+
+  const missingRequest = prepareRunAction(input({ actionKind: 'run-intent-auto-approved' }));
+  assert.equal(missingRequest.status, 'blocked');
+  assert.ok(missingRequest.blockers.some((blocker) => blocker.code === 'run-intent.request-id-missing'));
+});
+
 test('every Run, NodeRun, Attempt, subflow replay/retry and RunIntent requires explicit confirmation', () => {
   const runRef: RunEvidenceRefInput[] = [{ runId: 'run-a' }];
   const nodeRunRef: RunEvidenceRefInput[] = [{ runId: 'run-a', nodeRunId: 'node-run-a' }];
@@ -113,7 +128,7 @@ test('missing or malformed host context digest fails closed and a changed digest
   assert.notEqual(changed.digest, baseline.digest);
 });
 
-test('structure, capability, asset, and policy errors block; warnings require confirmation', () => {
+test('structure, capability, asset, and policy errors block; advisory warnings do not interrupt ordinary runs', () => {
   const domains: RunPreflightDiagnosticDomain[] = ['structure', 'capability', 'asset', 'policy'];
   for (const domain of domains) {
     const diagnostics = emptyDiagnostics();
@@ -131,8 +146,9 @@ test('structure, capability, asset, and policy errors block; warnings require co
   const diagnostics = emptyDiagnostics();
   diagnostics.capability = [{ id: 'capability-warning', severity: 'warning', title: 'capability not independently verified' }];
   const warning = prepareRunAction(input({ diagnostics }));
-  assert.equal(warning.status, 'confirmation-required');
-  assert.equal(warning.requiresExplicitConfirmation, true);
+  assert.equal(warning.status, 'ready');
+  assert.equal(warning.requiresExplicitConfirmation, false);
+  assert.equal(warning.warnings.length, 1);
 });
 
 test('explicitly incomplete capability, asset, policy, or structure coverage blocks', () => {
@@ -257,9 +273,10 @@ test('duplicate, mixed, extra, and cross-Run evidence is rejected instead of nor
   assert.ok(unexpectedForAction.blockers.some((blocker) => blocker.code === 'evidence.unexpected-for-action'));
 });
 
-test('unknown cost is honest and requires confirmation without inventing an amount', () => {
+test('unknown cost remains honest evidence without interrupting an ordinary creation run', () => {
   const preview = prepareRunAction(input({ cost: { known: false } }));
-  assert.equal(preview.status, 'confirmation-required');
+  assert.equal(preview.status, 'ready');
+  assert.equal(preview.requiresExplicitConfirmation, false);
   assert.deepEqual(preview.cost, { known: false, reason: 'not-authoritatively-known' });
   assert.equal('amount' in preview.cost, false);
   assert.ok(preview.warnings.some((warning) => warning.code === 'cost.unknown'));

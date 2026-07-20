@@ -36,6 +36,14 @@ function preview(overrides: Partial<RunActionPreview> = {}): RunActionPreview {
   };
 }
 
+function advisoryPreview(overrides: Partial<RunActionPreview> = {}): RunActionPreview {
+  return preview({
+    status: 'ready',
+    requiresExplicitConfirmation: false,
+    ...overrides,
+  });
+}
+
 test('snapshot comparison binds project, canvas, revision, and graph mutation epoch', () => {
   assert.equal(isSameRunPreflightExecutionSnapshot(snapshot, { ...snapshot }), true);
   for (const changed of [
@@ -62,8 +70,8 @@ test('blocked preview is inspectable but never authorizes execution', async () =
   assert.deepEqual(result, { authorized: false, reason: 'blocked', preview: blocked });
 });
 
-test('cancelling a warning or unknown-cost confirmation has no authorization side effect', async () => {
-  const candidate = preview();
+test('cancelling an explicit retry/replay confirmation has no authorization side effect', async () => {
+  const candidate = preview({ actionKind: 'retry-run' });
   const result = await authorizeRunPreflight({
     snapshot,
     signal: new AbortController().signal,
@@ -74,6 +82,21 @@ test('cancelling a warning or unknown-cost confirmation has no authorization sid
   });
   assert.equal(result.authorized, false);
   assert.equal(result.reason, 'cancelled');
+});
+
+test('ordinary advisory warnings authorize without presenting an interrupting dialog', async () => {
+  const candidate = advisoryPreview();
+  const calls: string[] = [];
+  const result = await authorizeRunPreflight({
+    snapshot,
+    signal: new AbortController().signal,
+    prepare: async () => { calls.push('prepare'); return candidate; },
+    captureCurrent: () => ({ ...snapshot }),
+    present: async () => { calls.push('present'); return false; },
+    revalidate: async () => { calls.push('revalidate'); return candidate; },
+  });
+  assert.deepEqual(calls, ['prepare', 'revalidate']);
+  assert.equal(result.authorized, true);
 });
 
 test('confirmation is followed by final identity/revision/graph recheck', async () => {
