@@ -54,8 +54,8 @@ test('Seedream NZ proxy uses the independent SD2 key and stores completed output
     submittedKey = apiKey;
     return {
       taskId: 'seedream-nz-task-1',
-      model: request.images?.length ? 'seedream-v5-pro-i2i' : 'seedream-v5-pro-t2i',
-      taskType: request.images?.length ? 'i2i' : 't2i',
+      model: request.model || (request.images?.length ? 'seedream-v5-pro-i2i' : 'seedream-v5-pro-t2i'),
+      taskType: request.model?.endsWith('-i2i') || request.images?.length ? 'i2i' : 't2i',
       raw: { status: 'queued' },
     };
   };
@@ -100,6 +100,22 @@ test('Seedream NZ proxy uses the independent SD2 key and stores completed output
   assert.equal(submit.data.taskProvider, 'seedance-nz-image');
   assert.equal(submittedKey, 'sd2-image-key');
   assert.deepEqual(submittedRequest.images, ['/files/input/reference.png']);
+
+  const g2Submit = await fetch(`${base}/api/proxy/image/seedance-nz/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'zhenzhen-image-g2-t2i',
+      prompt: 'a minimal green penguin app icon',
+      images: [],
+      resolution: '1k',
+      ratio: '1:1',
+    }),
+  }).then((response) => response.json());
+  assert.equal(g2Submit.success, true);
+  assert.equal(g2Submit.data.model, 'zhenzhen-image-g2-t2i');
+  assert.equal(submittedKey, 'sd2-image-key');
+  assert.equal(submittedRequest.ratio, '1:1');
 
   const status = await fetch(`${base}/api/proxy/image/seedance-nz/status/seedream-nz-task-1`)
     .then((response) => response.json());

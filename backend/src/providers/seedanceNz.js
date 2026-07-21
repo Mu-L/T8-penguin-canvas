@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const sharp = require('sharp');
 const tls = require('tls');
 const { Agent, fetch: undiciFetch } = require('undici');
 const config = require('../config');
@@ -18,7 +19,17 @@ const IMAGE_MODEL_PAIRS = {
   domestic: ['seedream-v5-pro-t2i', 'seedream-v5-pro-i2i'],
   overseas: ['dola-seedream-5.0-pro-t2i', 'dola-seedream-5.0-pro-i2i'],
 };
-const IMAGE_MODELS = new Set(Object.values(IMAGE_MODEL_PAIRS).flat());
+const ZHENZHEN_IMAGE_G2_T2I_MODEL = 'zhenzhen-image-g2-t2i';
+const ZHENZHEN_IMAGE_G2_I2I_MODEL = 'zhenzhen-image-g2-i2i';
+const ZHENZHEN_IMAGE_G2_MODELS = new Set([
+  ZHENZHEN_IMAGE_G2_T2I_MODEL,
+  ZHENZHEN_IMAGE_G2_I2I_MODEL,
+]);
+const ZHENZHEN_IMAGE_G2_RATIOS = new Set(RATIOS);
+const IMAGE_MODELS = new Set([
+  ...Object.values(IMAGE_MODEL_PAIRS).flat(),
+  ...ZHENZHEN_IMAGE_G2_MODELS,
+]);
 const IMAGE_RESOLUTIONS = new Set(['1k', '2k']);
 const IMAGE_OUTPUT_FORMATS = new Set(['jpeg', 'png']);
 const HAPPYHORSE_MODELS = new Set([
@@ -29,6 +40,99 @@ const HAPPYHORSE_MODELS = new Set([
 const HAPPYHORSE_RESOLUTIONS = new Set(['720p', '1080p']);
 const WAN27_SPICY_MODEL = 'wan-2.7-spicy-i2v';
 const WAN27_SPICY_RESOLUTIONS = new Set(['720p', '1080p']);
+const KLING_T2V_MODELS = new Set([
+  'kling-v3.0-std-t2v',
+  'kling-v3.0-pro-t2v',
+  'kling-v3-turbo-std-t2v',
+  'kling-v3-turbo-pro-t2v',
+  'kling-v3-4k-t2v',
+  'kling-o3-std-t2v',
+  'kling-o3-pro-t2v',
+  'kling-o3-4k-t2v',
+]);
+const KLING_I2V_MODELS = new Set([
+  'kling-v3.0-std-i2v',
+  'kling-v3.0-pro-i2v',
+  'kling-v3-turbo-std-i2v',
+  'kling-v3-turbo-pro-i2v',
+  'kling-v3-4k-i2v',
+  'kling-o3-std-i2v',
+  'kling-o3-pro-i2v',
+  'kling-o3-4k-i2v',
+]);
+const KLING_R2V_MODELS = new Set([
+  'kling-o3-std-r2v',
+  'kling-o3-pro-r2v',
+  'kling-o3-4k-r2v',
+]);
+const KLING_EDIT_MODELS = new Set([
+  'kling-o3-std-edit',
+  'kling-o3-pro-edit',
+]);
+const KLING_VIDEO_MODELS = new Set([...KLING_T2V_MODELS, ...KLING_I2V_MODELS, ...KLING_R2V_MODELS]);
+const KLING_MODELS = new Set([...KLING_VIDEO_MODELS, ...KLING_EDIT_MODELS]);
+const KLING_SECONDS = new Set(['5', '10']);
+const KLING_PROMPT_MAX_LENGTH = 20480;
+const KLING_MAX_REFERENCE_IMAGES = 4;
+const ZHENZHEN_UPSCALER_MODEL = 'zhenzhen-upscaler';
+const ZHENZHEN_UPSCALER_RESOLUTIONS = new Set(['720p', '1080p', '2k', '4k']);
+const HAILUO23_T2V_MODELS = new Set([
+  'hailuo-2.3-t2v-standard',
+  'hailuo-2.3-t2v-pro',
+]);
+const HAILUO23_I2V_MODELS = new Set([
+  'hailuo-2.3-i2v-standard',
+  'hailuo-2.3-i2v-pro',
+  'hailuo-2.3-fast-i2v',
+  'hailuo-2.3-fast-pro-i2v',
+]);
+const HAILUO23_MODELS = new Set([...HAILUO23_T2V_MODELS, ...HAILUO23_I2V_MODELS]);
+const HAILUO23_RESOLUTIONS = new Set(['768p', '1080p']);
+const HAILUO23_SECONDS = new Set(['6', '10']);
+const HAILUO23_PROMPT_MAX_LENGTH = 2000;
+const HAILUO23_MIN_IMAGE_SHORT_EDGE = 301;
+const HAILUO23_MIN_ASPECT_RATIO = 2 / 5;
+const HAILUO23_MAX_ASPECT_RATIO = 5 / 2;
+const VIDU_Q3_T2V_MODELS = new Set([
+  'vidu-q3-pro-t2v',
+  'vidu-q3-turbo-t2v',
+  'vidu-q3-pro-fast-t2v',
+]);
+const VIDU_Q3_I2V_MODELS = new Set([
+  'vidu-q3-pro-i2v',
+  'vidu-q3-turbo-i2v',
+  'vidu-q3-pro-fast-i2v',
+]);
+const VIDU_Q3_START_END_MODELS = new Set([
+  'vidu-q3-pro-start-end',
+  'vidu-q3-turbo-start-end',
+  'vidu-q3-pro-fast-start-end',
+]);
+const VIDU_Q3_R2V_MODELS = new Set([
+  'vidu-q3-r2v',
+  'vidu-q3-mix-r2v',
+  'vidu-q3-ad-r2v',
+  'vidu-q3-drama-r2v',
+]);
+const VIDU_Q3_SHORT_PLAY_MODELS = new Set([
+  'vidu-q3-drama-short-play',
+  'vidu-q3-ad-short-play',
+]);
+const VIDU_Q3_VIDEO_MODELS = new Set([
+  ...VIDU_Q3_T2V_MODELS,
+  ...VIDU_Q3_I2V_MODELS,
+  ...VIDU_Q3_START_END_MODELS,
+  ...VIDU_Q3_R2V_MODELS,
+]);
+const VIDU_Q3_MODELS = new Set([...VIDU_Q3_VIDEO_MODELS, ...VIDU_Q3_SHORT_PLAY_MODELS]);
+const VIDU_Q3_SECONDS = new Set(Array.from({ length: 12 }, (_, index) => String(index + 4)));
+const VIDU_Q3_RESOLUTIONS = new Set(['default', '720p', '1080p']);
+const VIDU_Q3_SHORT_PLAY_DURATIONS = new Set(['8', '9', '10', '11', '12']);
+const VIDU_Q3_SHORT_PLAY_ASPECT_RATIOS = new Set(['9:16', '16:9']);
+const VIDU_Q3_SHORT_PLAY_ASSET_TYPES = new Set(['character', 'scene', 'prop']);
+const VIDU_Q3_PROMPT_MAX_LENGTH = 20480;
+const VIDU_Q3_MAX_REFERENCE_IMAGES = 9;
+const VIDU_Q3_MAX_SHORT_PLAY_ASSETS = 14;
 const SEED_AUDIO_MODEL = 'doubao-seed-audio-1.0';
 const SEED_AUDIO_FORMATS = new Set(['wav', 'mp3', 'pcm', 'ogg_opus']);
 const SEED_AUDIO_SAMPLE_RATES = new Set(['8000', '16000', '24000', '32000', '44100']);
@@ -745,7 +849,7 @@ async function uploadMedia(source, kind, apiKey, options = {}) {
   const baseUrl = cleanBaseUrl(options.baseUrl);
   const intervalMs = options.uploadIntervalMs ?? DEFAULT_UPLOAD_INTERVAL_MS;
   const ttlMs = options.uploadCacheTtlMs ?? DEFAULT_UPLOAD_CACHE_TTL_MS;
-  const cacheKey = `${hashKey(apiKey)}:${kind}:${Number(options.maxBytes) || 0}:${hashKey(text)}`;
+  const cacheKey = `${hashKey(apiKey)}:${kind}:${Number(options.maxBytes) || 0}:${String(options.cacheVariant || '')}:${hashKey(text)}`;
   const cached = uploadCache.get(cacheKey);
   if (cached && Date.now() - cached.createdAt < ttlMs) return cached.promise;
 
@@ -753,6 +857,9 @@ async function uploadMedia(source, kind, apiKey, options = {}) {
     const file = await mediaBuffer(text, kind, options.maxBytes, options);
     if (Array.isArray(options.allowedMimes) && !options.allowedMimes.includes(String(file.mime || '').toLowerCase())) {
       throw new Error(`seedance.nz 不支持该${kind}格式`);
+    }
+    if (typeof options.validateBuffer === 'function') {
+      await options.validateBuffer(file.buffer, file);
     }
     let lastError;
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -882,7 +989,69 @@ function normalizeImageMetadata(request = {}) {
   return metadata;
 }
 
+function normalizeZhenzhenImageG2Prompt(value) {
+  const prompt = String(value || '').trim();
+  if (!prompt) throw new Error('Zhenzhen Image G-2 必须填写提示词');
+  if (prompt.length > 20000) throw new Error('Zhenzhen Image G-2 提示词不能超过 20000 字符');
+  return prompt;
+}
+
+function normalizeZhenzhenImageG2Metadata(request = {}) {
+  const resolution = String(request.resolution || '1k').trim().toLowerCase();
+  if (resolution !== '1k') throw new Error('Zhenzhen Image G-2 分辨率只能是 1k');
+  if (request.output_format !== undefined || request.outputFormat !== undefined) {
+    throw new Error('Zhenzhen Image G-2 不支持 output_format');
+  }
+  if (request.size !== undefined || request.width !== undefined || request.height !== undefined) {
+    throw new Error('Zhenzhen Image G-2 不支持自定义宽高');
+  }
+  const ratio = String(request.ratio || 'adaptive').trim().toLowerCase();
+  if (!ZHENZHEN_IMAGE_G2_RATIOS.has(ratio)) {
+    throw new Error(`Zhenzhen Image G-2 不支持比例 ${ratio || '(空)'}`);
+  }
+  return ratio === 'adaptive' ? { resolution: '1k' } : { resolution: '1k', ratio };
+}
+
+async function buildZhenzhenImageG2Payload(request, apiKey, options = {}) {
+  const model = String(request.model || '').trim().toLowerCase();
+  if (!ZHENZHEN_IMAGE_G2_MODELS.has(model)) {
+    throw new Error(`未知 Zhenzhen Image G-2 模型：${model || '(空)'}`);
+  }
+  const refs = normalizeList(request.images || request.refImages);
+  if (model === ZHENZHEN_IMAGE_G2_I2I_MODEL && refs.length === 0) {
+    throw new Error('zhenzhen-image-g2-i2i 至少需要 1 张参考图');
+  }
+  if (model === ZHENZHEN_IMAGE_G2_I2I_MODEL && refs.length > 10) {
+    throw new Error('Zhenzhen Image G-2 图生图最多支持 10 张参考图');
+  }
+
+  const payload = {
+    model,
+    prompt: normalizeZhenzhenImageG2Prompt(request.prompt),
+    metadata: normalizeZhenzhenImageG2Metadata(request),
+  };
+  if (model === ZHENZHEN_IMAGE_G2_I2I_MODEL) {
+    payload.images = [];
+    for (const source of refs) {
+      payload.images.push(await uploadMedia(source, 'image', apiKey, {
+        ...options,
+        maxBytes: IMAGE_REFERENCE_MAX_BYTES,
+        allowedMimes: ['image/jpeg', 'image/png', 'image/webp'],
+      }));
+    }
+  }
+  return {
+    payload,
+    model,
+    taskType: model === ZHENZHEN_IMAGE_G2_I2I_MODEL ? 'i2i' : 't2i',
+  };
+}
+
 async function buildImagePayload(request, apiKey, options = {}) {
+  const requestedModel = String(request.model || '').trim().toLowerCase();
+  if (ZHENZHEN_IMAGE_G2_MODELS.has(requestedModel)) {
+    return buildZhenzhenImageG2Payload(request, apiKey, options);
+  }
   const refs = normalizeList(request.images || request.refImages);
   if (refs.length > 10) throw new Error('seedance.nz Seedream 最多支持 10 张参考图');
   const requestedFamily = String(
@@ -961,6 +1130,309 @@ async function buildWanPayload(request, apiKey, options = {}) {
   return { payload, model, taskType: 'i2v' };
 }
 
+async function validateHailuoFirstImage(buffer) {
+  let metadata;
+  try {
+    metadata = await sharp(buffer, {
+      animated: false,
+      failOn: 'error',
+      limitInputPixels: 100_000_000,
+    }).metadata();
+  } catch {
+    throw boundaryError('Hailuo 首帧图无法解码', 'HAILUO_INVALID_FIRST_IMAGE', 400);
+  }
+  const width = Number(metadata?.width || 0);
+  const height = Number(metadata?.pageHeight || metadata?.height || 0);
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+    throw boundaryError('Hailuo 首帧图缺少有效尺寸', 'HAILUO_INVALID_FIRST_IMAGE_SIZE', 400);
+  }
+  if (Math.min(width, height) < HAILUO23_MIN_IMAGE_SHORT_EDGE) {
+    throw boundaryError('Hailuo 首帧图短边必须大于 300px', 'HAILUO_FIRST_IMAGE_TOO_SMALL', 400);
+  }
+  const aspectRatio = width / height;
+  if (aspectRatio < HAILUO23_MIN_ASPECT_RATIO || aspectRatio > HAILUO23_MAX_ASPECT_RATIO) {
+    throw boundaryError('Hailuo 首帧图宽高比必须在 2:5 到 5:2 之间', 'HAILUO_FIRST_IMAGE_ASPECT_RATIO', 400);
+  }
+}
+
+async function buildHailuoPayload(request, apiKey, options = {}) {
+  const model = String(request.model || '').trim();
+  if (!HAILUO23_MODELS.has(model)) throw new Error(`未知 Hailuo 2.3 模型：${model || '(空)'}`);
+
+  const prompt = String(request.prompt || '').trim();
+  if (prompt.length > HAILUO23_PROMPT_MAX_LENGTH) {
+    throw new Error(`Hailuo 2.3 提示词不能超过 ${HAILUO23_PROMPT_MAX_LENGTH} 字符`);
+  }
+  const taskType = HAILUO23_T2V_MODELS.has(model) ? 't2v' : 'i2v';
+  if (taskType === 't2v' && !prompt) throw new Error('Hailuo 2.3 文生视频必须填写提示词');
+
+  const seconds = String(request.duration ?? request.seconds ?? '6').trim();
+  if (!HAILUO23_SECONDS.has(seconds)) throw new Error('Hailuo 2.3 时长只支持 6 或 10 秒');
+  const resolution = String(request.resolution || '768p').trim().toLowerCase();
+  if (!HAILUO23_RESOLUTIONS.has(resolution)) throw new Error('Hailuo 2.3 分辨率只支持 768p 或 1080p');
+  if (resolution === '1080p' && seconds !== '6') throw new Error('Hailuo 2.3 的 1080p 只支持 6 秒');
+
+  const payload = {
+    model,
+    seconds,
+    metadata: { resolution },
+  };
+  if (taskType === 't2v') {
+    const ratio = normalizeRatio(request.ratio || '16:9');
+    if (ratio !== 'adaptive') payload.metadata.ratio = ratio;
+    payload.prompt = prompt;
+    return { payload, model, taskType };
+  }
+
+  const sources = normalizeList(request.images || request.refImages);
+  if (sources.length === 0) throw new Error('Hailuo 2.3 图生视频必须提供 1 张首帧图');
+  const imageUrl = await uploadMedia(sources[0], 'image', apiKey, {
+    ...options,
+    maxBytes: 30 * 1024 * 1024,
+    allowedMimes: ['image/jpeg', 'image/png', 'image/webp'],
+    cacheVariant: 'hailuo23-first-image-v1',
+    validateBuffer: validateHailuoFirstImage,
+  });
+  payload.images = [imageUrl];
+  if (prompt) payload.prompt = prompt;
+  return { payload, model, taskType };
+}
+
+function deriveKlingTaskType(model) {
+  if (KLING_T2V_MODELS.has(model)) return 't2v';
+  if (KLING_I2V_MODELS.has(model)) return 'i2v';
+  if (KLING_R2V_MODELS.has(model)) return 'r2v';
+  if (KLING_EDIT_MODELS.has(model)) return 'edit';
+  return '';
+}
+
+async function uploadKlingImages(sources, apiKey, options = {}) {
+  const images = [];
+  for (const source of sources) {
+    images.push(await uploadMedia(source, 'image', apiKey, {
+      ...options,
+      maxBytes: 30 * 1024 * 1024,
+      allowedMimes: ['image/jpeg', 'image/png', 'image/webp'],
+    }));
+  }
+  return images;
+}
+
+async function buildKlingPayload(request, apiKey, options = {}) {
+  const model = String(request.model || '').trim();
+  if (!KLING_MODELS.has(model)) throw new Error(`未知 Kling 模型：${model || '(空)'}`);
+
+  const taskType = deriveKlingTaskType(model);
+  const prompt = String(request.prompt || '').trim();
+  if (prompt.length > KLING_PROMPT_MAX_LENGTH) {
+    throw new Error(`Kling 提示词不能超过 ${KLING_PROMPT_MAX_LENGTH} 字符`);
+  }
+  if (taskType !== 'i2v' && !prompt) {
+    throw new Error(`Kling ${taskType === 'edit' ? '视频编辑' : taskType === 'r2v' ? '参考生视频' : '文生视频'}必须填写提示词`);
+  }
+  const seconds = String(request.duration ?? request.seconds ?? '5').trim();
+  if (!KLING_SECONDS.has(seconds)) throw new Error('Kling 时长只支持 5 或 10 秒');
+
+  if (taskType === 'edit') {
+    const videos = normalizeList(request.videos || request.videoUrls);
+    if (videos.length === 0) throw new Error('Kling 视频编辑必须提供 1 个输入视频');
+    const videoUrl = await uploadMedia(videos[0], 'video', apiKey, {
+      ...options,
+      maxBytes: 50 * 1024 * 1024,
+      allowedMimes: ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska'],
+    });
+    return {
+      payload: {
+        model,
+        prompt,
+        seconds,
+        metadata: {
+          content: [{ type: 'video_url', video_url: { url: videoUrl } }],
+        },
+      },
+      model,
+      taskType,
+    };
+  }
+
+  const ratio = String(request.ratio || '16:9').trim();
+  if (!RATIOS.has(ratio)) throw new Error(`Kling 不支持比例：${ratio || '(空)'}`);
+  const negativePrompt = String(request.negativePrompt ?? request.negative_prompt ?? '').trim();
+  if (negativePrompt.length > KLING_PROMPT_MAX_LENGTH) {
+    throw new Error(`Kling 反向提示词不能超过 ${KLING_PROMPT_MAX_LENGTH} 字符`);
+  }
+  const sources = normalizeList(request.images || request.refImages);
+  let selectedSources = [];
+  if (taskType === 'i2v') {
+    if (sources.length === 0) throw new Error('Kling 图生视频必须提供第 1 张首帧图');
+    selectedSources = sources.slice(0, 2);
+  } else if (taskType === 'r2v') {
+    if (sources.length === 0) throw new Error('Kling 参考生视频至少需要 1 张参考图');
+    selectedSources = sources.slice(0, KLING_MAX_REFERENCE_IMAGES);
+  }
+
+  const metadata = {};
+  if (ratio !== 'adaptive') metadata.ratio = ratio;
+  if (negativePrompt) metadata.negative_prompt = negativePrompt;
+  const payload = { model, seconds, metadata };
+  if (prompt) payload.prompt = prompt;
+  if (selectedSources.length) payload.images = await uploadKlingImages(selectedSources, apiKey, options);
+  return { payload, model, taskType };
+}
+
+function validateUpscalerMp4(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 12 || buffer.subarray(4, 8).toString('ascii') !== 'ftyp') {
+    throw boundaryError('Zhenzhen Upscaler 输入必须是有效 MP4', 'UPSCALER_INVALID_MP4', 400);
+  }
+}
+
+async function buildUpscalerPayload(request, apiKey, options = {}) {
+  const model = String(request.model || ZHENZHEN_UPSCALER_MODEL).trim();
+  if (model !== ZHENZHEN_UPSCALER_MODEL) {
+    throw new Error(`未知 Zhenzhen Upscaler 模型：${model || '(空)'}`);
+  }
+  const resolution = String(request.resolution || '1080p').trim().toLowerCase();
+  if (!ZHENZHEN_UPSCALER_RESOLUTIONS.has(resolution)) {
+    throw new Error('Zhenzhen Upscaler 分辨率只支持 720p、1080p、2k 或 4k');
+  }
+  const sources = normalizeList(request.videos || request.videoUrls || (request.video ? [request.video] : []));
+  if (sources.length !== 1) throw new Error('Zhenzhen Upscaler 必须提供且只能提供 1 个 MP4 视频');
+  const videoUrl = await uploadMedia(sources[0], 'video', apiKey, {
+    ...options,
+    maxBytes: 50 * 1024 * 1024,
+    allowedMimes: ['video/mp4'],
+    cacheVariant: 'zhenzhen-upscaler-mp4-v1',
+    validateBuffer: validateUpscalerMp4,
+  });
+  return {
+    payload: {
+      model,
+      prompt: 'upscale',
+      metadata: {
+        resolution,
+        content: [{ type: 'video_url', video_url: { url: videoUrl } }],
+      },
+    },
+    model,
+    taskType: 'upscale',
+  };
+}
+
+function deriveViduTaskType(model) {
+  if (VIDU_Q3_T2V_MODELS.has(model)) return 't2v';
+  if (VIDU_Q3_I2V_MODELS.has(model)) return 'i2v';
+  if (VIDU_Q3_START_END_MODELS.has(model)) return 'start-end';
+  if (VIDU_Q3_R2V_MODELS.has(model)) return 'r2v';
+  if (VIDU_Q3_SHORT_PLAY_MODELS.has(model)) return 'short-play';
+  return '';
+}
+
+async function uploadViduImages(sources, apiKey, options = {}) {
+  const images = [];
+  for (const source of sources) {
+    images.push(await uploadMedia(source, 'image', apiKey, {
+      ...options,
+      maxBytes: 30 * 1024 * 1024,
+      allowedMimes: ['image/jpeg', 'image/png', 'image/webp'],
+    }));
+  }
+  return images;
+}
+
+async function buildViduPayload(request, apiKey, options = {}) {
+  const model = String(request.model || '').trim();
+  if (!VIDU_Q3_MODELS.has(model)) throw new Error(`未知 Vidu Q3 模型：${model || '(空)'}`);
+
+  const taskType = deriveViduTaskType(model);
+  const prompt = String(request.prompt || '').trim();
+  if (prompt.length > VIDU_Q3_PROMPT_MAX_LENGTH) {
+    throw new Error(`Vidu Q3 提示词不能超过 ${VIDU_Q3_PROMPT_MAX_LENGTH} 字符`);
+  }
+
+  const sources = normalizeList(request.images || request.refImages);
+  if (taskType === 'short-play') {
+    if (!prompt) throw new Error('Vidu Q3 短剧成片必须填写脚本内容');
+    const scriptName = String(request.scriptName ?? request.script_name ?? '').trim();
+    if (!scriptName) throw new Error('Vidu Q3 短剧成片必须填写脚本名称');
+    if (scriptName.length > 20) throw new Error('Vidu Q3 短剧脚本名称不能超过 20 字符');
+    const resolution = String(request.resolution || '1080p').trim().toLowerCase();
+    if (resolution !== '1080p') throw new Error('Vidu Q3 短剧成片分辨率必须是 1080p');
+    const duration = String(request.duration ?? request.seconds ?? '8').trim();
+    if (!VIDU_Q3_SHORT_PLAY_DURATIONS.has(duration)) throw new Error('Vidu Q3 短剧成片时长只支持 8-12 秒');
+    const aspectRatio = String(request.aspectRatio ?? request.aspect_ratio ?? request.ratio ?? '9:16').trim();
+    if (!VIDU_Q3_SHORT_PLAY_ASPECT_RATIOS.has(aspectRatio)) throw new Error('Vidu Q3 短剧成片比例只支持 9:16 或 16:9');
+    const style = String(request.style || 'realistic').trim();
+    if (style.length > 30) throw new Error('Vidu Q3 短剧视频风格不能超过 30 字符');
+    const assetType = String(request.assetType ?? request.asset_type ?? 'character').trim();
+    if (!VIDU_Q3_SHORT_PLAY_ASSET_TYPES.has(assetType)) throw new Error('Vidu Q3 短剧资产类型只支持 character、scene 或 prop');
+    const assetNamePrefix = String(request.assetNamePrefix ?? request.asset_name_prefix ?? 'Asset').trim();
+    if (!assetNamePrefix) throw new Error('Vidu Q3 短剧资产名称前缀不能为空');
+    const assetDescription = String(request.assetDescription ?? request.asset_description ?? 'Reference asset').trim();
+    if (!assetDescription) throw new Error('Vidu Q3 短剧资产描述不能为空');
+    if (sources.length === 0) throw new Error('Vidu Q3 短剧成片至少需要 1 张参考资产图');
+    if (sources.length > VIDU_Q3_MAX_SHORT_PLAY_ASSETS) throw new Error('Vidu Q3 短剧成片最多支持 14 张参考资产图');
+
+    const uploaded = await uploadViduImages(sources, apiKey, options);
+    return {
+      payload: {
+        model,
+        prompt,
+        metadata: {
+          script_name: scriptName,
+          resolution: '1080p',
+          duration: Number(duration),
+          aspect_ratio: aspectRatio,
+          style,
+          assets: uploaded.map((url, index) => ({
+            id: String(index + 1),
+            type: assetType,
+            name: `${assetNamePrefix} ${index + 1}`,
+            image_uri: url,
+            description: assetDescription,
+          })),
+        },
+      },
+      model,
+      taskType,
+    };
+  }
+
+  if (taskType === 't2v' && !prompt) throw new Error('Vidu Q3 文生视频必须填写提示词');
+  const seconds = String(request.duration ?? request.seconds ?? '4').trim();
+  if (!VIDU_Q3_SECONDS.has(seconds)) throw new Error('Vidu Q3 时长只支持 4-15 秒');
+  const ratio = String(request.ratio || '16:9').trim();
+  if (!RATIOS.has(ratio)) throw new Error(`Vidu Q3 不支持比例：${ratio || '(空)'}`);
+  const resolution = String(request.resolution || 'default').trim().toLowerCase();
+  if (!VIDU_Q3_RESOLUTIONS.has(resolution)) throw new Error('Vidu Q3 分辨率只支持 default、720p 或 1080p');
+  const seed = request.seed === undefined || request.seed === null || request.seed === ''
+    ? -1
+    : Number(request.seed);
+  if (!Number.isInteger(seed) || seed < -1 || seed > 2147483647) {
+    throw new Error('Vidu Q3 seed 必须是 -1 到 2147483647 的整数');
+  }
+
+  let selectedSources = [];
+  if (taskType === 'i2v') {
+    if (sources.length === 0) throw new Error('Vidu Q3 图生视频必须提供第 1 张首帧图');
+    selectedSources = sources.slice(0, 1);
+  } else if (taskType === 'start-end') {
+    if (sources.length < 2) throw new Error('Vidu Q3 首尾帧视频必须提供第 1 张和第 2 张图片');
+    selectedSources = sources.slice(0, 2);
+  } else if (taskType === 'r2v') {
+    if (sources.length === 0) throw new Error('Vidu Q3 参考生视频至少需要 1 张参考图');
+    selectedSources = sources.slice(0, VIDU_Q3_MAX_REFERENCE_IMAGES);
+  }
+
+  const metadata = {};
+  if (ratio !== 'adaptive') metadata.ratio = ratio;
+  if (resolution !== 'default') metadata.resolution = resolution;
+  if (seed >= 0) metadata.seed = seed;
+  const payload = { model, seconds, metadata };
+  if (prompt) payload.prompt = prompt;
+  if (selectedSources.length) payload.images = await uploadViduImages(selectedSources, apiKey, options);
+  return { payload, model, taskType };
+}
+
 async function buildHappyHorsePayload(request, apiKey, options = {}) {
   const model = String(request.model || '').trim();
   if (!HAPPYHORSE_MODELS.has(model)) throw new Error(`未知 Happy Horse 模型：${model || '(空)'}`);
@@ -1015,6 +1487,82 @@ async function submitHappyHorseTask(request, apiKey, options = {}) {
   const data = await responseJson(response, 'seedance.nz Happy Horse 任务提交');
   if (!response.ok) throw createUpstreamError(data, response);
   const taskId = requiredTaskId(data?.id || data?.task_id || data?.data?.id, 'seedance.nz Happy Horse 任务提交', response);
+  return { taskId, model: built.model, taskType: built.taskType, ...safeProviderTrace(response, data, { pollCount: 0 }) };
+}
+
+async function submitHailuoTask(request, apiKey, options = {}) {
+  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”');
+  const fetchImpl = getFetchImpl(options);
+  const baseUrl = cleanBaseUrl(options.baseUrl);
+  const built = await buildHailuoPayload(request, apiKey, options);
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/videos`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(built.payload),
+  }, options, 'seedance.nz Hailuo 2.3 任务提交');
+  const data = await responseJson(response, 'seedance.nz Hailuo 2.3 任务提交');
+  if (!response.ok) throw createUpstreamError(data, response);
+  const taskId = requiredTaskId(data?.id || data?.task_id || data?.data?.id, 'seedance.nz Hailuo 2.3 任务提交', response);
+  return { taskId, model: built.model, taskType: built.taskType, ...safeProviderTrace(response, data, { pollCount: 0 }) };
+}
+
+async function submitKlingTask(request, apiKey, options = {}) {
+  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”');
+  const fetchImpl = getFetchImpl(options);
+  const baseUrl = cleanBaseUrl(options.baseUrl);
+  const built = await buildKlingPayload(request, apiKey, options);
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/videos`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(built.payload),
+  }, options, 'seedance.nz Kling 任务提交');
+  const data = await responseJson(response, 'seedance.nz Kling 任务提交');
+  if (!response.ok) throw createUpstreamError(data, response);
+  const taskId = requiredTaskId(data?.id || data?.task_id || data?.data?.id, 'seedance.nz Kling 任务提交', response);
+  return { taskId, model: built.model, taskType: built.taskType, ...safeProviderTrace(response, data, { pollCount: 0 }) };
+}
+
+async function submitUpscalerTask(request, apiKey, options = {}) {
+  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”');
+  const fetchImpl = getFetchImpl(options);
+  const baseUrl = cleanBaseUrl(options.baseUrl);
+  const built = await buildUpscalerPayload(request, apiKey, options);
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/videos`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(built.payload),
+  }, options, 'seedance.nz Zhenzhen Upscaler 任务提交');
+  const data = await responseJson(response, 'seedance.nz Zhenzhen Upscaler 任务提交');
+  if (!response.ok) throw createUpstreamError(data, response);
+  const taskId = requiredTaskId(data?.id || data?.task_id || data?.data?.id, 'seedance.nz Zhenzhen Upscaler 任务提交', response);
+  return { taskId, model: built.model, taskType: built.taskType, ...safeProviderTrace(response, data, { pollCount: 0 }) };
+}
+
+async function submitViduTask(request, apiKey, options = {}) {
+  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”');
+  const fetchImpl = getFetchImpl(options);
+  const baseUrl = cleanBaseUrl(options.baseUrl);
+  const built = await buildViduPayload(request, apiKey, options);
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/videos`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(built.payload),
+  }, options, 'seedance.nz Vidu Q3 任务提交');
+  const data = await responseJson(response, 'seedance.nz Vidu Q3 任务提交');
+  if (!response.ok) throw createUpstreamError(data, response);
+  const taskId = requiredTaskId(data?.id || data?.task_id || data?.data?.id, 'seedance.nz Vidu Q3 任务提交', response);
   return { taskId, model: built.model, taskType: built.taskType, ...safeProviderTrace(response, data, { pollCount: 0 }) };
 }
 
@@ -1137,12 +1685,12 @@ async function submitImageTask(request, apiKey, options = {}) {
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(built.payload),
-  }, options, 'seedance.nz Seedream 任务提交');
-  const data = await responseJson(response, 'seedance.nz Seedream 任务提交');
+  }, options, 'seedance.nz 图像任务提交');
+  const data = await responseJson(response, 'seedance.nz 图像任务提交');
   if (!response.ok) throw createUpstreamError(data, response);
   const taskId = requiredTaskId(
     data?.task_id || data?.id || data?.data?.task_id || data?.data?.id,
-    'seedance.nz Seedream 任务提交',
+    'seedance.nz 图像任务提交',
     response,
   );
   return { taskId, model: built.model, taskType: built.taskType, ...safeProviderTrace(response, data, { pollCount: 0 }) };
@@ -1162,8 +1710,8 @@ async function queryImageTask(taskId, apiKey, options = {}) {
   const baseUrl = cleanBaseUrl(options.baseUrl);
   const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/image/generations/${encodeURIComponent(taskId)}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
-  }, options, 'seedance.nz Seedream 任务查询');
-  const data = await responseJson(response, 'seedance.nz Seedream 任务查询');
+  }, options, 'seedance.nz 图像任务查询');
+  const data = await responseJson(response, 'seedance.nz 图像任务查询');
   if (!response.ok) throw createUpstreamError(data, response);
   const record = data?.data && typeof data.data === 'object' ? data.data : data;
   const status = normalizeImageTaskStatus(record?.status || data?.status);
@@ -1175,7 +1723,7 @@ async function queryImageTask(taskId, apiKey, options = {}) {
     status,
     progress: safeProgress(record?.progress ?? data?.progress),
     imageUrl: imageUrl || null,
-    failReason: status === 'failed' ? 'Seedream 任务失败' : null,
+    failReason: status === 'failed' ? '图像任务失败' : null,
     ...safeProviderTrace(response, data),
   };
 }
@@ -1236,11 +1784,38 @@ function resetCachesForTests() {
 
 module.exports = {
   BASE_URL,
+  HAILUO23_I2V_MODELS,
+  HAILUO23_MODELS,
+  HAILUO23_RESOLUTIONS,
+  HAILUO23_SECONDS,
+  HAILUO23_T2V_MODELS,
+  KLING_EDIT_MODELS,
+  KLING_I2V_MODELS,
+  KLING_MODELS,
+  KLING_R2V_MODELS,
+  KLING_SECONDS,
+  KLING_T2V_MODELS,
+  KLING_VIDEO_MODELS,
+  VIDU_Q3_I2V_MODELS,
+  VIDU_Q3_MODELS,
+  VIDU_Q3_R2V_MODELS,
+  VIDU_Q3_RESOLUTIONS,
+  VIDU_Q3_SECONDS,
+  VIDU_Q3_SHORT_PLAY_MODELS,
+  VIDU_Q3_START_END_MODELS,
+  VIDU_Q3_T2V_MODELS,
+  VIDU_Q3_VIDEO_MODELS,
   HAPPYHORSE_MODELS,
   HAPPYHORSE_RESOLUTIONS,
   IMAGE_MODEL_PAIRS,
   IMAGE_MODELS,
   IMAGE_RESOLUTIONS,
+  ZHENZHEN_IMAGE_G2_I2I_MODEL,
+  ZHENZHEN_IMAGE_G2_MODELS,
+  ZHENZHEN_IMAGE_G2_RATIOS,
+  ZHENZHEN_IMAGE_G2_T2I_MODEL,
+  ZHENZHEN_UPSCALER_MODEL,
+  ZHENZHEN_UPSCALER_RESOLUTIONS,
   PROVIDER_ID,
   RATIOS,
   RESOLUTIONS,
@@ -1250,10 +1825,15 @@ module.exports = {
   WAN27_SPICY_MODEL,
   WAN27_SPICY_RESOLUTIONS,
   buildAudioPayload,
+  buildHailuoPayload,
+  buildKlingPayload,
+  buildUpscalerPayload,
+  buildViduPayload,
   buildHappyHorsePayload,
   buildWanPayload,
   buildPayload,
   buildImagePayload,
+  buildZhenzhenImageG2Payload,
   deriveTaskType,
   fetchRemote: secureFetch,
   normalizePromptMentions,
@@ -1264,6 +1844,10 @@ module.exports = {
   resetCachesForTests,
   resolveModel,
   submitAudioTask,
+  submitHailuoTask,
+  submitKlingTask,
+  submitUpscalerTask,
+  submitViduTask,
   submitHappyHorseTask,
   submitImageTask,
   submitTask,

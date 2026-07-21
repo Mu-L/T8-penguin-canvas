@@ -1,10 +1,10 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.6.0",
-  "lastUpdated": "2026-07-21-v2.6.0-release-candidate",
+  "version": "2.6.1",
+  "lastUpdated": "2026-07-21-v2.6.1-release-candidate",
   "sixSystemsImplementationAudit": {
-    "version": "2.6.0",
-    "status": "verified-local-b1-f2-f7-b2-schema32-f9-f10-v2.6.0-release-candidate-external-evidence-pending",
+    "version": "2.6.1",
+    "status": "verified-local-b1-f2-f7-b2-schema32-f9-f10-v2.6.1-release-candidate-external-evidence-deferred",
     "date": "2026-07-18",
   "lastUpdated": "2026-07-20-canonical-core-direct-development-restored",
     "completedRounds": 27,
@@ -48,8 +48,11 @@
     },
     "currentIncrement": {
       "name": "b2-schema32-f9-f10-local-hardening-and-assetcenter-p2",
-      "status": "verified-local-integrated-core-v2.6.0-release-candidate-external-evidence-pending",
+      "status": "verified-local-integrated-core-v2.6.1-release-candidate-external-evidence-deferred",
       "capabilities": [
+        "2026-07-21 AI工坊私有充值弹窗强化账号绑定警告：标题明确给出 ai.t8star.org、注册登录后从左侧个人中心取得数字 ID、先解绑再绑定自己的 ID，以及充错无法退回；辅助提示同步为不可退款语义。长标题可换行且不会挤压绑定状态，私有实现与测试继续仅在 ignored local-private/**。未生产 build、打包或发布。",
+        "2026-07-21 核心目录顶部充值入口新增双平台选择：贞贞的AI工坊继续复用原充值弹窗与业务，贞贞的平价AI小屋通过 Electron 系统外链打开指定 seedance.nz 注册地址，Web 开发环境保留 noopener/noreferrer 新窗口兜底；选择浮层支持再次点击、点击外部和 Escape 关闭，并适配像素/科技明暗主题。私有充值实现与专项测试继续仅存在于 ignored local-private/**，不进入公开 GitHub 源码。专项 4/4、私有入口完整模块解析和 type-check 通过；未生产 build、打包或发布。",
+        "2026-07-21 图像/编辑、视频、SD2.0、音频、RunningHub/RH钱包、RH超市和 RH工具箱节点新增默认关闭的‘复用结果’：仅当节点已有与其输出类型匹配的真实素材时跳过生成执行器并继续连线下游；没有结果时仍正常生成。统一 useRunTrigger 保留 Run/NodeRun/Attempt、node.output 与成功终态，但复用分支不产生虚假的 Provider 请求/提交/响应事件；共享 schema 与新节点初始值均为 reuseResult=false，旧画布缺字段保持关闭。聚焦/运行/RH 组合 53/53、相邻持久化/预检/重放/次级动作 33/33、type-check、public、RH toolbox 与 development 门通过；未 build、打包或发布。",
         "2026-07-20 用户明确选择恢复简单工作流：E:\\PenguinPravite\\T8-penguin-canvas 是唯一默认开发目录，development mode 同时接受 canonical core 与可选的 T8-penguin-canvas-dev-<topic>，但继续拒绝全部 release 命名路径。此前‘core 只作 integration landing point、必须在第三工作树开发’的规则已被本条覆盖；predev/predev:vite/predev:backend/preelectron:dev 继续执行角色门，专项锁定 core/dev 接受与 release 拒绝。",
         "2026-07-20 视频节点结构化 Provider 错误已在核心目录热修：新增有界错误消息归一化器，只读取 message/error/detail/failReason/reason/code 等已知字段；普通视频与 FAL 查询边界保证 failReason/error 为字符串，HTTP 失败保留 transport trace；VideoNode 的普通轮询、FAL 轮询、提交异常和最终渲染均再次归一化，第三方返回 {message, code} 时不再触发 React error #31 或画布错误边界。动态回归 4/4、相关视频前端 43/43、type-check 通过；未生产 build、打包、升级版本或发布，不增加 completedRounds。",
         "2026-07-20 VibeX 节点 Electron 下拉滚动已热修：iframe 原生 select 定位补丁不再把菜单自身的 scroll 当作外部页面滚动关闭；滚轮和拖动菜单滚动条时保持展开，overscroll containment 防止滚动链穿透，外部滚动、resize、Escape、点击外部及选择后的关闭行为保持。VibeX 组合 12/12、Electron main 语法、type-check 与 public-check 通过；未生产 build、打包、升级版本或发布，不增加 completedRounds。",
@@ -86,6 +89,8 @@
         "普通 RUN 的 cost.unknown 保持诚实提示但不再弹出确认窗口；阻断性结构/能力/素材/策略错误仍 fail-closed，历史重试/重放及高风险远程运行仍必须显式确认。"
       ],
       "verification": [
+        "2026-07-21 充值账号绑定警告专项 1/1、与平台双选组合 5/5：锁定 ai.t8star.org、数字 ID 获取/解绑重绑/不可退款精确文案，以及长标题换行和绑定状态防挤压；私有入口模块解析、开发服务 transform、JSON、public-check、development 门和 diff-check 通过。未执行生产 build/package/release。",
+        "2026-07-21 充值平台双选专项 4/4：锁定指定 seedance.nz 推广 URL、Electron 外链成功不重复开窗、Electron 异常时 noopener/noreferrer 浏览器兜底、两个平台文案/原 RechargeModal/外部点击/Escape 契约；私有扩展入口 esbuild 完整模块解析与 npm run type-check 通过。实现和测试仅在 ignored local-private/**，未执行生产 build/package/release。",
         "2026-07-21 图像节点仅图片输出专项与相邻回归 26/26：覆盖旧画布缺字段、新节点默认开启、显式关闭恢复图文、edit 共享语义、非图像节点隔离、ImageNode UI、OutputNode 即时签名、普通下游素材收集、Canvas 自动输出、Relay/RandomRoute/GroupBox、Loop 快照、跨画布发送、素材集合并与共享 Schema 默认；npm run type-check、public-check、development 工作树门、JSON 与 diff-check 通过。未执行生产 build/package/release。",
         "2026-07-20 schema32 生产切换与故障矩阵：18 个串行文件 113/113 通过，冻结 schema32 checksum/extension、精确 source→target lineage、freshness receipt、physical admission、7+1 hard-exit，以及 cold PRAGMA、WAL 长读者、TEMP SQLITE_FULL、backup fsync/rename、main/WAL/journal/SHM 故障边界；新增覆盖 v31→v32 末段真实 SQLITE_FULL 的精确回滚/重试、SQLite 内部页单比特损坏与当前 schema 外键孤儿的冷开和恢复候选拒绝，且受保护证据不被改写。该结果只属于临时数据库自动化，不代表真实 Windows 磁盘和安装升级验收。",
       "2026-07-20 writer audit：455 个方法，read 198 / write 182 / maintenance 43 / migration 32 / test-only 0；policy 408 compliant / 11 noncompliant / 4 unresolved / 32 not-applicable，classification gate=true、policyCompliant=false、external raw=0，audit --compact --check exit 0。",
@@ -122,7 +127,37 @@
       "F9 的 Base URL、自检、安全降级、持久化与 Nginx/Caddy 示例已完成本地自动化；仍必须在真实域名、证书和 HTTPS 反向代理下验证 health、invite、WebSocket、upload、Range 及 TLS/SNI。F10 的分级限速与发布证据门已完成本地自动化；仍必须完成真实公网红队、连接/吞吐/100MB+ 上传/10 万素材和存储增长压测。",
 	      "release/core 独立 checkpoint、第三工作树语义合并与 canonical core 采用已经完成，没有复制、checkout 覆盖或丢弃 core 本地文件。用户已明确将 E:\\PenguinPravite\\T8-penguin-canvas 恢复为唯一默认开发目录，后续功能直接在当前 core 分支修改、测试并按范围提交；历史 integration 工作树只作参考，不再要求二次推进。正式发布仍须先补真实 Windows/双设备/公网/负载证据并重新执行发布门，Electron/NSIS 正式包仍只允许构建一次。"
     ],
-	    "releaseBoundary": "严格本地自动化进度仍为 27/32：共同底座 1/3、多人协作 7/10、智能素材中心 5/5。schema32、全节点 RunEvent、B3 原始代码侧清单、F9 本地自检/安全持久化、F10 本地分级限流/发布证据门和 AssetCenter 响应式 P2 已落地，并已整理为 v2.6.0 公开源码发布候选；但 B2/B3 的真实历史/Windows/安装/Provider/公网/负载证据、F8 双设备/Electron、F9 真实公网 HTTPS/TLS/SNI 与 F10 真实红队/负载仍未闭环，不能增加 completedRounds。v2.6.0 正式 Electron/NSIS 与自动更新 Release 必须等待与最终 40 位源码提交绑定的 t8-collaboration-release-evidence-v2 真实清单；当前正式构建次数为 0，不能称为已发布的生产级多人协作正式版。"
+	    "releaseBoundary": "严格本地自动化进度仍为 27/32：共同底座 1/3、多人协作 7/10、智能素材中心 5/5。schema32、全节点 RunEvent、B3 原始代码侧清单、F9 本地自检/安全持久化、F10 本地分级限流/发布证据门和 AssetCenter 响应式 P2 已落地；但 B2/B3 的真实历史/Windows/安装/Provider/公网/负载证据、F8 双设备/Electron、F9 真实公网 HTTPS/TLS/SNI 与 F10 真实红队/负载仍未闭环，不能增加 completedRounds。v2.6.1 按用户再次明确授权，只允许对完全缺失的证据清单采用精确版本和固定 40 位 target 的一次性延期；该延期不产生 passed 检查，不能称为已完成生产级多人协作验收。"
+  },
+  "generationResultReuse": {
+    "version": "2.6.0-postrelease-dev",
+    "status": "implemented-verified-unreleased",
+    "date": "2026-07-21",
+    "description": "生成节点可复用已经存在的输出，在组运行中跳过重复生成并继续下游。",
+    "nodeTypes": [
+      "image",
+      "edit",
+      "video",
+      "seedance",
+      "audio",
+      "runninghub",
+      "runninghub-wallet",
+      "rh-tools",
+      "rh-toolbox"
+    ],
+    "behavior": [
+      "reuseResult 默认 false；旧画布缺字段同样按关闭处理。",
+      "开启且已有对应真实输出时，保留持久化 Run/NodeRun/Attempt 与 node.output，但跳过 Provider/ffmpeg 执行器并让组运行继续下游。",
+      "开启但没有可用输出时正常生成；Prompt、taskId、模型配置和空数组不算可复用结果。",
+      "图像节点只认图像输出，视频和 SD2.0 只认视频输出，音频只认音频输出；RH 生成节点认媒体输出，RH 工具箱额外支持文本输出。",
+      "复用运行不会伪造 provider.request/provider.submitted/provider.response，Attempt metadata 明确记录 reusedResult。"
+    ],
+    "verification": [
+      "聚焦/运行总线/画布入口/图像输出/RH 工具箱/生命周期组合 53/53。",
+      "持久化门、体检执行、精确重放与次级 Provider 动作相邻组 33/33。",
+      "type-check、public-check、rh-toolbox-check、development 工作树门、JSON 与 diff-check 通过。"
+    ],
+    "releaseBoundary": "未运行生产 build、Electron/NSIS 打包、版本升级、Git 提交/推送、tag 或 Release。"
   },
   "wan27DolaSeedreamModels": {
     "version": "2.5.5",
@@ -150,6 +185,224 @@
       "实现参数同时核对 api.seedance.nz 官方 llms.txt 与本地 ComfyUI_Seedance 参考节点；测试 Key 未写入源码、设置、日志、文档或构建产物。"
     ],
     "releaseBoundary": "已纳入 v2.5.5 Electron 自动更新版；公开提交只包含 Wan/Dola 功能、测试、版本记录和 release notes，私有 sidecar 仅进入加密安装包。"
+  },
+  "zhenzhenImageG2Models": {
+    "version": "2.6.0-postrelease-dev",
+    "status": "implemented-live-verified-unreleased",
+    "date": "2026-07-21",
+    "description": "图像节点 GPT2 TAB 新增 Zhenzhen Image G-2 文生图与图生图，使用贞贞的平价AI工坊（国内）独立异步图片协议和 zhenzhenSd2ApiKey。",
+    "models": [
+      "zhenzhen-image-g2-t2i",
+      "zhenzhen-image-g2-i2i"
+    ],
+    "capabilities": [
+      "两个模型显示在 GPT2 TAB 的具体模型下拉中，但不会进入原 gpt-image-2 的 /v1/images/generations 或 edits 路由；统一使用 POST /v1/image/generations 与 GET /v1/image/generations/{task_id}。",
+      "严格按官方 llms.txt 与本机 ComfyUI_Seedance 0.2.7 参考实现约束：Prompt 必填且最长 20000 字符，resolution 仅 1k，ratio 只允许 adaptive/16:9/4:3/1:1/3:4/9:16/21:9，adaptive 不发送 metadata.ratio。",
+      "zhenzhen-image-g2-t2i 只发送 Prompt 并忽略画布参考图；zhenzhen-image-g2-i2i 必须提供 1-10 张 JPG/PNG/WebP 参考图，单张最多 10MB，先通过 /v1/files/upload 再提交 images。",
+      "G-2 请求禁止混入 Seedream 专属 output_format、width、height 或自定义 size；完成图片继续由本地代理安全下载并转存 T8 output，不向前端暴露签名 URL。",
+      "API 设置页明确把 Zhenzhen Image G-2 归入贞贞的平价AI工坊（国内） Key；测试 Key 仅存在于一次性进程环境，未写入源码、设置、日志、文档或 Git。"
+    ],
+    "verification": [
+      "模型映射、前端接线、Provider 契约、路由与既有 Seedream/Seedance 相邻回归 44/44 通过；npm run type-check、Provider/Proxy node -c 通过。",
+      "真实 zhenzhen-image-g2-t2i 成功：pending→running→succeeded，输出可解码 PNG 1,095,245 bytes、1254x1254、SHA256 前 16 位 add748f59448c5b3。",
+      "真实 zhenzhen-image-g2-i2i 直接使用上一张真实 t2i 结果作为参考图并成功：pending→running→succeeded，输出可解码 PNG 1,543,054 bytes、1254x1254、SHA256 前 16 位 f70ee7ffe49d490d；两次摘要不同。",
+      "真实链路调用的是生产 backend/src/providers/seedanceNz.js，没有使用 mock；单元/路由回归另负责锁定 T8 前后端请求字段与独立国内 Key 选择。"
+    ],
+    "releaseBoundary": "这是 v2.6.0 正式发布后的未发布源码增量；本轮未升级版本、未生产 build、未打 Electron/NSIS、未推送、未创建 tag 或 GitHub Release。"
+  },
+  "hailuo23VideoModels": {
+    "version": "2.6.0-postrelease-dev",
+    "status": "implemented-six-model-live-verified-unreleased",
+    "date": "2026-07-21",
+    "description": "视频节点新增独立 Hailuo TAB，接入 api.seedance.nz 的 Hailuo 2.3 文生视频、图生视频与 Fast 图生视频六个模型，使用 zhenzhenSd2ApiKey。",
+    "models": [
+      "hailuo-2.3-t2v-standard",
+      "hailuo-2.3-t2v-pro",
+      "hailuo-2.3-i2v-standard",
+      "hailuo-2.3-i2v-pro",
+      "hailuo-2.3-fast-i2v",
+      "hailuo-2.3-fast-pro-i2v"
+    ],
+    "capabilities": [
+      "六个模型统一通过独立 POST /api/proxy/video/hailuo/submit 与 GET /api/proxy/video/hailuo/status/{task_id} 接入官方 POST /v1/videos、GET /v1/videos/{task_id} 异步协议，不落入旧 ai.t8star.org 视频路由。",
+      "文生模型必须填写不超过 2000 字符的 Prompt，不发送参考图；比例只允许 adaptive/16:9/4:3/1:1/3:4/9:16/21:9，adaptive 不发送 metadata.ratio。",
+      "图生与 Fast 图生模型的 Prompt 可选，只取排序后的第 1 张首帧图并发送 images[0]，不发送比例；首帧仅接受 JPG/PNG/WebP、最大 30MB、短边大于 300px、宽高比 2:5 到 5:2，前端提示且后端使用 Sharp 解码再次失败关闭校验。",
+      "时长仅 6/10 秒，分辨率仅 768p/1080p；1080p 只允许 6 秒，前端联动收窄选项且 Provider 再次拒绝非法组合。",
+      "Hailuo 使用贞贞平价 API 独立国内 Key、独立任务 authority scope 和固定恢复路由；完成视频立即安全下载到本地 output，画布不保存上游签名 URL。",
+      "API 设置、运行前凭据体检、Run/NodeRun/Attempt Provider 证据与重启恢复均识别 Hailuo；测试 Key 只注入一次性进程环境，未写入源码、设置、日志、文档或 Git。"
+    ],
+    "verification": [
+      "按官方 https://api.seedance.nz/docs/llms.txt 与本机 F:\\AI-T8-video-onekey\\ComfyUI\\custom_nodes\\ComfyUI_Seedance Hailuo23Video 的字段、模型和限制逐项对齐。",
+      "真实六模型均以 6 秒/768p 完成 pending→running→succeeded；输出全部为 video/mp4 且含 MP4 ftyp：t2v-standard 411602 bytes / 46af3b8481d6172e，t2v-pro 450979 / 7eb01d5c0db54bac。",
+      "真实 i2v-standard 420243 bytes / 5e69494d2dd1a658，i2v-pro 339947 / 238b69ecaf480dfa，fast-i2v 402621 / 6d227987ae2aae11，fast-pro-i2v 543824 / 18774de8c70d4f5a；摘要均为 SHA256 前 16 位。",
+      "Hailuo Provider、路由、前端模型/交互、独立 Key、恢复与相邻运行前体检聚焦回归通过；npm run type-check、Provider/Proxy/RunRecovery node --check 与 git diff --check 通过。",
+      "真实链路直接调用生产 backend/src/providers/seedanceNz.js；六个模型各提交一次，未对失败做自动重试，也未打印任务 ID、签名 URL、账户信息或原始响应。"
+    ],
+    "releaseBoundary": "这是 v2.6.0 正式发布后的未发布源码增量；本轮未升级版本、未运行生产 build、未打 Electron/NSIS、未提交或推送 Git、未创建 tag 或 GitHub Release。"
+  },
+  "viduQ3VideoModels": {
+    "version": "2.6.0-postrelease-dev",
+    "status": "implemented-15-model-contract-9-live-verified-6-upstream-blocked-unreleased",
+    "date": "2026-07-21",
+    "description": "视频节点新增独立 Vidu TAB，按 api.seedance.nz 与本机 ComfyUI_Seedance 接入 Vidu Q3 文生、图生、首尾帧、参考生视频和短剧成片 15 个模型，使用 zhenzhenSd2ApiKey。",
+    "models": [
+      "vidu-q3-pro-t2v",
+      "vidu-q3-turbo-t2v",
+      "vidu-q3-pro-fast-t2v",
+      "vidu-q3-pro-i2v",
+      "vidu-q3-turbo-i2v",
+      "vidu-q3-pro-fast-i2v",
+      "vidu-q3-pro-start-end",
+      "vidu-q3-turbo-start-end",
+      "vidu-q3-pro-fast-start-end",
+      "vidu-q3-r2v",
+      "vidu-q3-mix-r2v",
+      "vidu-q3-ad-r2v",
+      "vidu-q3-drama-r2v",
+      "vidu-q3-drama-short-play",
+      "vidu-q3-ad-short-play"
+    ],
+    "capabilities": [
+      "15 个模型统一通过独立 POST /api/proxy/video/vidu/submit 与 GET /api/proxy/video/vidu/status/{task_id} 接入官方 POST /v1/videos、GET /v1/videos/{task_id} 异步协议；使用独立 vidu-nz authority scope，完成签名视频立即安全转存本地 output。",
+      "普通 Vidu Q3 时长 4-15 秒；比例为 adaptive/16:9/4:3/1:1/3:4/9:16/21:9，adaptive 不提交 metadata.ratio；分辨率为 default/720p/1080p，default 不提交 metadata.resolution；seed 为 -1 到 2147483647。",
+      "t2v 必须填写不超过 20480 字符的 Prompt 且不发送图片；i2v 使用第 1 张图；start-end 必须使用前 2 张图；r2v 使用 1-9 张图。图片仅接受 JPG/PNG/WebP、单张最大 30MB，并先上传到 /v1/files/upload。",
+      "短剧成片必须填写脚本内容和最多 20 字符的脚本名，固定 1080p、8-12 秒、9:16 或 16:9；style 最多 30 字符，资产类型限定 character/scene/prop，使用 1-14 张参考图构造 metadata.assets。",
+      "API 设置、运行前凭据体检、Run/NodeRun/Attempt Provider 证据与重启恢复均识别 Vidu；测试 Key 只注入一次性进程环境，未写入源码、设置、日志、文档或 Git。",
+      "因 2026-07-21 真实提交确认 4 个 r2v 与 2 个 short-play 均由上游返回 fail_to_fetch_task，当前 UI 保留全部官方模型名称和完整适配但禁用这 6 项，避免用户发起已知无效请求；Provider 代码与契约测试保留，便于上游修复后复测开放。"
+    ],
+    "verification": [
+      "按官方 https://api.seedance.nz/docs/llms.txt 与本机 F:\\AI-T8-video-onekey\\ComfyUI\\custom_nodes\\ComfyUI_Seedance 的 ViduQ3Video/ViduQ3ShortPlay 字段、模型、素材数量与限制逐项对齐。",
+      "真实 3 个 t2v 均 succeeded 并验证为 MP4：pro 1351997 bytes / 5f17d6168587e43c，turbo 836260 / 013deb0de067a591，pro-fast 1073490 / ac91a8f33479fc00。",
+      "真实 3 个 i2v 均 succeeded：pro 2498525 bytes / fa0a9ce1e2ee6776，turbo 1965586 / bc13ce6553c62674，pro-fast 1308940 / 3c1e67669eb65210。",
+      "真实 3 个 start-end 均 succeeded：pro 1255235 bytes / 3b2e195dd0b161ee，turbo 1371215 / 1f084387665679aa，pro-fast 1536795 / 878c9f24d638c260；摘要均为 SHA256 前 16 位。",
+      "真实 r2v 四模型与 short-play 两模型各只提交一次，r2v 三项 HTTP 502、一项 HTTP 400，short-play 两项 HTTP 502，安全上游错误码均为 fail_to_fetch_task；与参考插件 README 的已知状态一致，未把上游失败伪装为已跑通。",
+      "真实链路直接调用生产 backend/src/providers/seedanceNz.js；生成 POST 未自动重试，输出未打印任务 ID、签名 URL、账户信息或原始响应。Vidu Provider、路由、前端模型/交互、独立 Key 与恢复聚焦回归通过。"
+    ],
+    "releaseBoundary": "这是 v2.6.0 正式发布后的未发布源码增量；本轮未升级版本、未运行生产 build、未打 Electron/NSIS、未提交或推送 Git、未创建 tag 或 GitHub Release。"
+  },
+  "klingVideoModels": {
+    "version": "2.6.0-postrelease-dev",
+    "status": "implemented-21-model-contract-6-live-verified-15-submit-403-unreleased",
+    "date": "2026-07-21",
+    "description": "视频节点新增独立 Kling TAB，按 api.seedance.nz 与本机 ComfyUI_Seedance 接入 Kling 文生、图生/首尾帧、O3 参考生视频和 O3 视频编辑 21 个可独立提交的模型，使用 zhenzhenSd2ApiKey。",
+    "models": [
+      "kling-v3.0-std-t2v",
+      "kling-v3.0-pro-t2v",
+      "kling-v3-turbo-std-t2v",
+      "kling-v3-turbo-pro-t2v",
+      "kling-v3-4k-t2v",
+      "kling-o3-std-t2v",
+      "kling-o3-pro-t2v",
+      "kling-o3-4k-t2v",
+      "kling-v3.0-std-i2v",
+      "kling-v3.0-pro-i2v",
+      "kling-v3-turbo-std-i2v",
+      "kling-v3-turbo-pro-i2v",
+      "kling-v3-4k-i2v",
+      "kling-o3-std-i2v",
+      "kling-o3-pro-i2v",
+      "kling-o3-4k-i2v",
+      "kling-o3-std-r2v",
+      "kling-o3-pro-r2v",
+      "kling-o3-4k-r2v",
+      "kling-o3-std-edit",
+      "kling-o3-pro-edit"
+    ],
+    "excludedSpecialModels": [
+      "kling-v3.0-std-motion",
+      "kling-v3.0-pro-motion",
+      "kling-v3.0-4k-motion",
+      "kling-elements-advanced",
+      "kling-lip-sync-identify-face",
+      "kling-lip-sync-tts",
+      "kling-lip-sync-video"
+    ],
+    "capabilities": [
+      "21 个模型统一通过独立 POST /api/proxy/video/kling/submit 与 GET /api/proxy/video/kling/status/{task_id} 接入官方 POST /v1/videos、GET /v1/videos/{task_id} 异步协议；使用独立 kling-nz authority scope，完成签名视频立即安全转存本地 output。",
+      "普通 Kling 时长只允许 5 或 10 秒；比例为 adaptive/16:9/4:3/1:1/3:4/9:16/21:9，adaptive 不提交 metadata.ratio；可选反向提示词写入 metadata.negative_prompt，Prompt 与反向提示词均最多 20480 字符。",
+      "t2v 必须填写 Prompt 且不发送图片；i2v 使用第 1 张首帧并可选第 2 张尾帧，Prompt 可选；O3 r2v 必须填写 Prompt并使用 1-4 张参考图。图片仅接受 JPG/PNG/WebP、单张最大 30MB，并先上传到 /v1/files/upload。",
+      "O3 edit 必须填写 Prompt并提供 1 个 MP4/MOV/AVI/MKV 视频；视频最大 50MB，上传后精确写入 metadata.content[0]={type:'video_url',video_url:{url}}，不混入图片、比例或反向提示词字段。",
+      "API 设置、运行前凭据体检、Run/NodeRun/Attempt Provider 证据与重启恢复均识别 Kling；测试 Key 只注入一次性进程环境，未写入源码、设置、日志、文档或 Git。",
+      "参考插件明确记录 kling-o3-std-r2v 与 kling-o3-pro-r2v 当前上游提交 502，因此 UI 保留协议适配但禁用这两项；kling-o3-4k-r2v 有参考插件既往成功证据，继续保留可选。",
+      "官方同时列出的 motion、elements 与三步 lip-sync 共 7 个特殊模型需要额外视频结构、frontal element 或 sessionId/faceId 多步流程；当前官方 llms.txt 未给足可独立实现的字段契约，本轮不猜测暴露。"
+    ],
+    "verification": [
+      "按官方 https://api.seedance.nz/docs/llms.txt 与本机 F:\\AI-T8-video-onekey\\ComfyUI\\custom_nodes\\ComfyUI_Seedance 的 KlingVideo/KlingEditVideo 字段、模型、素材数量与限制逐项对齐。",
+      "真实 kling-v3.0-std-t2v succeeded：2740007 bytes / 958d59aff86f8154；kling-v3.0-pro-t2v：1126971 / 441cdca285ff6d60；kling-v3-turbo-std-t2v：2137455 / 1c8f3f27cfbab17e；kling-v3-turbo-pro-t2v：6190876 / c39a7953fc98edb2。",
+      "真实 kling-o3-std-t2v succeeded：2373249 bytes / 2eb9ccefddb40e3c；kling-o3-pro-t2v：1091962 / bd4a6e21fb142e90。六个输出均为 video/mp4 且含 MP4 ftyp，摘要为 SHA256 前 16 位。",
+      "21 个模型各只提交一次且生成 POST 未自动重试；kling-v3-4k-t2v、kling-o3-4k-t2v、8 个 i2v、3 个 r2v 与 2 个 edit 在本次凭据下均于视频任务提交返回 HTTP 403。测试后独立复核 /v1/files/upload 返回 200，故 15 项 403 不是本地素材读取或上传失败；在没有新的有效账户授权前不能把它们伪称为本轮已跑通，也不能仅凭该凭据边界断言所有用户均不可用。",
+      "本机参考插件 README 已记录 kling-v3.0-std-i2v、kling-o3-4k-r2v 与 kling-o3-std-edit 的既往真实成功样本，同时记录 kling-o3-std-r2v/pro-r2v 的上游 502；这些参考证据不替代本轮凭据下的逐模型 403 事实。",
+      "Kling Provider、路由、前端模型/交互、独立 Key 与恢复聚焦回归 60/60 通过；type-check 与 Provider/Proxy/RunRecovery 语法检查通过。"
+    ],
+    "liveAvailability": {
+      "verifiedEnabled": [
+        "kling-v3.0-std-t2v",
+        "kling-v3.0-pro-t2v",
+        "kling-v3-turbo-std-t2v",
+        "kling-v3-turbo-pro-t2v",
+        "kling-o3-std-t2v",
+        "kling-o3-pro-t2v"
+      ],
+      "implementedPendingAuthorizedRetest": [
+        "kling-v3-4k-t2v",
+        "kling-o3-4k-t2v",
+        "kling-v3.0-std-i2v",
+        "kling-v3.0-pro-i2v",
+        "kling-v3-turbo-std-i2v",
+        "kling-v3-turbo-pro-i2v",
+        "kling-v3-4k-i2v",
+        "kling-o3-std-i2v",
+        "kling-o3-pro-i2v",
+        "kling-o3-4k-i2v",
+        "kling-o3-std-r2v",
+        "kling-o3-pro-r2v",
+        "kling-o3-4k-r2v",
+        "kling-o3-std-edit",
+        "kling-o3-pro-edit"
+      ]
+    },
+    "releaseBoundary": "这是 v2.6.0 正式发布后的未发布源码增量；本轮未升级版本、未运行生产 build、未打 Electron/NSIS、未提交或推送 Git、未创建 tag 或 GitHub Release。"
+  },
+  "zhenzhenUpscalerVideo": {
+    "version": "2.6.0-postrelease-dev",
+    "status": "implemented-live-verified-unreleased",
+    "date": "2026-07-21",
+    "description": "视频节点新增独立 Upscaler TAB，接入 api.seedance.nz 的 zhenzhen-upscaler 单视频高清化模型，使用 zhenzhenSd2ApiKey。",
+    "models": [
+      "zhenzhen-upscaler"
+    ],
+    "capabilities": [
+      "通过独立 POST /api/proxy/video/upscaler/submit 与 GET /api/proxy/video/upscaler/status/{task_id} 接入官方 POST /v1/videos、GET /v1/videos/{task_id} 异步协议；使用独立 upscaler-nz authority scope，完成签名视频立即安全转存本地 output。",
+      "输入必须恰好 1 个有效 MP4，最大 50MB；本地或画布视频先经 /v1/files/upload，Provider 同时校验 MIME 与 MP4 ftyp 文件头，拒绝空输入、多视频和非 MP4。",
+      "目标分辨率只允许 720p、1080p、2k 或 4k，默认 1080p；请求固定发送 model=zhenzhen-upscaler、prompt=upscale 与 metadata.content[0].video_url，不发送 seconds，时长由输入视频读取。",
+      "视频节点 Upscaler 模式只显示视频素材和目标分辨率，不显示比例、时长、Seed 或 Prompt；运行前要求画布最终只保留一个输入视频。",
+      "API 设置、运行前凭据体检、Run/NodeRun/Attempt Provider 证据与重启恢复均识别 Upscaler；测试 Key 只注入一次性进程环境，未写入源码、设置、日志、文档或 Git。"
+    ],
+    "verification": [
+      "按官方 https://api.seedance.nz/docs/llms.txt 与本机 F:\\AI-T8-video-onekey\\ComfyUI\\custom_nodes\\ComfyUI_Seedance 的 ZhenzhenUpscalerVideo 字段和限制逐项对齐。",
+      "生产 backend/src/providers/seedanceNz.js 使用临时 1 秒 MP4 完成唯一一次真实提交，状态 pending→running→succeeded；下载结果为 video/mp4、381292 bytes、包含 MP4 ftyp，SHA256 前 16 位 59c3a42ac3e7f74b。",
+      "Upscaler Provider、路由、前端模型/交互、独立 Key 与恢复聚焦测试通过；type-check 和 Provider/Proxy/RunRecovery 语法检查通过。",
+      "真实生成 POST 未自动重试；未打印或保存任务 ID、签名 URL、账户信息、原始响应或测试 Key，临时输入视频在验证后删除。"
+    ],
+    "releaseBoundary": "这是 v2.6.0 正式发布后的未发布源码增量；本轮未升级版本、未运行生产 build、未打 Electron/NSIS、未提交或推送 Git、未创建 tag 或 GitHub Release。"
+  },
+  "electronReleaseV261": {
+    "version": "2.6.1",
+    "status": "release-candidate-owner-approved-evidence-deferred",
+    "date": "2026-07-21",
+    "description": "v2.6.1 Electron 自动更新候选：发布 Zhenzhen Image G-2、Hailuo、Vidu、Kling、Upscaler、生成结果复用与私有充值体验更新。",
+    "capabilities": [
+      "图像 GPT2 TAB 新增 zhenzhen-image-g2-t2i/i2i；视频节点新增 Hailuo、Vidu、Kling 与 Upscaler TAB，统一使用平价 AI 小屋独立 Key、异步任务协议、素材上传约束和完成产物安全本地转存。",
+      "图像/编辑、视频、SD2.0、音频、RunningHub/RH钱包、RH超市与 RH工具箱新增默认关闭的 reuseResult；只有已有匹配类型真实输出时才跳过生成并继续下游，没有结果仍正常生成。",
+      "私有 Electron 充值入口先选择 AI 工坊或平价 AI 小屋；AI 工坊保留原充值弹窗并强化 ai.t8star.org 数字 ID 与充错不可退款警告，平价 AI 小屋使用系统外链。",
+      "版本由 package.json 统一注入 Web、Electron 与后端；release-notes/v2.6.1.md 记录公开范围和真实 API 可用性边界，local-private/**、测试 Key、缓存、外部参考源码与维护者文档继续禁止进入公开提交。"
+    ],
+    "verification": [
+      "G-2 t2i/i2i、Hailuo 六模型、Vidu 九个文生/图生/首尾帧、Kling 六个文生模型及 Upscaler 已使用一次性进程 Key 完成真实 API 验证；Vidu 参考生/短剧上游失败与 Kling 其余模型本次凭据 403 均保持诚实边界。",
+      "生成结果复用专项与运行/RH 相邻组、充值双平台选择与绑定警告组合 5/5 均通过；完整 TypeScript 回归 200 个文件 1546/1546，完整 CJS/后端回归 186 个文件 1370/1370（其中 Electron 双进程 17/17 在与候选生产数据库源码逐字节一致的独立 Electron ABI 工作树验证）。Windows CRLF 源码取段、历史 schema 合成 receipt 外键顺序及已完成核心集成后的过时 schema22 外部路径测试夹具已按真实契约修正。type-check、public、RH toolbox、JSON/语法、core/development 工作树、diff-check、受保护 FFmpeg 精确尺寸/摘要与公开差异密钥扫描通过。",
+      "默认 t8-collaboration-release-evidence-v2 清单完全不存在。用户再次明确授权精确 v2.6.1 一次性先发布后补证据延期；它不产生 passed 检查，F8-F10 状态保持未完成。"
+    ],
+    "releaseBoundary": "候选阶段尚未执行 Electron/NSIS 正式构建、推送、tag 或 GitHub Release。正式打包只允许在固定且已推送的 40 位 source commit 上运行一次 T8_RELEASE_APPROVAL=release-2.6.1 与精确 T8_COLLAB_RELEASE_EVIDENCE_DEFERRAL=owner-approved-post-release-v2.6.1；损坏、过期或不匹配清单仍失败关闭。"
   },
   "electronReleaseV260": {
     "version": "2.6.0",
@@ -5266,11 +5519,11 @@
       "T8_ENABLE_LOCAL_PRIVATE": "开发环境和普通本机构建可选；0=关闭本机 local-private/extensions 私有扩展。正式 dist:release 固定为 1，不能被父环境降级。GitHub/clean clone 因为没有 local-private 目录，不包含充值实现。",
       "T8_DISABLE_LOCAL_EXTENSIONS": "开发环境可选；1=关闭本地扩展。正式 dist:release 固定为 0，确保本机私有 sidecar 参与加密打包与后置校验。"
     },
-    "version": "2.6.0",
-    "semverVersion": "2.6.0",
+    "version": "2.6.1",
+    "semverVersion": "2.6.1",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；当前源码候选版本为 v2.6.0，整合多人协作 F2-F7、schema32、运行/发布加固和创作稳定性热修。最近正式发布版本仍为 v2.5.8；公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.6.0 正式 Electron/NSIS 尚未构建；用户已明确要求本版先发布、后补真实双设备/公网/红队/负载证据。只允许使用精确 v2.6.0 一次性 deferral 执行唯一一次 T8_RELEASE_APPROVAL=release-2.6.0 npm run dist:release，F8-F10 状态不得因此改为完成。最近已验证的自动更新 Release 仍为 v2.5.8。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；当前源码候选版本为 v2.6.1，新增贞贞 G-2/Hailuo/Vidu/Kling/Upscaler、生成结果复用与私有充值体验更新。最近正式发布版本为 v2.6.0；公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.6.1 正式 Electron/NSIS 尚未构建；用户已再次明确授权本版先发布、后补真实双设备/公网/红队/负载证据。只允许使用精确 v2.6.1 一次性 deferral 执行唯一一次 T8_RELEASE_APPROVAL=release-2.6.1 npm run dist:release，F8-F10 状态不得因此改为完成。最近已验证的自动更新 Release 为 v2.6.0。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
@@ -8341,6 +8594,22 @@
         "endpoint": "/v1/images/generations"
       },
       {
+        "id": "zhenzhen-image-g2-t2i",
+        "label": "Zhenzhen Image G-2 T2I",
+        "provider": "seedance-nz",
+        "endpoint": "/v1/image/generations",
+        "resolution": "1k",
+        "maxRefs": 0
+      },
+      {
+        "id": "zhenzhen-image-g2-i2i",
+        "label": "Zhenzhen Image G-2 I2I",
+        "provider": "seedance-nz",
+        "endpoint": "/v1/image/generations",
+        "resolution": "1k",
+        "maxRefs": 10
+      },
+      {
         "id": "gpt-image-2-fal",
         "label": "GPT Image 2 (FAL)",
         "provider": "zhenzhen-fal",
@@ -8463,6 +8732,109 @@
         ],
         "imageMode": "base64",
         "maxRefs": 1
+      },
+      {
+        "id": "hailuo-2.3",
+        "label": "Hailuo",
+        "provider": "seedance-nz",
+        "endpoint": "/v1/videos",
+        "models": [
+          "hailuo-2.3-t2v-standard",
+          "hailuo-2.3-t2v-pro",
+          "hailuo-2.3-i2v-standard",
+          "hailuo-2.3-i2v-pro",
+          "hailuo-2.3-fast-i2v",
+          "hailuo-2.3-fast-pro-i2v"
+        ],
+        "durations": [
+          6,
+          10
+        ],
+        "resolutions": [
+          "768p",
+          "1080p"
+        ],
+        "maxRefs": 1
+      },
+      {
+        "id": "vidu-q3",
+        "label": "Vidu",
+        "provider": "seedance-nz",
+        "endpoint": "/v1/videos",
+        "models": [
+          "vidu-q3-pro-t2v",
+          "vidu-q3-turbo-t2v",
+          "vidu-q3-pro-fast-t2v",
+          "vidu-q3-pro-i2v",
+          "vidu-q3-turbo-i2v",
+          "vidu-q3-pro-fast-i2v",
+          "vidu-q3-pro-start-end",
+          "vidu-q3-turbo-start-end",
+          "vidu-q3-pro-fast-start-end",
+          "vidu-q3-r2v",
+          "vidu-q3-mix-r2v",
+          "vidu-q3-ad-r2v",
+          "vidu-q3-drama-r2v",
+          "vidu-q3-drama-short-play",
+          "vidu-q3-ad-short-play"
+        ],
+        "durations": [
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15
+        ],
+        "resolutions": [
+          "default",
+          "720p",
+          "1080p"
+        ],
+        "maxRefs": 14,
+        "liveAvailability": "t2v/i2v/start-end 9 个已真实跑通；r2v/short-play 6 个因上游 fail_to_fetch_task 暂时禁用"
+      },
+      {
+        "id": "kling-v3.0",
+        "label": "Kling",
+        "provider": "seedance-nz",
+        "endpoint": "/v1/videos",
+        "models": [
+          "kling-v3.0-std-t2v",
+          "kling-v3.0-pro-t2v",
+          "kling-v3-turbo-std-t2v",
+          "kling-v3-turbo-pro-t2v",
+          "kling-v3-4k-t2v",
+          "kling-o3-std-t2v",
+          "kling-o3-pro-t2v",
+          "kling-o3-4k-t2v",
+          "kling-v3.0-std-i2v",
+          "kling-v3.0-pro-i2v",
+          "kling-v3-turbo-std-i2v",
+          "kling-v3-turbo-pro-i2v",
+          "kling-v3-4k-i2v",
+          "kling-o3-std-i2v",
+          "kling-o3-pro-i2v",
+          "kling-o3-4k-i2v",
+          "kling-o3-std-r2v",
+          "kling-o3-pro-r2v",
+          "kling-o3-4k-r2v",
+          "kling-o3-std-edit",
+          "kling-o3-pro-edit"
+        ],
+        "durations": [
+          5,
+          10
+        ],
+        "maxRefs": 4,
+        "maxEditVideos": 1,
+        "liveAvailability": "6 个非 4K t2v 已由本轮真实跑通；其余 15 个本轮凭据提交 HTTP 403，等待新的有效授权复测；O3 std/pro r2v 另因参考插件当前上游 502 暂时禁用"
       },
       {
         "id": "seedance-2.0",

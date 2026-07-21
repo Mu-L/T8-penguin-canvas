@@ -2101,7 +2101,7 @@ function seedanceNzTrace(value = {}) {
   };
 }
 
-// seedance.nz Seedream uses a dedicated async protocol. Keep this route
+// seedance.nz Seedream / Zhenzhen Image G-2 use a dedicated async protocol. Keep this route
 // isolated from the existing zhenzhen /v1/images/generations implementation.
 router.post('/image/seedance-nz/submit', async (req, res) => {
   const settings = loadRawSettings();
@@ -2133,7 +2133,7 @@ router.post('/image/seedance-nz/submit', async (req, res) => {
     proxyRouteError('proxy/image/seedance-nz/submit 错误', error, [apiKey]);
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
-      error: proxyPublicError(error, 'seedance.nz Seedream 请求失败', [apiKey]),
+      error: proxyPublicError(error, 'seedance.nz 图像请求失败', [apiKey]),
       ...seedanceNzTrace(error),
     });
   }
@@ -2150,10 +2150,10 @@ router.get('/image/seedance-nz/status/:tid', async (req, res) => {
     const result = await seedanceNz.queryImageTask(req.params.tid, apiKey);
     if (result.status === 'succeeded') {
       if (!result.imageUrl) {
-        return res.status(502).json({ success: false, error: 'Seedream 任务成功但未返回图片 URL', ...seedanceNzTrace(result) });
+        return res.status(502).json({ success: false, error: '图像任务成功但未返回图片 URL', ...seedanceNzTrace(result) });
       }
       const localUrl = await saveRemoteImage(result.imageUrl, seedanceNz.fetchRemote);
-      if (!localUrl) return res.status(502).json({ success: false, error: 'Seedream 输出素材未通过安全下载校验' });
+      if (!localUrl) return res.status(502).json({ success: false, error: '图像输出素材未通过安全下载校验' });
       return res.json({
         success: true,
         data: {
@@ -2170,7 +2170,7 @@ router.get('/image/seedance-nz/status/:tid', async (req, res) => {
         data: {
           status: 'failed',
           progress: safeDiagnosticText(seedreamNzProgress(result.progress, '100%'), 80, [apiKey]),
-          error: safeDiagnosticText(result.failReason || 'Seedream 任务失败', 240, [apiKey]),
+          error: safeDiagnosticText(result.failReason || '图像任务失败', 240, [apiKey]),
           ...seedanceNzTrace(result),
         },
       });
@@ -2188,7 +2188,7 @@ router.get('/image/seedance-nz/status/:tid', async (req, res) => {
     proxyRouteError('proxy/image/seedance-nz/status 错误', error, [apiKey]);
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
-      error: proxyPublicError(error, 'seedance.nz Seedream 查询失败', [apiKey]),
+      error: proxyPublicError(error, 'seedance.nz 图像查询失败', [apiKey]),
       ...seedanceNzTrace(error),
     });
   }
@@ -2259,6 +2259,286 @@ router.get('/video/happyhorse/status/:tid', async (req, res) => {
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
       error: proxyPublicError(error, 'Happy Horse 查询失败', [apiKey]),
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+router.post('/video/hailuo/submit', async (req, res) => {
+  const settings = loadRawSettings();
+  const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) {
+    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”' });
+  }
+  try {
+    const result = await seedanceNz.submitHailuoTask(req.body || {}, apiKey);
+    rememberTaskKey(result.taskId, apiKey, {
+      provider: 'hailuo-nz',
+      model: result.model,
+      taskType: result.taskType,
+    });
+    return res.json({
+      success: true,
+      data: {
+        taskId: result.taskId,
+        model: result.model,
+        taskType: result.taskType,
+        ...seedanceNzTrace(result),
+      },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    proxyRouteError('proxy/video/hailuo/submit 错误', error, [apiKey]);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: proxyPublicError(error, 'Hailuo 2.3 请求失败', [apiKey]),
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+router.get('/video/hailuo/status/:tid', async (req, res) => {
+  const settings = loadRawSettings();
+  const remembered = recallTaskMeta(req.params.tid, 'hailuo-nz');
+  const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
+  try {
+    const result = await seedanceNz.queryTask(req.params.tid, apiKey);
+    let videoUrl = '';
+    if (result.status === 'succeeded' && result.videoUrl) {
+      videoUrl = await saveRemoteVideo(result.videoUrl, seedanceNz.fetchRemote);
+      if (!videoUrl) return res.status(502).json({ success: false, error: 'Hailuo 2.3 输出素材未通过安全下载校验' });
+    }
+    return res.json({
+      success: true,
+      data: {
+        status: result.status,
+        progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
+        videoUrl,
+        failReason: result.status === 'failed'
+          ? safeDiagnosticText(result.failReason || 'Hailuo 2.3 任务失败', 240, [apiKey])
+          : '',
+        model: remembered?.model || '',
+        taskType: remembered?.taskType || '',
+        ...seedanceNzTrace(result),
+      },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    proxyRouteError('proxy/video/hailuo/status 错误', error, [apiKey]);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: proxyPublicError(error, 'Hailuo 2.3 查询失败', [apiKey]),
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+router.post('/video/kling/submit', async (req, res) => {
+  const settings = loadRawSettings();
+  const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) {
+    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”' });
+  }
+  try {
+    const result = await seedanceNz.submitKlingTask(req.body || {}, apiKey);
+    rememberTaskKey(result.taskId, apiKey, {
+      provider: 'kling-nz',
+      model: result.model,
+      taskType: result.taskType,
+    });
+    return res.json({
+      success: true,
+      data: {
+        taskId: result.taskId,
+        model: result.model,
+        taskType: result.taskType,
+        ...seedanceNzTrace(result),
+      },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    proxyRouteError('proxy/video/kling/submit 错误', error, [apiKey]);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: proxyPublicError(error, 'Kling 请求失败', [apiKey]),
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+router.get('/video/kling/status/:tid', async (req, res) => {
+  const settings = loadRawSettings();
+  const remembered = recallTaskMeta(req.params.tid, 'kling-nz');
+  const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
+  try {
+    const result = await seedanceNz.queryTask(req.params.tid, apiKey);
+    let videoUrl = '';
+    if (result.status === 'succeeded' && result.videoUrl) {
+      videoUrl = await saveRemoteVideo(result.videoUrl, seedanceNz.fetchRemote);
+      if (!videoUrl) return res.status(502).json({ success: false, error: 'Kling 输出素材未通过安全下载校验' });
+    }
+    return res.json({
+      success: true,
+      data: {
+        status: result.status,
+        progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
+        videoUrl,
+        failReason: result.status === 'failed'
+          ? safeDiagnosticText(result.failReason || 'Kling 任务失败', 240, [apiKey])
+          : '',
+        model: remembered?.model || '',
+        taskType: remembered?.taskType || '',
+        ...seedanceNzTrace(result),
+      },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    proxyRouteError('proxy/video/kling/status 错误', error, [apiKey]);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: proxyPublicError(error, 'Kling 查询失败', [apiKey]),
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+router.post('/video/upscaler/submit', async (req, res) => {
+  const settings = loadRawSettings();
+  const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) {
+    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”' });
+  }
+  try {
+    const result = await seedanceNz.submitUpscalerTask(req.body || {}, apiKey);
+    rememberTaskKey(result.taskId, apiKey, {
+      provider: 'upscaler-nz',
+      model: result.model,
+      taskType: result.taskType,
+    });
+    return res.json({
+      success: true,
+      data: {
+        taskId: result.taskId,
+        model: result.model,
+        taskType: result.taskType,
+        ...seedanceNzTrace(result),
+      },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    proxyRouteError('proxy/video/upscaler/submit 错误', error, [apiKey]);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: proxyPublicError(error, 'Zhenzhen Upscaler 请求失败', [apiKey]),
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+router.get('/video/upscaler/status/:tid', async (req, res) => {
+  const settings = loadRawSettings();
+  const remembered = recallTaskMeta(req.params.tid, 'upscaler-nz');
+  const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
+  try {
+    const result = await seedanceNz.queryTask(req.params.tid, apiKey);
+    let videoUrl = '';
+    if (result.status === 'succeeded' && result.videoUrl) {
+      videoUrl = await saveRemoteVideo(result.videoUrl, seedanceNz.fetchRemote);
+      if (!videoUrl) return res.status(502).json({ success: false, error: 'Zhenzhen Upscaler 输出素材未通过安全下载校验' });
+    }
+    return res.json({
+      success: true,
+      data: {
+        status: result.status,
+        progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
+        videoUrl,
+        failReason: result.status === 'failed'
+          ? safeDiagnosticText(result.failReason || 'Zhenzhen Upscaler 任务失败', 240, [apiKey])
+          : '',
+        model: remembered?.model || '',
+        taskType: remembered?.taskType || '',
+        ...seedanceNzTrace(result),
+      },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    proxyRouteError('proxy/video/upscaler/status 错误', error, [apiKey]);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: proxyPublicError(error, 'Zhenzhen Upscaler 查询失败', [apiKey]),
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+router.post('/video/vidu/submit', async (req, res) => {
+  const settings = loadRawSettings();
+  const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) {
+    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”' });
+  }
+  try {
+    const result = await seedanceNz.submitViduTask(req.body || {}, apiKey);
+    rememberTaskKey(result.taskId, apiKey, {
+      provider: 'vidu-nz',
+      model: result.model,
+      taskType: result.taskType,
+    });
+    return res.json({
+      success: true,
+      data: {
+        taskId: result.taskId,
+        model: result.model,
+        taskType: result.taskType,
+        ...seedanceNzTrace(result),
+      },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    proxyRouteError('proxy/video/vidu/submit 错误', error, [apiKey]);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: proxyPublicError(error, 'Vidu Q3 请求失败', [apiKey]),
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+router.get('/video/vidu/status/:tid', async (req, res) => {
+  const settings = loadRawSettings();
+  const remembered = recallTaskMeta(req.params.tid, 'vidu-nz');
+  const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
+  try {
+    const result = await seedanceNz.queryTask(req.params.tid, apiKey);
+    let videoUrl = '';
+    if (result.status === 'succeeded' && result.videoUrl) {
+      videoUrl = await saveRemoteVideo(result.videoUrl, seedanceNz.fetchRemote);
+      if (!videoUrl) return res.status(502).json({ success: false, error: 'Vidu Q3 输出素材未通过安全下载校验' });
+    }
+    return res.json({
+      success: true,
+      data: {
+        status: result.status,
+        progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
+        videoUrl,
+        failReason: result.status === 'failed'
+          ? safeDiagnosticText(result.failReason || 'Vidu Q3 任务失败', 240, [apiKey])
+          : '',
+        model: remembered?.model || '',
+        taskType: remembered?.taskType || '',
+        ...seedanceNzTrace(result),
+      },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    proxyRouteError('proxy/video/vidu/status 错误', error, [apiKey]);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: proxyPublicError(error, 'Vidu Q3 查询失败', [apiKey]),
       ...seedanceNzTrace(error),
     });
   }

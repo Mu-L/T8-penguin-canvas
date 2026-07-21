@@ -14,7 +14,7 @@ const {
 } = require('../scripts/collaboration-release-evidence.cjs');
 
 const TARGET = 'a'.repeat(40);
-const VERSION = '2.6.0';
+const VERSION = '2.6.1';
 const GENERATED_AT = '2026-07-20T00:00:00.000Z';
 const NOW = Date.parse('2026-07-20T00:01:00.000Z');
 const DEVICE_A = '1'.repeat(64);
@@ -321,7 +321,7 @@ function validate(item) {
   });
 }
 
-test('v2.6.0 owner-approved deferral accepts only a missing manifest and never marks evidence passed', () => {
+test('v2.6.1 owner-approved deferral accepts only a missing manifest and never marks evidence passed', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-collab-evidence-deferral-'));
   const evidencePath = path.join(directory, 'manifest.json');
   try {
@@ -348,7 +348,14 @@ test('v2.6.0 owner-approved deferral accepts only a missing manifest and never m
     assert.throws(() => assertCollaborationReleaseEvidenceForPublish({
       root: path.resolve(__dirname, '..'),
       evidencePath,
-      version: '2.6.1',
+      version: '2.6.0',
+      target: TARGET,
+      deferralApproval: COLLABORATION_RELEASE_EVIDENCE_POST_RELEASE_DEFERRAL_APPROVAL,
+    }), /manifest is missing/);
+    assert.throws(() => assertCollaborationReleaseEvidenceForPublish({
+      root: path.resolve(__dirname, '..'),
+      evidencePath,
+      version: '2.6.2',
       target: TARGET,
       deferralApproval: COLLABORATION_RELEASE_EVIDENCE_POST_RELEASE_DEFERRAL_APPROVAL,
     }), /manifest is missing/);
@@ -444,7 +451,7 @@ test('formal Electron and GitHub release entry points invoke the F8-F10 gate but
   assert.match(dist, /assertCollaborationReleaseEvidenceForPublish\(\{[\s\S]*target: releaseTarget/);
   assert.match(github, /if \(!dryRun\) \{[\s\S]*assertCollaborationReleaseEvidenceForPublish\(\{[\s\S]*target: releaseTarget/);
   assert.match(guide, /不得手工把未执行项目改写为 `passed`/);
-  assert.match(guide, /owner-approved-post-release-v2\.6\.0/);
+  assert.match(guide, /owner-approved-post-release-v2\.6\.1/);
   assert.match(guide, /T8_COLLAB_RELEASE_EVIDENCE/);
   assert.match(guide, /至少 100 MiB 上传/);
   assert.match(guide, /独立设备和客户端/);

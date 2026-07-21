@@ -72,7 +72,10 @@ test('project run routes force queued creation, redact payloads and map running 
   assert.match(imageNode, /kind: 'image-fal'/);
   assert.match(imageNode, /kind: 'mj'/);
   assert.match(videoNode, /kind: 'video-fal'/);
-  assert.match(videoNode, /kind: isWan \? 'wan' : isHappyHorse \? 'happyhorse' : 'video'/);
+  assert.match(
+    videoNode,
+    /kind: isWan \? 'wan' : isHailuo \? 'hailuo' : isKling \? 'kling' : isUpscaler \? 'upscaler' : isVidu \? 'vidu' : isHappyHorse \? 'happyhorse' : 'video'/,
+  );
   assert.match(postBuild, /services', 'runLifecycle\.t8c'/);
   assert.match(postBuild, /services', 'runErrors\.t8c'/);
   assert.match(postBuild, /services', 'runUsage\.t8c'/);

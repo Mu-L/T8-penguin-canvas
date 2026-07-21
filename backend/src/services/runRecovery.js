@@ -7,6 +7,10 @@ const RECOVERY_KINDS = new Set([
   'seedream-nz',
   'wan',
   'happyhorse',
+  'hailuo',
+  'kling',
+  'upscaler',
+  'vidu',
   'seed-audio',
   'suno',
   'image',
@@ -121,6 +125,10 @@ function recoveryRequest(baseUrl, descriptor) {
   if (descriptor.kind === 'seedream-nz') return get(`/api/proxy/image/seedance-nz/status/${taskId}`);
   if (descriptor.kind === 'wan') return get(`/api/proxy/video/wan/status/${taskId}`);
   if (descriptor.kind === 'happyhorse') return get(`/api/proxy/video/happyhorse/status/${taskId}`);
+  if (descriptor.kind === 'hailuo') return get(`/api/proxy/video/hailuo/status/${taskId}`);
+  if (descriptor.kind === 'kling') return get(`/api/proxy/video/kling/status/${taskId}`);
+  if (descriptor.kind === 'upscaler') return get(`/api/proxy/video/upscaler/status/${taskId}`);
+  if (descriptor.kind === 'vidu') return get(`/api/proxy/video/vidu/status/${taskId}`);
   if (descriptor.kind === 'seed-audio') return get(`/api/proxy/audio/seed-audio/status/${taskId}`);
   if (descriptor.kind === 'suno') return get(`/api/proxy/audio/query?clipIds=${encodeURIComponent(descriptor.taskIds.join(','))}&saveLocal=true`);
   if (descriptor.kind === 'image') return get(`/api/proxy/image/status/${taskId}${descriptor.model ? `?model=${encodeURIComponent(descriptor.model)}` : ''}`);
@@ -140,7 +148,7 @@ function normalizedState(value) {
 
 function outputKindForDescriptor(descriptor) {
   if (descriptor.kind === 'seed-audio' || descriptor.kind === 'suno') return 'audio';
-  if (['seedance', 'wan', 'happyhorse', 'video', 'video-fal'].includes(descriptor.kind)) return 'video';
+  if (['seedance', 'wan', 'happyhorse', 'hailuo', 'kling', 'upscaler', 'vidu', 'video', 'video-fal'].includes(descriptor.kind)) return 'video';
   return 'image';
 }
 

@@ -12,12 +12,14 @@ import { useUpdateNodeData } from './useUpdateNodeData';
 import { useHasAutoOutput } from './useHasAutoOutput';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
 import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
+import { hasReusableGenerationResult, shouldReuseGenerationResult } from '../../utils/reuseGenerationResult';
 import type { RunNodeLifecycleReporter } from '../../types/project';
 import { logBus } from '../../stores/logs';
 import { useThemeStore } from '../../stores/theme';
 import { useUpstreamMaterials, type Material } from './useUpstreamMaterials';
 import { useOrderedMaterials } from './useOrderedMaterials';
 import MaterialPreviewSection from './MaterialPreviewSection';
+import ReuseResultToggle from './ReuseResultToggle';
 import MentionPromptInput from './MentionPromptInput';
 import LoopingVideo from '../LoopingVideo';
 import SmartImage from '../SmartImage';
@@ -635,7 +637,10 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
   useRunTrigger(id, async (reporter) => {
     if (status === 'submitting' || status === 'polling') return;
     await handleGenerate(reporter);
-  }, 'seedance', { lifecycleAware: true });
+  }, 'seedance', {
+    lifecycleAware: true,
+    shouldReuseResult: (nodeData) => shouldReuseGenerationResult('seedance', nodeData),
+  });
 
   // === 跨节点拖拽: source (输出视频可拖出) ===
   const startDrag = useDragMaterialStore((s) => s.start);
@@ -1122,6 +1127,13 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
             className="w-full h-12 resize-none rounded bg-white/5 border border-white/10 px-2 py-1 text-[11px] text-white outline-none focus:border-white/30 placeholder:text-white/30"
           />
         </div>
+
+        <ReuseResultToggle
+          checked={d?.reuseResult === true}
+          hasResult={hasReusableGenerationResult('seedance', d)}
+          onChange={(checked) => update({ reuseResult: checked })}
+          accentColor="#e879f9"
+        />
 
         {!isBusy ? (
           <button

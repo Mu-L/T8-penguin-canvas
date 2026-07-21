@@ -16,6 +16,7 @@ import { useUpdateNodeData } from './useUpdateNodeData';
 import { useHasAutoOutput } from './useHasAutoOutput';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
 import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
+import { hasReusableGenerationResult, shouldReuseGenerationResult } from '../../utils/reuseGenerationResult';
 import type { RunNodeLifecycleReporter } from '../../types/project';
 import { logBus } from '../../stores/logs';
 import { PORT_COLOR } from '../../config/portTypes';
@@ -23,6 +24,7 @@ import { useThemeStore } from '../../stores/theme';
 import { useUpstreamMaterials, type Material } from './useUpstreamMaterials';
 import { useOrderedMaterials } from './useOrderedMaterials';
 import MaterialPreviewSection from './MaterialPreviewSection';
+import ReuseResultToggle from './ReuseResultToggle';
 import MentionPromptInput from './MentionPromptInput';
 import { resolveMediaMentions, type MediaMention } from './mediaMentions';
 import { useDragMaterialStore, type MaterialPayload } from '../../stores/dragMaterial';
@@ -528,7 +530,10 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
   useRunTrigger(id, async (reporter) => {
     if (status === 'submitting' || status === 'polling') return;
     await handleGenerate(reporter);
-  }, 'audio', { lifecycleAware: true });
+  }, 'audio', {
+    lifecycleAware: true,
+    shouldReuseResult: (nodeData) => shouldReuseGenerationResult('audio', nodeData),
+  });
 
   // === 跨节点拖拽: source (输出 tracks 可拖出) ===
   const startDrag = useDragMaterialStore((s) => s.start);
@@ -856,6 +861,13 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
             </div>
           </div>
         )}
+
+        <ReuseResultToggle
+          checked={d?.reuseResult === true}
+          hasResult={hasReusableGenerationResult('audio', d)}
+          onChange={(checked) => update({ reuseResult: checked })}
+          accentColor="#a78bfa"
+        />
 
         {!isBusy ? (
           <button

@@ -4,6 +4,7 @@ import { AlertCircle, Image as ImageIcon, Plus, Sparkles, Square, X } from 'luci
 import { useUpstreamMaterials, type Material } from './useUpstreamMaterials';
 import { useOrderedMaterials } from './useOrderedMaterials';
 import MaterialPreviewSection from './MaterialPreviewSection';
+import ReuseResultToggle from './ReuseResultToggle';
 import MentionPromptInput from './MentionPromptInput';
 import SmartImage from '../SmartImage';
 import PromptTextarea from '../PromptTextarea';
@@ -23,6 +24,9 @@ import {
   DEFAULT_MJ_RATIO,
   DEFAULT_MJ_SPEED,
   gptImage2ZhenzhenVariantSize,
+  isZhenzhenImageG2Model,
+  ZHENZHEN_IMAGE_G2_I2I_MODEL,
+  ZHENZHEN_IMAGE_G2_RATIOS,
 } from '../../providers/models';
 import {
   submitImageAsync,
@@ -43,6 +47,7 @@ import { useUpdateNodeData } from './useUpdateNodeData';
 import { useHasAutoOutput } from './useHasAutoOutput';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
 import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
+import { hasReusableGenerationResult, shouldReuseGenerationResult } from '../../utils/reuseGenerationResult';
 import { useThemeStore } from '../../stores/theme';
 import { logBus } from '../../stores/logs';
 import { useDragMaterialStore, type MaterialPayload } from '../../stores/dragMaterial';
@@ -371,6 +376,14 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   const apiModel = modelDef.apiModelOptions.some((opt) => opt.value === savedApiModel)
     ? savedApiModel
     : modelDef.apiModel;
+  const isZhenzhenImageG2 = !isExternalSelected && isZhenzhenImageG2Model(apiModel);
+  const isZhenzhenImageG2I2I = apiModel === ZHENZHEN_IMAGE_G2_I2I_MODEL;
+  const effectiveAspectRatios = isZhenzhenImageG2 ? ZHENZHEN_IMAGE_G2_RATIOS : modelDef.aspectRatios;
+  const effectiveAspectRatio = effectiveAspectRatios.includes(aspectRatio)
+    ? aspectRatio
+    : (isZhenzhenImageG2 ? 'adaptive' : modelDef.defaultAspectRatio);
+  const effectiveSizes = isZhenzhenImageG2 ? ['1K'] : modelDef.sizes;
+  const effectiveSizeLevel = isZhenzhenImageG2 ? '1K' : sizeLevel;
 
   // ========== FAL 渠道识别及参数(不影响其他模型) ==========
   const isFal = isFalModel(apiModel);
@@ -432,7 +445,11 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   const MJ_REF_MAX = 2; // sref 与 oref 各最多 2 张
 
   // 参考图上限(FAL 使用 FAL_REGISTRY.maxRefs,其他走原设计)
-  const maxRefs = isExternalSelected ? Math.max(8, modelDef.maxReferenceImages || 0) : (falDef?.maxRefs ?? modelDef.maxReferenceImages);
+  const maxRefs = isExternalSelected
+    ? Math.max(8, modelDef.maxReferenceImages || 0)
+    : isZhenzhenImageG2
+      ? 10
+      : (falDef?.maxRefs ?? modelDef.maxReferenceImages);
   const status: 'idle' | 'generating' | 'success' | 'error' = d?.status || 'idle';
   const imageUrl = d?.imageUrl as string | undefined;
   const localPrompt = d?.prompt || '';
@@ -518,7 +535,15 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
 
   const switchApiModel = (nextApiModel: string) => {
     const nextSize = gptImage2ZhenzhenVariantSize(nextApiModel);
-    update(nextSize ? { apiModel: nextApiModel, sizeLevel: nextSize } : { apiModel: nextApiModel });
+    if (isZhenzhenImageG2Model(nextApiModel)) {
+      const nextRatio = ZHENZHEN_IMAGE_G2_RATIOS.includes(aspectRatio) ? aspectRatio : 'adaptive';
+      update({ apiModel: nextApiModel, sizeLevel: '1K', aspectRatio: nextRatio });
+      return;
+    }
+    const leavingG2Patch = isZhenzhenImageG2 ? { aspectRatio: modelDef.defaultAspectRatio } : {};
+    update(nextSize
+      ? { apiModel: nextApiModel, sizeLevel: nextSize, ...leavingG2Patch }
+      : { apiModel: nextApiModel, ...leavingG2Patch });
   };
 
   // 从上游节点 + 本地上传按用户排序后的顺序聚合 prompt + 参考图
@@ -608,6 +633,16 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
       logBus.error('生成中止: 缺少 prompt', src);
       return;
     }
+    if (isZhenzhenImageG2 && finalPrompt.length > 20000) {
+      setError('Zhenzhen Image G-2 提示词不能超过 20000 字符');
+      logBus.error(`生成中止: G-2 提示词长度 ${finalPrompt.length} 超过 20000`, src);
+      return;
+    }
+    if (isZhenzhenImageG2I2I && upstreamImages.length === 0) {
+      setError('zhenzhen-image-g2-i2i 至少需要 1 张参考图');
+      logBus.error('生成中止: G-2 图生图缺少参考图', src);
+      return;
+    }
     if (isSeedream && !isSeedreamNz && !/^\d+x\d+$/.test(seedreamResolvedSize)) {
       setError('Seedream 自定义尺寸格式应为 宽x高，例如 2048x1536');
       logBus.error(`生成中止: Seedream 尺寸格式无效 ${seedreamResolvedSize || '(空)'}`, src);
@@ -628,7 +663,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
       ? providerSelection.provider.id
       : isFal
         ? 'fal'
-        : isSeedreamNz
+        : isSeedreamNz || isZhenzhenImageG2
           ? 'seedance-nz'
           : isMj
             ? 'zhenzhen-mj'
@@ -637,6 +672,8 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
       ? externalProviderModel
       : isSeedreamNz
         ? seedreamNzUiModel
+        : isZhenzhenImageG2
+          ? apiModel
         : isMj
           ? mjVersion
           : apiModel;
@@ -1036,28 +1073,41 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         throw new Error(`FAL 超时: ${(maxPoll * interval) / 1000}s 未完成`);
       }
 
-      // seedance.nz has a separate asynchronous Seedream API. This branch is
-      // deliberately isolated so the existing zhenzhen Seedream call remains unchanged.
-      if (isSeedreamNz) {
+      // seedance.nz has a separate asynchronous image API for Seedream and
+      // Zhenzhen Image G-2. Keep it isolated from the legacy GPT2/Seedream route.
+      if (isSeedreamNz || isZhenzhenImageG2) {
         if (!zhenzhenSd2ApiKey) throw new Error('请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”');
-        const expectedModel = seedreamNzModelFamily === 'overseas'
-          ? (allRefs.length ? 'dola-seedream-5.0-pro-i2i' : 'dola-seedream-5.0-pro-t2i')
-          : (allRefs.length ? 'seedream-v5-pro-i2i' : 'seedream-v5-pro-t2i');
+        const providerRefs = isZhenzhenImageG2 && !isZhenzhenImageG2I2I ? [] : allRefs;
+        const expectedModel = isZhenzhenImageG2
+          ? apiModel
+          : seedreamNzModelFamily === 'overseas'
+            ? (providerRefs.length ? 'dola-seedream-5.0-pro-i2i' : 'dola-seedream-5.0-pro-t2i')
+            : (providerRefs.length ? 'seedream-v5-pro-i2i' : 'seedream-v5-pro-t2i');
+        const imageFamilyLabel = isZhenzhenImageG2 ? 'Zhenzhen Image G-2' : 'Seedream';
+        const sizeLabel = isZhenzhenImageG2
+          ? '1k'
+          : (seedreamNzResolution === 'custom' ? seedreamNzResolvedSize : seedreamNzResolution);
         logBus.info(
-          `贞贞的平价AI工坊 Seedream 提交: model=${expectedModel} ${seedreamNzModelRegion} 参考图=${allRefs.length} 尺寸=${seedreamNzResolution === 'custom' ? seedreamNzResolvedSize : seedreamNzResolution}`,
+          `贞贞的平价AI工坊 ${imageFamilyLabel} 提交: model=${expectedModel} 参考图=${providerRefs.length} 尺寸=${sizeLabel}`,
           src,
         );
         const submit = await submitSeedreamNz({
           prompt: finalPrompt,
-          images: allRefs,
-          modelFamily: seedreamNzModelFamily,
-          resolution: seedreamNzResolution === 'custom' ? undefined : seedreamNzResolution,
-          size: seedreamNzResolution === 'custom' ? seedreamNzResolvedSize : undefined,
-          output_format: seedreamOutputFormat,
+          images: providerRefs,
+          model: isZhenzhenImageG2 ? apiModel as 'zhenzhen-image-g2-t2i' | 'zhenzhen-image-g2-i2i' : undefined,
+          modelFamily: isZhenzhenImageG2 ? undefined : seedreamNzModelFamily,
+          resolution: isZhenzhenImageG2
+            ? '1k'
+            : (seedreamNzResolution === 'custom' ? undefined : seedreamNzResolution),
+          ratio: isZhenzhenImageG2
+            ? effectiveAspectRatio as 'adaptive' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16' | '21:9'
+            : undefined,
+          size: !isZhenzhenImageG2 && seedreamNzResolution === 'custom' ? seedreamNzResolvedSize : undefined,
+          output_format: isZhenzhenImageG2 ? undefined : seedreamOutputFormat,
         });
         if (!isCurrentGenerationRun(runId)) return;
         const taskId = submit.taskId;
-        if (!taskId) throw new Error('贞贞的平价AI工坊（国内） Seedream 未返回任务 ID');
+        if (!taskId) throw new Error(`贞贞的平价AI工坊（国内）${imageFamilyLabel} 未返回任务 ID`);
         await reporter?.providerSubmitted({
           provider: traceProvider,
           model: traceModel,
@@ -1098,15 +1148,15 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           const queryStatus = String(query.status || '').toLowerCase();
           if (queryStatus === 'completed' || queryStatus === 'success' || queryStatus === 'done') {
             const url = query.urls?.[0];
-            if (!url) throw new Error('贞贞的平价AI工坊（国内） Seedream 任务完成但未返回图片');
-            logBus.success(`贞贞的平价AI工坊（国内） Seedream 完成 → ${url}`, src);
+            if (!url) throw new Error(`贞贞的平价AI工坊（国内）${imageFamilyLabel} 任务完成但未返回图片`);
+            logBus.success(`贞贞的平价AI工坊（国内）${imageFamilyLabel} 完成 → ${url}`, src);
             update({
               status: 'success',
               progress: '100%',
               imageUrl: url,
               imageUrls: query.urls,
               lastPrompt: finalPrompt,
-              usedI2I: allRefs.length > 0,
+              usedI2I: isZhenzhenImageG2 ? isZhenzhenImageG2I2I : providerRefs.length > 0,
               requestId: query.requestId,
               transportHttpStatus: query.transportHttpStatus,
               upstreamHttpStatus: query.upstreamHttpStatus,
@@ -1129,15 +1179,15 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             return;
           }
           if (queryStatus === 'failed' || queryStatus === 'failure' || queryStatus === 'error') {
-            throw new Error(query.error || '贞贞的平价AI工坊（国内） Seedream 任务失败');
+            throw new Error(query.error || `贞贞的平价AI工坊（国内）${imageFamilyLabel} 任务失败`);
           }
         }
-        throw new Error(`贞贞的平价AI工坊（国内） Seedream 超时: ${(maxPoll * interval) / 1000}s 未完成`);
+        throw new Error(`贞贞的平价AI工坊（国内）${imageFamilyLabel} 超时: ${(maxPoll * interval) / 1000}s 未完成`);
       }
 
       // ============ 原有标准路径(GPT2 standard / nano-banana / nano-banana-pro 未动) ============
       logBus.info(
-        `提交任务: model=${apiModel} 比例=${aspectRatio} 尺寸=${sizeLevel} 参考图=${allRefs.length} prompt="${finalPrompt.slice(0, 60)}${finalPrompt.length > 60 ? '…' : ''}"`,
+        `提交任务: model=${apiModel} 比例=${effectiveAspectRatio} 尺寸=${effectiveSizeLevel} 参考图=${allRefs.length} prompt="${finalPrompt.slice(0, 60)}${finalPrompt.length > 60 ? '…' : ''}"`,
         src,
       );
       const submit = await submitImageAsync({
@@ -1145,8 +1195,8 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         apiModel: apiModel,
         paramKind: modelDef.paramKind,
         prompt: finalPrompt,
-        aspect_ratio: isSeedream ? undefined : aspectRatio,
-        image_size: isSeedream ? undefined : sizeLevel,
+        aspect_ratio: isSeedream ? undefined : effectiveAspectRatio,
+        image_size: isSeedream ? undefined : effectiveSizeLevel,
         size: isSeedream ? seedreamResolvedSize : undefined,
         response_format: isSeedream ? 'url' : undefined,
         output_format: isSeedream ? seedreamOutputFormat : undefined,
@@ -1295,7 +1345,10 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   };
 
   // 接入运行总线,供批量运行调起
-  useRunTrigger(id, handleGenerate, 'image', { lifecycleAware: true });
+  useRunTrigger(id, handleGenerate, 'image', {
+    lifecycleAware: true,
+    shouldReuseResult: (nodeData) => shouldReuseGenerationResult('image', nodeData),
+  });
 
   // === 跨节点拖拽: source (从输出图 Ctrl+拖出) ===
   const startDrag = useDragMaterialStore((s) => s.start);
@@ -1856,47 +1909,60 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           </div>
         )}
 
+        {isZhenzhenImageG2 && !isExternalSelected && (
+          <div className="rounded border border-cyan-400/25 bg-cyan-500/5 px-2 py-1.5 text-[10px] leading-4 text-cyan-100/80">
+            <div>贞贞的平价AI工坊（国内） · 异步 G-2 · 固定 1K</div>
+            <div>
+              {isZhenzhenImageG2I2I
+                ? '图生图模式：必须提供 1–10 张参考图。'
+                : '文生图模式：只使用 Prompt，已连接的参考图不会发送。'}
+            </div>
+            {!zhenzhenSd2ApiKey && <div className="text-amber-300">尚未配置“贞贞的平价AI工坊（国内） API Key”</div>}
+          </div>
+        )}
+
         <LocalNodeAddonSlot
           nodeId={id}
           nodeType="image"
           data={d}
           update={update}
           context={{
-            providerSource: isExternalSelected ? providerSelection.providerSource : (isSeedreamNz ? 'seedance-nz' : 'zhenzhen'),
+            providerSource: isExternalSelected ? providerSelection.providerSource : ((isSeedreamNz || isZhenzhenImageG2) ? 'seedance-nz' : 'zhenzhen'),
             providerId: providerSelection.providerId,
             providerModel: isExternalSelected ? externalProviderModel : (isSeedreamNz ? seedreamNzUiModel : apiModel),
             model: modelDef.id,
             apiModel,
-            providerKind: isFal ? 'fal' : modelDef.paramKind,
+            providerKind: isFal ? 'fal' : (isZhenzhenImageG2 ? 'zhenzhen-image-g2' : modelDef.paramKind),
           }}
         />
 
         {/* 比例 + 尺寸;Seedream 使用像素尺寸 + 输出格式,Grok Image 只需要比例 */}
         {(!isFal && !isMj && !isComfyExternal) && (
-          <div className={`grid gap-2 ${isSeedream || (!isGrokImage && modelDef.sizes.length) ? 'grid-cols-2' : 'grid-cols-1'}`}>
-            {modelDef.aspectRatios.length > 0 && <div>
+          <div className={`grid gap-2 ${isSeedream || (!isGrokImage && effectiveSizes.length) ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            {effectiveAspectRatios.length > 0 && <div>
               <label className="text-[10px] text-white/50 block mb-1">比例</label>
               <select
-                value={aspectRatio}
+                value={effectiveAspectRatio}
                 onChange={(e) => update({ aspectRatio: e.target.value })}
                 style={{ background: '#18181b', color: '#ffffff' }}
                 className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
               >
-                {modelDef.aspectRatios.map((r) => (
+                {effectiveAspectRatios.map((r) => (
                   <option key={r} value={r} style={{ background: '#18181b', color: '#ffffff' }}>{r}</option>
                 ))}
               </select>
             </div>}
-            {!isGrokImage && !isSeedreamNz && modelDef.sizes.length > 0 && (
+            {!isGrokImage && !isSeedreamNz && effectiveSizes.length > 0 && (
               <div>
                 <label className="text-[10px] text-white/50 block mb-1">尺寸</label>
                 <select
-                  value={sizeLevel}
+                  value={effectiveSizeLevel}
                   onChange={(e) => update({ sizeLevel: e.target.value })}
+                  disabled={isZhenzhenImageG2}
                   style={{ background: '#18181b', color: '#ffffff' }}
                   className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
                 >
-                  {modelDef.sizes.map((s) => (
+                  {effectiveSizes.map((s) => (
                     <option key={s} value={s} style={{ background: '#18181b', color: '#ffffff' }}>{s}</option>
                   ))}
                 </select>
@@ -2416,9 +2482,13 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             isDark={isDark}
             isPixel={isPixel}
             groups={['text', 'image']}
-            title={isMj ? '主参考图 · 上游+本地' : '参考图 · 上游+本地'}
+            title={isMj
+              ? '主参考图 · 上游+本地'
+              : isZhenzhenImageG2 && !isZhenzhenImageG2I2I
+                ? '参考图 · G-2 文生图模式不会发送'
+                : '参考图 · 上游+本地'}
             imageUploadAction={
-              orderedImages.length < maxRefs
+              (!isZhenzhenImageG2 || isZhenzhenImageG2I2I) && orderedImages.length < maxRefs
                 ? {
                     onClick: handlePickFile,
                     title: '上传本地参考图',
@@ -2475,6 +2545,13 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           />
           <span>仅输出图片结果（不输出 Prompt）</span>
         </label>
+
+        <ReuseResultToggle
+          checked={d?.reuseResult === true}
+          hasResult={hasReusableGenerationResult('image', d)}
+          onChange={(checked) => update({ reuseResult: checked })}
+          accentColor="#f59e0b"
+        />
 
         {/* 生成按钮(包含异步进度) */}
         {status === 'generating' ? (

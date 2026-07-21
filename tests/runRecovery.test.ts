@@ -13,6 +13,18 @@ test('frontend stores credential-free recovery recipes for supported provider po
     provider: 'seedance-nz', model: 'wan-2.7-spicy-i2v', taskId: 'wan-task',
   })?.kind, 'wan');
   assert.equal(inferRunRecoveryDescriptor({
+    provider: 'seedance-nz', model: 'hailuo-2.3-fast-i2v', taskId: 'hailuo-task',
+  })?.kind, 'hailuo');
+  assert.equal(inferRunRecoveryDescriptor({
+    provider: 'seedance-nz', model: 'kling-o3-pro-edit', taskId: 'kling-task',
+  })?.kind, 'kling');
+  assert.equal(inferRunRecoveryDescriptor({
+    provider: 'seedance-nz', model: 'zhenzhen-upscaler', taskId: 'upscaler-task',
+  })?.kind, 'upscaler');
+  assert.equal(inferRunRecoveryDescriptor({
+    provider: 'seedance-nz', model: 'vidu-q3-turbo-start-end', taskId: 'vidu-task',
+  })?.kind, 'vidu');
+  assert.equal(inferRunRecoveryDescriptor({
     provider: 'seedance-nz', model: 'dola-seedream-5.0-pro-t2i', taskId: 'image-task',
   })?.kind, 'seedream-nz');
   assert.equal(inferRunRecoveryDescriptor({

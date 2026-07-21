@@ -298,7 +298,7 @@ test('VideoNode keeps Jimeng Seedance media limits separate from Grok FAL contro
 
   assert.match(source, /JIMENG_SEEDANCE_LIMITS = \{ images: 9, videos: 3, audios: 3 \}/);
   assert.match(source, /showBuiltinFalControls = !isExternalSelected && isFal/);
-  assert.match(source, /isJimengSeedanceSelected \? \['image', 'video', 'audio', 'text'\]/);
+  assert.match(source, /accepts:\s*isJimengSeedanceSelected\s*\?\s*\['image', 'video', 'audio', 'text'\]/);
   assert.match(source, /isJimengSeedanceSelected\s*\?\s*\['480p', '720p', '1080p', '4k'\]/);
   assert.match(source, /videos: videoRefs/);
   assert.match(source, /audios: audioRefs/);

@@ -23,6 +23,14 @@ import {
   generateExternalVideo,
   submitHappyHorse,
   queryHappyHorse,
+  submitHailuo,
+  queryHailuo,
+  submitKling,
+  queryKling,
+  submitUpscaler,
+  queryUpscaler,
+  submitVidu,
+  queryVidu,
   submitWan,
   queryWan,
   submitVideo,
@@ -31,6 +39,10 @@ import {
   queryVideoFal,
   type VideoSubmitRequest,
   type VideoFalSubmitRequest,
+  type Hailuo23Model,
+  type KlingModel,
+  type UpscalerResolution,
+  type ViduQ3Model,
 } from '../../services/generation';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useHasAutoOutput } from './useHasAutoOutput';
@@ -42,6 +54,7 @@ import { useThemeStore } from '../../stores/theme';
 import { useUpstreamMaterials, type Material } from './useUpstreamMaterials';
 import { useOrderedMaterials } from './useOrderedMaterials';
 import MaterialPreviewSection from './MaterialPreviewSection';
+import ReuseResultToggle from './ReuseResultToggle';
 import MentionPromptInput from './MentionPromptInput';
 import LoopingVideo from '../LoopingVideo';
 import SmartImage from '../SmartImage';
@@ -51,6 +64,7 @@ import { useMaterialDropTarget } from '../../hooks/useMaterialDropTarget';
 import { taskCompletionSound } from '../../stores/taskCompletionSound';
 import { useApiKeysStore } from '../../stores/apiKeys';
 import { normalizeProviderErrorMessage } from '../../utils/providerErrorMessage.ts';
+import { hasReusableGenerationResult, shouldReuseGenerationResult } from '../../utils/reuseGenerationResult';
 import {
   advancedProviderModelOptions,
   advancedProvidersForNode,
@@ -71,6 +85,9 @@ import { LocalNodeAddonSlot } from 'virtual:t8-local-extensions';
  *   - Grok Video(kind=grok)     — Zhenzhen Grok 1.5 New / Grok Video 1.5 FAL / 旧版 FAL / grok-video-3 / images
  *   - Sora2    (kind=sora)      — Zhenzhen API + FAL 双渠道 / Base64 参考图(≤1)
  *   - HappyHorse(kind=happyhorse)— api.seedance.nz 文生/图生/参考图生视频(≤9 图)
+ *   - Hailuo   (kind=hailuo)    — api.seedance.nz Hailuo 2.3 文生/图生/Fast 图生视频(1 张首帧)
+ *   - Vidu     (kind=vidu)      — api.seedance.nz Vidu Q3 文生/图生/首尾帧/参考/短剧成片(≤14 图)
+ *   - Kling    (kind=kling)     — api.seedance.nz Kling 文生/图生/首尾帧/参考/视频编辑
  *   - Wan      (kind=wan)       — api.seedance.nz Wan 2.7 Spicy 图生视频(1 张首帧)
  *   - Seedance  (kind=seedance) — 零破坏兼容旧 veo 字段
  * 流程: submit → poll(5s 间隔) → 转存 → 展示
@@ -154,12 +171,56 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   // 子模型(上游真实 model 名)
   const apiModel: string = d?.model && modelDef.apiModelOptions.some((o) => o.value === d.model) ? d.model : modelDef.apiModelOptions[0].value;
   const isHappyHorse = !isExternalSelected && modelDef.kind === 'happyhorse';
+  const isHailuo = !isExternalSelected && modelDef.kind === 'hailuo';
+  const isKling = !isExternalSelected && modelDef.kind === 'kling';
+  const isUpscaler = !isExternalSelected && modelDef.kind === 'upscaler';
+  const isVidu = !isExternalSelected && modelDef.kind === 'vidu';
   const isWan = !isExternalSelected && modelDef.kind === 'wan';
   const happyHorseMode = apiModel.endsWith('-i2v') ? 'i2v' : apiModel.endsWith('-r2v') ? 'r2v' : 't2v';
+  const hailuoMode = apiModel.includes('-i2v') ? 'i2v' : 't2v';
+  const klingMode = apiModel.endsWith('-edit')
+    ? 'edit'
+    : apiModel.endsWith('-r2v')
+      ? 'r2v'
+      : apiModel.endsWith('-i2v')
+        ? 'i2v'
+        : 't2v';
+  const viduMode = apiModel.endsWith('-short-play')
+    ? 'short-play'
+    : apiModel.endsWith('-start-end')
+      ? 'start-end'
+      : apiModel.endsWith('-r2v')
+        ? 'r2v'
+        : apiModel.endsWith('-i2v')
+          ? 'i2v'
+          : 't2v';
+  const isViduUpstreamUnavailable = isVidu && (viduMode === 'r2v' || viduMode === 'short-play');
+  const isKlingUpstreamUnavailable = isKling && ['kling-o3-std-r2v', 'kling-o3-pro-r2v'].includes(apiModel);
+  const isSeedanceNzVideo = isWan || isHailuo || isKling || isUpscaler || isVidu || isHappyHorse;
   // 各参数(跳过着调用 update 默认值)
   const ratio: string = d?.ratio || modelDef.defaultRatio;
   const duration: number = d?.duration ?? modelDef.defaultDuration ?? (modelDef.durations?.[0] || 0);
   const resolution: string = d?.resolution || (isJimengSeedanceSelected ? '720p' : modelDef.defaultResolution || '');
+  const hailuoDuration: 6 | 10 = resolution === '1080p' ? 6 : Number(duration) === 10 ? 10 : 6;
+  const klingDuration: 5 | 10 = Number(duration) === 10 ? 10 : 5;
+  const klingNegativePrompt: string = typeof d?.klingNegativePrompt === 'string' ? d.klingNegativePrompt : '';
+  const viduDuration = viduMode === 'short-play'
+    ? Math.max(8, Math.min(12, Number(duration) || 8))
+    : Math.max(4, Math.min(15, Number(duration) || 4));
+  const viduResolution: 'default' | '720p' | '1080p' = viduMode === 'short-play'
+    ? '1080p'
+    : resolution === '720p' || resolution === '1080p' ? resolution : 'default';
+  const viduRatio = viduMode === 'short-play'
+    ? ratio === '16:9' ? '16:9' : '9:16'
+    : ratio;
+  const viduSeed: number = Number.isInteger(d?.viduSeed) ? d.viduSeed : -1;
+  const viduScriptName: string = typeof d?.viduScriptName === 'string' ? d.viduScriptName : 'Vidu short play';
+  const viduStyle: string = typeof d?.viduStyle === 'string' ? d.viduStyle : 'realistic';
+  const viduAssetType: 'character' | 'scene' | 'prop' = ['character', 'scene', 'prop'].includes(d?.viduAssetType)
+    ? d.viduAssetType
+    : 'character';
+  const viduAssetNamePrefix: string = typeof d?.viduAssetNamePrefix === 'string' ? d.viduAssetNamePrefix : 'Asset';
+  const viduAssetDescription: string = typeof d?.viduAssetDescription === 'string' ? d.viduAssetDescription : 'Reference asset';
   const seed: number = typeof d?.seed === 'number' ? d.seed : 0;
   const enhancePrompt: boolean = d?.enhancePrompt ?? false;
   const enableUpsample: boolean = d?.enableUpsample ?? false;
@@ -193,6 +254,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     ? [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 18]
     : isGrok15New
     ? []
+    : isHailuo && resolution === '1080p'
+    ? [6]
     : modelDef.durations || [];
   const resolutionOptions = isJimengSeedanceSelected
     ? ['480p', '720p', '1080p', '4k']
@@ -307,8 +370,16 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     [localRefImages, localRefVideos, localRefAudios, id],
   );
   const maxMentionRefs =
-    isWan
+    isUpscaler
+      ? 0
+      : isWan
       ? 1
+      : isKling
+      ? klingMode === 'i2v' ? 2 : klingMode === 'r2v' ? 4 : 0
+      : isVidu
+      ? viduMode === 't2v' ? 0 : viduMode === 'i2v' ? 1 : viduMode === 'start-end' ? 2 : viduMode === 'r2v' ? 9 : 14
+      : isHailuo
+      ? hailuoMode === 't2v' ? 0 : 1
       : isHappyHorse
       ? happyHorseMode === 't2v' ? 0 : happyHorseMode === 'i2v' ? 1 : 9
       : isVeoOmni
@@ -322,7 +393,11 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         ? 1
         : falReg.maxRefImages
       : modelDef.maxRefImages;
-  const maxMentionVideos = isJimengSeedanceSelected ? JIMENG_SEEDANCE_LIMITS.videos : 0;
+  const maxMentionVideos = isUpscaler
+    ? 1
+    : isKling && klingMode === 'edit'
+    ? 1
+    : isJimengSeedanceSelected ? JIMENG_SEEDANCE_LIMITS.videos : 0;
   const maxMentionAudios = isJimengSeedanceSelected ? JIMENG_SEEDANCE_LIMITS.audios : 0;
   const mentionMaterials = useMemo(
     () => [
@@ -335,8 +410,14 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
 
   // 分组动态跟随子模型: Seedance / 即梦 CLI 支持 image/video/audio, 其他 (grok/veo/sora) 仅 image
   const previewGroups = useMemo<ReadonlyArray<'text' | 'image' | 'video' | 'audio'>>(
-    () => (modelDef.kind === 'seedance' || isJimengSeedanceSelected ? ['text', 'image', 'video', 'audio'] : ['text', 'image']),
-    [modelDef.kind, isJimengSeedanceSelected],
+    () => (modelDef.kind === 'seedance' || isJimengSeedanceSelected
+      ? ['text', 'image', 'video', 'audio']
+      : isUpscaler
+        ? ['video']
+      : isKling && klingMode === 'edit'
+        ? ['text', 'video']
+        : ['text', 'image']),
+    [modelDef.kind, isJimengSeedanceSelected, isUpscaler, isKling, klingMode],
   );
 
   // 收集上游 prompt + 参考图/视频/音频 (按用户拖拽顺序), 合并本地拖入素材
@@ -410,6 +491,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       resolution: def.defaultResolution || '',
       ...(nextModel === 'grok-imagine-video-1.5' ? { gkfMode: 'image_to_video' } : {}),
       ...(isGrokVideo15NewModel(nextModel) ? { ratio: '16:9', resolution: '' } : {}),
+      ...(nextModel.startsWith('vidu-q3-') ? { viduSeed: -1 } : {}),
     });
   };
 
@@ -444,17 +526,25 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         try {
           const r = isWan
             ? await queryWan(tid)
+            : isHailuo
+              ? await queryHailuo(tid)
+            : isKling
+              ? await queryKling(tid)
+            : isUpscaler
+              ? await queryUpscaler(tid)
+            : isVidu
+              ? await queryVidu(tid)
             : isHappyHorse
               ? await queryHappyHorse(tid)
               : await queryVideo(tid, apiModel);
           const normalizedStatus = String(r.status || '').trim().toUpperCase();
           const currentProgress = String(r.progress ?? '');
           await reporter?.polling({
-            provider: isWan || isHappyHorse ? 'seedance-nz' : 'zhenzhen',
+            provider: isSeedanceNzVideo ? 'seedance-nz' : 'zhenzhen',
             model: apiModel,
             taskId: tid,
             recovery: {
-              kind: isWan ? 'wan' : isHappyHorse ? 'happyhorse' : 'video',
+              kind: isWan ? 'wan' : isHailuo ? 'hailuo' : isKling ? 'kling' : isUpscaler ? 'upscaler' : isVidu ? 'vidu' : isHappyHorse ? 'happyhorse' : 'video',
               taskId: tid, model: apiModel, pollIntervalMs: POLL_INT, maxPolls: MAX,
             },
             requestId: r.requestId,
@@ -482,7 +572,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
               status: 'success',
               videoUrl: r.videoUrl,
               progress: '100%',
-              provider: isWan || isHappyHorse ? 'seedance-nz' : 'zhenzhen',
+              provider: isSeedanceNzVideo ? 'seedance-nz' : 'zhenzhen',
               apiModel,
               taskId: tid,
               requestId: r.requestId,
@@ -492,7 +582,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
               pollCount: elapsed,
             });
             await reporter?.providerResponse({
-              provider: isWan || isHappyHorse ? 'seedance-nz' : 'zhenzhen',
+              provider: isSeedanceNzVideo ? 'seedance-nz' : 'zhenzhen',
               model: apiModel,
               upstreamTaskId: tid,
               requestId: r.requestId,
@@ -511,7 +601,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             stopPoll();
             const msg = normalizeProviderErrorMessage(r.failReason, '生成失败');
             await reporter?.providerResponse({
-              provider: isWan || isHappyHorse ? 'seedance-nz' : 'zhenzhen',
+              provider: isSeedanceNzVideo ? 'seedance-nz' : 'zhenzhen',
               model: apiModel,
               upstreamTaskId: tid,
               requestId: r.requestId,
@@ -663,7 +753,15 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     const { prompt: upstreamPrompt, imageUrls, videoUrls, audioUrls } = collectUpstream();
     const resolvedLocalPrompt = resolveMediaMentions(localPrompt, promptMentions, mentionMaterials);
     const finalPrompt = (upstreamPrompt || resolvedLocalPrompt || '').trim();
-    if (!finalPrompt && !isWan && !(isHappyHorse && happyHorseMode !== 't2v')) {
+    if (
+      !finalPrompt
+      && !isWan
+      && !isUpscaler
+      && !(isHappyHorse && happyHorseMode !== 't2v')
+      && !(isHailuo && hailuoMode === 'i2v')
+      && !(isKling && klingMode === 'i2v')
+      && !(isVidu && !['t2v', 'short-play'].includes(viduMode))
+    ) {
       setError('未连接 text 节点也未填写 prompt');
       logBus.error('生成中止: 缺少 prompt', src);
       return;
@@ -672,6 +770,73 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       setError(`Happy Horse ${happyHorseMode} 至少需要 1 张参考图`);
       logBus.error(`生成中止: Happy Horse ${happyHorseMode} 缺少参考图`, src);
       return;
+    }
+    if (isHailuo && hailuoMode === 'i2v' && imageUrls.length === 0) {
+      setError('Hailuo 2.3 图生视频必须连接或拖入 1 张首帧图');
+      logBus.error('生成中止: Hailuo 2.3 图生视频缺少首帧图', src);
+      return;
+    }
+    if (isKling && klingMode === 'i2v' && imageUrls.length === 0) {
+      setError('Kling 图生视频必须连接或拖入第 1 张首帧图');
+      logBus.error('生成中止: Kling 图生视频缺少首帧图', src);
+      return;
+    }
+    if (isKlingUpstreamUnavailable) {
+      setError('该 Kling O3 参考生视频模型已按官方协议接入，但参考插件当前实测上游提交返回 502，暂时禁用以避免无效请求');
+      logBus.error('生成中止: Kling O3 参考生视频上游当前不可用', src);
+      return;
+    }
+    if (isKling && klingMode === 'r2v' && imageUrls.length === 0) {
+      setError('Kling 参考生视频至少需要 1 张参考图');
+      logBus.error('生成中止: Kling 参考生视频缺少参考图', src);
+      return;
+    }
+    if (isKling && klingMode === 'edit' && videoUrls.length === 0) {
+      setError('Kling 视频编辑必须连接或拖入 1 个输入视频');
+      logBus.error('生成中止: Kling 视频编辑缺少输入视频', src);
+      return;
+    }
+    if (isUpscaler && videoUrls.length !== 1) {
+      setError('Zhenzhen Upscaler 必须连接或拖入且只能保留 1 个 MP4 视频');
+      logBus.error('生成中止: Zhenzhen Upscaler 输入视频数量必须为 1', src);
+      return;
+    }
+    if (isViduUpstreamUnavailable) {
+      setError('该 Vidu Q3 模型已按官方协议接入，但当前上游提交返回 fail_to_fetch_task，暂时禁用以避免无效请求');
+      logBus.error('生成中止: Vidu Q3 上游当前不可用', src);
+      return;
+    }
+    if (isVidu && viduMode === 'i2v' && imageUrls.length === 0) {
+      setError('Vidu Q3 图生视频必须连接或拖入第 1 张首帧图');
+      logBus.error('生成中止: Vidu Q3 图生视频缺少首帧图', src);
+      return;
+    }
+    if (isVidu && viduMode === 'start-end' && imageUrls.length < 2) {
+      setError('Vidu Q3 首尾帧视频必须连接或拖入起始帧和结束帧两张图片');
+      logBus.error('生成中止: Vidu Q3 首尾帧视频缺少两张图片', src);
+      return;
+    }
+    if (isVidu && viduMode === 'r2v' && imageUrls.length === 0) {
+      setError('Vidu Q3 参考生视频至少需要 1 张参考图');
+      logBus.error('生成中止: Vidu Q3 参考生视频缺少参考图', src);
+      return;
+    }
+    if (isVidu && viduMode === 'short-play') {
+      if (imageUrls.length === 0) {
+        setError('Vidu Q3 短剧成片至少需要 1 张参考资产图');
+        logBus.error('生成中止: Vidu Q3 短剧成片缺少参考资产图', src);
+        return;
+      }
+      if (!viduScriptName.trim()) {
+        setError('Vidu Q3 短剧成片必须填写脚本名称');
+        logBus.error('生成中止: Vidu Q3 短剧成片缺少脚本名称', src);
+        return;
+      }
+      if (!viduAssetNamePrefix.trim() || !viduAssetDescription.trim()) {
+        setError('Vidu Q3 短剧资产名称前缀和描述不能为空');
+        logBus.error('生成中止: Vidu Q3 短剧资产信息不完整', src);
+        return;
+      }
     }
     if (isWan && imageUrls.length === 0) {
       setError('Wan 2.7 Spicy 必须连接或拖入 1 张首帧图');
@@ -695,7 +860,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       ? providerSelection.provider.id
       : isFal
         ? 'fal'
-        : isWan || isHappyHorse
+        : isSeedanceNzVideo
           ? 'seedance-nz'
           : 'zhenzhen';
     const traceModel = isExternalSelected && providerSelection.provider ? externalProviderModel : apiModel;
@@ -807,6 +972,145 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         });
         update({ status: 'polling', taskId: result.taskId, lastPrompt: finalPrompt, progress: '0%' });
         logBus.info(`Wan 2.7 Spicy 任务 ${result.taskId} 已提交，开始轮询`, src);
+        await startPolling(result.taskId, runId, reporter);
+        return;
+      }
+
+      if (isHailuo) {
+        const hailuoImages = hailuoMode === 'i2v' ? imageUrls.slice(0, 1) : [];
+        logBus.info(
+          `提交 Hailuo 2.3: ${apiModel} · ${hailuoDuration}s · ${resolution || '768p'} · ${hailuoMode === 't2v' ? ratio : 'follow-image'} · refs=${hailuoImages.length}`,
+          src,
+        );
+        const result = await submitHailuo({
+          model: apiModel as Hailuo23Model,
+          prompt: finalPrompt || undefined,
+          duration: hailuoDuration,
+          ratio,
+          resolution: resolution === '1080p' ? '1080p' : '768p',
+          images: hailuoImages.length ? hailuoImages : undefined,
+        });
+        if (!isCurrentGenerationRun(runId)) return;
+        await reporter?.providerSubmitted({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: result.taskId,
+          requestId: result.requestId,
+          transportHttpStatus: result.transportHttpStatus,
+          upstreamHttpStatus: result.upstreamHttpStatus,
+          usage: result.usage,
+          httpStatusSource: 'local-backend',
+        });
+        update({ status: 'polling', taskId: result.taskId, lastPrompt: finalPrompt, progress: '0%' });
+        logBus.info(`Hailuo 2.3 任务已提交，开始轮询`, src);
+        await startPolling(result.taskId, runId, reporter);
+        return;
+      }
+
+      if (isKling) {
+        const klingImages = klingMode === 'i2v'
+          ? imageUrls.slice(0, 2)
+          : klingMode === 'r2v' ? imageUrls.slice(0, 4) : [];
+        const klingVideos = klingMode === 'edit' ? videoUrls.slice(0, 1) : [];
+        logBus.info(
+          `提交 Kling: ${apiModel} · ${klingDuration}s · ${klingMode === 'edit' ? 'video-edit' : ratio} · refs=${klingImages.length} · videos=${klingVideos.length}`,
+          src,
+        );
+        const result = await submitKling({
+          model: apiModel as KlingModel,
+          prompt: finalPrompt || undefined,
+          duration: klingDuration,
+          ...(klingMode === 'edit'
+            ? { videos: klingVideos }
+            : {
+                ratio,
+                negativePrompt: klingNegativePrompt.trim() || undefined,
+                images: klingImages.length ? klingImages : undefined,
+              }),
+        });
+        if (!isCurrentGenerationRun(runId)) return;
+        await reporter?.providerSubmitted({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: result.taskId,
+          requestId: result.requestId,
+          transportHttpStatus: result.transportHttpStatus,
+          upstreamHttpStatus: result.upstreamHttpStatus,
+          usage: result.usage,
+          httpStatusSource: 'local-backend',
+        });
+        update({ status: 'polling', taskId: result.taskId, lastPrompt: finalPrompt, progress: '0%' });
+        logBus.info('Kling 任务已提交，开始轮询', src);
+        await startPolling(result.taskId, runId, reporter);
+        return;
+      }
+
+      if (isUpscaler) {
+        const targetResolution: UpscalerResolution = ['720p', '1080p', '2k', '4k'].includes(resolution)
+          ? resolution as UpscalerResolution
+          : '1080p';
+        logBus.info(`提交 Zhenzhen Upscaler: ${targetResolution} · videos=1`, src);
+        const result = await submitUpscaler({
+          model: 'zhenzhen-upscaler',
+          resolution: targetResolution,
+          videos: [videoUrls[0]],
+        });
+        if (!isCurrentGenerationRun(runId)) return;
+        await reporter?.providerSubmitted({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: result.taskId,
+          requestId: result.requestId,
+          transportHttpStatus: result.transportHttpStatus,
+          upstreamHttpStatus: result.upstreamHttpStatus,
+          usage: result.usage,
+          httpStatusSource: 'local-backend',
+        });
+        update({ status: 'polling', taskId: result.taskId, lastPrompt: '', progress: '0%' });
+        logBus.info('Zhenzhen Upscaler 任务已提交，开始轮询', src);
+        await startPolling(result.taskId, runId, reporter);
+        return;
+      }
+
+      if (isVidu) {
+        const viduImages = viduMode === 't2v'
+          ? []
+          : imageUrls.slice(0, viduMode === 'i2v' ? 1 : viduMode === 'start-end' ? 2 : viduMode === 'r2v' ? 9 : 14);
+        logBus.info(
+          `提交 Vidu Q3: ${apiModel} · ${viduDuration}s · ${viduResolution} · ${viduRatio} · refs=${viduImages.length}`,
+          src,
+        );
+        const result = await submitVidu({
+          model: apiModel as ViduQ3Model,
+          prompt: finalPrompt || undefined,
+          duration: viduDuration,
+          ratio: viduRatio,
+          resolution: viduResolution,
+          seed: viduSeed,
+          images: viduImages.length ? viduImages : undefined,
+          ...(viduMode === 'short-play'
+            ? {
+                scriptName: viduScriptName.trim(),
+                style: viduStyle.trim(),
+                assetType: viduAssetType,
+                assetNamePrefix: viduAssetNamePrefix.trim(),
+                assetDescription: viduAssetDescription.trim(),
+              }
+            : {}),
+        });
+        if (!isCurrentGenerationRun(runId)) return;
+        await reporter?.providerSubmitted({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: result.taskId,
+          requestId: result.requestId,
+          transportHttpStatus: result.transportHttpStatus,
+          upstreamHttpStatus: result.upstreamHttpStatus,
+          usage: result.usage,
+          httpStatusSource: 'local-backend',
+        });
+        update({ status: 'polling', taskId: result.taskId, lastPrompt: finalPrompt, progress: '0%' });
+        logBus.info('Vidu Q3 任务已提交，开始轮询', src);
         await startPolling(result.taskId, runId, reporter);
         return;
       }
@@ -1071,7 +1375,10 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   useRunTrigger(id, async (reporter) => {
     if (status === 'submitting' || status === 'polling') return;
     await handleGenerate(reporter);
-  }, 'video', { lifecycleAware: true });
+  }, 'video', {
+    lifecycleAware: true,
+    shouldReuseResult: (nodeData) => shouldReuseGenerationResult('video', nodeData),
+  });
 
   // === 跨节点拖拽: source (输出视频可拖出) ===
   const startDrag = useDragMaterialStore((s) => s.start);
@@ -1089,6 +1396,10 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       if (cur.indexOf(payload.url) !== -1) return;
       const cap = isWan
         ? 1
+        : isKling
+        ? maxMentionRefs
+        : isVidu
+        ? maxMentionRefs
         : isHappyHorse
         ? maxMentionRefs
         : isGrok15New
@@ -1098,9 +1409,10 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             : (modelDef.maxRefImages || 7) + 4;
       if (cur.length >= cap) return;
       update({ localRefImages: [...cur, payload.url] });
-    } else if (payload.kind === 'video' && payload.url && isJimengSeedanceSelected) {
+    } else if (payload.kind === 'video' && payload.url && (isJimengSeedanceSelected || isUpscaler || (isKling && klingMode === 'edit'))) {
       const cur = Array.isArray(d?.localRefVideos) ? d.localRefVideos : [];
-      if (cur.indexOf(payload.url) !== -1 || cur.length >= JIMENG_SEEDANCE_LIMITS.videos) return;
+      const cap = isUpscaler || (isKling && klingMode === 'edit') ? 1 : JIMENG_SEEDANCE_LIMITS.videos;
+      if (cur.indexOf(payload.url) !== -1 || cur.length >= cap) return;
       update({ localRefVideos: [...cur, payload.url] });
     } else if (payload.kind === 'audio' && payload.url && isJimengSeedanceSelected) {
       const cur = Array.isArray(d?.localRefAudios) ? d.localRefAudios : [];
@@ -1112,7 +1424,10 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   };
   const { dropProps, isAccepting } = useMaterialDropTarget({
     id,
-    accepts: isJimengSeedanceSelected ? ['image', 'video', 'audio', 'text'] : ['image', 'text'],
+    accepts: isJimengSeedanceSelected
+      ? ['image', 'video', 'audio', 'text']
+      : isUpscaler ? ['video']
+      : isKling && klingMode === 'edit' ? ['video', 'text'] : ['image', 'text'],
     onDrop: handleDrop,
   });
 
@@ -1122,6 +1437,18 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   const audioRefsCount = orderedAudios.length + localRefAudios.length;
   const previewTitle = isWan
     ? `上游素材 · 首帧图 ${Math.min(refsCount, 1)}/1`
+    : isUpscaler
+    ? `上游素材 · 输入 MP4 ${Math.min(videoRefsCount, 1)}/1`
+    : isKling
+    ? klingMode === 't2v'
+      ? '上游素材 · 当前模型不使用参考素材'
+      : klingMode === 'edit'
+        ? `上游素材 · 输入视频 ${Math.min(videoRefsCount, 1)}/1`
+        : `上游素材 · ${klingMode === 'i2v' ? '首尾帧' : '参考图'} ${Math.min(refsCount, maxMentionRefs)}/${maxMentionRefs}`
+    : isVidu
+    ? viduMode === 't2v'
+      ? '上游素材 · 当前模型不使用参考图'
+      : `上游素材 · ${viduMode === 'short-play' ? '资产图' : '参考图'} ${Math.min(refsCount, maxMentionRefs)}/${maxMentionRefs}`
     : isHappyHorse
     ? happyHorseMode === 't2v'
       ? '上游素材 · 当前模型不使用参考图'
@@ -1266,14 +1593,19 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
                   model: nextModel,
                   ...(nextModel === 'grok-imagine-video-1.5' ? { gkfMode: 'image_to_video' } : {}),
                   ...(isGrokVideo15NewModel(nextModel) ? { ratio: '16:9', size: '1280x720', resolution: '' } : {}),
-                  ...(nextModel === 'sora-2-zhenzhen' ? { ratio: '16:9', duration: 15, resolution: '' } : {}),
-                  ...(nextModel === 'veo-omni-10s' ? { ratio: '16:9', duration: 10, resolution: '' } : {}),
-                });
+                   ...(nextModel === 'sora-2-zhenzhen' ? { ratio: '16:9', duration: 15, resolution: '' } : {}),
+                   ...(nextModel === 'veo-omni-10s' ? { ratio: '16:9', duration: 10, resolution: '' } : {}),
+                   ...(nextModel.endsWith('-short-play')
+                     ? { ratio: '9:16', duration: 8, resolution: '1080p' }
+                     : nextModel.startsWith('vidu-q3-')
+                       ? { ratio: '16:9', duration: 4, resolution: 'default' }
+                       : {}),
+                 });
               }}
               className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-white/30"
             >
               {modelDef.apiModelOptions.map((o) => (
-                <option key={o.value} value={o.value} className="bg-zinc-900">{o.label}</option>
+                <option key={o.value} value={o.value} disabled={o.disabled} className="bg-zinc-900">{o.label}</option>
               ))}
             </select>
           </div>
@@ -1517,6 +1849,57 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           </div>
         )}
 
+        {isHailuo && (
+          <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.06] px-2 py-1.5 text-[10px] leading-relaxed text-white/55">
+            {hailuoMode === 't2v'
+              ? '文生视频必须填写提示词，不发送画布中的参考图；比例会随请求提交。'
+              : '图生视频使用排序后的第 1 张首帧图，提示词可选；比例跟随输入图片，不发送比例参数。'}
+            <div className="mt-1 text-white/35">
+              贞贞的平价AI小屋 API · 按次计费 · 6 / 10 秒 · 768p / 1080p（1080p 仅 6 秒）
+            </div>
+            {hailuoMode === 'i2v' && (
+              <div className="mt-1 text-white/35">首帧图短边需大于 300px，宽高比需在 2:5 到 5:2 之间。</div>
+            )}
+          </div>
+        )}
+
+        {isKling && (
+          <div className="rounded border border-sky-300/20 bg-sky-400/[0.06] px-2 py-1.5 text-[10px] leading-relaxed text-white/55">
+            {klingMode === 't2v'
+              ? '文生视频必须填写提示词，不发送参考图。'
+              : klingMode === 'i2v'
+                ? '图生视频使用第 1 张图作为首帧，可选第 2 张图作为尾帧；提示词可选。'
+                : klingMode === 'r2v'
+                  ? 'O3 参考生视频必须填写提示词，按素材顺序使用 1-4 张参考图。'
+                  : 'O3 视频编辑必须填写提示词，并使用第 1 个输入视频。'}
+            <div className="mt-1 text-white/35">贞贞的平价AI小屋 API · 按次计费 · 5 / 10 秒</div>
+          </div>
+        )}
+
+        {isUpscaler && (
+          <div className="rounded border border-emerald-300/20 bg-emerald-400/[0.06] px-2 py-1.5 text-[10px] leading-relaxed text-white/55">
+            连接或拖入恰好 1 个 MP4 视频，选择目标分辨率后执行高清化；无需 Prompt，时长由输入视频读取。
+            <div className="mt-1 text-white/35">贞贞的平价AI小屋 API · 目标 720p / 1080p / 2k / 4k · 输入最长约 10 分钟</div>
+          </div>
+        )}
+
+        {isVidu && (
+          <div className="rounded border border-violet-300/20 bg-violet-400/[0.06] px-2 py-1.5 text-[10px] leading-relaxed text-white/55">
+            {viduMode === 't2v'
+              ? '文生视频只提交提示词，不发送参考图。'
+              : viduMode === 'i2v'
+                ? '图生视频使用排序后的第 1 张图作为首帧，提示词可选。'
+                : viduMode === 'start-end'
+                  ? '首尾帧视频依次使用前 2 张图片作为起始帧和结束帧。'
+                  : viduMode === 'r2v'
+                    ? '参考生视频使用 1-9 张图片，按画布素材顺序提交。'
+                    : '短剧成片把 Prompt 作为脚本内容，并使用 1-14 张图片构造参考资产。'}
+            <div className="mt-1 text-white/35">
+              贞贞的平价AI小屋 API · 按次计费 · {viduMode === 'short-play' ? '8-12 秒 · 固定 1080p' : '4-15 秒 · default / 720p / 1080p'}
+            </div>
+          </div>
+        )}
+
         {isWan && (
           <div className="rounded border border-orange-300/20 bg-orange-400/[0.06] p-2 space-y-2">
             <div className="text-[10px] leading-relaxed text-white/60">
@@ -1594,7 +1977,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         )}
 
         {/* 比例(非 FAL 时显示原始控件) */}
-        {showGenericVideoControls && !isGrok15New && !isWan && (
+        {showGenericVideoControls && !isGrok15New && !isWan && !isHailuo && !isKling && !isUpscaler && !isVidu && (
         <div className="grid grid-cols-2 gap-1.5">
           <div>
             <label className="text-[10px] text-white/50 block mb-1">比例</label>
@@ -1626,6 +2009,219 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         </div>
         )}
 
+        {isHailuo && (
+          <>
+            <div className="grid grid-cols-2 gap-1.5">
+              {hailuoMode === 't2v' && (
+                <div>
+                  <label className="text-[10px] text-white/50 block mb-1">比例</label>
+                  <select
+                    value={ratio}
+                    onChange={(e) => update({ ratio: e.target.value })}
+                    className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-cyan-300/40"
+                  >
+                    {ratioOptions.map((item) => (
+                      <option key={item} value={item} className="bg-zinc-900">{item}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">时长(s)</label>
+                <select
+                  value={String(hailuoDuration)}
+                  onChange={(e) => {
+                    const nextDuration = Number(e.target.value) === 10 ? 10 : 6;
+                    update({
+                      duration: nextDuration,
+                      ...(nextDuration === 10 && resolution === '1080p' ? { resolution: '768p' } : {}),
+                    });
+                  }}
+                  className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-cyan-300/40"
+                >
+                  {durationOptions.map((seconds) => (
+                    <option key={seconds} value={seconds} className="bg-zinc-900">{seconds}s</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="text-[10px] text-white/50 block mb-1">分辨率</label>
+              <select
+                value={resolution === '1080p' ? '1080p' : '768p'}
+                onChange={(e) => {
+                  const nextResolution = e.target.value === '1080p' ? '1080p' : '768p';
+                  update({ resolution: nextResolution, ...(nextResolution === '1080p' ? { duration: 6 } : {}) });
+                }}
+                className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-cyan-300/40"
+              >
+                {resolutionOptions.map((item) => (
+                  <option key={item} value={item} className="bg-zinc-900">{item}</option>
+                ))}
+              </select>
+            </div>
+          </>
+        )}
+
+        {isKling && (
+          <div className="rounded border border-sky-300/20 bg-sky-400/[0.06] p-2 space-y-2">
+            <div className={klingMode === 'edit' ? '' : 'grid grid-cols-2 gap-1.5'}>
+              {klingMode !== 'edit' && (
+                <div>
+                  <label className="text-[10px] text-white/50 block mb-1">比例</label>
+                  <select
+                    value={ratio}
+                    onChange={(e) => update({ ratio: e.target.value })}
+                    className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-sky-300/40"
+                  >
+                    {ratioOptions.map((item) => (
+                      <option key={item} value={item} className="bg-zinc-900">{item}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">时长(s)</label>
+                <select
+                  value={String(klingDuration)}
+                  onChange={(e) => update({ duration: Number(e.target.value) })}
+                  className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-sky-300/40"
+                >
+                  {[5, 10].map((item) => (
+                    <option key={item} value={item} className="bg-zinc-900">{item}s</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            {klingMode !== 'edit' && (
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">反向提示词（可选）</label>
+                <textarea
+                  value={klingNegativePrompt}
+                  maxLength={20480}
+                  onChange={(e) => update({ klingNegativePrompt: e.target.value })}
+                  placeholder="不希望出现在视频中的内容"
+                  className="w-full h-12 resize-none rounded bg-white/5 border border-white/10 px-2 py-1 text-[11px] text-white outline-none focus:border-sky-300/40 placeholder:text-white/25"
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {isVidu && (
+          <div className="rounded border border-violet-300/20 bg-violet-400/[0.06] p-2 space-y-2">
+            {viduMode === 'short-play' && (
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">脚本名称（≤20 字符）</label>
+                <input
+                  value={viduScriptName}
+                  maxLength={20}
+                  onChange={(e) => update({ viduScriptName: e.target.value })}
+                  className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-violet-300/40"
+                />
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-1.5">
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">比例</label>
+                <select
+                  value={viduRatio}
+                  onChange={(e) => update({ ratio: e.target.value })}
+                  className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-violet-300/40"
+                >
+                  {(viduMode === 'short-play' ? ['9:16', '16:9'] : ratioOptions).map((item) => (
+                    <option key={item} value={item} className="bg-zinc-900">{item}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">时长(s)</label>
+                <select
+                  value={String(viduDuration)}
+                  onChange={(e) => update({ duration: Number(e.target.value) })}
+                  className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-violet-300/40"
+                >
+                  {(viduMode === 'short-play' ? [8, 9, 10, 11, 12] : [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]).map((item) => (
+                    <option key={item} value={item} className="bg-zinc-900">{item}s</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">分辨率</label>
+                <select
+                  value={viduResolution}
+                  disabled={viduMode === 'short-play'}
+                  onChange={(e) => update({ resolution: e.target.value })}
+                  className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-violet-300/40 disabled:opacity-60"
+                >
+                  {(viduMode === 'short-play' ? ['1080p'] : ['default', '720p', '1080p']).map((item) => (
+                    <option key={item} value={item} className="bg-zinc-900">{item}</option>
+                  ))}
+                </select>
+              </div>
+              {viduMode === 'short-play' ? (
+                <div>
+                  <label className="text-[10px] text-white/50 block mb-1">资产类型</label>
+                  <select
+                    value={viduAssetType}
+                    onChange={(e) => update({ viduAssetType: e.target.value })}
+                    className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-violet-300/40"
+                  >
+                    {['character', 'scene', 'prop'].map((item) => (
+                      <option key={item} value={item} className="bg-zinc-900">{item}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div>
+                  <label className="text-[10px] text-white/50 block mb-1">Seed（-1 随机）</label>
+                  <input
+                    type="number"
+                    min={-1}
+                    max={2147483647}
+                    value={viduSeed}
+                    onChange={(e) => update({ viduSeed: Math.max(-1, Math.min(2147483647, Number(e.target.value) || 0)) })}
+                    className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-violet-300/40"
+                  />
+                </div>
+              )}
+            </div>
+            {viduMode === 'short-play' && (
+              <>
+                <div>
+                  <label className="text-[10px] text-white/50 block mb-1">视频风格（≤30 字符）</label>
+                  <input
+                    value={viduStyle}
+                    maxLength={30}
+                    onChange={(e) => update({ viduStyle: e.target.value })}
+                    className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-violet-300/40"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <div>
+                    <label className="text-[10px] text-white/50 block mb-1">资产名称前缀</label>
+                    <input
+                      value={viduAssetNamePrefix}
+                      onChange={(e) => update({ viduAssetNamePrefix: e.target.value })}
+                      className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-violet-300/40"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-white/50 block mb-1">资产描述</label>
+                    <input
+                      value={viduAssetDescription}
+                      onChange={(e) => update({ viduAssetDescription: e.target.value })}
+                      className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-violet-300/40"
+                    />
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {isWan && durationOptions.length > 0 && (
           <div>
             <label className="text-[10px] text-white/50 block mb-1">时长(s)</label>
@@ -1642,7 +2238,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         )}
 
         {/* 分辨率(仅 grok 非FAL) */}
-        {showGenericVideoControls && resolutionOptions.length > 0 && (
+        {showGenericVideoControls && !isHailuo && !isKling && !isVidu && resolutionOptions.length > 0 && (
           <div>
             <label className="text-[10px] text-white/50 block mb-1">分辨率</label>
             <select
@@ -1722,7 +2318,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         )}
 
         {/* Seed(非FAL) */}
-        {showGenericVideoControls && !isHappyHorse && !isWan && (
+        {showGenericVideoControls && !isHappyHorse && !isKling && !isUpscaler && !isWan && (
         <div>
           <label className="text-[10px] text-white/50 block mb-1">Seed (0=随机)</label>
           <input
@@ -1737,7 +2333,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         )}
 
         {/* 上游素材聚合预览区 (代替原「参考图(上游)」计数提示) */}
-        {modelDef.supportImages && (
+        {(modelDef.supportImages || modelDef.supportVideos) && (
           <MaterialPreviewSection
             texts={orderedTexts}
             images={orderedImages}
@@ -1757,12 +2353,12 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         )}
 
         {/* 本地拖入参考素材 (Ctrl+拖拽自其他节点) */}
-        {modelDef.supportImages && (localRefImages.length + localRefVideos.length + localRefAudios.length) > 0 && (
+        {(modelDef.supportImages || modelDef.supportVideos) && (isUpscaler ? localRefVideos.length : localRefImages.length + localRefVideos.length + localRefAudios.length) > 0 && (
           <div className="rounded border border-emerald-400/30 bg-emerald-500/5 p-1.5 space-y-1">
             <div className="text-[10px] text-emerald-200/80">
-              本地拖入 · 图{localRefImages.length} 视{localRefVideos.length} 音{localRefAudios.length}
+              {isUpscaler ? `本地拖入 · 视频 ${localRefVideos.length}/1` : `本地拖入 · 图${localRefImages.length} 视${localRefVideos.length} 音${localRefAudios.length}`}
             </div>
-            {localRefImages.length > 0 && (
+            {!isUpscaler && localRefImages.length > 0 && (
               <div className="flex gap-1 flex-wrap">
                 {localRefImages.map((u, i) => (
                   <div key={`img-${i}`} className="relative w-10 h-10">
@@ -1813,7 +2409,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
                 ))}
               </div>
             )}
-            {localRefAudios.length > 0 && (
+            {!isUpscaler && localRefAudios.length > 0 && (
               <div className="space-y-1">
                 {localRefAudios.map((u, i) => (
                   <div key={`aud-${i}`} className="flex items-center gap-1">
@@ -1843,8 +2439,14 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         )}
 
         {/* Prompt */}
-        <div>
-          <label className="text-[10px] text-white/50 block mb-1">本地 Prompt(可选)</label>
+        {!isUpscaler && <div>
+          <label className="text-[10px] text-white/50 block mb-1">
+            {isVidu && viduMode === 'short-play'
+              ? '短剧脚本内容（必填）'
+              : isKling && klingMode !== 'i2v'
+                ? '本地 Prompt（必填）'
+                : '本地 Prompt(可选)'}
+          </label>
           <MentionPromptInput
             title="视频 Prompt"
             value={localPrompt}
@@ -1857,14 +2459,21 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             promptTemplateKind="video"
             className="w-full h-12 resize-none rounded bg-white/5 border border-white/10 px-2 py-1 text-[11px] text-white outline-none focus:border-white/30 placeholder:text-white/30"
           />
-        </div>
+        </div>}
+
+        <ReuseResultToggle
+          checked={d?.reuseResult === true}
+          hasResult={hasReusableGenerationResult('video', d)}
+          onChange={(checked) => update({ reuseResult: checked })}
+          accentColor="#fb7185"
+        />
 
         {!isBusy ? (
           <button
             onClick={() => requestCanvasNodeRun(id)}
             className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 text-xs font-medium transition-colors"
           >
-            <Sparkles size={12} /> 生成视频
+            <Sparkles size={12} /> {isUpscaler ? '开始超分' : '生成视频'}
           </button>
         ) : (
           <button

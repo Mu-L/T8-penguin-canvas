@@ -2,7 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { IMAGE_MODELS, gptImage2ZhenzhenVariantSize, isFalModel } from '../src/providers/models.ts';
+import {
+  IMAGE_MODELS,
+  ZHENZHEN_IMAGE_G2_I2I_MODEL,
+  ZHENZHEN_IMAGE_G2_RATIOS,
+  ZHENZHEN_IMAGE_G2_T2I_MODEL,
+  gptImage2ZhenzhenVariantSize,
+  isFalModel,
+  isZhenzhenImageG2Model,
+} from '../src/providers/models.ts';
 
 const imageNodeSource = fs.readFileSync(new URL('../src/components/nodes/ImageNode.tsx', import.meta.url), 'utf8');
 const proxySource = fs.readFileSync(new URL('../backend/src/routes/proxy.js', import.meta.url), 'utf8');
@@ -82,6 +90,25 @@ test('GPT Image 2 2K and 4K variants stay on the Zhenzhen gpt-image-2 route', ()
   assert.match(proxySource, /if \(gptImage2ZhenzhenVariantSize\(raw\)\) return 'gpt-image-2'/);
   assert.match(proxySource, /image_size: gptImage2ForcedSize \|\| image_size/);
   assert.match(proxySource, /size: gptImage2ForcedSize \? undefined : size/);
+});
+
+test('Zhenzhen Image G-2 models are exposed inside GPT2 but use the isolated seedance.nz protocol', () => {
+  const gpt2 = IMAGE_MODELS.find((model) => model.id === 'gpt-image-2');
+  const options = gpt2?.apiModelOptions.map((option) => option.value) || [];
+
+  assert.ok(options.includes(ZHENZHEN_IMAGE_G2_T2I_MODEL));
+  assert.ok(options.includes(ZHENZHEN_IMAGE_G2_I2I_MODEL));
+  assert.equal(isZhenzhenImageG2Model(ZHENZHEN_IMAGE_G2_T2I_MODEL), true);
+  assert.equal(isZhenzhenImageG2Model(ZHENZHEN_IMAGE_G2_I2I_MODEL), true);
+  assert.equal(isFalModel(ZHENZHEN_IMAGE_G2_T2I_MODEL), false);
+  assert.deepEqual(ZHENZHEN_IMAGE_G2_RATIOS, ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9']);
+  assert.match(imageNodeSource, /isSeedreamNz \|\| isZhenzhenImageG2/);
+  assert.match(imageNodeSource, /model: isZhenzhenImageG2 \? apiModel as/);
+  assert.match(imageNodeSource, /resolution: isZhenzhenImageG2/);
+  assert.match(imageNodeSource, /图生图模式：必须提供 1–10 张参考图/);
+  assert.match(imageNodeSource, /文生图模式：只使用 Prompt，已连接的参考图不会发送/);
+  assert.match(proxySource, /seedanceNz\.submitImageTask/);
+  assert.doesNotMatch(proxySource, /raw === 'zhenzhen-image-g2-t2i'\) return 'gpt-image-2'/);
 });
 
 test('Seedream V5 Pro is isolated behind its own image protocol and supports up to 10 edit references', () => {

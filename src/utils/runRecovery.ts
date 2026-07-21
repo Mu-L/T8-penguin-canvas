@@ -4,6 +4,10 @@ export type RunRecoveryKind =
   | 'seedream-nz'
   | 'wan'
   | 'happyhorse'
+  | 'hailuo'
+  | 'kling'
+  | 'upscaler'
+  | 'vidu'
   | 'seed-audio'
   | 'suno'
   | 'image'
@@ -27,7 +31,7 @@ export interface RunRecoveryDescriptor {
   maxPolls?: number;
 }
 const RECOVERY_KINDS = new Set<RunRecoveryKind>([
-  'runninghub', 'seedance', 'seedream-nz', 'wan', 'happyhorse', 'seed-audio', 'suno',
+  'runninghub', 'seedance', 'seedream-nz', 'wan', 'happyhorse', 'hailuo', 'kling', 'upscaler', 'vidu', 'seed-audio', 'suno',
   'image', 'mj', 'video', 'image-fal', 'video-fal',
 ]);
 
@@ -90,6 +94,10 @@ export function inferRunRecoveryDescriptor(payload: Record<string, unknown>): Ru
     if (lowerModel.includes('seedream')) return { version: 1, kind: 'seedream-nz', taskId, model, pollIntervalMs, maxPolls };
     if (lowerModel.startsWith('wan-')) return { version: 1, kind: 'wan', taskId, model, pollIntervalMs, maxPolls };
     if (lowerModel.startsWith('happyhorse-')) return { version: 1, kind: 'happyhorse', taskId, model, pollIntervalMs, maxPolls };
+    if (lowerModel.startsWith('hailuo-')) return { version: 1, kind: 'hailuo', taskId, model, pollIntervalMs, maxPolls };
+    if (lowerModel.startsWith('kling-')) return { version: 1, kind: 'kling', taskId, model, pollIntervalMs, maxPolls };
+    if (lowerModel === 'zhenzhen-upscaler') return { version: 1, kind: 'upscaler', taskId, model, pollIntervalMs, maxPolls };
+    if (lowerModel.startsWith('vidu-')) return { version: 1, kind: 'vidu', taskId, model, pollIntervalMs, maxPolls };
     if (lowerModel.includes('seedance')) return { version: 1, kind: 'seedance', taskId, model, taskProvider: 'seedance-nz', pollIntervalMs, maxPolls };
   }
   if (provider === 'zhenzhen-legacy' && model.toLowerCase().includes('seedance')) {

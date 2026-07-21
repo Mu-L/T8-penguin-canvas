@@ -50,6 +50,18 @@ export const GPT_IMAGE_2_ZHENZHEN_SIZE_VARIANTS: Record<string, '2K' | '4K'> = {
   'gpt-image-2-4K': '4K',
 };
 
+export const ZHENZHEN_IMAGE_G2_T2I_MODEL = 'zhenzhen-image-g2-t2i';
+export const ZHENZHEN_IMAGE_G2_I2I_MODEL = 'zhenzhen-image-g2-i2i';
+export const ZHENZHEN_IMAGE_G2_MODELS = [
+  ZHENZHEN_IMAGE_G2_T2I_MODEL,
+  ZHENZHEN_IMAGE_G2_I2I_MODEL,
+] as const;
+export const ZHENZHEN_IMAGE_G2_RATIOS = ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'];
+
+export function isZhenzhenImageG2Model(apiModel: string | undefined | null): boolean {
+  return (ZHENZHEN_IMAGE_G2_MODELS as readonly string[]).includes(String(apiModel || '').trim());
+}
+
 export function gptImage2ZhenzhenVariantSize(apiModel: string | undefined | null): '2K' | '4K' | null {
   return GPT_IMAGE_2_ZHENZHEN_SIZE_VARIANTS[String(apiModel || '').trim()] || null;
 }
@@ -68,6 +80,8 @@ export const IMAGE_MODELS: ImageModelDef[] = [
       { value: 'gpt-image-2', label: 'gpt-image-2' },
       { value: 'gpt-image-2-2K', label: 'gpt-image-2-2K' },
       { value: 'gpt-image-2-4K', label: 'gpt-image-2-4K' },
+      { value: ZHENZHEN_IMAGE_G2_T2I_MODEL, label: ZHENZHEN_IMAGE_G2_T2I_MODEL },
+      { value: ZHENZHEN_IMAGE_G2_I2I_MODEL, label: ZHENZHEN_IMAGE_G2_I2I_MODEL },
       { value: 'gpt-image-2-fal', label: 'gpt-image-2-fal' },
     ],
     aspectRatios: GPT_RATIOS,
@@ -308,7 +322,7 @@ export const NBPRO_FAL_RESOLUTIONS = ['1K', '2K', '4K'];
 
 // ========== 视频 ==========
 // kind 决定上游 payload 协议(后端会根据 model 名自动识别,前端主要用于控制参数 UI 列表)
-export type VideoKind = 'veo' | 'grok' | 'sora' | 'seedance' | 'happyhorse' | 'wan';
+export type VideoKind = 'veo' | 'grok' | 'sora' | 'seedance' | 'happyhorse' | 'hailuo' | 'kling' | 'vidu' | 'upscaler' | 'wan';
 
 // ---- Video FAL 渠道注册表 (1:1 对齐 gpt-image-2-web runVeo3Fal / runGrokFal / runSora2Fal) ----
 export interface VideoFalEndpointDef {
@@ -423,7 +437,7 @@ export interface VideoModelDef {
   provider: ProviderType;
   description?: string;
   // 子模型下拉(参考项目 类似 gpt-image-2-web 的 g_model / veo_model / gk_model)
-  apiModelOptions: Array<{ value: string; label: string }>;
+  apiModelOptions: Array<{ value: string; label: string; disabled?: boolean }>;
   // 比例/尺寸 — 字段名上游各不同,这里只是 UI 选项
   ratios: string[];
   defaultRatio: string;
@@ -434,6 +448,8 @@ export interface VideoModelDef {
   defaultResolution?: string;
   // 参考图
   supportImages: boolean;
+  // 参考视频（如视频编辑、超分）
+  supportVideos?: boolean;
   maxRefImages: number;
 }
 
@@ -554,6 +570,117 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     defaultResolution: '720p',
     supportImages: true,
     maxRefImages: 9,
+  },
+  {
+    id: 'hailuo-2.3',
+    label: 'Hailuo',
+    kind: 'hailuo',
+    provider: 'zhenzhen',
+    description: 'Hailuo 2.3 · 文生/图生/Fast 图生视频',
+    apiModelOptions: [
+      { value: 'hailuo-2.3-t2v-standard', label: 'hailuo-2.3-t2v-standard（文生标准）' },
+      { value: 'hailuo-2.3-t2v-pro', label: 'hailuo-2.3-t2v-pro（文生 Pro）' },
+      { value: 'hailuo-2.3-i2v-standard', label: 'hailuo-2.3-i2v-standard（图生标准）' },
+      { value: 'hailuo-2.3-i2v-pro', label: 'hailuo-2.3-i2v-pro（图生 Pro）' },
+      { value: 'hailuo-2.3-fast-i2v', label: 'hailuo-2.3-fast-i2v（Fast 图生）' },
+      { value: 'hailuo-2.3-fast-pro-i2v', label: 'hailuo-2.3-fast-pro-i2v（Fast Pro 图生）' },
+    ],
+    ratios: ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
+    defaultRatio: '16:9',
+    durations: [6, 10],
+    defaultDuration: 6,
+    resolutions: ['768p', '1080p'],
+    defaultResolution: '768p',
+    supportImages: true,
+    maxRefImages: 1,
+  },
+  {
+    id: 'vidu-q3',
+    label: 'Vidu',
+    kind: 'vidu',
+    provider: 'zhenzhen',
+    description: 'Vidu Q3 · 文生/图生/首尾帧/参考生视频/短剧成片',
+    apiModelOptions: [
+      { value: 'vidu-q3-turbo-t2v', label: 'vidu-q3-turbo-t2v（文生 Turbo）' },
+      { value: 'vidu-q3-pro-t2v', label: 'vidu-q3-pro-t2v（文生 Pro）' },
+      { value: 'vidu-q3-pro-fast-t2v', label: 'vidu-q3-pro-fast-t2v（文生 Pro Fast）' },
+      { value: 'vidu-q3-turbo-i2v', label: 'vidu-q3-turbo-i2v（图生 Turbo）' },
+      { value: 'vidu-q3-pro-i2v', label: 'vidu-q3-pro-i2v（图生 Pro）' },
+      { value: 'vidu-q3-pro-fast-i2v', label: 'vidu-q3-pro-fast-i2v（图生 Pro Fast）' },
+      { value: 'vidu-q3-turbo-start-end', label: 'vidu-q3-turbo-start-end（首尾帧 Turbo）' },
+      { value: 'vidu-q3-pro-start-end', label: 'vidu-q3-pro-start-end（首尾帧 Pro）' },
+      { value: 'vidu-q3-pro-fast-start-end', label: 'vidu-q3-pro-fast-start-end（首尾帧 Pro Fast）' },
+      { value: 'vidu-q3-r2v', label: 'vidu-q3-r2v（上游当前不可用）', disabled: true },
+      { value: 'vidu-q3-mix-r2v', label: 'vidu-q3-mix-r2v（上游当前不可用）', disabled: true },
+      { value: 'vidu-q3-ad-r2v', label: 'vidu-q3-ad-r2v（上游当前不可用）', disabled: true },
+      { value: 'vidu-q3-drama-r2v', label: 'vidu-q3-drama-r2v（上游当前不可用）', disabled: true },
+      { value: 'vidu-q3-drama-short-play', label: 'vidu-q3-drama-short-play（上游当前不可用）', disabled: true },
+      { value: 'vidu-q3-ad-short-play', label: 'vidu-q3-ad-short-play（上游当前不可用）', disabled: true },
+    ],
+    ratios: ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
+    defaultRatio: '16:9',
+    durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    defaultDuration: 4,
+    resolutions: ['default', '720p', '1080p'],
+    defaultResolution: 'default',
+    supportImages: true,
+    maxRefImages: 14,
+  },
+  {
+    id: 'kling-v3.0',
+    label: 'Kling',
+    kind: 'kling',
+    provider: 'zhenzhen',
+    description: 'Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑',
+    apiModelOptions: [
+      { value: 'kling-v3.0-std-t2v', label: 'kling-v3.0-std-t2v（文生标准）' },
+      { value: 'kling-v3.0-pro-t2v', label: 'kling-v3.0-pro-t2v（文生 Pro）' },
+      { value: 'kling-v3-turbo-std-t2v', label: 'kling-v3-turbo-std-t2v（文生 Turbo 标准）' },
+      { value: 'kling-v3-turbo-pro-t2v', label: 'kling-v3-turbo-pro-t2v（文生 Turbo Pro）' },
+      { value: 'kling-v3-4k-t2v', label: 'kling-v3-4k-t2v（文生 4K）' },
+      { value: 'kling-o3-std-t2v', label: 'kling-o3-std-t2v（O3 文生标准）' },
+      { value: 'kling-o3-pro-t2v', label: 'kling-o3-pro-t2v（O3 文生 Pro）' },
+      { value: 'kling-o3-4k-t2v', label: 'kling-o3-4k-t2v（O3 文生 4K）' },
+      { value: 'kling-v3.0-std-i2v', label: 'kling-v3.0-std-i2v（图生标准）' },
+      { value: 'kling-v3.0-pro-i2v', label: 'kling-v3.0-pro-i2v（图生 Pro）' },
+      { value: 'kling-v3-turbo-std-i2v', label: 'kling-v3-turbo-std-i2v（图生 Turbo 标准）' },
+      { value: 'kling-v3-turbo-pro-i2v', label: 'kling-v3-turbo-pro-i2v（图生 Turbo Pro）' },
+      { value: 'kling-v3-4k-i2v', label: 'kling-v3-4k-i2v（图生 4K）' },
+      { value: 'kling-o3-std-i2v', label: 'kling-o3-std-i2v（O3 图生标准）' },
+      { value: 'kling-o3-pro-i2v', label: 'kling-o3-pro-i2v（O3 图生 Pro）' },
+      { value: 'kling-o3-4k-i2v', label: 'kling-o3-4k-i2v（O3 图生 4K）' },
+      { value: 'kling-o3-std-r2v', label: 'kling-o3-std-r2v（上游当前不可用）', disabled: true },
+      { value: 'kling-o3-pro-r2v', label: 'kling-o3-pro-r2v（上游当前不可用）', disabled: true },
+      { value: 'kling-o3-4k-r2v', label: 'kling-o3-4k-r2v（O3 参考 4K）' },
+      { value: 'kling-o3-std-edit', label: 'kling-o3-std-edit（O3 视频编辑标准）' },
+      { value: 'kling-o3-pro-edit', label: 'kling-o3-pro-edit（O3 视频编辑 Pro）' },
+    ],
+    ratios: ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
+    defaultRatio: '16:9',
+    durations: [5, 10],
+    defaultDuration: 5,
+    resolutions: [],
+    defaultResolution: '',
+    supportImages: true,
+    maxRefImages: 4,
+  },
+  {
+    id: 'zhenzhen-upscaler',
+    label: 'Upscaler',
+    kind: 'upscaler',
+    provider: 'zhenzhen',
+    description: 'Zhenzhen Upscaler · 单个 MP4 视频高清化',
+    apiModelOptions: [
+      { value: 'zhenzhen-upscaler', label: 'zhenzhen-upscaler' },
+    ],
+    ratios: [],
+    defaultRatio: '',
+    durations: [],
+    resolutions: ['720p', '1080p', '2k', '4k'],
+    defaultResolution: '1080p',
+    supportImages: false,
+    supportVideos: true,
+    maxRefImages: 0,
   },
   {
     id: 'seedance-2.0',

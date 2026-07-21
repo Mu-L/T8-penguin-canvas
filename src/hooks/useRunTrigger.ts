@@ -49,7 +49,10 @@ export function useRunTrigger(
   nodeId: string,
   runFn: (() => Promise<void> | void) | ((reporter: RunNodeLifecycleReporter) => Promise<void> | void),
   completionSoundNodeType?: string,
-  options: { lifecycleAware?: boolean } = {},
+  options: {
+    lifecycleAware?: boolean;
+    shouldReuseResult?: (nodeData: Record<string, unknown>) => boolean;
+  } = {},
 ) {
   const { getNodes, getEdges } = useReactFlow();
   const executionToken = useRunBusStore((s) => s.executionTokens[nodeId] || null);
@@ -58,6 +61,8 @@ export function useRunTrigger(
   runFnRef.current = runFn;
   const lifecycleAwareRef = useRef(Boolean(options.lifecycleAware));
   lifecycleAwareRef.current = Boolean(options.lifecycleAware);
+  const shouldReuseResultRef = useRef(options.shouldReuseResult);
+  shouldReuseResultRef.current = options.shouldReuseResult;
   const startedTokensRef = useRef(new Set<string>());
 
   useEffect(
@@ -77,6 +82,7 @@ export function useRunTrigger(
       let nodeRunId: string | undefined;
       let attemptId: string | undefined;
       let executionCallbackStarted = false;
+      let reusedExistingResult = false;
       let terminalWrite: Promise<void> | null = null;
       let acceptLifecycleEvents = true;
       let providerSubmittedRecorded = false;
@@ -212,7 +218,7 @@ export function useRunTrigger(
               : normalizeRunError(error) as unknown as Record<string, unknown>;
           const terminalNodeData = getNodes().find((node) => node.id === nodeId)?.data as Record<string, unknown> | undefined;
           const terminalTrace = rememberProviderTrace(extractRunProviderTrace(terminalNodeData));
-          if (hasProviderIdentity(terminalTrace) && !providerResponseRecorded) {
+          if (!reusedExistingResult && hasProviderIdentity(terminalTrace) && !providerResponseRecorded) {
             await lifecycle.reporter.providerResponse({
               ...terminalTrace,
               status,
@@ -274,6 +280,11 @@ export function useRunTrigger(
         }
         try {
           const inputSnapshot = captureRunNodeInputSnapshot(getNodes(), getEdges(), nodeId);
+          const nodeDataAtStart = getNodes().find((node) => node.id === nodeId)?.data as Record<string, unknown> | undefined;
+          reusedExistingResult = Boolean(
+            nodeDataAtStart
+            && shouldReuseResultRef.current?.(nodeDataAtStart),
+          );
           const nodeRun = await createProjectNodeRun(runId, {
             nodeId: executionContext?.runNodeId || nodeId,
             parentNodeRunId: executionContext?.parentNodeRunId,
@@ -291,7 +302,9 @@ export function useRunTrigger(
             : executionContext?.inputSnapshot || {};
           const initialTrace = rememberProviderTrace(extractRunProviderTrace(snapshot));
           const attempt = await createProjectRunAttempt(runId, nodeRun.id, {
-            ...providerTraceAttemptPatch(initialTrace),
+            ...(reusedExistingResult
+              ? { metadata: { reusedResult: true, source: 'existing-node-output' } }
+              : providerTraceAttemptPatch(initialTrace)),
             status: 'running',
             timestamps: { queuedAt: Date.now(), startedAt: Date.now() },
           });
@@ -303,7 +316,7 @@ export function useRunTrigger(
               contextId: runContext?.contextId || null,
             },
           });
-          if (initialTrace.provider || initialTrace.model) {
+          if (!reusedExistingResult && (initialTrace.provider || initialTrace.model)) {
             await lifecycle.reporter.providerRequest({ ...initialTrace, phase: 'request' });
           }
         } catch (error) {
@@ -326,6 +339,14 @@ export function useRunTrigger(
           },
           async () => {
             executionCallbackStarted = true;
+            if (reusedExistingResult) {
+              await lifecycle.reporter.progress({
+                phase: 'reused-existing-output',
+                progress: 100,
+                reusedResult: true,
+              });
+              return;
+            }
             if (lifecycleAwareRef.current) {
               await (runFnRef.current as (reporter: RunNodeLifecycleReporter) => Promise<void> | void)(lifecycle.reporter);
             } else {
@@ -340,23 +361,33 @@ export function useRunTrigger(
         }
         const latestNodeData = getNodes().find((node) => node.id === nodeId)?.data as Record<string, unknown> | undefined;
         const latestStatus = String(latestNodeData?.status || latestNodeData?.taskStatus || '').trim().toLowerCase();
-        if (latestStatus === 'error' || latestStatus === 'failed' || latestStatus === 'failure') {
+        if (!reusedExistingResult && (latestStatus === 'error' || latestStatus === 'failed' || latestStatus === 'failure')) {
           throw new Error(String(latestNodeData?.error || latestNodeData?.failReason || '节点运行失败'));
         }
-        const finalTrace = rememberProviderTrace(extractRunProviderTrace(latestNodeData));
-        if ((finalTrace.upstreamTaskId || finalTrace.requestId) && !providerSubmittedRecorded) {
-          await lifecycle.reporter.providerSubmitted({ ...finalTrace, observedFrom: 'node-result' });
+        if (!reusedExistingResult) {
+          const finalTrace = rememberProviderTrace(extractRunProviderTrace(latestNodeData));
+          if ((finalTrace.upstreamTaskId || finalTrace.requestId) && !providerSubmittedRecorded) {
+            await lifecycle.reporter.providerSubmitted({ ...finalTrace, observedFrom: 'node-result' });
+          }
+          if (finalTrace.usage && Object.keys(finalTrace.usage).length > 0) {
+            await lifecycle.reporter.providerUsage({ ...finalTrace, usage: finalTrace.usage });
+          }
+          if (hasProviderIdentity(finalTrace) && !providerResponseRecorded) {
+            await lifecycle.reporter.providerResponse({ ...finalTrace, status: 'succeeded' });
+          }
         }
-        if (finalTrace.usage && Object.keys(finalTrace.usage).length > 0) {
-          await lifecycle.reporter.providerUsage({ ...finalTrace, usage: finalTrace.usage });
+        if (reusedExistingResult) {
+          await lifecycle.reporter.progress({ phase: 'completed', progress: 100, reusedResult: true });
+        } else {
+          await lifecycle.reporter.progress({ phase: 'completed', progress: 100 });
         }
-        if (hasProviderIdentity(finalTrace) && !providerResponseRecorded) {
-          await lifecycle.reporter.providerResponse({ ...finalTrace, status: 'succeeded' });
-        }
-        await lifecycle.reporter.progress({ phase: 'completed', progress: 100 });
         if (!lifecycle.outputEmitted()) {
           const assets = collectRunOutputAssets(latestNodeData);
-          await lifecycle.reporter.output({ status: 'succeeded', outputCount: assets.length, assets });
+          if (reusedExistingResult) {
+            await lifecycle.reporter.output({ status: 'succeeded', outputCount: assets.length, assets, reusedResult: true });
+          } else {
+            await lifecycle.reporter.output({ status: 'succeeded', outputCount: assets.length, assets });
+          }
         }
         await persistTerminal('succeeded');
         markDone(nodeId, capturedExecutionToken, true);

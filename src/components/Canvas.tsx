@@ -1634,8 +1634,9 @@ function withNodeSerialBadge(Component: ComponentType<any>): ComponentType<any> 
 
 // 节点初始 data(用于区分共享组件的 kind/preset/model 等)
 const INITIAL_DATA: Record<string, Record<string, any>> = {
-  image: { model: 'gpt-image-2', aspectRatio: '1:1', sizeLevel: '1K', referenceImages: [], imageOnlyOutput: true },
-  edit: { mode: 'edit', model: 'gpt-image-2', aspectRatio: '1:1', sizeLevel: '1K', referenceImages: [], imageOnlyOutput: true },
+  image: { model: 'gpt-image-2', aspectRatio: '1:1', sizeLevel: '1K', referenceImages: [], imageOnlyOutput: true, reuseResult: false },
+  edit: { mode: 'edit', model: 'gpt-image-2', aspectRatio: '1:1', sizeLevel: '1K', referenceImages: [], imageOnlyOutput: true, reuseResult: false },
+  video: { reuseResult: false },
   'video-edit': { ...DEFAULT_VIDEO_EDIT_DATA, clips: [], settings: { ...DEFAULT_VIDEO_EDIT_DATA.settings }, job: { ...DEFAULT_VIDEO_EDIT_DATA.job } },
   seedance: {
     seedanceApiSource: 'auto',
@@ -1652,6 +1653,7 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     maxPoll: 360,
     pollInt: 10,
     frameMode: 'auto',
+    reuseResult: false,
   },
   'director-storyboard': {
     seedanceApiSource: 'auto',
@@ -1851,7 +1853,9 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
   'multi-angle-3d': { preset: 'multi-angle-3d' },
   'panorama-720': { preset: 'panorama-720' },
   'penguin-portrait': { preset: 'penguin-portrait' },
-  audio: { mode: 'generate', version: 'v5.5', title: '', tags: '', seed: 0, continueAt: 28 },
+  audio: { mode: 'generate', version: 'v5.5', title: '', tags: '', seed: 0, continueAt: 28, reuseResult: false },
+  runninghub: { reuseResult: false },
+  'runninghub-wallet': { reuseResult: false },
   llm: {
     model: 'gemini-3.5-flash',
     system: '',
@@ -1881,6 +1885,7 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
   // 运行态：appInfo / paramValues / instanceType / status / taskId / urls / error / rhCode / materialOrder
   // 输出字段：imageUrl / videoUrl / audioUrl（按扩展名分流给下游 OutputNode）
   'rh-tools': {
+    reuseResult: false,
     rhToolsActiveCategoryId: 'all',
     rhToolsActiveAppId: '',
     rhToolsSearchQuery: '',
@@ -1898,6 +1903,7 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     audioUrl: '',
   },
   'rh-toolbox': {
+    reuseResult: false,
     rhToolboxCategoryId: 'all',
     rhToolboxActiveToolId: '',
     rhToolboxSearchQuery: '',

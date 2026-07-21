@@ -13,12 +13,12 @@ import {
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
-test('video model type order keeps Grok Video, Veo, Sora2 before Wan and Happy Horse', () => {
+test('video model type order keeps built-in families stable and appends Upscaler after Kling', () => {
   const visibleVideoModels = VIDEO_MODELS.filter((model) => model.kind !== 'seedance');
 
   assert.deepEqual(
     visibleVideoModels.map((model) => model.label),
-    ['Grok Video', 'Veo', 'Sora2', 'Wan', 'Happy Horse'],
+    ['Grok Video', 'Veo', 'Sora2', 'Wan', 'Happy Horse', 'Hailuo', 'Vidu', 'Kling', 'Upscaler'],
   );
   assert.equal(VIDEO_MODELS[0].kind, 'grok');
 });
@@ -160,6 +160,6 @@ test('FAL routes use the common zhenzhen key instead of group tokens', () => {
   assert.match(proxyRoute, /ensureDefaultZhenzhenKey\(settings, res, '视频 FAL'\)/);
   assert.doesNotMatch(proxyRoute, /route: 'image\/fal\/submit'[\s\S]*?applyZhenzhenProviderContext/);
   assert.doesNotMatch(proxyRoute, /route: 'video\/fal\/submit'[\s\S]*?applyZhenzhenProviderContext/);
-  assert.match(imageNode, /providerKind: isFal \? 'fal' : modelDef\.paramKind/);
+  assert.match(imageNode, /providerKind: isFal \? 'fal' : \(isZhenzhenImageG2 \? 'zhenzhen-image-g2' : modelDef\.paramKind\)/);
   assert.match(videoNode, /providerKind: isFal \? 'fal' : modelDef\.kind/);
 });

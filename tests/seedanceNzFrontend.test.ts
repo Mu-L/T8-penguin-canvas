@@ -89,6 +89,149 @@ test('video node exposes Wan 2.7 Spicy as an isolated built-in i2v family', () =
   assert.match(proxy, /seedanceNz\.submitWanTask/);
 });
 
+test('video node exposes Hailuo 2.3 as an isolated six-model built-in family', () => {
+  const models = read('../src/providers/models.ts');
+  const node = read('../src/components/nodes/VideoNode.tsx');
+  const generation = read('../src/services/generation.ts');
+  const proxy = read('../backend/src/routes/proxy.js');
+  for (const model of [
+    'hailuo-2.3-t2v-standard',
+    'hailuo-2.3-t2v-pro',
+    'hailuo-2.3-i2v-standard',
+    'hailuo-2.3-i2v-pro',
+    'hailuo-2.3-fast-i2v',
+    'hailuo-2.3-fast-pro-i2v',
+  ]) {
+    assert.match(models, new RegExp(model.replaceAll('.', '\\.')));
+  }
+  assert.match(models, /label: 'Hailuo'/);
+  assert.match(models, /durations: \[6, 10\]/);
+  assert.match(models, /resolutions: \['768p', '1080p'\]/);
+  assert.match(node, /submitHailuo/);
+  assert.match(node, /queryHailuo/);
+  assert.match(node, /首帧图短边需大于 300px/);
+  assert.match(node, /1080p 仅 6 秒/);
+  assert.match(generation, /\/api\/proxy\/video\/hailuo\/submit/);
+  assert.match(generation, /\/api\/proxy\/video\/hailuo\/status/);
+  assert.match(proxy, /seedanceNz\.submitHailuoTask/);
+  assert.match(proxy, /recallTaskMeta\(req\.params\.tid, 'hailuo-nz'\)/);
+});
+
+test('video node exposes Vidu Q3 as an isolated 15-model built-in family', () => {
+  const models = read('../src/providers/models.ts');
+  const node = read('../src/components/nodes/VideoNode.tsx');
+  const generation = read('../src/services/generation.ts');
+  const proxy = read('../backend/src/routes/proxy.js');
+  for (const model of [
+    'vidu-q3-pro-t2v',
+    'vidu-q3-turbo-t2v',
+    'vidu-q3-pro-fast-t2v',
+    'vidu-q3-pro-i2v',
+    'vidu-q3-turbo-i2v',
+    'vidu-q3-pro-fast-i2v',
+    'vidu-q3-pro-start-end',
+    'vidu-q3-turbo-start-end',
+    'vidu-q3-pro-fast-start-end',
+    'vidu-q3-r2v',
+    'vidu-q3-mix-r2v',
+    'vidu-q3-ad-r2v',
+    'vidu-q3-drama-r2v',
+    'vidu-q3-drama-short-play',
+    'vidu-q3-ad-short-play',
+  ]) {
+    assert.match(models, new RegExp(model.replaceAll('.', '\\.')));
+  }
+  assert.match(models, /label: 'Vidu'/);
+  assert.match(models, /durations: \[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15\]/);
+  assert.match(models, /resolutions: \['default', '720p', '1080p'\]/);
+  assert.match(node, /submitVidu/);
+  assert.match(node, /queryVidu/);
+  assert.match(node, /viduMode === 'start-end'/);
+  assert.match(node, /短剧成片把 Prompt 作为脚本内容/);
+  assert.match(node, /1-14 张图片构造参考资产/);
+  assert.match(node, /isViduUpstreamUnavailable/);
+  assert.match(node, /fail_to_fetch_task/);
+  assert.match(models, /vidu-q3-r2v[^\n]+disabled: true/);
+  assert.match(models, /vidu-q3-ad-short-play[^\n]+disabled: true/);
+  assert.match(generation, /\/api\/proxy\/video\/vidu\/submit/);
+  assert.match(generation, /\/api\/proxy\/video\/vidu\/status/);
+  assert.match(proxy, /seedanceNz\.submitViduTask/);
+  assert.match(proxy, /recallTaskMeta\(req\.params\.tid, 'vidu-nz'\)/);
+});
+
+test('video node exposes Kling as an isolated 21-model built-in family', () => {
+  const models = read('../src/providers/models.ts');
+  const node = read('../src/components/nodes/VideoNode.tsx');
+  const generation = read('../src/services/generation.ts');
+  const proxy = read('../backend/src/routes/proxy.js');
+  const provider = read('../backend/src/providers/seedanceNz.js');
+  for (const model of [
+    'kling-v3.0-std-t2v',
+    'kling-v3.0-pro-t2v',
+    'kling-v3-turbo-std-t2v',
+    'kling-v3-turbo-pro-t2v',
+    'kling-v3-4k-t2v',
+    'kling-o3-std-t2v',
+    'kling-o3-pro-t2v',
+    'kling-o3-4k-t2v',
+    'kling-v3.0-std-i2v',
+    'kling-v3.0-pro-i2v',
+    'kling-v3-turbo-std-i2v',
+    'kling-v3-turbo-pro-i2v',
+    'kling-v3-4k-i2v',
+    'kling-o3-std-i2v',
+    'kling-o3-pro-i2v',
+    'kling-o3-4k-i2v',
+    'kling-o3-std-r2v',
+    'kling-o3-pro-r2v',
+    'kling-o3-4k-r2v',
+    'kling-o3-std-edit',
+    'kling-o3-pro-edit',
+  ]) {
+    assert.match(models, new RegExp(model.replaceAll('.', '\\.')));
+    assert.match(provider, new RegExp(model.replaceAll('.', '\\.')));
+  }
+  assert.match(models, /label: 'Kling'/);
+  assert.match(models, /durations: \[5, 10\]/);
+  assert.match(node, /submitKling/);
+  assert.match(node, /queryKling/);
+  assert.match(node, /klingMode === 'edit'/);
+  assert.match(node, /Kling 视频编辑必须连接或拖入 1 个输入视频/);
+  assert.match(node, /negativePrompt: klingNegativePrompt/);
+  assert.match(node, /isKlingUpstreamUnavailable/);
+  assert.match(models, /kling-o3-std-r2v[^\n]+disabled: true/);
+  assert.match(models, /kling-o3-pro-r2v[^\n]+disabled: true/);
+  assert.match(generation, /\/api\/proxy\/video\/kling\/submit/);
+  assert.match(generation, /\/api\/proxy\/video\/kling\/status/);
+  assert.match(proxy, /seedanceNz\.submitKlingTask/);
+  assert.match(proxy, /recallTaskMeta\(req\.params\.tid, 'kling-nz'\)/);
+  assert.doesNotMatch(models, /kling-v3\.0-std-motion|kling-elements-advanced|kling-lip-sync/);
+});
+
+test('video node exposes Zhenzhen Upscaler as a dedicated single-MP4 family', () => {
+  const models = read('../src/providers/models.ts');
+  const node = read('../src/components/nodes/VideoNode.tsx');
+  const generation = read('../src/services/generation.ts');
+  const proxy = read('../backend/src/routes/proxy.js');
+  const provider = read('../backend/src/providers/seedanceNz.js');
+
+  assert.match(models, /label: 'Upscaler'/);
+  assert.match(models, /kind: 'upscaler'/);
+  assert.match(models, /resolutions: \['720p', '1080p', '2k', '4k'\]/);
+  assert.match(models, /supportVideos: true/);
+  assert.match(node, /submitUpscaler/);
+  assert.match(node, /queryUpscaler/);
+  assert.match(node, /Zhenzhen Upscaler 必须连接或拖入且只能保留 1 个 MP4 视频/);
+  assert.match(node, /videos: \[videoUrls\[0\]\]/);
+  assert.match(node, /!isUpscaler && <div>/);
+  assert.match(generation, /\/api\/proxy\/video\/upscaler\/submit/);
+  assert.match(generation, /\/api\/proxy\/video\/upscaler\/status/);
+  assert.match(proxy, /seedanceNz\.submitUpscalerTask/);
+  assert.match(proxy, /recallTaskMeta\(req\.params\.tid, 'upscaler-nz'\)/);
+  assert.match(provider, /prompt: 'upscale'/);
+  assert.match(provider, /content: \[\{ type: 'video_url', video_url: \{ url: videoUrl \} \}\]/);
+});
+
 test('Seedream NZ selector distinguishes domestic and Dola overseas model families', () => {
   const node = read('../src/components/nodes/ImageNode.tsx');
   const generation = read('../src/services/generation.ts');
@@ -98,7 +241,7 @@ test('Seedream NZ selector distinguishes domestic and Dola overseas model famili
   assert.match(node, /Dola Seedream 5\.0 Pro（海外模型）/);
   assert.match(node, /dola-seedream-5\.0-pro-t2i/);
   assert.match(node, /dola-seedream-5\.0-pro-i2i/);
-  assert.match(node, /modelFamily: seedreamNzModelFamily/);
+  assert.match(node, /modelFamily: isZhenzhenImageG2 \? undefined : seedreamNzModelFamily/);
   assert.match(generation, /modelFamily\?: 'domestic' \| 'overseas'/);
   assert.match(provider, /dola-seedream-5\.0-pro-t2i/);
   assert.match(provider, /dola-seedream-5\.0-pro-i2i/);
@@ -125,7 +268,7 @@ test('audio node exposes Seed Audio without replacing Suno and supports image/au
     outputs: ['audio'],
     executable: true,
   });
-  assert.match(apiSettings, /Happy Horse、Seedream 与 Seed Audio/);
+  assert.match(apiSettings, /Happy Horse、Hailuo、Kling、Vidu、Upscaler、Seedream、Zhenzhen Image G-2 与 Seed Audio/);
 });
 
 test('proxy keeps Happy Horse and Seed Audio on the domestic key and stores outputs locally', () => {

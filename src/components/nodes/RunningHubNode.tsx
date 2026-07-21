@@ -6,10 +6,12 @@ import { useUpdateNodeData } from './useUpdateNodeData';
 import { useHasAutoOutput } from './useHasAutoOutput';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
 import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
+import { hasReusableGenerationResult, shouldReuseGenerationResult } from '../../utils/reuseGenerationResult';
 import type { RunNodeLifecycleReporter } from '../../types/project';
 import { useUpstreamMaterials, type Material } from './useUpstreamMaterials';
 import { useOrderedMaterials } from './useOrderedMaterials';
 import MaterialPreviewSection from './MaterialPreviewSection';
+import ReuseResultToggle from './ReuseResultToggle';
 import MentionPromptInput from './MentionPromptInput';
 import LoopingVideo from '../LoopingVideo';
 import SmartImage from '../SmartImage';
@@ -818,7 +820,10 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
   useRunTrigger(id, async (reporter) => {
     if (status === 'submitting' || status === 'polling') return;
     await handleRun(reporter);
-  }, undefined, { lifecycleAware: true });
+  }, undefined, {
+    lifecycleAware: true,
+    shouldReuseResult: (nodeData) => shouldReuseGenerationResult('runninghub', nodeData),
+  });
 
   const handleStop = async () => {
     stopRequestedRef.current = true;
@@ -1172,6 +1177,13 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
             <option value="plus" className="bg-zinc-800">plus</option>
           </select>
         </div>
+
+        <ReuseResultToggle
+          checked={d?.reuseResult === true}
+          hasResult={hasReusableGenerationResult('runninghub', d)}
+          onChange={(checked) => update({ reuseResult: checked })}
+          accentColor={useWallet ? '#a78bfa' : '#22d3ee'}
+        />
 
         {!isBusy ? (
           <button

@@ -279,8 +279,10 @@ export async function queryImageStatus(taskId: string, apiModel?: string): Promi
 export interface SeedreamNzSubmitRequest {
   prompt: string;
   images?: string[];
+  model?: 'zhenzhen-image-g2-t2i' | 'zhenzhen-image-g2-i2i';
   modelFamily?: 'domestic' | 'overseas';
   resolution?: '1k' | '2k';
+  ratio?: 'adaptive' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16' | '21:9';
   size?: string;
   output_format?: 'png' | 'jpeg';
 }
@@ -291,14 +293,14 @@ export async function submitSeedreamNz(req: SeedreamNzSubmitRequest): Promise<Im
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
   });
-  const data = await safeJsonResponse(r, '贞贞的平价AI工坊（国内） Seedream 提交');
+  const data = await safeJsonResponse(r, '贞贞的平价AI工坊（国内）图像任务提交');
   if (!r.ok || !data.success) throw providerResponseError(r, data);
   return withProviderTransportTrace(data.data, r);
 }
 
 export async function querySeedreamNz(taskId: string): Promise<ImageQueryResult> {
   const r = await fetch(`/api/proxy/image/seedance-nz/status/${encodeURIComponent(taskId)}`);
-  const data = await safeJsonResponse(r, '贞贞的平价AI工坊（国内） Seedream 查询');
+  const data = await safeJsonResponse(r, '贞贞的平价AI工坊（国内）图像任务查询');
   if (!r.ok) throw providerResponseError(r, data);
   return withProviderTransportTrace(
     data.data || { status: data.success ? 'pending' : 'failed', progress: '0%', error: data?.error },
@@ -911,6 +913,184 @@ export interface HappyHorseQueryResult extends ProviderTransportTrace {
 export async function queryHappyHorse(taskId: string): Promise<HappyHorseQueryResult> {
   const r = await fetch(`/api/proxy/video/happyhorse/status/${encodeURIComponent(taskId)}`);
   const data = await r.json();
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
+}
+
+export type Hailuo23Model =
+  | 'hailuo-2.3-t2v-standard'
+  | 'hailuo-2.3-t2v-pro'
+  | 'hailuo-2.3-i2v-standard'
+  | 'hailuo-2.3-i2v-pro'
+  | 'hailuo-2.3-fast-i2v'
+  | 'hailuo-2.3-fast-pro-i2v';
+
+export interface HailuoSubmitRequest {
+  model: Hailuo23Model;
+  prompt?: string;
+  duration: 6 | 10;
+  ratio: string;
+  resolution: '768p' | '1080p';
+  images?: string[];
+}
+
+export async function submitHailuo(req: HailuoSubmitRequest): Promise<{
+  taskId: string;
+  model: string;
+  taskType: 't2v' | 'i2v';
+} & ProviderTransportTrace> {
+  const r = await fetch('/api/proxy/video/hailuo/submit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  const data = await safeJsonResponse(r, 'Hailuo 2.3 提交');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
+}
+
+export async function queryHailuo(taskId: string): Promise<HappyHorseQueryResult> {
+  const r = await fetch(`/api/proxy/video/hailuo/status/${encodeURIComponent(taskId)}`);
+  const data = await safeJsonResponse(r, 'Hailuo 2.3 查询');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
+}
+
+export type KlingModel =
+  | 'kling-v3.0-std-t2v'
+  | 'kling-v3.0-pro-t2v'
+  | 'kling-v3-turbo-std-t2v'
+  | 'kling-v3-turbo-pro-t2v'
+  | 'kling-v3-4k-t2v'
+  | 'kling-o3-std-t2v'
+  | 'kling-o3-pro-t2v'
+  | 'kling-o3-4k-t2v'
+  | 'kling-v3.0-std-i2v'
+  | 'kling-v3.0-pro-i2v'
+  | 'kling-v3-turbo-std-i2v'
+  | 'kling-v3-turbo-pro-i2v'
+  | 'kling-v3-4k-i2v'
+  | 'kling-o3-std-i2v'
+  | 'kling-o3-pro-i2v'
+  | 'kling-o3-4k-i2v'
+  | 'kling-o3-std-r2v'
+  | 'kling-o3-pro-r2v'
+  | 'kling-o3-4k-r2v'
+  | 'kling-o3-std-edit'
+  | 'kling-o3-pro-edit';
+
+export interface KlingSubmitRequest {
+  model: KlingModel;
+  prompt?: string;
+  duration: 5 | 10;
+  ratio?: string;
+  negativePrompt?: string;
+  images?: string[];
+  videos?: string[];
+}
+
+export async function submitKling(req: KlingSubmitRequest): Promise<{
+  taskId: string;
+  model: string;
+  taskType: 't2v' | 'i2v' | 'r2v' | 'edit';
+} & ProviderTransportTrace> {
+  const r = await fetch('/api/proxy/video/kling/submit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  const data = await safeJsonResponse(r, 'Kling 提交');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
+}
+
+export async function queryKling(taskId: string): Promise<HappyHorseQueryResult> {
+  const r = await fetch(`/api/proxy/video/kling/status/${encodeURIComponent(taskId)}`);
+  const data = await safeJsonResponse(r, 'Kling 查询');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
+}
+
+export type UpscalerResolution = '720p' | '1080p' | '2k' | '4k';
+
+export interface UpscalerSubmitRequest {
+  model: 'zhenzhen-upscaler';
+  resolution: UpscalerResolution;
+  videos: string[];
+}
+
+export async function submitUpscaler(req: UpscalerSubmitRequest): Promise<{
+  taskId: string;
+  model: 'zhenzhen-upscaler';
+  taskType: 'upscale';
+} & ProviderTransportTrace> {
+  const r = await fetch('/api/proxy/video/upscaler/submit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  const data = await safeJsonResponse(r, 'Zhenzhen Upscaler 提交');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
+}
+
+export async function queryUpscaler(taskId: string): Promise<HappyHorseQueryResult> {
+  const r = await fetch(`/api/proxy/video/upscaler/status/${encodeURIComponent(taskId)}`);
+  const data = await safeJsonResponse(r, 'Zhenzhen Upscaler 查询');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
+}
+
+export type ViduQ3Model =
+  | 'vidu-q3-pro-t2v'
+  | 'vidu-q3-turbo-t2v'
+  | 'vidu-q3-pro-fast-t2v'
+  | 'vidu-q3-pro-i2v'
+  | 'vidu-q3-turbo-i2v'
+  | 'vidu-q3-pro-fast-i2v'
+  | 'vidu-q3-pro-start-end'
+  | 'vidu-q3-turbo-start-end'
+  | 'vidu-q3-pro-fast-start-end'
+  | 'vidu-q3-r2v'
+  | 'vidu-q3-mix-r2v'
+  | 'vidu-q3-ad-r2v'
+  | 'vidu-q3-drama-r2v'
+  | 'vidu-q3-drama-short-play'
+  | 'vidu-q3-ad-short-play';
+
+export interface ViduSubmitRequest {
+  model: ViduQ3Model;
+  prompt?: string;
+  duration: number;
+  ratio: string;
+  resolution: 'default' | '720p' | '1080p';
+  seed?: number;
+  images?: string[];
+  scriptName?: string;
+  style?: string;
+  assetType?: 'character' | 'scene' | 'prop';
+  assetNamePrefix?: string;
+  assetDescription?: string;
+}
+
+export async function submitVidu(req: ViduSubmitRequest): Promise<{
+  taskId: string;
+  model: string;
+  taskType: 't2v' | 'i2v' | 'start-end' | 'r2v' | 'short-play';
+} & ProviderTransportTrace> {
+  const r = await fetch('/api/proxy/video/vidu/submit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  const data = await safeJsonResponse(r, 'Vidu Q3 提交');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
+}
+
+export async function queryVidu(taskId: string): Promise<HappyHorseQueryResult> {
+  const r = await fetch(`/api/proxy/video/vidu/status/${encodeURIComponent(taskId)}`);
+  const data = await safeJsonResponse(r, 'Vidu Q3 查询');
   if (!r.ok || !data.success) throw providerResponseError(r, data);
   return withProviderTransportTrace(data.data, r);
 }

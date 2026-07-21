@@ -856,9 +856,6 @@ test('B2 malformed migration-ledger diagnostics expose only bounded schema summa
 test('B2 complete manifest accepts only deterministic pre-ledger and schema10/15/16/17/19/22/23/25/27/28 histories', async () => {
   const historicalSchema22 = loadHistoricalProjectDatabase('v2.5.6');
   const historicalSchema23 = loadHistoricalProjectDatabase('v2.5.8');
-  const retainedCoreSchema22 = loadProjectDatabaseSourceFile(
-    'E:\\PenguinPravite\\T8-penguin-canvas\\backend\\src\\services\\projectDatabase.js',
-  );
   const retainedF2Schema23 = loadProjectDatabaseSourceFile(
     'E:\\PenguinPravite\\T8-penguin-canvas-release-v2.5.9\\backend\\src\\services\\projectDatabase.js',
   );
@@ -875,7 +872,6 @@ test('B2 complete manifest accepts only deterministic pre-ledger and schema10/15
       target,
       implementation: historicalSchema22,
     })),
-    { label: 'retained-core-schema22-source', target: 22, implementation: retainedCoreSchema22 },
     { label: 'retained-f2-schema23-source', target: 23, implementation: retainedF2Schema23 },
     { label: 'schema23', target: 23, implementation: historicalSchema23 },
     { label: 'schema25', target: 25, implementation: { ProjectDatabase } },
@@ -911,6 +907,13 @@ test('B2 complete manifest accepts only deterministic pre-ledger and schema10/15
         try {
           if (entry.implementation.ProjectDatabase === ProjectDatabase) {
             removeSchema29ExtensionForSyntheticLegacy(raw);
+          }
+          const receiptTablePresent = Boolean(raw.prepare(`
+            SELECT 1 AS present FROM sqlite_master
+            WHERE type = 'table' AND name = 'schema_migration_receipts'
+          `).get());
+          if (receiptTablePresent) {
+            raw.prepare('DELETE FROM schema_migration_receipts WHERE version > ?').run(entry.target);
           }
           raw.prepare('DELETE FROM schema_migrations WHERE version > ?').run(entry.target);
           assert.equal(

@@ -59,7 +59,7 @@ function replaceExactly(source, needle, replacement, label) {
 // real exported ProjectDatabase performs the production 30 -> 31 migration.
 function loadSchema30ProjectDatabase() {
   const filename = path.resolve(__dirname, '../backend/src/services/projectDatabase.js');
-  let source = fs.readFileSync(filename, 'utf8');
+  let source = fs.readFileSync(filename, 'utf8').replace(/\r\n/g, '\n');
   source = replaceExactly(
     source,
     'const PROJECT_DATABASE_SCHEMA_VERSION = 32;',

@@ -2230,6 +2230,9 @@
           },
           "imageOnlyOutput": {
             "type": "boolean"
+          },
+          "reuseResult": {
+            "type": "boolean"
           }
         },
         "defaults": {
@@ -2237,7 +2240,8 @@
           "aspectRatio": "1:1",
           "sizeLevel": "1K",
           "referenceImages": [],
-          "imageOnlyOutput": true
+          "imageOnlyOutput": true,
+          "reuseResult": false
         },
         "connectionPorts": {
           "dynamic": false,
@@ -2271,8 +2275,14 @@
       "executable": true,
       "generatable": true,
       "generation": {
-        "allowedDataFields": {},
-        "defaults": {},
+        "allowedDataFields": {
+          "reuseResult": {
+            "type": "boolean"
+          }
+        },
+        "defaults": {
+          "reuseResult": false
+        },
         "connectionPorts": {
           "dynamic": false,
           "inputs": [
@@ -2328,8 +2338,14 @@
       "executable": true,
       "generatable": false,
       "generation": {
-        "allowedDataFields": {},
-        "defaults": {}
+        "allowedDataFields": {
+          "reuseResult": {
+            "type": "boolean"
+          }
+        },
+        "defaults": {
+          "reuseResult": false
+        }
       }
     },
     {
@@ -2378,8 +2394,14 @@
       "executable": true,
       "generatable": true,
       "generation": {
-        "allowedDataFields": {},
-        "defaults": {},
+        "allowedDataFields": {
+          "reuseResult": {
+            "type": "boolean"
+          }
+        },
+        "defaults": {
+          "reuseResult": false
+        },
         "connectionPorts": {
           "dynamic": false,
           "inputs": [
@@ -2448,8 +2470,14 @@
       "executable": true,
       "generatable": false,
       "generation": {
-        "allowedDataFields": {},
-        "defaults": {}
+        "allowedDataFields": {
+          "reuseResult": {
+            "type": "boolean"
+          }
+        },
+        "defaults": {
+          "reuseResult": false
+        }
       }
     },
     {
@@ -2475,8 +2503,14 @@
       "executable": true,
       "generatable": false,
       "generation": {
-        "allowedDataFields": {},
-        "defaults": {}
+        "allowedDataFields": {
+          "reuseResult": {
+            "type": "boolean"
+          }
+        },
+        "defaults": {
+          "reuseResult": false
+        }
       }
     },
     {
@@ -2528,8 +2562,14 @@
       "executable": true,
       "generatable": false,
       "generation": {
-        "allowedDataFields": {},
-        "defaults": {}
+        "allowedDataFields": {
+          "reuseResult": {
+            "type": "boolean"
+          }
+        },
+        "defaults": {
+          "reuseResult": false
+        }
       }
     },
     {
@@ -2556,8 +2596,14 @@
       "executable": true,
       "generatable": false,
       "generation": {
-        "allowedDataFields": {},
-        "defaults": {}
+        "allowedDataFields": {
+          "reuseResult": {
+            "type": "boolean"
+          }
+        },
+        "defaults": {
+          "reuseResult": false
+        }
       }
     },
     {
@@ -3315,8 +3361,14 @@
       "executable": true,
       "generatable": false,
       "generation": {
-        "allowedDataFields": {},
-        "defaults": {}
+        "allowedDataFields": {
+          "reuseResult": {
+            "type": "boolean"
+          }
+        },
+        "defaults": {
+          "reuseResult": false
+        }
       }
     },
     {

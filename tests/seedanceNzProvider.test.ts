@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import sharp from 'sharp';
 
 const require = createRequire(import.meta.url);
 const seedanceNz = require('../backend/src/providers/seedanceNz.js');
@@ -25,6 +26,7 @@ function jsonResponse(data: unknown, status = 200) {
 const TINY_PNG_A = 'data:image/png;base64,iVBORw0KGgo=';
 const TINY_PNG_B = 'data:image/png;base64,iVBORw0KGgox';
 const TINY_MP3 = 'data:audio/mpeg;base64,SUQzAwAAAAA=';
+const TINY_MP4 = 'data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb20=';
 
 async function listen(handler: Parameters<typeof createServer>[0]) {
   const server = createServer(handler);
@@ -203,6 +205,86 @@ test('seedance.nz builds official Seedream t2i and i2i payloads without mixing v
   assert.equal('seconds' in i2i.payload, false);
 });
 
+test('seedance.nz builds documented Zhenzhen Image G-2 t2i and i2i payloads', async () => {
+  seedanceNz.resetCachesForTests();
+  const t2i = await seedanceNz.buildImagePayload({
+    model: 'zhenzhen-image-g2-t2i',
+    prompt: 'clean product photo on a white background',
+    images: ['https://assets.example.com/ignored.png'],
+    resolution: '1k',
+    ratio: 'adaptive',
+  }, 'test-key');
+  assert.deepEqual(t2i, {
+    model: 'zhenzhen-image-g2-t2i',
+    taskType: 't2i',
+    payload: {
+      model: 'zhenzhen-image-g2-t2i',
+      prompt: 'clean product photo on a white background',
+      metadata: { resolution: '1k' },
+    },
+  });
+
+  const uploads: string[] = [];
+  const i2i = await seedanceNz.buildImagePayload({
+    model: 'zhenzhen-image-g2-i2i',
+    prompt: 'turn this into a glossy blue app icon',
+    images: [TINY_PNG_A, TINY_PNG_B],
+    resolution: '1k',
+    ratio: '1:1',
+  }, 'test-key', {
+    uploadIntervalMs: 0,
+    fetchImpl: async (url: string) => {
+      assert.match(url, /\/v1\/files\/upload$/);
+      uploads.push(url);
+      return jsonResponse({ url: `https://cdn.example.com/g2-ref-${uploads.length}.png` });
+    },
+  });
+  assert.deepEqual(i2i.payload, {
+    model: 'zhenzhen-image-g2-i2i',
+    prompt: 'turn this into a glossy blue app icon',
+    images: [
+      'https://cdn.example.com/g2-ref-1.png',
+      'https://cdn.example.com/g2-ref-2.png',
+    ],
+    metadata: { resolution: '1k', ratio: '1:1' },
+  });
+  assert.equal(i2i.taskType, 'i2i');
+  assert.equal(uploads.length, 2);
+});
+
+test('seedance.nz rejects undocumented Zhenzhen Image G-2 combinations before upstream submission', async () => {
+  await assert.rejects(
+    seedanceNz.buildImagePayload({
+      model: 'zhenzhen-image-g2-i2i', prompt: 'valid prompt', resolution: '1k', images: [],
+    }, 'test-key'),
+    /至少需要 1 张参考图/,
+  );
+  await assert.rejects(
+    seedanceNz.buildImagePayload({
+      model: 'zhenzhen-image-g2-t2i', prompt: 'x'.repeat(20001), resolution: '1k',
+    }, 'test-key'),
+    /不能超过 20000 字符/,
+  );
+  await assert.rejects(
+    seedanceNz.buildImagePayload({
+      model: 'zhenzhen-image-g2-t2i', prompt: 'valid prompt', resolution: '2k',
+    }, 'test-key'),
+    /分辨率只能是 1k/,
+  );
+  await assert.rejects(
+    seedanceNz.buildImagePayload({
+      model: 'zhenzhen-image-g2-t2i', prompt: 'valid prompt', resolution: '1k', ratio: 'bad-ratio',
+    }, 'test-key'),
+    /不支持比例/,
+  );
+  await assert.rejects(
+    seedanceNz.buildImagePayload({
+      model: 'zhenzhen-image-g2-t2i', prompt: 'valid prompt', resolution: '1k', output_format: 'png',
+    }, 'test-key'),
+    /不支持 output_format/,
+  );
+});
+
 test('seedance.nz selects the documented Dola Seedream overseas t2i and i2i models', async () => {
   seedanceNz.resetCachesForTests();
   const t2i = await seedanceNz.buildImagePayload({
@@ -332,6 +414,455 @@ test('seedance.nz Happy Horse submit uses /v1/videos and rejects invalid limits'
     }, 'test-key'),
     /分辨率只支持 720p 或 1080p|时长只支持 3-15 秒|至少需要 1 张参考图/,
   );
+});
+
+test('seedance.nz builds documented Kling t2v, i2v and r2v payloads', async () => {
+  seedanceNz.resetCachesForTests();
+  const t2v = await seedanceNz.buildKlingPayload({
+    model: 'kling-v3.0-std-t2v',
+    prompt: 'A compact product reveal shot',
+    duration: 5,
+    ratio: '16:9',
+    negativePrompt: '',
+    images: [TINY_PNG_A],
+  }, 'test-key');
+  assert.deepEqual(t2v, {
+    model: 'kling-v3.0-std-t2v',
+    taskType: 't2v',
+    payload: {
+      model: 'kling-v3.0-std-t2v',
+      prompt: 'A compact product reveal shot',
+      seconds: '5',
+      metadata: { ratio: '16:9' },
+    },
+  });
+
+  let uploadIndex = 0;
+  const upload = async (url: string) => {
+    assert.match(url, /\/v1\/files\/upload$/);
+    uploadIndex += 1;
+    return jsonResponse({ url: `https://cdn.example.com/kling-${uploadIndex}.png` });
+  };
+  const i2v = await seedanceNz.buildKlingPayload({
+    model: 'kling-v3.0-pro-i2v',
+    prompt: 'Move from the first frame to the second',
+    duration: 10,
+    ratio: 'adaptive',
+    negativePrompt: 'blur',
+    images: [TINY_PNG_A, TINY_PNG_B, TINY_PNG_A],
+  }, 'test-key', { fetchImpl: upload, uploadIntervalMs: 0 });
+  assert.deepEqual(i2v.payload, {
+    model: 'kling-v3.0-pro-i2v',
+    prompt: 'Move from the first frame to the second',
+    seconds: '10',
+    metadata: { negative_prompt: 'blur' },
+    images: ['https://cdn.example.com/kling-1.png', 'https://cdn.example.com/kling-2.png'],
+  });
+
+  seedanceNz.resetCachesForTests();
+  uploadIndex = 0;
+  const r2v = await seedanceNz.buildKlingPayload({
+    model: 'kling-o3-4k-r2v',
+    prompt: 'Use image1 as the product and image2 as the environment',
+    duration: 5,
+    ratio: '9:16',
+    images: [TINY_PNG_A, TINY_PNG_B, TINY_PNG_A, TINY_PNG_B, TINY_PNG_A],
+  }, 'test-key', { fetchImpl: upload, uploadIntervalMs: 0 });
+  assert.equal(r2v.taskType, 'r2v');
+  assert.equal(r2v.payload.images.length, 4);
+  assert.deepEqual(r2v.payload.metadata, { ratio: '9:16' });
+});
+
+test('seedance.nz builds documented Kling edit payload and validates mode limits', async () => {
+  seedanceNz.resetCachesForTests();
+  const built = await seedanceNz.buildKlingPayload({
+    model: 'kling-o3-std-edit',
+    prompt: 'Turn the product red',
+    duration: 5,
+    videos: [TINY_MP4],
+  }, 'test-key', {
+    uploadIntervalMs: 0,
+    fetchImpl: async (url: string) => {
+      assert.match(url, /\/v1\/files\/upload$/);
+      return jsonResponse({ url: 'https://cdn.example.com/kling-source.mp4' });
+    },
+  });
+  assert.deepEqual(built, {
+    model: 'kling-o3-std-edit',
+    taskType: 'edit',
+    payload: {
+      model: 'kling-o3-std-edit',
+      prompt: 'Turn the product red',
+      seconds: '5',
+      metadata: {
+        content: [{
+          type: 'video_url',
+          video_url: { url: 'https://cdn.example.com/kling-source.mp4' },
+        }],
+      },
+    },
+  });
+
+  await assert.rejects(
+    seedanceNz.buildKlingPayload({
+      model: 'kling-v3.0-std-t2v', prompt: 'valid', duration: 6, ratio: '16:9',
+    }, 'test-key'),
+    /时长只支持 5 或 10 秒/,
+  );
+  await assert.rejects(
+    seedanceNz.buildKlingPayload({
+      model: 'kling-o3-std-r2v', prompt: 'valid', duration: 5, ratio: '16:9', images: [],
+    }, 'test-key'),
+    /至少需要 1 张参考图/,
+  );
+  await assert.rejects(
+    seedanceNz.buildKlingPayload({
+      model: 'kling-o3-pro-edit', prompt: '', duration: 5, videos: [TINY_MP4],
+    }, 'test-key'),
+    /视频编辑必须填写提示词/,
+  );
+});
+
+test('seedance.nz submits Kling through /v1/videos', async () => {
+  const calls: string[] = [];
+  const submitted = await seedanceNz.submitKlingTask({
+    model: 'kling-v3-turbo-std-t2v',
+    prompt: 'A minimal Kling submission test',
+    duration: 5,
+    ratio: '16:9',
+  }, 'test-key', {
+    baseUrl: 'https://api.seedance.nz',
+    fetchImpl: async (url: string) => {
+      calls.push(url);
+      return jsonResponse({ id: 'kling-task-1', status: 'queued' });
+    },
+  });
+  assert.equal(submitted.taskId, 'kling-task-1');
+  assert.equal(submitted.taskType, 't2v');
+  assert.deepEqual(calls, ['https://api.seedance.nz/v1/videos']);
+});
+
+test('seedance.nz builds the documented Zhenzhen Upscaler payload from exactly one MP4', async () => {
+  seedanceNz.resetCachesForTests();
+  const built = await seedanceNz.buildUpscalerPayload({
+    model: 'zhenzhen-upscaler',
+    resolution: '2k',
+    videos: [TINY_MP4],
+    prompt: 'must not be forwarded',
+    duration: 15,
+  }, 'test-key', {
+    uploadIntervalMs: 0,
+    fetchImpl: async (url: string) => {
+      assert.match(url, /\/v1\/files\/upload$/);
+      return jsonResponse({ url: 'https://cdn.example.com/upscaler-source.mp4' });
+    },
+  });
+  assert.deepEqual(built, {
+    model: 'zhenzhen-upscaler',
+    taskType: 'upscale',
+    payload: {
+      model: 'zhenzhen-upscaler',
+      prompt: 'upscale',
+      metadata: {
+        resolution: '2k',
+        content: [{
+          type: 'video_url',
+          video_url: { url: 'https://cdn.example.com/upscaler-source.mp4' },
+        }],
+      },
+    },
+  });
+
+  await assert.rejects(
+    seedanceNz.buildUpscalerPayload({ model: 'zhenzhen-upscaler', resolution: '8k', videos: [TINY_MP4] }, 'test-key'),
+    /分辨率只支持 720p、1080p、2k 或 4k/,
+  );
+  await assert.rejects(
+    seedanceNz.buildUpscalerPayload({ model: 'zhenzhen-upscaler', resolution: '1080p', videos: [] }, 'test-key'),
+    /必须提供且只能提供 1 个 MP4/,
+  );
+  await assert.rejects(
+    seedanceNz.buildUpscalerPayload({ model: 'zhenzhen-upscaler', resolution: '1080p', videos: [TINY_MP4, TINY_MP4] }, 'test-key'),
+    /必须提供且只能提供 1 个 MP4/,
+  );
+});
+
+test('seedance.nz submits Zhenzhen Upscaler through /v1/videos without seconds', async () => {
+  seedanceNz.resetCachesForTests();
+  const calls: Array<{ url: string; body: any }> = [];
+  const submitted = await seedanceNz.submitUpscalerTask({
+    model: 'zhenzhen-upscaler',
+    resolution: '720p',
+    videos: [TINY_MP4],
+  }, 'test-key', {
+    baseUrl: 'https://api.seedance.nz',
+    uploadIntervalMs: 0,
+    fetchImpl: async (url: string, init: any = {}) => {
+      if (url.endsWith('/v1/files/upload')) return jsonResponse({ url: 'https://cdn.example.com/source.mp4' });
+      calls.push({ url, body: JSON.parse(init.body) });
+      return jsonResponse({ id: 'upscaler-task-1', status: 'queued' });
+    },
+  });
+  assert.equal(submitted.taskId, 'upscaler-task-1');
+  assert.equal(submitted.taskType, 'upscale');
+  assert.equal(calls[0].url, 'https://api.seedance.nz/v1/videos');
+  assert.equal(Object.hasOwn(calls[0].body, 'seconds'), false);
+});
+
+test('seedance.nz builds the documented Hailuo 2.3 t2v and i2v payloads', async () => {
+  seedanceNz.resetCachesForTests();
+  const t2v = await seedanceNz.buildHailuoPayload({
+    model: 'hailuo-2.3-t2v-standard',
+    prompt: 'A compact product reveal shot',
+    duration: 6,
+    resolution: '768p',
+    ratio: '16:9',
+    images: [TINY_PNG_A],
+  }, 'test-key');
+  assert.deepEqual(t2v, {
+    model: 'hailuo-2.3-t2v-standard',
+    taskType: 't2v',
+    payload: {
+      model: 'hailuo-2.3-t2v-standard',
+      prompt: 'A compact product reveal shot',
+      seconds: '6',
+      metadata: { resolution: '768p', ratio: '16:9' },
+    },
+  });
+
+  const validFirstFrame = `data:image/png;base64,${(
+    await sharp({ create: { width: 512, height: 512, channels: 3, background: '#65a30d' } }).png().toBuffer()
+  ).toString('base64')}`;
+  const i2v = await seedanceNz.buildHailuoPayload({
+    model: 'hailuo-2.3-fast-pro-i2v',
+    prompt: 'Gentle product motion',
+    duration: 10,
+    resolution: '768p',
+    ratio: '9:16',
+    images: [validFirstFrame, TINY_PNG_B],
+  }, 'test-key', {
+    uploadIntervalMs: 0,
+    fetchImpl: async (url: string) => {
+      assert.match(url, /\/v1\/files\/upload$/);
+      return jsonResponse({ url: 'https://cdn.example.com/hailuo-first.png' });
+    },
+  });
+  assert.deepEqual(i2v, {
+    model: 'hailuo-2.3-fast-pro-i2v',
+    taskType: 'i2v',
+    payload: {
+      model: 'hailuo-2.3-fast-pro-i2v',
+      prompt: 'Gentle product motion',
+      seconds: '10',
+      metadata: { resolution: '768p' },
+      images: ['https://cdn.example.com/hailuo-first.png'],
+    },
+  });
+});
+
+test('seedance.nz Hailuo 2.3 validates model limits and submits through /v1/videos', async () => {
+  const validFirstFrame = `data:image/png;base64,${(
+    await sharp({ create: { width: 512, height: 512, channels: 3, background: '#0891b2' } }).png().toBuffer()
+  ).toString('base64')}`;
+  const tooSmallFrame = `data:image/png;base64,${(
+    await sharp({ create: { width: 512, height: 300, channels: 3, background: '#dc2626' } }).png().toBuffer()
+  ).toString('base64')}`;
+
+  await assert.rejects(
+    seedanceNz.buildHailuoPayload({
+      model: 'hailuo-2.3-t2v-standard', prompt: 'Valid prompt', duration: 10, resolution: '1080p', ratio: '16:9',
+    }, 'test-key'),
+    /1080p 只支持 6 秒/,
+  );
+  await assert.rejects(
+    seedanceNz.buildHailuoPayload({
+      model: 'hailuo-2.3-i2v-standard', duration: 6, resolution: '768p', images: [tooSmallFrame],
+    }, 'test-key', { uploadIntervalMs: 0, fetchImpl: async () => jsonResponse({ url: 'must-not-upload' }) }),
+    /短边必须大于 300px/,
+  );
+  await assert.rejects(
+    seedanceNz.buildHailuoPayload({
+      model: 'hailuo-2.3-t2v-pro', prompt: 'x'.repeat(2001), duration: 6, resolution: '768p', ratio: '16:9',
+    }, 'test-key'),
+    /不能超过 2000 字符/,
+  );
+
+  seedanceNz.resetCachesForTests();
+  const calls: string[] = [];
+  const submitted = await seedanceNz.submitHailuoTask({
+    model: 'hailuo-2.3-i2v-pro',
+    duration: 6,
+    resolution: '1080p',
+    images: [validFirstFrame],
+  }, 'test-key', {
+    baseUrl: 'https://api.seedance.nz',
+    uploadIntervalMs: 0,
+    fetchImpl: async (url: string) => {
+      calls.push(url);
+      return url.endsWith('/v1/files/upload')
+        ? jsonResponse({ url: 'https://cdn.example.com/hailuo-submit-first.png' })
+        : jsonResponse({ id: 'hailuo-task-1', status: 'queued' });
+    },
+  });
+  assert.equal(submitted.taskId, 'hailuo-task-1');
+  assert.deepEqual(calls, [
+    'https://api.seedance.nz/v1/files/upload',
+    'https://api.seedance.nz/v1/videos',
+  ]);
+});
+
+test('seedance.nz builds documented Vidu Q3 t2v, i2v, start-end and r2v payloads', async () => {
+  seedanceNz.resetCachesForTests();
+  const t2v = await seedanceNz.buildViduPayload({
+    model: 'vidu-q3-turbo-t2v',
+    prompt: 'A paper bird takes flight in a clean studio',
+    duration: 4,
+    ratio: '16:9',
+    resolution: 'default',
+    seed: -1,
+    images: [TINY_PNG_A],
+  }, 'test-key');
+  assert.deepEqual(t2v, {
+    model: 'vidu-q3-turbo-t2v',
+    taskType: 't2v',
+    payload: {
+      model: 'vidu-q3-turbo-t2v',
+      prompt: 'A paper bird takes flight in a clean studio',
+      seconds: '4',
+      metadata: { ratio: '16:9' },
+    },
+  });
+
+  let uploadIndex = 0;
+  const upload = async (url: string) => {
+    assert.match(url, /\/v1\/files\/upload$/);
+    uploadIndex += 1;
+    return jsonResponse({ url: `https://cdn.example.com/vidu-${uploadIndex}.png` });
+  };
+  const i2v = await seedanceNz.buildViduPayload({
+    model: 'vidu-q3-pro-i2v',
+    duration: 5,
+    ratio: 'adaptive',
+    resolution: '720p',
+    seed: 7,
+    images: [TINY_PNG_A, TINY_PNG_B],
+  }, 'test-key', { fetchImpl: upload, uploadIntervalMs: 0 });
+  assert.deepEqual(i2v.payload, {
+    model: 'vidu-q3-pro-i2v',
+    seconds: '5',
+    metadata: { resolution: '720p', seed: 7 },
+    images: ['https://cdn.example.com/vidu-1.png'],
+  });
+
+  seedanceNz.resetCachesForTests();
+  uploadIndex = 0;
+  const startEnd = await seedanceNz.buildViduPayload({
+    model: 'vidu-q3-pro-fast-start-end',
+    prompt: 'Move smoothly from the first composition to the second',
+    duration: 6,
+    ratio: '9:16',
+    resolution: '1080p',
+    images: [TINY_PNG_A, TINY_PNG_B],
+  }, 'test-key', { fetchImpl: upload, uploadIntervalMs: 0 });
+  assert.equal(startEnd.taskType, 'start-end');
+  assert.deepEqual(startEnd.payload.images, [
+    'https://cdn.example.com/vidu-1.png',
+    'https://cdn.example.com/vidu-2.png',
+  ]);
+  assert.deepEqual(startEnd.payload.metadata, { ratio: '9:16', resolution: '1080p' });
+
+  seedanceNz.resetCachesForTests();
+  uploadIndex = 0;
+  const r2v = await seedanceNz.buildViduPayload({
+    model: 'vidu-q3-drama-r2v',
+    duration: 4,
+    ratio: 'adaptive',
+    resolution: 'default',
+    images: Array.from({ length: 10 }, (_, index) => index % 2 ? TINY_PNG_A : TINY_PNG_B),
+  }, 'test-key', { fetchImpl: upload, uploadIntervalMs: 0 });
+  assert.equal(r2v.taskType, 'r2v');
+  assert.equal(r2v.payload.images.length, 9);
+  assert.deepEqual(r2v.payload.metadata, {});
+});
+
+test('seedance.nz builds the documented Vidu Q3 short-play payload', async () => {
+  seedanceNz.resetCachesForTests();
+  const built = await seedanceNz.buildViduPayload({
+    model: 'vidu-q3-drama-short-play',
+    prompt: 'Scene one: a designer presents a small ceramic bird in a quiet studio.',
+    scriptName: 'Studio intro',
+    duration: 8,
+    ratio: '9:16',
+    resolution: '1080p',
+    style: 'realistic',
+    assetType: 'character',
+    assetNamePrefix: 'Hero',
+    assetDescription: 'Designer in a clean studio',
+    images: [TINY_PNG_A],
+  }, 'test-key', {
+    uploadIntervalMs: 0,
+    fetchImpl: async () => jsonResponse({ url: 'https://cdn.example.com/vidu-asset.png' }),
+  });
+  assert.deepEqual(built, {
+    model: 'vidu-q3-drama-short-play',
+    taskType: 'short-play',
+    payload: {
+      model: 'vidu-q3-drama-short-play',
+      prompt: 'Scene one: a designer presents a small ceramic bird in a quiet studio.',
+      metadata: {
+        script_name: 'Studio intro',
+        resolution: '1080p',
+        duration: 8,
+        aspect_ratio: '9:16',
+        style: 'realistic',
+        assets: [{
+          id: '1',
+          type: 'character',
+          name: 'Hero 1',
+          image_uri: 'https://cdn.example.com/vidu-asset.png',
+          description: 'Designer in a clean studio',
+        }],
+      },
+    },
+  });
+});
+
+test('seedance.nz Vidu Q3 validates mode limits and submits through /v1/videos', async () => {
+  await assert.rejects(
+    seedanceNz.buildViduPayload({
+      model: 'vidu-q3-pro-t2v', prompt: 'valid', duration: 3, ratio: '16:9', resolution: '720p',
+    }, 'test-key'),
+    /时长只支持 4-15 秒/,
+  );
+  await assert.rejects(
+    seedanceNz.buildViduPayload({
+      model: 'vidu-q3-turbo-start-end', duration: 4, ratio: '16:9', resolution: 'default', images: [TINY_PNG_A],
+    }, 'test-key'),
+    /必须提供第 1 张和第 2 张图片/,
+  );
+  await assert.rejects(
+    seedanceNz.buildViduPayload({
+      model: 'vidu-q3-ad-short-play', prompt: 'valid script', scriptName: '', duration: 8, ratio: '9:16', resolution: '1080p', images: [TINY_PNG_A],
+    }, 'test-key'),
+    /必须填写脚本名称/,
+  );
+
+  const calls: string[] = [];
+  const submitted = await seedanceNz.submitViduTask({
+    model: 'vidu-q3-pro-fast-t2v',
+    prompt: 'A minimal Vidu submission test',
+    duration: 4,
+    ratio: '16:9',
+    resolution: 'default',
+  }, 'test-key', {
+    baseUrl: 'https://api.seedance.nz',
+    fetchImpl: async (url: string) => {
+      calls.push(url);
+      return jsonResponse({ id: 'vidu-task-1', status: 'queued' });
+    },
+  });
+  assert.equal(submitted.taskId, 'vidu-task-1');
+  assert.deepEqual(calls, ['https://api.seedance.nz/v1/videos']);
 });
 
 test('seedance.nz builds and submits the documented Wan 2.7 Spicy i2v payload', async () => {

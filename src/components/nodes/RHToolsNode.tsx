@@ -32,10 +32,12 @@ import { useUpdateNodeData } from './useUpdateNodeData';
 import { useHasAutoOutput } from './useHasAutoOutput';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
 import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
+import { hasReusableGenerationResult, shouldReuseGenerationResult } from '../../utils/reuseGenerationResult';
 import type { RunNodeLifecycleReporter } from '../../types/project';
 import { useUpstreamMaterials, type Material } from './useUpstreamMaterials';
 import { useOrderedMaterials } from './useOrderedMaterials';
 import MaterialPreviewSection from './MaterialPreviewSection';
+import ReuseResultToggle from './ReuseResultToggle';
 import MentionPromptInput from './MentionPromptInput';
 import LoopingVideo from '../LoopingVideo';
 import SmartImage from '../SmartImage';
@@ -862,7 +864,10 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
     if (!activeAppId || !webappId) return; // 启动器视图不可被调起
     if (status === 'submitting' || status === 'polling') return;
     await handleRun(reporter);
-  }, undefined, { lifecycleAware: true });
+  }, undefined, {
+    lifecycleAware: true,
+    shouldReuseResult: (nodeData) => shouldReuseGenerationResult('rh-tools', nodeData),
+  });
 
   const handleStop = async () => {
     stopRequestedRef.current = true;
@@ -1304,6 +1309,13 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
               <option value="pro">pro</option>
             </select>
           </div>
+
+          <ReuseResultToggle
+            checked={d?.reuseResult === true}
+            hasResult={hasReusableGenerationResult('rh-tools', d)}
+            onChange={(checked) => update({ reuseResult: checked })}
+            accentColor={accent}
+          />
 
           {!isBusy ? (
             <button

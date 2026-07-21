@@ -244,6 +244,7 @@ export interface CanvasNodeData {
   prompt?: string;
   imageUrl?: string;
   imageOnlyOutput?: boolean;
+  reuseResult?: boolean;
   videoUrl?: string;
   audioUrl?: string;
   model?: string;

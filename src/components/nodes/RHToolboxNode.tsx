@@ -20,6 +20,7 @@ import {
 import { PORT_COLOR } from '../../config/portTypes';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
 import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
+import { hasReusableGenerationResult, shouldReuseGenerationResult } from '../../utils/reuseGenerationResult';
 import type { RunNodeLifecycleReporter } from '../../types/project';
 import { cancelRh, fetchRhAppInfo, uploadFile } from '../../services/generation';
 import { runRhToolboxTool, getRhToolboxManifest, type RunRhToolboxProgress } from '../../services/rhToolbox';
@@ -58,6 +59,7 @@ import { useOrderedMaterials } from './useOrderedMaterials';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useUpstreamMaterials, type Material } from './useUpstreamMaterials';
 import MaterialPreviewSection from './MaterialPreviewSection';
+import ReuseResultToggle from './ReuseResultToggle';
 import MentionPromptInput from './MentionPromptInput';
 import { resolveMediaMentions, type MediaMention } from './mediaMentions';
 import LoopingVideo from '../LoopingVideo';
@@ -805,7 +807,10 @@ const RHToolboxNode = ({ id, data, selected }: NodeProps) => {
   useRunTrigger(id, async (reporter) => {
     if (isBusy) return;
     await handleRun(reporter);
-  }, undefined, { lifecycleAware: true });
+  }, undefined, {
+    lifecycleAware: true,
+    shouldReuseResult: (nodeData) => shouldReuseGenerationResult('rh-toolbox', nodeData),
+  });
 
   const onResize = (_event: any, params: { width: number; height: number }) => {
     const next = { w: Math.round(params.width), h: Math.round(params.height) };
@@ -1239,6 +1244,13 @@ const RHToolboxNode = ({ id, data, selected }: NodeProps) => {
               <option value="pro">pro</option>
             </select>
           </label>
+
+          <ReuseResultToggle
+            checked={d?.reuseResult === true}
+            hasResult={hasReusableGenerationResult('rh-toolbox', d)}
+            onChange={(checked) => update({ reuseResult: checked })}
+            accentColor={accent}
+          />
 
           {isBusy ? (
             <button type="button" onClick={handleStop} className="nodrag w-full flex items-center justify-center gap-1.5 rounded py-2 text-xs font-bold" style={{ background: surface, color: text, border: `1px solid ${border}` }}>
