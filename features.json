@@ -1,10 +1,10 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.6.1",
-  "lastUpdated": "2026-07-21-v2.6.1-release-candidate",
+  "lastUpdated": "2026-07-21-v2.6.1-electron-release",
   "sixSystemsImplementationAudit": {
     "version": "2.6.1",
-    "status": "verified-local-b1-f2-f7-b2-schema32-f9-f10-v2.6.1-release-candidate-external-evidence-deferred",
+    "status": "verified-local-b1-f2-f7-b2-schema32-f9-f10-v2.6.1-released-external-evidence-deferred",
     "date": "2026-07-18",
   "lastUpdated": "2026-07-20-canonical-core-direct-development-restored",
     "completedRounds": 27,
@@ -48,7 +48,7 @@
     },
     "currentIncrement": {
       "name": "b2-schema32-f9-f10-local-hardening-and-assetcenter-p2",
-      "status": "verified-local-integrated-core-v2.6.1-release-candidate-external-evidence-deferred",
+      "status": "verified-local-integrated-core-v2.6.1-released-external-evidence-deferred",
       "capabilities": [
         "2026-07-21 AI工坊私有充值弹窗强化账号绑定警告：标题明确给出 ai.t8star.org、注册登录后从左侧个人中心取得数字 ID、先解绑再绑定自己的 ID，以及充错无法退回；辅助提示同步为不可退款语义。长标题可换行且不会挤压绑定状态，私有实现与测试继续仅在 ignored local-private/**。未生产 build、打包或发布。",
         "2026-07-21 核心目录顶部充值入口新增双平台选择：贞贞的AI工坊继续复用原充值弹窗与业务，贞贞的平价AI小屋通过 Electron 系统外链打开指定 seedance.nz 注册地址，Web 开发环境保留 noopener/noreferrer 新窗口兜底；选择浮层支持再次点击、点击外部和 Escape 关闭，并适配像素/科技明暗主题。私有充值实现与专项测试继续仅存在于 ignored local-private/**，不进入公开 GitHub 源码。专项 4/4、私有入口完整模块解析和 type-check 通过；未生产 build、打包或发布。",
@@ -388,9 +388,11 @@
   },
   "electronReleaseV261": {
     "version": "2.6.1",
-    "status": "release-candidate-owner-approved-evidence-deferred",
+    "status": "released-postrelease-evidence-pending",
     "date": "2026-07-21",
-    "description": "v2.6.1 Electron 自动更新候选：发布 Zhenzhen Image G-2、Hailuo、Vidu、Kling、Upscaler、生成结果复用与私有充值体验更新。",
+    "description": "v2.6.1 Electron 自动更新版已正式发布：新增 Zhenzhen Image G-2、Hailuo、Vidu、Kling、Upscaler、生成结果复用与本地私有扩展体验更新。",
+    "sourceCommit": "da4ac0051a2e19852c5aecc4aabd914a578a308b",
+    "tagCommit": "da4ac0051a2e19852c5aecc4aabd914a578a308b",
     "capabilities": [
       "图像 GPT2 TAB 新增 zhenzhen-image-g2-t2i/i2i；视频节点新增 Hailuo、Vidu、Kling 与 Upscaler TAB，统一使用平价 AI 小屋独立 Key、异步任务协议、素材上传约束和完成产物安全本地转存。",
       "图像/编辑、视频、SD2.0、音频、RunningHub/RH钱包、RH超市与 RH工具箱新增默认关闭的 reuseResult；只有已有匹配类型真实输出时才跳过生成并继续下游，没有结果仍正常生成。",
@@ -400,9 +402,37 @@
     "verification": [
       "G-2 t2i/i2i、Hailuo 六模型、Vidu 九个文生/图生/首尾帧、Kling 六个文生模型及 Upscaler 已使用一次性进程 Key 完成真实 API 验证；Vidu 参考生/短剧上游失败与 Kling 其余模型本次凭据 403 均保持诚实边界。",
       "生成结果复用专项与运行/RH 相邻组、充值双平台选择与绑定警告组合 5/5 均通过；完整 TypeScript 回归 200 个文件 1546/1546，完整 CJS/后端回归 186 个文件 1370/1370（其中 Electron 双进程 17/17 在与候选生产数据库源码逐字节一致的独立 Electron ABI 工作树验证）。Windows CRLF 源码取段、历史 schema 合成 receipt 外键顺序及已完成核心集成后的过时 schema22 外部路径测试夹具已按真实契约修正。type-check、public、RH toolbox、JSON/语法、core/development 工作树、diff-check、受保护 FFmpeg 精确尺寸/摘要与公开差异密钥扫描通过。",
+      "正式发布使用固定 source/tag da4ac0051a2e19852c5aecc4aabd914a578a308b，发布时 HEAD、origin/main 与 tag 精确一致；公开提交 45 个文件，排除 skill.md、roadmap.md、local-private/**、缓存、外部源码、归档和受保护运行时 sidecar。",
+      "首次正式流程在 Electron builder 前因新发布工作树缺少 ignored 去水印 Python 运行时而停止，未生成 NSIS；复制 v2.6.0 已发布且哈希锁定的两套运行时后，严格归档门复用 739,387,305-byte 与 98,088,084-byte ZIP。",
+      "随后首次 NSIS 候选在 post-build 发现 ignored ffprobe.exe 未进入包而失败，未上传；补入 143,110,656 bytes / SHA256 1B3AA5D83D945594B8CEC869AED4509F7A5C6E91AC49BE650A952284A271AC54 的已验证 ffprobe 后，完整 post-build 通过，并仅从已验证 win-unpacked 重生成最终可发布 NSIS。该纠正意味着物理上生成过一个未发布无效候选和一个最终有效安装包，不能误记为只生成一次。",
+      "最终发布脚本完成草稿三项资产精确校验、1.28 GB 安装包全量下载复核、发布后 digest/size/tag/Latest 校验并清除密封 recovery；额外独立全量下载因 30 分钟工具上限被终止且未返回哈希错误，随后独立 metadata 校验确认本地 bytes 与 GitHub digest/size 一致且 v2.6.1 为 Latest。",
       "默认 t8-collaboration-release-evidence-v2 清单完全不存在。用户再次明确授权精确 v2.6.1 一次性先发布后补证据延期；它不产生 passed 检查，F8-F10 状态保持未完成。"
     ],
-    "releaseBoundary": "候选阶段尚未执行 Electron/NSIS 正式构建、推送、tag 或 GitHub Release。正式打包只允许在固定且已推送的 40 位 source commit 上运行一次 T8_RELEASE_APPROVAL=release-2.6.1 与精确 T8_COLLAB_RELEASE_EVIDENCE_DEFERRAL=owner-approved-post-release-v2.6.1；损坏、过期或不匹配清单仍失败关闭。"
+    "releaseBoundary": "v2.6.1 已按用户再次明确授权采用精确一次性先发布后补证据例外正式发布；例外没有把缺失证据标成通过。严格进度仍为 27/32，F8-F10 继续保持未完成，后续必须用真实双 Windows、三个隔离客户端和公共 HTTPS/TLS 环境补齐。",
+    "release": {
+      "tag": "v2.6.1",
+      "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.6.1",
+      "publishedAt": "2026-07-21T05:58:06Z",
+      "isDraft": false,
+      "isPrerelease": false,
+      "isLatest": true,
+      "installer": {
+        "name": "T8-PenguinCanvas-Setup-2.6.1.exe",
+        "bytes": 1281075673,
+        "sha256": "AE7305C3A4D6C6B2640CBFC8816A3FE897BB236F438A1C9D40BC8489F9A675B4",
+        "sha512": "tt7s91hSISzKJ4AJManbR4kyYKnz2Co8BbImeNYaLWPtdYfn+yiQ8J+fLRbcumOh7DZW6K1JBSdgKBB+trgBeg=="
+      },
+      "blockmap": {
+        "name": "T8-PenguinCanvas-Setup-2.6.1.exe.blockmap",
+        "bytes": 1334377,
+        "sha256": "3AF26BC2D481C30369EC9FEECBEFC62CAE523E67B2220388A01CD26A08A0B670"
+      },
+      "metadata": {
+        "name": "latest.yml",
+        "bytes": 362,
+        "sha256": "1E97C6F26B5AF6E6273BD862B2237804C88B038055C8073C78F67FCE41F46EB5"
+      }
+    }
   },
   "electronReleaseV260": {
     "version": "2.6.0",
@@ -5522,8 +5552,8 @@
     "version": "2.6.1",
     "semverVersion": "2.6.1",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；当前源码候选版本为 v2.6.1，新增贞贞 G-2/Hailuo/Vidu/Kling/Upscaler、生成结果复用与私有充值体验更新。最近正式发布版本为 v2.6.0；公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.6.1 正式 Electron/NSIS 尚未构建；用户已再次明确授权本版先发布、后补真实双设备/公网/红队/负载证据。只允许使用精确 v2.6.1 一次性 deferral 执行唯一一次 T8_RELEASE_APPROVAL=release-2.6.1 npm run dist:release，F8-F10 状态不得因此改为完成。最近已验证的自动更新 Release 为 v2.6.0。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；当前正式版本为 v2.6.1，新增贞贞 G-2/Hailuo/Vidu/Kling/Upscaler、生成结果复用与本地私有扩展体验更新。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.6.1 正式 Electron 自动更新版已发布到 GitHub Latest，source/tag 为 da4ac0051a2e19852c5aecc4aabd914a578a308b，三项资产通过发布脚本草稿全量下载与发布后 digest/size/Latest 校验。用户授权的一次性证据延期不改变 F8-F10 未完成状态。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
