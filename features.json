@@ -153,9 +153,11 @@
   },
   "electronReleaseV260": {
     "version": "2.6.0",
-    "status": "release-authorized-postrelease-evidence-pending",
+    "status": "released-postrelease-evidence-pending",
     "date": "2026-07-21",
-    "description": "v2.6.0 公开源码发布候选整合多人协作 F2-F7、schema32 与运行/发布加固，并收录普通 RUN 免打断、Provider 错误、VibeX、Photoshop 0.1.4 和图像节点仅图片输出修复。",
+    "description": "v2.6.0 Electron 自动更新版已正式发布，整合多人协作 F2-F7、schema32 与运行/发布加固，并收录普通 RUN 免打断、Provider 错误、VibeX、Photoshop 0.1.4 和图像节点仅图片输出修复。",
+    "sourceCommit": "9c770c503937d20092feee68673c7d0e50177e7c",
+    "tagCommit": "9c770c503937d20092feee68673c7d0e50177e7c",
     "capabilities": [
       "F2-F7 覆盖断线重连与增量同步、结构并发、协同文本冲突与撤销、可续传素材 ACL/配额、评论审批和权威运行队列/审计。",
       "普通 RUN 保留只读体检和最终重验，但 advisory warning 不再反复要求确认；阻断错误、历史重放和高风险远程运行继续失败关闭。",
@@ -166,9 +168,37 @@
       "集成基线已覆盖 193 个 TS 与 186 个 CJS 测试文件共 2872 项：2865 通过、7 条件跳过；type-check、public、RH toolbox、数据库 writer/lifecycle、语法、JSON 与工作树门通过。",
       "v2.6.0 候选聚焦回归 52/52、完整 TS 回归 195 个文件四组全部通过；同时修复 Windows CRLF 下三个源码取段测试，并把生成停止断言收窄到按钮区域，允许新输出复选框在生成期间按设计禁用。",
       "npm run type-check -- --pretty false、npm run public:check、npm run rh-toolbox:check、JSON/脚本语法、core/development 工作树门与 git diff --check 通过。",
+      "构建前修复 tsconfig.node.json，使 tsc -b 将 Vite 编译产物写入 ignored build/tsc-node；连续编译与完整 npm run build 均不再修改跟踪文件。首次预处理在 Electron builder 前因核心开发服务锁定共享 better_sqlite3.node 而停止，未生成安装包；改为发布工作树独立 node_modules 后，Electron/NSIS 仅实际生成一次。",
+      "正式 dist:release 完成私有 sidecar、120 个公开后端与 4 个私有后端加密、两套离线运行时、Electron native rebuild、NSIS、post-build、密封恢复、草稿全量下载及最终发布校验；独立 release:verify 再次按远端下载字节、GitHub digest 和 Latest 状态通过。",
+      "win-unpacked 使用隔离 userData 冷启动 15 秒保持运行，共 4 个本次进程并监听自动避让后的 18768；验证后仅终止本次进程树并清理隔离目录，核心开发服务未被中断。",
+      "tag、Release target 与发布时 origin/main 均精确指向 9c770c503937d20092feee68673c7d0e50177e7c；Release 非草稿、非预发布并为 Latest。本 postrelease 记录随后只追加发布事实，不移动 tag。",
       "t8-collaboration-release-evidence-v2 默认清单当前不存在；用户于 2026-07-21 明确要求 v2.6.0 先发布、后补真实证据。一次性 deferral 只接受完全缺失的清单、精确 2.6.0 和固定 40 位 target，不产生 passed 项，也不能用于未来版本。"
     ],
-    "releaseBoundary": "正式 Electron/NSIS 构建次数在本记录写入时仍为 0。v2.6.0 按用户明确要求采用一次性先发布后补证据例外，只执行一次 T8_RELEASE_APPROVAL=release-2.6.0 npm run dist:release；F8-F10 继续保持未完成，发布后必须由至少两台真实 Windows、三个隔离客户端及真实公共 HTTPS/TLS 环境补齐并绑定 source commit。"
+    "releaseBoundary": "v2.6.0 已按用户明确要求采用一次性先发布后补证据例外正式发布；该例外没有把缺失证据标成通过。严格进度仍为 27/32，F8-F10 继续保持未完成，后续仍必须由至少两台真实 Windows、三个隔离客户端及真实公共 HTTPS/TLS 环境补齐并绑定 source commit。",
+    "release": {
+      "tag": "v2.6.0",
+      "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.6.0",
+      "publishedAt": "2026-07-20T19:45:16Z",
+      "isDraft": false,
+      "isPrerelease": false,
+      "isLatest": true,
+      "installer": {
+        "name": "T8-PenguinCanvas-Setup-2.6.0.exe",
+        "bytes": 1281044143,
+        "sha256": "88C0D7B49AD620314BFAB36612DDD9DC8FFC79567EE8AC333CECA944A7F27A39",
+        "sha512": "/jaN8fndG+qkXVzQqSErUq/SU861gR8i3hrjcxvpfKrNzc4GTJT1awPzTmi52228qkgF9Af3zjrwp/4eiGID7A=="
+      },
+      "blockmap": {
+        "name": "T8-PenguinCanvas-Setup-2.6.0.exe.blockmap",
+        "bytes": 1334141,
+        "sha256": "1A9284C5CADB8364C653ED3474C7EA8536624A6B602FE6F66D23FF41665708E7"
+      },
+      "metadata": {
+        "name": "latest.yml",
+        "bytes": 362,
+        "sha256": "B7D0152233BAE4A4CB2814E418D3FCD5AEAFCAB421B8AAEDDB48F0B254157DFC"
+      }
+    }
   },
   "electronReleaseV258": {
     "version": "2.5.8",
