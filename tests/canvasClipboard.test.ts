@@ -1,11 +1,62 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildCanvasNodeClipboardMarker,
   expandClipboardNodesForGroups,
+  markSystemClipboardAsCanvasNodes,
   offsetClipboardNodes,
   positionClipboardNodesAtAnchor,
   remapPastedGroupMemberIds,
+  shouldPreferInternalNodeClipboardPaste,
 } from '../src/utils/canvasClipboard.ts';
+
+test('node clipboard marker replaces stale system media without serializing node payloads', async () => {
+  let written = '';
+  const ok = await markSystemClipboardAsCanvasNodes(2, {
+    writeText: async (value) => { written = value; },
+  });
+
+  assert.equal(ok, true);
+  assert.equal(written, buildCanvasNodeClipboardMarker(2));
+  assert.equal(written, 'T8 Penguin Canvas nodes:2');
+});
+
+test('node clipboard marker failure leaves the in-memory clipboard usable', async () => {
+  const ok = await markSystemClipboardAsCanvasNodes(1, {
+    writeText: async () => { throw new Error('clipboard denied'); },
+  });
+
+  assert.equal(ok, false);
+});
+
+test('fresh internal node copies win over stale external media on the first paste', () => {
+  assert.equal(shouldPreferInternalNodeClipboardPaste({
+    hasInternalNodes: true,
+    internalCopiedAt: 10_000,
+    now: 10_500,
+    mediaSignature: 'image/png:old-image',
+  }), true);
+  assert.equal(shouldPreferInternalNodeClipboardPaste({
+    hasInternalNodes: true,
+    internalCopiedAt: 1_000,
+    now: 10_500,
+    mediaSignature: 'image/png:new-image',
+  }), false);
+  assert.equal(shouldPreferInternalNodeClipboardPaste({
+    hasInternalNodes: true,
+    internalCopiedAt: 8_000,
+    now: 20_000,
+    mediaSignature: 'image/png:previously-consumed',
+    lastExternalMediaSignature: 'image/png:previously-consumed',
+    lastExternalPasteAt: 7_000,
+  }), true);
+  assert.equal(shouldPreferInternalNodeClipboardPaste({
+    hasInternalNodes: false,
+    internalCopiedAt: 19_900,
+    now: 20_000,
+    mediaSignature: 'image/png:external-only',
+  }), false);
+});
 
 test('positionClipboardNodesAtAnchor aligns the copied group top-left to the pointer anchor', () => {
   const sourceNodes = [

@@ -96,6 +96,7 @@ export interface GenerateImageRequest {
   // 多张参考图(base64 dataURL 或 http(s):// URL)
   images?: string[];
   quality?: string;
+  moderation?: 'auto' | 'low';
   // 兼容旧参数:若传了 size(像素串)则优先用、image 单张也会并入 images
   size?: string;
   image?: string;

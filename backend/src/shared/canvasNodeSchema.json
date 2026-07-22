@@ -2253,6 +2253,22 @@
               "1K"
             ]
           },
+          "gptImageQuality": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "gptImageModeration": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "low"
+            ]
+          },
           "referenceImages": {
             "type": "array",
             "maxItems": 0
@@ -2268,6 +2284,8 @@
           "model": "gpt-image-2",
           "aspectRatio": "1:1",
           "sizeLevel": "1K",
+          "gptImageQuality": "auto",
+          "gptImageModeration": "auto",
           "referenceImages": [],
           "imageOnlyOutput": true,
           "reuseResult": false

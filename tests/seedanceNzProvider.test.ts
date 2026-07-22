@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { join } from 'node:path';
 import sharp from 'sharp';
 
 const require = createRequire(import.meta.url);
@@ -1226,6 +1227,13 @@ test('seedance.nz rejects metadata, special-range IPv4, IPv6 local and credentia
     }));
     assert.equal(error.code, 'SEEDANCE_REMOTE_MEDIA_BLOCKED', source);
     assert.equal(error.status, 400, source);
+    if (source.includes('credential-secret')) {
+      assert.match(error.message, /包含账号或密码/);
+    } else {
+      assert.match(error.message, /本机、局域网或受保护网络/);
+    }
+    assert.match(error.message, /重新上传原图片/);
+    assert.match(error.message, /SEEDANCE_REMOTE_MEDIA_BLOCKED/);
     assert.doesNotMatch(`${error.message} ${JSON.stringify(error)}`, /credential-secret/);
   }
   const invalidSecret = 'invalid-media-reference-provider-secret';
@@ -1244,6 +1252,38 @@ test('seedance.nz rejects metadata, special-range IPv4, IPv6 local and credentia
   assert.equal(invalidError.code, 'SEEDANCE_MEDIA_REFERENCE_INVALID');
   assert.doesNotMatch(`${invalidError.message} ${JSON.stringify(invalidError)}`, new RegExp(invalidSecret));
   assert.equal(providerCalls, 0);
+});
+
+test('seedance.nz treats absolute loopback URLs on controlled T8 mounts as local uploaded media', async () => {
+  seedanceNz.resetCachesForTests();
+  const config = require('../backend/src/config.js');
+  const fileName = `seedance-local-ref-${process.pid}-${Date.now()}.png`;
+  const filePath = join(config.INPUT_DIR, fileName);
+  mkdirSync(config.INPUT_DIR, { recursive: true });
+  writeFileSync(filePath, Buffer.from('local-reference'));
+  let providerCalls = 0;
+
+  try {
+    const result = await seedanceNz.uploadMedia(
+      `http://127.0.0.1:11422/files/input/${fileName}?legacy=1`,
+      'image',
+      'test-key',
+      {
+        uploadIntervalMs: 0,
+        fetchImpl: async (url: string, init?: RequestInit) => {
+          providerCalls += 1;
+          assert.match(url, /\/v1\/files\/upload$/);
+          assert.ok(init?.body instanceof FormData);
+          return jsonResponse({ url: 'https://cdn.example.com/local-ref.png' });
+        },
+      },
+    );
+
+    assert.equal(result, 'https://cdn.example.com/local-ref.png');
+    assert.equal(providerCalls, 1);
+  } finally {
+    rmSync(filePath, { force: true });
+  }
 });
 
 test('seedance.nz media download enforces byte limit during streaming and cancels before upload', async (t) => {

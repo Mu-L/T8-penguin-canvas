@@ -3,6 +3,10 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 export type CanvasEntityWithUid = {
   id: string;
   entityUid?: unknown;
+  entityRevision?: unknown;
+  legacyAliases?: unknown;
+  sourceEntityUid?: unknown;
+  targetEntityUid?: unknown;
 };
 
 export function isCanonicalEntityUid(value: unknown): value is string {
@@ -28,6 +32,29 @@ export function createCanvasEntityUid(): string {
   const generated = globalThis.crypto?.randomUUID?.() || fallbackUuidV4();
   if (!isCanonicalEntityUid(generated)) throw new Error('无法生成稳定画布实体 UUID');
   return generated.toLowerCase();
+}
+
+/**
+ * A copied node/edge is a new logical entity, not another display alias of the
+ * source entity. Remove migration metadata that belongs exclusively to the
+ * source before the clone enters state. Edge endpoint UUIDs are recomputed by
+ * the backend from the remapped source/target display IDs.
+ */
+export function cloneCanvasEntityAsNew<T extends CanvasEntityWithUid>(
+  entity: T,
+  entityType: 'node' | 'edge',
+): T {
+  const cloned = {
+    ...entity,
+    entityUid: createCanvasEntityUid(),
+  };
+  delete cloned.entityRevision;
+  delete cloned.legacyAliases;
+  if (entityType === 'edge') {
+    delete cloned.sourceEntityUid;
+    delete cloned.targetEntityUid;
+  }
+  return cloned;
 }
 
 /**

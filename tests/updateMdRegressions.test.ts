@@ -110,11 +110,15 @@ test('canvas exposes Figma send, placement shelf, and external file drag protoco
   assert.match(canvas, /stopRadialPointerEvent/);
   assert.match(canvas, /window\.addEventListener\('mousemove', onMouseMove, true\)/);
   assert.match(canvas, /Let the real paste event fire first/);
-  assert.match(canvas, /screenshots\/files must win/);
+  assert.match(canvas, /fresh node copy wins over stale/);
   assert.match(canvas, /internalClipboardCopiedAtRef\.current = Date\.now\(\)/);
+  assert.match(canvas, /markSystemClipboardAsCanvasNodes\(sel\.length\)/);
+  assert.match(canvas, /const currentNodes = nodesRef\.current/);
+  assert.match(canvas, /const selectedCount = useMemo/);
+  assert.match(canvas, /nodes\.reduce\(\(count, node\) => count \+ \(node\.selected/);
   assert.match(canvas, /mediaSignature/);
   assert.match(canvas, /shouldReleaseConsumedExternalMedia/);
-  assert.match(canvas, /internalClipboardCopiedAtRef\.current > last\.at/);
+  assert.match(canvas, /shouldPreferInternalNodeClipboardPaste/);
   assert.match(canvas, /internalClipboardCopiedAtRef\.current <= lastExternalPaste\.at/);
   const externalPasteBranch = canvas.slice(
     canvas.indexOf('const onPaste = (e: ClipboardEvent)'),
@@ -127,7 +131,7 @@ test('canvas exposes Figma send, placement shelf, and external file drag protoco
   );
   assert.match(canvas, /if \(internalPasteTimerRef\.current\) \{\s*window\.clearTimeout\(internalPasteTimerRef\.current\);/);
   const pasteShortcutBranch = canvas.slice(
-    canvas.indexOf("matchesAnyShortcut(shortcuts['canvas.paste'], e)"),
+    canvas.lastIndexOf("matchesAnyShortcut(shortcuts['canvas.paste'], e)"),
     canvas.indexOf("matchesAnyShortcut(shortcuts['canvas.duplicate'], e)"),
   );
   assert.equal(pasteShortcutBranch.includes('e.preventDefault()'), false);

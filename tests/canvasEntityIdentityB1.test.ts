@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  cloneCanvasEntityAsNew,
   createCanvasEntityUid,
   ensureCanvasEntityUids,
   isCanonicalEntityUid,
@@ -36,4 +37,41 @@ test('B1 preserves canonical UUIDs and fails closed on malformed or duplicate id
     ], 'node'),
     /entityUid 重复/,
   );
+});
+
+test('copied canvas entities must receive fresh identities before entering state', () => {
+  const originalUid = createCanvasEntityUid();
+  const original = {
+    id: 'node-original',
+    entityUid: originalUid,
+    entityRevision: 12,
+    legacyAliases: ['node-original'],
+  };
+  const copied = cloneCanvasEntityAsNew({
+    ...original,
+    id: 'node-copy',
+  }, 'node');
+
+  assert.notEqual(copied.entityUid, original.entityUid);
+  assert.equal(Object.hasOwn(copied, 'entityRevision'), false);
+  assert.equal(Object.hasOwn(copied, 'legacyAliases'), false);
+  assert.doesNotThrow(() => ensureCanvasEntityUids([original, copied], 'node'));
+});
+
+test('copied edges discard source identity aliases so remapped endpoints can be resolved', () => {
+  const copied = cloneCanvasEntityAsNew({
+    id: 'edge-copy',
+    entityUid: createCanvasEntityUid(),
+    entityRevision: 12,
+    legacyAliases: ['edge-original'],
+    sourceEntityUid: createCanvasEntityUid(),
+    targetEntityUid: createCanvasEntityUid(),
+    source: 'node-copy-a',
+    target: 'node-copy-b',
+  }, 'edge');
+
+  assert.equal(Object.hasOwn(copied, 'entityRevision'), false);
+  assert.equal(Object.hasOwn(copied, 'legacyAliases'), false);
+  assert.equal(Object.hasOwn(copied, 'sourceEntityUid'), false);
+  assert.equal(Object.hasOwn(copied, 'targetEntityUid'), false);
 });

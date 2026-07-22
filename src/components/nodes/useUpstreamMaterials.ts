@@ -6,6 +6,7 @@ import { fileNameFromUrl } from '../../utils/mediaCollection';
 import { normalizeRhNodeId } from '../../utils/rhTextBinding';
 import { dedupeUpstreamMaterialBuckets } from '../../utils/upstreamMaterialBuckets';
 import { shouldCollectNodeTextOutput } from '../../utils/imageNodeOutputMode';
+import { normalizeLoopCustomIterationInput } from '../../utils/loopDerivedExecution';
 
 /**
  * useUpstreamMaterials - 通用「上游素材聚合」hook
@@ -186,6 +187,7 @@ export function useUpstreamMaterials(nodeId: string): UpstreamMaterials {
     [conns]
   );
   const upstreamNodes = useNodesData(upstreamIds);
+  const currentNodeData = useNodesData([nodeId]);
 
   // v1.2.8.3: 收集每个上游 source 上被连接的 sourceHandle 集合, 供 FramePair 等多端口节点按 handle 区分输出
   // - sourceHandle === 'first' / 'last' (FramePair) → 只取对应帧
@@ -392,8 +394,26 @@ export function useUpstreamMaterials(nodeId: string): UpstreamMaterials {
       fixedImages.push(m);
     }
 
-    return dedupeUpstreamMaterialBuckets({ texts, images: fixedImages, videos, audios });
-  }, [upstreamNodes, handleMap]);
+    const collected = dedupeUpstreamMaterialBuckets({ texts, images: fixedImages, videos, audios });
+    const self = Array.isArray(currentNodeData) ? currentNodeData[0] : null;
+    const customInput = normalizeLoopCustomIterationInput((self?.data as any)?.__loopCustomInput);
+    if (!customInput) return collected;
+
+    const asMaterials = (kind: MaterialKind, entries: typeof customInput.texts): Material[] => entries.map((entry) => ({
+      ...entry,
+      kind,
+      origin: 'upstream' as const,
+      label: kind === 'text'
+        ? (entry.url.length > 24 ? `${entry.url.slice(0, 22)}…` : entry.url)
+        : fileNameFromUrl(entry.url).slice(0, 28),
+    }));
+    return {
+      texts: asMaterials('text', customInput.texts),
+      images: asMaterials('image', customInput.images),
+      videos: asMaterials('video', customInput.videos),
+      audios: asMaterials('audio', customInput.audios),
+    };
+  }, [upstreamNodes, handleMap, currentNodeData]);
 }
 
 /**

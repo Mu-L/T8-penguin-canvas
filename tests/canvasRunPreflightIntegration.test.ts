@@ -58,6 +58,7 @@ test('Canvas authorizes the exact preview before dispatch lease, atomic RunInten
     'read-only preflight must not persist, accept, or execute anything');
 
   assertOrdered(run, [
+    ['the execution UI becomes active when the request is accepted locally', 'setIsRunning(true);'],
     ['empty execution scope returns 0', 'if (order.length === 0) return 0;'],
     ['preflight is awaited', /const authorizedScope = await authorizeRunNodes\(/],
     ['blocked, cancelled, or stale preflight returns -1', 'if (!authorizedScope) return -1;'],
@@ -65,13 +66,12 @@ test('Canvas authorizes the exact preview before dispatch lease, atomic RunInten
     ['the last identity/revision/graph guard runs before persistence', /if \(!isSameRunPreflightExecutionSnapshot\(/],
     ['an exact FIFO dispatch lease is acquired for a remote intent', 'runIntentLease = await api.leaseCollaborationRunIntent({'],
     ['the durable Run and leased RunIntent claim enter through one API call', 'run = await api.createProjectRun({'],
-    ['the execution UI becomes active', 'setIsRunning(true);'],
-    ['the Provider-facing run bus is triggered', 'triggerRun(id,'],
+    ['the Provider-facing run bus is triggered', /triggerRun\(\s*id,/],
     ['a successful execution reports its positive node count', 'return order.length;'],
   ]);
   assert.equal(run.match(/api\.createProjectRun\(/g)?.length, 1);
   assert.equal(run.match(/setIsRunning\(true\)/g)?.length, 1);
-  assert.equal(run.match(/\btriggerRun\(id,/g)?.length, 1);
+  assert.equal(run.match(/\btriggerRun\(\s*id,/g)?.length, 1);
 });
 
 test('confirmation re-fetches host capability, asset, and policy state instead of reusing cached diagnostics', () => {
@@ -246,22 +246,24 @@ test('the automatic worker executes only confirmation-free FIFO candidates and p
   assert.match(canvasSource, /\.sort\(\(left, right\) => left\.createdAt - right\.createdAt \|\| left\.id\.localeCompare\(right\.id\)\)\[0\]/);
   assert.match(canvasSource, /runIntentWorkerBusyRef\.current = true/);
   assert.match(run, /api\.getCollaborationRunIntent\([\s\S]*\{ signal: monitorAbort\.signal \}/);
-  assert.match(run, /if \(current\.cancelRequestedAt \|\| current\.status === 'cancelled'\) \{[\s\S]*cancelRunRef\.current = true;[\s\S]*await cancelAll\(\)/);
+  assert.match(run, /if \(current\.cancelRequestedAt \|\| current\.status === 'cancelled'\) \{[\s\S]*runControl\.cancelled = true;[\s\S]*cancelRun\(runContext!\.runId\);[\s\S]*await runControl\.cancelPersistence/);
   assert.match(run, /stopRunIntentCancellationMonitor\(\)/);
 });
 
-test('one CAS gate spans preflight through terminal persistence and graph changes after confirmation stop Provider dispatch', () => {
+test('launch preparation is queued, Provider execution is concurrent, and graph changes still stop dispatch', () => {
   const run = callbackSource(canvasSource, 'Canvas.tsx', 'runNodesByOrder');
   assertOrdered(run, [
-    ['a synchronous gate rejects overlap', 'if (runExecutionGateRef.current) {'],
-    ['the gate is claimed before any await', "runExecutionGateRef.current = executionGateToken;"],
-    ['preflight happens under the gate', /const authorizedScope = await authorizeRunNodes\(/],
-    ['Run persistence happens under the same gate', 'run = await api.createProjectRun({'],
+    ['launch preparation waits for the short exclusive queue', 'await runLaunchQueueRef.current.acquire();'],
+    ['preflight happens under the launch queue', /const authorizedScope = await authorizeRunNodes\(/],
+    ['Run persistence happens under the launch queue', 'run = await api.createProjectRun({'],
     ['the graph is rechecked after Run creation', /runId = run\.id;[\s\S]*if \(!isSameRunPreflightExecutionSnapshot\(persistenceSnapshot, captureExecutionSnapshot\(\)\)\)/],
-    ['Provider tokens are issued only after the rechecks', 'executionToken = triggerRun(id,'],
-    ['terminal Run persistence precedes gate release', 'await api.updateProjectRun(runId, {'],
-    ['the CAS gate is released last', 'runExecutionGateRef.current = null;'],
+    ['Provider tokens are issued with the immutable RunContext after the rechecks', 'executionToken = triggerRun('],
+    ['the launch queue is released once Provider execution has started', 'releaseLaunch();'],
+    ['the first execution can remain in flight while the next launch starts', 'const current = useRunBusStore.getState();'],
   ]);
+  assert.doesNotMatch(run, /runExecutionGateRef|已有运行正在体检、持久化或执行/);
+  assert.doesNotMatch(run, /void cancelAll\(\)/,
+    'normal completion must not cancel independent concurrent executions');
   assert.match(run, /await api\.updateProjectRun\(run\.id,[\s\S]*if \(!isSameRunPreflightExecutionSnapshot\(persistenceSnapshot, captureExecutionSnapshot\(\)\)\)/,
     'a delayed transition to running must also recheck the exact graph');
   assert.match(run, /if \(runId && options\.prepareRunExecution\)[\s\S]*if \(!isSameRunPreflightExecutionSnapshot\(persistenceSnapshot, captureExecutionSnapshot\(\)\)\)/,

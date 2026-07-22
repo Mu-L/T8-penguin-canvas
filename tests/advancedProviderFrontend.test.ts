@@ -171,7 +171,6 @@ test('advancedProviderModelOptions uses explicit lists before safe provider defa
       'seedance2.0',
       'seedance1.5pro',
       'seedance1.0fast',
-      'seedance1.0',
       'jimeng-video-720p',
       'jimeng-video-1080p',
     ],
@@ -183,6 +182,7 @@ test('advancedProviderModelOptions uses explicit lists before safe provider defa
       'seedream-4.6',
       'seedream-4.5',
       'seedream-5.0',
+      'seedream-5.0-pro',
       'jimeng-image-2k',
       'jimeng-image-4k',
     ],
@@ -282,7 +282,8 @@ test('ImageNode lets Jimeng CLI request up to 10 images without lifting other pr
   assert.match(source, /const externalImageCountLimit = isJimengCliImageSelected \? 10 : 4/);
   assert.match(source, /Math\.min\(externalImageCountLimit,\s*Number\(d\?\.providerParams\?\.n \|\| 1\)\)/);
   assert.match(source, /生成数量/);
-  assert.match(source, /即梦 CLI v1\.4\.10 起支持 text2image \/ image2image 一次生成 1-10 张/);
+  assert.match(source, /自定义宽高（v1\.4\.14）/);
+  assert.match(source, /Seedream 5\.0 Pro 支持 1K \/ 2K \/ 4K/);
 });
 
 test('VideoNode keeps Jimeng Seedance media limits separate from Grok FAL controls', () => {
@@ -296,10 +297,10 @@ test('VideoNode keeps Jimeng Seedance media limits separate from Grok FAL contro
     executable: true,
   });
 
-  assert.match(source, /JIMENG_SEEDANCE_LIMITS = \{ images: 9, videos: 3, audios: 3 \}/);
+  assert.match(source, /JIMENG_SEEDANCE_LIMITS = \{ images: 9, multiframeImages: 20, videos: 3, audios: 3 \}/);
   assert.match(source, /showBuiltinFalControls = !isExternalSelected && isFal/);
   assert.match(source, /accepts:\s*isJimengSeedanceSelected\s*\?\s*\['image', 'video', 'audio', 'text'\]/);
-  assert.match(source, /isJimengSeedanceSelected\s*\?\s*\['480p', '720p', '1080p', '4k'\]/);
+  assert.match(source, /jimengSeedanceMode === 'multiframe'[\s\S]*\['720p', '1080p'\]/);
   assert.match(source, /videos: videoRefs/);
   assert.match(source, /audios: audioRefs/);
   assert.match(source, /图\$\{refs\.length\}\/视\$\{videoRefs\.length\}\/音\$\{audioRefs\.length\}/);

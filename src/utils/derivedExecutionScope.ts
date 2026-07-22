@@ -1,9 +1,13 @@
 import type { Edge, Node } from '@xyflow/react';
 import { EXECUTABLE_NODE_TYPES } from '../config/executableNodeTypes.ts';
 import {
+  buildLoopCustomIterationInputs,
   buildLoopParallelCloneGraph,
+  collectLoopCustomMaterialBuckets,
   collectLoopIterationMaterials,
   isLoopRunRequestId,
+  normalizeLoopCustomMaterialConfig,
+  type LoopCustomIterationInput,
 } from './loopDerivedExecution.ts';
 import {
   compileSubflow,
@@ -445,9 +449,27 @@ export function buildPossibleDerivedExecutionScope(
     const edgesPerClone = sourceGraph.sourceEdges.length + 1;
     const maxItemsByEdges = Math.floor(remainingEdges / edgesPerClone) + 1;
     const maxItems = Math.max(1, Math.min(maxItemsByNodes, maxItemsByEdges));
+    const loopData = isRecord(loop.data) ? loop.data : {};
+    const customParallel = loopData.mode === 'parallel-custom';
     let items;
+    let iterationInputs: LoopCustomIterationInput[] | undefined;
     try {
-      items = collectLoopIterationMaterials(loop, [...nodesById.values()], [...edgesById.values()], maxItems);
+      if (customParallel) {
+        const customConfig = normalizeLoopCustomMaterialConfig(loopData);
+        const buckets = collectLoopCustomMaterialBuckets(
+          loop,
+          [...nodesById.values()],
+          [...edgesById.values()],
+          maxItems,
+        );
+        items = customConfig.driverKind === 'text' ? buckets.texts
+          : customConfig.driverKind === 'video' ? buckets.videos
+            : customConfig.driverKind === 'audio' ? buckets.audios
+              : buckets.images;
+        iterationInputs = buildLoopCustomIterationInputs(buckets, customConfig);
+      } else {
+        items = collectLoopIterationMaterials(loop, [...nodesById.values()], [...edgesById.values()], maxItems);
+      }
     } catch (_) {
       addBlocker(
         maxItemsByNodes <= maxItemsByEdges ? 'loop-clone-node-limit' : 'loop-clone-edge-limit',
@@ -494,6 +516,7 @@ export function buildPossibleDerivedExecutionScope(
         sourceEdges: sourceGraph.sourceEdges,
         entryEdge: sourceGraph.entryEdge,
         items,
+        ...(iterationInputs ? { iterationInputs } : {}),
       });
     } catch (_) {
       addBlocker('loop-clone-build-invalid', [loop.id]);
@@ -708,7 +731,7 @@ export function buildPossibleDerivedExecutionScope(
     else if (scheduler.type === 'loop') {
       includeForwardReachable(scheduler.id);
       const schedulerData = isRecord(scheduler.data) ? scheduler.data : {};
-      if (schedulerData.mode === 'parallel') expandParallelLoopClones(scheduler);
+      if (schedulerData.mode === 'parallel' || schedulerData.mode === 'parallel-custom') expandParallelLoopClones(scheduler);
     } else if (scheduler.type === 'random-route') includeForwardReachable(scheduler.id);
   }
 

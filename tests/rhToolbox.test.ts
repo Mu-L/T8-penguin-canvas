@@ -1187,8 +1187,8 @@ test('global run cancellation is broadcast to RH nodes with the active task targ
 
   assert.match(runBus, /cancelSeq:\s*number/);
   assert.match(runBus, /cancelTargets:\s*string\[\]/);
-  assert.match(runBus, /cancelSeq:\s*s\.cancelSeq \+ 1/);
-  assert.match(runBus, /cancelTargets:\s*targets/);
+  assert.match(runBus, /cancelSeq:\s*state\.cancelSeq \+ 1/);
+  assert.match(runBus, /cancelTargets:\s*targetIds/);
   assert.match(actionBar, /runningIds = useRunBusStore/);
   assert.match(actionBar, /runningIds\.includes\(selectedExe\.id\)/);
   for (const source of [runningHubNode, rhToolsNode, rhToolboxNode]) {

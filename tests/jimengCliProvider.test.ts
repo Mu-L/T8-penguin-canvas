@@ -57,6 +57,7 @@ test('Jimeng provider test accepts a WSL dreamina executable path', async () => 
 
   assert.equal(result.ok, true);
   assert.equal(result.code, 'cli_found');
+  assert.equal(result.supportedCliVersion, '1.4.14');
 });
 
 test('Jimeng video generation builds image2video command when one reference image is provided', async () => {
@@ -230,6 +231,66 @@ test('Jimeng image generation sends Seedream 4.7 model_version from CLI model op
   assert.ok(commands[0].args.includes('--model_version=4.7'));
   assert.ok(commands[0].args.includes('--resolution_type=4k'));
   assert.deepEqual(result.imageUrls, ['/files/output/seedream47.png']);
+});
+
+test('Jimeng image generation maps Seedream 5.0 Pro to exact v1.4.14 CLI spelling and 1K', async () => {
+  const commands: any[] = [];
+  const provider = {
+    id: 'jimeng-cli',
+    protocol: 'jimeng-cli',
+    imageModels: ['seedream-5.0-pro'],
+    jimengConfig: { executablePath: 'dreamina', pollSeconds: 20 },
+  };
+
+  const result = await jimengCli.generateImage(provider, {
+    prompt: 'cinematic portrait',
+    providerModel: 'seedream-5.0-pro',
+    size: '1024x1024',
+  }, {
+    runCli: async (command: string, args: string[]) => {
+      commands.push({ command, args });
+      return { images: ['C:\\tmp\\seedream50pro.png'], submit_id: 'img-50-pro' };
+    },
+    storeOutput: async (value: string) => `/files/output/${value.split('\\').pop()}`,
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(commands[0].args.includes('--model_version=5.0Pro'));
+  assert.ok(commands[0].args.includes('--resolution_type=1k'));
+});
+
+test('Jimeng v1.4.14 custom image size sends paired width and height without ratio', async () => {
+  const commands: any[] = [];
+  const provider = {
+    id: 'jimeng-cli',
+    protocol: 'jimeng-cli',
+    imageModels: ['seedream-5.0-pro'],
+    jimengConfig: { executablePath: 'dreamina', pollSeconds: 20 },
+  };
+
+  const result = await jimengCli.generateImage(provider, {
+    prompt: 'wide establishing shot',
+    providerModel: 'seedream-5.0-pro',
+    size: '1536x768',
+    providerParams: {
+      customSizeEnabled: true,
+      width: 1536,
+      height: 768,
+      resolutionType: '1k',
+    },
+  }, {
+    runCli: async (command: string, args: string[]) => {
+      commands.push({ command, args });
+      return { images: ['C:\\tmp\\custom.png'], submit_id: 'img-custom' };
+    },
+    storeOutput: async (value: string) => `/files/output/${value.split('\\').pop()}`,
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(commands[0].args.includes('--width=1536'));
+  assert.ok(commands[0].args.includes('--height=768'));
+  assert.ok(commands[0].args.includes('--resolution_type=1k'));
+  assert.equal(commands[0].args.some((arg: string) => arg.startsWith('--ratio=')), false);
 });
 
 test('Jimeng image generation passes generate_num for text2image batch output', async () => {
@@ -618,7 +679,7 @@ test('Jimeng Seedance pure multi-image defaults to all-around multimodal referen
   assert.deepEqual(result.videoUrls, ['/files/output/omni.mp4']);
 });
 
-test('Jimeng Seedance multiframe keeps up to 9 image references', async () => {
+test('Jimeng v1.4.14 Seedance multiframe keeps up to 20 images and requires video resolution', async () => {
   const commands: any[] = [];
   const provider = {
     id: 'jimeng-cli',
@@ -626,7 +687,7 @@ test('Jimeng Seedance multiframe keeps up to 9 image references', async () => {
     videoModels: ['seedance2.0_vip'],
     jimengConfig: { executablePath: 'dreamina', pollSeconds: 20 },
   };
-  const images = Array.from({ length: 10 }, (_, i) => `C:\\tmp\\frame-${i + 1}.png`);
+  const images = Array.from({ length: 21 }, (_, i) => `C:\\tmp\\frame-${i + 1}.png`);
 
   const result = await jimengCli.generateVideo(provider, {
     prompt: 'multi frame action',
@@ -649,12 +710,12 @@ test('Jimeng Seedance multiframe keeps up to 9 image references', async () => {
   assert.equal(result.ok, true);
   assert.equal(args[0], 'multiframe2video');
   assert.ok(imagesArg);
-  assert.equal(String(imagesArg).split(',').length, 9);
-  assert.match(String(imagesArg), /frame-9\.png/);
-  assert.doesNotMatch(String(imagesArg), /frame-10\.png/);
+  assert.equal(String(imagesArg).split(',').length, 20);
+  assert.match(String(imagesArg), /frame-20\.png/);
+  assert.doesNotMatch(String(imagesArg), /frame-21\.png/);
   assert.equal(args.some((arg: string) => arg.startsWith('--model_version=')), false);
-  assert.equal(args.some((arg: string) => arg.startsWith('--video_resolution=')), false);
-  assert.equal(args.filter((arg: string) => arg.startsWith('--transition-prompt=')).length, 8);
-  assert.equal(args.filter((arg: string) => arg.startsWith('--transition-duration=')).length, 8);
+  assert.ok(args.includes('--video_resolution=1080p'));
+  assert.equal(args.filter((arg: string) => arg.startsWith('--transition-prompt=')).length, 19);
+  assert.equal(args.filter((arg: string) => arg.startsWith('--transition-duration=')).length, 19);
   assert.deepEqual(result.videoUrls, ['/files/output/frames.mp4']);
 });

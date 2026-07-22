@@ -39,13 +39,15 @@ interface RunBusState {
   mode: 'idle' | 'single' | 'batch';
   batchTotal: number;
   batchDoneCount: number;
-  triggerRun: (id: string, mode?: 'single' | 'batch') => string;
-  triggerRunMany: (ids: string[], mode?: 'single' | 'batch') => Record<string, string>;
+  triggerRun: (id: string, mode?: 'single' | 'batch', runContext?: RunContext | null) => string;
+  triggerRunMany: (ids: string[], mode?: 'single' | 'batch', runContext?: RunContext | null) => Record<string, string>;
   markDone: (id: string, executionToken: string, ok: boolean, error?: string) => boolean;
   cancelAll: () => Promise<void>;
+  cancelRun: (runId: string) => Promise<void>;
   setBatchProgress: (total: number, done: number) => void;
   setActiveRun: (runId: string | null) => void;
   setActiveRunContext: (context: RunContext | null) => void;
+  clearActiveRunContext: (runId: string) => void;
   setActiveNodeRun: (nodeId: string, nodeRunId: string | undefined, executionToken: string) => void;
 }
 
@@ -206,6 +208,35 @@ async function cancelRunExecutions(entries: Array<[string, string]>) {
   await Promise.allSettled(handlers.map(({ entry }) => Promise.resolve().then(() => entry!.handler())));
 }
 
+function removeRunExecutionsFromState(
+  state: RunBusState,
+  entries: Array<[string, string]>,
+) {
+  const acceptedEntries = entries.filter(([nodeId, executionToken]) => state.executionTokens[nodeId] === executionToken);
+  const targetIds = acceptedEntries.map(([nodeId]) => nodeId);
+  const targetSet = new Set(targetIds);
+  const nextExecutionTokens = { ...state.executionTokens };
+  for (const [nodeId] of acceptedEntries) delete nextExecutionTokens[nodeId];
+  const nextRunningIds = state.runningIds.filter((nodeId) => !targetSet.has(nodeId));
+  return {
+    acceptedEntries,
+    patch: {
+      currentRunId: state.currentRunId && targetSet.has(state.currentRunId)
+        ? nextRunningIds[0] || null
+        : state.currentRunId,
+      runningIds: nextRunningIds,
+      executionTokens: nextExecutionTokens,
+      activeNodeRunIds: Object.fromEntries(Object.entries(state.activeNodeRunIds).filter(([nodeId]) => !targetSet.has(nodeId))),
+      activeNodeRunTokens: Object.fromEntries(Object.entries(state.activeNodeRunTokens).filter(([nodeId]) => !targetSet.has(nodeId))),
+      mode: nextRunningIds.length > 0 ? state.mode : 'idle' as const,
+      batchTotal: nextRunningIds.length > 0 ? state.batchTotal : 0,
+      batchDoneCount: nextRunningIds.length > 0 ? state.batchDoneCount : 0,
+      cancelSeq: state.cancelSeq + 1,
+      cancelTargets: targetIds,
+    },
+  };
+}
+
 export const useRunBusStore = create<RunBusState>((set, get) => ({
   activeRunId: null,
   activeRunContext: null,
@@ -220,10 +251,11 @@ export const useRunBusStore = create<RunBusState>((set, get) => ({
   mode: 'idle',
   batchTotal: 0,
   batchDoneCount: 0,
-  triggerRun: (id, mode = 'single') => {
-    assertNodeAuthorizedByRunContext(get().activeRunContext, id);
+  triggerRun: (id, mode = 'single', explicitRunContext) => {
+    const runContext = explicitRunContext === undefined ? get().activeRunContext : explicitRunContext;
+    assertNodeAuthorizedByRunContext(runContext, id);
     const executionToken = createRunExecutionToken();
-    bindRunExecution(id, executionToken, mode, get().activeRunContext);
+    bindRunExecution(id, executionToken, mode, runContext);
     if (typeof window !== 'undefined') taskCompletionSound.primeAudio();
     set((s) => ({
       currentRunId: id,
@@ -236,12 +268,12 @@ export const useRunBusStore = create<RunBusState>((set, get) => ({
     }));
     return executionToken;
   },
-  triggerRunMany: (ids, mode = 'batch') => {
+  triggerRunMany: (ids, mode = 'batch', explicitRunContext) => {
     const uniqueIds = Array.from(new Set(ids));
-    const activeRunContext = get().activeRunContext;
-    uniqueIds.forEach((id) => assertNodeAuthorizedByRunContext(activeRunContext, id));
+    const runContext = explicitRunContext === undefined ? get().activeRunContext : explicitRunContext;
+    uniqueIds.forEach((id) => assertNodeAuthorizedByRunContext(runContext, id));
     const issuedTokens = Object.fromEntries(uniqueIds.map((id) => [id, createRunExecutionToken()]));
-    for (const [id, executionToken] of Object.entries(issuedTokens)) bindRunExecution(id, executionToken, mode, activeRunContext);
+    for (const [id, executionToken] of Object.entries(issuedTokens)) bindRunExecution(id, executionToken, mode, runContext);
     if (typeof window !== 'undefined') taskCompletionSound.primeAudio();
     set((s) => {
       // 并发模式：runningIds 合并去重，currentRunId 取首个 (仅为向后兼容订阅者)
@@ -289,36 +321,37 @@ export const useRunBusStore = create<RunBusState>((set, get) => ({
   cancelAll: async () => {
     const state = get();
     const targets = Array.from(new Set([...(state.currentRunId ? [state.currentRunId] : []), ...state.runningIds]));
-    const targetSet = new Set(targets);
-    const entries = Object.entries(state.executionTokens).filter(([nodeId]) => targetSet.has(nodeId));
-    set((s) => ({
-      currentRunId: null,
-      runningIds: [],
-      executionTokens: {},
-      activeNodeRunIds: {},
-      activeNodeRunTokens: {},
-      mode: 'idle',
-      batchTotal: 0,
-      batchDoneCount: 0,
-      cancelSeq: s.cancelSeq + 1,
-      cancelTargets: targets,
-    }));
-    await cancelRunExecutions(entries);
+    const requestedEntries = Object.entries(state.executionTokens).filter(([nodeId]) => targets.includes(nodeId));
+    const { acceptedEntries, patch } = removeRunExecutionsFromState(state, requestedEntries);
+    set(patch);
+    await cancelRunExecutions(acceptedEntries);
+  },
+  cancelRun: async (runId) => {
+    const state = get();
+    const requestedEntries = Object.entries(state.executionTokens).filter(([nodeId, executionToken]) => {
+      const binding = getRunExecutionBinding(nodeId, executionToken);
+      return binding?.runContext?.runId === runId;
+    });
+    const { acceptedEntries, patch } = removeRunExecutionsFromState(state, requestedEntries);
+    if (acceptedEntries.length === 0) return;
+    set(patch);
+    await cancelRunExecutions(acceptedEntries);
   },
   setBatchProgress: (total, done) =>
     set({ batchTotal: total, batchDoneCount: done, mode: total > 0 ? 'batch' : 'idle' }),
   setActiveRun: (runId) => set((state) => ({
     activeRunId: runId,
     activeRunContext: state.activeRunContext?.runId === runId ? state.activeRunContext : null,
-    activeNodeRunIds: {},
-    activeNodeRunTokens: {},
   })),
   setActiveRunContext: (context) => set({
     activeRunId: context?.runId || null,
     activeRunContext: cloneRunContext(context),
-    activeNodeRunIds: {},
-    activeNodeRunTokens: {},
   }),
+  clearActiveRunContext: (runId) => set((state) => (
+    state.activeRunContext?.runId === runId
+      ? { activeRunId: null, activeRunContext: null }
+      : state
+  )),
   setActiveNodeRun: (nodeId, nodeRunId, executionToken) => set((state) => {
     const activeExecutionToken = state.executionTokens[nodeId];
     const registeredExecutionToken = state.activeNodeRunTokens[nodeId];

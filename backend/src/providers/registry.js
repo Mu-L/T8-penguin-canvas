@@ -80,6 +80,7 @@ const DEFAULT_JIMENG_IMAGE_MODELS = [
   'seedream-4.6',
   'seedream-4.5',
   'seedream-5.0',
+  'seedream-5.0-pro',
   'jimeng-image-2k',
   'jimeng-image-4k',
 ];
@@ -92,7 +93,6 @@ const DEFAULT_JIMENG_VIDEO_MODELS = [
   'seedance2.0',
   'seedance1.5pro',
   'seedance1.0fast',
-  'seedance1.0',
   'jimeng-video-720p',
   'jimeng-video-1080p',
 ];

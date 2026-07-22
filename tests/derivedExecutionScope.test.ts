@@ -263,6 +263,43 @@ test('parallel loop fails closed without a Run request ID or when this run can c
   assert.deepEqual(unstable.loopParallelCloneGroups, []);
 });
 
+test('custom parallel loop preflight expands isolated per-iteration material snapshots', () => {
+  const requestId = 'run:custom-scope:12345678';
+  const nodes = [
+    node('prompts', 'text-split', { textSegments: ['one', 'two', 'three'] }),
+    node('image-source', 'upload', { imageUrls: ['reference.png'] }),
+    node('loop', 'loop', {
+      mode: 'parallel-custom',
+      kind: 'text',
+      parallelCustomStrategies: { text: 'sequence', image: 'fixed' },
+    }),
+    node('provider', 'image'),
+  ];
+  const edges = [
+    edge('prompts-loop', 'prompts', 'loop'),
+    edge('image-loop', 'image-source', 'loop'),
+    edge('loop-provider', 'loop', 'provider'),
+  ];
+
+  const scope = buildPossibleDerivedExecutionScope({ nodes, edges, executionNodeIds: ['loop'], requestId });
+  const secondProvider = loopParallelCloneNodeId('loop', requestId, 1, 0);
+  const thirdProvider = loopParallelCloneNodeId('loop', requestId, 2, 0);
+
+  assert.equal(scope.coverageComplete, true);
+  assert.deepEqual(scope.loopParallelCloneGroups, [{
+    schedulerNodeId: 'loop',
+    itemCount: 3,
+    cloneCount: 2,
+    cloneNodeIds: [secondProvider, thirdProvider].sort(),
+  }]);
+  const secondData = scope.nodes.find((item) => item.id === secondProvider)?.data as any;
+  const thirdData = scope.nodes.find((item) => item.id === thirdProvider)?.data as any;
+  assert.deepEqual(secondData.__loopCustomInput.texts.map((item: any) => item.url), ['two']);
+  assert.deepEqual(secondData.__loopCustomInput.images.map((item: any) => item.url), ['reference.png']);
+  assert.deepEqual(thirdData.__loopCustomInput.texts.map((item: any) => item.url), ['three']);
+  assert.deepEqual(thirdData.__loopCustomInput.images.map((item: any) => item.url), ['reference.png']);
+});
+
 test('non-embedded dependency is fail-closed until the exact fixed definition is prefetched', () => {
   const inner = definition('remote-inner', [node('remote-provider', 'video')], [], { version: 7 });
   const outer = definition('remote-outer', [node('remote-child', 'subflow', {

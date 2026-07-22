@@ -37,6 +37,7 @@ import { useGroupBusStore, GROUP_COLORS, DEFAULT_GROUP_NAME } from '../stores/gr
 import { useRadialMenuStore } from '../stores/radialMenu';
 import { topologicalSort } from '../utils/topologicalSort';
 import { excludeRandomRouteBranchDescendants } from '../utils/randomRoute';
+import { createRunLaunchQueue } from '../utils/runLaunchQueue';
 import { installGlobalWheelBlockObserver } from '../utils/wheelBlock';
 // v1.2.10.5: 节点落点防重叠解析器 (单节点/整组双模式 + 兜底+toast+飞镜)
 import {
@@ -49,9 +50,11 @@ import {
 } from '../utils/nodePlacement';
 import {
   expandClipboardNodesForGroups,
+  markSystemClipboardAsCanvasNodes,
   offsetClipboardNodes,
   positionClipboardNodesAtAnchor,
   remapPastedGroupMemberIds,
+  shouldPreferInternalNodeClipboardPaste,
 } from '../utils/canvasClipboard';
 import {
   createOutputDataFromItems,
@@ -102,7 +105,7 @@ import {
   parseNodeSerialInput,
 } from '../utils/nodeSerialIds';
 import { resolveConnectionByNodeSerialId } from '../utils/connectByNodeSerialId';
-import { ensureCanvasEntityUids } from '../utils/canvasEntityIdentity';
+import { cloneCanvasEntityAsNew, ensureCanvasEntityUids } from '../utils/canvasEntityIdentity';
 import { formatShortcutList, matchesAnyShortcut } from '../utils/keyboardShortcuts';
 import { applyNodeAlignment, type NodeAlignAction } from '../utils/nodeAlign';
 import {
@@ -172,6 +175,7 @@ import {
   buildPhotoshopSendNodeSpecs,
   normalizePhotoshopResultPayload,
 } from '../utils/photoshopBridge';
+import { isAltModifierActive } from '../utils/canvasInteraction';
 import * as api from '../services/api';
 import { logBus } from '../stores/logs';
 import CanvasToolbar from './CanvasToolbar';
@@ -315,6 +319,11 @@ type ProjectRunTerminalStatus = 'succeeded' | 'failed' | 'stopped';
 interface PreparedRunExecution {
   executionContexts: Record<string, RunNodeExecutionContext>;
   finalize: (status: ProjectRunTerminalStatus) => Promise<void> | void;
+}
+
+interface ActiveCanvasRunControl {
+  cancelled: boolean;
+  cancelPersistence: Promise<void>;
 }
 
 interface RunNodesByOrderOptions {
@@ -1636,8 +1645,8 @@ function withNodeSerialBadge(Component: ComponentType<any>): ComponentType<any> 
 
 // 节点初始 data(用于区分共享组件的 kind/preset/model 等)
 const INITIAL_DATA: Record<string, Record<string, any>> = {
-  image: { model: 'gpt-image-2', aspectRatio: '1:1', sizeLevel: '1K', referenceImages: [], imageOnlyOutput: true, reuseResult: false },
-  edit: { mode: 'edit', model: 'gpt-image-2', aspectRatio: '1:1', sizeLevel: '1K', referenceImages: [], imageOnlyOutput: true, reuseResult: false },
+  image: { model: 'gpt-image-2', aspectRatio: '1:1', sizeLevel: '1K', gptImageQuality: 'auto', gptImageModeration: 'auto', referenceImages: [], imageOnlyOutput: true, reuseResult: false },
+  edit: { mode: 'edit', model: 'gpt-image-2', aspectRatio: '1:1', sizeLevel: '1K', gptImageQuality: 'auto', gptImageModeration: 'auto', referenceImages: [], imageOnlyOutput: true, reuseResult: false },
   video: { reuseResult: false },
   'video-edit': { ...DEFAULT_VIDEO_EDIT_DATA, clips: [], settings: { ...DEFAULT_VIDEO_EDIT_DATA.settings }, job: { ...DEFAULT_VIDEO_EDIT_DATA.job } },
   seedance: {
@@ -4048,7 +4057,10 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   }, [flashFarmMiniMapRouteHint, getFarmViewportCenter]);
 
   // 选中节点 / 剪贴板
-  const [selectedCount, setSelectedCount] = useState(0);
+  const selectedCount = useMemo(
+    () => nodes.reduce((count, node) => count + (node.selected ? 1 : 0), 0),
+    [nodes],
+  );
   const clipboardRef = useRef<{ nodes: Node[]; edges: Edge[]; incomingEdges?: Edge[]; outgoingEdges?: Edge[] } | null>(null);
   const [clipboardCount, setClipboardCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -4077,6 +4089,41 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   const altDragCloneRef = useRef<{
     placeholderIds: Map<string, string>; // origId -> placeholderId
   } | null>(null);
+  const altKeyPressedRef = useRef(false);
+  const altNodeDragIntentRef = useRef(false);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Alt') altKeyPressedRef.current = true;
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.key === 'Alt') altKeyPressedRef.current = false;
+    };
+    const latchNodePointerDown = (event: PointerEvent | MouseEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      altNodeDragIntentRef.current = Boolean(target?.closest('.react-flow__node'))
+        && isAltModifierActive(event, altKeyPressedRef.current);
+    };
+    const clearAltState = () => {
+      altKeyPressedRef.current = false;
+      altNodeDragIntentRef.current = false;
+    };
+
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('keyup', onKeyUp, true);
+    window.addEventListener('pointerdown', latchNodePointerDown, true);
+    window.addEventListener('mousedown', latchNodePointerDown, true);
+    window.addEventListener('blur', clearAltState);
+    document.addEventListener('visibilitychange', clearAltState);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+      window.removeEventListener('pointerdown', latchNodePointerDown, true);
+      window.removeEventListener('mousedown', latchNodePointerDown, true);
+      window.removeEventListener('blur', clearAltState);
+      document.removeEventListener('visibilitychange', clearAltState);
+    };
+  }, []);
 
   const setConnectionPanMode = useCallback((enabled: boolean) => {
     connectionPanModeRef.current = enabled;
@@ -4407,18 +4454,15 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
 
   // 批量运行状态
   const [isRunning, setIsRunning] = useState(false);
-  const cancelRunRef = useRef(false);
-  const cancelPersistenceRef = useRef<Promise<void>>(Promise.resolve());
+  const activeCanvasRunsRef = useRef(new Set<ActiveCanvasRunControl>());
+  const activeRunPlansRef = useRef(new Map<symbol, Set<string>>());
+  const runLaunchQueueRef = useRef(createRunLaunchQueue());
   const [runPreflightModal, setRunPreflightModal] = useState<{
     loading: boolean;
     preview: RunActionPreview | null;
   } | null>(null);
   const runPreflightAbortRef = useRef<AbortController | null>(null);
   const runPreflightPendingRef = useRef(false);
-  // One synchronous CAS spans preflight, Run persistence, Provider execution,
-  // and terminal writes. React state alone leaves an await window where a
-  // second click can create another Run and overwrite the active RunContext.
-  const runExecutionGateRef = useRef<symbol | null>(null);
   const runIntentWorkerIdRef = useRef('');
   if (!runIntentWorkerIdRef.current) {
     const nonce = typeof globalThis.crypto?.randomUUID === 'function'
@@ -8114,16 +8158,21 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
 
   // ===== 复制 / 粘贴 / 删除 =====
   const handleCopy = useCallback(() => {
-    const selectedNodes = nodes.filter((n) => n.selected);
-    if (selectedNodes.length === 0) return;
-    const sel = expandClipboardNodesForGroups(selectedNodes, nodes) as Node[];
+    const currentNodes = nodesRef.current;
+    const currentEdges = edgesRef.current;
+    const selectedNodes = currentNodes.filter((n) => n.selected);
+    if (selectedNodes.length === 0) {
+      logBus.warn('没有检测到选中的节点，请重新点选节点后再复制', '画布剪贴板');
+      return false;
+    }
+    const sel = expandClipboardNodesForGroups(selectedNodes, currentNodes) as Node[];
     const ids = new Set(sel.map((n) => n.id));
     // 内部边: source/target 都在选中集合 —— 普通粘贴/快速复制会使用
-    const selEdges = edges.filter((e) => ids.has(e.source) && ids.has(e.target));
+    const selEdges = currentEdges.filter((e) => ids.has(e.source) && ids.has(e.target));
     // 外部入边: target 在选中集合,source 不在 —— Ctrl+Shift+V 连边粘贴使用
-    const incomingEdges = edges.filter((e) => !ids.has(e.source) && ids.has(e.target));
+    const incomingEdges = currentEdges.filter((e) => !ids.has(e.source) && ids.has(e.target));
     // 外部出边: source 在选中集合,target 不在
-    const outgoingEdges = edges.filter((e) => ids.has(e.source) && !ids.has(e.target));
+    const outgoingEdges = currentEdges.filter((e) => ids.has(e.source) && !ids.has(e.target));
     clipboardRef.current = {
       nodes: JSON.parse(JSON.stringify(sel)),
       edges: JSON.parse(JSON.stringify(selEdges)),
@@ -8132,7 +8181,10 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     };
     internalClipboardCopiedAtRef.current = Date.now();
     setClipboardCount(sel.length);
-  }, [nodes, edges]);
+    void markSystemClipboardAsCanvasNodes(sel.length);
+    logBus.success(`已复制 ${sel.length} 个节点，可直接按 Ctrl+V 粘贴`, '画布剪贴板');
+    return true;
+  }, []);
 
   // 普通粘贴: 仅复制选中节点 + 其内部边(与原逻辑一致)
   // withLinks=true: Ctrl+Shift+V 额外复制原节点的外部入边/出边 —— 将新节点与原画布上还存在的邻居连接
@@ -8141,7 +8193,11 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       incomingEdges?: Edge[];
       outgoingEdges?: Edge[];
     }) | null;
-    if (!cb || cb.nodes.length === 0) return;
+    if (!cb || cb.nodes.length === 0) {
+      logBus.warn('节点剪贴板为空，请先选择节点并复制', '画布剪贴板');
+      return false;
+    }
+    const currentNodes = nodesRef.current;
     // 运行时字段黑名单(复制/粘贴时必须重置,避免新节点显示为进行中/携带旧 taskId)
     const RUNTIME_KEYS = [
       'status', 'taskId', 'progress', 'error',
@@ -8158,31 +8214,31 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     const newNodes = cb.nodes.map((n, idx) => {
       const newId = `${n.type}-${stamp}-${idx}-${Math.random().toString(36).slice(2, 5)}`;
       idMap.set(n.id, newId);
-      return {
+      return cloneCanvasEntityAsNew({
         ...n,
         id: newId,
         selected: true,
         data: sanitize(n.data),
-      } as Node;
+      } as Node, 'node');
     });
     const remappedGroupNodes = remapPastedGroupMemberIds(newNodes, idMap) as Node[];
     const positionedNodes =
       placementMode === 'offset'
         ? offsetClipboardNodes(remappedGroupNodes, QUICK_DUPLICATE_OFFSET)
         : positionClipboardNodesAtAnchor(remappedGroupNodes, resolveClipboardPasteAnchor());
-    const assignedNewNodes = assignActiveNodeSerials(positionedNodes, nodes);
+    const assignedNewNodes = assignActiveNodeSerials(positionedNodes, currentNodes);
     // 内部边: source/target 都映射到新节点
     const newInternalEdges = cb.edges
       .map((e, idx) => {
         const s = idMap.get(e.source);
         const t = idMap.get(e.target);
         if (!s || !t) return null;
-        return {
+        return cloneCanvasEntityAsNew({
           ...e,
           id: `e-${stamp}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
           source: s,
           target: t,
-        } as Edge;
+        } as Edge, 'edge');
       })
       .filter(Boolean) as Edge[];
     let extraEdges: Edge[] = [];
@@ -8190,29 +8246,29 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       // 外部入边: source 保留(原节点须仍在画布), target 映射为新节点
       const incoming = (cb.incomingEdges || [])
         .map((e, idx) => {
-          const sourceStillExists = nodes.some((n) => n.id === e.source);
+          const sourceStillExists = currentNodes.some((n) => n.id === e.source);
           const t = idMap.get(e.target);
           if (!sourceStillExists || !t) return null;
-          return {
+          return cloneCanvasEntityAsNew({
             ...e,
             id: `e-in-${stamp}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
             source: e.source,
             target: t,
-          } as Edge;
+          } as Edge, 'edge');
         })
         .filter(Boolean) as Edge[];
       // 外部出边: source 映射为新节点, target 保留
       const outgoing = (cb.outgoingEdges || [])
         .map((e, idx) => {
-          const targetStillExists = nodes.some((n) => n.id === e.target);
+          const targetStillExists = currentNodes.some((n) => n.id === e.target);
           const s = idMap.get(e.source);
           if (!targetStillExists || !s) return null;
-          return {
+          return cloneCanvasEntityAsNew({
             ...e,
             id: `e-out-${stamp}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
             source: s,
             target: e.target,
-          } as Edge;
+          } as Edge, 'edge');
         })
         .filter(Boolean) as Edge[];
       extraEdges = [...incoming, ...outgoing];
@@ -8220,10 +8276,12 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     // 取消其他节点的选中,新粘贴节点设为选中
     setNodes((prev) => [...prev.map((n) => ({ ...n, selected: false })), ...assignedNewNodes]);
     setEdges((prev) => [...prev, ...newInternalEdges, ...extraEdges]);
-  }, [nodes, assignActiveNodeSerials, resolveClipboardPasteAnchor]);
+    logBus.success(`已粘贴 ${assignedNewNodes.length} 个节点`, '画布剪贴板');
+    return true;
+  }, [assignActiveNodeSerials, resolveClipboardPasteAnchor]);
 
   const handleDuplicate = useCallback(() => {
-    handleCopy();
+    if (!handleCopy()) return;
     // 在 copy 完成后下一帧执行 paste(由于上面的 setClipboardCount 是异步)
     setTimeout(() => handlePaste(false, 'offset'), 0);
   }, [handleCopy, handlePaste]);
@@ -8677,13 +8735,23 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   // 通用: 在指定节点子集上拓扑排序 + 串行调 runBus
   const runNodesByOrder = useCallback(
     async (subNodes: Node[], subEdges: Edge[], options: RunNodesByOrderOptions = {}) => {
-      if (runExecutionGateRef.current) {
-        logBus.warn('已有运行正在体检、持久化或执行，请等待当前运行结束', '运行门禁');
-        return -1;
-      }
-      const executionGateToken = Symbol('run-execution-gate');
-      runExecutionGateRef.current = executionGateToken;
+      const runControl: ActiveCanvasRunControl = {
+        cancelled: false,
+        cancelPersistence: Promise.resolve(),
+      };
+      activeCanvasRunsRef.current.add(runControl);
+      setIsRunning(true);
+      const releaseLaunchLock = await runLaunchQueueRef.current.acquire();
+      let launchLockReleased = false;
+      const releaseLaunch = () => {
+        if (launchLockReleased) return;
+        launchLockReleased = true;
+        releaseLaunchLock();
+      };
+      const runReservationToken = Symbol('run-plan-reservation');
+      let planReserved = false;
       try {
+      if (runControl.cancelled) return -1;
       options = {
         ...options,
         requestId: options.requestId || createCanvasNodeRunRequestId('canvas', options.actionKind || 'run'),
@@ -8701,6 +8769,17 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       }
       const order = requestedOrder || topologicalSort(plannedSubgraph.nodes, plannedSubgraph.edges, EXECUTABLE_NODE_TYPES);
       if (order.length === 0) return 0;
+      const reservedNodeIds = new Set(Array.from(activeRunPlansRef.current.values()).flatMap((ids) => [...ids]));
+      const conflictingNodeIds = order.filter((nodeId) => reservedNodeIds.has(nodeId));
+      if (conflictingNodeIds.length > 0) {
+        logBus.warn(
+          `以下节点已有任务在运行，未重复提交：${conflictingNodeIds.join('、')}`,
+          '并发运行',
+        );
+        return -1;
+      }
+      activeRunPlansRef.current.set(runReservationToken, new Set(order));
+      planReserved = true;
       const authorizedScope = await authorizeRunNodes(
         options.preflightContextNodes || plannedSubgraph.nodes,
         options.preflightContextEdges || plannedSubgraph.edges,
@@ -8788,7 +8867,13 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
           throw new Error('主机返回了不匹配的运行租约，已停止执行');
         }
       }
-      const { triggerRun, setBatchProgress, cancelAll, setActiveRunContext } = useRunBusStore.getState();
+      const {
+        triggerRun,
+        setBatchProgress,
+        cancelRun,
+        setActiveRunContext,
+        clearActiveRunContext,
+      } = useRunBusStore.getState();
       let unregisterExecutionContexts: () => void = () => undefined;
       let unregisterPreparedExecutionContexts: () => void = () => undefined;
       let stopRunIntentCancellationMonitor: () => void = () => undefined;
@@ -8953,8 +9038,6 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
           failedCount += 1;
           throw new Error('准备运行期间画布或执行输入发生变化，已停止调用 Provider');
         }
-        cancelRunRef.current = false;
-        cancelPersistenceRef.current = Promise.resolve();
         unregisterExecutionContexts = options.executionContexts
           ? registerRunNodeExecutionContexts(options.executionContexts)
           : () => undefined;
@@ -8962,9 +9045,8 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
           unregisterPreparedExecutionContexts = registerRunNodeExecutionContexts(preparedRunExecution.executionContexts);
         }
         setActiveRunContext(runContext);
-        setIsRunning(true);
         executionStarted = true;
-        setBatchProgress(order.length, 0);
+        if (order.length > 1) setBatchProgress(order.length, 0);
         if (options.runIntentId && options.runIntentSnapshot) {
           const monitorAbort = new AbortController();
           let monitorTimer: number | null = null;
@@ -8979,8 +9061,9 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
                 { signal: monitorAbort.signal },
               );
               if (current.cancelRequestedAt || current.status === 'cancelled') {
-                cancelRunRef.current = true;
-                await cancelAll();
+                runControl.cancelled = true;
+                runControl.cancelPersistence = cancelRun(runContext!.runId);
+                await runControl.cancelPersistence;
                 return;
               }
             } catch (error) {
@@ -8997,7 +9080,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
           void checkCancellation();
         }
         for (let i = 0; i < order.length; i++) {
-          if (cancelRunRef.current) break;
+          if (runControl.cancelled) break;
           const id = order[i];
           const doneResult = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
             let done = false;
@@ -9010,20 +9093,25 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
               resolve(result);
             };
             const unsub = useRunBusStore.subscribe((state) => {
-              if (cancelRunRef.current) finish({ ok: false, error: 'stopped' });
+              if (runControl.cancelled) finish({ ok: false, error: 'stopped' });
               else if (matchesRunCompletion(state.lastDone, id, executionToken)) finish({ ok: state.lastDone.ok, error: state.lastDone.error });
               else if (executionToken && state.executionTokens[id] !== executionToken) finish({ ok: false, error: 'superseded' });
             });
             // 安全超时 60 分钟，避免图像/视频/SD2.0/音频长轮询被批量运行提前截断。
             const timer = window.setTimeout(() => finish({ ok: false, error: 'timeout' }), 60 * 60 * 1000);
-            executionToken = triggerRun(id, order.length === 1 && !options.replayMode ? 'single' : 'batch');
+            executionToken = triggerRun(
+              id,
+              order.length === 1 && !options.replayMode ? 'single' : 'batch',
+              runContext,
+            );
+            releaseLaunch();
             const current = useRunBusStore.getState();
-            if (cancelRunRef.current) finish({ ok: false, error: 'stopped' });
+            if (runControl.cancelled) finish({ ok: false, error: 'stopped' });
             else if (matchesRunCompletion(current.lastDone, id, executionToken)) finish({ ok: current.lastDone.ok, error: current.lastDone.error });
             else if (current.executionTokens[id] !== executionToken) finish({ ok: false, error: 'superseded' });
           });
           if (!doneResult.ok) failedCount += 1;
-          setBatchProgress(order.length, i + 1);
+          if (order.length > 1) setBatchProgress(order.length, i + 1);
         }
         return order.length;
       } catch (error) {
@@ -9031,11 +9119,11 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         throw error;
       } finally {
         stopRunIntentCancellationMonitor();
-        let status: ProjectRunTerminalStatus = cancelRunRef.current ? 'stopped' : failedCount > 0 ? 'failed' : 'succeeded';
+        let status: ProjectRunTerminalStatus = runControl.cancelled ? 'stopped' : failedCount > 0 ? 'failed' : 'succeeded';
         let finalizationError: unknown = null;
-        if (cancelRunRef.current) {
+        if (runControl.cancelled) {
           try {
-            await cancelPersistenceRef.current;
+            await runControl.cancelPersistence;
           } catch (error) {
             failedCount += 1;
             finalizationError = error;
@@ -9087,12 +9175,8 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         unregisterPreparedExecutionContexts();
         unregisterExecutionContexts();
         if (executionStarted) {
-          setActiveRunContext(null);
-          void cancelAll();
-          setIsRunning(false);
+          if (runId) clearActiveRunContext(runId);
         }
-        cancelRunRef.current = false;
-        cancelPersistenceRef.current = Promise.resolve();
         if (finalizationError) {
           throw new Error(
             `运行终态证据持久化失败：${finalizationError instanceof Error ? finalizationError.message : String(finalizationError)}`,
@@ -9100,7 +9184,12 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         }
       }
       } finally {
-        if (runExecutionGateRef.current === executionGateToken) runExecutionGateRef.current = null;
+        releaseLaunch();
+        if (planReserved) activeRunPlansRef.current.delete(runReservationToken);
+        activeCanvasRunsRef.current.delete(runControl);
+        const hasActiveRuns = activeCanvasRunsRef.current.size > 0;
+        setIsRunning(hasActiveRuns);
+        if (!hasActiveRuns) useRunBusStore.getState().setBatchProgress(0, 0);
       }
     },
     [authorizeRunNodes, captureRunExecutionSnapshot]
@@ -9120,7 +9209,6 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   // 组执行: 仅在选中的节点子集上运行(仅保留子集内部边作为依赖)
   const handleRunGroup = useCallback(
     async (ids: string[], options: RunNodesByOrderOptions = {}) => {
-      if (isRunning) return;
       const idSet = new Set(ids);
       const subNodes = nodes.filter((n) => idSet.has(n.id));
       const subEdges = edges.filter((e) => idSet.has(e.source) && idSet.has(e.target));
@@ -9137,7 +9225,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         actionKind: options.actionKind || (executable.length === 1 ? 'run-single' : 'run-group'),
       });
     },
-    [isRunning, nodes, edges, runNodesByOrder]
+    [nodes, edges, runNodesByOrder]
   );
 
   useEffect(() => {
@@ -9529,7 +9617,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     const poll = async () => {
       if (stopped) return;
       try {
-        if (!runIntentWorkerBusyRef.current && !runExecutionGateRef.current) {
+        if (!runIntentWorkerBusyRef.current && !runLaunchQueueRef.current.busy) {
           const now = Date.now();
           const intents = await api.listCollaborationRunIntents('accepted', activeProjectId, activeId);
           const candidate = intents
@@ -9570,7 +9658,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       isDraggingRef.current = true;
       setNodeDragging(true);
       altDragCloneRef.current = null;
-      if (!e.altKey) return;
+      if (!isAltModifierActive(e, altNodeDragIntentRef.current || altKeyPressedRef.current)) return;
       // ALT 按下: 确定被拖动的节点集合
       const selected = nodes.filter((n) => n.selected);
       const targets = selected.length > 0 && selected.some((n) => n.id === node.id)
@@ -9579,10 +9667,12 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       // 在原位创建占位克隆(临时 ID, 同样外观 / 数据, 但不选中)
       const stamp = Date.now();
       const placeholderIds = new Map<string, string>();
+      const copyIds = new Set<string>();
       const placeholders: Node[] = [];
       targets.forEach((n, idx) => {
         const phId = `_alt-ph-${stamp}-${idx}-${Math.random().toString(36).slice(2, 5)}`;
         placeholderIds.set(n.id, phId);
+        copyIds.add(n.id);
         placeholders.push({
           ...n,
           id: phId,
@@ -9591,7 +9681,14 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
           data: JSON.parse(JSON.stringify(n.data || {})),
         } as Node);
       });
-      setNodes((prev) => [...prev, ...placeholders]);
+      // 占位节点代表留在原位的原实体，继续保留原 entityUid；被拖走的节点
+      // 从这一刻起就是新副本，必须在二者同时进入状态前获得全新的 entityUid。
+      setNodes((prev) => [
+        ...prev.map((existing) => (
+          copyIds.has(existing.id) ? cloneCanvasEntityAsNew(existing, 'node') : existing
+        )),
+        ...placeholders,
+      ]);
       // 立即将连接原节点的边转移到占位克隆上,这样拖动过程中连线留在原位不动
       setEdges((prev) => prev.map((e2) => {
         let s = e2.source;
@@ -9743,9 +9840,10 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   }, [deleteReq?.ts]);
 
   const handleCancelRun = useCallback(() => {
-    if (cancelRunRef.current) return;
-    cancelRunRef.current = true;
-    cancelPersistenceRef.current = useRunBusStore.getState().cancelAll();
+    if (activeCanvasRunsRef.current.size === 0) return;
+    for (const runControl of activeCanvasRunsRef.current) runControl.cancelled = true;
+    const cancellation = useRunBusStore.getState().cancelAll();
+    for (const runControl of activeCanvasRunsRef.current) runControl.cancelPersistence = cancellation;
   }, []);
 
   const handleAlignSelection = useCallback((action: NodeAlignAction, ids?: string[]) => {
@@ -9899,6 +9997,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
 
   const onNodeDragStop = useCallback((_e: any, node: Node) => {
     isDraggingRef.current = false;
+    altNodeDragIntentRef.current = false;
     setDragSaveTick((tick) => tick + 1);
     releaseEdgeMotionSoon(setNodeDragging);
     setGuides({ vertical: [], horizontal: [] });
@@ -9967,7 +10066,12 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
             const s = newIdMap.get(e2.source);
             const t = newIdMap.get(e2.target);
             if (!s || !t) return null;
-            return { ...e2, id: `e-alt-${stamp}-${idx}-${Math.random().toString(36).slice(2, 5)}`, source: s, target: t } as Edge;
+            return cloneCanvasEntityAsNew({
+              ...e2,
+              id: `e-alt-${stamp}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
+              source: s,
+              target: t,
+            } as Edge, 'edge');
           })
           .filter(Boolean) as Edge[];
         return cloneEdges.length > 0 ? [...restored, ...cloneEdges] : restored;
@@ -10512,9 +10616,6 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       }
       setNodes((nds) => {
         const next = applyNodeChanges(visibleChanges, nds);
-        // 同步选中数(用 next 计算更准确)
-        const selCount = next.reduce((acc, n) => acc + (n.selected ? 1 : 0), 0);
-        setSelectedCount(selCount);
         return next;
       });
     },
@@ -12282,12 +12383,14 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         .join('||');
       const now = Date.now();
       const last = lastExternalMediaPasteRef.current;
-      const shouldReleaseConsumedExternalMedia =
-        Boolean(
-          last?.mediaSignature === mediaSignature &&
-          clipboardRef.current?.nodes?.length &&
-          internalClipboardCopiedAtRef.current > last.at
-        );
+      const shouldReleaseConsumedExternalMedia = shouldPreferInternalNodeClipboardPaste({
+        hasInternalNodes: Boolean(clipboardRef.current?.nodes?.length),
+        internalCopiedAt: internalClipboardCopiedAtRef.current,
+        now,
+        mediaSignature,
+        lastExternalMediaSignature: last?.mediaSignature,
+        lastExternalPasteAt: last?.at,
+      });
       if (shouldReleaseConsumedExternalMedia) {
         e.preventDefault();
         e.stopPropagation();
@@ -12374,13 +12477,53 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
 
   // ===== 全局快捷键 =====
   useEffect(() => {
+    const clipboardHandledEvents = new WeakSet<KeyboardEvent>();
+    const isEditingEvent = (event: KeyboardEvent) => {
+      const tag = (event.target as HTMLElement | null)?.tagName?.toLowerCase();
+      return tag === 'input'
+        || tag === 'textarea'
+        || tag === 'select'
+        || (event.target as HTMLElement | null)?.isContentEditable;
+    };
+    const scheduleInternalNodePaste = () => {
+      if (!clipboardRef.current?.nodes?.length) return false;
+      // Let the real paste event fire first. A fresh node copy wins over stale
+      // system media; otherwise genuine screenshots/files can still be pasted.
+      if (internalPasteTimerRef.current) window.clearTimeout(internalPasteTimerRef.current);
+      internalPasteTimerRef.current = window.setTimeout(() => {
+        internalPasteTimerRef.current = null;
+        const lastExternalPaste = lastExternalMediaPasteRef.current;
+        if (
+          lastExternalPaste
+          && Date.now() - lastExternalPaste.at < EXTERNAL_MEDIA_PASTE_DEDUPE_MS
+          && internalClipboardCopiedAtRef.current <= lastExternalPaste.at
+        ) return;
+        handlePaste(false);
+      }, INTERNAL_NODE_PASTE_DELAY_MS);
+      return true;
+    };
+    const onClipboardKeyCapture = (e: KeyboardEvent) => {
+      if (isEditingEvent(e)) return;
+      if (matchesAnyShortcut(shortcuts['canvas.copy'], e)) {
+        clipboardHandledEvents.add(e);
+        e.preventDefault();
+        handleCopy();
+        return;
+      }
+      if (matchesAnyShortcut(shortcuts['canvas.paste-links'], e)) {
+        clipboardHandledEvents.add(e);
+        e.preventDefault();
+        handlePaste(true);
+        return;
+      }
+      if (matchesAnyShortcut(shortcuts['canvas.paste'], e) && scheduleInternalNodePaste()) {
+        clipboardHandledEvents.add(e);
+      }
+    };
     const onKey = (e: KeyboardEvent) => {
+      if (clipboardHandledEvents.has(e)) return;
       // 当焦点在表单元素中时不拦截
-      const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
-      const isEditing =
-        tag === 'input' ||
-        tag === 'textarea' ||
-        (e.target as HTMLElement | null)?.isContentEditable;
+      const isEditing = isEditingEvent(e);
       // Undo / Redo 全局拦截(即使在输入框,Ctrl+Z 也属于画布,但更友好的是输入框内不抢占)
       if (matchesAnyShortcut(shortcuts['canvas.undo'], e)) {
         if (isEditing) return;
@@ -12403,21 +12546,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         e.preventDefault();
         handlePaste(true);
       } else if (matchesAnyShortcut(shortcuts['canvas.paste'], e)) {
-        if (!clipboardRef.current?.nodes?.length) return;
-        // Let the real paste event fire first. Some browsers suppress clipboard
-        // files when Ctrl+V keydown is prevented, so screenshots/files must win
-        // over the in-memory node clipboard.
-        if (internalPasteTimerRef.current) window.clearTimeout(internalPasteTimerRef.current);
-        internalPasteTimerRef.current = window.setTimeout(() => {
-          internalPasteTimerRef.current = null;
-          const lastExternalPaste = lastExternalMediaPasteRef.current;
-          if (
-            lastExternalPaste &&
-            Date.now() - lastExternalPaste.at < EXTERNAL_MEDIA_PASTE_DEDUPE_MS &&
-            internalClipboardCopiedAtRef.current <= lastExternalPaste.at
-          ) return;
-          handlePaste(false);
-        }, INTERNAL_NODE_PASTE_DELAY_MS);
+        scheduleInternalNodePaste();
       } else if (matchesAnyShortcut(shortcuts['canvas.duplicate'], e)) {
         e.preventDefault();
         handleDuplicate();
@@ -12487,8 +12616,10 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         setNodes((prev) => prev.map((n) => ({ ...n, selected: true })));
       }
     };
+    window.addEventListener('keydown', onClipboardKeyCapture, true);
     window.addEventListener('keydown', onKey);
     return () => {
+      window.removeEventListener('keydown', onClipboardKeyCapture, true);
       window.removeEventListener('keydown', onKey);
       if (internalPasteTimerRef.current) {
         window.clearTimeout(internalPasteTimerRef.current);

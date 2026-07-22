@@ -190,6 +190,47 @@ test('active RunContext refuses execution tokens outside the final preflight all
   assert.equal(typeof token, 'string');
 });
 
+test('parallel nodes keep their own explicit RunContext while the active context changes', () => {
+  const firstContext = context('run-first', ['node-a']);
+  const secondContext = context('run-second', ['node-b']);
+  store.getState().setActiveRunContext(firstContext);
+  const firstToken = store.getState().triggerRun('node-a', 'single', firstContext);
+  store.getState().setActiveNodeRun('node-a', 'node-run-a', firstToken);
+
+  store.getState().setActiveRunContext(secondContext);
+  const secondToken = store.getState().triggerRun('node-b', 'single', secondContext);
+
+  assert.equal(runBus.getRunExecutionBinding('node-a', firstToken).runContext.runId, 'run-first');
+  assert.equal(runBus.getRunExecutionBinding('node-b', secondToken).runContext.runId, 'run-second');
+  assert.equal(store.getState().activeNodeRunIds['node-a'], 'node-run-a');
+  assert.deepEqual(store.getState().runningIds, ['node-a', 'node-b']);
+
+  store.getState().clearActiveRunContext('run-first');
+  assert.equal(store.getState().activeRunContext.runId, 'run-second');
+  store.getState().clearActiveRunContext('run-second');
+  assert.equal(store.getState().activeRunContext, null);
+});
+
+test('cancelRun stops only tokens bound to that durable Run', async () => {
+  const firstContext = context('run-first', ['node-a']);
+  const secondContext = context('run-second', ['node-b']);
+  const firstToken = store.getState().triggerRun('node-a', 'single', firstContext);
+  const secondToken = store.getState().triggerRun('node-b', 'single', secondContext);
+  const calls: string[] = [];
+  runBus.registerRunExecutionCancelHandler('node-a', firstToken, () => calls.push('first-stopped'));
+  runBus.registerRunExecutionCancelHandler('node-b', secondToken, () => calls.push('second-stopped'));
+
+  await store.getState().cancelRun('run-first');
+
+  assert.deepEqual(calls, ['first-stopped']);
+  assert.equal(runBus.isRunExecutionCancelled(firstToken), true);
+  assert.equal(runBus.isRunExecutionCancelled(secondToken), false);
+  assert.equal(store.getState().executionTokens['node-a'], undefined);
+  assert.equal(store.getState().executionTokens['node-b'], secondToken);
+  assert.deepEqual(store.getState().runningIds, ['node-b']);
+  assert.deepEqual(store.getState().cancelTargets, ['node-a']);
+});
+
 test('cancelAll awaits registered persistence and late handlers still see cancelled tokens', async () => {
   store.getState().setActiveRunContext(context('run-cancel'));
   const token = store.getState().triggerRun('node-a');
@@ -234,4 +275,9 @@ test('all run-bus waiters require node id and execution token instead of timesta
   assert.match(hook, /getRunExecutionBinding\(nodeId, capturedExecutionToken\)/);
   assert.match(hook, /registerRunExecutionCancelHandler/);
   assert.match(hook, /await persistTerminal\('succeeded'\)/);
+  assert.match(canvas, /triggerRun\([\s\S]*runContext/);
+  assert.doesNotMatch(canvas, /runExecutionGateRef/);
+  assert.match(loop, /triggerRunMany\(\[nodeId\], 'batch', runContext\)/);
+  assert.match(randomRoute, /triggerRun\(nodeId, state\.mode === 'batch' \? 'batch' : 'single', runContext\)/);
+  assert.match(subflow, /triggerRunMany\(runnable, 'batch', reporter\.runContext\)/);
 });

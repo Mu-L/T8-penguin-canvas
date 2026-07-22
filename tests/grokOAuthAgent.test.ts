@@ -92,6 +92,9 @@ test('Grok OAuth frontend service and node use an Agent studio with manual publi
   assert.match(service, /generateGrokOAuthTts/);
   assert.match(service, /transcribeGrokOAuthAudio/);
   assert.match(node, /Grok 创作台/);
+  assert.match(node, /\{loginPanel\(true\)\}/);
+  assert.match(node, /loginPanel=\{loginPanel\(false\)\}/);
+  assert.match(node, /status\?\.loggedIn \? '重新登录 \/ 绑定' : '登录 \/ 绑定'/);
   assert.match(node, /type GrokArtifactTab = 'image' \| 'video' \| 'audio' \| 'text'/);
   assert.match(node, /useState<GrokArtifactTab>\('image'\)/);
   assert.match(node, /artifactTabs\.map/);

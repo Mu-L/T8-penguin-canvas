@@ -11,30 +11,36 @@ import { topologicalSort } from '../../utils/topologicalSort';
 import { excludeRandomRouteBranchDescendants } from '../../utils/randomRoute';
 import { EXECUTABLE_NODE_TYPES } from '../../config/executableNodeTypes';
 import {
+  buildLoopCustomIterationInputs,
   buildLoopParallelCloneGraph,
   isLoopRunRequestId,
   loopParallelCloneNodeId,
+  normalizeLoopCustomMaterialConfig,
+  type LoopCustomIterationInput,
 } from '../../utils/loopDerivedExecution';
 import { PORT_COLOR } from '../../config/portTypes';
 import LoopingVideo from '../LoopingVideo';
 import SmartImage from '../SmartImage';
 // v1.2.10.5: 节点落点防重叠 —— 多链克隆子图整组避让
 import { placeBatchNodes, rectOf, type Rect as PlacementRect } from '../../utils/nodePlacement';
+import type { RunContext } from '../../types/project';
 
 /**
  * LoopNode — 工具节点：循环器（v1.2.8 新增）
  *
  * 功能:
  *   1. 接收上游 N 个同类型素材 (text / image / video / audio)
- *   2. 两种模式:
+ *   2. 三种模式:
  *      - serial 串联循环: 每轮把第 i 个素材注入自身 → 触发整条下游可执行子图 → 等成功/失败 → 下一轮
- *      - parallel 并联循环: 克隆 (N-1) 份完整下游子图 + 为每个克隆链建一个 supplier upload
- *        节点喂入 items[i] → 并发触发 N 条链 → 等所有完成
+ *      - parallel 并联循环: 克隆 (N-1) 份完整下游子图并分别连接第 i 个来源素材
+ *        → 并发触发 N 条链 → 等所有完成
+ *      - parallel-custom 并联循环（自定义）: 主素材决定轮数，每种素材独立选择顺序取值或固定复用；
+ *        每条链通过 __loopCustomInput 读取隔离快照，避免同源数组被每个克隆重复整组读取
  *   3. 输出聚合: imageUrls / urls / videoUrls / audioUrls 数组 (失败位 null 占位)
  *
  * 重要不变量:
  *   - 不修改任何现有 16 个可执行节点
- *   - 不修改 useUpstreamMaterials / topologicalSort
+ *   - 原有 serial / parallel 的素材读取与执行语义保持不变
  *   - 仅利用 v1.2.8 扩展的 runBus.runningIds + triggerRunMany
  */
 
@@ -44,7 +50,7 @@ const PASSIVE_LOOP_TYPES = new Set<string>(['text-split']);
 
 const COLOR = '#a78bfa'; // violet-400
 
-type LoopMode = 'serial' | 'parallel';
+type LoopMode = 'serial' | 'parallel' | 'parallel-custom';
 
 const KIND_LABEL: Record<MaterialKind, string> = { text: '文本', image: '图像', video: '视频', audio: '音频' };
 
@@ -63,6 +69,30 @@ function buildResetPatch(kind: MaterialKind) {
   if (kind === 'audio') return { audioUrl: '' };
   return { text: '', prompt: '', outputText: '', textSegments: [], segments: [], texts: [] };
 }
+
+function buildCustomInputPatch(input: LoopCustomIterationInput) {
+  const text = input.texts[0]?.url || '';
+  const image = input.images[0]?.url || '';
+  const video = input.videos[0]?.url || '';
+  const audio = input.audios[0]?.url || '';
+  return {
+    text,
+    prompt: text,
+    outputText: text,
+    textSegments: text ? [text] : [],
+    segments: text ? [text] : [],
+    texts: text ? [text] : [],
+    imageUrl: image,
+    imageUrls: image ? [image] : [],
+    urls: image ? [image] : [],
+    videoUrl: video,
+    videoUrls: video ? [video] : [],
+    audioUrl: audio,
+    audioUrls: audio ? [audio] : [],
+  };
+}
+
+const EMPTY_CUSTOM_INPUT: LoopCustomIterationInput = { texts: [], images: [], videos: [], audios: [] };
 
 // ===== helper: 从某个节点 data 提取对应 kind 的产物 url/text =====
 // v1.2.9.11: kind 不匹配兜底 —— 用户场景: 上游图像 (kind=image) → 循环器 → 视频节点 → OutputNode
@@ -127,7 +157,12 @@ function hasPassiveLoopNode(nodes: Node[]): boolean {
 // ===== helper: 触发节点并只等待本次 execution token =====
 const LOOP_NODE_WAIT_TIMEOUT_MS = 60 * 60 * 1000;
 
-function awaitTriggeredNode(nodeId: string, cancelRef: React.MutableRefObject<boolean>, timeoutMs = LOOP_NODE_WAIT_TIMEOUT_MS): Promise<boolean> {
+function awaitTriggeredNode(
+  nodeId: string,
+  cancelRef: React.MutableRefObject<boolean>,
+  runContext: RunContext | null,
+  timeoutMs = LOOP_NODE_WAIT_TIMEOUT_MS,
+): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     let resolved = false;
     const startCancelSeq = useRunBusStore.getState().cancelSeq;
@@ -140,28 +175,28 @@ function awaitTriggeredNode(nodeId: string, cancelRef: React.MutableRefObject<bo
       resolve(ok);
     };
     const off = useRunBusStore.subscribe((state) => {
-      if (cancelRef.current || state.cancelSeq !== startCancelSeq) finish(false);
+      if (cancelRef.current || (state.cancelSeq !== startCancelSeq && state.cancelTargets.includes(nodeId))) finish(false);
       else if (matchesRunCompletion(state.lastDone, nodeId, executionToken)) finish(state.lastDone.ok);
       else if (executionToken && state.executionTokens[nodeId] !== executionToken) finish(false);
     });
     const timer = window.setTimeout(() => finish(false), timeoutMs);
     // 用 triggerRunMany([id]) 而非 triggerRun(id) 触发——这样并联多链时 currentRunId 不会互相覆盖
-    const tokens = useRunBusStore.getState().triggerRunMany([nodeId]);
+    const tokens = useRunBusStore.getState().triggerRunMany([nodeId], 'batch', runContext);
     executionToken = tokens[nodeId] || null;
     const current = useRunBusStore.getState();
-    if (cancelRef.current || current.cancelSeq !== startCancelSeq) finish(false);
+    if (cancelRef.current || (current.cancelSeq !== startCancelSeq && current.cancelTargets.includes(nodeId))) finish(false);
     else if (matchesRunCompletion(current.lastDone, nodeId, executionToken)) finish(current.lastDone.ok);
     else if (!executionToken || current.executionTokens[nodeId] !== executionToken) finish(false);
   });
 }
 
-function awaitNode(nodeId: string, cancelRef: React.MutableRefObject<boolean>, timeoutMs = LOOP_NODE_WAIT_TIMEOUT_MS): Promise<boolean> {
-  return awaitTriggeredNode(nodeId, cancelRef, timeoutMs);
+function awaitNode(nodeId: string, cancelRef: React.MutableRefObject<boolean>, runContext: RunContext | null, timeoutMs = LOOP_NODE_WAIT_TIMEOUT_MS): Promise<boolean> {
+  return awaitTriggeredNode(nodeId, cancelRef, runContext, timeoutMs);
 }
 
 // 并联模式每条克隆链仍逐节点独立触发，但不同链可同时等待各自的 token。
-function awaitOnly(nodeId: string, cancelRef: React.MutableRefObject<boolean>, timeoutMs = LOOP_NODE_WAIT_TIMEOUT_MS): Promise<boolean> {
-  return awaitTriggeredNode(nodeId, cancelRef, timeoutMs);
+function awaitOnly(nodeId: string, cancelRef: React.MutableRefObject<boolean>, runContext: RunContext | null, timeoutMs = LOOP_NODE_WAIT_TIMEOUT_MS): Promise<boolean> {
+  return awaitTriggeredNode(nodeId, cancelRef, runContext, timeoutMs);
 }
 
 const LoopNode = (p: NodeProps) => {
@@ -173,7 +208,11 @@ const LoopNode = (p: NodeProps) => {
   const isDark = theme === 'dark';
   const rf = useReactFlow();
 
-  const mode: LoopMode = (d?.mode === 'parallel' ? 'parallel' : 'serial');
+  const mode: LoopMode = d?.mode === 'parallel-custom'
+    ? 'parallel-custom'
+    : d?.mode === 'parallel'
+      ? 'parallel'
+      : 'serial';
   const kind: MaterialKind = (['text', 'image', 'video', 'audio'] as const).includes(d?.kind) ? d.kind : 'image';
   const status: 'idle' | 'running' | 'success' | 'error' = d?.status || 'idle';
   const progress: { done: number; total: number; ok: number; fail: number } = d?.progress || { done: 0, total: 0, ok: 0, fail: 0 };
@@ -192,9 +231,16 @@ const LoopNode = (p: NodeProps) => {
       : upstream.texts;
     return list.filter((m) => Boolean(m.url));
   }, [upstream.images, upstream.videos, upstream.audios, upstream.texts, kind]);
+  const customConfig = useMemo(() => normalizeLoopCustomMaterialConfig(d), [d?.kind, d?.parallelCustomStrategies, d?.parallelCustomFixedIndexes]);
+  const customIterationInputs = useMemo(() => buildLoopCustomIterationInputs({
+    texts: upstream.texts,
+    images: upstream.images,
+    videos: upstream.videos,
+    audios: upstream.audios,
+  }, customConfig), [upstream.texts, upstream.images, upstream.videos, upstream.audios, customConfig]);
 
   // ===== 串联执行 =====
-  const runSerial = useCallback(async (): Promise<void> => {
+  const runSerial = useCallback(async (runContext: RunContext | null): Promise<void> => {
     if (items.length === 0) { setError('上游没有可循环的素材'); return; }
     setError(null);
     cancelRef.current = false;
@@ -464,7 +510,7 @@ const LoopNode = (p: NodeProps) => {
       let chainOk = true;
       for (const nid of order) {
         if (cancelRef.current) { chainOk = false; break; }
-        const ok = await awaitNode(nid, cancelRef);
+        const ok = await awaitNode(nid, cancelRef, runContext);
         if (!ok) { chainOk = false; break; }
       }
       if (chainOk && passiveOnly) {
@@ -542,7 +588,7 @@ const LoopNode = (p: NodeProps) => {
   }, [id, items, kind, rf, update]);
 
   // ===== 并联执行 =====
-  const runParallel = useCallback(async (): Promise<void> => {
+  const runParallel = useCallback(async (runContext: RunContext | null): Promise<void> => {
     if (items.length === 0) { setError('上游没有可循环的素材'); return; }
     setError(null);
     cancelRef.current = false;
@@ -550,7 +596,7 @@ const LoopNode = (p: NodeProps) => {
 
     const allNodes = rf.getNodes();
     const allEdges = rf.getEdges();
-    const requestId = useRunBusStore.getState().activeRunContext?.requestId;
+    const requestId = runContext?.requestId;
     if (!isLoopRunRequestId(requestId)) {
       throw new Error('并联循环缺少最终体检绑定的 Run requestId');
     }
@@ -619,6 +665,7 @@ const LoopNode = (p: NodeProps) => {
       sourceEdges: subEdges,
       entryEdge: directEdges[0],
       items,
+      ...(mode === 'parallel-custom' ? { iterationInputs: customIterationInputs } : {}),
     });
     const sourceNodesById = new Map(subNodes.map((node) => [node.id, node]));
     const allNewNodes = cloneGraph.nodes.map((clone) => {
@@ -650,8 +697,20 @@ const LoopNode = (p: NodeProps) => {
     if (allNewNodes.length > 0) rf.addNodes(allNewNodes);
     if (allNewEdges.length > 0) rf.setEdges((eds) => [...eds, ...allNewEdges]);
 
-    // 注入 items[0] 到自身 (原版下游链使用, i=0 链仍走 LoopNode 中转)
-    update(buildItemPatch(kind, items[0].url));
+    const originalEntryId = directs[0];
+    const originalEntry = rf.getNode(originalEntryId);
+    const originalCustomInput = (originalEntry?.data as any)?.__loopCustomInput ?? null;
+    if (mode === 'parallel-custom') {
+      const firstInput = customIterationInputs[0];
+      if (!firstInput) throw new Error('并联循环（自定义）没有可执行的主循环素材');
+      rf.setNodes((nodes) => nodes.map((node) => node.id === originalEntryId
+        ? { ...node, data: { ...(node.data as any), __loopCustomInput: firstInput } }
+        : node));
+      update(buildCustomInputPatch(firstInput));
+    } else {
+      // 注入 items[0] 到自身 (原版下游链使用, i=0 链仍走 LoopNode 中转)
+      update(buildItemPatch(kind, items[0].url));
+    }
     await new Promise<void>((r) => setTimeout(() => r(), 120)); // 等克隆 + 数据落 store + xyflow useNodesData 重订阅
 
     // 计算每条链的拓扑顺序
@@ -670,7 +729,7 @@ const LoopNode = (p: NodeProps) => {
       let chainOk = true;
       for (const nid of chain) {
         if (cancelRef.current) { chainOk = false; break; }
-        const ok = await awaitOnly(nid, cancelRef);
+        const ok = await awaitOnly(nid, cancelRef, runContext);
         if (!ok) { chainOk = false; break; }
       }
       if (chainOk && passiveOnly) {
@@ -688,11 +747,19 @@ const LoopNode = (p: NodeProps) => {
       updateProgress();
     };
 
-    await Promise.all(chainOrders.map((_, i) => runChain(i)));
+    try {
+      await Promise.all(chainOrders.map((_, i) => runChain(i)));
+    } finally {
+      if (mode === 'parallel-custom') {
+        rf.setNodes((nodes) => nodes.map((node) => node.id === originalEntryId
+          ? { ...node, data: { ...(node.data as any), __loopCustomInput: originalCustomInput } }
+          : node));
+      }
+    }
 
     // v1.2.9.3: 同 runSerial 的逻辑——子图内有 OutputNode 时循环器不再输出聚合 (避免与下游累积展示重复)
     const successOnly = collected.filter((x): x is string => !!x);
-    const aggPatch: any = {};
+    const aggPatch: any = mode === 'parallel-custom' ? buildCustomInputPatch(EMPTY_CUSTOM_INPUT) : {};
     const parallelHasOutput = subNodes.some((n) => n.type === 'output');
     if (parallelHasOutput) {
       if (kind === 'image') { aggPatch.imageUrl = ''; aggPatch.imageUrls = []; aggPatch.urls = []; }
@@ -706,16 +773,20 @@ const LoopNode = (p: NodeProps) => {
       else { aggPatch.text = successOnly.join('\n\n'); aggPatch.prompt = successOnly.join('\n\n'); aggPatch.outputText = successOnly.join('\n\n'); aggPatch.texts = successOnly; aggPatch.textSegments = successOnly; aggPatch.segments = successOnly; }
     }
     update({ status: cancelRef.current ? 'idle' : (failCount === items.length ? 'error' : 'success'), error: null, ...aggPatch });
-  }, [id, items, kind, rf, update]);
+  }, [id, items, kind, rf, update, mode, customIterationInputs]);
 
-  const handleRun = useCallback(async () => {
+  const handleRun = useCallback(async (runContext: RunContext | null) => {
     try {
-      if (mode === 'parallel') await runParallel();
-      else await runSerial();
+      if (mode === 'parallel' || mode === 'parallel-custom') await runParallel(runContext);
+      else await runSerial(runContext);
     } catch (e: any) {
       const msg = e?.message || '循环执行失败';
       setError(msg);
-      update({ status: 'error', error: msg });
+      update({
+        ...(mode === 'parallel-custom' ? buildCustomInputPatch(EMPTY_CUSTOM_INPUT) : {}),
+        status: 'error',
+        error: msg,
+      });
     }
   }, [mode, runSerial, runParallel, update]);
 
@@ -726,10 +797,10 @@ const LoopNode = (p: NodeProps) => {
   };
 
   // 接入运行总线 (供批量运行 ▶ 调起本节点)
-  useRunTrigger(id, async () => {
+  useRunTrigger(id, async (reporter) => {
     if (status === 'running') return;
-    await handleRun();
-  });
+    await handleRun(reporter.runContext);
+  }, 'loop', { lifecycleAware: true });
 
   // ===== 双主题 token =====
   // 重要: 必须固定 width 不能只设 minWidth, 否则子元素的预览图 / 视频会把节点擑到反近十倍宽
@@ -764,8 +835,8 @@ const LoopNode = (p: NodeProps) => {
       <Handle
         type="target"
         position={Position.Left}
-        style={{ background: handleColor, width: 12, height: 12, top: '50%', left: -6, transform: 'translateY(-50%)', border: 'none', zIndex: 12 }}
-        title={`接入上游 ${KIND_LABEL[kind]}`}
+        style={{ background: mode === 'parallel-custom' ? COLOR : handleColor, width: 12, height: 12, top: '50%', left: -6, transform: 'translateY(-50%)', border: 'none', zIndex: 12 }}
+        title={mode === 'parallel-custom' ? '接入上游文本 / 图像 / 视频 / 音频' : `接入上游 ${KIND_LABEL[kind]}`}
       />
       {/* source handle (右) */}
       <Handle
@@ -787,7 +858,7 @@ const LoopNode = (p: NodeProps) => {
       {/* body */}
       <div className="nodrag" style={{ padding: 10 }} onMouseDown={(e) => e.stopPropagation()} onWheelCapture={(e) => e.stopPropagation()}>
         {/* 模式切换 */}
-        <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
           <button
             type="button"
             style={segBtn(mode === 'serial')}
@@ -806,9 +877,21 @@ const LoopNode = (p: NodeProps) => {
           >
             <Layers size={11} style={{ marginRight: 4, verticalAlign: -2 }} />并联循环
           </button>
+          <button
+            type="button"
+            style={segBtn(mode === 'parallel-custom')}
+            onClick={() => update({ mode: 'parallel-custom' })}
+            disabled={status === 'running'}
+            title="并联自定义：每种素材分别选择按顺序取一个，或固定复用同一个"
+          >
+            <Layers size={11} style={{ marginRight: 4, verticalAlign: -2 }} />并联循环（自定义）
+          </button>
         </div>
 
         {/* 类型选择 */}
+        <div style={{ marginBottom: 4, fontSize: 10, color: subLabel }}>
+          {mode === 'parallel-custom' ? '主循环素材（决定生成次数）' : '循环素材类型'}
+        </div>
         <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
           {(['text', 'image', 'video', 'audio'] as MaterialKind[]).map((k) => (
             <button
@@ -823,6 +906,65 @@ const LoopNode = (p: NodeProps) => {
             </button>
           ))}
         </div>
+
+        {mode === 'parallel-custom' && (
+          <div style={{ marginBottom: 10, padding: 8, borderRadius: 6, border: isPixel ? '2px solid var(--px-ink)' : `1px solid ${isDark ? 'rgba(167,139,250,.28)' : 'rgba(109,40,217,.2)'}`, background: isDark ? 'rgba(167,139,250,.08)' : 'rgba(109,40,217,.05)' }}>
+            <div style={{ fontSize: 10, lineHeight: 1.45, color: labelColor, marginBottom: 7 }}>
+              把需要配对的文本、图片、视频或音频都连接到本循环器。每条并发链只读取本轮选中的单个素材，不会再读取整组提示词。
+            </div>
+            {(['text', 'image', 'video', 'audio'] as MaterialKind[]).map((materialKind) => {
+              const pool = materialKind === 'text' ? upstream.texts
+                : materialKind === 'image' ? upstream.images
+                  : materialKind === 'video' ? upstream.videos
+                    : upstream.audios;
+              const strategy = customConfig.strategies[materialKind];
+              return (
+                <div key={materialKind} style={{ display: 'grid', gridTemplateColumns: '56px minmax(0, 1fr)', gap: 6, alignItems: 'center', marginTop: 5 }}>
+                  <span style={{ fontSize: 10, color: materialKind === kind ? headerColor : subLabel, fontWeight: materialKind === kind ? 700 : 500 }}>
+                    {KIND_LABEL[materialKind]} {pool.length}
+                  </span>
+                  <div style={{ display: 'flex', gap: 5, minWidth: 0 }}>
+                    <select
+                      value={strategy}
+                      onChange={(event) => update({
+                        parallelCustomStrategies: {
+                          ...customConfig.strategies,
+                          [materialKind]: event.target.value === 'fixed' ? 'fixed' : 'sequence',
+                        },
+                      })}
+                      disabled={status === 'running' || pool.length === 0}
+                      style={{ minWidth: 0, flex: 1, padding: '4px 5px', borderRadius: 4, border: isPixel ? '1px solid var(--px-ink)' : `1px solid ${isDark ? 'rgba(255,255,255,.14)' : 'rgba(0,0,0,.14)'}`, background: isDark ? '#18181b' : '#fff', color: labelColor, fontSize: 10 }}
+                    >
+                      <option value="sequence">按顺序·每个用一次</option>
+                      <option value="fixed">固定·全部用同一个</option>
+                    </select>
+                    {strategy === 'fixed' && pool.length > 1 && (
+                      <select
+                        value={Math.min(customConfig.fixedIndexes[materialKind], pool.length - 1)}
+                        onChange={(event) => update({
+                          parallelCustomFixedIndexes: {
+                            ...customConfig.fixedIndexes,
+                            [materialKind]: Math.max(0, Number(event.target.value) || 0),
+                          },
+                        })}
+                        disabled={status === 'running'}
+                        title={`选择所有任务共同使用的${KIND_LABEL[materialKind]}`}
+                        style={{ width: 78, padding: '4px 5px', borderRadius: 4, border: isPixel ? '1px solid var(--px-ink)' : `1px solid ${isDark ? 'rgba(255,255,255,.14)' : 'rgba(0,0,0,.14)'}`, background: isDark ? '#18181b' : '#fff', color: labelColor, fontSize: 10 }}
+                      >
+                        {pool.map((material, index) => (
+                          <option key={material.id} value={index}>第 {index + 1} 个</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{ marginTop: 7, fontSize: 9, lineHeight: 1.4, color: subLabel }}>
+              “按顺序”在素材不足时留空，不会从头循环；“固定”默认复用第 1 个，也可以指定其他素材。
+            </div>
+          </div>
+        )}
 
         {/* 上游素材池预览 */}
         <div style={{ marginBottom: 8, fontSize: 10, color: subLabel }}>上游素材 ({items.length})</div>
@@ -878,7 +1020,7 @@ const LoopNode = (p: NodeProps) => {
           ) : (
             <button type="button" style={primaryBtn} onClick={() => requestCanvasNodeRun(id)} disabled={items.length === 0}>
               <Play size={11} />
-              {mode === 'serial' ? '串联运行' : '并联运行'}
+              {mode === 'serial' ? '串联运行' : mode === 'parallel-custom' ? '自定义并联运行' : '并联运行'}
             </button>
           )}
           <div style={{ flex: 1 }} />

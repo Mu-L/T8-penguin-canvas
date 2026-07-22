@@ -25,6 +25,55 @@ export interface ClipboardNodeBounds {
   centerY: number;
 }
 
+export const CANVAS_NODE_CLIPBOARD_MARKER_PREFIX = 'T8 Penguin Canvas nodes';
+export const INTERNAL_NODE_CLIPBOARD_PRIORITY_MS = 2_000;
+
+interface ClipboardTextWriter {
+  writeText: (value: string) => Promise<void>;
+}
+
+export function buildCanvasNodeClipboardMarker(nodeCount: number): string {
+  const count = Math.max(1, Math.trunc(Number(nodeCount) || 1));
+  return `${CANVAS_NODE_CLIPBOARD_MARKER_PREFIX}:${count}`;
+}
+
+/**
+ * Replace stale operating-system clipboard media after copying canvas nodes.
+ * The actual node payload intentionally stays in memory because it can contain
+ * large local media data; the lightweight marker only resolves paste priority.
+ */
+export async function markSystemClipboardAsCanvasNodes(
+  nodeCount: number,
+  clipboard: ClipboardTextWriter | null | undefined =
+    typeof navigator !== 'undefined' ? navigator.clipboard : undefined,
+): Promise<boolean> {
+  if (!clipboard || typeof clipboard.writeText !== 'function') return false;
+  try {
+    await clipboard.writeText(buildCanvasNodeClipboardMarker(nodeCount));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function shouldPreferInternalNodeClipboardPaste(input: {
+  hasInternalNodes: boolean;
+  internalCopiedAt: number;
+  now: number;
+  mediaSignature: string;
+  lastExternalMediaSignature?: string;
+  lastExternalPasteAt?: number;
+  priorityWindowMs?: number;
+}): boolean {
+  if (!input.hasInternalNodes || input.internalCopiedAt <= 0) return false;
+  const priorityWindowMs = Math.max(0, input.priorityWindowMs ?? INTERNAL_NODE_CLIPBOARD_PRIORITY_MS);
+  if (input.now - input.internalCopiedAt <= priorityWindowMs) return true;
+  return Boolean(
+    input.lastExternalMediaSignature === input.mediaSignature &&
+    input.internalCopiedAt > (input.lastExternalPasteAt || 0),
+  );
+}
+
 const finiteNumber = (value: unknown, fallback = 0) =>
   typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 

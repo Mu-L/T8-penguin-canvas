@@ -54,6 +54,7 @@ import {
   isSeedanceNzStandardModel,
   type SeedanceBuiltinSource,
 } from '../../config/seedance';
+import JimengCliHelpButton from './JimengCliHelpButton';
 
 /**
  * SeedanceNode — 字节 Seedance 2.0 视频分镜节点
@@ -134,15 +135,6 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
   const seed: number = typeof d.seed === 'number' ? d.seed : -1;
   const maxPoll: number = typeof d.maxPoll === 'number' ? d.maxPoll : 360;
   const pollInt: number = typeof d.pollInt === 'number' ? d.pollInt : 10;
-  const builtinModel = isSeedanceNzSelected ? seedanceNzModel : model;
-  const activeRatioOptions = isSeedanceNzSelected ? SEEDANCE_NZ_RATIO_OPTIONS : RATIO_OPTIONS;
-  const activeDurationOptions = isSeedanceNzSelected ? SEEDANCE_NZ_DURATION_OPTIONS : DURATION_OPTIONS;
-  const seedanceNzIsStandard = isSeedanceNzStandardModel(seedanceNzModel);
-  const activeResolutionOptions = isSeedanceNzSelected
-    ? (seedanceNzIsStandard ? SEEDANCE_NZ_NATIVE_RESOLUTION_OPTIONS : SEEDANCE_NZ_RESOLUTION_OPTIONS)
-    : RESOLUTION_OPTIONS;
-  const builtinRatio = activeRatioOptions.includes(ratio as any) ? ratio : '16:9';
-  const builtinResolution = activeResolutionOptions.includes(resolution as any) ? resolution : '720p';
   // 首/末帧使用模式: Jimeng CLI additionally supports explicit intelligent multi-frame.
   const rawFrameMode = String(d.frameMode || 'auto');
   const frameMode: SeedanceFrameMode = (
@@ -151,7 +143,21 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
     || rawFrameMode === 'multiframe'
   ) ? rawFrameMode : 'auto';
   const activeFrameMode: SeedanceFrameMode = !isJimengCliSelected && frameMode === 'multiframe' ? 'auto' : frameMode;
-
+  const builtinModel = isSeedanceNzSelected ? seedanceNzModel : model;
+  const activeRatioOptions = isSeedanceNzSelected ? SEEDANCE_NZ_RATIO_OPTIONS : RATIO_OPTIONS;
+  const activeDurationOptions = isSeedanceNzSelected ? SEEDANCE_NZ_DURATION_OPTIONS : DURATION_OPTIONS;
+  const seedanceNzIsStandard = isSeedanceNzStandardModel(seedanceNzModel);
+  const activeResolutionOptions = isJimengCliSelected
+    ? activeFrameMode === 'multiframe'
+      ? ['720p', '1080p']
+      : externalProviderModel === 'seedance2.0_vip'
+        ? ['720p', '1080p', '4k']
+        : ['720p']
+    : isSeedanceNzSelected
+      ? (seedanceNzIsStandard ? SEEDANCE_NZ_NATIVE_RESOLUTION_OPTIONS : SEEDANCE_NZ_RESOLUTION_OPTIONS)
+      : RESOLUTION_OPTIONS;
+  const builtinRatio = activeRatioOptions.includes(ratio as any) ? ratio : '16:9';
+  const builtinResolution = activeResolutionOptions.includes(resolution as any) ? resolution : '720p';
   const status: 'idle' | 'submitting' | 'polling' | 'success' | 'error' = d.status || 'idle';
   const taskId: string | undefined = d.taskId;
   const videoUrl: string | undefined = d.videoUrl;
@@ -715,6 +721,7 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
                 : '贞贞的AI工坊（海外） · Seedance 2.0')}
           </div>
         </div>
+        {isJimengCliSelected && <JimengCliHelpButton />}
       </div>
 
       <div className="p-2.5 space-y-2" onMouseDown={(e) => e.stopPropagation()}>
@@ -762,6 +769,7 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
                         providerSource: provider.protocol,
                         providerId: provider.id,
                         providerModel: nextModels[0] || '',
+                        ...(provider.protocol === 'jimeng-cli' ? { resolution: '720p' } : {}),
                       });
                     }}
                     style={{ background: '#18181b', color: '#ffffff' }}
@@ -788,7 +796,16 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
                     <label className="text-[10px] text-white/50 block mb-1">外部模型</label>
                     <select
                       value={externalProviderModel}
-                      onChange={(e) => update({ providerModel: e.target.value })}
+                      onChange={(e) => {
+                        const nextModel = e.target.value;
+                        update({
+                          providerModel: nextModel,
+                          ...(providerSelection.provider?.protocol === 'jimeng-cli'
+                            && nextModel !== 'seedance2.0_vip'
+                            ? { resolution: '720p' }
+                            : {}),
+                        });
+                      }}
                       style={{ background: '#18181b', color: '#ffffff' }}
                       className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
                     >
@@ -816,7 +833,7 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
             生成；下方只保留时长、比例、分辨率、参考素材和 Prompt 等通用参数。
             {isJimengCliSelected && (
               <div className="mt-1 text-amber-100/70">
-                即梦 CLI 会通过本地 dreamina 上传图片 / 视频 / 音频参考，并在只返回 submit_id 时自动查询下载结果。
+                当前按即梦 CLI v1.4.14 适配：所有视频命令都会显式提交分辨率；智能多帧支持 2-20 张图片与 720P / 1080P，并会在只返回 submit_id 时自动查询下载结果。
               </div>
             )}
           </div>
@@ -934,7 +951,15 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
           <label className="text-[10px] text-white/50 block mb-1">参考图模式</label>
           <select
             value={activeFrameMode}
-            onChange={(e) => update({ frameMode: e.target.value })}
+            onChange={(e) => {
+              const nextMode = e.target.value;
+              update({
+                frameMode: nextMode,
+                ...(isJimengCliSelected && nextMode === 'multiframe' && !['720p', '1080p'].includes(resolution)
+                  ? { resolution: '720p' }
+                  : {}),
+              });
+            }}
             className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-white/30"
           >
             <option value="auto" className="bg-zinc-900">{isJimengCliSelected ? '全能参考(auto)' : '全部作参考图(auto)'}</option>

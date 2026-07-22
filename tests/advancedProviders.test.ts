@@ -117,12 +117,13 @@ test('normalizeAdvancedProviders merges built-in provider model defaults into ol
   ]);
   assert.ok(jimeng?.videoModels.includes('seedance1.5pro'));
   assert.ok(jimeng?.videoModels.includes('seedance1.0fast'));
-  assert.ok(jimeng?.videoModels.includes('seedance1.0'));
-  assert.deepEqual(jimeng?.imageModels.slice(0, 4), [
+  assert.equal(jimeng?.videoModels.includes('seedance1.0'), false);
+  assert.deepEqual(jimeng?.imageModels.slice(0, 5), [
     'seedream-4.7',
     'seedream-4.6',
     'seedream-4.5',
     'seedream-5.0',
+    'seedream-5.0-pro',
   ]);
 });
 

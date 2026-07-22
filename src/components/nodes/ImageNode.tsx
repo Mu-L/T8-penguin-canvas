@@ -79,6 +79,7 @@ import { COMFY_APP_SOURCE_LABELS } from '../../utils/comfyuiApps';
 import { canonicalizeComfyFieldsByWorkflow, comfyFieldInputValue } from '../../utils/comfyuiWorkflow';
 import { LocalNodeAddonSlot } from 'virtual:t8-local-extensions';
 import type { RunNodeLifecycleReporter } from '../../types/project';
+import JimengCliHelpButton from './JimengCliHelpButton';
 
 /**
  * ImageNode - 图像生成(ZhenzhenMagic)
@@ -204,6 +205,10 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   const isModelScopeExternal = isExternalSelected && providerSelection.provider?.protocol === 'modelscope';
   const isComfyExternal = isExternalSelected && providerSelection.provider?.protocol === 'comfyui';
   const isJimengCliImageSelected = isExternalSelected && providerSelection.provider?.protocol === 'jimeng-cli';
+  const isJimengCliSeedream5Pro = isJimengCliImageSelected && /seedream[-_\s]?5\.0[-_\s]?pro/i.test(externalProviderModel);
+  const jimengCliCustomSizeEnabled = isJimengCliImageSelected && providerParams?.customSizeEnabled === true;
+  const jimengCliWidth = Math.round(Number(providerParams?.width) || 1024);
+  const jimengCliHeight = Math.round(Number(providerParams?.height) || 1024);
   const externalImageCountLimit = isJimengCliImageSelected ? 10 : 4;
   const comfyWorkflow = isComfyExternal
     ? providerSelection.provider?.comfyuiConfig?.workflows?.find((workflow) => workflow.id === externalProviderModel || workflow.name === externalProviderModel)
@@ -389,6 +394,14 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   const isFal = isFalModel(apiModel);
   const falDef = isFal ? FAL_REGISTRY[apiModel] : undefined;
   const falKind = falDef?.paramKind; // 'gpt-fal' | 'nbpro-fal'
+  const isStandardGptImage2 = !isExternalSelected
+    && modelDef.paramKind === 'gpt-size'
+    && !isFal
+    && !isZhenzhenImageG2;
+  const gptImageQuality: 'auto' | 'high' | 'medium' | 'low' = ['auto', 'high', 'medium', 'low'].includes(d?.gptImageQuality)
+    ? d.gptImageQuality
+    : 'auto';
+  const gptImageModeration: 'auto' | 'low' = d?.gptImageModeration === 'low' ? 'low' : 'auto';
   // FAL 参数(默认对齐主项目初始值)
   // gpt-fal: mode/size/quality/n/format/sync/customW/customH
   const falMode: 'edit' | 'gen' = d?.falMode || 'edit';
@@ -689,6 +702,9 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         const providerModel = externalProviderModel;
         if (!providerModel) throw new Error('扩展平台未配置可用图像模型');
         let size = externalImageSizeFor(aspectRatio, sizeLevel);
+        if (isJimengCliImageSelected && jimengCliCustomSizeEnabled) {
+          size = `${jimengCliWidth}x${jimengCliHeight}`;
+        }
         if (isComfyExternal && comfyWorkflow) {
           const width = comfyNumberForSource('width', 1024);
           const height = comfyNumberForSource('height', 1024);
@@ -1202,6 +1218,8 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         output_format: isSeedream ? seedreamOutputFormat : undefined,
         images: allRefs,
         n: 1,
+        quality: isStandardGptImage2 ? gptImageQuality : undefined,
+        moderation: isStandardGptImage2 ? gptImageModeration : undefined,
         providerParams,
       });
       if (!isCurrentGenerationRun(runId)) return;
@@ -1410,6 +1428,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
                 : `${modelDef.label} · ${modelDef.description}`}
           </div>
         </div>
+        {isJimengCliImageSelected && <JimengCliHelpButton />}
       </div>
 
       {/* 配置区 */}
@@ -1462,7 +1481,17 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
                     <label className="text-[10px] text-white/50 block mb-1">外部模型</label>
                     <select
                       value={externalProviderModel}
-                      onChange={(e) => update({ providerModel: e.target.value, ...clearModelscopeLoraParams() })}
+                      onChange={(e) => {
+                        const nextModel = e.target.value;
+                        const mustLeave1k = providerSelection.provider?.protocol === 'jimeng-cli'
+                          && !/seedream[-_\s]?5\.0[-_\s]?pro/i.test(nextModel)
+                          && String(providerParams.resolutionType || '').toLowerCase() === '1k';
+                        update({
+                          providerModel: nextModel,
+                          ...(mustLeave1k ? { providerParams: { ...providerParams, resolutionType: '2k' } } : {}),
+                          ...clearModelscopeLoraParams(),
+                        });
+                      }}
                       style={{ background: '#18181b', color: '#ffffff' }}
                       className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
                     >
@@ -1473,19 +1502,78 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
                   </div>
                 )}
                 {isJimengCliImageSelected && (
-                  <label className="block space-y-1">
-                    <span className="text-[10px] text-white/50">生成数量</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={10}
-                      value={String(providerParams.n ?? 1)}
-                      onChange={(e) => patchProviderParams({ n: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })}
-                      style={{ background: '#18181b', color: '#ffffff' }}
-                      className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
-                    />
-                    <span className="block text-[10px] text-white/40">即梦 CLI v1.4.10 起支持 text2image / image2image 一次生成 1-10 张。</span>
-                  </label>
+                  <div className="space-y-2 rounded border border-lime-300/15 bg-lime-400/[0.05] p-2">
+                    <label className="block space-y-1">
+                      <span className="text-[10px] text-white/50">生成数量</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={10}
+                        value={String(providerParams.n ?? 1)}
+                        onChange={(e) => patchProviderParams({ n: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })}
+                        style={{ background: '#18181b', color: '#ffffff' }}
+                        className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
+                      />
+                    </label>
+                    <label className="flex items-center gap-2 text-[10px] text-white/65">
+                      <input
+                        type="checkbox"
+                        checked={jimengCliCustomSizeEnabled}
+                        onChange={(e) => patchProviderParams({
+                          customSizeEnabled: e.target.checked,
+                          ...(!e.target.checked ? { width: undefined, height: undefined, resolutionType: undefined } : {}),
+                        })}
+                        className="accent-lime-400"
+                      />
+                      自定义宽高（v1.4.14）
+                    </label>
+                    {jimengCliCustomSizeEnabled && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="space-y-1">
+                          <span className="text-[10px] text-white/45">宽度</span>
+                          <input
+                            type="number"
+                            min={512}
+                            max={6240}
+                            step={8}
+                            value={jimengCliWidth}
+                            onChange={(e) => patchProviderParams({ width: Math.round(Number(e.target.value) || 0) })}
+                            style={{ background: '#18181b', color: '#ffffff' }}
+                            className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
+                          />
+                        </label>
+                        <label className="space-y-1">
+                          <span className="text-[10px] text-white/45">高度</span>
+                          <input
+                            type="number"
+                            min={512}
+                            max={6240}
+                            step={8}
+                            value={jimengCliHeight}
+                            onChange={(e) => patchProviderParams({ height: Math.round(Number(e.target.value) || 0) })}
+                            style={{ background: '#18181b', color: '#ffffff' }}
+                            className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
+                          />
+                        </label>
+                        <label className="col-span-2 space-y-1">
+                          <span className="text-[10px] text-white/45">分辨率级别</span>
+                          <select
+                            value={String(providerParams.resolutionType || (isJimengCliSeedream5Pro ? '1k' : '2k')).toLowerCase()}
+                            onChange={(e) => patchProviderParams({ resolutionType: e.target.value })}
+                            style={{ background: '#18181b', color: '#ffffff' }}
+                            className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
+                          >
+                            {isJimengCliSeedream5Pro && <option value="1k" style={{ background: '#18181b', color: '#ffffff' }}>1K</option>}
+                            <option value="2k" style={{ background: '#18181b', color: '#ffffff' }}>2K</option>
+                            <option value="4k" style={{ background: '#18181b', color: '#ffffff' }}>4K</option>
+                          </select>
+                        </label>
+                      </div>
+                    )}
+                    <span className="block text-[10px] leading-relaxed text-white/40">
+                      当前按即梦 CLI v1.4.14 提交；自定义宽高会成对传入，并自动停用 ratio。Seedream 5.0 Pro 支持 1K / 2K / 4K，其他当前模型使用 2K / 4K。
+                    </span>
+                  </div>
                 )}
                 {isModelScopeExternal && (
                   <div className="rounded border border-white/10 bg-white/[0.03] p-2 space-y-2">
@@ -2023,6 +2111,36 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
                 />
               </div>
             )}
+          </div>
+        )}
+        {isStandardGptImage2 && (
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] text-white/50 block mb-1">质量</label>
+              <select
+                value={gptImageQuality}
+                onChange={(e) => update({ gptImageQuality: e.target.value })}
+                style={{ background: '#18181b', color: '#ffffff' }}
+                className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
+              >
+                <option value="auto" style={{ background: '#18181b', color: '#ffffff' }}>Auto</option>
+                <option value="high" style={{ background: '#18181b', color: '#ffffff' }}>High</option>
+                <option value="medium" style={{ background: '#18181b', color: '#ffffff' }}>Medium</option>
+                <option value="low" style={{ background: '#18181b', color: '#ffffff' }}>Low</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] text-white/50 block mb-1">内容审查</label>
+              <select
+                value={gptImageModeration}
+                onChange={(e) => update({ gptImageModeration: e.target.value })}
+                style={{ background: '#18181b', color: '#ffffff' }}
+                className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
+              >
+                <option value="auto" style={{ background: '#18181b', color: '#ffffff' }}>Auto</option>
+                <option value="low" style={{ background: '#18181b', color: '#ffffff' }}>Low</option>
+              </select>
+            </div>
           </div>
         )}
         {isSeedreamNz && !isExternalSelected && (

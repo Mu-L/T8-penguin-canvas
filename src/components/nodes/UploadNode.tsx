@@ -3,6 +3,7 @@ import { Handle, Position, useReactFlow, type Node, type Edge, type NodeProps } 
 import {
   AlertCircle,
   Box,
+  Camera,
   Download,
   Edit3,
   FileImage,
@@ -61,6 +62,7 @@ import {
 // v1.2.10.5: 节点落点防重叠
 import { placeSingleNode, placeBatchNodes, defaultSizeOf, type Rect as PlacementRect } from '../../utils/nodePlacement';
 import { extractRunProviderTrace } from '../../utils/runProviderTrace';
+import { snapshotVideoFrameAsync } from '../../services/videoOps';
 import {
   createSecondaryProviderActionForNode,
   executeRegisteredSecondaryProviderAction,
@@ -201,6 +203,8 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
   const [error, setError] = useState<string | null>(null);
   const [rhCapabilityBusy, setRhCapabilityBusy] = useState(false);
   const [rhVideoCapabilityBusy, setRhVideoCapabilityBusy] = useState(false);
+  const [capturingFrameKey, setCapturingFrameKey] = useState<string | null>(null);
+  const videoFrameTimesRef = useRef(new Map<string, number>());
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   // 图像编辑弹窗 src URL（与 OutputNode 双击逻辑保持一致）
@@ -762,6 +766,49 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
     }
   };
 
+  const rememberVideoFrameTime = (key: string, time: number) => {
+    if (Number.isFinite(time) && time >= 0) videoFrameTimesRef.current.set(key, time);
+  };
+
+  const captureCurrentVideoFrame = async (item: MediaItem, index: number) => {
+    const frameKey = `${index}:${item.url}`;
+    if (capturingFrameKey) return;
+    const frameTime = Math.max(0, Number(videoFrameTimesRef.current.get(frameKey)) || 0);
+    const sourceName = item.name || fileNameFromUrl(item.url) || `视频 ${index + 1}`;
+    setCapturingFrameKey(frameKey);
+    setError(null);
+    try {
+      const snapshot = await snapshotVideoFrameAsync({
+        id: `upload-video-frame-${id}-${index}`,
+        sourceNodeId: id,
+        sourceLabel: '上传节点视频',
+        name: sourceName,
+        url: item.url,
+        directUrl: item.url,
+        mime: item.mime,
+        trimStart: 0,
+        status: 'ready',
+      }, frameTime, {
+        format: 'png',
+        sourceLabel: `${sourceName} · 当前帧`,
+      });
+      await Promise.resolve(handleProduce([snapshot.imageUrl], {
+        type: 'video-frame-extract',
+        label: '当前帧截图',
+      }));
+      logBus.success(
+        `已截取 ${snapshot.time.toFixed(2)} 秒画面，图片已保存并输出`,
+        `video-frame:upload:${id}`,
+      );
+    } catch (captureError: any) {
+      const message = captureError?.message || '当前帧截取失败，请确认视频仍可播放后重试';
+      setError(message);
+      logBus.error(message, `video-frame:upload:${id}`);
+    } finally {
+      setCapturingFrameKey(null);
+    }
+  };
+
   const splitUploadCollection = () => {
     if (!uploadType || mediaItems.length <= 1) return;
     const me = rf.getNode(id);
@@ -1131,6 +1178,9 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
                       data-drag-preview={item.url}
                       data-drag-node-id={id}
                       data-resource-title={item.name}
+                      onLoadedMetadata={(event) => rememberVideoFrameTime(`${i}:${item.url}`, event.currentTarget.currentTime)}
+                      onTimeUpdate={(event) => rememberVideoFrameTime(`${i}:${item.url}`, event.currentTarget.currentTime)}
+                      onSeeked={(event) => rememberVideoFrameTime(`${i}:${item.url}`, event.currentTarget.currentTime)}
                       onMouseDown={(e) =>
                         beginMaterialDrag(e, { kind: 'video', url: item.url, sourceNodeId: id, previewUrl: item.url })
                       }
@@ -1139,6 +1189,26 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
                       <span className="truncate flex-1" title={item.name}>{item.name || `视频 ${i + 1}`}</span>
                       <MediaMetadataBadge kind="video" url={item.url} />
                       {item.size ? <span className="opacity-70">{formatMediaSize(item.size)}</span> : null}
+                      <button
+                        type="button"
+                        data-video-current-frame
+                        className={`nodrag nopan flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 ${
+                          isDark ? 'hover:bg-white/10 text-white/65' : 'hover:bg-black/10 text-zinc-600'
+                        } disabled:cursor-wait disabled:opacity-55`}
+                        title="截取当前播放画面，保存到 T8 输出目录并创建图片输出节点"
+                        aria-label={`截取视频 ${i + 1} 当前帧`}
+                        disabled={capturingFrameKey !== null}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          void captureCurrentVideoFrame(item, i);
+                        }}
+                      >
+                        <Camera size={10} />
+                        {capturingFrameKey === `${i}:${item.url}` ? '截取中' : '当前帧'}
+                      </button>
                       <button
                         type="button"
                         className={`nodrag nopan p-0.5 rounded ${isDark ? 'hover:bg-white/10' : 'hover:bg-black/10'}`}

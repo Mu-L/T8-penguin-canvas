@@ -8,7 +8,7 @@ import {
   type NodeProps,
   type Node,
 } from '@xyflow/react';
-import { Box, MonitorPlay, Type as TypeIcon, Image as ImageIcon, Video as VideoIcon, Music, Download, Pencil, Check, Edit3, GitCompare, Trash2 } from 'lucide-react';
+import { Box, Camera, MonitorPlay, Type as TypeIcon, Image as ImageIcon, Video as VideoIcon, Music, Download, Pencil, Check, Edit3, GitCompare, Trash2 } from 'lucide-react';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useThemeStore } from '../../stores/theme';
 import { logBus } from '../../stores/logs';
@@ -54,6 +54,7 @@ import {
 // v1.2.10.5: 节点落点防重叠 —— 双击编辑产出 N 节点 3 列宫格整组避让
 import { placeBatchNodes, defaultSizeOf, type Rect as PlacementRect } from '../../utils/nodePlacement';
 import { extractRunProviderTrace } from '../../utils/runProviderTrace';
+import { snapshotVideoFrameAsync } from '../../services/videoOps';
 import {
   createSecondaryProviderActionForNode,
   executeRegisteredSecondaryProviderAction,
@@ -140,6 +141,9 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
   }, [id, rf, update]);
   const [rhCapabilityBusy, setRhCapabilityBusy] = useState(false);
   const [rhVideoCapabilityBusy, setRhVideoCapabilityBusy] = useState(false);
+  const [capturingFrameKey, setCapturingFrameKey] = useState<string | null>(null);
+  const [videoFrameError, setVideoFrameError] = useState('');
+  const videoFrameTimesRef = useRef(new Map<string, number>());
   const activeTemplate = useMemo(
     () => resolveThemeTemplate(templateId, customTemplates),
     [templateId, customTemplates],
@@ -965,6 +969,48 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
     }
   };
 
+  const rememberVideoFrameTime = (key: string, time: number) => {
+    if (Number.isFinite(time) && time >= 0) videoFrameTimesRef.current.set(key, time);
+  };
+
+  const captureCurrentVideoFrame = async (videoUrl: string, index: number) => {
+    const frameKey = `${index}:${videoUrl}`;
+    if (capturingFrameKey) return;
+    const frameTime = Math.max(0, Number(videoFrameTimesRef.current.get(frameKey)) || 0);
+    const sourceName = fileNameFromUrl(videoUrl) || `视频 ${index + 1}`;
+    setCapturingFrameKey(frameKey);
+    setVideoFrameError('');
+    try {
+      const snapshot = await snapshotVideoFrameAsync({
+        id: `output-video-frame-${id}-${index}`,
+        sourceNodeId: id,
+        sourceLabel: '输出节点视频',
+        name: sourceName,
+        url: videoUrl,
+        directUrl: videoUrl,
+        trimStart: 0,
+        status: 'ready',
+      }, frameTime, {
+        format: 'png',
+        sourceLabel: `${sourceName} · 当前帧`,
+      });
+      await Promise.resolve(handleProduce([snapshot.imageUrl], {
+        type: 'video-frame-extract',
+        label: '当前帧截图',
+      }));
+      logBus.success(
+        `已截取 ${snapshot.time.toFixed(2)} 秒画面，图片已保存并输出`,
+        `video-frame:output:${id}`,
+      );
+    } catch (captureError: any) {
+      const message = captureError?.message || '当前帧截取失败，请确认视频仍可播放后重试';
+      setVideoFrameError(message);
+      logBus.error(message, `video-frame:output:${id}`);
+    } finally {
+      setCapturingFrameKey(null);
+    }
+  };
+
   // === 跨节点拖拽: source (从 collected.* 拖出) ===
   // 独立函数避开 hooks-in-loop 限制
   const startDrag = useDragMaterialStore((s) => s.start);
@@ -1557,6 +1603,9 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
                   data-prompt-template-category="video-image-to-video"
                   data-prompt-template-prompt={mediaPromptByUrl.get(u)?.prompt || displayText}
                   data-prompt-template-negative={mediaPromptByUrl.get(u)?.negative || ''}
+                  onLoadedMetadata={(event) => rememberVideoFrameTime(`${i}:${u}`, event.currentTarget.currentTime)}
+                  onTimeUpdate={(event) => rememberVideoFrameTime(`${i}:${u}`, event.currentTarget.currentTime)}
+                  onSeeked={(event) => rememberVideoFrameTime(`${i}:${u}`, event.currentTarget.currentTime)}
                   onMouseDown={(e) =>
                     beginMaterialDrag(e, { kind: 'video', url: u, sourceNodeId: id, previewUrl: u })
                   }
@@ -1564,6 +1613,26 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
                 <div className={`flex items-center gap-1 text-[10px] ${isDark ? 'text-white/40' : 'text-zinc-400'}`}>
                   <span className="truncate flex-1" title={u}>{u.split('/').pop()}</span>
                   <MediaMetadataBadge kind="video" url={u} />
+                  <button
+                    type="button"
+                    data-video-current-frame
+                    className={`nodrag nopan flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 ${
+                      isDark ? 'hover:bg-white/10 text-white/60' : 'hover:bg-black/10 text-zinc-600'
+                    } disabled:cursor-wait disabled:opacity-55`}
+                    title="截取当前播放画面，保存到 T8 输出目录并创建图片输出节点"
+                    aria-label={`截取视频 ${i + 1} 当前帧`}
+                    disabled={capturingFrameKey !== null}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      void captureCurrentVideoFrame(u, i);
+                    }}
+                  >
+                    <Camera size={10} />
+                    {capturingFrameKey === `${i}:${u}` ? '截取中' : '当前帧'}
+                  </button>
                   <a
                     href={u}
                     target="_blank"
@@ -1593,6 +1662,11 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
                 </div>
               </div>
             ))}
+            {videoFrameError ? (
+              <div className="rounded border border-red-500/35 bg-red-500/10 px-2 py-1 text-[10px] text-red-400">
+                {videoFrameError}
+              </div>
+            ) : null}
           </div>
         )}
 

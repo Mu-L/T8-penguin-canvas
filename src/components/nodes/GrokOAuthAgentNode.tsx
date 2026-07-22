@@ -2221,13 +2221,15 @@ const GrokOAuthAgentNode = ({ id, data, selected }: NodeProps) => {
 
   const loginPanel = (compact = false) => (
     <div className="space-y-2">
-      <div className="grid grid-cols-2 gap-2">
+      <div className={`grid ${status?.loggedIn ? 'grid-cols-2' : 'grid-cols-1'} gap-2`}>
         <button type="button" onClick={handleLogin} className="nodrag rounded px-2 py-1.5 text-[11px] font-bold flex items-center justify-center gap-1" style={{ background: status?.loggedIn ? surface : accent, color: status?.loggedIn ? text : studioAccentText, border: `1px solid ${border}` }}>
-          {loginPolling ? <Loader2 size={12} className="animate-spin" /> : <LogIn size={12} />} 登录 / 绑定
+          {loginPolling ? <Loader2 size={12} className="animate-spin" /> : <LogIn size={12} />} {status?.loggedIn ? '重新登录 / 绑定' : '登录 / 绑定'}
         </button>
-        <button type="button" onClick={handleLogout} className="nodrag rounded px-2 py-1.5 text-[11px] font-bold flex items-center justify-center gap-1" style={{ background: surface, color: text, border: `1px solid ${border}` }}>
-          <LogOut size={12} /> 退出
-        </button>
+        {status?.loggedIn && (
+          <button type="button" onClick={handleLogout} className="nodrag rounded px-2 py-1.5 text-[11px] font-bold flex items-center justify-center gap-1" style={{ background: surface, color: text, border: `1px solid ${border}` }}>
+            <LogOut size={12} /> 退出
+          </button>
+        )}
       </div>
       {(oauthLoginUrl || loginPolling || manualCode) && !status?.loggedIn && (
         <div className="space-y-2 rounded p-2 text-[10px]" style={{ background: surfaceStrong, color: text, border: `1px solid ${border}` }}>
@@ -2299,6 +2301,8 @@ const GrokOAuthAgentNode = ({ id, data, selected }: NodeProps) => {
         <button type="button" onClick={() => setStudioOpen(true)} className="nodrag w-full rounded-xl py-2 text-xs font-bold flex items-center justify-center gap-2" style={{ background: accent, color: studioAccentText, border: `1px solid ${accent}`, boxShadow: isPixel ? '2px 2px 0 var(--px-ink)' : '0 10px 24px rgba(16,185,129,0.20)' }}>
           <PanelRightOpen size={15} /> 打开 Grok 创作台
         </button>
+
+        {loginPanel(true)}
 
         <div className="rounded p-2 text-[11px] space-y-1" style={{ background: surface, color: text, border: `1px solid ${border}` }}>
           <div className="flex items-center justify-between gap-2">

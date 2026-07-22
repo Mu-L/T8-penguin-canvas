@@ -3,6 +3,7 @@ import { EXECUTABLE_NODE_TYPES } from '../config/executableNodeTypes.ts';
 import { CANVAS_NODE_SCHEMA_MANIFEST, NODE_REGISTRY } from '../config/nodeRegistry.ts';
 import {
   arePortsCompatible,
+  isKnownCanvasNodeType,
   resolveNodeConnectionPorts,
   type NodeConnectionPort,
 } from '../config/portTypes.ts';
@@ -1083,7 +1084,6 @@ export function analyzeWorkflow(nodes: Node[], edges: Edge[], context: WorkflowD
   const edgeIdCounts = new Map<string, number>();
   nodes.forEach((node) => nodeIdCounts.set(node.id, (nodeIdCounts.get(node.id) || 0) + 1));
   edges.forEach((edge) => edgeIdCounts.set(edge.id, (edgeIdCounts.get(edge.id) || 0) + 1));
-  const knownTypes = new Set(NODE_REGISTRY.map((item) => item.type));
   const incoming = new Map(nodes.map((node) => [node.id, 0]));
   const outgoing = new Map(nodes.map((node) => [node.id, 0]));
 
@@ -1158,7 +1158,7 @@ export function analyzeWorkflow(nodes: Node[], edges: Edge[], context: WorkflowD
       }));
     }
     seenNodeIds.set(node.id, occurrence);
-    if (!node.type || !knownTypes.has(node.type as any)) {
+    if (!isKnownCanvasNodeType(node.type)) {
       issues.push(workflowIssue('registry.unknown-node-type', {
         id: `unknown-type-${node.id}`,
         detail: `节点类型 ${node.type || '(空)'} 未注册，可能来自缺失插件或旧版本。`,

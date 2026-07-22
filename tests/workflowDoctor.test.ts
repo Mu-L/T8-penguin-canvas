@@ -11,6 +11,7 @@ import {
   planCanvasAgentRequest,
   workflowIssuesFromCanvasAgentValidation,
 } from '../src/utils/workflowDoctor.ts';
+import { CANVAS_NODE_SCHEMA_MANIFEST } from '../src/config/nodeRegistry.ts';
 
 test('E1 exposes exactly 30 independently countable rules with a complete evidence contract', () => {
   assert.equal(WORKFLOW_DOCTOR_RULE_COUNT, 30);
@@ -22,6 +23,24 @@ test('E1 exposes exactly 30 independently countable rules with a complete eviden
     assert.equal(rule.applicableVersion.minAppVersion, '2.5.5');
     assert.equal(rule.applicableVersion.doctorSchema, 1);
   }
+});
+
+test('doctor recognizes every production type plus persisted groupBox while still rejecting an actual unknown type', () => {
+  const nodes: Node[] = [
+    ...CANVAS_NODE_SCHEMA_MANIFEST.types.map((item, index) => ({
+      id: `known-${index}`,
+      type: item.type,
+      position: { x: index, y: 0 },
+      data: {},
+    } as Node)),
+    { id: 'group', type: 'groupBox', position: { x: 0, y: 100 }, data: { memberIds: [] } } as Node,
+    { id: 'unknown', type: 'missing-plugin-node', position: { x: 0, y: 200 }, data: {} } as Node,
+  ];
+
+  const unknownIssues = analyzeWorkflow(nodes, [])
+    .filter((issue) => issue.ruleId === 'registry.unknown-node-type');
+
+  assert.deepEqual(unknownIssues.map((issue) => issue.nodeIds), [['unknown']]);
 });
 
 test('doctor reports dangling and duplicate edges with previewable repairs', () => {

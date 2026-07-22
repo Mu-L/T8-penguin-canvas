@@ -19,6 +19,7 @@ import { topologicalLayers, topologicalSort } from '../../utils/topologicalSort'
 import { collectMaterialSetBucketsFromData, valueOfMaterialSetItem } from '../../utils/materialSet';
 import { shouldCollectNodeTextOutput } from '../../utils/imageNodeOutputMode';
 import { useUpdateNodeData } from './useUpdateNodeData';
+import type { RunContext, RunNodeLifecycleReporter } from '../../types/project';
 
 const COLOR = '#f97316';
 const ACTIVE_COLOR = '#22c55e';
@@ -50,7 +51,7 @@ const pushUnique = (arr: string[], value: any) => {
   if (!arr.includes(trimmed)) arr.push(trimmed);
 };
 
-function waitForNodeRun(nodeId: string): Promise<WaitResult> {
+function waitForNodeRun(nodeId: string, runContext: RunContext | null): Promise<WaitResult> {
   return new Promise((resolve) => {
     let done = false;
     const startCancelSeq = useRunBusStore.getState().cancelSeq;
@@ -63,15 +64,15 @@ function waitForNodeRun(nodeId: string): Promise<WaitResult> {
       resolve(result);
     };
     const unsubscribe = useRunBusStore.subscribe((state) => {
-      if (state.cancelSeq !== startCancelSeq) finish('cancelled');
+      if (state.cancelSeq !== startCancelSeq && state.cancelTargets.includes(nodeId)) finish('cancelled');
       else if (matchesRunCompletion(state.lastDone, nodeId, executionToken)) finish(state.lastDone.ok ? 'ok' : 'fail');
       else if (executionToken && state.executionTokens[nodeId] !== executionToken) finish('cancelled');
     });
     const timer = window.setTimeout(() => finish('fail'), WAIT_TIMEOUT_MS);
     const state = useRunBusStore.getState();
-    executionToken = state.triggerRun(nodeId, state.mode === 'batch' ? 'batch' : 'single');
+    executionToken = state.triggerRun(nodeId, state.mode === 'batch' ? 'batch' : 'single', runContext);
     const current = useRunBusStore.getState();
-    if (current.cancelSeq !== startCancelSeq) finish('cancelled');
+    if (current.cancelSeq !== startCancelSeq && current.cancelTargets.includes(nodeId)) finish('cancelled');
     else if (matchesRunCompletion(current.lastDone, nodeId, executionToken)) finish(current.lastDone.ok ? 'ok' : 'fail');
     else if (current.executionTokens[nodeId] !== executionToken) finish('cancelled');
   });
@@ -287,7 +288,7 @@ const RandomRouteNode = (p: NodeProps) => {
     [d, update],
   );
 
-  const handleRun = useCallback(async () => {
+  const handleRun = useCallback(async (reporter: RunNodeLifecycleReporter) => {
     const normalized = normalizeRandomRouteSettings(d);
     const selectedHandles = selectRandomRouteHandles(normalized.totalOutputs, normalized.randomPassCount);
     const runAt = Date.now();
@@ -326,8 +327,8 @@ const RandomRouteNode = (p: NodeProps) => {
 
     for (const layer of layers) {
       const results = normalized.executionMode === 'parallel'
-        ? await Promise.all(layer.map((nodeId) => waitForNodeRun(nodeId)))
-        : [await waitForNodeRun(layer[0])];
+        ? await Promise.all(layer.map((nodeId) => waitForNodeRun(nodeId, reporter.runContext)))
+        : [await waitForNodeRun(layer[0], reporter.runContext)];
       if (results.includes('cancelled')) {
         update({
           randomRouteLastOrder: order,
@@ -353,7 +354,7 @@ const RandomRouteNode = (p: NodeProps) => {
     });
   }, [d, getEdges, getNodes, p.id, update]);
 
-  useRunTrigger(p.id, handleRun, 'random-route');
+  useRunTrigger(p.id, handleRun, 'random-route', { lifecycleAware: true });
 
   const upstreamCount = upstreamConnections.length;
   const downstreamCount = getEdges().filter((edge) => edge.source === p.id).length;

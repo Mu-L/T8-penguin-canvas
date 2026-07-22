@@ -56,9 +56,13 @@ test('ApiSettings advanced provider fields stay mounted while typing and ModelSc
 });
 
 test('ApiSettings Jimeng CLI panel explains install, login, and executable path', () => {
-  assert.match(apiSettingsSource, /如何安装即梦 CLI/);
-  assert.match(apiSettingsSource, /curl -s https:\/\/jimeng\.jianying\.com\/cli \| bash/);
+  assert.match(apiSettingsSource, /如何安装或更新即梦 CLI/);
+  assert.match(apiSettingsSource, /JIMENG_CLI_INSTALL_UPDATE_COMMAND/);
+  assert.match(apiSettingsSource, /JIMENG_CLI_SUPPORTED_VERSION/);
   assert.match(apiSettingsSource, /dreamina login/);
+  assert.match(apiSettingsSource, /dreamina user_credit/);
+  assert.match(apiSettingsSource, /dreamina relogin/);
+  assert.match(apiSettingsSource, /dreamina logout/);
   assert.match(apiSettingsSource, /C:\\Users\\&lt;用户名&gt;\\bin\\dreamina\.exe/);
   assert.match(apiSettingsSource, /测试连接/);
 });

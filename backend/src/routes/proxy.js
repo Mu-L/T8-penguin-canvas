@@ -1476,7 +1476,7 @@ function saveBase64Image(b64) {
 }
 
 // ========== POST /api/proxy/image — 图像生成 ==========
-// body: { model, apiModel?, paramKind?, prompt, aspect_ratio?, image_size?, images?[], size?, image?, quality?, n?, response_format?, output_format? }
+// body: { model, apiModel?, paramKind?, prompt, aspect_ratio?, image_size?, images?[], size?, image?, quality?, moderation?, n?, response_format?, output_format? }
 //
 // 主项目对齐的双协议路由:
 //  1. paramKind === 'gpt-size'
@@ -2065,7 +2065,7 @@ async function buildGeminiOfficialContents(prompt, refs) {
 //   - Gemini 3 官方图像模型: JSON /v1/models/{model}:generateContent + generationConfig.responseFormat.image
 //   - Grok Image: JSON /generations?async=true { model, prompt, aspect_ratio, image:[base64...]? }
 // ========================================================================
-async function callImageUpstreamAsync({ apiKey, finalApiModel, paramKind, prompt, n, aspect_ratio, image_size, refs, size, quality, response_format, output_format }) {
+async function callImageUpstreamAsync({ apiKey, finalApiModel, paramKind, prompt, n, aspect_ratio, image_size, refs, size, quality, moderation, response_format, output_format }) {
   const upstreamBase = `${config.ZHENZHEN_BASE_URL}/v1/images`;
   const auth = `Bearer ${apiKey}`;
   const ar = String(aspect_ratio || '').trim();
@@ -2165,11 +2165,17 @@ async function callImageUpstreamAsync({ apiKey, finalApiModel, paramKind, prompt
   if (paramKind === 'gpt-size') {
     const form = new FormData();
     const px = size || aspectToGptSize(ar, lvlLower);
+    const normalizedQuality = ['auto', 'high', 'medium', 'low'].includes(String(quality || '').toLowerCase())
+      ? String(quality).toLowerCase()
+      : 'auto';
+    const normalizedModeration = ['auto', 'low'].includes(String(moderation || '').toLowerCase())
+      ? String(moderation).toLowerCase()
+      : 'auto';
     form.append('prompt', prompt);
     form.append('model', finalApiModel);
     form.append('n', String(n || 1));
-    form.append('quality', quality || 'auto');
-    form.append('moderation', 'auto');
+    form.append('quality', normalizedQuality);
+    form.append('moderation', normalizedModeration);
     form.append('size', px);
     form.append('aspectRatio', isAuto ? '' : ar); // 主项目用 camelCase
     form.append('resolution', lvlLower);          // 主项目用小写 1k/2k/4k
@@ -2851,7 +2857,7 @@ router.post('/image', async (req, res) => {
     model, apiModel, paramKind: paramKindIn,
     prompt, n,
     aspect_ratio, image_size,
-    images, image, size, quality, response_format, output_format, providerParams,
+    images, image, size, quality, moderation, response_format, output_format, providerParams,
   } = req.body || {};
   // v1.2.9.15: 一体化「专属优先 fallback 通用」校验
   if (!ensureKeyOrSelectedGroup(settings, res, apiModel || model || '', '图像', providerParams)) return;
@@ -2877,7 +2883,7 @@ router.post('/image', async (req, res) => {
     apiKey = String(settings.zhenzhenApiKey || '');
     const r = await callImageUpstreamAsync({
       apiKey, finalApiModel, paramKind,
-      prompt, n, aspect_ratio, image_size: gptImage2ForcedSize || image_size, refs, size: gptImage2ForcedSize ? undefined : size, quality, response_format, output_format,
+      prompt, n, aspect_ratio, image_size: gptImage2ForcedSize || image_size, refs, size: gptImage2ForcedSize ? undefined : size, quality, moderation, response_format, output_format,
     });
     if (!r.ok) {
       const providerError = await boundedProviderHttpError(r, 'Image generation failed');
@@ -2927,7 +2933,7 @@ router.post('/image/submit', async (req, res) => {
   let apiKey = String(settings?.zhenzhenApiKey || '');
   try {
     const { model, apiModel, paramKind: paramKindIn, prompt, n,
-            aspect_ratio, image_size, images, image, size, quality, response_format, output_format, providerParams } = req.body || {};
+            aspect_ratio, image_size, images, image, size, quality, moderation, response_format, output_format, providerParams } = req.body || {};
     // v1.2.9.15: 一体化「专属优先 fallback 通用」校验
     if (!ensureKeyOrSelectedGroup(settings, res, apiModel || model || '', '图像', providerParams)) return;
     apiKey = String(settings.zhenzhenApiKey || '');
@@ -2952,7 +2958,7 @@ router.post('/image/submit', async (req, res) => {
     apiKey = String(settings.zhenzhenApiKey || '');
     const r = await callImageUpstreamAsync({
       apiKey, finalApiModel, paramKind,
-      prompt, n, aspect_ratio, image_size: gptImage2ForcedSize || image_size, refs, size: gptImage2ForcedSize ? undefined : size, quality, response_format, output_format,
+      prompt, n, aspect_ratio, image_size: gptImage2ForcedSize || image_size, refs, size: gptImage2ForcedSize ? undefined : size, quality, moderation, response_format, output_format,
     });
     if (!r.ok) {
       const providerError = await boundedProviderHttpError(r, 'Image submit failed');
@@ -5379,9 +5385,11 @@ router.post('/seedance/submit', async (req, res) => {
     } catch (e) {
       proxyRouteError('proxy/seedance/submit seedance.nz 错误', e, [settings?.zhenzhenSd2ApiKey || '']);
       const status = Number(e?.status);
+      const code = /^SEEDANCE_[A-Z0-9_]+$/.test(String(e?.code || '')) ? String(e.code) : '';
       return res.status(status >= 400 && status < 600 ? status : 500).json({
         success: false,
         error: proxyPublicError(e, 'seedance.nz 请求失败', [settings?.zhenzhenSd2ApiKey || '']),
+        ...(code ? { code } : {}),
         ...seedanceNzTrace(e),
       });
     }

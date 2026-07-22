@@ -248,6 +248,14 @@ test('upload, material-set, loop, and pick-from-set resolve instance discriminat
     assert.deepEqual([loop.inputs[0].kinds, loop.outputs[0].kinds], [[kind], [kind]]);
     assert.deepEqual([pick.inputs[0].kinds, pick.outputs[0].kinds], [[kind], [kind]]);
   }
+  const customLoop = requireResolved(canvasNode('loop', { kind: 'text', mode: 'parallel-custom' }));
+  assert.deepEqual(customLoop.inputs[0].kinds, ['text', 'image', 'video', 'audio']);
+  assert.deepEqual(customLoop.outputs[0].kinds, ['text']);
+  assert.equal(isConnectionValid(
+    canvasNode('upload', { uploadType: 'image' }, 'image-source'),
+    canvasNode('loop', { kind: 'text', mode: 'parallel-custom' }, 'custom-loop'),
+    { sourceHandle: null, targetHandle: null },
+  ), true);
   for (const discriminator of [undefined, '', 'bogus', 42]) {
     assert.deepEqual(requireResolved(canvasNode('loop', { kind: discriminator })).outputs[0].kinds, ['image']);
     assert.deepEqual(requireResolved(canvasNode('pick-from-set', { pickKind: discriminator })).outputs[0].kinds, ['image']);

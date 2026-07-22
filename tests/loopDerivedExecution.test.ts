@@ -2,11 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Edge, Node } from '@xyflow/react';
 import {
+  buildLoopCustomIterationInputs,
   buildLoopParallelCloneGraph,
+  collectLoopCustomMaterialBuckets,
   collectLoopIterationMaterials,
   loopParallelCloneEdgeId,
   loopParallelCloneInputEdgeId,
   loopParallelCloneNodeId,
+  normalizeLoopCustomMaterialConfig,
 } from '../src/utils/loopDerivedExecution.ts';
 
 function node(id: string, type: string, data: Record<string, unknown> = {}): Node {
@@ -116,4 +119,74 @@ test('parallel clone graph uses request-bound stable IDs and preserves the entry
   );
   assert.equal(first.nodes[0].data.__loopCloneRequestId, requestId);
   assert.equal(first.nodes[0].data.__loopCloneSourceNodeId, 'entry');
+  assert.equal(Object.hasOwn(first.nodes[0].data, '__loopCustomInput'), false);
+});
+
+test('custom parallel loop pairs prompts one-by-one while reusing one selected image', () => {
+  const loop = node('loop', 'loop', {
+    mode: 'parallel-custom',
+    kind: 'text',
+    parallelCustomStrategies: {
+      text: 'sequence',
+      image: 'fixed',
+      video: 'sequence',
+      audio: 'sequence',
+    },
+    parallelCustomFixedIndexes: { image: 1 },
+  });
+  const promptValues = Array.from({ length: 16 }, (_, index) => `prompt ${index + 1}`);
+  const prompts = node('prompts', 'text-split', { textSegments: promptValues });
+  const references = node('references', 'upload', { imageUrls: ['ref-a.png', 'ref-b.png'] });
+  const nodes = [loop, prompts, references];
+  const edges = [
+    edge('prompts-loop', 'prompts', 'loop'),
+    edge('references-loop', 'references', 'loop'),
+  ];
+
+  const config = normalizeLoopCustomMaterialConfig(loop.data);
+  const buckets = collectLoopCustomMaterialBuckets(loop, nodes, edges);
+  const iterations = buildLoopCustomIterationInputs(buckets, config);
+
+  assert.equal(iterations.length, 16);
+  assert.deepEqual(iterations.map((input) => input.texts[0]?.url), promptValues);
+  assert.deepEqual(iterations.map((input) => input.images[0]?.url), Array(16).fill('ref-b.png'));
+});
+
+test('custom parallel sequence does not wrap a shorter material pool and clone entries receive isolated snapshots', () => {
+  const requestId = 'run:custom-loop:12345678';
+  const sourceNodes = [node('entry', 'image'), node('sink', 'output')];
+  const sourceEdges = [edge('entry-sink', 'entry', 'sink')];
+  const items = ['one', 'two', 'three'].map((url, index) => ({
+    id: `prompt-${index}`,
+    kind: 'text' as const,
+    url,
+    sourceNodeId: 'prompts',
+  }));
+  const iterations = buildLoopCustomIterationInputs({
+    texts: items,
+    images: [
+      { id: 'image-a', kind: 'image', url: 'a.png', sourceNodeId: 'images' },
+      { id: 'image-b', kind: 'image', url: 'b.png', sourceNodeId: 'images' },
+    ],
+    videos: [],
+    audios: [],
+  }, normalizeLoopCustomMaterialConfig({ kind: 'text' }));
+
+  assert.deepEqual(iterations.map((input) => input.images.map((item) => item.url)), [['a.png'], ['b.png'], []]);
+
+  const graph = buildLoopParallelCloneGraph({
+    loopId: 'loop',
+    requestId,
+    sourceNodes,
+    sourceEdges,
+    entryEdge: edge('loop-entry', 'loop', 'entry'),
+    items,
+    iterationInputs: iterations,
+  });
+  const secondEntry = graph.nodes.find((item) => item.id === loopParallelCloneNodeId('loop', requestId, 1, 0));
+  const thirdEntry = graph.nodes.find((item) => item.id === loopParallelCloneNodeId('loop', requestId, 2, 0));
+  assert.deepEqual((secondEntry?.data as any).__loopCustomInput.texts.map((item: any) => item.url), ['two']);
+  assert.deepEqual((secondEntry?.data as any).__loopCustomInput.images.map((item: any) => item.url), ['b.png']);
+  assert.deepEqual((thirdEntry?.data as any).__loopCustomInput.texts.map((item: any) => item.url), ['three']);
+  assert.deepEqual((thirdEntry?.data as any).__loopCustomInput.images, []);
 });

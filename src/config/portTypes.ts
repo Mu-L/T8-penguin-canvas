@@ -93,7 +93,7 @@ const CONNECTION_PORT_RESOLVERS = new Set<ConnectionPortResolver>([
 ]);
 const MANIFEST_CONNECTION_PORTS = (schemaManifest as unknown as CanvasNodePortManifest).connectionPorts;
 
-// 画布内部结构节点不属于 69 类生产业务节点，但其 JSX Handle 仍必须精确校验。
+// 画布内部结构节点不属于公开/可生成的生产业务节点，但其 JSX Handle 仍必须精确校验。
 const INTERNAL_CONNECTION_PORTS: Record<string, ManifestConnectionPortAuthority> = {
   groupBox: {
     resolver: 'static', inputs: [], outputs: [{ id: 'group-out', kinds: ['any'], required: false, minConnections: 0, maxConnections: null }],
@@ -108,6 +108,20 @@ const DEV_CONNECTION_PORTS: Record<string, ManifestConnectionPortAuthority> = im
     resolver: 'static', inputs: [], outputs: [{ id: null, kinds: ['text'], required: false, minConnections: 0, maxConnections: null }],
   },
 } : {};
+
+/**
+ * 判断一个节点类型是否拥有权威连接契约。
+ *
+ * 这里同时覆盖生产节点、持久化内部结构节点和开发态节点。工作流医生等
+ * 结构检查必须复用它，不能只看侧边栏 NODE_REGISTRY；否则合法的 groupBox
+ * 聚合出口会在单节点/组选区体检中被误报为“未知节点类型”。
+ */
+export function isKnownCanvasNodeType(type: unknown): type is string {
+  if (typeof type !== 'string' || !type) return false;
+  return Object.prototype.hasOwnProperty.call(MANIFEST_CONNECTION_PORTS, type)
+    || Object.prototype.hasOwnProperty.call(INTERNAL_CONNECTION_PORTS, type)
+    || Object.prototype.hasOwnProperty.call(DEV_CONNECTION_PORTS, type);
+}
 
 const TOOLBOX_PARAM_KIND_BY_TYPE: Record<string, 'cinematic' | 'video-motion' | 'multi-angle-visual'> = {
   cinematic: 'cinematic',
@@ -321,7 +335,10 @@ export function resolveNodeConnectionPorts(node: Node | null | undefined): NodeC
     if (!input || !output || input.id !== null || output.id !== null) {
       return unresolvedConnectionPorts(`${authority.resolver} authority is invalid`, authority.resolver);
     }
-    return { ...authority, inputs: [portWithKinds(input, [kind])], outputs: [portWithKinds(output, [kind])] };
+    const inputKinds = authority.resolver === 'loop' && data.mode === 'parallel-custom'
+      ? [...MATERIAL_KINDS]
+      : [kind];
+    return { ...authority, inputs: [portWithKinds(input, inputKinds)], outputs: [portWithKinds(output, [kind])] };
   }
 
   if (authority.resolver === 'random-route') {

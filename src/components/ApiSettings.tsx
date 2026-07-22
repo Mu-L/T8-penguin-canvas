@@ -15,6 +15,10 @@ import {
   stringifyAdvancedProviderModels,
 } from '../utils/advancedProviders';
 import {
+  JIMENG_CLI_INSTALL_UPDATE_COMMAND,
+  JIMENG_CLI_SUPPORTED_VERSION,
+} from '../config/jimengCli';
+import {
   COMFY_FIELD_SOURCE_OPTIONS,
   BASIC_COMFY_TEXT_TO_IMAGE_SAMPLE_ID,
   analyzeComfyWorkflow,
@@ -160,7 +164,7 @@ const ADVANCED_PROVIDER_GUIDES: Record<AdvancedProviderProtocol, {
     description: '适合已经在本机配置好即梦 CLI 的用户。它不走 API Key，而是调用本地命令并轮询任务结果。',
     nodeScopes: ['图像节点', '视频节点', 'SD2.0 节点'],
     connectionHint: '填写 dreamina 可执行文件路径；如果 CLI 装在 WSL 里，再打开 WSL 并填写发行版名称。',
-    modelHint: '模型名按 CLI 支持的命令参数填写；图像可填 seedream-4.7 / seedream-5.0，视频可填 seedance2.0fast_vip、seedance2.0_vip(支持 4K)、seedance2.0mini、seedance1.5pro、seedance1.0fast、seedance1.0 等。每行一个。',
+    modelHint: '当前节点按即梦 CLI v1.4.14 适配。图像支持 seedream-5.0-pro（CLI 参数 5.0Pro）、seedream-5.0、seedream-4.7 等；视频支持 seedance2.0fast_vip、seedance2.0_vip（720P/1080P/4K）、seedance2.0mini、seedance1.5pro、seedance1.0fast。每行一个。',
   },
 };
 
@@ -170,8 +174,6 @@ const MODELSCOPE_TOKEN_URLS = {
 } as const;
 
 const AGNES_API_KEY_URL = 'https://platform.agnes-ai.com/settings/apiKeys';
-
-const JIMENG_CLI_INSTALL_COMMAND = 'curl -s https://jimeng.jianying.com/cli | bash';
 
 const CLOUD_UPLOAD_LABELS: Record<CloudUploadProvider, string> = {
   'tencent-cos': '腾讯云 COS',
@@ -2122,13 +2124,16 @@ export default function ApiSettingsModal({ open, onClose }: ApiSettingsModalProp
               <div className="flex items-start gap-2">
                 <Info size={14} className="mt-0.5 shrink-0" />
                 <div className="min-w-0 space-y-2">
-                  <div className={`font-bold ${labelCls}`}>如何安装即梦 CLI？</div>
+                  <div className={`font-bold ${labelCls}`}>如何安装或更新即梦 CLI？</div>
                   <p className={hintCls}>
-                    在 PowerShell 7、Git Bash 或 WSL 终端执行安装命令；安装完成后运行 <code className="font-mono">dreamina login</code> 登录，再回到这里点击“测试连接”。
+                    当前节点按 <strong>即梦 CLI v{JIMENG_CLI_SUPPORTED_VERSION}</strong> 适配。在 PowerShell 7、Git Bash 或 WSL 终端执行同一条官方命令即可安装或更新；完成后运行 <code className="font-mono">dreamina login</code> 登录，再回到这里点击“测试连接”。
                   </p>
                   <code className="block w-full overflow-x-auto rounded border px-2 py-1.5 font-mono text-[11px] leading-relaxed">
-                    {JIMENG_CLI_INSTALL_COMMAND}
+                    {JIMENG_CLI_INSTALL_UPDATE_COMMAND}
                   </code>
+                  <p className={hintCls}>
+                    登录验证：<code className="font-mono">dreamina user_credit</code>；切换账号：<code className="font-mono">dreamina relogin</code>；退出：<code className="font-mono">dreamina logout</code>。
+                  </p>
                   <p className={hintCls}>
                     Windows 常见路径是 <code className="font-mono">C:\Users\&lt;用户名&gt;\bin\dreamina.exe</code>；如果命令已加入 PATH，可直接填写 <code className="font-mono">dreamina</code>。装在 WSL 里时，勾选下面的 WSL 选项并填写发行版名称。
                   </p>

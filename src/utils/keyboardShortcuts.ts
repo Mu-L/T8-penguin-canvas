@@ -109,8 +109,14 @@ function normalizeEventKey(key: string): string {
 }
 
 export function keyboardEventToShortcutCombo(event: KeyboardEvent): ShortcutCombo | null {
-  if (event.isComposing) return null;
-  const rawKey = event.code === 'Space' ? 'Space' : normalizeEventKey(event.key);
+  const hasCommandModifier = event.ctrlKey || event.metaKey;
+  if (event.isComposing && !hasCommandModifier) return null;
+  const physicalLetter = hasCommandModifier ? /^Key([A-Z])$/i.exec(event.code)?.[1] : undefined;
+  const rawKey = event.code === 'Space'
+    ? 'Space'
+    : physicalLetter
+      ? physicalLetter.toUpperCase()
+      : normalizeEventKey(event.key);
   if (!rawKey) return null;
   return normalizeShortcutCombo({
     key: rawKey,

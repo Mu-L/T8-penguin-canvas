@@ -8,6 +8,7 @@ import {
   collectRunPreflightAssetIds,
   scopeRunPreflightIssues,
 } from '../src/utils/runPreflightContext.ts';
+import { buildPossibleDerivedExecutionScope } from '../src/utils/derivedExecutionScope.ts';
 import { analyzeWorkflow } from '../src/utils/workflowDoctor.ts';
 
 const settings: ApiSettings = {
@@ -99,6 +100,105 @@ test('exact-plan scope preserves the caller supplied run-all/replay graph withou
   assert.deepEqual(scope.nodes, nodes);
   assert.deepEqual(scope.edges, edges);
   assert.deepEqual(scope.inputContextNodeIds, ['planned-source']);
+});
+
+test('groupBox aggregate output is valid direct input context for a selected generation node', () => {
+  const group = {
+    id: 'group',
+    type: 'groupBox',
+    position: { x: 0, y: 0 },
+    data: { memberIds: ['member'], prompt: 'group prompt' },
+  } as Node;
+  const selected = {
+    id: 'selected-image',
+    type: 'image',
+    position: { x: 400, y: 0 },
+    data: { prompt: 'generate from group' },
+  } as Node;
+  const edge: Edge = {
+    id: 'group-to-image',
+    source: group.id,
+    target: selected.id,
+    sourceHandle: 'group-out',
+    targetHandle: null,
+  };
+  const scope = buildRunPreflightDiagnosticScope({
+    nodes: [group, selected],
+    edges: [edge],
+    executionNodeIds: [selected.id],
+    mode: 'selection-input-context',
+  });
+
+  assert.deepEqual(scope.inputContextNodeIds, [group.id]);
+  const structureIssues = scopeRunPreflightIssues(analyzeWorkflow(scope.nodes, scope.edges), scope)
+    .filter((issue) => issue.severity === 'error' || issue.severity === 'warning');
+  assert.equal(structureIssues.some((issue) => issue.ruleId === 'registry.unknown-node-type'), false);
+  assert.equal(structureIssues.some((issue) => issue.ruleId === 'ports.handle-unknown'), false);
+  assert.equal(structureIssues.some((issue) => issue.ruleId === 'ports.type-incompatible'), false);
+
+  const derived = buildPossibleDerivedExecutionScope({
+    nodes: [group, selected],
+    edges: [edge],
+    executionNodeIds: [selected.id],
+  });
+  assert.equal(derived.coverageComplete, true);
+  assert.deepEqual(derived.requiredAuthorizationNodeIds, [selected.id]);
+  assert.deepEqual(derived.diagnosticContextNodeIds, [group.id]);
+
+  const exactScope = buildRunPreflightDiagnosticScope({
+    nodes: derived.nodes,
+    edges: derived.edges,
+    executionNodeIds: derived.requiredAuthorizationNodeIds,
+    mode: 'exact-plan',
+  });
+  const exactStructureIssues = scopeRunPreflightIssues(
+    analyzeWorkflow(exactScope.nodes, exactScope.edges),
+    exactScope,
+  );
+  assert.equal(exactStructureIssues.some((issue) => issue.ruleId === 'registry.unknown-node-type'), false);
+  assert.equal(exactStructureIssues.some((issue) => issue.ruleId === 'ports.handle-unknown'), false);
+  assert.equal(exactStructureIssues.some((issue) => issue.ruleId === 'ports.type-incompatible'), false);
+});
+
+test('a truly unknown direct source still blocks the derived exact execution plan', () => {
+  const unknownSource = {
+    id: 'missing-plugin-source',
+    type: 'missing-plugin-node',
+    position: { x: 0, y: 0 },
+    data: {},
+  } as Node;
+  const selected = {
+    id: 'selected-image',
+    type: 'image',
+    position: { x: 400, y: 0 },
+    data: { prompt: 'generate from plugin output' },
+  } as Node;
+  const edge: Edge = {
+    id: 'unknown-to-image',
+    source: unknownSource.id,
+    target: selected.id,
+  };
+  const derived = buildPossibleDerivedExecutionScope({
+    nodes: [unknownSource, selected],
+    edges: [edge],
+    executionNodeIds: [selected.id],
+  });
+  assert.equal(derived.coverageComplete, true);
+
+  const exactScope = buildRunPreflightDiagnosticScope({
+    nodes: derived.nodes,
+    edges: derived.edges,
+    executionNodeIds: derived.requiredAuthorizationNodeIds,
+    mode: 'exact-plan',
+  });
+  const issues = scopeRunPreflightIssues(
+    analyzeWorkflow(exactScope.nodes, exactScope.edges),
+    exactScope,
+  );
+  assert.ok(issues.some((issue) => (
+    issue.ruleId === 'registry.unknown-node-type'
+    && issue.targetNodeIds?.includes(unknownSource.id)
+  )));
 });
 
 test('group preflight validates selected inputs but ignores provider and required-input failures of unexecuted sources', () => {

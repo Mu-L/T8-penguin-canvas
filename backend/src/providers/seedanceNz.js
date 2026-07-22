@@ -677,22 +677,74 @@ function readBoundedLocalFile(filePath, kind, maxBytes) {
   }
 }
 
+function mediaKindLabel(kind) {
+  if (kind === 'image') return '图片';
+  if (kind === 'video') return '视频';
+  if (kind === 'audio') return '音频';
+  return '素材';
+}
+
+function normalizeLocalT8MediaRef(value) {
+  const text = String(value || '').trim();
+  if (!/^https?:\/\//i.test(text)) return text;
+  try {
+    const parsed = new URL(text);
+    if (parsed.username || parsed.password) return text;
+    const hostname = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    const isLoopback = hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1';
+    const isControlledMount = /^\/(?:files|api\/resources|api\/files|input|output)\//.test(parsed.pathname || '');
+    return isLoopback && isControlledMount
+      ? `${parsed.pathname}${parsed.search || ''}`
+      : text;
+  } catch {
+    return text;
+  }
+}
+
 function normalizeRemoteMediaError(error, kind, maxBytes) {
+  const label = mediaKindLabel(kind);
   if (error?.code === 'item_too_large') return mediaTooLargeError(kind, maxBytes);
   if (error?.code === 'fetch_timeout') {
-    return boundaryError(`读取待上传${kind}上游响应超时`, 'SEEDANCE_UPSTREAM_TIMEOUT', 504);
+    return boundaryError(
+      `下载参考${label}超时。请检查网络和素材链接是否仍有效，或重新上传原${label}后重试（错误码：SEEDANCE_UPSTREAM_TIMEOUT）`,
+      'SEEDANCE_UPSTREAM_TIMEOUT',
+      504,
+    );
   }
-  if (error?.code === 'private_address' || error?.code === 'url_credentials_forbidden') {
-    return boundaryError(`待上传${kind}远程地址未通过安全校验`, 'SEEDANCE_REMOTE_MEDIA_BLOCKED', 400);
+  if (error?.code === 'private_address') {
+    return boundaryError(
+      `参考${label}地址指向本机、局域网或受保护网络，已被安全校验拦截。请重新上传原${label}，或改用无需登录、可公开访问的 HTTPS ${label}直链（错误码：SEEDANCE_REMOTE_MEDIA_BLOCKED）`,
+      'SEEDANCE_REMOTE_MEDIA_BLOCKED',
+      400,
+    );
+  }
+  if (error?.code === 'url_credentials_forbidden') {
+    return boundaryError(
+      `参考${label}网址包含账号或密码，已被安全校验拦截。请重新上传原${label}，或改用不含登录信息的公开 HTTPS ${label}直链（错误码：SEEDANCE_REMOTE_MEDIA_BLOCKED）`,
+      'SEEDANCE_REMOTE_MEDIA_BLOCKED',
+      400,
+    );
   }
   if (error?.code === 'invalid_url' || error?.code === 'invalid_protocol') {
-    return boundaryError(`待上传${kind}远程地址无效`, 'SEEDANCE_REMOTE_MEDIA_INVALID', 400);
+    return boundaryError(
+      `参考${label}地址无效或不是 HTTP/HTTPS 链接。请重新上传原${label}，或改用可公开访问的 HTTPS ${label}直链（错误码：SEEDANCE_REMOTE_MEDIA_INVALID）`,
+      'SEEDANCE_REMOTE_MEDIA_INVALID',
+      400,
+    );
   }
   const remoteStatus = Number(error?.status);
   if (error?.code === 'remote_http_error' && Number.isInteger(remoteStatus)) {
-    return boundaryError(`读取待上传${kind}失败（HTTP ${remoteStatus}）`, 'SEEDANCE_REMOTE_MEDIA_HTTP_ERROR', remoteStatus);
+    return boundaryError(
+      `下载参考${label}失败：素材服务器返回 HTTP ${remoteStatus}。链接可能已过期、需要登录或禁止外部访问；请重新上传原${label}后重试（错误码：SEEDANCE_REMOTE_MEDIA_HTTP_ERROR）`,
+      'SEEDANCE_REMOTE_MEDIA_HTTP_ERROR',
+      remoteStatus,
+    );
   }
-  return boundaryError(`读取待上传${kind}失败`, 'SEEDANCE_REMOTE_MEDIA_UNAVAILABLE', 502);
+  return boundaryError(
+    `下载参考${label}失败，远程地址当前无法访问。请检查网络和链接有效期，或重新上传原${label}后重试（错误码：SEEDANCE_REMOTE_MEDIA_UNAVAILABLE）`,
+    'SEEDANCE_REMOTE_MEDIA_UNAVAILABLE',
+    502,
+  );
 }
 
 async function responseJson(response, label) {
@@ -775,7 +827,7 @@ async function withUploadQueue(apiKey, intervalMs, task) {
 }
 
 async function mediaBuffer(source, kind, maxBytes, options = {}) {
-  const text = String(source || '').trim();
+  const text = normalizeLocalT8MediaRef(source);
   const dataMatch = text.match(/^data:([^;,]+);base64,(.+)$/i);
   if (dataMatch) {
     const max = Number(maxBytes) || maxBytesForKind(kind);
@@ -792,11 +844,24 @@ async function mediaBuffer(source, kind, maxBytes, options = {}) {
     };
   }
 
-  let resolved;
+  let resolved = null;
   try {
-    resolved = await resolveMediaRef(text, { target: 'url' });
+    resolved = await resolveMediaRef(text, { target: 'local-path' });
   } catch {
-    throw boundaryError(`待上传${kind}引用无效`, 'SEEDANCE_MEDIA_REFERENCE_INVALID', 400);
+    // Remote references are resolved below. Controlled T8 mounts must be tried
+    // locally first so /files/* never becomes an SSRF-prone loopback fetch.
+  }
+  if (!resolved) {
+    try {
+      resolved = await resolveMediaRef(text, { target: 'url' });
+    } catch {
+      const label = mediaKindLabel(kind);
+      throw boundaryError(
+        `参考${label}引用无效。请删除该素材后重新上传原${label}（错误码：SEEDANCE_MEDIA_REFERENCE_INVALID）`,
+        'SEEDANCE_MEDIA_REFERENCE_INVALID',
+        400,
+      );
+    }
   }
   if (resolved.kind === 'local-path') {
     const max = Number(maxBytes) || maxBytesForKind(kind);
@@ -805,7 +870,12 @@ async function mediaBuffer(source, kind, maxBytes, options = {}) {
       buffer = readBoundedLocalFile(resolved.path, kind, max);
     } catch (error) {
       if (error?.code === 'SEEDANCE_MEDIA_TOO_LARGE') throw error;
-      throw boundaryError(`待上传${kind}本地素材不可用`, 'SEEDANCE_MEDIA_REFERENCE_UNAVAILABLE', 400);
+      const label = mediaKindLabel(kind);
+      throw boundaryError(
+        `参考${label}的本地文件不存在或无法读取。请删除失效素材后重新上传原${label}（错误码：SEEDANCE_MEDIA_REFERENCE_UNAVAILABLE）`,
+        'SEEDANCE_MEDIA_REFERENCE_UNAVAILABLE',
+        400,
+      );
     }
     return {
       buffer,
@@ -843,7 +913,7 @@ async function mediaBuffer(source, kind, maxBytes, options = {}) {
 
 async function uploadMedia(source, kind, apiKey, options = {}) {
   const text = String(source || '').trim();
-  if (!text) throw new Error(`待上传${kind}为空`);
+  if (!text) throw new Error(`未收到参考${mediaKindLabel(kind)}，请重新选择或上传素材`);
 
   const fetchImpl = getFetchImpl(options);
   const baseUrl = cleanBaseUrl(options.baseUrl);

@@ -1,0 +1,6 @@
+{
+  "supportedVersion": "1.4.14",
+  "releaseDate": "2026-07-21",
+  "installUpdateCommand": "curl -fsSL https://jimeng.jianying.com/cli | bash",
+  "officialGuideUrl": "https://bytedance.larkoffice.com/wiki/FVTwwm0bGiishxkKOoScdHR2nsg"
+}

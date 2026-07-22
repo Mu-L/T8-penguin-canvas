@@ -61,6 +61,14 @@ test('resource library shortcut conflicts with canvas-visible shortcuts', () => 
   assert.equal(conflicts[0].actionId, 'canvas.nearest-node');
 });
 
+test('command shortcuts use physical letter codes across keyboard layouts and stale IME composition', () => {
+  const localizedCopy = event('с', { code: 'KeyC', ctrlKey: true, isComposing: true });
+  const localizedPaste = event('ν', { code: 'KeyV', metaKey: true });
+
+  assert.equal(formatShortcutCombo(keyboardEventToShortcutCombo(localizedCopy)), 'Ctrl+C');
+  assert.equal(formatShortcutCombo(keyboardEventToShortcutCombo(localizedPaste)), 'Ctrl+V');
+});
+
 test('sidebar toggle defaults to H and stays in the canvas window group', () => {
   const action = DEFAULT_SHORTCUTS.find((item) => item.id === 'global.sidebar-toggle');
 

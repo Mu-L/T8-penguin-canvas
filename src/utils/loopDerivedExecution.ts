@@ -13,6 +13,28 @@ export interface LoopIterationMaterial {
   sourceNodeId: string;
 }
 
+export type LoopCustomMaterialStrategy = 'sequence' | 'fixed';
+
+export interface LoopCustomIterationInput {
+  texts: LoopIterationMaterial[];
+  images: LoopIterationMaterial[];
+  videos: LoopIterationMaterial[];
+  audios: LoopIterationMaterial[];
+}
+
+export interface LoopCustomMaterialBuckets {
+  texts: LoopIterationMaterial[];
+  images: LoopIterationMaterial[];
+  videos: LoopIterationMaterial[];
+  audios: LoopIterationMaterial[];
+}
+
+export interface LoopCustomMaterialConfig {
+  driverKind: LoopMaterialKind;
+  strategies: Record<LoopMaterialKind, LoopCustomMaterialStrategy>;
+  fixedIndexes: Record<LoopMaterialKind, number>;
+}
+
 export interface LoopParallelCloneGraph {
   nodes: Node[];
   edges: Edge[];
@@ -50,6 +72,80 @@ export function loopParallelCloneInputEdgeId(loopId: string, requestId: string, 
 
 function record(value: unknown): Record<string, any> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
+}
+
+const LOOP_MATERIAL_KINDS: readonly LoopMaterialKind[] = ['text', 'image', 'video', 'audio'];
+
+function materialBucketKey(kind: LoopMaterialKind): keyof LoopCustomMaterialBuckets {
+  if (kind === 'text') return 'texts';
+  if (kind === 'image') return 'images';
+  if (kind === 'video') return 'videos';
+  return 'audios';
+}
+
+export function normalizeLoopCustomMaterialConfig(data: unknown): LoopCustomMaterialConfig {
+  const source = record(data);
+  const driverKind: LoopMaterialKind = LOOP_MATERIAL_KINDS.includes(source.kind)
+    ? source.kind
+    : 'image';
+  const rawStrategies = record(source.parallelCustomStrategies);
+  const rawFixedIndexes = record(source.parallelCustomFixedIndexes);
+  const strategies = {} as Record<LoopMaterialKind, LoopCustomMaterialStrategy>;
+  const fixedIndexes = {} as Record<LoopMaterialKind, number>;
+  for (const kind of LOOP_MATERIAL_KINDS) {
+    strategies[kind] = rawStrategies[kind] === 'fixed' ? 'fixed' : 'sequence';
+    const rawIndex = Number(rawFixedIndexes[kind]);
+    fixedIndexes[kind] = Number.isFinite(rawIndex) ? Math.max(0, Math.trunc(rawIndex)) : 0;
+  }
+  return { driverKind, strategies, fixedIndexes };
+}
+
+export function buildLoopCustomIterationInputs(
+  buckets: LoopCustomMaterialBuckets,
+  config: LoopCustomMaterialConfig,
+): LoopCustomIterationInput[] {
+  const driverItems = buckets[materialBucketKey(config.driverKind)];
+  return driverItems.map((_, iteration) => {
+    const input: LoopCustomIterationInput = { texts: [], images: [], videos: [], audios: [] };
+    for (const kind of LOOP_MATERIAL_KINDS) {
+      const key = materialBucketKey(kind);
+      const items = buckets[key];
+      const selected = config.strategies[kind] === 'fixed'
+        ? items[Math.min(config.fixedIndexes[kind], Math.max(0, items.length - 1))]
+        : items[iteration];
+      if (selected) input[key] = [{ ...selected }];
+    }
+    return input;
+  });
+}
+
+export function normalizeLoopCustomIterationInput(value: unknown): LoopCustomIterationInput | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const source = value as Record<string, unknown>;
+  const normalizeBucket = (key: keyof LoopCustomIterationInput, kind: LoopMaterialKind) => {
+    const raw = source[key];
+    if (!Array.isArray(raw)) return [];
+    return raw.flatMap((entry, index) => {
+      const item = record(entry);
+      const url = typeof item.url === 'string' ? item.url.trim() : '';
+      if (!url) return [];
+      const sourceNodeId = typeof item.sourceNodeId === 'string' && item.sourceNodeId
+        ? item.sourceNodeId
+        : 'loop-custom';
+      return [{
+        id: typeof item.id === 'string' && item.id ? item.id : `${sourceNodeId}::${kind}:${index}`,
+        kind,
+        url,
+        sourceNodeId,
+      }];
+    });
+  };
+  return {
+    texts: normalizeBucket('texts', 'text'),
+    images: normalizeBucket('images', 'image'),
+    videos: normalizeBucket('videos', 'video'),
+    audios: normalizeBucket('audios', 'audio'),
+  };
 }
 
 /**
@@ -235,6 +331,30 @@ export function collectLoopIterationMaterials(
   return selected;
 }
 
+export function collectLoopCustomMaterialBuckets(
+  loopNode: Node,
+  nodes: readonly Node[],
+  edges: readonly Edge[],
+  maxDriverItems = Number.POSITIVE_INFINITY,
+): LoopCustomMaterialBuckets {
+  const config = normalizeLoopCustomMaterialConfig(loopNode.data);
+  const collect = (kind: LoopMaterialKind) => collectLoopIterationMaterials(
+    {
+      ...loopNode,
+      data: { ...record(loopNode.data), kind },
+    },
+    nodes,
+    edges,
+    kind === config.driverKind ? maxDriverItems : Number.POSITIVE_INFINITY,
+  );
+  return {
+    texts: collect('text'),
+    images: collect('image'),
+    videos: collect('video'),
+    audios: collect('audio'),
+  };
+}
+
 /**
  * Builds the exact identity/data/edge portion of LoopNode's parallel clone
  * graph. Visual collision offsets are intentionally excluded: run-preflight
@@ -248,6 +368,7 @@ export function buildLoopParallelCloneGraph(input: {
   sourceEdges: readonly Edge[];
   entryEdge: Edge;
   items: readonly LoopIterationMaterial[];
+  iterationInputs?: readonly LoopCustomIterationInput[];
 }): LoopParallelCloneGraph {
   if (!isLoopRunRequestId(input.requestId)) throw new Error('loop-request-id-invalid');
   const nodes: Node[] = [];
@@ -261,6 +382,9 @@ export function buildLoopParallelCloneGraph(input: {
     });
     for (const source of input.sourceNodes) {
       const cloneId = idMap.get(source.id)!;
+      const customInput = source.id === input.entryEdge.target
+        ? input.iterationInputs?.[iteration]
+        : undefined;
       cloneNodeIds.push(cloneId);
       cloneExecutionSourceById[cloneId] = source.id;
       nodes.push({
@@ -275,6 +399,7 @@ export function buildLoopParallelCloneGraph(input: {
           __loopCloneRequestId: input.requestId,
           __loopCloneSourceNodeId: source.id,
           __loopCloneIteration: iteration,
+          ...(customInput ? { __loopCustomInput: customInput } : {}),
         },
         selected: false,
       });

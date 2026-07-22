@@ -124,7 +124,8 @@ test('topology entry and single-node action bar share the persisted RunContext p
   assert.match(canvas, /status: 'queued'/);
   assert.match(canvas, /setActiveRunContext\(runContext\)/);
   assert.match(canvas, /status: 'running',[\s\S]*runContextId: runContext\.contextId/);
-  assert.match(canvas, /await cancelPersistenceRef\.current/);
+  assert.match(canvas, /await runControl\.cancelPersistence/);
+  assert.match(canvas, /executionToken = triggerRun\([\s\S]*runContext/);
   assert.match(canvas, /<NodeActionBar[\s\S]*onRunNode=\{\(nodeId\) => handleRunGroup\(\[nodeId\]\)\}/);
   assert.match(actionBar, /EXECUTABLE_NODE_TYPES.*executableNodeTypes/);
   assert.match(actionBar, /void onRunNode\(selectedExe\.id\)/);

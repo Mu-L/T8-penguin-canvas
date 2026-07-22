@@ -9,6 +9,7 @@ import { EXECUTABLE_NODE_TYPES } from '../../config/executableNodeTypes';
 import { compileSubflow, isPrivateSubflowDataKey, loadSubflowDependencyDefinitions, prepareSubflowRootInputs, subflowDependencyMapKey, type SubflowDefinition, type SubflowParameter, type SubflowPort } from '../../utils/subflows';
 import { selectSingleSourceHandleData } from '../../utils/sourceHandleData';
 import { useUpdateNodeData } from './useUpdateNodeData';
+import type { RunNodeLifecycleReporter } from '../../types/project';
 
 function waitForNode(nodeId: string, executionToken: string) {
   return new Promise<boolean>((resolve) => {
@@ -22,13 +23,13 @@ function waitForNode(nodeId: string, executionToken: string) {
       resolve(ok);
     };
     const unsubscribe = useRunBusStore.subscribe((state) => {
-      if (state.cancelSeq !== cancelSeq) finish(false);
+      if (state.cancelSeq !== cancelSeq && state.cancelTargets.includes(nodeId)) finish(false);
       else if (matchesRunCompletion(state.lastDone, nodeId, executionToken)) finish(state.lastDone.ok);
       else if (state.executionTokens[nodeId] !== executionToken) finish(false);
     });
     const timer = window.setTimeout(() => finish(false), 60 * 60 * 1000);
     const current = useRunBusStore.getState();
-    if (current.cancelSeq !== cancelSeq) finish(false);
+    if (current.cancelSeq !== cancelSeq && current.cancelTargets.includes(nodeId)) finish(false);
     else if (matchesRunCompletion(current.lastDone, nodeId, executionToken)) finish(current.lastDone.ok);
     else if (current.executionTokens[nodeId] !== executionToken) finish(false);
   });
@@ -139,7 +140,7 @@ const SubflowNode = memo((props: NodeProps) => {
     });
   }, [definition, overrides, props.id]);
 
-  const run = useCallback(async () => {
+  const run = useCallback(async (reporter: RunNodeLifecycleReporter) => {
     if (!definition) throw new Error('子工作流定义缺失');
     const dependencyDefinitions = await loadSubflowDependencyDefinitions(definition, (reference) => api.getSubflow(reference.definitionId, reference.version, reference.projectId));
     const compiled = compileSubflow(definition, props.id, overrides, {
@@ -182,7 +183,7 @@ const SubflowNode = memo((props: NodeProps) => {
           return Boolean(node?.type && EXECUTABLE_NODE_TYPES.has(node.type));
         });
         if (!runnable.length) continue;
-        const executionTokens = useRunBusStore.getState().triggerRunMany(runnable, 'batch');
+        const executionTokens = useRunBusStore.getState().triggerRunMany(runnable, 'batch', reporter.runContext);
         const waits = runnable.map((nodeId) => waitForNode(nodeId, executionTokens[nodeId]));
         const results = await Promise.all(waits);
         const failedIndex = results.findIndex((ok) => !ok);
@@ -204,7 +205,7 @@ const SubflowNode = memo((props: NodeProps) => {
     }
   }, [definition, getEdges, getNodes, overrides, props.id, setEdges, setNodes, update]);
 
-  useRunTrigger(props.id, run, 'subflow');
+  useRunTrigger(props.id, run, 'subflow', { lifecycleAware: true });
 
   return (
     <div className="relative w-[330px] overflow-hidden rounded-md border-2 border-[var(--border-primary)] bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-lg">
