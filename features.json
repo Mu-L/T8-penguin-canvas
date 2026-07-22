@@ -1,10 +1,10 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.6.2",
-  "lastUpdated": "2026-07-22-v2.6.2-electron-release-candidate",
+  "lastUpdated": "2026-07-22-v2.6.2-electron-release",
   "storyAutoProduction": {
     "version": "2.6.2",
-    "status": "verified-release-candidate",
+    "status": "released-postrelease-evidence-pending",
     "date": "2026-07-21",
     "description": "新增可见、可执行的 Story 全自动制片节点，把剧本依次转成可编辑分镜、分类资产、分层提示词、SD2.0 分镜视频和顺序成片。",
     "workflow": [
@@ -32,11 +32,11 @@
       "平台模型贯通专项 Story/Director/Advanced Provider 回归 62/62，type-check 与生产 build 通过；G-2 i2i 无参考图路径有显式阻断，未冒充真实付费 API 已跑通。",
       "Story 资产库选择接线已纳入 Story 专项静态契约；Story/Director/资产库相关组合 46/46、type-check 与生产 build 通过；资源上传回归同步锁定兼容的一参数调用及可选 lineage context。"
     ],
-    "releaseBoundary": "Story 全自动制片纳入 v2.6.2 Electron 自动更新候选；没有把未执行的真实付费完整制片冒充为已验证。正式发布仅允许一次 Electron/NSIS 构建，F8-F10 仍按用户授权先发布后补真实证据。"
+    "releaseBoundary": "Story 全自动制片已纳入 v2.6.2 Electron 自动更新版；没有把未执行的真实付费完整制片冒充为已验证。正式发布只执行了一次 Electron/NSIS 构建，F8-F10 仍按用户授权先发布后补真实证据。"
   },
   "sixSystemsImplementationAudit": {
     "version": "2.6.1",
-    "status": "verified-local-b1-f2-f7-b2-schema32-f9-f10-v2.6.2-release-candidate-external-evidence-deferred",
+    "status": "verified-local-b1-f2-f7-b2-schema32-f9-f10-v2.6.2-released-external-evidence-deferred",
     "date": "2026-07-18",
   "lastUpdated": "2026-07-20-canonical-core-direct-development-restored",
     "completedRounds": 27,
@@ -80,7 +80,7 @@
     },
     "currentIncrement": {
       "name": "b2-schema32-f9-f10-local-hardening-and-assetcenter-p2",
-      "status": "verified-local-integrated-core-v2.6.2-release-candidate-external-evidence-deferred",
+      "status": "verified-local-integrated-core-v2.6.2-released-external-evidence-deferred",
       "capabilities": [
         "2026-07-22 修复少数用户图片任务 completed/100% 却没有本地图片的问题：普通图像兼容更多 Provider 输出字段与嵌套结构，完成结果只有成功下载并保存到本机后才会返回 completed；临时 HTTP/DNS/网络错误最多重试 3 次。默认/国内 Seedream 与 G-2、FAL、MJ、LLM 图片和扩展 Provider 都会把真实失败原因及稳定诊断码传到节点与 Logs，覆盖 DNS/Fake-IP/代理、超时、HTTP 状态、连接中断、TLS、内容无效/超限、磁盘空间、目录权限和上游空结果；签名 URL、Token 与 Key 保持脱敏，SSRF/内网阻断未放宽。后端 24/24、Seedance/FAL 55/55、扩展 Provider/网页反推 15/15、type-check 与生产 build 通过；未付费实测、Electron 打包、提交、推送或发布。",
         "2026-07-22 修复异步生成完成后重复保存大量相同素材：所有 interval 轮询节点统一禁止上一轮查询未结束时启动下一轮；SD2.0 国内/海外、普通/FAL 视频、Happy Horse、Hailuo、Kling、Vidu、Wan、Upscaler、Fal超市、Seedream、Seed Audio、Suno、MJ 与 RunningHub 的异步输出按 Provider+task+输出索引使用稳定文件名，同一任务重复/恢复查询不再新增副本；FAL 超市同响应重复 URL 在下载前去重。8 路并发完成查询验证只下载一次且只产生一个文件，后端 23/23、异步前端 14/14、Provider/RH/FAL 60/60、type-check 和生产 build 通过；未 Electron 打包、提交、推送或发布。",
@@ -424,9 +424,11 @@
   },
   "electronReleaseV262": {
     "version": "2.6.2",
-    "status": "release-candidate-postrelease-evidence-authorized",
+    "status": "released-postrelease-evidence-pending",
     "date": "2026-07-22",
-    "description": "v2.6.2 Electron 自动更新候选：新增 Story 全自动制片，并收口阶段联动、资产库选图、生产模型贯通、运行配置白话提示、异步输出去重和图片下载真实诊断。",
+    "description": "v2.6.2 Electron 自动更新版已正式发布：新增 Story 全自动制片，并收口阶段联动、资产库选图、生产模型贯通、运行配置白话提示、异步输出去重和图片下载真实诊断。",
+    "sourceCommit": "ca3001e247287adee7d092f179b11bc6965f16f1",
+    "tagCommit": "ca3001e247287adee7d092f179b11bc6965f16f1",
     "capabilities": [
       "新增 Story 可执行节点与六步工作台：剧本与风格、确认镜头、准备资产、合成提示词、生成视频、成片导出；支持镜头编辑、资产自动识别/上传/资产库/AI 补齐、分层提示词、恢复生成和 VideoEdit/FFmpeg 成片。",
       "Story 的语言、图像和视频模型分别复用现有 LLM、GPT Image 2、SD2.0 与扩展 Provider 注册表，真实配置贯穿分析、资产、视频与物化后的导演分镜台；完成镜头和资产后自动进入下一阶段。",
@@ -435,12 +437,38 @@
       "执行前体检缺少 API Key/服务时使用白话说明和设置路径，内部诊断代码默认折叠；公开源码继续排除 local-private/**、测试 Key、缓存、外部参考源码和维护者文档。"
     ],
     "verification": [
-      "Story 最新专项、Story/Director/VideoEdit/schema/运行入口、资产中心和阶段/模型贯通组合回归通过；type-check 与生产 build 已通过。",
+      "Story 最新专项、Story/Director/VideoEdit/schema/运行入口、资产中心和阶段/模型贯通组合回归通过；type-check、public、RH toolbox、JSON/语法、工作树门与生产 build 通过。完整 TypeScript 串行尝试在 15 分钟外部工具上限结束，因此本版只声明已完成的聚焦回归，不冒充完整测试套件通过。",
       "图片下载诊断后端 24/24、Seedance/FAL 55/55、扩展 Provider/网页反推 15/15 通过；异步去重后端 23/23、前端 14/14、Provider/RH/FAL 60/60 通过。",
-      "本条是正式构建前候选记录；固定 source commit、安装包字节数/摘要、GitHub Release 和冷启动结果只能在唯一一次正式发布完成后回填。",
-      "用户明确授权 v2.6.2 在 F8-F10 清单完全不存在时使用精确版本、固定 40 位 target 和 owner-approved-post-release-v2.6.2 一次性延期；延期不产生 passed 检查。"
+      "固定 source/tag ca3001e247287adee7d092f179b11bc6965f16f1 在构建前已快进推送 origin/main；发布工作树只携带允许的 FFmpeg 与去水印 README 差异，私有充值/扩展 sidecar、Electron ABI 130、FFmpeg/FFprobe 和两套离线运行时均在 builder 前验证。",
+      "正式 npm run dist:release 只触发一次 electron-builder/NSIS；post-build 完整通过，草稿上传后对 1,281,120,002-byte 安装包完成全量回读，并以密封 provenance、GitHub digest/size、最终 tag 与 Latest 做双阶段校验，recovery 随后清除。",
+      "win-unpacked 使用唯一隔离 userData 冷启动 15 秒保持运行并产生 4 个本次 Electron 进程；验收后只终止该进程树，残留 0，隔离目录已清理，核心开发服务未被操作。",
+      "用户明确授权 v2.6.2 在 F8-F10 清单完全不存在时使用精确版本、固定 40 位 target 和 owner-approved-post-release-v2.6.2 一次性延期；延期不产生 passed 检查，严格进度继续为 27/32。"
     ],
-    "releaseBoundary": "v2.6.2 不声称完成真实付费 Story 全链路或 F8-F10 外部验收。正式发布器仍会拒绝损坏、过期、版本不匹配或哈希不匹配的证据；只允许一次 Electron/NSIS 构建。"
+    "releaseBoundary": "v2.6.2 已按用户明确授权采用精确一次性先发布后补证据例外正式发布；不声称完成真实付费 Story 全链路或 F8-F10 外部验收。发布器仍拒绝损坏、过期、版本不匹配或哈希不匹配的证据；本版只执行了一次 Electron/NSIS 构建。",
+    "release": {
+      "tag": "v2.6.2",
+      "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.6.2",
+      "publishedAt": "2026-07-22T07:14:24Z",
+      "isDraft": false,
+      "isPrerelease": false,
+      "isLatest": true,
+      "installer": {
+        "name": "T8-PenguinCanvas-Setup-2.6.2.exe",
+        "bytes": 1281120002,
+        "sha256": "1E9C1DB4AF1028D3FD7642ED2745933B20D0DFED6725884A989549079506A167",
+        "sha512": "U/VIZ/cY3hPXfuSjMZAxhh5KWfdU27rGeJ5r/JzpBdUG8LkQB/Y/PxQ2HWJ4BieUKHkVHZzBh8M9hn9DzTJ5BA=="
+      },
+      "blockmap": {
+        "name": "T8-PenguinCanvas-Setup-2.6.2.exe.blockmap",
+        "bytes": 1334694,
+        "sha256": "FF21ADA7C491AF25C6E67051F241F96110738988613E9F91025F2CC2688CD4C3"
+      },
+      "metadata": {
+        "name": "latest.yml",
+        "bytes": 362,
+        "sha256": "0BF2791FC04C6FABA70D34180435F4D22BF61FC2AE3F55D51C9791A8EFDA7844"
+      }
+    }
   },
   "electronReleaseV261": {
     "version": "2.6.1",
