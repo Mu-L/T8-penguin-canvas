@@ -41,6 +41,7 @@ const CANVAS_REQUEST_COMPONENTS: ComponentAudit[] = [
   { file: 'CodexImageConjureNode.tsx', types: ['codex-image-conjure'], requestBoundaryCalls: 3, directClickHandlers: ['handleGenerate'], directSubmitHandlers: ['handleGenerate'] },
   { file: 'ComfyUIStoreNode.tsx', types: ['comfyui-store'], requestBoundaryCalls: 1, directClickHandlers: ['handleRun'] },
   { file: 'DirectorStoryboardNode.tsx', types: ['director-storyboard'], requestBoundaryCalls: 1, directClickHandlers: ['runStoryboard', 'runBridge', 'refreshStoryboardOutputs'] },
+  { file: 'StoryNode.tsx', types: ['story'], requestBoundaryCalls: 1, directClickHandlers: ['runMode', 'generateAsset', 'generateVideos', 'compose'] },
   { file: 'ArtistStyleMasterNode.tsx', types: ['artist-style-master'], requestBoundaryCalls: 1, directClickHandlers: ['handleRun', 'runArtistStyleOutput'] },
   { file: 'AnimeTagMasterNode.tsx', types: ['anime-tag-master'], requestBoundaryCalls: 1, directClickHandlers: ['handleRun', 'runAnimeTagOutput'] },
   { file: 'PresetImageNode.tsx', types: ['multi-angle-3d', 'panorama-720', 'penguin-portrait'], requestBoundaryCalls: 1, directClickHandlers: ['handleGenerate'] },
@@ -114,7 +115,7 @@ test('primary node run audit classifies every shared executable type exactly onc
   assert.equal(containsIdentifier('{handleRun}', 'handleRun'), true, 'handler audit must detect exact identifiers');
   assert.equal(containsIdentifier('{handleRunner}', 'handleRun'), false, 'handler audit must not match identifier prefixes');
   const audited = [...CANVAS_REQUEST_COMPONENTS, ...NO_NODE_PRIMARY_COMPONENTS].flatMap((entry) => entry.types);
-  assert.equal(audited.length, 51, 'shared executable audit count changed; classify every new or removed type explicitly');
+  assert.equal(audited.length, 52, 'shared executable audit count changed; classify every new or removed type explicitly');
   assert.equal(new Set(audited).size, audited.length, 'audit matrix must not classify an executable type twice');
   assert.deepEqual([...audited].sort(), [...EXECUTABLE_NODE_TYPES].sort());
 });

@@ -22,6 +22,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  generateExternalVideo,
   querySeedance,
   submitSeedance,
   type SeedanceTaskProvider,
@@ -83,6 +84,11 @@ import {
   isSeedanceNzStandardModel,
   type SeedanceBuiltinSource,
 } from '../../config/seedance';
+import {
+  advancedProviderModelOptions,
+  advancedProvidersForNode,
+  resolveAdvancedProviderSelection,
+} from '../../utils/advancedProviders';
 
 const FRAME_MODE_OPTIONS = [
   { value: 'auto', label: '多参考图' },
@@ -324,6 +330,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
   const isPixel = themeStyle === 'pixel';
   const d = (data as any) || {};
   const hasSeedanceNzKey = useApiKeysStore((state) => !!String(state.settings.zhenzhenSd2ApiKey || '').trim());
+  const advancedProviders = useApiKeysStore((state) => state.settings.advancedProviders);
   const src = `director:${id.slice(0, 6)}`;
 
   const shots = useMemo(
@@ -364,6 +371,13 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
   );
   const hasBusyBridge = bridges.some((bridge) => isBridgeBusy(bridge));
   const isBusy = status === 'submitting' || status === 'polling' || hasBusyBridge;
+  const videoProviders = useMemo(() => advancedProvidersForNode(advancedProviders, 'video'), [advancedProviders]);
+  const externalVideoSelection = useMemo(() => resolveAdvancedProviderSelection(advancedProviders, 'video', {
+    providerSource: d.providerSource,
+    providerId: d.providerId,
+    providerModel: d.providerModel,
+  }), [advancedProviders, d.providerId, d.providerModel, d.providerSource]);
+  const isExternalVideo = externalVideoSelection.available;
   const savedBuiltinSource = String(d.seedanceApiSource || '');
   const builtinSource: SeedanceBuiltinSource = isSeedanceBuiltinSource(savedBuiltinSource)
     ? savedBuiltinSource
@@ -371,11 +385,13 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
   const effectiveTaskProvider: Exclude<SeedanceTaskProvider, 'auto'> = builtinSource === 'auto'
     ? (hasSeedanceNzKey ? 'seedance-nz' : 'zhenzhen-legacy')
     : builtinSource;
-  const isSeedanceNzSelected = effectiveTaskProvider === 'seedance-nz';
+  const isSeedanceNzSelected = !isExternalVideo && effectiveTaskProvider === 'seedance-nz';
   const legacyModel = String(d.model || LEGACY_SEEDANCE_MODEL_OPTIONS[0].value);
   const seedanceNzModel = String(d.seedanceNzModel || 'fast');
-  const model = isSeedanceNzSelected ? seedanceNzModel : legacyModel;
-  const modelOptions = isSeedanceNzSelected ? SEEDANCE_NZ_MODEL_OPTIONS : LEGACY_SEEDANCE_MODEL_OPTIONS;
+  const model = isExternalVideo ? externalVideoSelection.providerModel : isSeedanceNzSelected ? seedanceNzModel : legacyModel;
+  const modelOptions = isExternalVideo && externalVideoSelection.provider
+    ? advancedProviderModelOptions(externalVideoSelection.provider, 'video').map((value) => ({ value, label: value }))
+    : isSeedanceNzSelected ? SEEDANCE_NZ_MODEL_OPTIONS : LEGACY_SEEDANCE_MODEL_OPTIONS;
   const ratioOptions = isSeedanceNzSelected ? SEEDANCE_NZ_RATIO_OPTIONS : LEGACY_SEEDANCE_RATIO_OPTIONS;
   const resolutionOptions = isSeedanceNzSelected
     ? (isSeedanceNzStandardModel(seedanceNzModel) ? SEEDANCE_NZ_NATIVE_RESOLUTION_OPTIONS : SEEDANCE_NZ_RESOLUTION_OPTIONS)
@@ -519,7 +535,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
   );
   const runSettings = useMemo(() => ({
     model,
-    taskProvider: builtinSource,
+    taskProvider: isExternalVideo ? undefined : builtinSource,
     ratio,
     resolution,
     generateAudio,
@@ -528,7 +544,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
     webSearch,
     seed,
     providerParams,
-  }), [model, builtinSource, ratio, resolution, generateAudio, returnLastFrame, watermark, webSearch, seed, providerParams]);
+  }), [model, isExternalVideo, builtinSource, ratio, resolution, generateAudio, returnLastFrame, watermark, webSearch, seed, providerParams]);
   const currentShotPlan = useMemo(
     () => buildDirectorStoryboardRunPlan(shots, runSettings, {
       upstreamPrompt,
@@ -1446,13 +1462,75 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
       `提交${job.kind === 'bridge' ? '桥接' : '分镜'} ${job.title}: ${job.payload.duration || 5}s ${job.payload.ratio || ratio} ${job.payload.resolution || resolution}`,
       src,
     );
+    const runtimeProvider = isExternalVideo ? externalVideoSelection.providerSource : effectiveTaskProvider;
     await reporter?.providerRequest({
-      provider: effectiveTaskProvider,
+      provider: runtimeProvider,
       model: job.payload.model,
       jobId: job.id,
       jobKind: job.kind,
     });
     setJobPatch(job, { status: 'submitting', error: null, progress: '提交中' });
+    if (isExternalVideo) {
+      try {
+        const result = await generateExternalVideo({
+          providerId: externalVideoSelection.providerId,
+          providerModel: externalVideoSelection.providerModel,
+          model: externalVideoSelection.providerModel,
+          prompt: job.payload.prompt,
+          aspect_ratio: job.payload.ratio,
+          ratio: job.payload.ratio,
+          duration: job.payload.duration,
+          resolution: job.payload.resolution,
+          seed: job.payload.seed,
+          images: [job.payload.firstFrame, job.payload.lastFrame, ...(job.payload.refImages || [])].filter((value): value is string => Boolean(value)),
+          videos: job.payload.videos,
+          audios: job.payload.audios,
+          providerParams: job.payload.providerParams,
+        });
+        const videoUrl = String(result.videoUrls?.[0] || '');
+        if (!videoUrl) throw new Error(`${job.title} 未返回视频`);
+        if (result.taskId || result.requestId) await reporter?.providerSubmitted({
+          provider: runtimeProvider,
+          model: externalVideoSelection.providerModel,
+          upstreamTaskId: result.taskId,
+          requestId: result.requestId,
+          transportHttpStatus: result.transportHttpStatus,
+          upstreamHttpStatus: result.upstreamHttpStatus,
+          usage: result.usage,
+          jobId: job.id,
+          jobKind: job.kind,
+          httpStatusSource: 'local-backend',
+        });
+        await reporter?.providerResponse({
+          provider: runtimeProvider,
+          model: externalVideoSelection.providerModel,
+          upstreamTaskId: result.taskId,
+          requestId: result.requestId,
+          transportHttpStatus: result.transportHttpStatus,
+          upstreamHttpStatus: result.upstreamHttpStatus,
+          usage: result.usage,
+          status: 'succeeded',
+          jobId: job.id,
+          jobKind: job.kind,
+          httpStatusSource: 'local-backend',
+        });
+        return videoUrl;
+      } catch (error: any) {
+        await reporter?.providerResponse({
+          provider: runtimeProvider,
+          model: externalVideoSelection.providerModel,
+          requestId: error?.requestId,
+          transportHttpStatus: error?.transportHttpStatus,
+          upstreamHttpStatus: error?.upstreamHttpStatus,
+          status: 'failed',
+          error: { message: error?.message || '提交失败', code: error?.code },
+          jobId: job.id,
+          jobKind: job.kind,
+          httpStatusSource: 'local-backend',
+        });
+        throw error;
+      }
+    }
     let submitted: Awaited<ReturnType<typeof submitSeedance>>;
     try {
       submitted = await submitSeedance(job.payload);
@@ -2449,7 +2527,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
         <div className="min-w-0 flex-1">
           <div className="font-semibold leading-tight">导演分镜台</div>
           <div className="truncate text-[11px]" style={mutedStyle}>
-            {shots.length} 镜头 · {totalDuration}s · Seedance2.0 无限并发
+            {shots.length} 镜头 · {totalDuration}s · {isExternalVideo ? externalVideoSelection.provider?.label || externalVideoSelection.providerSource : 'Seedance2.0'} 无限并发
           </div>
         </div>
         <span
@@ -2463,12 +2541,22 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
       <div className="space-y-2 p-3">
         <div className="grid grid-cols-4 gap-1.5">
           <select
-            value={builtinSource}
+            value={isExternalVideo ? `advanced:${externalVideoSelection.providerId}` : builtinSource}
             onChange={(event) => {
-              const nextSource = event.target.value as SeedanceBuiltinSource;
+              const selectedValue = event.target.value;
+              if (selectedValue.startsWith('advanced:')) {
+                const providerId = selectedValue.slice('advanced:'.length);
+                const provider = videoProviders.find((item) => item.id === providerId);
+                if (provider) update({ providerSource: provider.protocol, providerId: provider.id, providerModel: advancedProviderModelOptions(provider, 'video')[0] || '' });
+                return;
+              }
+              const nextSource = selectedValue as SeedanceBuiltinSource;
               const nextUsesSeedanceNz = nextSource === 'seedance-nz' || (nextSource === 'auto' && hasSeedanceNzKey);
               update({
                 seedanceApiSource: nextSource,
+                providerSource: 'zhenzhen',
+                providerId: '',
+                providerModel: '',
                 ratio: nextUsesSeedanceNz && savedRatio === '9:21' ? '9:16' : savedRatio,
                 resolution: nextUsesSeedanceNz && savedResolution === 'native4K' ? 'native4k' : savedResolution,
               });
@@ -2480,6 +2568,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
             <option value="auto">主力 API（自动：优先国内平价工坊）</option>
             <option value="seedance-nz">贞贞的平价AI工坊（国内） · api.seedance.nz</option>
             <option value="zhenzhen-legacy">贞贞的AI工坊（海外） · ai.t8star.org</option>
+            {videoProviders.map((provider) => <option key={provider.id} value={`advanced:${provider.id}`}>{provider.label} · {provider.protocol}</option>)}
           </select>
         </div>
         {isSeedanceNzSelected && !hasSeedanceNzKey && (
@@ -2493,7 +2582,7 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
             onChange={(event) => {
               const nextModel = event.target.value;
               update({
-                [isSeedanceNzSelected ? 'seedanceNzModel' : 'model']: nextModel,
+                [isExternalVideo ? 'providerModel' : isSeedanceNzSelected ? 'seedanceNzModel' : 'model']: nextModel,
                 resolution: isSeedanceNzSelected
                   && !isSeedanceNzStandardModel(nextModel)
                   && String(resolution).startsWith('native')

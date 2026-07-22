@@ -239,7 +239,9 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
       let elapsed = 0;
       const POLL_INT = SUNO_POLL_INTERVAL_MS;
       const MAX = SUNO_MAX_POLL;
+      let pollInFlight = false;
       pollTimer.current = window.setInterval(async () => {
+        if (pollInFlight) return;
         elapsed += 1;
         if (elapsed > MAX) {
           stopPoll();
@@ -249,6 +251,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           reject(new Error('轮询超时 (60min)'));
           return;
         }
+        pollInFlight = true;
         try {
           const r = await queryAudio(clipIds, true);
           await reporter?.polling({
@@ -303,6 +306,8 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           }
         } catch (e: any) {
           logBus.warn(`轮询出错: ${e?.message}`, src);
+        } finally {
+          pollInFlight = false;
         }
       }, POLL_INT);
     });
@@ -312,7 +317,9 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     stopPoll();
     return new Promise<void>((resolve, reject) => {
       let elapsed = 0;
+      let pollInFlight = false;
       pollTimer.current = window.setInterval(async () => {
+        if (pollInFlight) return;
         elapsed += 1;
         if (elapsed > SUNO_MAX_POLL) {
           stopPoll();
@@ -322,6 +329,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           reject(new Error(message));
           return;
         }
+        pollInFlight = true;
         try {
           const result = await querySeedAudio(tid);
           const normalizedStatus = String(result.status || '').trim().toLowerCase();
@@ -403,6 +411,8 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           }
         } catch (pollError: any) {
           logBus.warn(`Seed Audio 轮询出错: ${pollError?.message || pollError}`, src);
+        } finally {
+          pollInFlight = false;
         }
       }, 4000);
     });

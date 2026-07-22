@@ -2,11 +2,11 @@
 
 正式 Electron/GitHub Release 现在要求一份与版本和 40 位源码提交精确绑定的 `t8-collaboration-release-evidence-v2` 清单。v2 不再接受“客户端数量/设备数量”的自报汇总；缺少真实双设备、独立客户端、公网、红队或负载证据时，发布入口会在构建和上传之前失败。`--dry-run` 仍保持不发布用途。
 
-## v2.6.1 一次性先发布后补证据例外
+## v2.6.2 一次性先发布后补证据例外
 
-2026-07-21 用户再次明确授权 v2.6.1 先发布自动更新包，再补真实 F8-F10 环境验收。仅当清单文件完全不存在、版本精确为 `2.6.1`、发布目标是固定 40 位 SHA，且同时设置 `T8_COLLAB_RELEASE_EVIDENCE_DEFERRAL=owner-approved-post-release-v2.6.1` 时，正式发布器允许继续。该例外不会生成检查数、不会把任何项目标记为 `passed`，Release notes 与 `features.json` 必须继续写明证据待补。
+2026-07-22 用户再次明确授权 v2.6.2 先发布自动更新包，再补真实 F8-F10 环境验收。仅当清单文件完全不存在、版本精确为 `2.6.2`、发布目标是固定 40 位 SHA，且同时设置 `T8_COLLAB_RELEASE_EVIDENCE_DEFERRAL=owner-approved-post-release-v2.6.2` 时，正式发布器允许继续。该例外不会生成检查数、不会把任何项目标记为 `passed`，Release notes 与 `features.json` 必须继续写明证据待补。
 
-该变量不能绕过损坏、过期、版本不匹配或哈希不匹配的现有清单，也不能用于 v2.6.0、v2.6.2 或任何其他版本；未来发布仍默认先证据后打包。v2.6.0 的旧例外已经使用完毕且不能复用；v2.6.1 发布后必须继续按本文采集真实证据，并绑定正式 tag 的 source commit，不得把“已发布安装包”表述为 F8-F10 已验收。
+该变量不能绕过损坏、过期、版本不匹配或哈希不匹配的现有清单，也不能用于 v2.6.0、v2.6.1、v2.6.3 或任何其他版本；未来发布仍默认先证据后打包。v2.6.0 与 v2.6.1 的旧例外已经使用完毕且不能复用；v2.6.2 发布后必须继续按本文采集真实证据，并绑定正式 tag 的 source commit，不得把“已发布安装包”表述为 F8-F10 已验收。
 
 默认清单位置：
 
@@ -73,7 +73,7 @@ npm run collaboration:evidence:attest -- client \
 ```json
 {
   "contractVersion": "t8-collaboration-release-evidence-v2",
-  "releaseVersion": "2.6.1",
+  "releaseVersion": "2.6.2",
   "sourceCommit": "40-character-lowercase-git-sha",
   "generatedAt": "2026-07-20T00:00:00.000Z",
   "environment": {

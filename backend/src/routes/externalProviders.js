@@ -122,6 +122,49 @@ async function saveOneMediaOutput(url, kind = 'image', options = {}) {
   return text;
 }
 
+function outputSaveFailure(error) {
+  const cause = error?.cause || error;
+  const code = String(cause?.code || error?.code || '').trim();
+  const message = String(error?.message || cause?.message || error || '').trim();
+  if (['ENOTFOUND', 'EAI_AGAIN'].includes(code) || /getaddrinfo|dns/i.test(message)) {
+    return { code: 'output_download_dns_failed', error: '本机无法解析结果文件域名，请检查 DNS、代理或网络连接。' };
+  }
+  if (error?.name === 'AbortError' || ['ETIMEDOUT', 'ESOCKETTIMEDOUT'].includes(code)) {
+    return { code: 'output_download_timeout', error: '从结果服务器下载文件超时，请检查代理或网络后重试。' };
+  }
+  if (['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH'].includes(code)) {
+    return { code: 'output_download_network_failed', error: '本机与结果服务器的连接被拒绝或中断，请检查防火墙、代理、VPN 和网络。' };
+  }
+  if (/HTTP\s+\d+/i.test(message)) {
+    return { code: 'output_download_http_error', error: message };
+  }
+  if (/certificate|cert_|self signed|unable to verify|tls|ssl/i.test(`${code} ${message}`)) {
+    return { code: 'output_download_tls_failed', error: '结果服务器 HTTPS 证书校验失败，请检查系统时间、代理证书或杀毒软件的 HTTPS 扫描。' };
+  }
+  if (code === 'ENOSPC') {
+    return { code: 'output_disk_full', error: '本机磁盘空间不足，无法保存生成结果。' };
+  }
+  if (['EACCES', 'EPERM', 'EROFS'].includes(code)) {
+    return { code: 'output_not_writable', error: '本机输出目录无法写入，请检查文件夹权限、杀毒软件或受控文件夹访问设置。' };
+  }
+  const causeMessage = String(cause?.message || '').trim();
+  const detail = causeMessage && causeMessage !== message ? `${message}（${code || causeMessage}）` : (message || code);
+  return {
+    code: 'output_persist_failed',
+    error: detail || '下载或保存生成结果失败，请检查网络、代理、磁盘和输出目录权限。',
+  };
+}
+
+function safeOutputSource(value) {
+  const text = String(value || '').trim();
+  try {
+    const parsed = new URL(text);
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return text.startsWith('/files/') ? text.slice(0, 240) : '';
+  }
+}
+
 async function saveMediaOutputs(kind, urls, options = {}) {
   const out = [];
   const errors = [];
@@ -130,18 +173,16 @@ async function saveMediaOutputs(kind, urls, options = {}) {
       const saved = await saveOneMediaOutput(url, kind, options);
       if (saved) out.push(saved);
     } catch (error) {
+      const failure = outputSaveFailure(error);
       errors.push({
         kind,
-        url: String(url || '').slice(0, 2048),
-        error: error?.message || String(error),
+        url: safeOutputSource(url),
+        code: failure.code,
+        error: failure.error,
       });
     }
   }
   return { urls: out, errors };
-}
-
-async function saveImageOutputs(urls, options = {}) {
-  return (await saveMediaOutputs('image', urls, options)).urls;
 }
 
 async function saveVideoOutputs(urls, options = {}) {
@@ -391,12 +432,15 @@ router.post('/image', async (req, res) => {
     const outputSaveErrors = [...savedImages.errors, ...savedVideos.errors, ...savedAudios.errors];
     const outputKinds = outputKindsForPayload({ imageUrls, videoUrls, audioUrls, text: result.text });
     const primaryKind = outputKinds[0] || result.primaryKind || result.kind || 'image';
-    if (!outputKinds.length && outputSaveErrors.length) {
+    if (!outputKinds.length) {
+      const firstFailure = outputSaveErrors[0];
       return resultResponse(res, {
         ...result,
         ok: false,
-        code: 'output_persist_failed',
-        error: `ComfyUI 已生成结果，但保存到 T8 本地失败：${outputSaveErrors[0].error}`,
+        code: firstFailure?.code || 'output_missing',
+        error: firstFailure
+          ? `扩展平台已生成结果，但保存到 T8 本地失败：${firstFailure.error}`
+          : '扩展平台任务已完成，但没有返回可识别的图像、视频、音频或文本结果。请保留任务 ID 并检查平台任务详情。',
       }, resolved.provider, {
         remoteImageUrls,
         remoteVideoUrls,
@@ -581,7 +625,27 @@ router.post('/web-image', async (req, res) => {
     }
 
     const remoteImageUrls = Array.isArray(imageResult.imageUrls) ? imageResult.imageUrls : [];
-    const imageUrls = await saveImageOutputs(remoteImageUrls);
+    const savedImages = await saveMediaOutputs('image', remoteImageUrls);
+    const imageUrls = savedImages.urls;
+    if (!imageUrls.length) {
+      const firstFailure = savedImages.errors[0];
+      return res.json({
+        success: false,
+        code: firstFailure?.code || 'output_missing',
+        error: firstFailure
+          ? `图片已经生成，但保存到 T8 本地失败：${firstFailure.error}`
+          : '图片任务已完成，但平台没有返回可识别的图片地址。请保留任务 ID 并检查平台任务详情。',
+        data: {
+          ...imageResult,
+          provider: safeProviderForResponse(provider),
+          prompt,
+          sourceImageUrl: imageUrl,
+          remoteImageUrls,
+          imageUrls: [],
+          outputSaveErrors: savedImages.errors,
+        },
+      });
+    }
     return res.json({
       success: true,
       code: 'completed',
@@ -592,6 +656,7 @@ router.post('/web-image', async (req, res) => {
         sourceImageUrl: imageUrl,
         remoteImageUrls,
         imageUrls,
+        outputSaveErrors: savedImages.errors,
         chat: {
           model: chatResult.model,
           finishReason: chatResult.finishReason,

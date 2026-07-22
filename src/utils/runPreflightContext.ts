@@ -192,17 +192,21 @@ function advancedProviderConfigurationNotice(node: Node, settings: ApiSettings) 
   // Missing, disabled, and unsupported providers are diagnosed by analyzeWorkflow.
   if (!provider || provider.enabled !== true) return null;
   if (ADVANCED_KEY_PROTOCOLS.has(provider.protocol) && !advancedProviderKeyConfigured(provider)) {
-    return capabilityNotice(node, 'provider.credential-not-configured', `${provider.label || provider.id} 尚未配置运行凭据。`);
+    return capabilityNotice(
+      node,
+      'provider.credential-not-configured',
+      `未检测到“${provider.label || provider.id}”的 API Key。请点击右上角齿轮打开“API 设置”，在扩展平台中填写并保存，然后重新运行。`,
+    );
   }
   if (provider.protocol === 'comfyui') {
     const endpointConfigured = Boolean(String(provider.baseUrl || '').trim())
       || Boolean(provider.comfyuiConfig?.instances?.some((item) => String(item || '').trim()));
     if (!endpointConfigured) {
-      return capabilityNotice(node, 'provider.endpoint-not-configured', `${provider.label || provider.id} 尚未配置可用实例。`);
+      return capabilityNotice(node, 'provider.endpoint-not-configured', `“${provider.label || provider.id}”没有可用的服务地址。请点击右上角齿轮打开“API 设置”，在扩展平台中填写服务地址并保存，然后重新运行。`);
     }
   }
   if (provider.protocol === 'jimeng-cli' && !String(provider.jimengConfig?.executablePath || '').trim()) {
-    return capabilityNotice(node, 'provider.runtime-not-configured', `${provider.label || provider.id} 尚未配置本地运行程序。`);
+    return capabilityNotice(node, 'provider.runtime-not-configured', `“${provider.label || provider.id}”没有配置本地运行程序。请点击右上角齿轮打开“API 设置”，填写程序路径并保存，然后重新运行。`);
   }
   return null;
 }
@@ -216,6 +220,17 @@ type ClassifiedKeyField =
   | 'grokApiKey'
   | 'seedanceApiKey'
   | 'sunoApiKey';
+
+const CLASSIFIED_KEY_LABELS: Record<ClassifiedKeyField, string> = {
+  gptImageApiKey: 'gpt-image 系列',
+  nanoBananaApiKey: 'nano-banana 系列',
+  mjApiKey: 'Midjourney 系列',
+  veoApiKey: 'Veo 系列',
+  soraApiKey: 'Sora 系列',
+  grokApiKey: 'Grok 系列',
+  seedanceApiKey: 'Seedance 系列',
+  sunoApiKey: 'Suno 系列',
+};
 
 function classifiedKeyField(hint: unknown): ClassifiedKeyField | null {
   const model = String(hint || '').toLowerCase();
@@ -235,6 +250,18 @@ function classifiedKeyField(hint: unknown): ClassifiedKeyField | null {
 function classifiedKeyConfigured(settings: ApiSettings, hint: unknown) {
   const field = classifiedKeyField(hint);
   return configuredSecret(settings.zhenzhenApiKey) || (field ? configuredSecret(settings[field]) : false);
+}
+
+function missingOverseasCredentialMessage(kind: string, hint: unknown) {
+  const field = classifiedKeyField(hint);
+  const target = field
+    ? `“${CLASSIFIED_KEY_LABELS[field]}”分类 API Key；也可以填写“贞贞的AI工坊（海外） API Key”作为通用后备`
+    : '“贞贞的AI工坊（海外） API Key”';
+  return `未检测到当前${kind}所需的 API Key。请点击右上角齿轮打开“API 设置”，填写${target}，保存后重新运行。`;
+}
+
+function missingDomesticCredentialMessage() {
+  return '未检测到“贞贞的平价AI工坊（国内） API Key”。请点击右上角齿轮打开“API 设置”，填写并保存该 Key，然后重新运行。';
 }
 
 function selectedRuntimeCredentialGroup(data: Record<string, unknown>) {
@@ -277,17 +304,17 @@ function builtInCredentialNotice(node: Node, settings: ApiSettings): RunPrefligh
     if (hint.credential === 'gpt-image') {
       return classifiedKeyConfigured(settings, hint.model || 'gpt-image')
         ? null
-        : capabilityNotice(node, 'provider.secondary-gpt-image-credential-missing', '该次级图像动作的运行能力尚未配置。');
+        : capabilityNotice(node, 'provider.secondary-gpt-image-credential-missing', missingOverseasCredentialMessage('次级图像动作', hint.model || 'gpt-image'));
     }
     if (hint.credential === 'llm') {
       return configuredSecret(settings.llmApiKey)
         ? null
-        : capabilityNotice(node, 'provider.secondary-llm-credential-missing', '该次级 LLM 动作的运行能力尚未配置。');
+        : capabilityNotice(node, 'provider.secondary-llm-credential-missing', '未检测到次级 LLM 动作所需的“LLM 独立 API Key”。请点击右上角齿轮打开“API 设置”，填写并保存，然后重新运行。');
     }
     if (hint.credential === 'runninghub-cn') {
       return configuredSecret(settings.rhApiKey)
         ? null
-        : capabilityNotice(node, 'provider.secondary-runninghub-credential-missing', '该次级 RunningHub 动作的运行能力尚未配置。');
+        : capabilityNotice(node, 'provider.secondary-runninghub-credential-missing', '未检测到次级 RunningHub 动作所需的“RH APIKEY国内”。请点击右上角齿轮打开“API 设置”，填写并保存，然后重新运行。');
     }
   }
   const { source } = selectedProviderFields(node);
@@ -298,18 +325,18 @@ function builtInCredentialNotice(node: Node, settings: ApiSettings): RunPrefligh
     if (definition?.paramKind === 'seedream-v5' && data.seedreamApiSource === 'seedance-nz') {
       return configuredSecret(settings.zhenzhenSd2ApiKey)
         ? null
-        : capabilityNotice(node, 'provider.seedance-nz-credential-missing', '平价 AI 工坊能力尚未配置。');
+        : capabilityNotice(node, 'provider.seedance-nz-credential-missing', missingDomesticCredentialMessage());
     }
     if (isFalModel(apiModel)) {
       return configuredSecret(settings.zhenzhenApiKey)
         ? null
-        : capabilityNotice(node, 'provider.zhenzhen-credential-missing', '图像 FAL 运行能力尚未配置。');
+        : capabilityNotice(node, 'provider.zhenzhen-credential-missing', missingOverseasCredentialMessage('图像 FAL 模型', ''));
     }
     if (classifiedKeyConfigured(settings, apiModel)) return null;
     if (selectedRuntimeCredentialGroup(data)) {
       return capabilityNotice(node, 'provider.runtime-group-unverified', '所选运行分组的凭据只在主机执行时解析，体检不会猜测其可用性。', 'warning');
     }
-    return capabilityNotice(node, 'provider.zhenzhen-credential-missing', '当前图像模型的运行能力尚未配置。');
+    return capabilityNotice(node, 'provider.zhenzhen-credential-missing', missingOverseasCredentialMessage('图像模型', apiModel));
   }
 
   if (node.type === 'video') {
@@ -317,18 +344,18 @@ function builtInCredentialNotice(node: Node, settings: ApiSettings): RunPrefligh
     if (definition?.kind === 'happyhorse' || definition?.kind === 'hailuo' || definition?.kind === 'kling' || definition?.kind === 'upscaler' || definition?.kind === 'vidu' || definition?.kind === 'wan') {
       return configuredSecret(settings.zhenzhenSd2ApiKey)
         ? null
-        : capabilityNotice(node, 'provider.seedance-nz-credential-missing', '平价 AI 工坊能力尚未配置。');
+        : capabilityNotice(node, 'provider.seedance-nz-credential-missing', missingDomesticCredentialMessage());
     }
     if (isFalVideoModel(apiModel)) {
       return configuredSecret(settings.zhenzhenApiKey)
         ? null
-        : capabilityNotice(node, 'provider.zhenzhen-credential-missing', '视频 FAL 运行能力尚未配置。');
+        : capabilityNotice(node, 'provider.zhenzhen-credential-missing', missingOverseasCredentialMessage('视频 FAL 模型', ''));
     }
     if (classifiedKeyConfigured(settings, apiModel)) return null;
     if (selectedRuntimeCredentialGroup(data)) {
       return capabilityNotice(node, 'provider.runtime-group-unverified', '所选运行分组的凭据只在主机执行时解析，体检不会猜测其可用性。', 'warning');
     }
-    return capabilityNotice(node, 'provider.zhenzhen-credential-missing', '当前视频模型的运行能力尚未配置。');
+    return capabilityNotice(node, 'provider.zhenzhen-credential-missing', missingOverseasCredentialMessage('视频模型', apiModel));
   }
 
   if (node.type === 'seedance') {
@@ -336,43 +363,43 @@ function builtInCredentialNotice(node: Node, settings: ApiSettings): RunPrefligh
     if (selected === 'seedance-nz' || (selected === 'auto' && configuredSecret(settings.zhenzhenSd2ApiKey))) {
       return configuredSecret(settings.zhenzhenSd2ApiKey)
         ? null
-        : capabilityNotice(node, 'provider.seedance-nz-credential-missing', '平价 AI 工坊能力尚未配置。');
+        : capabilityNotice(node, 'provider.seedance-nz-credential-missing', missingDomesticCredentialMessage());
     }
     if (classifiedKeyConfigured(settings, String(data.model || 'seedance'))) return null;
     if (selectedRuntimeCredentialGroup(data)) {
       return capabilityNotice(node, 'provider.runtime-group-unverified', '所选运行分组的凭据只在主机执行时解析，体检不会猜测其可用性。', 'warning');
     }
-    return capabilityNotice(node, 'provider.seedance-credential-missing', 'Seedance 运行能力尚未配置。');
+    return capabilityNotice(node, 'provider.seedance-credential-missing', missingOverseasCredentialMessage('Seedance 模型', String(data.model || 'seedance')));
   }
 
   if (node.type === 'audio') {
     if (data.audioProviderMode === 'seed-audio') {
       return configuredSecret(settings.zhenzhenSd2ApiKey)
         ? null
-        : capabilityNotice(node, 'provider.seedance-nz-credential-missing', '平价 AI 工坊能力尚未配置。');
+        : capabilityNotice(node, 'provider.seedance-nz-credential-missing', missingDomesticCredentialMessage());
     }
     return classifiedKeyConfigured(settings, 'suno')
       ? null
-      : capabilityNotice(node, 'provider.suno-credential-missing', 'Suno 运行能力尚未配置。');
+      : capabilityNotice(node, 'provider.suno-credential-missing', missingOverseasCredentialMessage('Suno 音频模型', 'suno'));
   }
 
   if (node.type === 'llm' || node.type === 'batch-tagger') {
     return configuredSecret(settings.llmApiKey)
       ? null
-      : capabilityNotice(node, 'provider.llm-credential-missing', 'LLM 运行能力尚未配置。');
+      : capabilityNotice(node, 'provider.llm-credential-missing', '未检测到当前语言模型所需的“LLM 独立 API Key”。请点击右上角齿轮打开“API 设置”，填写并保存，然后重新运行。');
   }
 
   if (['runninghub', 'runninghub-wallet', 'rh-tools', 'rh-toolbox'].includes(String(node.type || ''))) {
     const international = String(data.rhSite || '').toLowerCase() === 'intl';
     return configuredSecret(international ? settings.rhIntlApiKey : settings.rhApiKey)
       ? null
-      : capabilityNotice(node, 'provider.runninghub-credential-missing', `RunningHub ${international ? '海外站' : '国内站'}运行能力尚未配置。`);
+      : capabilityNotice(node, 'provider.runninghub-credential-missing', `未检测到 RunningHub ${international ? '海外站' : '国内站'}所需的“${international ? 'RH APIKEY海外' : 'RH APIKEY国内'}”。请点击右上角齿轮打开“API 设置”，填写并保存，然后重新运行。`);
   }
 
   if (node.type === 'fal-toolbox') {
     return configuredSecret(settings.zhenzhenApiKey)
       ? null
-      : capabilityNotice(node, 'provider.zhenzhen-credential-missing', 'FAL 工具箱运行能力尚未配置。');
+      : capabilityNotice(node, 'provider.zhenzhen-credential-missing', missingOverseasCredentialMessage('FAL 工具箱', ''));
   }
   return null;
 }

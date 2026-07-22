@@ -166,6 +166,40 @@ test('group preflight validates selected inputs but ignores provider and require
   assert.equal(diagnostics.structure.some((item) => item.nodeIds?.includes('unrelated-provider')), false);
 });
 
+test('missing built-in image credentials explain the exact API setting in plain language', () => {
+  const image: Node = {
+    id: 'image-missing-key',
+    type: 'image',
+    position: { x: 0, y: 0 },
+    data: { model: 'gpt-image-2', apiModel: 'gpt-image-2-all', prompt: 'portrait' },
+  };
+  const diagnostics = buildRunPreflightDiagnostics({
+    nodes: [image],
+    edges: [],
+    executionNodeIds: [image.id],
+    scopeMode: 'exact-plan',
+    projectId: 'project-a',
+    settings,
+    providersComplete: true,
+    assets: [],
+    policy: null,
+  });
+  const missing = diagnostics.capability.find((item) => item.ruleId === 'provider.zhenzhen-credential-missing');
+  assert.ok(missing);
+  assert.match(String(missing.title), /未检测到当前图像模型所需的 API Key/);
+  assert.match(String(missing.title), /右上角齿轮/);
+  assert.match(String(missing.title), /“API 设置”/);
+  assert.match(String(missing.title), /“gpt-image 系列”分类 API Key/);
+  assert.match(String(missing.title), /“贞贞的AI工坊（海外） API Key”作为通用后备/);
+
+  const configured = buildRunPreflightDiagnostics({
+    nodes: [image], edges: [], executionNodeIds: [image.id], scopeMode: 'exact-plan',
+    projectId: 'project-a', settings: { ...settings, gptImageApiKey: 'configured' },
+    providersComplete: true, assets: [], policy: null,
+  });
+  assert.equal(configured.capability.some((item) => item.ruleId === 'provider.zhenzhen-credential-missing'), false);
+});
+
 test('a missing or invalid inbound connection on the selected node still blocks in selection scope', () => {
   const source = subflowNode('source', [], [{ id: 'image-out', kind: 'image' }]);
   const selected = subflowNode('selected', [{ id: 'image-in', kind: 'image', required: true }], []);

@@ -40,6 +40,23 @@ test('SD2 node exposes built-in provider choices and preserves provider during p
   assert.match(generation, /taskProvider=\$\{encodeURIComponent\(taskProvider\)\}/);
 });
 
+test('all interval-based generation polling never overlaps a slow status request', () => {
+  const seedanceNode = read('../src/components/nodes/SeedanceNode.tsx');
+  const videoNode = read('../src/components/nodes/VideoNode.tsx');
+  const audioNode = read('../src/components/nodes/AudioNode.tsx');
+  const runningHubNode = read('../src/components/nodes/RunningHubNode.tsx');
+  const rhToolsNode = read('../src/components/nodes/RHToolsNode.tsx');
+
+  assert.match(seedanceNode, /let pollInFlight = false;[\s\S]*?if \(pollInFlight\) return;[\s\S]*?pollInFlight = true;[\s\S]*?finally \{[\s\S]*?pollInFlight = false;/);
+  assert.equal((videoNode.match(/let pollInFlight = false;/g) || []).length, 2);
+  assert.equal((videoNode.match(/if \(pollInFlight\) return;/g) || []).length, 2);
+  assert.equal((videoNode.match(/pollInFlight = false;/g) || []).length, 4);
+  assert.equal((audioNode.match(/let pollInFlight = false;/g) || []).length, 2);
+  assert.equal((audioNode.match(/if \(pollInFlight\) return;/g) || []).length, 2);
+  assert.match(runningHubNode, /let pollInFlight = false;[\s\S]*?if \(pollInFlight\) return;/);
+  assert.match(rhToolsNode, /let pollInFlight = false;[\s\S]*?if \(pollInFlight\) return;/);
+});
+
 test('proxy routes seedance.nz independently and immediately stores completed output locally', () => {
   const proxy = read('../backend/src/routes/proxy.js');
   const settings = read('../backend/src/routes/settings.js');
@@ -47,7 +64,8 @@ test('proxy routes seedance.nz independently and immediately stores completed ou
   assert.match(proxy, /requestedTaskProvider === seedanceNz\.PROVIDER_ID/);
   assert.match(proxy, /seedanceNz\.submitTask/);
   assert.match(proxy, /seedanceNz\.queryTask/);
-  assert.match(proxy, /saveRemoteVideo\(result\.videoUrl, seedanceNz\.fetchRemote\)/);
+  assert.match(proxy, /saveRemoteVideo\([\s\S]*?result\.videoUrl,[\s\S]*?seedanceNz\.fetchRemote,[\s\S]*?seedanceNz\.PROVIDER_ID/);
+  assert.match(proxy, /saveRemoteVideo\(vUrl, null, `zhenzhen-legacy:\$\{taskId\}`\)/);
   assert.match(proxy, /provider: 'zhenzhen-legacy'/);
   assert.match(settings, /zhenzhenSd2ApiKey/);
   assert.match(settings, /zhenzhenSd2BaseUrl: config\.ZHENZHEN_SD2_BASE_URL/);
@@ -276,6 +294,6 @@ test('proxy keeps Happy Horse and Seed Audio on the domestic key and stores outp
   assert.match(proxy, /seedanceNz\.submitHappyHorseTask/);
   assert.match(proxy, /seedanceNz\.submitAudioTask/);
   assert.match(proxy, /settings\?\.zhenzhenSd2ApiKey/);
-  assert.match(proxy, /saveRemoteVideo\(result\.videoUrl, seedanceNz\.fetchRemote\)/);
-  assert.match(proxy, /saveRemoteAudio\(result\.audioUrl\)/);
+  assert.match(proxy, /saveRemoteVideo\(result\.videoUrl, seedanceNz\.fetchRemote, `happyhorse-nz:\$\{req\.params\.tid\}`\)/);
+  assert.match(proxy, /saveRemoteAudio\(result\.audioUrl, `seed-audio-nz:\$\{req\.params\.tid\}:0`\)/);
 });

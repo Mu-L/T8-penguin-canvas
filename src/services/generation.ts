@@ -57,6 +57,8 @@ function providerResponseError(response: Response, data: any, fallback?: string)
   const trace = providerTransportTrace(data?.data ?? data, response);
   error.transportHttpStatus = trace.transportHttpStatus;
   error.status = response.status;
+  const errorCode = String(data?.code || data?.data?.code || '').trim();
+  if (errorCode) error.code = errorCode;
   if (trace.requestId) error.requestId = trace.requestId;
   if (trace.upstreamHttpStatus) error.upstreamHttpStatus = trace.upstreamHttpStatus;
   if (trace.usage) error.usage = trace.usage;
@@ -148,7 +150,7 @@ export interface GenerateExternalImageResult extends ProviderTransportTrace {
   remoteAudioUrls?: string[];
   outputKinds?: Array<'image' | 'video' | 'audio' | 'text'>;
   primaryKind?: 'image' | 'video' | 'audio' | 'text';
-  outputSaveErrors?: Array<{ kind: string; url: string; error: string }>;
+  outputSaveErrors?: Array<{ kind: string; url: string; code?: string; error: string }>;
   text?: string;
   taskId?: string;
   raw?: any;

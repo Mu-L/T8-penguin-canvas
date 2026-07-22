@@ -563,6 +563,7 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
       let settled = false;
       const POLL_INT = 5000;
       const MAX = 480;
+      let pollInFlight = false;
       const finish = (ok: boolean, error?: Error) => {
         if (settled) return;
         settled = true;
@@ -583,6 +584,7 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
       };
       rejectPoll = (error?: Error) => finish(false, error || new Error('已取消'));
       timer = window.setInterval(async () => {
+        if (pollInFlight) return;
         elapsed += 1;
         if (elapsed > MAX) {
           update({ status: 'error', error: '轮询超时' });
@@ -590,6 +592,7 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
           finish(false, new Error('轮询超时'));
           return;
         }
+        pollInFlight = true;
         try {
           const r = await queryRh(tid, activeRhSiteRef.current);
           if (r.site) activeRhSiteRef.current = r.site;
@@ -687,6 +690,8 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
           }
         } catch (e: any) {
           logBus.warn(`轮询出错: ${e?.message || e}`, src);
+        } finally {
+          pollInFlight = false;
         }
       }, POLL_INT);
     });

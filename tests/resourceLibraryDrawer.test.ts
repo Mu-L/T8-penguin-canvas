@@ -32,7 +32,7 @@ test('resource library drawer uploads local files into the selected category', (
 
 test('resource upload api helper stages local files through the existing file upload endpoint', () => {
   assert.match(api, /export interface UploadedResourceLocalFile/);
-  assert.match(api, /export (?:async )?function uploadResourceLocalFile\(file: File\)/);
+  assert.match(api, /export (?:async )?function uploadResourceLocalFile\(file: File, context: UploadResourceLocalFileContext = \{\}\)/);
   assert.match(api, /new FormData\(\)/);
   assert.match(api, /fd\.append\('file', file\)/);
   assert.match(api, /fetch\(`\$\{BASE\}\/files\/upload`/);

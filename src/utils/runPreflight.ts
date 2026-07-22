@@ -145,7 +145,7 @@ const NODE_RUN_EVIDENCE_ACTIONS = new Set<RunActionKind>([
 const ATTEMPT_EVIDENCE_ACTIONS = new Set<RunActionKind>(['replay-attempt', 'retry-attempt']);
 const DOMAIN_LABELS: Record<RunPreflightDiagnosticDomain, string> = {
   structure: '画布结构',
-  capability: 'Provider 能力与配置',
+  capability: '运行配置',
   asset: '素材',
   policy: '主机执行策略',
 };

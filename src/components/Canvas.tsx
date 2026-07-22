@@ -1302,6 +1302,7 @@ const VideoNode = lazyCanvasNode(() => import('./nodes/VideoNode'), 'VideoNode')
 const VideoEditNode = lazyCanvasNode(() => import('./nodes/VideoEditNode'), 'VideoEditNode');
 const SeedanceNode = lazyCanvasNode(() => import('./nodes/SeedanceNode'), 'SeedanceNode');
 const DirectorStoryboardNode = lazyCanvasNode(() => import('./nodes/DirectorStoryboardNode'), 'DirectorStoryboardNode');
+const StoryNode = lazyCanvasNode(() => import('./nodes/StoryNode'), 'StoryNode');
 const AudioNode = lazyCanvasNode(() => import('./nodes/AudioNode'), 'AudioNode');
 const RunningHubNode = lazyCanvasNode(() => import('./nodes/RunningHubNode'), 'RunningHubNode');
 const RhConfigNode = lazyCanvasNode(() => import('./nodes/RhConfigNode'), 'RhConfigNode');
@@ -1376,6 +1377,7 @@ const SPECIFIC_NODES: Record<string, any> = {
   'video-edit': VideoEditNode,
   seedance: SeedanceNode, // 完全对齐 gpt-image-2-web Seedance2.0(独立 /seedance/v3 路径)
   'director-storyboard': DirectorStoryboardNode,
+  story: StoryNode,
   audio: AudioNode,
   llm: LLMNode,
   runninghub: RunningHubNode,
@@ -1681,6 +1683,16 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     shotResults: {},
     videoUrls: [],
     outputText: '',
+    status: 'idle',
+  },
+  story: {
+    storyProject: null,
+    storyRunMode: 'all',
+    storyRunTargetId: '',
+    storyRunRequestId: '',
+    outputText: '',
+    videoUrl: '',
+    videoUrls: [],
     status: 'idle',
   },
   cinematic: { kind: 'cinematic', cinematicLanguage: 'en', cinematicStrength: 'balanced' },

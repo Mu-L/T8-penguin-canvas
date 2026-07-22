@@ -1368,6 +1368,89 @@ test('B3 Zhenzhen image routes bound Provider JSON and expose only normalized re
   });
 });
 
+test('B3 completed image tasks retry transient downloads and expose actionable safe failure reasons', async () => {
+  await withProxyFixture(async ({ appServer, outputDir }) => {
+    const originalFetch = global.fetch;
+    const validPng = await sharp({
+      create: { width: 2, height: 2, channels: 4, background: { r: 20, g: 120, b: 220, alpha: 1 } },
+    }).png().toBuffer();
+    let outputRequests = 0;
+    const outputServer = await listen((req, res) => {
+      if (req.url?.startsWith('/expired.png')) {
+        res.writeHead(410, { 'content-type': 'text/plain' });
+        res.end('expired signed output');
+        return;
+      }
+      outputRequests += 1;
+      if (outputRequests < 3) {
+        res.writeHead(503, { 'content-type': 'text/plain' });
+        res.end('temporary unavailable');
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'image/png', 'content-length': validPng.length });
+      res.end(validPng);
+    });
+    try {
+      const localOutput = `http://127.0.0.1:${outputServer.address().port}/generated.png`;
+      proxyRouter._test.setProxySafeRemoteTestOptions({
+        allowPrivateForTests: true,
+        lookupImpl: async () => [{ address: '127.0.0.1', family: 4 }],
+      });
+      global.fetch = async () => new Response(JSON.stringify({
+        status: 'SUCCESS',
+        progress: '100%',
+        data: { data: [{ url: localOutput }] },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+
+      const recovered = await requestGet(appServer, '/api/proxy/image/status/retry-image-task?model=gpt-image-2');
+      assert.equal(recovered.status, 200, recovered.text);
+      assert.equal(recovered.data?.data?.status, 'completed');
+      assert.match(recovered.data?.data?.urls?.[0] || '', /^\/files\/output\/img_task_/);
+      assert.equal(outputRequests, 3, 'transient output download must retry before failing the completed task');
+      assert.equal(fs.readdirSync(outputDir).filter((name) => name.startsWith('img_task_')).length, 1);
+
+      global.fetch = async () => new Response(JSON.stringify({
+        status: 'completed',
+        progress: '100%',
+        result: { output_url: `http://127.0.0.1:${outputServer.address().port}/expired.png?token=provider-signed-secret` },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+      const expired = await requestGet(appServer, '/api/proxy/image/status/expired-image-task?model=gpt-image-2');
+      assert.equal(expired.status, 502, expired.text);
+      assert.equal(expired.data?.code, 'image_download_http_error');
+      assert.match(expired.data?.error || '', /HTTP 410/);
+      assert.doesNotMatch(expired.text, /provider-signed-secret|expired\.png/);
+
+      proxyRouter._test.setProxySafeRemoteTestOptions({
+        lookupImpl: async () => [{ address: '198.18.0.25', family: 4 }],
+      });
+      global.fetch = async () => new Response(JSON.stringify({
+        status: 'completed',
+        progress: '100%',
+        result: { image_url: 'https://cdn.example/private.png?token=provider-signed-secret' },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+      const blocked = await requestGet(appServer, '/api/proxy/image/status/fake-ip-image-task?model=gpt-image-2');
+      assert.equal(blocked.status, 502, blocked.text);
+      assert.equal(blocked.data?.code, 'image_download_proxy_dns_blocked');
+      assert.match(blocked.data?.error || '', /DNS|代理|Fake-IP/);
+      assert.doesNotMatch(blocked.text, /cdn\.example|provider-signed-secret/);
+
+      global.fetch = async () => new Response(JSON.stringify({
+        status: 'finished',
+        progress: '100%',
+        data: {},
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+      const missing = await requestGet(appServer, '/api/proxy/image/status/missing-image-task?model=gpt-image-2');
+      assert.equal(missing.status, 502, missing.text);
+      assert.equal(missing.data?.code, 'image_output_missing');
+      assert.match(missing.data?.error || '', /没有可识别的图片地址/);
+    } finally {
+      global.fetch = originalFetch;
+      proxyRouter._test.setProxySafeRemoteTestOptions(null);
+      await closeServer(outputServer);
+    }
+  });
+});
+
 test('B3 Zhenzhen video and Seedance routes bound Provider JSON and redact failures', async () => {
   await withProxyFixture(async ({ appServer }) => {
     const originalFetch = global.fetch;
@@ -1474,6 +1557,55 @@ test('B3 Zhenzhen video and Seedance routes bound Provider JSON and redact failu
       global.fetch = originalFetch;
     }
   });
+});
+
+test('B3 task-scoped video materialization coalesces concurrent polls and reuses one output file', async () => {
+  const videoBytes = Buffer.concat([
+    Buffer.from([0x00, 0x00, 0x00, 0x14]),
+    Buffer.from('ftypisom', 'ascii'),
+    Buffer.alloc(8),
+  ]);
+  let assetHits = 0;
+  const assetServer = await listen((_req, res) => {
+    assetHits += 1;
+    setTimeout(() => {
+      res.writeHead(200, { 'content-type': 'video/mp4' });
+      res.end(videoBytes);
+    }, 60);
+  });
+  const assetBase = `http://video-output.test:${assetServer.address().port}`;
+
+  try {
+    await withProxyFixture(async ({ outputDir }) => {
+      proxyRouter._test.resetVideoMaterializationCacheForTests();
+      proxyRouter._test.setProxySafeRemoteTestOptions({
+        allowPrivateForTests: (hostname) => hostname === 'video-output.test',
+        lookupImpl: async () => [{ address: '127.0.0.1', family: 4 }],
+      });
+      const taskKey = 'zhenzhen-legacy:dedupe-video-task';
+      const urls = await Promise.all(Array.from({ length: 8 }, () => (
+        proxyRouter._test.saveRemoteVideo(`${assetBase}/result.mp4?signature=first`, null, taskKey)
+      )));
+
+      assert.equal(new Set(urls).size, 1);
+      assert.match(urls[0], /^\/files\/output\/vid_task_[0-9a-f]{24}\.mp4$/);
+      assert.equal(assetHits, 1, 'concurrent completed polls must share one remote download');
+      assert.equal(fs.readdirSync(outputDir).length, 1);
+
+      // 模拟后端重启后内存缓存丢失、Provider 又返回了不同签名 URL：任务键仍应落到同一个文件。
+      proxyRouter._test.resetVideoMaterializationCacheForTests();
+      const recovered = await proxyRouter._test.saveRemoteVideo(
+        `${assetBase}/result.mp4?signature=second`,
+        null,
+        taskKey,
+      );
+      assert.equal(recovered, urls[0]);
+      assert.equal(assetHits, 2);
+      assert.equal(fs.readdirSync(outputDir).length, 1);
+    });
+  } finally {
+    await closeServer(assetServer);
+  }
 });
 
 test('B3 signed audio upload pins the public destination, requires TLS, forbids redirects, and bounds responses', async () => {

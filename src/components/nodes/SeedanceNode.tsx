@@ -305,7 +305,9 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
       const POLL_MS = Math.max(2, pollInt) * 1000;
       const MAX = Math.max(10, maxPoll, seedanceMinPollCount(POLL_MS));
       let lastProgress = '';
+      let pollInFlight = false;
       pollTimer.current = window.setInterval(async () => {
+        if (pollInFlight) return;
         elapsed += 1;
         if (!isCurrentGenerationRun(runId)) {
           rejectStoppedGeneration(reject);
@@ -320,6 +322,7 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
           reject(new Error('轮询超时'));
           return;
         }
+        pollInFlight = true;
         try {
           const r = await querySeedance(tid, taskProvider);
           if (!isCurrentGenerationRun(runId)) {
@@ -410,6 +413,8 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
           }
           // 偶发失败不停止
           console.warn('Seedance 轮询出错', e?.message);
+        } finally {
+          pollInFlight = false;
         }
       }, POLL_MS);
     });

@@ -1,10 +1,42 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.6.1",
-  "lastUpdated": "2026-07-21-v2.6.1-electron-release",
+  "version": "2.6.2",
+  "lastUpdated": "2026-07-22-v2.6.2-electron-release-candidate",
+  "storyAutoProduction": {
+    "version": "2.6.2",
+    "status": "verified-release-candidate",
+    "date": "2026-07-21",
+    "description": "新增可见、可执行的 Story 全自动制片节点，把剧本依次转成可编辑分镜、分类资产、分层提示词、SD2.0 分镜视频和顺序成片。",
+    "workflow": [
+      "剧本与风格：支持粘贴剧本或连接上游文本，设置片名、画幅、节奏、目标时长、视觉风格；语言、图像与视频均可选择 API 平台和模型，选项直接复用 LLM、GPT Image 2、SD2.0 与扩展 Provider 的权威注册表。",
+      "确认镜头：编辑时长、画面、动作、台词、旁白、音效、运镜、光线与硬约束，支持新增、复制、拆分、合并、重排和字段锁定。",
+      "准备资产：角色、场景、道具、服装、声音五类资产可自动识别去重、手动重分类、电脑上传、绑定上游素材、从资产库搜索并选择图片、单项 AI 生成或批量补齐。",
+      "合成提示词：按全局风格、稳定身份、场景、动作、镜头语言、光线、声音、必须出现和禁止项分层编译，并执行源剧本覆盖与连续性预检。",
+      "生成视频：只生成缺失镜头，默认使用现有 SD2.0/Director 能力，支持限并发、停止、恢复、冷重开续轮询和仅重试失败。",
+      "成片导出：复用 VideoEdit 时间线与本地 FFmpeg 顺序合成，保留镜头/声音资产，物化关联 Director 与 VideoEdit 节点继续精修。"
+    ],
+    "integrity": [
+      "StoryProject 使用稳定 storyId、storyRevision、productionRevision、sourceSpan、资产/镜头 revision 和任务 Provider 元数据；迟到资产、视频或成片不得覆盖新修订。",
+      "统一 request-bound Run/NodeRun/Attempt 生命周期报告分析、资产、视频、轮询、部分输出和最终输出；按钮不直接绕过画布运行入口调用 Provider。",
+      "已完成资产/视频跳过新提交；单次新任务上限只计算新任务，恢复已有任务不占额度；本地合成任务在后端重启后丢失时只安全重提本地 FFmpeg。",
+      "手动提示词编辑保持可见；只修改字段锁不会清空已有视频；复制、删除、移动、拆分、合并镜头会重算资产依赖并只失效受影响连续性。",
+      "阶段完成状态与工作台当前页保持同步：确认镜头开始生成时进入准备资产，全部资产齐备后自动进入合成提示词；底部阶段主按钮也会立即显示目标页。",
+      "平台与模型不是界面占位：剧本分析、资产生成和视频生成走实际选择的内置或扩展 Provider；异步任务保存原 Provider、模型与必要轮询端点；物化 Director 时同步完整视频平台配置，后续微调不换线路。",
+      "资产库图片通过现有 ResourceItem 接口绑定稳定文件 URL，并更新最近使用时间；替换图片沿用统一资产失效传播，只把依赖该资产的镜头提示词、视频和成片标记为待更新。"
+    ],
+    "verification": [
+      "《唐人街巷战》本地可解释回退：6 段 100% 覆盖、0 条硬约束丢失、精确 8 个核心资产；120 镜头长剧本不截断且 ID 唯一。",
+      "Story 最新专项 16/16；Story/Director/VideoEdit/schema/运行入口/停止控制组合 197/197；资产中心/可恢复上传/Canvas Agent 组合 50/50。",
+      "隔离内存画布完成六步工作台、拆分/合并、资产新增/删除，以及 1600×1000 和 1280×720 浏览器验收，无页面溢出和浏览器异常；type-check 通过。",
+      "阶段联动热修复的 Story/Canvas 运行入口聚焦回归 23/23，type-check 与 diff-check 通过。",
+      "平台模型贯通专项 Story/Director/Advanced Provider 回归 62/62，type-check 与生产 build 通过；G-2 i2i 无参考图路径有显式阻断，未冒充真实付费 API 已跑通。",
+      "Story 资产库选择接线已纳入 Story 专项静态契约；Story/Director/资产库相关组合 46/46、type-check 与生产 build 通过；资源上传回归同步锁定兼容的一参数调用及可选 lineage context。"
+    ],
+    "releaseBoundary": "Story 全自动制片纳入 v2.6.2 Electron 自动更新候选；没有把未执行的真实付费完整制片冒充为已验证。正式发布仅允许一次 Electron/NSIS 构建，F8-F10 仍按用户授权先发布后补真实证据。"
+  },
   "sixSystemsImplementationAudit": {
     "version": "2.6.1",
-    "status": "verified-local-b1-f2-f7-b2-schema32-f9-f10-v2.6.1-released-external-evidence-deferred",
+    "status": "verified-local-b1-f2-f7-b2-schema32-f9-f10-v2.6.2-release-candidate-external-evidence-deferred",
     "date": "2026-07-18",
   "lastUpdated": "2026-07-20-canonical-core-direct-development-restored",
     "completedRounds": 27,
@@ -48,8 +80,11 @@
     },
     "currentIncrement": {
       "name": "b2-schema32-f9-f10-local-hardening-and-assetcenter-p2",
-      "status": "verified-local-integrated-core-v2.6.1-released-external-evidence-deferred",
+      "status": "verified-local-integrated-core-v2.6.2-release-candidate-external-evidence-deferred",
       "capabilities": [
+        "2026-07-22 修复少数用户图片任务 completed/100% 却没有本地图片的问题：普通图像兼容更多 Provider 输出字段与嵌套结构，完成结果只有成功下载并保存到本机后才会返回 completed；临时 HTTP/DNS/网络错误最多重试 3 次。默认/国内 Seedream 与 G-2、FAL、MJ、LLM 图片和扩展 Provider 都会把真实失败原因及稳定诊断码传到节点与 Logs，覆盖 DNS/Fake-IP/代理、超时、HTTP 状态、连接中断、TLS、内容无效/超限、磁盘空间、目录权限和上游空结果；签名 URL、Token 与 Key 保持脱敏，SSRF/内网阻断未放宽。后端 24/24、Seedance/FAL 55/55、扩展 Provider/网页反推 15/15、type-check 与生产 build 通过；未付费实测、Electron 打包、提交、推送或发布。",
+        "2026-07-22 修复异步生成完成后重复保存大量相同素材：所有 interval 轮询节点统一禁止上一轮查询未结束时启动下一轮；SD2.0 国内/海外、普通/FAL 视频、Happy Horse、Hailuo、Kling、Vidu、Wan、Upscaler、Fal超市、Seedream、Seed Audio、Suno、MJ 与 RunningHub 的异步输出按 Provider+task+输出索引使用稳定文件名，同一任务重复/恢复查询不再新增副本；FAL 超市同响应重复 URL 在下载前去重。8 路并发完成查询验证只下载一次且只产生一个文件，后端 23/23、异步前端 14/14、Provider/RH/FAL 60/60、type-check 和生产 build 通过；未 Electron 打包、提交、推送或发布。",
+        "2026-07-22 普通运行缺少 API Key 时继续安全阻断，但体检不再把 Provider、capability 或 credential-missing 等内部术语作为主要提示。内置图像、视频、Seedance、音频、LLM、RunningHub、FAL 及扩展平台会明确说明缺少哪一类 Key/服务地址/本地程序，并统一指引右上角齿轮 → API 设置 → 填写保存 → 重新运行；诊断代码和节点 ID 默认收进可展开的‘技术详情’，主分类改为‘运行配置’。",
         "2026-07-21 AI工坊私有充值弹窗强化账号绑定警告：标题明确给出 ai.t8star.org、注册登录后从左侧个人中心取得数字 ID、先解绑再绑定自己的 ID，以及充错无法退回；辅助提示同步为不可退款语义。长标题可换行且不会挤压绑定状态，私有实现与测试继续仅在 ignored local-private/**。未生产 build、打包或发布。",
         "2026-07-21 核心目录顶部充值入口新增双平台选择：贞贞的AI工坊继续复用原充值弹窗与业务，贞贞的平价AI小屋通过 Electron 系统外链打开指定 seedance.nz 注册地址，Web 开发环境保留 noopener/noreferrer 新窗口兜底；选择浮层支持再次点击、点击外部和 Escape 关闭，并适配像素/科技明暗主题。私有充值实现与专项测试继续仅存在于 ignored local-private/**，不进入公开 GitHub 源码。专项 4/4、私有入口完整模块解析和 type-check 通过；未生产 build、打包或发布。",
         "2026-07-21 图像/编辑、视频、SD2.0、音频、RunningHub/RH钱包、RH超市和 RH工具箱节点新增默认关闭的‘复用结果’：仅当节点已有与其输出类型匹配的真实素材时跳过生成执行器并继续连线下游；没有结果时仍正常生成。统一 useRunTrigger 保留 Run/NodeRun/Attempt、node.output 与成功终态，但复用分支不产生虚假的 Provider 请求/提交/响应事件；共享 schema 与新节点初始值均为 reuseResult=false，旧画布缺字段保持关闭。聚焦/运行/RH 组合 53/53、相邻持久化/预检/重放/次级动作 33/33、type-check、public、RH toolbox 与 development 门通过；未 build、打包或发布。",
@@ -89,6 +124,7 @@
         "普通 RUN 的 cost.unknown 保持诚实提示但不再弹出确认窗口；阻断性结构/能力/素材/策略错误仍 fail-closed，历史重试/重放及高风险远程运行仍必须显式确认。"
       ],
       "verification": [
+        "2026-07-22 运行体检白话提示专项与相邻回归 85/85：覆盖普通运行、最终重验、单/组/全部节点、次级 Provider、工作流医生、图像 gpt-image 分类 Key 与通用海外 Key 后备，以及诊断代码折叠显示；type-check 与生产 build 通过。未打 Electron、提交、推送或发布。",
         "2026-07-21 充值账号绑定警告专项 1/1、与平台双选组合 5/5：锁定 ai.t8star.org、数字 ID 获取/解绑重绑/不可退款精确文案，以及长标题换行和绑定状态防挤压；私有入口模块解析、开发服务 transform、JSON、public-check、development 门和 diff-check 通过。未执行生产 build/package/release。",
         "2026-07-21 充值平台双选专项 4/4：锁定指定 seedance.nz 推广 URL、Electron 外链成功不重复开窗、Electron 异常时 noopener/noreferrer 浏览器兜底、两个平台文案/原 RechargeModal/外部点击/Escape 契约；私有扩展入口 esbuild 完整模块解析与 npm run type-check 通过。实现和测试仅在 ignored local-private/**，未执行生产 build/package/release。",
         "2026-07-21 图像节点仅图片输出专项与相邻回归 26/26：覆盖旧画布缺字段、新节点默认开启、显式关闭恢复图文、edit 共享语义、非图像节点隔离、ImageNode UI、OutputNode 即时签名、普通下游素材收集、Canvas 自动输出、Relay/RandomRoute/GroupBox、Loop 快照、跨画布发送、素材集合并与共享 Schema 默认；npm run type-check、public-check、development 工作树门、JSON 与 diff-check 通过。未执行生产 build/package/release。",
@@ -385,6 +421,26 @@
       "真实生成 POST 未自动重试；未打印或保存任务 ID、签名 URL、账户信息、原始响应或测试 Key，临时输入视频在验证后删除。"
     ],
     "releaseBoundary": "这是 v2.6.0 正式发布后的未发布源码增量；本轮未升级版本、未运行生产 build、未打 Electron/NSIS、未提交或推送 Git、未创建 tag 或 GitHub Release。"
+  },
+  "electronReleaseV262": {
+    "version": "2.6.2",
+    "status": "release-candidate-postrelease-evidence-authorized",
+    "date": "2026-07-22",
+    "description": "v2.6.2 Electron 自动更新候选：新增 Story 全自动制片，并收口阶段联动、资产库选图、生产模型贯通、运行配置白话提示、异步输出去重和图片下载真实诊断。",
+    "capabilities": [
+      "新增 Story 可执行节点与六步工作台：剧本与风格、确认镜头、准备资产、合成提示词、生成视频、成片导出；支持镜头编辑、资产自动识别/上传/资产库/AI 补齐、分层提示词、恢复生成和 VideoEdit/FFmpeg 成片。",
+      "Story 的语言、图像和视频模型分别复用现有 LLM、GPT Image 2、SD2.0 与扩展 Provider 注册表，真实配置贯穿分析、资产、视频与物化后的导演分镜台；完成镜头和资产后自动进入下一阶段。",
+      "所有 interval 异步轮询使用单飞保护；Provider+task+输出索引采用稳定文件名，同一任务重复或恢复查询不再新增重复素材。",
+      "图片任务只有成功下载并保存到本机后才报告完成，兼容更多输出结构并反馈 DNS/Fake-IP/代理、超时、HTTP、连接、TLS、内容、磁盘、权限或上游空结果等真实原因；敏感 URL、Token 与 Key 继续脱敏。",
+      "执行前体检缺少 API Key/服务时使用白话说明和设置路径，内部诊断代码默认折叠；公开源码继续排除 local-private/**、测试 Key、缓存、外部参考源码和维护者文档。"
+    ],
+    "verification": [
+      "Story 最新专项、Story/Director/VideoEdit/schema/运行入口、资产中心和阶段/模型贯通组合回归通过；type-check 与生产 build 已通过。",
+      "图片下载诊断后端 24/24、Seedance/FAL 55/55、扩展 Provider/网页反推 15/15 通过；异步去重后端 23/23、前端 14/14、Provider/RH/FAL 60/60 通过。",
+      "本条是正式构建前候选记录；固定 source commit、安装包字节数/摘要、GitHub Release 和冷启动结果只能在唯一一次正式发布完成后回填。",
+      "用户明确授权 v2.6.2 在 F8-F10 清单完全不存在时使用精确版本、固定 40 位 target 和 owner-approved-post-release-v2.6.2 一次性延期；延期不产生 passed 检查。"
+    ],
+    "releaseBoundary": "v2.6.2 不声称完成真实付费 Story 全链路或 F8-F10 外部验收。正式发布器仍会拒绝损坏、过期、版本不匹配或哈希不匹配的证据；只允许一次 Electron/NSIS 构建。"
   },
   "electronReleaseV261": {
     "version": "2.6.1",
@@ -5549,11 +5605,11 @@
       "T8_ENABLE_LOCAL_PRIVATE": "开发环境和普通本机构建可选；0=关闭本机 local-private/extensions 私有扩展。正式 dist:release 固定为 1，不能被父环境降级。GitHub/clean clone 因为没有 local-private 目录，不包含充值实现。",
       "T8_DISABLE_LOCAL_EXTENSIONS": "开发环境可选；1=关闭本地扩展。正式 dist:release 固定为 0，确保本机私有 sidecar 参与加密打包与后置校验。"
     },
-    "version": "2.6.1",
-    "semverVersion": "2.6.1",
+    "version": "2.6.2",
+    "semverVersion": "2.6.2",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；当前正式版本为 v2.6.1，新增贞贞 G-2/Hailuo/Vidu/Kling/Upscaler、生成结果复用与本地私有扩展体验更新。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.6.1 正式 Electron 自动更新版已发布到 GitHub Latest，source/tag 为 da4ac0051a2e19852c5aecc4aabd914a578a308b，三项资产通过发布脚本草稿全量下载与发布后 digest/size/Latest 校验。用户授权的一次性证据延期不改变 F8-F10 未完成状态。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；当前发布候选为 v2.6.2，新增 Story 全自动制片并修复异步重复保存、图片完成无本地结果、真实下载诊断和运行配置提示。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.6.2 Electron 自动更新候选已完成版本与公开范围记录；固定 source/tag、三项自动更新资产、摘要、Latest 与冷启动结果必须在唯一一次正式 dist:release 成功后回填。用户授权的一次性证据延期不改变 F8-F10 未完成状态。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
@@ -6200,7 +6256,7 @@
       "自动更新到带新影片的版本后，旧成就数据仍能解锁并播放新资源。"
     ]
   },
-  "totalNodes": 54,
+  "totalNodes": 55,
   "phases": {
     "phase0": {
       "label": "基础设施",
@@ -8243,7 +8299,7 @@
     },
     "core": {
       "label": "核心节点",
-      "count": 7,
+      "count": 8,
       "nodes": [
         {
           "type": "text",
@@ -8269,6 +8325,11 @@
           "type": "director-storyboard",
           "label": "导演分镜台",
           "description": "秒级长片分镜台：每镜头 4-15 秒，可继承或单独覆盖模型/比例/分辨率，支持独立提示词和参考素材；生成时按分镜无限并发调用 Seedance2.0，多镜头逐个完成逐个输出，首尾帧桥接默认关闭可选启用"
+        },
+        {
+          "type": "story",
+          "label": "Story 全自动制片",
+          "description": "六步把剧本自动转为可编辑分镜、分类资产、分层提示词、SD2.0 分镜视频与顺序成片；支持上传/复用/AI 补资产、停止恢复、只重试失败、任务上限、Director/VideoEdit 联动和 revision 防迟到覆盖"
         },
         {
           "type": "audio",
@@ -9278,6 +9339,7 @@
     "video",
     "seedance",
     "director-storyboard",
+    "story",
     "audio",
     "llm",
     "runninghub",

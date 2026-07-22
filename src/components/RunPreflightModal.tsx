@@ -47,7 +47,7 @@ const DOMAIN_LABELS: Record<RunPreflightNoticeDomain, string> = {
   evidence: '运行证据',
   cost: '费用',
   structure: '画布结构',
-  capability: 'Provider 能力',
+  capability: '运行配置',
   asset: '素材',
   policy: '主机策略',
 };
@@ -95,14 +95,15 @@ function NoticeList({
           <li key={`${item.domain}:${item.code}:${index}`} className="px-3 py-2.5">
             <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-[var(--text-secondary)]">
               <span className="rounded bg-[var(--bg-tertiary)] px-1.5 py-0.5 font-semibold">{DOMAIN_LABELS[item.domain]}</span>
-              <code className="break-all">{item.code}</code>
             </div>
             <p className="mt-1 break-words text-xs leading-5 text-[var(--text-primary)]">{item.message}</p>
-            {item.nodeIds.length > 0 && (
-              <p className="mt-1 break-all text-[10px] text-[var(--text-secondary)]">
-                节点：{item.nodeIds.join('、')}
-              </p>
-            )}
+            <details className="mt-1.5 text-[10px] text-[var(--text-secondary)]">
+              <summary className="cursor-pointer select-none">技术详情</summary>
+              <div className="mt-1 space-y-1 rounded bg-[var(--bg-tertiary)] px-2 py-1.5">
+                <div>诊断代码：<code className="break-all">{item.code}</code></div>
+                {item.nodeIds.length > 0 && <div className="break-all">节点：{item.nodeIds.join('、')}</div>}
+              </div>
+            </details>
           </li>
         ))}
       </ul>

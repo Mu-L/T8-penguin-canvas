@@ -402,6 +402,35 @@
         }
       ]
     },
+    "story": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "video",
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
     "audio": {
       "resolver": "static",
       "inputs": [
@@ -2355,6 +2384,32 @@
       "description": "秒级长片分镜台：多镜头提示词、参考素材和 Seedance2.0 无限并发生成",
       "icon": "Clapperboard",
       "color": "fuchsia",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ],
+        "outputs": [
+          "video",
+          "text"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "story",
+      "label": "Story 全自动制片",
+      "category": "core",
+      "description": "从剧本自动完成分镜、资产、提示词、SD2.0 视频与成片，并允许逐步微调",
+      "icon": "BookOpenText",
+      "color": "amber",
       "ports": {
         "inputs": [
           "text",

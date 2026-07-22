@@ -508,7 +508,9 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       const POLL_INT = VIDEO_POLL_INTERVAL_MS;
       const MAX = VIDEO_MAX_POLL; // 60 分钟
       let lastProgress = '';
+      let pollInFlight = false;
       pollTimer.current = window.setInterval(async () => {
+        if (pollInFlight) return;
         elapsed += 1;
         if (!isCurrentGenerationRun(runId)) {
           rejectStoppedGeneration(reject);
@@ -523,6 +525,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           reject(new Error('轮询超时'));
           return;
         }
+        pollInFlight = true;
         try {
           const r = isWan
             ? await queryWan(tid)
@@ -627,6 +630,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           }
           // 偶尔失败不停止
           console.warn('轮询出错', e?.message);
+        } finally {
+          pollInFlight = false;
         }
       }, POLL_INT);
     });
@@ -643,7 +648,9 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       let elapsed = 0;
       const POLL_INT = VIDEO_FAL_POLL_INTERVAL_MS;
       const MAX = VIDEO_FAL_MAX_POLL; // 60分钟
+      let pollInFlight = false;
       pollTimer.current = window.setInterval(async () => {
+        if (pollInFlight) return;
         elapsed += 1;
         if (!isCurrentGenerationRun(runId)) {
           rejectStoppedGeneration(reject);
@@ -658,6 +665,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           reject(new Error('FAL 轮询超时'));
           return;
         }
+        pollInFlight = true;
         try {
           const r = await queryVideoFal(falPollRef.current!);
           await reporter?.polling({
@@ -743,6 +751,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             return;
           }
           console.warn('FAL 轮询出错', e?.message);
+        } finally {
+          pollInFlight = false;
         }
       }, POLL_INT);
     });

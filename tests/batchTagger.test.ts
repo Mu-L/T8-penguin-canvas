@@ -623,7 +623,7 @@ test('batch tagger local import preserves native source path and opens the actua
     PROJECT_DB_FILE: config.PROJECT_DB_FILE,
     PROJECT_DB_BACKUP_FILE: config.PROJECT_DB_BACKUP_FILE,
   };
-  const root = mkdtempSync(join(tmpdir(), 't8-batch-tags-import-'));
+  const root = mkdtempSync(join(process.cwd(), '.t8-batch-tags-import-'));
   let projectDatabase: any = null;
   try {
     config.DATA_DIR = join(root, 'data');
@@ -632,13 +632,13 @@ test('batch tagger local import preserves native source path and opens the actua
     config.THUMBNAILS_DIR = join(root, 'thumbnails');
     config.PROJECT_DB_FILE = join(config.DATA_DIR, 't8-projects.sqlite3');
     config.PROJECT_DB_BACKUP_FILE = join(config.DATA_DIR, 't8-projects.sqlite3.backup');
-    const filesRouter = require('../backend/src/routes/files.js');
-    projectDatabase = require('../backend/src/services/projectDatabase.js').getProjectDatabase(config);
-    const sourceDir = join(root, '工作流(2)');
     mkdirSync(config.DATA_DIR, { recursive: true });
     mkdirSync(config.INPUT_DIR, { recursive: true });
     mkdirSync(config.OUTPUT_DIR, { recursive: true });
     mkdirSync(config.THUMBNAILS_DIR, { recursive: true });
+    const filesRouter = require('../backend/src/routes/files.js');
+    projectDatabase = require('../backend/src/services/projectDatabase.js').getProjectDatabase(config);
+    const sourceDir = join(root, '工作流(2)');
     mkdirSync(sourceDir, { recursive: true });
     const sourcePath = join(sourceDir, 'ComfyUI_00006_fhrxf_1782377039.png');
     writeFileSync(sourcePath, 'fake image bytes');

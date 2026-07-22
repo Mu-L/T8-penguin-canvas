@@ -1283,7 +1283,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         const st = String(q.status || '').toLowerCase();
         if (st === 'completed' || st === 'success' || st === 'done') {
           const url = q.urls?.[0];
-          if (!url) throw new Error('任务完成但未返回图片');
+          if (!url) throw new Error(q.error || '任务已完成，但本机没有拿到图片；请查看 Logs 中的下载失败原因');
           logBus.success(`任务完成 → ${url}`, src);
           update({
             status: 'success',

@@ -12,6 +12,7 @@ export type NodeType =
   | 'video-edit'
   | 'seedance'
   | 'director-storyboard'
+  | 'story'
   | 'audio'
   | 'llm'
   | 'runninghub'

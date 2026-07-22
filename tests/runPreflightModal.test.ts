@@ -74,6 +74,14 @@ test('preview renders exact action, scope, revision, evidence, cost, notices, an
   assert.match(modal, />执行图摘要<\/dt>/);
 });
 
+test('credential blockers use a user-facing label and hide diagnostic codes in technical details', () => {
+  assert.match(modal, /capability: '运行配置'/);
+  assert.doesNotMatch(modal, /capability: 'Provider 能力'/);
+  assert.match(modal, /<summary className="cursor-pointer select-none">技术详情<\/summary>/);
+  assert.match(modal, /诊断代码：<code className="break-all">\{item\.code\}<\/code>/);
+  assert.match(modal, /节点：\{item\.nodeIds\.join\('、'\)\}/);
+});
+
 test('unknown cost is described without inventing a number while known cost uses the authoritative fields', () => {
   const cost = sourceBetween(modal, 'preview.cost.known ? (', '\n          )}\n        </div>');
   assert.match(cost, /String\(preview\.cost\.amount\)/);

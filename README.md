@@ -10,13 +10,13 @@ https://www.runninghub.cn/?inviteCode=rh-v1121
 My favorite girl Go YounJung
 # 🐧 贞贞的无限画布（企鹅共创版） · T8-penguin-canvas
 
-> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.6.1
+> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.6.2
 >
 > GitHub：<https://github.com/T8mars/T8-penguin-canvas>
 
 一个面向 AI 创作的 **节点式画布**：拖拽节点、连线编排、生成图像 / 视频 / 音频、调用 LLM、串接 RunningHub 工作流，叠加批量执行、智能对齐、打组、主题模板与终端日志。Web 浏览器和桌面端均可使用。
 
-![status](https://img.shields.io/badge/version-v2.6.1-brightgreen) ![node](https://img.shields.io/badge/node-56-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
+![status](https://img.shields.io/badge/version-v2.6.2-brightgreen) ![node](https://img.shields.io/badge/node-57-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
 
 ---
 
@@ -35,8 +35,9 @@ My favorite girl Go YounJung
 
 ## ✨ 功能亮点
 
-- 🎨 **56 个节点**，覆盖文本 / 图像 / 视频 / 音频 / LLM / RunningHub / ComfyUI / 3D / 工具 / 辅助 / 工具箱 / 输出预览 / 上传素材 / 素材集 / 批量打标 / 随机路由
+- 🎨 **57 个节点**，覆盖文本 / 图像 / 视频 / 音频 / LLM / RunningHub / ComfyUI / 3D / 工具 / 辅助 / 工具箱 / 输出预览 / 上传素材 / 素材集 / 批量打标 / 随机路由 / Story 全自动制片
 - 🧺 **画布级批量导入 + 素材合集打散**：上传节点支持一次选择多张图 / 多个视频 / 多段音频；也可直接把剪贴板或文件拖到画布，同类型多素材自动形成合集，上传和输出合集都可一键打散为多个独立素材节点
+- 🎞️ **v2.6.2 Story 全自动制片与生成可靠性自动更新版**：新增 Story 节点，将剧本自动转换为可编辑镜头、角色/场景/道具/服装/声音资产、分层提示词、SD2.0 分镜视频和顺序成片；语言、图像、视频平台与模型贯穿后续导演台。同步修复阶段自动切换、资产库选图、缺少 API Key 的白话提示、异步轮询重复保存，以及少数图片任务完成却未落盘的问题，并把真实下载失败原因反馈到节点和日志。
 - 🎬 **v2.6.1 贞贞国内模型与结果复用自动更新版**：图像节点 GPT2 新增 Zhenzhen Image G-2 文生图/图生图；视频节点新增 Hailuo、Vidu、Kling 与 Upscaler TAB，并按真实 API 验证结果保留未授权或上游异常模型的明确边界。图像、视频、SD2.0、音频及 RH 生成节点新增默认关闭的“复用结果”，已有真实素材时可跳过重复生成并继续下游。
 - 🔄 **v2.6.0 协作、执行与创作稳定性升级**：整合 F2-F7 的断线重连与增量同步、结构并发、协同文本与撤销、可续传素材、评论审批和权威运行队列；普通 RUN 的 advisory 警告不再反复弹窗，同时修复结构化 Provider 错误、VibeX 下拉滚动、Photoshop 当前图层编辑，并让图像节点默认只输出图片结果。正式自动更新包仍受真实双设备、公网 TLS、红队与负载证据闸门约束。
 - 🤝 **v2.5.8 多人协作 F1 自动更新版**：新增与私有后端隔离的独立协作网关、具体网卡/端口选择、LAN 链接和本地二维码；邀请严格绑定项目/画布、角色、有效期和次数，支持成员角色、邀请、单会话、全部会话与网关生命周期管理。viewer 保持只读，角色变化和撤销会立即让旧连接失效；schema 23 对 AssetRef、URL 映射、固定子工作流、历史操作、增量同步与 Patch 建立持久资源授权，缺失或内容冲突时失败关闭。真实私网浏览器已覆盖读 200/写 403、关闭码和端口释放；离线队列、双设备、审片与公网反代仍在后续轮次。

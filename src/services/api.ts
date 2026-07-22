@@ -3590,6 +3590,17 @@ export interface UploadedResourceLocalFile {
   url: string;
   size: number;
   mime?: string;
+  assetId?: string | null;
+  storageMode?: string;
+  availability?: string;
+  indexError?: string;
+}
+
+export interface UploadResourceLocalFileContext {
+  projectId?: string;
+  canvasId?: string;
+  sourceNodeId?: string;
+  sourceNodeType?: string;
 }
 
 export interface AddResourcePosePayload {
@@ -3659,9 +3670,13 @@ export function addResourceItem(payload: AddResourcePayload) {
   });
 }
 
-export async function uploadResourceLocalFile(file: File): Promise<UploadedResourceLocalFile> {
+export async function uploadResourceLocalFile(file: File, context: UploadResourceLocalFileContext = {}): Promise<UploadedResourceLocalFile> {
   const fd = new FormData();
   fd.append('file', file);
+  for (const [key, value] of Object.entries(context)) {
+    const normalized = String(value || '').trim();
+    if (normalized) fd.append(key, normalized);
+  }
   const res = await fetch(`${BASE}/files/upload`, {
     method: 'POST',
     body: fd,

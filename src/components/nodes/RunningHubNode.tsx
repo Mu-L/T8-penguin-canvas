@@ -510,6 +510,7 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
       let settled = false;
       const POLL_INT = 5000;
       const MAX = 480;
+      let pollInFlight = false;
       const finish = (ok: boolean, error?: Error) => {
         if (settled) return;
         settled = true;
@@ -524,6 +525,7 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
       };
       pollRejectRef.current = (error?: Error) => finish(false, error || new Error('已取消'));
       pollTimer.current = window.setInterval(async () => {
+        if (pollInFlight) return;
         elapsed += 1;
         if (elapsed > MAX) {
           update({ status: 'error', error: '轮询超时' });
@@ -531,6 +533,7 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
           finish(false, new Error('轮询超时'));
           return;
         }
+        pollInFlight = true;
         try {
           const r = await queryRh(tid, activeRhSiteRef.current);
           applyResolvedRhSite(r.site);
@@ -637,6 +640,8 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
         } catch (e: any) {
           console.warn('RH 轮询出错', e?.message);
           logBus.warn(`轮询出错: ${e?.message || e}`, src);
+        } finally {
+          pollInFlight = false;
         }
       }, POLL_INT);
     });

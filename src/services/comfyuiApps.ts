@@ -28,7 +28,7 @@ export interface RunComfyuiAppResult {
   audioUrls?: string[];
   outputKinds: Array<'image' | 'video' | 'audio' | 'text'>;
   primaryKind: 'image' | 'video' | 'audio' | 'text';
-  outputSaveErrors?: Array<{ kind: string; url: string; error: string }>;
+  outputSaveErrors?: Array<{ kind: string; url: string; code?: string; error: string }>;
   text?: string;
   taskId?: string;
   raw?: any;
