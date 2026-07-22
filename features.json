@@ -1,7 +1,7 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.6.3",
-  "lastUpdated": "2026-07-23-v2.6.3-release-prepared",
+  "lastUpdated": "2026-07-23-v2.6.3-released",
   "storyAutoProduction": {
     "version": "2.6.2",
     "status": "released-postrelease-evidence-pending",
@@ -424,9 +424,11 @@
   },
   "electronReleaseV263": {
     "version": "2.6.3",
-    "status": "release-prepared-postrelease-evidence-pending",
+    "status": "released-postrelease-evidence-pending",
     "date": "2026-07-23",
-    "description": "v2.6.3 Electron 自动更新候选：恢复复制粘贴、Alt 拖动复制和多任务并行运行，修复组/子工作流端口体检，并新增自定义并联循环、GPT Image 2 参数、即梦 CLI 1.4.14 帮助、Grok 登录入口和视频当前帧截图。",
+    "description": "v2.6.3 Electron 自动更新版已正式发布：恢复复制粘贴、Alt 拖动复制和多任务并行运行，修复组/子工作流端口体检，并新增自定义并联循环、GPT Image 2 参数、即梦 CLI 1.4.14 帮助、Grok 登录入口和视频当前帧截图。",
+    "sourceCommit": "4ab7a7cae8343b257e56a0b5a724c5502ac397e6",
+    "tagCommit": "4ab7a7cae8343b257e56a0b5a724c5502ac397e6",
     "capabilities": [
       "节点复制粘贴与 Alt 拖动复制重新覆盖内部焦点、原生修饰键和手势锁存；刚复制的节点优先于系统剪贴板中的旧媒体，组复制继续保持成员关系。",
       "运行启动队列只串行保护准备阶段，随后立即允许其他节点启动；每次执行使用独立 token、不可变 RunContext 和节点快照，停止或迟到完成不会污染新的并行任务。",
@@ -437,12 +439,38 @@
       "开发启动器等待后端健康后再启动前端和浏览器，避免端口清理、连接拒绝或 Windows 批处理字符解析导致启动失败。"
     ],
     "verification": [
-      "复制/交互、运行队列与 token、工作流医生/端口、自定义循环、即梦 CLI、GPT Image 2、Grok、SD2.0 和开发启动器均有聚焦回归。",
-      "视频当前帧节点回归 3/3、视频播放相邻回归 2/2、真实 FFmpeg 当前帧写入测试 1/1、type-check 与生产 build 已通过。",
-      "正式发布前仍需 public、RH toolbox、JSON/语法、diff-check、固定 source commit 和 release 工作树门；Electron/NSIS 只允许执行一次。",
-      "用户明确授权 v2.6.3 在 F8-F10 清单完全不存在时使用精确版本、固定 40 位 target 和 owner-approved-post-release-v2.6.3 一次性延期；延期不产生 passed 检查。"
+      "复制/交互、运行队列与 token、工作流医生/端口、自定义循环、即梦 CLI、GPT Image 2、Grok、SD2.0 和开发启动器聚焦 TypeScript 回归 241/241；发布脚本与启动器 CJS 回归 6/6，Electron 打包/更新/RH/取消相邻回归 59/59。",
+      "视频当前帧节点回归 3/3、视频播放相邻回归 2/2、真实 FFmpeg 当前帧写入测试 1/1、type-check、production build、public、RH toolbox、JSON/语法、diff-check 与 release 工作树门均通过。",
+      "固定 source/tag 4ab7a7cae8343b257e56a0b5a724c5502ac397e6 在构建前已快进推送 origin/main；发布工作树只携带允许的 FFmpeg 与去水印 README 差异，私有扩展、Electron ABI 130、FFmpeg/FFprobe 和两套离线运行时均在 builder 前验证。",
+      "正式 npm run dist:release 只触发一次 electron-builder/NSIS；post-build 完整通过，草稿上传后对 1,281,135,112-byte 安装包完成全量回读，并以密封 provenance、GitHub digest/size、最终 tag 与 Latest 做双阶段校验，recovery 随后清除。",
+      "win-unpacked 使用唯一隔离 userData 冷启动 15 秒保持运行并产生 4 个本次 Electron 进程，同时建立新的项目数据库；验收后终止本次进程树，临时 userData 已清理，核心开发服务未被操作。",
+      "用户明确授权 v2.6.3 在 F8-F10 清单完全不存在时使用精确版本、固定 40 位 target 和 owner-approved-post-release-v2.6.3 一次性延期；延期不产生 passed 检查，严格进度继续为 27/32。"
     ],
-    "releaseBoundary": "当前为 v2.6.3 待发布候选；不得把未执行的真实 F8-F10 外部证据声明为通过。公开提交继续排除 skill.md、roadmap.md、local-private/**、测试 Key、缓存、外部参考项目和本地归档。正式发布后回填固定 source/tag、三项自动更新资产、摘要、Latest 与冷启动结果。"
+    "releaseBoundary": "v2.6.3 已按用户明确授权采用精确一次性先发布后补证据例外正式发布；不声称完成 F8-F10 外部验收。发布器仍拒绝损坏、过期、版本不匹配或哈希不匹配的证据；本版只执行了一次 Electron/NSIS 构建。",
+    "release": {
+      "tag": "v2.6.3",
+      "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.6.3",
+      "publishedAt": "2026-07-22T21:08:17Z",
+      "isDraft": false,
+      "isPrerelease": false,
+      "isLatest": true,
+      "installer": {
+        "name": "T8-PenguinCanvas-Setup-2.6.3.exe",
+        "bytes": 1281135112,
+        "sha256": "0AA54584C470C7A3504C2FE234FDEAE7AE5DF5A6F581D8DE29B3E2EF46B0AA3A",
+        "sha512": "DL2r0YqMZ+Cw7MgJuM2Z3phPZ6X8qRPVHnqT611N3tA6lY4Kc204kW8SyEArUXZNkahzo8stPnuUER/DiVEG3A=="
+      },
+      "blockmap": {
+        "name": "T8-PenguinCanvas-Setup-2.6.3.exe.blockmap",
+        "bytes": 1334691,
+        "sha256": "3EE4008B3AECC2F28F0612B3C98C20F568E6BEDF21FD7E41D0C782902839A8AC"
+      },
+      "metadata": {
+        "name": "latest.yml",
+        "bytes": 362,
+        "sha256": "EADEBA7CBA129E0EB54BBBAAF074AA7C80976D7187E1581576368CC76972DEC7"
+      }
+    }
   },
   "electronReleaseV262": {
     "version": "2.6.2",
@@ -5658,8 +5686,8 @@
     "version": "2.6.3",
     "semverVersion": "2.6.3",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；当前发布候选为 v2.6.3，聚焦画布复制与并行执行回归、自定义并联循环、即梦 CLI 1.4.14、GPT Image 2 参数和视频当前帧截图。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.6.3 Electron 自动更新候选已完成版本与公开范围记录；固定 source/tag、三项自动更新资产、摘要、Latest 与冷启动结果必须在唯一一次正式 dist:release 成功后回填。用户授权的一次性证据延期不改变 F8-F10 未完成状态。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；当前正式发布版为 v2.6.3，聚焦画布复制与并行执行回归、自定义并联循环、即梦 CLI 1.4.14、GPT Image 2 参数和视频当前帧截图。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.6.3 Electron 自动更新版已正式发布并成为 GitHub Latest；固定 source/tag、三项自动更新资产、摘要、全量远端回读与隔离冷启动均已记录。用户授权的一次性证据延期不改变 F8-F10 未完成状态。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
