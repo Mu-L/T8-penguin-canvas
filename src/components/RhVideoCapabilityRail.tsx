@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
-import { Film, Loader2, Sparkles, Zap } from 'lucide-react';
+import { Film, Loader2, Scissors, Sparkles, Zap } from 'lucide-react';
 import { cancelRh } from '../services/generation';
 import { probeVideo, snapshotVideoFrameAsync } from '../services/videoOps';
 import {
@@ -210,7 +210,7 @@ export default function RhVideoCapabilityRail({
     logBus.success(`首尾帧获取: 已输出 ${imageUrls.length} 张图片`, 'rh-video:frames');
   };
 
-  const runRhUpscale = async (
+  const runRhVideoCapabilityAction = async (
     presetId: RhVideoCapabilityPresetId,
     params: Extract<SecondaryProviderActionExecution['action'], { actionId: 'rh-video.capability' }>['params'],
     controller: AbortController,
@@ -349,7 +349,7 @@ export default function RhVideoCapabilityRail({
         }));
         await runFrameExtraction(boundItems, controller, execution);
       } else {
-        await runRhUpscale(action.target, action.params, controller, execution);
+        await runRhVideoCapabilityAction(action.target, action.params, controller, execution);
       }
     } catch (err) {
       const nextError = formatError(err);
@@ -460,7 +460,7 @@ export default function RhVideoCapabilityRail({
         label: preset.label,
         shortLabel: preset.shortLabel || preset.label,
         title: preset.title,
-        Icon: preset.icon === 'sparkles' ? Sparkles : Zap,
+        Icon: preset.icon === 'scissors' ? Scissors : preset.icon === 'sparkles' ? Sparkles : Zap,
       };
     }),
   ], [presets]);
@@ -471,7 +471,7 @@ export default function RhVideoCapabilityRail({
     <div
       className="nodrag nopan rh-video-capability-rail"
       data-rh-video-capability-rail
-      data-rh-video-capability-labels="首尾帧获取,极速超分,质量超分"
+      data-rh-video-capability-labels="首尾帧获取,抠像,极速超分,质量超分"
       data-rh-video-capability-count={actionDefs.length}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}

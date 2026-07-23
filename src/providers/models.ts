@@ -747,13 +747,53 @@ export interface LlmModelDef {
 export const LLM_MODELS: LlmModelDef[] = [
   { id: 'gemini-3.1-flash-lite-preview', label: 'gemini-3.1-flash-lite-preview', provider: 'llm-direct', vision: true, contextLength: 1_000_000 },
   { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', provider: 'llm-direct', vision: true, contextLength: 1_000_000 },
+  { id: 'gemini-3.6-flash', label: 'gemini-3.6-flash', provider: 'llm-direct' },
   { id: 'gpt-4o', label: 'GPT-4o', provider: 'llm-direct', vision: true, contextLength: 128_000 },
   { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', provider: 'llm-direct', vision: true, contextLength: 2_000_000 },
   { id: 'gpt-5', label: 'GPT-5', provider: 'llm-direct', vision: true, contextLength: 200_000 },
+  { id: 'gpt-5.6-luna', label: 'gpt-5.6-luna', provider: 'llm-direct' },
+  { id: 'kimi-k3', label: 'kimi-k3', provider: 'llm-direct' },
   { id: 'gpt-image-2-all', label: 'GPT Image 2 All (图文)', provider: 'llm-direct', vision: true, imageOutput: true, nonStreaming: true, description: '可自动调用图像生成' },
 ];
 
 export const DEFAULT_LLM_MODEL = 'gemini-3.5-flash';
+export const CUSTOM_LLM_MODEL_VALUE = '__custom__';
+
+export interface LlmModelSelectionInput {
+  model?: unknown;
+  customModel?: unknown;
+  useCustomModel?: unknown;
+}
+
+export interface ResolvedLlmModelSelection {
+  model: string;
+  customModelInput: string;
+  isCustom: boolean;
+  presetValue: string;
+}
+
+/**
+ * Resolve the persisted LLM node fields without forcing custom model names
+ * through the preset registry. Unknown legacy model IDs are treated as custom,
+ * so older canvases keep calling the exact model they saved.
+ */
+export function resolveLlmModelSelection(input: LlmModelSelectionInput): ResolvedLlmModelSelection {
+  const storedModel = typeof input.model === 'string' ? input.model.trim() : '';
+  const storedIsPreset = LLM_MODELS.some((item) => item.id === storedModel);
+  const isCustom = input.useCustomModel === true || (!!storedModel && !storedIsPreset);
+  const customModelInput = typeof input.customModel === 'string'
+    ? input.customModel
+    : (isCustom ? storedModel : '');
+  const model = isCustom
+    ? customModelInput.trim()
+    : (storedIsPreset ? storedModel : DEFAULT_LLM_MODEL);
+  return {
+    model,
+    customModelInput,
+    isCustom,
+    presetValue: isCustom ? CUSTOM_LLM_MODEL_VALUE : model,
+  };
+}
 
 /** 是否为出图模型(需走非流式 + 检测 generate_image 指令) */
 export function isImageOutputLlm(modelId: string): boolean {

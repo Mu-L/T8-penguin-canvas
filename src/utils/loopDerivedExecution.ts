@@ -74,6 +74,36 @@ function record(value: unknown): Record<string, any> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
 }
 
+type CloneableCanvasGraphEntity = (Node | Edge) & {
+  entityUid?: unknown;
+  entityRevision?: unknown;
+  legacyAliases?: unknown;
+  sourceEntityUid?: unknown;
+  targetEntityUid?: unknown;
+};
+
+/**
+ * Parallel-loop clones are new runtime canvas entities. They may retain the
+ * source node's executable data and visual fields, but must not retain its
+ * persistent entity identity. Canvas' guarded state setter assigns a fresh UUID
+ * to each identity-free clone when the whole clone batch is inserted.
+ *
+ * Keeping this transformation in the shared graph builder covers both legacy
+ * parallel mode and parallel-custom mode, while keeping the request-bound
+ * display IDs deterministic for preflight/runtime agreement.
+ */
+function cloneLoopGraphEntity<T extends Node | Edge>(source: T, entityType: 'node' | 'edge'): T {
+  const clone = { ...source } as T & CloneableCanvasGraphEntity;
+  delete clone.entityUid;
+  delete clone.entityRevision;
+  delete clone.legacyAliases;
+  if (entityType === 'edge') {
+    delete clone.sourceEntityUid;
+    delete clone.targetEntityUid;
+  }
+  return clone;
+}
+
 const LOOP_MATERIAL_KINDS: readonly LoopMaterialKind[] = ['text', 'image', 'video', 'audio'];
 
 function materialBucketKey(kind: LoopMaterialKind): keyof LoopCustomMaterialBuckets {
@@ -385,10 +415,11 @@ export function buildLoopParallelCloneGraph(input: {
       const customInput = source.id === input.entryEdge.target
         ? input.iterationInputs?.[iteration]
         : undefined;
+      const sourceClone = cloneLoopGraphEntity(source, 'node');
       cloneNodeIds.push(cloneId);
       cloneExecutionSourceById[cloneId] = source.id;
       nodes.push({
-        ...source,
+        ...sourceClone,
         id: cloneId,
         position: { ...source.position },
         data: {
@@ -405,8 +436,9 @@ export function buildLoopParallelCloneGraph(input: {
       });
     }
     input.sourceEdges.forEach((source, edgeIndex) => {
+      const sourceClone = cloneLoopGraphEntity(source, 'edge');
       edges.push({
-        ...source,
+        ...sourceClone,
         id: loopParallelCloneEdgeId(input.loopId, input.requestId, iteration, edgeIndex),
         source: idMap.get(source.source)!,
         target: idMap.get(source.target)!,

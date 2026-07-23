@@ -44,7 +44,7 @@ test('RH image capability service exposes cutout, upscale, and expand wrappers f
   assert.match(presets, /wide-21-9/);
 });
 
-test('RH video material shortcuts ship frame extraction and RH video upscalers', async () => {
+test('RH video material shortcuts ship frame extraction, cutout, and RH video upscalers', async () => {
   const { RH_TOOLBOX_MANIFEST } = await loadRhToolboxManifest();
   const {
     buildRhToolboxNodeInfoList,
@@ -63,6 +63,9 @@ test('RH video material shortcuts ship frame extraction and RH video upscalers',
   const category = manifest.categories.find((item) => item.id === 'video-category-9d33p');
   assert.equal(category?.name, '视频超分');
   assert.equal(category?.parentId, 'video');
+  const cutoutCategory = manifest.categories.find((item) => item.id === 'video-category-9dael');
+  assert.equal(cutoutCategory?.name, '视频抠像');
+  assert.equal(cutoutCategory?.parentId, 'video');
   assert.match(rail, /status: result\.cancelled \? 'stopped' : result\.failedItems\.length > 0 \? 'partial' : 'succeeded'/);
   assert.match(rail, /if \(result\.failedItems\.length > 0\)[\s\S]*throw new Error\(warning\)/);
 
@@ -91,6 +94,32 @@ test('RH video material shortcuts ship frame extraction and RH video upscalers',
   assert.equal(flashVsr?.outputSchema[0]?.kind, 'video');
   assert.equal(flashVsr?.ui?.showInVideoEditor, true);
 
+  const videoCutout = findRhToolboxToolById(manifest, 'video-removebg-v1');
+  assert.equal(videoCutout?.title, '视频抠像');
+  assert.equal(videoCutout?.webappId, '2036113391479169025');
+  assert.deepEqual(videoCutout?.capabilities, ['video.cutout', 'video.edit']);
+  assert.equal(videoCutout?.inputSchema.find((item) => item.key === 'source-video')?.rhNodeId, '51');
+  assert.equal(videoCutout?.inputSchema.find((item) => item.key === 'prompt')?.rhNodeId, '53');
+  assert.equal(videoCutout?.outputSchema[0]?.kind, 'video');
+  assert.equal(videoCutout?.ui?.showInVideoEditor, true);
+  assert.deepEqual(
+    buildRhToolboxNodeInfoList(videoCutout!, {
+      inputValues: { 'source-video': 'rh-uploaded-cutout.mp4' },
+    }),
+    [
+      { nodeId: '53', fieldName: 'prompt', fieldValue: '男人', valueType: 'text' },
+      { nodeId: '51', fieldName: 'video', fieldValue: 'rh-uploaded-cutout.mp4', valueType: 'video' },
+      { nodeId: '51', fieldName: 'skip_first_frames', fieldValue: 0, valueType: 'number' },
+      { nodeId: '51', fieldName: 'frame_load_cap', fieldValue: 0, valueType: 'number' },
+      { nodeId: '56', fieldName: 'value', fieldValue: 960, valueType: 'number' },
+    ],
+  );
+
+  assert.equal(resolveRhToolboxCapability(manifest, {
+    surface: 'video',
+    capability: 'video.cutout',
+    preferredToolId: 'video-removebg-v1',
+  })?.id, 'video-removebg-v1');
   assert.equal(resolveRhToolboxCapability(manifest, {
     surface: 'video',
     capability: 'video.upscale',
@@ -98,16 +127,21 @@ test('RH video material shortcuts ship frame extraction and RH video upscalers',
   })?.id, 'video-nividia-upscale');
   assert.deepEqual(
     new Set(buildRhToolboxQuickActions(manifest, 'video').map((action) => action.toolId)),
-    new Set(['bernini1', 'bernini2', 'video-nividia-upscale', 'video-flashvsr']),
+    new Set(['bernini1', 'bernini2', 'video-removebg-v1', 'video-nividia-upscale', 'video-flashvsr']),
   );
 
   assert.match(presets, /RH_VIDEO_CAPABILITY_PRESETS/);
   assert.match(service, /export async function runRhVideoCapabilityBatch/);
+  assert.match(presets, /preferredToolId:\s*'video-removebg-v1'/);
   assert.match(presets, /preferredToolId:\s*'video-nividia-upscale'/);
   assert.match(presets, /preferredToolId:\s*'video-flashvsr'/);
+  assert.match(service, /export function runRhVideoCutout/);
+  assert.match(service, /RH_VIDEO_CAPABILITY_PRESETS\.cutout\.preferredToolId/);
   assert.match(service, /RH_VIDEO_CAPABILITY_PRESETS\.fastUpscale\.preferredToolId/);
   assert.match(service, /RH_VIDEO_CAPABILITY_PRESETS\.qualityUpscale\.preferredToolId/);
   assert.match(rail, /首尾帧获取/);
+  assert.match(rail, /抠像/);
+  assert.match(rail, /Scissors/);
   assert.match(rail, /极速超分/);
   assert.match(rail, /质量超分/);
   assert.match(rail, /snapshotVideoFrameAsync/);
@@ -116,9 +150,13 @@ test('RH video material shortcuts ship frame extraction and RH video upscalers',
   assert.match(uploadNode, /RhVideoCapabilityRail/);
   assert.match(uploadNode, /uploadType === 'video'/);
   assert.match(uploadNode, /handleVideoProduce\(result\.videoUrls/);
+  assert.match(uploadNode, /rhCapabilityOutput:\s*true/);
+  assert.match(uploadNode, /rhToolboxToolId:\s*_meta\?\.toolId/);
   assert.match(outputNode, /RhVideoCapabilityRail/);
   assert.match(outputNode, /collected\.videos/);
   assert.match(outputNode, /handleVideoProduce\(result\.videoUrls/);
+  assert.match(outputNode, /rhCapabilityOutput:\s*true/);
+  assert.match(outputNode, /rhToolboxToolId:\s*_meta\?\.toolId/);
 });
 
 test('RH toolbox manifest ships maintainer release tools for packaged users', async () => {
@@ -138,8 +176,8 @@ test('RH toolbox manifest ships maintainer release tools for packaged users', as
   const manifest = normalizeRhToolboxManifest(RH_TOOLBOX_MANIFEST);
 
   assert.equal(manifest.schema, 't8-rh-toolbox-manifest');
-  assert.match(String(manifest.updatedAt || ''), /^2026-07-08/);
-  assert.equal(manifest.categories.length, 10);
+  assert.match(String(manifest.updatedAt || ''), /^2026-07-23/);
+  assert.equal(manifest.categories.length, 11);
   const categories = new Map(manifest.categories.map((category) => [category.id, category]));
   assert.deepEqual(
     [
@@ -152,6 +190,7 @@ test('RH toolbox manifest ships maintainer release tools for packaged users', as
       'video-category-6djrs',
       'image-category-e7but',
       'video-category-9d33p',
+      'video-category-9dael',
       'image-category-8h6ed',
     ]
       .map((id) => [id, categories.get(id)?.name, categories.get(id)?.parentId]),
@@ -165,10 +204,11 @@ test('RH toolbox manifest ships maintainer release tools for packaged users', as
       ['video-category-6djrs', '视频去水印', 'video'],
       ['image-category-e7but', '扩图', 'image'],
       ['video-category-9d33p', '视频超分', 'video'],
+      ['video-category-9dael', '视频抠像', 'video'],
       ['image-category-8h6ed', '移除主体', 'image'],
     ],
   );
-  assert.equal(listRhToolboxTools(manifest).length, 13);
+  assert.equal(listRhToolboxTools(manifest).length, 14);
   assert.deepEqual(
     listRhToolboxTools(manifest).map((tool) => tool.id),
     [
@@ -180,6 +220,7 @@ test('RH toolbox manifest ships maintainer release tools for packaged users', as
       'bernini2',
       'jimenfenshen1',
       'kuotu-1',
+      'video-removebg-v1',
       'xiaochuzhuti',
       'xiaoyunqueheng',
       'xiaoyunqueshu',
@@ -195,13 +236,13 @@ test('RH toolbox manifest ships maintainer release tools for packaged users', as
       `${tool.id} should keep at least a 60 minute RH polling budget`,
     );
   }
-  assert.equal(listRhToolboxTools(manifest, { includeDisabled: true }).length, 13);
+  assert.equal(listRhToolboxTools(manifest, { includeDisabled: true }).length, 14);
   assert.equal(isRhToolboxBuiltinCategoryId('image-tools'), true);
   assert.equal(isRhToolboxBuiltinCategoryId('custom-rh-tools'), false);
   assert.equal(getRhToolboxToolMajorCategory(manifest.tools[0], manifest.categories), 'image');
   assert.deepEqual(
     filterRhToolboxTools(manifest, { majorCategoryId: 'video' }).map((tool) => tool.id),
-    ['bernini1', 'bernini2', 'jimenfenshen1', 'xiaoyunqueheng', 'xiaoyunqueshu', 'video-nividia-upscale', 'video-flashvsr'],
+    ['bernini1', 'bernini2', 'jimenfenshen1', 'video-removebg-v1', 'xiaoyunqueheng', 'xiaoyunqueshu', 'video-nividia-upscale', 'video-flashvsr'],
   );
   assert.deepEqual(
     filterRhToolboxTools(manifest, { capability: 'image.cutout' }).map((tool) => tool.id),
@@ -210,6 +251,10 @@ test('RH toolbox manifest ships maintainer release tools for packaged users', as
   assert.deepEqual(
     filterRhToolboxTools(manifest, { capability: 'image.upscale' }).map((tool) => tool.id),
     ['image-upscale-4k'],
+  );
+  assert.deepEqual(
+    filterRhToolboxTools(manifest, { capability: 'video.cutout' }).map((tool) => tool.id),
+    ['video-removebg-v1'],
   );
   assert.deepEqual(
     filterRhToolboxTools(manifest, { capability: 'image.remove-subject' }).map((tool) => tool.id),
@@ -233,7 +278,7 @@ test('RH toolbox manifest ships maintainer release tools for packaged users', as
   );
   assert.deepEqual(
     new Set(buildRhToolboxQuickActions(manifest, 'video').map((action) => action.toolId)),
-    new Set(['bernini1', 'bernini2', 'video-nividia-upscale', 'video-flashvsr']),
+    new Set(['bernini1', 'bernini2', 'video-removebg-v1', 'video-nividia-upscale', 'video-flashvsr']),
   );
 
   const cutout = findRhToolboxToolById(manifest, 'image-cutout-v1');
@@ -419,9 +464,11 @@ test('RH toolbox release manifest check is wired into packaging and post-build v
   assert.match(checker, /bernini1/);
   assert.match(checker, /berninituxiangbianji/);
   assert.match(checker, /bernini2/);
+  assert.match(checker, /video-removebg-v1/);
   assert.match(checker, /video-nividia-upscale/);
   assert.match(checker, /video-flashvsr/);
   assert.match(checker, /video-category-9d33p/);
+  assert.match(checker, /video-category-9dael/);
 
   assert.match(postBuild, /checkRhToolboxReleaseManifest/);
   assert.match(postBuild, /loadRhToolboxReleaseManifestMarkers/);
@@ -873,6 +920,8 @@ test('RH toolbox maker is dev-only and guarded from packaged builds', () => {
 test('RH toolbox maker rebuilds mappings from the current WebApp snapshot', () => {
   const maker = readFileSync(new URL('../src/components/nodes/RHToolboxMakerNode.tsx', import.meta.url), 'utf8');
 
+  assert.match(maker, /renderSelect\('RunningHub 站点',[\s\S]*\['cn', 'intl'\][\s\S]*\}, \{ intl: 'ai' \}\)/);
+  assert.match(maker, /rhToolboxMakerRhSite:\s*value === 'intl' \? 'intl' : 'cn'/);
   assert.match(maker, /getRhToolboxNodeInfoFieldOptions/);
   assert.match(maker, /function fieldOptionsText/);
   assert.match(maker, /optionsText:\s*kind === 'select' \? fieldOptionsText\(field\) : ''/);

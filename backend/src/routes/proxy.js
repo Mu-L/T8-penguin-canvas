@@ -15,6 +15,10 @@ const { tryDecodeDuckPayload } = require('../utils/duckPayload');
 const { normalizeLlmMessageMedia } = require('../providers/llmMedia');
 const seedanceNz = require('../providers/seedanceNz');
 const {
+  isT8LocalMediaPath,
+  normalizeT8LocalMediaRef,
+} = require('../providers/mediaResolver');
+const {
   normalizeRhSite,
   buildRhSiteCandidates,
   shouldRetryRhSiteResponse,
@@ -3995,7 +3999,9 @@ router.post('/llm', async (req, res) => {
 // 对齐 gpt-image-2-web 的 uploadFileToAPI: Seedance 的图像、视频、音频都不能直接传 /files/* 本地 URL。
 async function uploadRefToZhenzhen(ref, apiKey, label = '参考素材') {
   if (typeof ref !== 'string' || !ref) throw new Error(`${label} 上传失败: 引用为空`);
-  const trimmed = ref.trim();
+  const trimmed = normalizeT8LocalMediaRef(ref, {
+    allowedPorts: [config.PORT, 11422],
+  });
   if (/^asset-[a-z0-9_-]+$/i.test(trimmed)) return trimmed;
   let buf, mime, ext;
   if (trimmed.startsWith('data:')) {
@@ -4008,13 +4014,7 @@ async function uploadRefToZhenzhen(ref, apiKey, label = '参考素材') {
       maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
     });
     ext = extFromContentType(mime) || (mime.split('/')[1] || 'png').replace('jpeg', 'jpg');
-  } else if (
-    trimmed.startsWith('http://') ||
-    trimmed.startsWith('https://') ||
-    trimmed.startsWith('/files/') ||
-    trimmed.startsWith('/api/resources/file/') ||
-    trimmed.startsWith('/api/resources/set-file/')
-  ) {
+  } else if (isT8LocalMediaPath(trimmed) || trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
     let sourceName = trimmed;
     if (trimmed.startsWith('/api/resources/')) {
       const resource = readResourceImageRefBuffer(trimmed);

@@ -77,7 +77,13 @@ import type { RunNodeLifecycleReporter } from '../../types/project';
 
 type UploadProduceMeta =
   | ImageEditProduceMeta
-  | { type: 'rh-capability' | 'video-frame-extract' | 'rh-video-capability'; label?: string };
+  | {
+      type: 'rh-capability' | 'video-frame-extract' | 'rh-video-capability';
+      label?: string;
+      capability?: string;
+      toolId?: string;
+      taskIds?: string[];
+    };
 
 /**
  * UploadNode - 通用上传素材节点
@@ -118,7 +124,7 @@ const KIND_META: Record<
   },
   video: {
     label: '视频',
-    accept: 'video/*',
+    accept: 'video/*,.mov,video/quicktime',
     icon: FileVideo,
     color: PORT_COLOR.video,
     dataField: 'videoUrl',
@@ -143,11 +149,13 @@ const KIND_META: Record<
 };
 
 const MODEL_3D_EXT_RE = /\.(glb|gltf|obj|fbx|stl|usdz|zip)$/i;
+const VIDEO_EXT_RE = /\.(mp4|webm|mov|m4v|mkv|avi)$/i;
 
 /** 通过文件 MIME 推断上传类型(支持拖拽时自动选定类型) */
 function inferKindFromFile(file: File): UploadKind | null {
   const name = file.name || '';
   if (MODEL_3D_EXT_RE.test(name)) return 'model3d';
+  if (VIDEO_EXT_RE.test(name)) return 'video';
   const m = file.type;
   if (!m) return null;
   if (m.startsWith('model/')) return 'model3d';
@@ -737,11 +745,22 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
           x: baseX + (i % COLS) * COL_W + _off.dx,
           y: baseY + Math.floor(i / COLS) * ROW_H + _off.dy,
         },
-        data: createOutputDataFromItems('video', [{
-          kind: 'video',
-          url: u,
-          name: fileNameFromUrl(u),
-        }]),
+        data: {
+          ...createOutputDataFromItems('video', [{
+            kind: 'video',
+            url: u,
+            name: fileNameFromUrl(u),
+          }]),
+          ...(isRhCapabilityOutput
+            ? {
+                rhCapabilityOutput: true,
+                rhCapability: _meta?.capability || '',
+                rhToolboxToolId: _meta?.toolId || '',
+                rhTaskIds: Array.isArray(_meta?.taskIds) ? _meta.taskIds : [],
+                rhSourceNodeId: id,
+              }
+            : {}),
+        },
         selected: isRhCapabilityOutput,
       } as Node;
     });
@@ -984,7 +1003,13 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
         isPixel={isPixel}
         style={{ display: showRhVideoCapabilityRail ? 'flex' : 'none' }}
         onFramesComplete={(imageUrls) => handleProduce(imageUrls, { type: 'video-frame-extract', label: '首尾帧获取' })}
-        onVideosComplete={(result) => handleVideoProduce(result.videoUrls, { type: 'rh-video-capability', label: result.tool.title })}
+        onVideosComplete={(result) => handleVideoProduce(result.videoUrls, {
+          type: 'rh-video-capability',
+          label: result.tool.title,
+          capability: result.tool.capabilities.find((item) => item.startsWith('video.')),
+          toolId: result.tool.id,
+          taskIds: result.taskIds,
+        })}
         onError={setError}
         onRunningChange={setRhVideoCapabilityBusy}
       />
@@ -1042,7 +1067,7 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
         <input
           ref={fileInputRef}
           type="file"
-          accept={meta ? meta.accept : `image/*,video/*,${AUDIO_UPLOAD_ACCEPT},.glb,.gltf,.obj,.fbx,.stl,.usdz,.zip`}
+          accept={meta ? meta.accept : `image/*,${KIND_META.video.accept},${AUDIO_UPLOAD_ACCEPT},.glb,.gltf,.obj,.fbx,.stl,.usdz,.zip`}
           multiple
           className="hidden"
           onChange={handleFileChange}

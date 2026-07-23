@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type VideoHTMLAttributes } from 'react';
-import { mergeLoopingVideoProps } from '../utils/videoPlayback';
+import { compatibleVideoPreviewUrl, mergeLoopingVideoProps } from '../utils/videoPlayback';
 
 type LoopingVideoProps = VideoHTMLAttributes<HTMLVideoElement> & {
   src?: string;
@@ -8,6 +8,7 @@ type LoopingVideoProps = VideoHTMLAttributes<HTMLVideoElement> & {
 export default function LoopingVideo({ src, preload, ...props }: LoopingVideoProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const eager = preload === 'auto';
+  const playbackSrc = src ? compatibleVideoPreviewUrl(src) : src;
   const [shouldLoad, setShouldLoad] = useState(() => eager || !src);
 
   useEffect(() => {
@@ -36,5 +37,13 @@ export default function LoopingVideo({ src, preload, ...props }: LoopingVideoPro
 
   const videoProps = preload === undefined ? props : { ...props, preload };
   const merged = mergeLoopingVideoProps(videoProps as Record<string, unknown>) as LoopingVideoProps;
-  return <video {...merged} ref={videoRef} src={shouldLoad ? src : undefined} data-full-src={src} />;
+  return (
+    <video
+      {...merged}
+      ref={videoRef}
+      src={shouldLoad ? playbackSrc : undefined}
+      data-full-src={src}
+      data-playback-src={playbackSrc}
+    />
+  );
 }

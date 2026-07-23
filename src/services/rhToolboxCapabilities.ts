@@ -143,7 +143,10 @@ function imageOutputsFromResult(result: RunRhToolboxToolResult): string[] {
 
 function videoOutputsFromResult(result: RunRhToolboxToolResult): string[] {
   if (result.videoUrls.length > 0) return result.videoUrls;
-  return result.tool.outputSchema.some((output) => output.kind === 'video') ? result.urls : [];
+  // 进入本服务的均是“输出视频”的能力。制作器旧持久清单曾把视频抠像
+  // 错标为 image output；无扩展名签名 URL 也无法只靠后缀分类。
+  // 因此在已确认的视频能力上下文中，保留全部 RH 结果作为视频兜底。
+  return result.urls;
 }
 
 function cleanImageUrls(imageUrls: string[]): string[] {
@@ -551,6 +554,18 @@ export function runRhVideoFastUpscale(
     capability: RH_VIDEO_CAPABILITY_PRESETS.fastUpscale.capability,
     videoUrl,
     preferredToolId: RH_VIDEO_CAPABILITY_PRESETS.fastUpscale.preferredToolId,
+  });
+}
+
+export function runRhVideoCutout(
+  videoUrl: string,
+  options: Omit<RunRhVideoCapabilityOptions, 'capability' | 'videoUrl' | 'preferredToolId'> = {},
+): Promise<RunRhVideoCapabilityResult> {
+  return runRhVideoCapability({
+    ...options,
+    capability: RH_VIDEO_CAPABILITY_PRESETS.cutout.capability,
+    videoUrl,
+    preferredToolId: RH_VIDEO_CAPABILITY_PRESETS.cutout.preferredToolId,
   });
 }
 

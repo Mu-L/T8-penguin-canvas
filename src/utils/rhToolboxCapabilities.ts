@@ -35,7 +35,7 @@ export interface RhVideoCapabilityPreset {
   capability: string;
   title: string;
   preferredToolId?: string;
-  icon?: 'zap' | 'sparkles';
+  icon?: 'zap' | 'sparkles' | 'scissors';
 }
 
 export interface RhImageCapabilityParamPreset {
@@ -134,6 +134,15 @@ export type RhImageCapabilityPresetId = keyof typeof RH_IMAGE_CAPABILITY_PRESETS
 export const RH_IMAGE_NODE_CAPABILITY_PRESETS: RhImageCapabilityPresetId[] = ['cutout', 'upscale', 'expand', 'removeSubject'];
 
 export const RH_VIDEO_CAPABILITY_PRESETS = {
+  cutout: {
+    id: 'cutout',
+    label: '抠像',
+    shortLabel: '抠像',
+    title: '调用 RH工具箱 视频抠像，并把透明背景视频输出为新素材节点',
+    capability: 'video.cutout',
+    preferredToolId: 'video-removebg-v1',
+    icon: 'scissors',
+  },
   fastUpscale: {
     id: 'fastUpscale',
     label: '极速超分',
@@ -156,11 +165,12 @@ export const RH_VIDEO_CAPABILITY_PRESETS = {
 
 export type RhVideoCapabilityPresetId = keyof typeof RH_VIDEO_CAPABILITY_PRESETS;
 
-export const RH_VIDEO_NODE_CAPABILITY_PRESETS: RhVideoCapabilityPresetId[] = ['fastUpscale', 'qualityUpscale'];
+export const RH_VIDEO_NODE_CAPABILITY_PRESETS: RhVideoCapabilityPresetId[] = ['cutout', 'fastUpscale', 'qualityUpscale'];
 
 const CAPABILITY_TITLE_MATCHERS: Record<string, RegExp> = {
   'image.expand': /扩图|扩画|外扩|补景|outpaint|uncrop|expand/i,
   'image.remove-subject': /消除主体|移除主体|去主体|主体消除|主体移除|remove\s*subject|subject\s*remov/i,
+  'video.cutout': /视频抠像|视频去背|视频背景移除|video\s*(?:cutout|remove\s*bg|background\s*remov)/i,
   'video.upscale': /超分|放大|高清|upscale|super.?resolution|vsr/i,
 };
 

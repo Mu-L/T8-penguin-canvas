@@ -11,6 +11,7 @@ import {
   loopParallelCloneNodeId,
   normalizeLoopCustomMaterialConfig,
 } from '../src/utils/loopDerivedExecution.ts';
+import { ensureCanvasEntityUids, isCanonicalEntityUid } from '../src/utils/canvasEntityIdentity.ts';
 
 function node(id: string, type: string, data: Record<string, unknown> = {}): Node {
   return { id, type, position: { x: 0, y: 0 }, data };
@@ -120,6 +121,87 @@ test('parallel clone graph uses request-bound stable IDs and preserves the entry
   assert.equal(first.nodes[0].data.__loopCloneRequestId, requestId);
   assert.equal(first.nodes[0].data.__loopCloneSourceNodeId, 'entry');
   assert.equal(Object.hasOwn(first.nodes[0].data, '__loopCustomInput'), false);
+});
+
+test('parallel and custom-parallel clones enter canvas state with fresh node and edge identities', () => {
+  const nodeUids = [
+    '11111111-1111-4111-8111-111111111111',
+    '22222222-2222-4222-8222-222222222222',
+  ];
+  const edgeUid = '33333333-3333-4333-8333-333333333333';
+  const sourceNodes = [
+    {
+      ...node('entry', 'image'),
+      entityUid: nodeUids[0],
+      entityRevision: 7,
+      legacyAliases: ['entry-old'],
+    },
+    {
+      ...node('sink', 'output'),
+      entityUid: nodeUids[1],
+      entityRevision: 8,
+      legacyAliases: ['sink-old'],
+    },
+  ] as Node[];
+  const sourceEdges = [{
+    ...edge('entry-sink', 'entry', 'sink'),
+    entityUid: edgeUid,
+    entityRevision: 9,
+    legacyAliases: ['edge-old'],
+    sourceEntityUid: nodeUids[0],
+    targetEntityUid: nodeUids[1],
+  }] as Edge[];
+  const items = ['one', 'two', 'three'].map((url, index) => ({
+    id: `prompt-${index}`,
+    kind: 'text' as const,
+    url,
+    sourceNodeId: 'prompts',
+  }));
+  const customInputs = items.map((item) => ({
+    texts: [{ ...item }],
+    images: [],
+    videos: [],
+    audios: [],
+  }));
+
+  for (const [mode, iterationInputs] of [
+    ['parallel', undefined],
+    ['parallel-custom', customInputs],
+  ] as const) {
+    const graph = buildLoopParallelCloneGraph({
+      loopId: 'loop',
+      requestId: `run:${mode}:12345678`,
+      sourceNodes,
+      sourceEdges,
+      entryEdge: edge('loop-entry', 'loop', 'entry'),
+      items,
+      ...(iterationInputs ? { iterationInputs } : {}),
+    });
+
+    for (const cloned of [...graph.nodes, ...graph.edges] as Array<Record<string, unknown>>) {
+      assert.equal(Object.hasOwn(cloned, 'entityUid'), false);
+      assert.equal(Object.hasOwn(cloned, 'entityRevision'), false);
+      assert.equal(Object.hasOwn(cloned, 'legacyAliases'), false);
+    }
+    for (const cloned of graph.edges as Array<Edge & Record<string, unknown>>) {
+      assert.equal(Object.hasOwn(cloned, 'sourceEntityUid'), false);
+      assert.equal(Object.hasOwn(cloned, 'targetEntityUid'), false);
+    }
+
+    // This is the exact identity guard used by Canvas setNodes/setEdges when
+    // LoopNode inserts the clone batch.
+    const identifiedNodes = ensureCanvasEntityUids([...sourceNodes, ...graph.nodes], 'node');
+    const identifiedEdges = ensureCanvasEntityUids([...sourceEdges, ...graph.edges], 'edge');
+    const nodeIdentities = identifiedNodes.map((item) => String((item as any).entityUid));
+    const edgeIdentities = identifiedEdges.map((item) => String((item as any).entityUid));
+
+    assert.equal(new Set(nodeIdentities).size, identifiedNodes.length);
+    assert.equal(new Set(edgeIdentities).size, identifiedEdges.length);
+    assert.ok(nodeIdentities.every(isCanonicalEntityUid));
+    assert.ok(edgeIdentities.every(isCanonicalEntityUid));
+    assert.ok(nodeIdentities.slice(sourceNodes.length).every((uid) => !nodeUids.includes(uid)));
+    assert.ok(edgeIdentities.slice(sourceEdges.length).every((uid) => uid !== edgeUid));
+  }
 });
 
 test('custom parallel loop pairs prompts one-by-one while reusing one selected image', () => {

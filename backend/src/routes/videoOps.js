@@ -10,9 +10,10 @@ const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const { spawn, spawnSync } = require('child_process');
+const { spawn } = require('child_process');
 const config = require('../config');
 const { resolveBundledFfmpeg, resolveBundledFfprobe } = require('../providers/llmMedia');
+const { withFfmpegProcessSlot } = require('../utils/ffmpegProcessQueue');
 const {
   getProjectDatabase,
   translateProjectDatabaseStorageCapacityError,
@@ -62,6 +63,8 @@ const VIDEO_TRANSITIONS_BY_ID = new Map(VIDEO_TRANSITIONS.map((item) => [item.id
 const NO_TRANSITION_DEFINITION = { id: 'none', label: '无转场', category: 'basic', quality: 'cut' };
 const AUDIO_VOLUME_CURVES = new Set(['flat', 'linear-up', 'linear-down', 'duck']);
 let nativeXfadeSupportCache = null;
+let compatibilityFfmpegResolved = false;
+let compatibilityFfmpegPath = '';
 
 const TERMINAL_JOB_STATUSES = new Set(['done', 'failed', 'cancelled']);
 const VIDEO_OPERATION_EXECUTION_SCHEMA = 't8-video-operation-execution-v1';
@@ -984,12 +987,17 @@ function getTransitionDefinition(value) {
   throw new Error(`未知视频转场：${id}`);
 }
 
-function hasNativeXfadeSupport() {
+async function hasNativeXfadeSupport() {
   if (nativeXfadeSupportCache !== null) return nativeXfadeSupportCache;
   try {
-    const result = spawnSync(resolveBundledFfmpeg(), ['-hide_banner', '-h', 'filter=xfade'], { encoding: 'utf8' });
+    const result = await runFfmpegAttempt(
+      resolveVideoOpsFfmpeg(),
+      ['-hide_banner', '-h', 'filter=xfade'],
+      null,
+      15_000,
+    );
     const output = `${result.stdout || ''}\n${result.stderr || ''}`;
-    nativeXfadeSupportCache = result.status === 0 && /transition/.test(output) && /wipeleft/.test(output) && /circleopen/.test(output);
+    nativeXfadeSupportCache = result.code === 0 && /transition/.test(output) && /wipeleft/.test(output) && /circleopen/.test(output);
   } catch (_) {
     nativeXfadeSupportCache = false;
   }
@@ -1087,10 +1095,155 @@ async function resolveVideoSource(url, targetDir) {
   throw new Error('不支持的视频地址');
 }
 
-function runFfmpeg(args, job, options = {}) {
-  const ffmpeg = resolveBundledFfmpeg();
-  const timeoutMs = options.timeoutMs || FFMPEG_TIMEOUT_MS;
-  return new Promise((resolve, reject) => {
+function ffmpegExitCodeHex(code) {
+  const numeric = Number(code);
+  if (!Number.isInteger(numeric)) return '';
+  return `0x${(numeric >>> 0).toString(16).padStart(8, '0').toUpperCase()}`;
+}
+
+function isFfmpegAccessViolationExit(code) {
+  return ffmpegExitCodeHex(code) === '0xC0000005';
+}
+
+function isFfmpegNativeCrashExit(code) {
+  const normalized = Number(code) >>> 0;
+  return normalized === 0x80000003
+    || normalized === 0xC0000005
+    || normalized === 0xC000001D
+    || (normalized >= 0xC000008D && normalized <= 0xC0000093)
+    || normalized === 0xC00000FD
+    || normalized === 0xC0000409;
+}
+
+function withFfmpegSingleThreadRetry(args) {
+  if (!Array.isArray(args) || args.length === 0 || args.includes('-threads')) return null;
+  const output = args[args.length - 1];
+  const rewritten = [];
+  for (let i = 0; i < args.length - 1; i += 1) {
+    const value = args[i];
+    if (value === '-i') {
+      rewritten.push('-threads', '1', value);
+      continue;
+    }
+    rewritten.push(value);
+  }
+  rewritten.push(
+    '-filter_threads', '1',
+    '-filter_complex_threads', '1',
+    '-threads', '1',
+    output,
+  );
+  return rewritten;
+}
+
+function withFfmpegOpenH264Retry(args) {
+  return withFfmpegH264EncoderRetry(args, 'libopenh264');
+}
+
+function withFfmpegH264EncoderRetry(args, encoder) {
+  if (!Array.isArray(args) || args.length === 0 || !args.includes('libx264')) return null;
+  const output = args[args.length - 1];
+  const rewritten = [];
+  for (let i = 0; i < args.length - 1; i += 1) {
+    const value = args[i];
+    const next = args[i + 1];
+    if (value === '-c:v' && next === 'libx264') {
+      rewritten.push('-c:v', encoder);
+      i += 1;
+      continue;
+    }
+    if ((value === '-preset' || value === '-crf') && next !== undefined) {
+      i += 1;
+      continue;
+    }
+    rewritten.push(value);
+  }
+  if (!rewritten.includes('-b:v')) {
+    rewritten.push('-b:v', '8M');
+    if (encoder === 'libopenh264') {
+      rewritten.push('-maxrate', '12M', '-bufsize', '16M');
+    }
+  }
+  rewritten.push(output);
+  return rewritten;
+}
+
+function preferredCompatibleH264Args(args) {
+  return withFfmpegOpenH264Retry(args);
+}
+
+function resolveVideoOpsCompatibilityFfmpeg(primaryPath = resolveBundledFfmpeg()) {
+  if (!compatibilityFfmpegResolved) {
+    compatibilityFfmpegResolved = true;
+    const binary = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+    const resRoot = String(process.env.T8PC_RES || '').trim();
+    const candidates = [
+      String(process.env.T8_FFMPEG_COMPAT_BIN || '').trim(),
+      resRoot && path.join(resRoot, 'tools', 'ffmpeg-compat', binary),
+      path.resolve(__dirname, '..', '..', '..', 'tools', 'ffmpeg-compat', binary),
+    ];
+    try {
+      candidates.push(require('ffmpeg-static'));
+    } catch (_) {
+      // Packaged builds resolve the extraResources path above.
+    }
+    try {
+      // Legacy development fallback for workspaces installed before ffmpeg-static.
+      candidates.push(require('@ffmpeg-installer/ffmpeg').path);
+    } catch (_) {
+      // Optional compatibility runtime; the primary bundled runtime remains authoritative.
+    }
+    compatibilityFfmpegPath = candidates.find((candidate) => {
+      try {
+        return candidate
+          && path.resolve(candidate) !== path.resolve(primaryPath)
+          && fs.existsSync(candidate)
+          && fs.statSync(candidate).isFile();
+      } catch (_) {
+        return false;
+      }
+    }) || '';
+  }
+  return compatibilityFfmpegPath;
+}
+
+function resolveVideoOpsFfmpeg() {
+  return resolveBundledFfmpeg();
+}
+
+function ffmpegFailureMessage(stderr, code, options = {}) {
+  const exitCode = ffmpegExitCodeHex(code);
+  if (isFfmpegAccessViolationExit(code)) {
+    return options.compatibilityRetryFailed
+      ? `FFmpeg 在兼容模式下仍发生 Windows 内存访问冲突（退出码 ${exitCode}）。请更换稳定版 FFmpeg 运行时后重试。`
+      : `FFmpeg 发生 Windows 内存访问冲突（退出码 ${exitCode}）。`;
+  }
+  if (isFfmpegNativeCrashExit(code)) {
+    return options.compatibilityRetryFailed
+      ? `FFmpeg 在安全线程兼容模式下仍发生 Windows 原生异常（退出码 ${exitCode}）。请更新或更换稳定版 FFmpeg 运行时后重试。`
+      : `FFmpeg 发生 Windows 原生异常（退出码 ${exitCode}）。`;
+  }
+  const lines = String(stderr || '')
+    .replace(/\u001b\[[0-9;]*m/g, '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const diagnostic = lines.filter((line) => (
+    /\b(error|failed|failure|fatal|invalid|unable|unknown|unsupported|not found|no such|cannot|could not|refused|denied|corrupt|conversion failed)\b/i.test(line)
+    || /错误|失败|无效|不支持|不存在|拒绝|损坏/.test(line)
+  ));
+  if (diagnostic.length > 0) return diagnostic.slice(-4).join('\n').slice(0, 1800);
+  const usefulTail = lines.filter((line) => (
+    !/^metadata:?$/i.test(line)
+    && !/^(encoder|handler_name|vendor_id|major_brand|minor_version|compatible_brands)\s*:/i.test(line)
+    && !/^side data:?$/i.test(line)
+  ));
+  const tail = usefulTail.slice(-4).join('\n').slice(0, 1600);
+  return tail || `FFmpeg 处理失败${exitCode ? `（退出码 ${exitCode}）` : ''}`;
+}
+
+async function runFfmpegAttempt(ffmpeg, args, job, timeoutMs) {
+  return withFfmpegProcessSlot(() => new Promise((resolve, reject) => {
     if (job?.cancelled) {
       reject(new Error('任务已取消'));
       return;
@@ -1119,7 +1272,7 @@ function runFfmpeg(args, job, options = {}) {
       if (job) job.child = null;
       reject(error);
     });
-    child.once('close', (code) => {
+    child.once('close', (code, signal) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -1128,21 +1281,156 @@ function runFfmpeg(args, job, options = {}) {
         reject(new Error('任务已取消'));
         return;
       }
-      if (options.allowFailure || code === 0) {
-        resolve({ code, stdout, stderr });
-      } else {
-        const lastLine = stderr.trim().split(/\r?\n/).slice(-3).join('\n');
-        reject(new Error(lastLine || `ffmpeg 失败: ${code}`));
-      }
+      resolve({ code, signal, stdout, stderr });
     });
+  }), {
+    isCancelled: () => Boolean(job?.cancelled),
   });
 }
 
-function runFfmpegBuffer(args, job, options = {}) {
-  const ffmpeg = resolveBundledFfmpeg();
+function runFfmpeg(args, job, options = {}) {
+  const primaryFfmpeg = resolveBundledFfmpeg();
+  const compatibilityFfmpeg = resolveVideoOpsCompatibilityFfmpeg(primaryFfmpeg);
+  const usesLibx264 = Array.isArray(args) && args.includes('libx264');
+  // The feature-rich nightly runtime remains available for probing/decoding,
+  // but its Windows libx264 build can either access-violate or emit visually
+  // corrupted frames while still exiting 0. Route every H.264 encode through
+  // the separately packaged stable runtime so success is deterministic.
+  const preferCompatibilityRuntime = usesLibx264
+    && compatibilityFfmpeg
+    && path.resolve(compatibilityFfmpeg) !== path.resolve(primaryFfmpeg);
+  const ffmpeg = preferCompatibilityRuntime ? compatibilityFfmpeg : resolveVideoOpsFfmpeg();
+  const timeoutMs = options.timeoutMs || FFMPEG_TIMEOUT_MS;
+  const compatibleH264Args = process.platform === 'win32' ? null : preferredCompatibleH264Args(args);
+  const preferredArgs = args;
+  return runFfmpegAttempt(ffmpeg, preferredArgs, job, timeoutMs).then(async (result) => {
+    if (options.allowFailure || result.code === 0) {
+      return preferCompatibilityRuntime
+        ? { ...result, compatibilityMode: 'stable-runtime-preferred' }
+        : result;
+    }
+    let lastArgs = preferredArgs;
+    let lastFfmpeg = ffmpeg;
+    if (!preferCompatibilityRuntime
+      && usesLibx264
+      && isFfmpegNativeCrashExit(result.code)
+      && compatibilityFfmpeg
+      && path.resolve(compatibilityFfmpeg) !== path.resolve(ffmpeg)
+      && !job?.cancelled) {
+      if (job) {
+        job.message = '当前 FFmpeg H.264 编码器异常，正在切换稳定兼容运行时';
+        persistVideoOperationProgress(job);
+      }
+      console.warn(
+        `[videoOps] ffmpeg libx264 crashed ${ffmpegExitCodeHex(result.code)}; `
+        + 'retrying with the stable compatibility runtime',
+      );
+      const retried = await runFfmpegAttempt(compatibilityFfmpeg, args, job, timeoutMs);
+      if (retried.code === 0) return { ...retried, compatibilityMode: 'stable-runtime-retry' };
+      result = retried;
+      lastFfmpeg = compatibilityFfmpeg;
+    } else if (compatibleH264Args && isFfmpegNativeCrashExit(result.code) && !job?.cancelled) {
+      if (job) {
+        job.message = 'H.264 编码器异常，正在切换内置兼容编码器';
+        persistVideoOperationProgress(job);
+      }
+      console.warn(`[videoOps] ffmpeg libx264 crashed ${ffmpegExitCodeHex(result.code)}; retrying with libopenh264`);
+      const retried = await runFfmpegAttempt(ffmpeg, compatibleH264Args, job, timeoutMs);
+      if (retried.code === 0) return { ...retried, compatibilityMode: 'compatible-h264-retry' };
+      result = retried;
+      lastArgs = compatibleH264Args;
+    }
+    const retryArgs = isFfmpegNativeCrashExit(result.code)
+      ? withFfmpegSingleThreadRetry(lastArgs)
+      : null;
+    if (retryArgs && !job?.cancelled) {
+      if (job) {
+        job.message = 'FFmpeg 异常退出，正在限制解码、滤镜和编码线程后重试';
+        persistVideoOperationProgress(job);
+      }
+      console.warn(`[videoOps] ffmpeg native crash ${ffmpegExitCodeHex(result.code)}; retrying with safe thread limits`);
+      const retried = await runFfmpegAttempt(lastFfmpeg, retryArgs, job, timeoutMs);
+      if (retried.code === 0) return { ...retried, compatibilityMode: 'safe-thread-retry' };
+      if (lastFfmpeg === ffmpeg
+        && compatibilityFfmpeg
+        && path.resolve(compatibilityFfmpeg) !== path.resolve(ffmpeg)) {
+        if (job) {
+          job.message = '当前 FFmpeg 运行时不稳定，正在切换稳定兼容运行时';
+          persistVideoOperationProgress(job);
+        }
+        console.warn('[videoOps] one-thread retry also crashed; switching to the stable compatibility runtime');
+        const fallback = await runFfmpegAttempt(compatibilityFfmpeg, args, job, timeoutMs);
+        if (fallback.code === 0) {
+          return { ...fallback, compatibilityMode: 'explicit-runtime-fallback' };
+        }
+        throw new Error(ffmpegFailureMessage(fallback.stderr, fallback.code, { compatibilityRetryFailed: true }));
+      }
+      throw new Error(ffmpegFailureMessage(retried.stderr, retried.code, { compatibilityRetryFailed: true }));
+    }
+    throw new Error(ffmpegFailureMessage(result.stderr, result.code));
+  });
+}
+
+async function validateEncodedVideoOutput(output, job) {
+  const sink = process.platform === 'win32' ? 'NUL' : '/dev/null';
+  if (job) {
+    job.message = '校验成片完整性';
+    job.progress = Math.max(job.progress || 0, 94);
+    persistVideoOperationProgress(job);
+  }
+  const primaryFfmpeg = resolveVideoOpsFfmpeg();
+  const compatibilityFfmpeg = resolveVideoOpsCompatibilityFfmpeg(primaryFfmpeg);
+  const validationCandidates = Array.from(new Set([
+    compatibilityFfmpeg,
+    primaryFfmpeg,
+  ].filter(Boolean).map((candidate) => path.resolve(candidate))));
+  const validationArgs = [
+    '-v', 'error',
+    '-xerror',
+    '-filter_threads', '1',
+    '-filter_complex_threads', '1',
+    '-threads', '1',
+    '-i', output,
+    '-map', '0:v:0',
+    '-threads', '1',
+    '-f', 'null',
+    sink,
+  ];
+  let lastFailure = null;
+  for (let index = 0; index < validationCandidates.length; index += 1) {
+    const validationFfmpeg = validationCandidates[index];
+    const result = await runFfmpegAttempt(
+      validationFfmpeg,
+      validationArgs,
+      job,
+      FFMPEG_TIMEOUT_MS,
+    );
+    if (result.code === 0) return result;
+    lastFailure = result;
+    if (isFfmpegNativeCrashExit(result.code) && index + 1 < validationCandidates.length) {
+      if (job) {
+        job.message = '成片校验运行时异常，正在切换独立 FFmpeg 复核';
+        persistVideoOperationProgress(job);
+      }
+      console.warn(
+        `[videoOps] video validation runtime crashed ${ffmpegExitCodeHex(result.code)}; `
+        + 'retrying with an independent packaged runtime',
+      );
+      continue;
+    }
+    break;
+  }
+  const detail = ffmpegFailureMessage(lastFailure?.stderr, lastFailure?.code, {
+    compatibilityRetryFailed: validationCandidates.length > 1,
+  });
+  throw new Error(`成片完整性校验失败，已停止保存损坏视频：${detail}`);
+}
+
+async function runFfmpegBuffer(args, job, options = {}) {
+  const ffmpeg = resolveVideoOpsFfmpeg();
   const timeoutMs = options.timeoutMs || 90_000;
   const maxStdoutBytes = options.maxStdoutBytes || 16 * 1024 * 1024;
-  return new Promise((resolve, reject) => {
+  return withFfmpegProcessSlot(() => new Promise((resolve, reject) => {
     if (job?.cancelled) {
       reject(new Error('任务已取消'));
       return;
@@ -1200,10 +1488,12 @@ function runFfmpegBuffer(args, job, options = {}) {
         reject(new Error(lastLine || `ffmpeg 失败: ${code}`));
       }
     });
+  }), {
+    isCancelled: () => Boolean(job?.cancelled),
   });
 }
 
-function runFfprobeJson(file, job, options = {}) {
+async function runFfprobeJson(file, job, options = {}) {
   const ffprobe = resolveBundledFfprobe();
   const timeoutMs = options.timeoutMs || 45_000;
   const args = [
@@ -1213,7 +1503,7 @@ function runFfprobeJson(file, job, options = {}) {
     '-of', 'json',
     file,
   ];
-  return new Promise((resolve, reject) => {
+  return withFfmpegProcessSlot(() => new Promise((resolve, reject) => {
     if (job?.cancelled) {
       reject(new Error('任务已取消'));
       return;
@@ -1264,6 +1554,8 @@ function runFfprobeJson(file, job, options = {}) {
         reject(new Error(`ffprobe JSON 解析失败: ${error?.message || error}`));
       }
     });
+  }), {
+    isCancelled: () => Boolean(job?.cancelled),
   });
 }
 
@@ -1457,7 +1749,7 @@ async function makeSegment({ source, clip, index, probe, settings, width, height
   const duration = Math.max(0.1, (end || start + 1) - start);
   const keepAudio = !forceMuteAudio && shouldKeepAudio(settings, clip, index, probe);
   const output = path.join(targetDir, `segment_${String(index).padStart(3, '0')}.mp4`);
-  const args = ['-y'];
+  const args = ['-y', '-fflags', '+discardcorrupt', '-err_detect', 'ignore_err'];
   if (start > 0) args.push('-ss', start.toFixed(3));
   args.push('-i', source);
   if (!keepAudio) {
@@ -1485,21 +1777,40 @@ async function makeSegment({ source, clip, index, probe, settings, width, height
 }
 
 async function concatSegments(files, output, job) {
-  const listFile = path.join(path.dirname(output), 'concat.txt');
-  const body = files
-    .map((file) => file.replace(/\\/g, '/'))
-    .map((file) => `file '${file.replace(/'/g, "'\\''")}'`)
-    .join('\n');
-  await fsp.writeFile(listFile, body, 'utf8');
-  await runFfmpeg([
-    '-y',
-    '-f', 'concat',
-    '-safe', '0',
-    '-i', listFile,
-    '-c', 'copy',
+  if (files.length === 1) {
+    const listFile = path.join(path.dirname(output), 'concat.txt');
+    const normalized = files[0].replace(/\\/g, '/').replace(/'/g, "'\\''");
+    await fsp.writeFile(listFile, `file '${normalized}'`, 'utf8');
+    await runFfmpeg([
+      '-y',
+      '-f', 'concat',
+      '-safe', '0',
+      '-i', listFile,
+      '-c', 'copy',
+      '-movflags', '+faststart',
+      output,
+    ], job);
+    return;
+  }
+  const args = ['-y'];
+  for (const file of files) args.push('-i', file);
+  const filterInputs = files.map((_, index) => `[${index}:v:0][${index}:a:0]`).join('');
+  args.push(
+    '-filter_complex', `${filterInputs}concat=n=${files.length}:v=1:a=1[v][a]`,
+    '-map', '[v]',
+    '-map', '[a]',
+    '-c:v', 'libx264',
+    '-preset', 'veryfast',
+    '-crf', '20',
+    '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac',
+    '-b:a', '160k',
+    '-ar', '44100',
+    '-ac', '2',
     '-movflags', '+faststart',
     output,
-  ], job);
+  );
+  await runFfmpeg(args, job);
 }
 
 function buildXfadeFilterGraph(segments, transitionName, duration) {
@@ -2355,7 +2666,7 @@ async function composeVideoEdit(clips, settings, job = makeJob('compose'), optio
     const transitionDefinition = getTransitionDefinition(settings?.transition || 'none');
     const xfadeName = nativeXfadeName(settings, transitionDefinition);
     let useNativeXfade = Boolean(xfadeName && sources.length > 1);
-    if (useNativeXfade && !hasNativeXfadeSupport()) {
+    if (useNativeXfade && !(await hasNativeXfadeSupport())) {
       throw new Error('当前 ffmpeg 不支持高质量 xfade 转场，请更新内置 ffmpeg');
     }
     for (let i = 0; i < sources.length; i += 1) {
@@ -2452,6 +2763,7 @@ async function composeVideoEdit(clips, settings, job = makeJob('compose'), optio
     } finally {
       fsp.rm(audioTempOutput, { force: true }).catch(() => {});
     }
+    await validateEncodedVideoOutput(output, job);
     const finalProbe = await probeFile(output, job);
     const stat = fs.statSync(output);
     const result = {
@@ -3065,6 +3377,14 @@ router._test = {
   getJobForTest: (id) => publicJob(jobs.get(id)) || null,
   parseProbe,
   parseProbeJson,
+  ffmpegExitCodeHex,
+  isFfmpegAccessViolationExit,
+  isFfmpegNativeCrashExit,
+  withFfmpegSingleThreadRetry,
+  withFfmpegOpenH264Retry,
+  resolveVideoOpsCompatibilityFfmpeg,
+  ffmpegFailureMessage,
+  validateEncodedVideoOutput,
   runFfprobeJson,
   probeFile,
   targetSize,

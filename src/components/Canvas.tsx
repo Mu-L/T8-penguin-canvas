@@ -11613,7 +11613,9 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     //          autoOutput 若给 LoopNode 自动建 OutputNode 会让用户看到 “循环器自己生了 N 个素材” 的错误体验。
     // PoseMaster 自己负责写入单张/合集 OutputNode；通用 autoOutput 再处理会把批量合集拆出重复单体。
     // random-route 写入 imageUrl/prompt 等字段只是为了透传给命中的下游分支，不代表它自己生成了输出素材。
-    const SKIP_TYPES = new Set(['output', 'groupBox', 'bulkPhantom', 'upload', 'material-set', 'pick-from-set', 'loop', 'random-route', 'pose-master']);
+    // Story 的 outputText/videoUrls 是制片进度与最终状态快照；真实下游由导演分镜台和视频编辑节点承接，
+    // 不能在新建或中途生产时把每次进度变化自动物化成独立的“输出素材”节点。
+    const SKIP_TYPES = new Set(['output', 'groupBox', 'bulkPhantom', 'upload', 'material-set', 'pick-from-set', 'loop', 'random-route', 'story', 'pose-master']);
 
     const toAddNodes: Node[] = [];
     const toAddEdges: Edge[] = [];
@@ -11640,8 +11642,9 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       }
     }
 
-    // Clean up v2.4.4 random-route auto outputs: the router only passes input
-    // materials into selected branches, so older output-auto nodes are stale.
+    // Clean up stale auto outputs created by older builds for pass-through and
+    // orchestration nodes. Keep anything the user moved, connected onward, or
+    // merged with another input so this migration never removes user work.
     for (const edge of edges) {
       if (!edge.id.startsWith('e-auto-')) continue;
       const source = nodeById.get(edge.source);
@@ -11650,7 +11653,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       const totalIncoming = edges.filter((item) => item.target === edge.target).length;
       const hasOutgoing = edges.some((item) => item.source === edge.target);
       if (
-        source?.type === 'random-route' &&
+        (source?.type === 'random-route' || source?.type === 'story') &&
         target?.type === 'output' &&
         target.id.startsWith('output-auto-') &&
         totalIncoming === 1 &&

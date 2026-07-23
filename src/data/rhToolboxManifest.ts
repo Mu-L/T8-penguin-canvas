@@ -12,15 +12,15 @@ import type { RhToolboxManifest } from '../utils/rhToolbox';
 export const RH_TOOLBOX_MANIFEST: RhToolboxManifest = {
   "schema": "t8-rh-toolbox-manifest",
   "version": 1,
-  "updatedAt": "2026-07-08T12:26:08.692Z",
+  "updatedAt": "2026-07-23T11:09:55.033Z",
   "categories": [
     {
       "id": "custom-rh-tools",
       "name": "抠图",
       "parentId": "image",
       "description": "抠图 RunningHub 工具",
-      "icon": "Wrench",
-      "order": 50
+      "order": 50,
+      "icon": "Wrench"
     },
     {
       "id": "video-category-fwv2n",
@@ -84,6 +84,14 @@ export const RH_TOOLBOX_MANIFEST: RhToolboxManifest = {
       "parentId": "video",
       "description": "视频超分 RunningHub 工具",
       "order": 80,
+      "icon": "Wrench"
+    },
+    {
+      "id": "video-category-9dael",
+      "name": "视频抠像",
+      "parentId": "video",
+      "description": "视频抠像 RunningHub 工具",
+      "order": 90,
       "icon": "Wrench"
     },
     {
@@ -494,6 +502,7 @@ export const RH_TOOLBOX_MANIFEST: RhToolboxManifest = {
       "description": "即梦分身去水印（手机版）",
       "categoryId": "video-category-6djrs",
       "webappId": "2027300825827123202",
+      "rhSite": "cn",
       "enabled": true,
       "order": 100,
       "capabilities": [
@@ -545,6 +554,7 @@ export const RH_TOOLBOX_MANIFEST: RhToolboxManifest = {
       "description": "扩图",
       "categoryId": "image-category-e7but",
       "webappId": "2066227901946748930",
+      "rhSite": "cn",
       "enabled": true,
       "order": 100,
       "capabilities": [
@@ -618,11 +628,107 @@ export const RH_TOOLBOX_MANIFEST: RhToolboxManifest = {
       "version": 1
     },
     {
+      "id": "video-removebg-v1",
+      "title": "视频抠像",
+      "description": "视频抠像",
+      "categoryId": "video-category-9dael",
+      "webappId": "2036113391479169025",
+      "rhSite": "cn",
+      "enabled": true,
+      "order": 100,
+      "capabilities": [
+        "video.cutout",
+        "video.edit"
+      ],
+      "inputSchema": [
+        {
+          "key": "prompt",
+          "label": "分割提示词",
+          "kind": "text",
+          "rhNodeId": "53",
+          "fieldName": "prompt",
+          "required": false,
+          "multiple": false,
+          "defaultValue": "男人",
+          "uploadAsset": false,
+          "order": 0
+        },
+        {
+          "key": "source-video",
+          "label": "video",
+          "kind": "video",
+          "rhNodeId": "51",
+          "fieldName": "video",
+          "required": true,
+          "multiple": false,
+          "uploadAsset": true,
+          "order": 1
+        }
+      ],
+      "outputSchema": [
+        {
+          "key": "output-video",
+          "label": "输出视频",
+          "kind": "video",
+          "role": "append-output"
+        }
+      ],
+      "fixedParams": [],
+      "userParams": [
+        {
+          "key": "node-51-skip_first_frames",
+          "label": "跳过帧",
+          "kind": "number",
+          "rhNodeId": "51",
+          "fieldName": "skip_first_frames",
+          "defaultValue": "0",
+          "placeholder": "",
+          "required": false
+        },
+        {
+          "key": "node-51-frame_load_cap",
+          "label": "读取帧",
+          "kind": "number",
+          "rhNodeId": "51",
+          "fieldName": "frame_load_cap",
+          "defaultValue": "0",
+          "placeholder": "",
+          "required": false
+        },
+        {
+          "key": "node-56-value",
+          "label": "缩放长边",
+          "kind": "number",
+          "rhNodeId": "56",
+          "fieldName": "value",
+          "defaultValue": "960",
+          "placeholder": "",
+          "required": false
+        }
+      ],
+      "runtime": {
+        "instanceType": "plus",
+        "pollIntervalMs": 5000,
+        "maxPolls": 720,
+        "fetchAppInfo": true
+      },
+      "ui": {
+        "icon": "Scissors",
+        "showInNode": true,
+        "showInImageEditor": false,
+        "showInVideoEditor": true,
+        "showInTextEditor": false,
+        "showInAudioEditor": false
+      },
+      "version": 1
+    },
+    {
       "id": "xiaochuzhuti",
       "title": "消除主体",
       "description": "消除主体",
       "categoryId": "image-category-8h6ed",
       "webappId": "2067098822521745410",
+      "rhSite": "cn",
       "enabled": true,
       "order": 100,
       "capabilities": [
@@ -674,6 +780,7 @@ export const RH_TOOLBOX_MANIFEST: RhToolboxManifest = {
       "description": "小云雀视频去水印（横版）",
       "categoryId": "video-category-6djrs",
       "webappId": "2020109251271725058",
+      "rhSite": "cn",
       "enabled": true,
       "order": 100,
       "capabilities": [
@@ -725,6 +832,7 @@ export const RH_TOOLBOX_MANIFEST: RhToolboxManifest = {
       "description": "小云雀视频去水印（竖版）",
       "categoryId": "video-category-6djrs",
       "webappId": "2020114992531513345",
+      "rhSite": "cn",
       "enabled": true,
       "order": 100,
       "capabilities": [
@@ -776,6 +884,7 @@ export const RH_TOOLBOX_MANIFEST: RhToolboxManifest = {
       "description": "英伟达极速超分",
       "categoryId": "video-category-9d33p",
       "webappId": "2032095665941123073",
+      "rhSite": "cn",
       "enabled": true,
       "order": 100,
       "capabilities": [
@@ -827,6 +936,7 @@ export const RH_TOOLBOX_MANIFEST: RhToolboxManifest = {
       "description": "FlashVsr慢速超分",
       "categoryId": "video-category-9d33p",
       "webappId": "2043165928090767362",
+      "rhSite": "cn",
       "enabled": true,
       "order": 100,
       "capabilities": [

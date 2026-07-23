@@ -100,8 +100,30 @@ test('canvas video previews defer real video sources until near the viewport', (
   assert.match(loopingVideo, /IntersectionObserver/);
   assert.match(loopingVideo, /rootMargin:\s*'720px 720px'/);
   assert.match(loopingVideo, /preload === undefined \? props : \{ \.\.\.props, preload \}/);
+  assert.match(loopingVideo, /compatibleVideoPreviewUrl\(src\)/);
   assert.match(loopingVideo, /data-full-src=\{src\}/);
-  assert.match(loopingVideo, /src=\{shouldLoad \? src : undefined\}/);
+  assert.match(loopingVideo, /src=\{shouldLoad \? playbackSrc : undefined\}/);
+  assert.match(loopingVideo, /data-playback-src=\{playbackSrc\}/);
+});
+
+test('local MOV previews are transcoded to H.264 MP4 while original material URLs stay unchanged', () => {
+  const uploadNode = read('../src/components/nodes/UploadNode.tsx');
+  const outputNode = read('../src/components/nodes/OutputNode.tsx');
+  const videoPlayback = read('../src/utils/videoPlayback.ts');
+  const filesRoute = read('../backend/src/routes/files.js');
+
+  assert.match(uploadNode, /accept:\s*'video\/\*,\.mov,video\/quicktime'/);
+  assert.match(uploadNode, /VIDEO_EXT_RE\.test\(name\)/);
+  assert.match(uploadNode, /<LoopingVideo[\s\S]*src=\{item\.url\}/);
+  assert.match(outputNode, /<LoopingVideo[\s\S]*src=\{u\}/);
+  assert.match(videoPlayback, /\/api\/files\/video-preview\?url=/);
+  assert.match(filesRoute, /router\.get\('\/video-preview'/);
+  assert.match(filesRoute, /'-c:v', 'libx264'/);
+  assert.match(filesRoute, /'-pix_fmt', 'yuv420p'/);
+  assert.match(filesRoute, /'-threads', '1'/);
+  assert.match(filesRoute, /'-c:a', 'aac'/);
+  assert.match(filesRoute, /video_preview_\$\{key\}\.mp4/);
+  assert.match(filesRoute, /原 MOV URL 不变/);
 });
 
 test('high-traffic node previews render through SmartImage', () => {

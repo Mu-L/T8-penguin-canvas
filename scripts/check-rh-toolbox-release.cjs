@@ -15,6 +15,7 @@ const REQUIRED_TOOL_IDS = [
   'bernini1',
   'berninituxiangbianji',
   'bernini2',
+  'video-removebg-v1',
   'video-nividia-upscale',
   'video-flashvsr',
 ];
@@ -25,6 +26,7 @@ const REQUIRED_CATEGORY_IDS = [
   'video-category-e2v4g',
   'image-category-e78o2',
   'video-category-9d33p',
+  'video-category-9dael',
 ];
 const VALID_MEDIA_KINDS = new Set(['text', 'image', 'video', 'audio']);
 const VALID_PARAM_KINDS = new Set(['text', 'number', 'select', 'boolean']);

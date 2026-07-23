@@ -19,7 +19,7 @@ for %%P in (11422 18766) do (
 REM 按健康状态启动开发服务，避免前端先于后端发起 API 轮询
 echo [2/2] 启动后端(18766)，健康后再启动前端(11422)...
 cd /d "%~dp0"
-start "T8 Backend" cmd /k "cd backend && npm start"
+start "T8 Backend" cmd /k "cd backend && npm run dev"
 node scripts\wait-for-local-service.cjs "http://127.0.0.1:18766/api/status" 60000 "后端"
 if errorlevel 1 (
     echo.

@@ -11,6 +11,7 @@ const { AssetBlobStoreError, getAssetBlobStore } = require('./assetBlobStore');
 const { reconcileAssetAvailabilitySnapshots } = require('./assetAvailability');
 const { isUtf8 } = require('buffer');
 const { safeRemoteMediaDownload } = require('../utils/safeRemoteMediaFetch');
+const { withFfmpegProcessSlot } = require('../utils/ffmpegProcessQueue');
 
 const MAX_IMAGE_INPUT_PIXELS = 100_000_000;
 const PHASH_DCT64_ALGORITHM = 'phash-dct64-v1';
@@ -453,18 +454,18 @@ function hashFile(filename) {
 }
 
 function runFfprobe(filename) {
-  return new Promise((resolve, reject) => {
+  return withFfmpegProcessSlot(() => new Promise((resolve, reject) => {
     execFile(resolveBundledFfprobe(), [
       '-v', 'error', '-count_frames', '-show_format', '-show_streams', '-of', 'json', filename,
     ], { windowsHide: true, timeout: 45_000, maxBuffer: 3 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) return reject(new Error(String(stderr || error.message).trim().slice(0, 500)));
       try { resolve(JSON.parse(stdout || '{}')); } catch (parseError) { reject(parseError); }
     });
-  });
+  }));
 }
 
 function runFfprobeKeyframes(filename) {
-  return new Promise((resolve, reject) => {
+  return withFfmpegProcessSlot(() => new Promise((resolve, reject) => {
     execFile(resolveBundledFfprobe(), [
       '-v', 'error', '-select_streams', 'v:0', '-skip_frame', 'nokey', '-show_frames',
       '-show_entries', 'frame=key_frame,best_effort_timestamp_time,pkt_pts_time', '-of', 'json', filename,
@@ -481,16 +482,16 @@ function runFfprobeKeyframes(filename) {
         reject(parseError);
       }
     });
-  });
+  }));
 }
 
 function runFfmpeg(args, timeout = 90_000) {
-  return new Promise((resolve, reject) => {
+  return withFfmpegProcessSlot(() => new Promise((resolve, reject) => {
     execFile(resolveBundledFfmpeg(), ['-hide_banner', '-loglevel', 'error', '-y', ...args], { windowsHide: true, timeout, maxBuffer: 3 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) return reject(new Error(String(stderr || error.message).trim().slice(0, 500)));
       resolve(stdout);
     });
-  });
+  }));
 }
 
 function publicThumbnailUrl(filename, config = {}) {
@@ -2375,7 +2376,7 @@ class AssetIndexer {
       });
     }
 
-    const batch = this.buildHostArtifactBatch(
+    let batch = this.buildHostArtifactBatch(
       run,
       nodeRun,
       attempt,
@@ -2416,6 +2417,32 @@ class AssetIndexer {
     const installAt = async (index) => {
       throwIfHostArtifactAborted(signal);
       if (index >= groups.length) {
+        // Materializing and hashing a large video may take long enough for the
+        // normal canvas autosave to advance its revision. Build a fresh batch
+        // immediately before the synchronous database transaction so a valid
+        // long-running Run output is committed against the live canvas rather
+        // than the stale revision captured before file I/O began. Exact replay
+        // must keep the originally persisted batch/revision.
+        if (!existingCount) {
+          const liveDocument = this.database.getCanvas(run.canvasId);
+          const liveRun = this.database.getRun(run.id);
+          const liveNodeRun = this.database.getNodeRun(nodeRun.id);
+          const liveAttempt = this.database.getAttempt(attempt.id);
+          if (!liveDocument || liveDocument.projectId !== run.projectId) {
+            throw hostArtifactCommitError('host_artifact_canvas_scope_invalid', '输出 Run 不属于有效 Canvas', 409);
+          }
+          if (!liveRun || !liveNodeRun || liveNodeRun.runId !== liveRun.id
+            || !liveAttempt || liveAttempt.nodeRunId !== liveNodeRun.id) {
+            throw hostArtifactCommitError('host_artifact_run_scope_invalid', '输出记录不属于当前 Run', 409);
+          }
+          batch = this.buildHostArtifactBatch(
+            liveRun,
+            liveNodeRun,
+            liveAttempt,
+            liveDocument,
+            artifacts,
+          );
+        }
         const verifiedAt = Date.now();
         const verifiedArtifacts = artifacts.map((artifact, artifactIndex) => {
           const installed = installedByHash.get(artifact.contentHash);

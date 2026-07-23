@@ -52,6 +52,30 @@ function isT8RelativeUrl(value) {
   return /^\/(?:files|api\/resources|api\/files|input|output)\//.test(String(value || '').trim());
 }
 
+function isT8LocalMediaPath(value) {
+  const pathname = String(value || '').trim().split(/[?#]/)[0];
+  return /^\/(?:files\/(?:input|output|thumbnails)\/|input\/|output\/|api\/resources\/(?:file|set-file)\/)/.test(pathname);
+}
+
+function normalizeT8LocalMediaRef(value, options = {}) {
+  const text = String(value || '').trim();
+  if (!isRemoteUrl(text)) return text;
+  try {
+    const parsed = new URL(text);
+    if (parsed.username || parsed.password || !isT8LocalMediaPath(parsed.pathname)) return text;
+    const hostname = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    const isLoopback = hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1';
+    if (!isLoopback) return text;
+    const allowedPorts = Array.isArray(options.allowedPorts)
+      ? new Set(options.allowedPorts.map((port) => String(port || '').trim()).filter(Boolean))
+      : null;
+    if (allowedPorts?.size && parsed.port && !allowedPorts.has(parsed.port)) return text;
+    return `${parsed.pathname}${parsed.search || ''}`;
+  } catch {
+    return text;
+  }
+}
+
 function mediaRefToAbsoluteUrl(value, options = {}) {
   const text = String(value || '').trim();
   if (!text) return '';
@@ -146,7 +170,7 @@ function resolveResourceLibraryMediaPath(value, options = {}) {
 }
 
 function resolveT8LocalMediaPath(value, options = {}) {
-  const text = String(value || '').trim().split(/[?#]/)[0];
+  const text = normalizeT8LocalMediaRef(value, options).split(/[?#]/)[0];
   const resourcePath = resolveResourceLibraryMediaPath(text, options);
   if (resourcePath?.path) return resourcePath.path;
   const rules = [
@@ -205,7 +229,7 @@ function dataUrlFromFile(filePath) {
 
 async function resolveMediaRef(value, options = {}) {
   const target = options.target || 'url';
-  const text = String(value || '').trim();
+  const text = normalizeT8LocalMediaRef(value, options);
   if (!text) throw new Error('媒体引用为空');
 
   if (isDataUrl(text)) {
@@ -276,8 +300,10 @@ async function resolveMediaRef(value, options = {}) {
 
 module.exports = {
   isDataUrl,
+  isT8LocalMediaPath,
   mediaRefToAbsoluteUrl,
   mimeFromPath,
+  normalizeT8LocalMediaRef,
   resolveMediaRef,
   resolveResourceLibraryMediaPath,
   resolveT8LocalMediaPath,

@@ -82,6 +82,7 @@ import { DEFAULT_VIDEO_EDIT_DATA, DEFAULT_VIDEO_EDIT_SETTINGS } from '../../util
 import {
   STORY_ANALYSIS_SCHEMA,
   applyStoryAnalysis,
+  buildStoryAssetGenerationSpec,
   buildLocalStoryAnalysis,
   compileStoryPrompts,
   createEmptyStoryProject,
@@ -192,6 +193,15 @@ interface StoryRunTaskBudget {
   reserved: number;
 }
 
+interface StoryProductionRevisionGuard {
+  expected: number;
+  finalizeTail: Promise<void>;
+}
+
+interface StoryAssetRunSessionHandle {
+  enqueue: (assetId: string) => boolean;
+}
+
 function parseStoryAnalysisPayload(content: string): StoryAnalysisPayload {
   const payload = extractJsonObject(content) as StoryAnalysisPayload;
   if (!payload || typeof payload !== 'object') throw new Error('模型没有返回 Story JSON 对象');
@@ -287,8 +297,13 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
   const [resourceLoading, setResourceLoading] = useState(false);
   const [resourceMessage, setResourceMessage] = useState('');
   const [localMessage, setLocalMessage] = useState('');
+  const [assetRunActive, setAssetRunActive] = useState(false);
+  const [generatingAssetIds, setGeneratingAssetIds] = useState<Set<string>>(() => new Set());
   const abortRef = useRef<AbortController | null>(null);
   const composeJobIdRef = useRef('');
+  const assetRunSessionRef = useRef<StoryAssetRunSessionHandle | null>(null);
+  const assetRunRequestPendingRef = useRef(false);
+  const pendingAssetRunIdsRef = useRef(new Set<string>());
   const initialProject = useMemo(() => sanitizeStoryProject((data as any)?.storyProject || createEmptyStoryProject({ storyId: `story-${id}` })), [data, id]);
   const projectRef = useRef<StoryProject>(initialProject);
   projectRef.current = initialProject;
@@ -390,6 +405,14 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
 
   const selectedShot = project.shots.find((shot) => shot.id === selectedShotId) || project.shots[0];
   const selectedAsset = project.assets.find((asset) => asset.id === selectedAssetId) || project.assets[0];
+  const selectedAssetGenerationSpec = useMemo(
+    () => selectedAsset ? buildStoryAssetGenerationSpec(project, selectedAsset) : null,
+    [project, selectedAsset],
+  );
+  const selectedAssetReferenceNames = selectedAssetGenerationSpec?.referenceAssetIds
+    .map((assetId) => project.assets.find((asset) => asset.id === assetId)?.name)
+    .filter(Boolean)
+    .join('、') || '';
   const busy = Boolean(abortRef.current) || ACTIVE_TASK_STATUSES.has(String((data as any)?.status || ''));
 
   const setProjectPatch = useCallback((patch: Partial<StoryProject>) => {
@@ -410,7 +433,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
   }, [mutate]);
 
   const requestRun = useCallback((mode: StoryRunMode, targetId = '') => {
-    if (busy) return;
+    if (busy) return false;
     if (mode === 'asset-one' || mode === 'assets-missing') setActiveStage('assets');
     if (mode === 'compile') setActiveStage('prompts');
     if (mode === 'videos-missing') setActiveStage('videos');
@@ -433,7 +456,20 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
       if (requestCanvasNodeRun(id, { requestId })) return;
       updateNode({ storyRunRequestId: '', status: 'error', error: '无法提交 Story 运行请求，请重试。' });
     });
+    return true;
   }, [busy, effectiveVideoModel, id, imageSelection, llmSelection, updateNode, videoSelection]);
+
+  const enterAssetReview = useCallback(() => {
+    if (busy || projectRef.current.shots.length === 0) return;
+    setActiveStage('assets');
+    mutate((current) => ({
+      ...current,
+      stage: 'assets',
+      lastError: '',
+      updatedAt: new Date().toISOString(),
+    }), { status: 'ready', error: '' });
+    setLocalMessage('已进入准备资产；可先电脑上传、绑定上游或资产库，再手动生成仍缺失的资产。');
+  }, [busy, mutate]);
 
   const stopRun = useCallback(async () => {
     abortRef.current?.abort();
@@ -523,15 +559,35 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
     });
   }, [mutate]);
 
-  const generateAsset = useCallback(async (assetId: string, reporter: RunNodeLifecycleReporter, signal: AbortSignal, capturedRevision: number) => {
+  const generateAsset = useCallback(async (
+    assetId: string,
+    reporter: RunNodeLifecycleReporter,
+    signal: AbortSignal,
+    revisionGuard: StoryProductionRevisionGuard,
+    replaceExisting = false,
+  ) => {
     const asset = projectRef.current.assets.find((item) => item.id === assetId);
-    if (!asset || asset.url || asset.locked) return;
+    if (!asset || asset.locked || asset.url && !replaceExisting) return;
+    const originalUrl = asset.url;
+    const generationSpec = buildStoryAssetGenerationSpec(projectRef.current, asset);
+    const referenceImages = generationSpec.referenceImages;
+    const imageAspectRatio = generationSpec.aspectRatio;
     const external = asset.kind !== 'audio' && imageSelection.available ? imageSelection : null;
     const configuredImageModel = external?.providerModel || projectRef.current.settings.imageModel;
-    if (!external && asset.kind !== 'audio' && configuredImageModel === ZHENZHEN_IMAGE_G2_T2I_MODEL && !hasDomesticKey) throw new Error('请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”');
-    if (!external && asset.kind !== 'audio' && configuredImageModel === ZHENZHEN_IMAGE_G2_I2I_MODEL) throw new Error('G-2 图生图需要参考图；Story 缺失资产生成请改用 G-2 文生图或其他文生图模型');
-    const resumable = isStoryAssetTaskResumable(asset);
-    const model = resumable && asset.taskModel ? asset.taskModel : asset.kind === 'audio' ? 'suno-v5.5' : configuredImageModel;
+    const configuredModelWithReferences = !external && configuredImageModel === ZHENZHEN_IMAGE_G2_T2I_MODEL && referenceImages.length
+      ? ZHENZHEN_IMAGE_G2_I2I_MODEL
+      : configuredImageModel;
+    if (
+      !external
+      && asset.kind !== 'audio'
+      && (configuredModelWithReferences === ZHENZHEN_IMAGE_G2_T2I_MODEL || configuredModelWithReferences === ZHENZHEN_IMAGE_G2_I2I_MODEL)
+      && !hasDomesticKey
+    ) throw new Error('请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”');
+    if (!external && asset.kind !== 'audio' && configuredModelWithReferences === ZHENZHEN_IMAGE_G2_I2I_MODEL && !referenceImages.length) {
+      throw new Error('G-2 图生图需要参考图；请先生成或绑定角色参考图，或改用 G-2 文生图/其他文生图模型');
+    }
+    const resumable = !replaceExisting && isStoryAssetTaskResumable(asset);
+    const model = resumable && asset.taskModel ? asset.taskModel : asset.kind === 'audio' ? 'suno-v5.5' : configuredModelWithReferences;
     const provider = resumable
       ? asset.taskProvider
       : asset.kind === 'audio'
@@ -553,7 +609,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
       if (resumable) {
         await reporter.providerSubmitted({ provider: taskProvider, model, upstreamTaskId: taskId, jobId: assetId, jobKind: 'story-audio-asset', resumed: true, httpStatusSource: 'local-backend' });
       } else {
-        const submitted = await submitAudio({ mode: 'generate', prompt: asset.prompt || asset.description, title: asset.name, version: 'v5.5' });
+        const submitted = await submitAudio({ mode: 'generate', prompt: generationSpec.prompt, title: asset.name, version: 'v5.5' });
         taskId = submitted.taskId;
         taskProvider = 'suno';
         taskClipIds = submitted.clipIds?.length ? submitted.clipIds : taskId ? [taskId] : [];
@@ -580,9 +636,10 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
         providerId: external.providerId,
         providerModel: external.providerModel,
         model: external.providerModel,
-        prompt: asset.prompt || asset.description,
-        negativePrompt: asset.negativePrompt,
-        size: externalImageSizeFor(projectRef.current.settings.aspectRatio, '2K'),
+        prompt: generationSpec.prompt,
+        negativePrompt: generationSpec.negativePrompt,
+        images: referenceImages,
+        size: externalImageSizeFor(imageAspectRatio, '2K'),
         n: 1,
       });
       url = String(result.imageUrls?.[0] || '');
@@ -592,11 +649,17 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
       if (!url) throw new Error(`${asset.name} 未返回图片`);
       if (taskId || result.requestId) await reporter.providerSubmitted({ provider: taskProvider, model: taskModel, upstreamTaskId: taskId || undefined, requestId: result.requestId, transportHttpStatus: result.transportHttpStatus, upstreamHttpStatus: result.upstreamHttpStatus, usage: result.usage, jobId: assetId, jobKind: 'story-asset', httpStatusSource: 'local-backend' });
       await reporter.providerResponse({ provider: taskProvider, model: taskModel, upstreamTaskId: taskId || undefined, requestId: result.requestId, transportHttpStatus: result.transportHttpStatus, upstreamHttpStatus: result.upstreamHttpStatus, usage: result.usage, status: 'succeeded', jobId: assetId, jobKind: 'story-asset', httpStatusSource: 'local-backend' });
-    } else if (model === ZHENZHEN_IMAGE_G2_T2I_MODEL) {
+    } else if (model === ZHENZHEN_IMAGE_G2_T2I_MODEL || model === ZHENZHEN_IMAGE_G2_I2I_MODEL) {
       if (resumable) {
         await reporter.providerSubmitted({ provider: taskProvider, model, upstreamTaskId: taskId, jobId: assetId, jobKind: 'story-asset', resumed: true, httpStatusSource: 'local-backend' });
       } else {
-        const submitted = await submitSeedreamNz({ prompt: asset.prompt, model: 'zhenzhen-image-g2-t2i', resolution: '1k', ratio: projectRef.current.settings.aspectRatio as any });
+        const submitted = await submitSeedreamNz({
+          prompt: generationSpec.prompt,
+          images: referenceImages,
+          model,
+          resolution: '1k',
+          ratio: imageAspectRatio as any,
+        });
         taskId = String(submitted.taskId || '');
         taskProvider = 'seedance-nz';
         if (!taskId) throw new Error(`${asset.name} 未返回图像任务 ID`);
@@ -625,12 +688,13 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
       } else {
         const submitted = await submitImageFal({
           apiModel: model,
-          prompt: asset.prompt || asset.description,
+          prompt: generationSpec.prompt,
+          images: referenceImages,
           n: 1,
           format: 'png',
           sync: false,
-          mode: 'gen',
-          size: falImageSizeFor(projectRef.current.settings.aspectRatio),
+          mode: referenceImages.length ? 'edit' : 'gen',
+          size: falImageSizeFor(imageAspectRatio),
           quality: 'medium',
         });
         url = String(submitted.urls?.[0] || '');
@@ -660,47 +724,111 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
         }
       }
     } else {
-      const result = await generateImage({ model: 'gpt-image-2', apiModel: model, paramKind: 'gpt-size', prompt: asset.prompt || asset.description, n: 1, aspect_ratio: projectRef.current.settings.aspectRatio, image_size: gptImage2ZhenzhenVariantSize(model) || '2K' });
+      const result = await generateImage({
+        model: 'gpt-image-2',
+        apiModel: model,
+        paramKind: 'gpt-size',
+        prompt: generationSpec.prompt,
+        images: referenceImages,
+        n: 1,
+        aspect_ratio: imageAspectRatio,
+        image_size: gptImage2ZhenzhenVariantSize(model) || '2K',
+      });
       url = String(result.urls?.[0] || '');
       if (!url) throw new Error(`${asset.name} 未返回图片`);
       await reporter.providerResponse({ provider: 'zhenzhen', model, requestId: result.requestId, transportHttpStatus: result.transportHttpStatus, upstreamHttpStatus: result.upstreamHttpStatus, usage: result.usage, status: 'succeeded', jobId: assetId, jobKind: 'story-asset', httpStatusSource: 'local-backend' });
     }
     if (!url) throw new Error(`${asset.name} 生成超时`);
-    if (projectRef.current.productionRevision !== capturedRevision) {
-      updateAsset(assetId, { status: 'stale', error: '生产修订已变化，迟到结果未覆盖当前资产' });
-      return;
+    const assetChangedDuringGeneration = (latest: StoryAsset | undefined) => (
+      replaceExisting ? !latest || latest.url !== originalUrl : Boolean(latest?.url)
+    );
+    const preserveChangedAsset = (latest: StoryAsset | undefined) => {
+      const sourceLabel = latest?.source === 'upload'
+        ? '电脑上传'
+        : latest?.source === 'existing'
+          ? '绑定'
+          : '已有';
+      logBus.info(`${asset.name} 的素材已在生成期间发生变化，AI 返回结果未覆盖当前${sourceLabel}素材`, src);
+    };
+    const previousFinalize = revisionGuard.finalizeTail;
+    let releaseFinalize: () => void = () => undefined;
+    revisionGuard.finalizeTail = new Promise<void>((resolve) => {
+      releaseFinalize = resolve;
+    });
+    await previousFinalize;
+    try {
+      const latestAsset = projectRef.current.assets.find((item) => item.id === assetId);
+      if (assetChangedDuringGeneration(latestAsset)) {
+        preserveChangedAsset(latestAsset);
+        return;
+      }
+      if (projectRef.current.productionRevision !== revisionGuard.expected) {
+        updateAsset(assetId, { status: 'stale', error: '生产修订已变化，迟到结果未覆盖当前资产' });
+        return;
+      }
+      const outputRevision = replaceExisting ? revisionGuard.expected + 1 : revisionGuard.expected;
+      await reporter.output({
+        status: 'partial',
+        outputCount: 1,
+        assets: [{
+          kind: asset.kind === 'audio' ? 'audio' : 'image',
+          sourceUrl: url,
+          filename: safeOutputFilename(asset.name, asset.kind === 'audio' ? 'mp3' : 'png'),
+          mimeType: asset.kind === 'audio' ? 'audio/mpeg' : 'image/png',
+          metadata: {
+            storyId: projectRef.current.storyId,
+            storyAssetId: asset.id,
+            storyAssetKind: asset.kind,
+            productionRevision: outputRevision,
+          },
+        }],
+      }).catch((error) => logBus.warn(`Story 资产已生成，但资产中心登记失败：${error instanceof Error ? error.message : String(error)}`, src));
+      const latestAfterOutput = projectRef.current.assets.find((item) => item.id === assetId);
+      if (assetChangedDuringGeneration(latestAfterOutput)) {
+        preserveChangedAsset(latestAfterOutput);
+        return;
+      }
+      if (projectRef.current.productionRevision !== revisionGuard.expected) {
+        updateAsset(assetId, { status: 'stale', error: '生产修订已变化，迟到结果未覆盖当前资产' });
+        return;
+      }
+      const committed = mutate((current) => {
+        const base = replaceExisting ? invalidateStoryForAssetChange(current, assetId) : current;
+        return {
+          ...base,
+          assets: base.assets.map((item) => item.id === assetId ? {
+            ...item, source: 'ai', status: 'succeeded', url, taskId, taskProvider, taskModel, taskEndpoint, taskClipIds, error: '', generatedAt: new Date().toISOString(), revision: item.revision + 1,
+          } : item),
+          shots: replaceExisting ? base.shots : base.shots.map((shot) => shot.assetIds.includes(assetId) ? {
+            ...shot, finalPrompt: '', videoUrl: '', taskId: '', taskProvider: '', taskModel: '', error: '', status: 'stale', revision: shot.revision + 1,
+          } : shot),
+          finalVideoUrl: '',
+          composeTaskId: '',
+          composeTaskStatus: 'idle',
+          updatedAt: new Date().toISOString(),
+        };
+      });
+      revisionGuard.expected = committed.productionRevision;
+    } finally {
+      releaseFinalize();
     }
-    await reporter.output({
-      status: 'partial',
-      outputCount: 1,
-      assets: [{
-        kind: asset.kind === 'audio' ? 'audio' : 'image',
-        sourceUrl: url,
-        filename: safeOutputFilename(asset.name, asset.kind === 'audio' ? 'mp3' : 'png'),
-        mimeType: asset.kind === 'audio' ? 'audio/mpeg' : 'image/png',
-        metadata: { storyId: projectRef.current.storyId, storyAssetId: asset.id, storyAssetKind: asset.kind, productionRevision: capturedRevision },
-      }],
-    }).catch((error) => logBus.warn(`Story 资产已生成，但资产中心登记失败：${error instanceof Error ? error.message : String(error)}`, src));
-    mutate((current) => ({
-      ...current,
-      assets: current.assets.map((item) => item.id === assetId ? {
-        ...item, source: 'ai', status: 'succeeded', url, taskId, taskProvider, taskModel, taskEndpoint, taskClipIds, error: '', generatedAt: new Date().toISOString(), revision: item.revision + 1,
-      } : item),
-      shots: current.shots.map((shot) => shot.assetIds.includes(assetId) ? {
-        ...shot, finalPrompt: '', videoUrl: '', taskId: '', taskProvider: '', taskModel: '', error: '', status: 'stale', revision: shot.revision + 1,
-      } : shot),
-      finalVideoUrl: '',
-      composeTaskId: '',
-      composeTaskStatus: 'idle',
-      updatedAt: new Date().toISOString(),
-    }));
   }, [hasDomesticKey, imageSelection, mutate, src, updateAsset]);
 
-  const generateAssets = useCallback(async (targetIds: string[] | null, reporter: RunNodeLifecycleReporter, signal: AbortSignal, budget: StoryRunTaskBudget, retryFailed = false) => {
+  const generateAssets = useCallback(async (
+    targetIds: string[] | null,
+    reporter: RunNodeLifecycleReporter,
+    signal: AbortSignal,
+    budget: StoryRunTaskBudget,
+    retryFailed = false,
+    replaceExisting = false,
+  ) => {
     setActiveStage('assets');
     const current = projectRef.current;
-    const capturedRevision = current.productionRevision;
-    const candidates = selectStoryAssetTargets(current, targetIds, retryFailed);
+    const revisionGuard: StoryProductionRevisionGuard = {
+      expected: current.productionRevision,
+      finalizeTail: Promise.resolve(),
+    };
+    const candidates = selectStoryAssetTargets(current, targetIds, retryFailed, replaceExisting);
     const selection = limitStoryAssetTargets(candidates, budget.limit, budget.reserved);
     budget.reserved += selection.newTaskCount;
     const targets = selection.selected;
@@ -713,22 +841,36 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
       if (selection.deferred.length) setLocalMessage(`已达到本次新任务上限，剩余 ${selection.deferred.length} 个资产待下次继续`);
       return current;
     }
-    setLocalMessage(`正在生成 ${targets.length} 个缺失资产…`);
+    setLocalMessage(replaceExisting
+      ? `正在重新生成 ${targets[0]?.name || '图像资产'}；新结果成功前会保留当前图片…`
+      : `正在生成 ${targets.length} 个缺失资产…`);
     mutate((value) => ({ ...value, stage: 'assets', lastError: '', updatedAt: new Date().toISOString() }), { status: 'running' });
     const errors: string[] = [];
-    await runPool(targets, current.settings.maxParallelAssets, async (asset) => {
+    const generateTarget = async (asset: StoryAsset) => {
       try {
-        await generateAsset(asset.id, reporter, signal, capturedRevision);
+        await generateAsset(asset.id, reporter, signal, revisionGuard, replaceExisting);
       } catch (error: any) {
         const message = error?.message || `${asset.name} 生成失败`;
-        updateAsset(asset.id, { status: signal.aborted ? 'cancelled' : 'failed', error: message });
+        updateAsset(asset.id, {
+          status: replaceExisting && asset.url ? 'succeeded' : signal.aborted ? 'cancelled' : 'failed',
+          error: replaceExisting && asset.url ? `重新生成失败：${message}` : message,
+        });
         errors.push(`${asset.name}：${message}`);
       }
-    });
+    };
+    const characterTargets = targets.filter((asset) => asset.kind === 'character');
+    const remainingTargets = targets.filter((asset) => asset.kind !== 'character');
+    if (characterTargets.length) await runPool(characterTargets, current.settings.maxParallelAssets, generateTarget);
+    if (!signal.aborted && remainingTargets.length) await runPool(remainingTargets, current.settings.maxParallelAssets, generateTarget);
     if (signal.aborted) throw new Error('用户已停止');
     if (errors.length === targets.length) throw new Error(errors.join('；'));
     if (errors.length) setLocalMessage(`${targets.length - errors.length} 个资产完成，${errors.length} 个失败，可仅重试失败`);
     else if (selection.deferred.length) setLocalMessage(`${targets.length} 个资产完成；已达到本次新任务上限，剩余 ${selection.deferred.length} 个待下次继续`);
+    if (replaceExisting) {
+      setActiveStage('assets');
+      if (!errors.length) setLocalMessage(`${targets[0]?.name || '图像资产'} 已重新生成；原素材仅在新结果成功后才被替换`);
+      return projectRef.current;
+    }
     if (storyAssetsReady(projectRef.current)) {
       setActiveStage('prompts');
       setLocalMessage('资产已齐，已自动进入提示词编译');
@@ -736,6 +878,126 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
     }
     return projectRef.current;
   }, [generateAsset, mutate, updateAsset]);
+
+  const runAssetRegenerationSession = useCallback(async (
+    initialTargetId: string,
+    reporter: RunNodeLifecycleReporter,
+    signal: AbortSignal,
+    budget: StoryRunTaskBudget,
+  ) => {
+    setActiveStage('assets');
+    const revisionGuard: StoryProductionRevisionGuard = {
+      expected: projectRef.current.productionRevision,
+      finalizeTail: Promise.resolve(),
+    };
+    const pending = new Set<string>();
+    const active = new Map<string, Promise<void>>();
+    const owned = new Set<string>();
+    const errors: string[] = [];
+    let queueVersion = 0;
+    let completed = 0;
+    let sessionClosed = false;
+    const concurrency = Math.max(1, projectRef.current.settings.maxParallelAssets);
+
+    const setGenerating = (assetId: string, generating: boolean) => {
+      setGeneratingAssetIds((current) => {
+        const next = new Set(current);
+        if (generating) next.add(assetId);
+        else next.delete(assetId);
+        return next;
+      });
+    };
+
+    let pump = () => undefined;
+    const enqueue = (assetId: string) => {
+      if (sessionClosed || !assetId || owned.has(assetId)) return false;
+      const asset = projectRef.current.assets.find((item) => item.id === assetId);
+      if (!asset || asset.locked || asset.kind === 'audio' && Boolean(asset.url)) return false;
+      if (budget.reserved >= budget.limit) {
+        setLocalMessage(`本轮最多启动 ${budget.limit} 个新任务；请等待当前任务完成后再继续`);
+        return false;
+      }
+      budget.reserved += 1;
+      owned.add(assetId);
+      pending.add(assetId);
+      queueVersion += 1;
+      setGenerating(assetId, true);
+      pump();
+      return true;
+    };
+
+    pump = () => {
+      while (!sessionClosed && !signal.aborted && active.size < concurrency && pending.size > 0) {
+        const assetId = pending.values().next().value as string;
+        pending.delete(assetId);
+        const asset = projectRef.current.assets.find((item) => item.id === assetId);
+        if (!asset) {
+          setGenerating(assetId, false);
+          continue;
+        }
+        const replaceExisting = Boolean(asset.url && asset.kind !== 'audio');
+        const task = (async () => {
+          try {
+            setLocalMessage(`${asset.name} 正在${replaceExisting ? '重新' : ''}生成；当前最多并发 ${concurrency} 个资产任务…`);
+            await generateAsset(asset.id, reporter, signal, revisionGuard, replaceExisting);
+            completed += 1;
+          } catch (error: any) {
+            const message = error?.message || `${asset.name} 生成失败`;
+            updateAsset(asset.id, {
+              status: replaceExisting && asset.url ? 'succeeded' : signal.aborted ? 'cancelled' : 'failed',
+              error: replaceExisting && asset.url ? `重新生成失败：${message}` : message,
+            });
+            errors.push(`${asset.name}：${message}`);
+          } finally {
+            active.delete(assetId);
+            queueVersion += 1;
+            setGenerating(assetId, false);
+            pump();
+          }
+        })();
+        active.set(assetId, task);
+      }
+    };
+
+    assetRunSessionRef.current = { enqueue };
+    assetRunRequestPendingRef.current = false;
+    setAssetRunActive(true);
+    const initialIds = new Set([initialTargetId, ...pendingAssetRunIdsRef.current].filter(Boolean));
+    pendingAssetRunIdsRef.current.clear();
+    initialIds.forEach((assetId) => {
+      if (!enqueue(assetId)) setGenerating(assetId, false);
+    });
+
+    try {
+      while (!signal.aborted) {
+        pump();
+        if (active.size > 0) {
+          await Promise.race(Array.from(active.values()));
+          continue;
+        }
+        if (pending.size > 0) continue;
+        const idleVersion = queueVersion;
+        await sleep(160, signal);
+        if (active.size === 0 && pending.size === 0 && queueVersion === idleVersion) break;
+      }
+      if (signal.aborted) throw new Error('用户已停止');
+      if (errors.length === owned.size && errors.length > 0) throw new Error(errors.join('；'));
+      if (errors.length) setLocalMessage(`${completed} 个资产完成，${errors.length} 个失败；其他资产可继续并发生成`);
+      else if (completed > 0) setLocalMessage(`${completed} 个资产已生成；每张旧图都只在新图成功后替换`);
+      return projectRef.current;
+    } finally {
+      sessionClosed = true;
+      if (assetRunSessionRef.current?.enqueue === enqueue) assetRunSessionRef.current = null;
+      assetRunRequestPendingRef.current = false;
+      pendingAssetRunIdsRef.current.clear();
+      setAssetRunActive(false);
+      setGeneratingAssetIds((current) => {
+        const next = new Set(current);
+        owned.forEach((assetId) => next.delete(assetId));
+        return next;
+      });
+    }
+  }, [generateAsset, updateAsset]);
 
   const compile = useCallback(() => {
     const current = projectRef.current;
@@ -904,7 +1166,13 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
     setActiveStage('compose');
     const { timelineV2, renderPlan } = storyToVideoEditTimeline(current);
     const capturedRevision = current.productionRevision;
-    const existingTaskId = current.composeTaskId;
+    // Only an in-flight compose task is resumable. A failed/cancelled/stale
+    // Story can still retain the previous task id for diagnostics, but reusing
+    // that terminal job would simply return the old (possibly corrupt) file
+    // instead of performing the user's requested recomposition.
+    const existingTaskId = ACTIVE_TASK_STATUSES.has(current.composeTaskStatus)
+      ? current.composeTaskId
+      : '';
     setLocalMessage('正在按镜头顺序合成成片…');
     mutate((value) => ({ ...value, stage: 'compose', composeTaskStatus: existingTaskId ? 'polling' : 'submitting', lastError: '', updatedAt: new Date().toISOString() }), { status: 'running' });
     await reporter.providerRequest({ provider: 'local-ffmpeg', model: 'video-edit', jobKind: 'story-compose', resumed: Boolean(existingTaskId), upstreamTaskId: existingTaskId || undefined });
@@ -1028,7 +1296,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
 
   const runMode = useCallback(async (mode: StoryRunMode, targetId: string, reporter: RunNodeLifecycleReporter, signal: AbortSignal, budget: StoryRunTaskBudget) => {
     if (mode === 'analyze') return analyze(reporter, signal);
-    if (mode === 'asset-one') return generateAssets([targetId], reporter, signal, budget);
+    if (mode === 'asset-one') return runAssetRegenerationSession(targetId, reporter, signal, budget);
     if (mode === 'assets-missing') return generateAssets(null, reporter, signal, budget);
     if (mode === 'compile') return compile();
     if (mode === 'videos-missing') return generateVideos(reporter, signal, budget);
@@ -1048,7 +1316,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
     await generateVideos(reporter, signal, budget);
     if (projectRef.current.shots.every((shot) => shot.videoUrl)) await compose(reporter, signal);
     return projectRef.current;
-  }, [analyze, compile, compose, generateAssets, generateVideos]);
+  }, [analyze, compile, compose, generateAssets, generateVideos, runAssetRegenerationSession]);
 
   useRunTrigger(id, async (reporter) => {
     const liveData = rf.getNode(id)?.data as Record<string, unknown> | undefined;
@@ -1082,14 +1350,23 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
       logBus.success(`Story 流程完成：${synced.title}`, src);
     } catch (error: any) {
       const message = error?.message || 'Story 自动生产失败';
-      mutate((current) => ({
-        ...current,
-        composeTaskStatus: current.stage === 'compose' && current.composeTaskStatus !== 'stale'
-          ? controller.signal.aborted ? 'cancelled' : 'failed'
-          : current.composeTaskStatus,
-        lastError: message,
-        updatedAt: new Date().toISOString(),
-      }), { status: controller.signal.aborted ? 'cancelled' : 'error', error: message });
+      mutate((current) => {
+        const composeAlreadySucceeded = current.stage === 'compose'
+          && current.composeTaskStatus === 'succeeded'
+          && Boolean(current.finalVideoUrl);
+        return {
+          ...current,
+          composeTaskStatus: current.stage === 'compose'
+            && current.composeTaskStatus !== 'stale'
+            && !composeAlreadySucceeded
+            ? controller.signal.aborted ? 'cancelled' : 'failed'
+            : current.composeTaskStatus,
+          lastError: composeAlreadySucceeded
+            ? `成片已生成，但保存运行记录失败：${message}`
+            : message,
+          updatedAt: new Date().toISOString(),
+        };
+      }, { status: controller.signal.aborted ? 'cancelled' : 'error', error: message });
       logBus.error(`Story 失败：${message}`, src);
       throw error;
     } finally {
@@ -1101,6 +1378,43 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
       }
     }
   }, 'story', { lifecycleAware: true });
+
+  const requestAssetRun = useCallback((assetId: string) => {
+    const asset = projectRef.current.assets.find((item) => item.id === assetId);
+    if (!asset || asset.locked || asset.kind === 'audio' && Boolean(asset.url)) return;
+    if (generatingAssetIds.has(assetId)) return;
+    const activeSession = assetRunSessionRef.current;
+    if (activeSession) {
+      if (!activeSession.enqueue(assetId)) setLocalMessage(`${asset.name} 当前无法加入生成队列`);
+      return;
+    }
+    if (assetRunRequestPendingRef.current) {
+      pendingAssetRunIdsRef.current.add(assetId);
+      setGeneratingAssetIds((current) => new Set(current).add(assetId));
+      setLocalMessage(`${asset.name} 已加入并发生成队列`);
+      return;
+    }
+    if (busy) {
+      setLocalMessage('Story 正在执行其他生产步骤；完成或停止后即可生成该资产');
+      return;
+    }
+    assetRunRequestPendingRef.current = true;
+    pendingAssetRunIdsRef.current.add(assetId);
+    setAssetRunActive(true);
+    setGeneratingAssetIds((current) => new Set(current).add(assetId));
+    setLocalMessage(`${asset.name} 正在准备生成…`);
+    if (!requestRun('asset-one', assetId)) {
+      assetRunRequestPendingRef.current = false;
+      pendingAssetRunIdsRef.current.delete(assetId);
+      setAssetRunActive(false);
+      setGeneratingAssetIds((current) => {
+        const next = new Set(current);
+        next.delete(assetId);
+        return next;
+      });
+      setLocalMessage('当前无法启动资产生成，请稍后重试');
+    }
+  }, [busy, generatingAssetIds, requestRun]);
 
   const handleScriptChange = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
     commit(invalidateStoryForScriptChange(projectRef.current, event.target.value));
@@ -1283,6 +1597,15 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
     setLocalMessage('资产已删除，相关镜头已标记为需更新');
   }, [mutate]);
 
+  const confirmRemoveAsset = useCallback((asset: StoryAsset) => {
+    if (generatingAssetIds.has(asset.id)) {
+      setLocalMessage(`${asset.name} 正在生成，请等待完成或先停止当前流程`);
+      return;
+    }
+    if (!window.confirm(`确认删除资产「${asset.name}」？相关镜头会标记为需要更新。`)) return;
+    removeAsset(asset.id);
+  }, [generatingAssetIds, removeAsset]);
+
   const clearAssetMedia = useCallback((asset: StoryAsset) => {
     updateAsset(asset.id, {
       source: 'missing', status: 'pending', url: '', taskId: '', taskProvider: '', taskModel: '', taskEndpoint: '', taskClipIds: [], error: '', generatedAt: '',
@@ -1443,32 +1766,78 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
     </div>
   );
 
+  const assetActionsBlocked = busy && !assetRunActive;
+
   const renderAssetsStage = () => (
     <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_340px] gap-4">
       <section className="min-h-0 overflow-auto rounded-2xl border border-white/10 bg-white/[0.025] p-4">
         {ASSET_KIND_ORDER.map((kind) => {
           const assets = project.assets.filter((asset) => asset.kind === kind);
+          const selectedKindAsset = selectedAsset?.kind === kind ? selectedAsset : null;
           return <section key={kind} className="mb-6">
-            <div className="mb-2 flex items-center gap-2"><h3 className="text-sm font-semibold text-white">{storyAssetKindLabel(kind)}</h3><span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-white/50">{assets.filter((asset) => asset.url).length}/{assets.length}</span><button type="button" onClick={() => addAsset(kind)} className="ml-auto rounded-lg border border-white/10 p-1.5 text-white/50 hover:text-amber-200" title={`新增${storyAssetKindLabel(kind)}`}><Plus size={13} /></button></div>
-            {assets.length ? <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">{assets.map((asset) => <article key={asset.id} onClick={() => setSelectedAssetId(asset.id)} className={`overflow-hidden rounded-xl border ${asset.id === selectedAsset?.id ? 'border-amber-300/50' : 'border-white/10'} bg-black/20`}>
-              <div className="relative aspect-video bg-white/[0.03]">{asset.url ? asset.kind === 'audio' ? <div className="grid h-full place-items-center px-3"><audio src={asset.url} controls className="w-full" /></div> : <img src={asset.url} alt={asset.name} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-white/25"><PackageOpen size={30} /></div>}<span className={`absolute right-2 top-2 rounded-full border px-2 py-1 text-[9px] ${statusTone(asset.status)}`}>{statusLabel(asset.status)}</span></div>
-              <div className="space-y-2 p-3"><div className="flex items-center gap-2"><strong className="min-w-0 flex-1 truncate text-xs text-white">{asset.name}</strong><button onClick={(event) => { event.stopPropagation(); updateAsset(asset.id, { locked: !asset.locked }); }} className="text-white/45">{asset.locked ? <Lock size={13} /> : <Unlock size={13} />}</button></div><p className="line-clamp-2 min-h-9 text-[10px] leading-4 text-white/45">{asset.description || '点击右侧补充资产描述和提示词'}</p>{asset.error && <p className="text-[10px] text-rose-300">{asset.error}</p>}
-                <div className={`grid ${kind === 'audio' ? 'grid-cols-3' : 'grid-cols-4'} gap-1`}><label className="flex cursor-pointer items-center justify-center gap-1 rounded-lg border border-white/10 px-2 py-2 text-[10px] text-white/65 hover:bg-white/5"><Upload size={11} />电脑<input type="file" accept={kind === 'audio' ? 'audio/*' : 'image/*'} className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleAssetUpload(asset, file); event.currentTarget.value = ''; }} /></label><button onClick={(event) => { event.stopPropagation(); useUpstreamAsset(asset); }} className="flex items-center justify-center gap-1 rounded-lg border border-white/10 px-2 py-2 text-[10px] text-white/65"><ImagePlus size={11} />上游</button>{kind !== 'audio' && <button onClick={(event) => { event.stopPropagation(); openResourcePicker(asset); }} className="flex items-center justify-center gap-1 rounded-lg border border-cyan-300/25 bg-cyan-300/[0.06] px-2 py-2 text-[10px] text-cyan-100"><Library size={11} />资产库</button>}<button disabled={busy || asset.locked || Boolean(asset.url)} onClick={(event) => { event.stopPropagation(); requestRun('asset-one', asset.id); }} className="flex items-center justify-center gap-1 rounded-lg border border-amber-300/30 bg-amber-300/10 px-2 py-2 text-[10px] text-amber-200 disabled:opacity-30"><WandSparkles size={11} />AI</button></div>
+            <div className="mb-2 flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-white">{storyAssetKindLabel(kind)}</h3>
+              <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-white/50">{assets.filter((asset) => asset.url).length}/{assets.length}</span>
+              <div className="ml-auto flex items-center gap-1">
+                <button type="button" onClick={() => addAsset(kind)} className="rounded-lg border border-white/10 p-1.5 text-white/50 hover:text-amber-200" title={`新增${storyAssetKindLabel(kind)}`}><Plus size={13} /></button>
+                <button type="button" disabled={!selectedKindAsset || generatingAssetIds.has(selectedKindAsset.id)} onClick={() => selectedKindAsset && confirmRemoveAsset(selectedKindAsset)} className="rounded-lg border border-rose-300/15 p-1.5 text-rose-300/70 hover:border-rose-300/35 hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-25" title={selectedKindAsset ? `删除当前选中的${storyAssetKindLabel(kind)}「${selectedKindAsset.name}」` : `请先选择要删除的${storyAssetKindLabel(kind)}`}><Trash2 size={13} /></button>
               </div>
-            </article>)}</div> : <div className="rounded-xl border border-dashed border-white/10 px-4 py-5 text-center text-[10px] text-white/30">暂无{storyAssetKindLabel(kind)}，点击右上角 + 新增</div>}
+            </div>
+            {assets.length ? <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">{assets.map((asset) => {
+              const generating = generatingAssetIds.has(asset.id);
+              return <article key={asset.id} onClick={() => setSelectedAssetId(asset.id)} className={`overflow-hidden rounded-xl border transition ${asset.id === selectedAsset?.id ? 'border-amber-300/50' : 'border-white/10'} ${generating ? 'shadow-[0_0_24px_rgba(251,191,36,0.12)]' : ''} bg-black/20`}>
+                <div className="relative aspect-video bg-white/[0.03]">
+                  {asset.url
+                    ? asset.kind === 'audio'
+                      ? <div className="grid h-full place-items-center px-3"><audio src={asset.url} controls className="w-full" /></div>
+                      : <img src={asset.url} alt={asset.name} className={`h-full w-full object-cover transition duration-500 ${generating ? 'scale-[1.02] opacity-55' : ''}`} />
+                    : <div className="grid h-full place-items-center text-white/25"><PackageOpen size={30} /></div>}
+                  {generating && <div className="absolute inset-0 grid place-items-center overflow-hidden bg-black/45 backdrop-blur-[1px]">
+                    <span className="absolute h-24 w-24 animate-ping rounded-full border border-amber-300/20" />
+                    <div className="relative flex flex-col items-center gap-1 rounded-xl border border-amber-300/30 bg-black/65 px-4 py-3 text-amber-100 shadow-xl">
+                      <Loader2 size={20} className="animate-spin" />
+                      <strong className="text-[11px]">生成中</strong>
+                      <span className="text-[9px] text-white/45">{asset.url ? '旧素材保留至新图成功' : '正在创建素材'}</span>
+                    </div>
+                  </div>}
+                  <span className={`absolute right-2 top-2 rounded-full border px-2 py-1 text-[9px] ${statusTone(asset.status)}`}>{generating ? '生成中' : statusLabel(asset.status)}</span>
+                </div>
+                <div className="space-y-2 p-3">
+                  <div className="flex items-center gap-2">
+                    <strong className="min-w-0 flex-1 truncate text-xs text-white">{asset.name}</strong>
+                    <button onClick={(event) => { event.stopPropagation(); updateAsset(asset.id, { locked: !asset.locked }); }} className="text-white/45" title={asset.locked ? '解除锁定' : '锁定资产'}>{asset.locked ? <Lock size={13} /> : <Unlock size={13} />}</button>
+                    <button disabled={generating} onClick={(event) => { event.stopPropagation(); confirmRemoveAsset(asset); }} className="text-rose-300/65 hover:text-rose-200 disabled:opacity-25" title={`删除「${asset.name}」`}><Trash2 size={13} /></button>
+                  </div>
+                  <p className="line-clamp-2 min-h-9 text-[10px] leading-4 text-white/45">{asset.description || '点击右侧补充资产描述和提示词'}</p>
+                  {asset.error && <p className="text-[10px] text-rose-300">{asset.error}</p>}
+                  <div className={`grid ${kind === 'audio' ? 'grid-cols-3' : 'grid-cols-4'} gap-1`}>
+                    <label className="flex cursor-pointer items-center justify-center gap-1 rounded-lg border border-white/10 px-2 py-2 text-[10px] text-white/65 hover:bg-white/5"><Upload size={11} />电脑<input type="file" accept={kind === 'audio' ? 'audio/*' : 'image/*'} className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleAssetUpload(asset, file); event.currentTarget.value = ''; }} /></label>
+                    <button onClick={(event) => { event.stopPropagation(); useUpstreamAsset(asset); }} className="flex items-center justify-center gap-1 rounded-lg border border-white/10 px-2 py-2 text-[10px] text-white/65"><ImagePlus size={11} />上游</button>
+                    {kind !== 'audio' && <button onClick={(event) => { event.stopPropagation(); openResourcePicker(asset); }} className="flex items-center justify-center gap-1 rounded-lg border border-cyan-300/25 bg-cyan-300/[0.06] px-2 py-2 text-[10px] text-cyan-100"><Library size={11} />资产库</button>}
+                    <button disabled={assetActionsBlocked || generating || asset.locked || kind === 'audio' && Boolean(asset.url)} onClick={(event) => { event.stopPropagation(); requestAssetRun(asset.id); }} className={`flex items-center justify-center gap-1 rounded-lg border px-2 py-2 text-[10px] disabled:cursor-not-allowed disabled:opacity-30 ${generating ? 'animate-pulse border-amber-200/50 bg-amber-200/15 text-amber-100' : 'border-amber-300/30 bg-amber-300/10 text-amber-200'}`} title={asset.url && kind !== 'audio' ? '重新生成；可与其他资产并发，新图成功前保留当前图片' : 'AI 生成'}>{generating ? <Loader2 size={11} className="animate-spin" /> : <WandSparkles size={11} />}{generating ? '生成中' : asset.url && kind !== 'audio' ? '重生成' : 'AI'}</button>
+                  </div>
+                </div>
+              </article>;
+            })}</div> : <div className="rounded-xl border border-dashed border-white/10 px-4 py-5 text-center text-[10px] text-white/30">暂无{storyAssetKindLabel(kind)}，点击右上角 + 新增</div>}
           </section>;
         })}
       </section>
       <aside className="min-h-0 overflow-auto rounded-2xl border border-white/10 bg-white/[0.025] p-4">
         {selectedAsset ? <div className="space-y-3">
-          <div className="flex items-center gap-2"><strong className="min-w-0 flex-1 truncate text-sm text-white">资产详情</strong><button onClick={() => updateAsset(selectedAsset.id, { locked: !selectedAsset.locked })} className={selectedAsset.locked ? 'text-amber-200' : 'text-white/40'}>{selectedAsset.locked ? <Lock size={14} /> : <Unlock size={14} />}</button><button onClick={() => removeAsset(selectedAsset.id)} className="text-rose-300"><Trash2 size={14} /></button></div>
+          <div className="flex items-center gap-2"><strong className="min-w-0 flex-1 truncate text-sm text-white">资产详情</strong><button onClick={() => updateAsset(selectedAsset.id, { locked: !selectedAsset.locked })} className={selectedAsset.locked ? 'text-amber-200' : 'text-white/40'}>{selectedAsset.locked ? <Lock size={14} /> : <Unlock size={14} />}</button><button disabled={generatingAssetIds.has(selectedAsset.id)} onClick={() => confirmRemoveAsset(selectedAsset)} className="text-rose-300 disabled:opacity-25" title={`删除「${selectedAsset.name}」`}><Trash2 size={14} /></button></div>
           <label className="block text-[11px] text-white/50">名称<input value={selectedAsset.name} onChange={(event) => updateAsset(selectedAsset.id, { name: event.target.value }, true)} className="mt-1 w-full rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-xs text-white" /></label>
           <label className="block text-[11px] text-white/50">类型<select value={selectedAsset.kind} onChange={(event) => updateAsset(selectedAsset.id, { kind: event.target.value as StoryAssetKind }, true)} className="mt-1 w-full rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-xs text-white">{ASSET_KIND_ORDER.map((kind) => <option key={kind} value={kind}>{storyAssetKindLabel(kind)}</option>)}</select></label>
           <label className="block text-[11px] text-white/50">设定描述<textarea value={selectedAsset.description} onChange={(event) => updateAsset(selectedAsset.id, { description: event.target.value }, true)} className="mt-1 h-24 w-full resize-none rounded-lg border border-white/10 bg-black/25 p-3 text-xs leading-5 text-white" /></label>
           <label className="block text-[11px] text-white/50">AI 提示词<textarea value={selectedAsset.prompt} onChange={(event) => updateAsset(selectedAsset.id, { prompt: event.target.value }, true)} className="mt-1 h-28 w-full resize-none rounded-lg border border-white/10 bg-black/25 p-3 text-xs leading-5 text-white" /></label>
           <label className="block text-[11px] text-white/50">负面提示词<textarea value={selectedAsset.negativePrompt} onChange={(event) => updateAsset(selectedAsset.id, { negativePrompt: event.target.value }, true)} className="mt-1 h-16 w-full resize-none rounded-lg border border-white/10 bg-black/25 p-3 text-xs text-white" /></label>
+          {selectedAsset.kind === 'character' && <div className="rounded-lg border border-emerald-300/20 bg-emerald-300/[0.06] px-3 py-2 text-[10px] leading-4 text-emerald-100">生成规范：纯白底横版设定图，左侧脸部特写，右侧同一人物正面／侧面／背面三视图。</div>}
+          {selectedAsset.kind === 'costume' && <div className="rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] px-3 py-2 text-[10px] leading-4 text-cyan-100">生成规范：默认只展示服装本体，不出现人物或环境。{selectedAssetReferenceNames ? `若模型不可避免生成人物，将引用角色「${selectedAssetReferenceNames}」保持身份一致。` : '当前没有可用角色参考图，将严格按纯服装白底图生成。'}</div>}
           <div><div className="mb-2 text-[11px] text-white/50">用于镜头</div><div className="flex max-h-32 flex-wrap gap-1 overflow-auto">{project.shots.map((shot, index) => { const linked = shot.assetIds.includes(selectedAsset.id); return <button key={shot.id} onClick={() => toggleAssetShot(selectedAsset.id, shot.id)} className={`rounded-lg border px-2 py-1 text-[9px] ${linked ? 'border-amber-300/40 bg-amber-300/10 text-amber-200' : 'border-white/10 text-white/40'}`}>#{index + 1} {shot.title}</button>; })}</div></div>
-          <div className={`grid ${selectedAsset.kind === 'audio' ? 'grid-cols-2' : 'grid-cols-3'} gap-2`}><button disabled={busy || selectedAsset.locked || Boolean(selectedAsset.url)} onClick={() => requestRun('asset-one', selectedAsset.id)} className="rounded-lg border border-amber-300/30 bg-amber-300/10 px-3 py-2 text-xs text-amber-200 disabled:opacity-30"><WandSparkles size={12} className="mr-1 inline" />AI 生成</button>{selectedAsset.kind !== 'audio' && <button onClick={() => openResourcePicker(selectedAsset)} className="rounded-lg border border-cyan-300/25 bg-cyan-300/[0.06] px-3 py-2 text-xs text-cyan-100"><Library size={12} className="mr-1 inline" />资产库</button>}<button disabled={!selectedAsset.url} onClick={() => clearAssetMedia(selectedAsset)} className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/55 disabled:opacity-30">清空素材</button></div>
+          <div className={`grid ${selectedAsset.kind === 'audio' ? 'grid-cols-2' : 'grid-cols-3'} gap-2`}>
+            <button disabled={assetActionsBlocked || generatingAssetIds.has(selectedAsset.id) || selectedAsset.locked || selectedAsset.kind === 'audio' && Boolean(selectedAsset.url)} onClick={() => requestAssetRun(selectedAsset.id)} className={`rounded-lg border px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-30 ${generatingAssetIds.has(selectedAsset.id) ? 'animate-pulse border-amber-200/50 bg-amber-200/15 text-amber-100' : 'border-amber-300/30 bg-amber-300/10 text-amber-200'}`} title={selectedAsset.url && selectedAsset.kind !== 'audio' ? '重新生成；可与其他资产并发，新图成功前保留当前图片' : 'AI 生成'}>{generatingAssetIds.has(selectedAsset.id) ? <Loader2 size={12} className="mr-1 inline animate-spin" /> : <WandSparkles size={12} className="mr-1 inline" />}{generatingAssetIds.has(selectedAsset.id) ? '生成中' : selectedAsset.url && selectedAsset.kind !== 'audio' ? '重新生成' : 'AI 生成'}</button>
+            {selectedAsset.kind !== 'audio' && <button onClick={() => openResourcePicker(selectedAsset)} className="rounded-lg border border-cyan-300/25 bg-cyan-300/[0.06] px-3 py-2 text-xs text-cyan-100"><Library size={12} className="mr-1 inline" />资产库</button>}
+            <button disabled={!selectedAsset.url || generatingAssetIds.has(selectedAsset.id)} onClick={() => clearAssetMedia(selectedAsset)} className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/55 disabled:opacity-30">清空素材</button>
+          </div>
           {selectedAsset.taskId && <div className="break-all rounded-lg border border-white/10 bg-black/20 p-2 text-[9px] text-white/30">任务 {selectedAsset.taskId} · {selectedAsset.taskProvider || 'unknown'}</div>}
         </div> : <div className="grid h-full place-items-center text-center text-xs text-white/35"><div><PackageOpen className="mx-auto mb-2" /><p>选择一个资产后可编辑</p></div></div>}
       </aside>
@@ -1483,21 +1852,53 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
     <div className="min-h-0 flex-1 overflow-auto rounded-2xl border border-white/10 bg-white/[0.025] p-4"><div className="grid grid-cols-2 gap-3 xl:grid-cols-3">{project.shots.map((shot, index) => <article key={shot.id} className="overflow-hidden rounded-xl border border-white/10 bg-black/20"><div className="relative aspect-video bg-black">{shot.videoUrl ? <video src={shot.videoUrl} controls className="h-full w-full object-contain" /> : <div className="grid h-full place-items-center text-white/25">{ACTIVE_TASK_STATUSES.has(shot.status) ? <Loader2 className="animate-spin" /> : <Film />}</div>}<span className={`absolute right-2 top-2 rounded-full border px-2 py-1 text-[9px] ${statusTone(shot.status)}`}>{statusLabel(shot.status)}</span></div><div className="p-3"><div className="flex gap-2"><span className="text-[10px] text-white/35">#{index + 1}</span><strong className="min-w-0 flex-1 truncate text-xs text-white">{shot.title}</strong><span className="text-[10px] text-white/45">{shot.durationSec}s</span></div>{shot.error && <p className="mt-2 text-[10px] text-rose-300">{shot.error}</p>}</div></article>)}</div></div>
   );
 
+  const composeRunning = ACTIVE_TASK_STATUSES.has(project.composeTaskStatus);
   const renderComposeStage = () => (
-    <div className="grid min-h-0 flex-1 place-items-center rounded-2xl border border-white/10 bg-white/[0.025] p-6"><div className="w-full max-w-4xl text-center">{project.finalVideoUrl ? <video src={project.finalVideoUrl} controls className="mx-auto max-h-[58vh] w-full rounded-2xl bg-black shadow-2xl" /> : <div className="mx-auto grid aspect-video max-w-3xl place-items-center rounded-2xl border border-dashed border-white/15 bg-black/20 text-white/30"><div><Clapperboard className="mx-auto mb-3" size={36} /><p>所有镜头完成后，一键合成为片</p></div></div>}<h3 className="mt-5 text-xl font-semibold text-white">{project.title}</h3><p className="mt-2 text-sm text-white/45">{project.shots.length} 镜头 · {project.shots.reduce((sum, shot) => sum + shot.durationSec, 0)} 秒 · {project.settings.aspectRatio}</p><div className="mt-5 flex justify-center gap-2"><button onClick={() => materializeLinkedNodes()} className="rounded-xl border border-white/10 px-4 py-2 text-xs text-white/70">打开关联 Director / 剪辑台</button>{project.finalVideoUrl && <a href={project.finalVideoUrl} download className="rounded-xl border border-emerald-300/30 bg-emerald-300/10 px-4 py-2 text-xs text-emerald-200">下载成片</a>}</div></div></div>
+    <div
+      data-story-compose-state={project.composeTaskStatus}
+      className="grid min-h-0 flex-1 place-items-center rounded-2xl border border-white/10 bg-white/[0.025] p-6"
+    >
+      <div className="w-full max-w-4xl text-center">
+        {project.finalVideoUrl ? (
+          <video src={project.finalVideoUrl} controls className="mx-auto max-h-[58vh] w-full rounded-2xl bg-black shadow-2xl" />
+        ) : (
+          <div className={`mx-auto grid aspect-video max-w-3xl place-items-center rounded-2xl border border-dashed bg-black/20 ${project.composeTaskStatus === 'failed' ? 'border-rose-300/30' : composeRunning ? 'border-amber-300/30' : 'border-white/15'}`}>
+            <div className={project.composeTaskStatus === 'failed' ? 'text-rose-200/80' : composeRunning ? 'text-amber-100/80' : 'text-white/30'}>
+              {composeRunning ? <Loader2 className="mx-auto mb-3 animate-spin" size={36} /> : project.composeTaskStatus === 'failed' ? <AlertTriangle className="mx-auto mb-3" size={36} /> : <Clapperboard className="mx-auto mb-3" size={36} />}
+              <p className="font-medium">
+                {composeRunning ? '正在合成成片，请稍候…' : project.composeTaskStatus === 'failed' ? '上次合成失败，可以直接重新合成' : '所有镜头完成后，一键合成为片'}
+              </p>
+              {composeRunning && <p className="mt-2 text-xs opacity-60">正在使用本地 FFmpeg 按镜头顺序处理，不会重复生成镜头视频</p>}
+            </div>
+          </div>
+        )}
+        <h3 className="mt-5 text-xl font-semibold text-white">{project.title}</h3>
+        <p className="mt-2 text-sm text-white/45">{project.shots.length} 镜头 · {project.shots.reduce((sum, shot) => sum + shot.durationSec, 0)} 秒 · {project.settings.aspectRatio}</p>
+        {project.composeTaskStatus === 'failed' && project.lastError && (
+          <div data-story-compose-error="true" className="mx-auto mt-4 max-w-3xl rounded-xl border border-rose-300/25 bg-rose-300/[0.06] px-4 py-3 text-left text-xs leading-5 text-rose-100">
+            <strong className="block text-rose-200">成片合成失败</strong>
+            <span className="break-words text-rose-100/75">{project.lastError}</span>
+          </div>
+        )}
+        <div className="mt-5 flex justify-center gap-2">
+          <button onClick={() => materializeLinkedNodes()} className="rounded-xl border border-white/10 px-4 py-2 text-xs text-white/70">打开关联 Director / 剪辑台</button>
+          {project.finalVideoUrl && <a href={project.finalVideoUrl} download className="rounded-xl border border-emerald-300/30 bg-emerald-300/10 px-4 py-2 text-xs text-emerald-200">下载成片</a>}
+        </div>
+      </div>
+    </div>
   );
 
   const mainAction = activeStage === 'script'
     ? { label: '分析剧本', mode: 'analyze' as StoryRunMode, disabled: !project.script.trim() }
     : activeStage === 'shots'
-      ? { label: '确认镜头，准备资产', mode: 'assets-missing' as StoryRunMode, disabled: !project.shots.length }
+      ? { label: '确认镜头，进入准备资产', mode: 'review-assets' as const, disabled: !project.shots.length }
       : activeStage === 'assets'
         ? { label: progress.assets.missing ? `生成 ${progress.assets.missing} 个缺失资产` : '资产已齐，编译提示词', mode: progress.assets.missing ? 'assets-missing' as StoryRunMode : 'compile' as StoryRunMode, disabled: !project.shots.length }
         : activeStage === 'prompts'
           ? { label: project.shots.every((shot) => shot.finalPrompt) ? `生成 ${project.shots.filter((shot) => !shot.videoUrl).length} 个镜头视频` : '编译全部提示词', mode: project.shots.every((shot) => shot.finalPrompt) ? 'videos-missing' as StoryRunMode : 'compile' as StoryRunMode, disabled: !project.shots.length }
           : activeStage === 'videos'
             ? { label: progress.videos.completed === progress.videos.total && progress.videos.total > 0 ? '合成为片' : '生成缺失视频', mode: progress.videos.completed === progress.videos.total && progress.videos.total > 0 ? 'compose' as StoryRunMode : 'videos-missing' as StoryRunMode, disabled: !project.shots.length }
-            : { label: project.finalVideoUrl ? '重新合成' : '合成为片', mode: 'compose' as StoryRunMode, disabled: !project.shots.length || progress.videos.completed !== progress.videos.total };
+            : { label: project.finalVideoUrl || project.composeTaskStatus === 'failed' ? '重新合成' : '合成为片', mode: 'compose' as StoryRunMode, disabled: !project.shots.length || progress.videos.completed !== progress.videos.total };
 
   const resourcePickerTarget = project.assets.find((asset) => asset.id === resourcePickerAssetId);
   const resourcePicker = resourcePickerAssetId ? (
@@ -1515,7 +1916,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
       <header className="flex h-16 shrink-0 items-center gap-4 border-b border-white/10 px-5"><div className="grid h-9 w-9 place-items-center rounded-xl border border-amber-300/30 bg-amber-300/10 text-amber-200"><BookOpenText size={18} /></div><div className="min-w-0"><h2 className="truncate text-sm font-semibold">Story 全自动制片 · {project.title}</h2><p className="text-[10px] text-white/45">{compactProgress} · 覆盖 {project.coverage.percent}% · production r{project.productionRevision}</p></div><div className="ml-auto flex items-center gap-2"><button onClick={() => downloadJson(project)} className="rounded-lg border border-white/10 p-2 text-white/55" title="导出 Story JSON"><Download size={15} /></button><button onClick={() => { closeResourcePicker(); setWorkbenchOpen(false); }} className="rounded-lg border border-white/10 p-2 text-white/65"><X size={16} /></button></div></header>
       <nav className="shrink-0 border-b border-white/10 px-5 py-3"><div className="mx-auto flex max-w-6xl items-center">{STAGE_ORDER.map((stage, index) => { const state = project.stages[stage]; const active = activeStage === stage; return <div key={stage} className="flex min-w-0 flex-1 items-center"><button onClick={() => setActiveStage(stage)} className={`flex min-w-0 items-center gap-2 rounded-xl px-3 py-2 text-left ${active ? 'bg-amber-300/10 text-amber-100' : 'text-white/45 hover:bg-white/[0.03]'}`}><span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border text-[10px] ${state.status === 'succeeded' ? 'border-emerald-300/35 bg-emerald-300/10 text-emerald-200' : active ? 'border-amber-300/50 text-amber-200' : 'border-white/10'}`}>{state.status === 'succeeded' ? <Check size={11} /> : index + 1}</span><span className="min-w-0"><span className="block truncate text-xs font-medium">{storyStageLabel(stage)}</span><span className="block truncate text-[9px] opacity-60">{state.message || `${state.completed}/${state.total}`}</span></span></button>{index < STAGE_ORDER.length - 1 && <div className="h-px flex-1 bg-white/10" />}</div>; })}</div></nav>
       <main className="mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col p-4">{activeStage === 'script' ? renderScriptStage() : activeStage === 'shots' ? renderShotsStage() : activeStage === 'assets' ? renderAssetsStage() : activeStage === 'prompts' ? renderPromptsStage() : activeStage === 'videos' ? renderVideosStage() : renderComposeStage()}</main>
-      <footer className="flex shrink-0 items-center gap-3 border-t border-white/10 bg-black/25 px-5 py-3"><div className="min-w-0 flex-1 text-xs text-white/50">{localMessage || project.lastError || '修改会自动保存到当前画布；已完成结果不会重复生成。'}</div>{(progress.assets.failed > 0 || progress.videos.failed > 0) && <button disabled={busy} onClick={() => requestRun('retry-failed')} className="rounded-xl border border-rose-300/25 px-4 py-2.5 text-xs text-rose-200 disabled:opacity-40"><RefreshCw size={13} className="mr-1 inline" />仅重试失败</button>}{busy ? <button onClick={() => void stopRun()} className="rounded-xl border border-rose-300/30 bg-rose-300/10 px-5 py-2.5 text-xs font-semibold text-rose-200"><Pause size={14} className="mr-1 inline" />停止</button> : <><button onClick={() => requestRun('all')} className="rounded-xl border border-white/10 px-4 py-2.5 text-xs text-white/70"><Sparkles size={13} className="mr-1 inline" />一键生产全部</button><button disabled={mainAction.disabled} onClick={() => requestRun(mainAction.mode)} className="rounded-xl bg-gradient-to-r from-lime-300 to-emerald-300 px-6 py-2.5 text-xs font-bold text-black shadow-lg shadow-emerald-500/10 disabled:opacity-35"><Play size={13} className="mr-1 inline fill-current" />{mainAction.label}</button></>}</footer>
+      <footer className="flex shrink-0 items-center gap-3 border-t border-white/10 bg-black/25 px-5 py-3"><div className="min-w-0 flex-1 text-xs text-white/50">{localMessage || project.lastError || '修改会自动保存到当前画布；已完成结果不会重复生成。'}</div>{(progress.assets.failed > 0 || progress.videos.failed > 0) && <button disabled={busy} onClick={() => requestRun('retry-failed')} className="rounded-xl border border-rose-300/25 px-4 py-2.5 text-xs text-rose-200 disabled:opacity-40"><RefreshCw size={13} className="mr-1 inline" />仅重试失败</button>}{busy ? <button onClick={() => void stopRun()} className="rounded-xl border border-rose-300/30 bg-rose-300/10 px-5 py-2.5 text-xs font-semibold text-rose-200"><Pause size={14} className="mr-1 inline" />停止</button> : <><button onClick={() => requestRun('all')} className="rounded-xl border border-white/10 px-4 py-2.5 text-xs text-white/70"><Sparkles size={13} className="mr-1 inline" />一键生产全部</button><button disabled={mainAction.disabled} onClick={() => mainAction.mode === 'review-assets' ? enterAssetReview() : requestRun(mainAction.mode)} className="rounded-xl bg-gradient-to-r from-lime-300 to-emerald-300 px-6 py-2.5 text-xs font-bold text-black shadow-lg shadow-emerald-500/10 disabled:opacity-35"><Play size={13} className="mr-1 inline fill-current" />{mainAction.label}</button></>}</footer>
       {resourcePicker}
     </div>, document.body) : null;
 

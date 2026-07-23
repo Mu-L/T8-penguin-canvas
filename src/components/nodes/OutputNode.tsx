@@ -69,7 +69,13 @@ import type { RunNodeLifecycleReporter } from '../../types/project';
 
 type OutputProduceMeta =
   | ImageEditProduceMeta
-  | { type: 'rh-capability' | 'video-frame-extract' | 'rh-video-capability'; label?: string };
+  | {
+      type: 'rh-capability' | 'video-frame-extract' | 'rh-video-capability';
+      label?: string;
+      capability?: string;
+      toolId?: string;
+      taskIds?: string[];
+    };
 
 /**
  * OutputNode - 通用输出素材节点 (中继展示型)
@@ -940,11 +946,22 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
           x: baseX + (i % COLS) * COL_W + _off.dx,
           y: baseY + Math.floor(i / COLS) * ROW_H + _off.dy,
         },
-        data: createOutputDataFromItem({
-          kind: 'video',
-          url: u,
-          name: fileNameFromUrl(u),
-        }),
+        data: {
+          ...createOutputDataFromItem({
+            kind: 'video',
+            url: u,
+            name: fileNameFromUrl(u),
+          }),
+          ...(isRhCapabilityOutput
+            ? {
+                rhCapabilityOutput: true,
+                rhCapability: _meta?.capability || '',
+                rhToolboxToolId: _meta?.toolId || '',
+                rhTaskIds: Array.isArray(_meta?.taskIds) ? _meta.taskIds : [],
+                rhSourceNodeId: id,
+              }
+            : {}),
+        },
         selected: isRhCapabilityOutput,
       } as Node;
     });
@@ -1259,7 +1276,13 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
           ...(showRhCapabilityRail ? { left: -96 } : {}),
         }}
         onFramesComplete={(imageUrls) => handleProduce(imageUrls, { type: 'video-frame-extract', label: '首尾帧获取' })}
-        onVideosComplete={(result) => handleVideoProduce(result.videoUrls, { type: 'rh-video-capability', label: result.tool.title })}
+        onVideosComplete={(result) => handleVideoProduce(result.videoUrls, {
+          type: 'rh-video-capability',
+          label: result.tool.title,
+          capability: result.tool.capabilities.find((item) => item.startsWith('video.')),
+          toolId: result.tool.id,
+          taskIds: result.taskIds,
+        })}
         onRunningChange={setRhVideoCapabilityBusy}
       />
       {/* target handle (左侧) - 上游任意类型可连入 */}

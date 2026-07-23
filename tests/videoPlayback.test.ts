@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  compatibleVideoPreviewUrl,
   LOOPING_VIDEO_DEFAULT_PROPS,
   mergeLoopingVideoProps,
+  needsCompatibleVideoPreview,
 } from '../src/utils/videoPlayback.ts';
 
 test('LOOPING_VIDEO_DEFAULT_PROPS makes canvas video previews loop by default', () => {
@@ -20,4 +22,16 @@ test('mergeLoopingVideoProps preserves caller props while keeping loop enabled',
     muted: false,
     className: 'w-full',
   });
+});
+
+test('local MOV files use a browser-compatible MP4 preview without changing the source URL', () => {
+  assert.equal(needsCompatibleVideoPreview('/files/input/camera.MOV'), true);
+  assert.equal(needsCompatibleVideoPreview('/files/output/render.mov?revision=2'), true);
+  assert.equal(needsCompatibleVideoPreview('https://cdn.example.com/render.mov'), false);
+  assert.equal(needsCompatibleVideoPreview('/files/output/render.mp4'), false);
+  assert.equal(
+    compatibleVideoPreviewUrl('/files/output/render.mov'),
+    '/api/files/video-preview?url=%2Ffiles%2Foutput%2Frender.mov',
+  );
+  assert.equal(compatibleVideoPreviewUrl('/files/output/render.mp4'), '/files/output/render.mp4');
 });

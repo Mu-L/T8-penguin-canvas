@@ -14,10 +14,13 @@ test('development launcher waits for backend before frontend and browser', () =>
   const newlineCount = (launcher.match(/\n/g) || []).length;
   const windowsNewlineCount = (launcher.match(/\r\n/g) || []).length;
   const backendWait = launcher.indexOf('18766/api/status');
+  const backendStart = launcher.indexOf('cd backend && npm run dev');
   const frontendStart = launcher.indexOf('npm run dev:vite');
   const frontendWait = launcher.indexOf('127.0.0.1:11422/');
   const browserOpen = launcher.lastIndexOf('start "" "http://127.0.0.1:11422"');
 
+  assert.ok(backendStart >= 0);
+  assert.ok(backendStart < backendWait);
   assert.ok(backendWait >= 0);
   assert.ok(backendWait < frontendStart);
   assert.ok(frontendStart < frontendWait);
@@ -28,6 +31,13 @@ test('development launcher waits for backend before frontend and browser', () =>
     newlineCount,
     'start-dev.bat must use CRLF consistently because cmd.exe can concatenate bare-LF commands',
   );
+});
+
+test('development backend watches source dependencies so backend fixes do not stay stale', () => {
+  const backendPackage = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'backend', 'package.json'), 'utf8'));
+  assert.match(backendPackage.scripts?.dev || '', /node --watch\b/);
+  assert.match(backendPackage.scripts?.dev || '', /--watch-path=src\b/);
+  assert.match(backendPackage.scripts?.dev || '', /src\/server\.js\b/);
 });
 
 test('local service waiter tolerates startup refusal/status errors until service is ready', async (t) => {

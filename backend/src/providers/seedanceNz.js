@@ -5,7 +5,12 @@ const sharp = require('sharp');
 const tls = require('tls');
 const { Agent, fetch: undiciFetch } = require('undici');
 const config = require('../config');
-const { mimeFromPath, resolveMediaRef } = require('./mediaResolver');
+const {
+  isT8LocalMediaPath,
+  mimeFromPath,
+  normalizeT8LocalMediaRef,
+  resolveMediaRef,
+} = require('./mediaResolver');
 const { providerTrace } = require('./providerTrace');
 const { safeRemoteMediaFetch } = require('../utils/safeRemoteMediaFetch');
 
@@ -684,21 +689,13 @@ function mediaKindLabel(kind) {
   return '素材';
 }
 
-function normalizeLocalT8MediaRef(value) {
-  const text = String(value || '').trim();
-  if (!/^https?:\/\//i.test(text)) return text;
-  try {
-    const parsed = new URL(text);
-    if (parsed.username || parsed.password) return text;
-    const hostname = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
-    const isLoopback = hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1';
-    const isControlledMount = /^\/(?:files|api\/resources|api\/files|input|output)\//.test(parsed.pathname || '');
-    return isLoopback && isControlledMount
-      ? `${parsed.pathname}${parsed.search || ''}`
-      : text;
-  } catch {
-    return text;
-  }
+function localMediaUnavailableError(kind) {
+  const label = mediaKindLabel(kind);
+  return boundaryError(
+    `参考${label}的本地文件不存在或无法读取。请删除失效素材后重新上传原${label}（错误码：SEEDANCE_MEDIA_REFERENCE_UNAVAILABLE）`,
+    'SEEDANCE_MEDIA_REFERENCE_UNAVAILABLE',
+    400,
+  );
 }
 
 function normalizeRemoteMediaError(error, kind, maxBytes) {
@@ -827,7 +824,7 @@ async function withUploadQueue(apiKey, intervalMs, task) {
 }
 
 async function mediaBuffer(source, kind, maxBytes, options = {}) {
-  const text = normalizeLocalT8MediaRef(source);
+  const text = normalizeT8LocalMediaRef(source);
   const dataMatch = text.match(/^data:([^;,]+);base64,(.+)$/i);
   if (dataMatch) {
     const max = Number(maxBytes) || maxBytesForKind(kind);
@@ -850,6 +847,7 @@ async function mediaBuffer(source, kind, maxBytes, options = {}) {
   } catch {
     // Remote references are resolved below. Controlled T8 mounts must be tried
     // locally first so /files/* never becomes an SSRF-prone loopback fetch.
+    if (isT8LocalMediaPath(text)) throw localMediaUnavailableError(kind);
   }
   if (!resolved) {
     try {
@@ -870,12 +868,7 @@ async function mediaBuffer(source, kind, maxBytes, options = {}) {
       buffer = readBoundedLocalFile(resolved.path, kind, max);
     } catch (error) {
       if (error?.code === 'SEEDANCE_MEDIA_TOO_LARGE') throw error;
-      const label = mediaKindLabel(kind);
-      throw boundaryError(
-        `参考${label}的本地文件不存在或无法读取。请删除失效素材后重新上传原${label}（错误码：SEEDANCE_MEDIA_REFERENCE_UNAVAILABLE）`,
-        'SEEDANCE_MEDIA_REFERENCE_UNAVAILABLE',
-        400,
-      );
+      throw localMediaUnavailableError(kind);
     }
     return {
       buffer,
@@ -912,7 +905,7 @@ async function mediaBuffer(source, kind, maxBytes, options = {}) {
 }
 
 async function uploadMedia(source, kind, apiKey, options = {}) {
-  const text = String(source || '').trim();
+  const text = normalizeT8LocalMediaRef(source);
   if (!text) throw new Error(`未收到参考${mediaKindLabel(kind)}，请重新选择或上传素材`);
 
   const fetchImpl = getFetchImpl(options);

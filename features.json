@@ -1,7 +1,28 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.6.3",
-  "lastUpdated": "2026-07-23-v2.6.3-released",
+  "version": "2.6.4",
+  "lastUpdated": "2026-07-23-v2.6.4-release-candidate",
+  "electronReleaseV264": {
+    "version": "2.6.4",
+    "status": "release-candidate-postrelease-evidence-pending",
+    "date": "2026-07-23",
+    "description": "RH 视频能力层、视频抠像持久化、MOV/FFmpeg/FFprobe/视频合成可靠性以及 Story、循环与 LLM 的集中稳定性自动更新版。",
+    "highlights": [
+      "上传素材和输出素材为视频时，左侧能力栏新增“抠像”；调用 RH 工具箱 video-removebg-v1，支持进度、停止和失败反馈，完成后生成独立输出素材节点并持久保存本地视频及 RH 工具、任务和来源节点元数据。",
+      "RH 工具箱内置发布清单新增 video.cutout 能力、视频抠像分类和真实 WebApp 参数映射；发布门会检查工具 ID、分类、WebApp ID 和前端包内能力标记，防止制作器配置未进入用户包。",
+      "MOV/ProRes 等浏览器不直接支持的视频现在生成 H.264/AAC MP4 兼容预览，原素材 URL 保持不变；上传和输出节点的 MOV 显示、播放、当前帧以及后续处理继续使用真实源素材。",
+      "FFmpeg/FFprobe 路径解析、视频合成参数、临时文件原子提交、转码失败诊断和 Story 成片恢复得到补强；RH 抠像、MOV 预览、资产索引、LLM 视频处理和成片合成统一经过后端 FIFO 进程队列，避免 Windows 并发原生进程发生 0xC0000005 崩溃；正式包同时携带权威 FFmpeg/FFprobe sidecar 与兼容 FFmpeg 运行时，并在 post-build 中执行真实探针。",
+      "Story 资产进入阶段不再擅自自动生成，单项重生成可并发、已有上传素材不覆盖，角色/服装提示词约束、资产删除、视频生成与成片状态联动继续修复。",
+      "LLM / Vision 新增 gpt-5.6-luna、kimi-k3、gemini-3.6-flash 和 Custom 自定义模型；并联循环实体 ID 与派生执行映射继续修复。"
+    ],
+    "verification": [
+      "RH 视频能力层、RunningHub 站点、次级 Provider 和输出持久化组合回归 53/53；RH 发布清单检查为 14 个启用工具、11 个分类。",
+      "真实本地 FFmpeg/FFprobe 二进制 SHA-256 已锁定；MOV 专项使用真实 ProRes MOV 转成 H.264/AAC MP4 并由 ffprobe 校验视频、音频、像素格式、时长和文件大小；3 个真实成片任务同时提交的回归验证本地媒体进程按队列完成且输出均可探测。",
+      "TypeScript 检查、相关视频/Story/循环/LLM/RH 回归、公开源码检查、生产构建、正式包 post-build 和 GitHub 自动更新三资产校验必须在发布流程中通过。",
+      "F8-F10 真实双设备、三个隔离客户端、公共 HTTPS/TLS/SNI、红队和负载证据按用户明确授权在发布后补充；延期不会把任何证据检查标记为通过。"
+    ],
+    "releaseBoundary": "本版只允许在证据清单完全不存在、版本精确为 2.6.4、发布目标为固定 40 位源码提交且显式设置 owner-approved-post-release-v2.6.4 时先发布；损坏、过期或不匹配的证据仍失败关闭。Electron/NSIS 正式打包只触发一次。"
+  },
   "storyAutoProduction": {
     "version": "2.6.2",
     "status": "released-postrelease-evidence-pending",

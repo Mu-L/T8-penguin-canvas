@@ -4,6 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const config = require('../config');
+const { withFfmpegProcessSlot } = require('../utils/ffmpegProcessQueue');
 const {
   isDataUrl,
   mediaRefToAbsoluteUrl,
@@ -127,7 +128,7 @@ function parseDurationSeconds(stderr) {
 function probeVideoDurationSeconds(inputPath, options = {}) {
   const ffmpeg = options.ffmpegPath || resolveBundledFfmpeg();
   const timeoutMs = clampInt(options.ffmpegProbeTimeoutMs || options.ffmpegTimeoutMs, 5 * 1000, 60 * 1000, 15 * 1000);
-  return new Promise((resolve) => {
+  return withFfmpegProcessSlot(() => new Promise((resolve) => {
     const child = spawn(ffmpeg, ['-hide_banner', '-i', inputPath], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
     let settled = false;
@@ -153,7 +154,7 @@ function probeVideoDurationSeconds(inputPath, options = {}) {
       clearTimeout(timer);
       resolve(parseDurationSeconds(stderr));
     });
-  });
+  }));
 }
 
 function formatFpsValue(durationSeconds, frameCount) {
@@ -188,7 +189,7 @@ function runFfmpeg(inputPath, outputPath, options = {}) {
     '+faststart',
     outputPath,
   ];
-  return new Promise((resolve, reject) => {
+  return withFfmpegProcessSlot(() => new Promise((resolve, reject) => {
     const child = spawn(ffmpeg, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
     let settled = false;
@@ -215,7 +216,7 @@ function runFfmpeg(inputPath, outputPath, options = {}) {
       if (code === 0 && fs.existsSync(outputPath)) resolve(outputPath);
       else reject(new Error(`ffmpeg 压缩失败(${code}): ${stderr.trim().slice(0, 600)}`));
     });
-  });
+  }));
 }
 
 async function runFfmpegExtractFrames(inputPath, outputDir, options = {}) {
@@ -244,7 +245,7 @@ async function runFfmpegExtractFrames(inputPath, outputDir, options = {}) {
     String(frameCount),
     pattern,
   ];
-  return new Promise((resolve, reject) => {
+  return withFfmpegProcessSlot(() => new Promise((resolve, reject) => {
     const child = spawn(ffmpeg, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
     let settled = false;
@@ -271,7 +272,7 @@ async function runFfmpegExtractFrames(inputPath, outputDir, options = {}) {
       if (code === 0) resolve(pattern);
       else reject(new Error(`ffmpeg 抽帧失败(${code}): ${stderr.trim().slice(0, 600)}`));
     });
-  });
+  }));
 }
 
 async function compressLocalVideoToDataUrl(inputPath, options = {}) {

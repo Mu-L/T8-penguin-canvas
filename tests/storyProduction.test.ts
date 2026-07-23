@@ -6,6 +6,7 @@ import {
   STORY_ANALYSIS_SCHEMA,
   applyStoryAnalysis,
   buildLocalStoryAnalysis,
+  buildStoryAssetGenerationSpec,
   buildStoryCoverageReport,
   compileStoryPrompts,
   createEmptyStoryProject,
@@ -354,6 +355,88 @@ test('missing/retry selectors skip completed work and task cap always allows res
   assert.equal(limitedVideos.newTaskCount, 0);
 });
 
+test('missing asset generation never targets uploaded, bound, or completed AI assets', () => {
+  const project = sanitizeStoryProject({
+    ...createEmptyStoryProject({ storyId: 'story-preserve-assets', script: 'x' }),
+    assets: [
+      { id: 'uploaded', kind: 'character', name: '电脑上传', source: 'upload', url: '/upload.png', status: 'succeeded' },
+      { id: 'upstream', kind: 'scene', name: '上游绑定', source: 'existing', url: '/upstream.png', status: 'succeeded' },
+      { id: 'library', kind: 'prop', name: '资产库', source: 'existing', url: '/library.png', status: 'succeeded' },
+      { id: 'generated', kind: 'costume', name: '已有 AI', source: 'ai', url: '/generated.png', status: 'succeeded' },
+      { id: 'missing-image', kind: 'prop', name: '缺失图片', source: 'missing', url: '', status: 'pending' },
+    ],
+  });
+
+  assert.deepEqual(selectStoryAssetTargets(project).map((asset) => asset.id), ['missing-image']);
+  assert.deepEqual(
+    selectStoryAssetTargets(project, ['uploaded'], false, true).map((asset) => asset.id),
+    ['uploaded'],
+    'an explicit single-asset regeneration may include an existing image',
+  );
+  assert.deepEqual(
+    selectStoryAssetTargets(project, null, false, true).map((asset) => asset.id),
+    ['missing-image'],
+    'batch generation must never use includeExistingTargets without exact target ids',
+  );
+});
+
+test('character and costume generation specs use clean identity sheets and related references', () => {
+  const project = sanitizeStoryProject({
+    ...createEmptyStoryProject({ storyId: 'story-asset-sheets', script: 'x' }),
+    settings: { aspectRatio: '9:16' },
+    shots: [
+      { id: 'shot-a', title: 'A', sourceSpan: { start: 0, end: 1, text: 'x' }, assetIds: ['hero', 'costume'] },
+    ],
+    assets: [
+      {
+        id: 'hero',
+        kind: 'character',
+        name: '萌萌',
+        description: '黑色长发，身份稳定',
+        prompt: '电影写实角色',
+        url: '/hero.png',
+        status: 'succeeded',
+        requiredByShotIds: ['shot-a'],
+      },
+      {
+        id: 'other-hero',
+        kind: 'character',
+        name: '罂瑶',
+        description: '另一个角色',
+        prompt: '另一个角色',
+        url: '/other.png',
+        status: 'succeeded',
+        requiredByShotIds: ['shot-b'],
+      },
+      {
+        id: 'costume',
+        kind: 'costume',
+        name: '黑色西装外套',
+        description: '修身黑色西装',
+        prompt: '电影级面料',
+        requiredByShotIds: ['shot-a'],
+      },
+    ],
+  });
+  const characterSpec = buildStoryAssetGenerationSpec(project, project.assets[0]);
+  const costumeSpec = buildStoryAssetGenerationSpec(project, project.assets[2]);
+
+  assert.equal(characterSpec.aspectRatio, '16:9');
+  assert.match(characterSpec.prompt, /LEFT, one large unobstructed face close-up/);
+  assert.match(characterSpec.prompt, /RIGHT, the exact same character in three full-body orthographic views: front, side profile, and back/);
+  assert.match(characterSpec.prompt, /single pure white landscape canvas/);
+  assert.match(characterSpec.negativePrompt, /different identities/);
+  assert.deepEqual(characterSpec.referenceImages, []);
+
+  assert.equal(costumeSpec.aspectRatio, '16:9');
+  assert.deepEqual(costumeSpec.referenceImages, ['/hero.png']);
+  assert.deepEqual(costumeSpec.referenceAssetIds, ['hero']);
+  assert.match(costumeSpec.prompt, /clothing-only costume design sheet/);
+  assert.match(costumeSpec.prompt, /Do NOT render a person/);
+  assert.match(costumeSpec.prompt, /exact same character identity/);
+  assert.match(costumeSpec.negativePrompt, /fashion model/);
+});
+
 test('story maps exact shot order, prompts and references into Director and VideoEdit', () => {
   let project = sanitizeStoryProject({
     ...createEmptyStoryProject({ storyId: 'story-map', script: 'a\n\nb' }),
@@ -410,19 +493,66 @@ test('story node is wired into shared schema, Canvas and roadmap', () => {
   assert.match(directorNode, /generateExternalVideo/);
 });
 
+test('story orchestration progress never auto-creates output material nodes', () => {
+  const canvas = fs.readFileSync(path.join(root, 'src/components/Canvas.tsx'), 'utf8');
+
+  assert.match(
+    canvas,
+    /const SKIP_TYPES = new Set\(\[[^\]]*'story'[^\]]*\]\);/,
+    'story progress snapshots must be skipped by generic auto-output materialization',
+  );
+  assert.match(canvas, /source\?\.type === 'random-route' \|\| source\?\.type === 'story'/);
+  assert.match(canvas, /target\?\.type === 'output'/);
+  assert.match(canvas, /target\.id\.startsWith\('output-auto-'\)/);
+  assert.match(canvas, /td\.userMoved !== true/);
+});
+
 test('story production actions switch the visible workbench stage', () => {
   const storyNode = fs.readFileSync(path.join(root, 'src/components/nodes/StoryNode.tsx'), 'utf8');
   const requestAction = storyNode.slice(storyNode.indexOf('const requestRun = useCallback'), storyNode.indexOf('const stopRun = useCallback'));
+  const reviewAction = storyNode.slice(storyNode.indexOf('const enterAssetReview = useCallback'), storyNode.indexOf('const stopRun = useCallback'));
   const assetsAction = storyNode.slice(storyNode.indexOf('const generateAssets = useCallback'), storyNode.indexOf('const compile = useCallback'));
   const videosAction = storyNode.slice(storyNode.indexOf('const generateVideos = useCallback'), storyNode.indexOf('const compose = useCallback'));
   const composeAction = storyNode.slice(storyNode.indexOf('const compose = useCallback'), storyNode.indexOf('const materializeLinkedNodes = useCallback'));
 
+  assert.match(reviewAction, /setActiveStage\('assets'\)/);
+  assert.match(reviewAction, /stage: 'assets'/);
+  assert.match(reviewAction, /可先电脑上传、绑定上游或资产库/);
+  assert.doesNotMatch(reviewAction, /requestCanvasNodeRun|requestRun\(/);
+  assert.match(storyNode, /确认镜头，进入准备资产'[\s\S]*?mode: 'review-assets'/);
+  assert.match(storyNode, /mainAction\.mode === 'review-assets' \? enterAssetReview\(\) : requestRun\(mainAction\.mode\)/);
   assert.match(requestAction, /mode === 'compile'[\s\S]*?setActiveStage\('prompts'\)/);
   assert.match(assetsAction, /setActiveStage\('assets'\)/);
   assert.match(assetsAction, /storyAssetsReady\(projectRef\.current\)[\s\S]*?setActiveStage\('prompts'\)/);
   assert.match(assetsAction, /stage: 'prompts'/);
+  assert.match(storyNode, /const assetChangedDuringGeneration[\s\S]*?const preserveChangedAsset[\s\S]*?AI 返回结果未覆盖当前.*素材/);
+  assert.match(storyNode, /latestAfterOutput[\s\S]*?assetChangedDuringGeneration\(latestAfterOutput\)[\s\S]*?preserveChangedAsset\(latestAfterOutput\)[\s\S]*?return/);
+  assert.match(storyNode, /buildStoryAssetGenerationSpec\(projectRef\.current, asset\)/);
+  assert.equal((storyNode.match(/images: referenceImages/g) || []).length, 4);
+  assert.match(storyNode, /const characterTargets = targets\.filter\(\(asset\) => asset\.kind === 'character'\)/);
+  assert.match(storyNode, /mode === 'asset-one'[\s\S]*?return runAssetRegenerationSession\(targetId, reporter, signal, budget\)/);
+  assert.match(storyNode, /const runAssetRegenerationSession = useCallback[\s\S]*?active\.size < concurrency[\s\S]*?assetRunSessionRef\.current = \{ enqueue \}/);
+  assert.match(storyNode, /if \(activeSession\)[\s\S]*?activeSession\.enqueue\(assetId\)/);
+  assert.match(storyNode, /const assetActionsBlocked = busy && !assetRunActive/);
+  assert.match(storyNode, /generating \? <Loader2 size=\{11\} className="animate-spin" \/>/);
+  assert.match(storyNode, /旧素材保留至新图成功/);
+  assert.match(storyNode, /revisionGuard\.finalizeTail[\s\S]*?revisionGuard\.expected = committed\.productionRevision/);
+  assert.match(storyNode, /if \(replaceExisting\)[\s\S]*?setActiveStage\('assets'\)[\s\S]*?原素材仅在新结果成功后才被替换/);
+  assert.match(storyNode, /generating \? '生成中' : asset\.url && kind !== 'audio' \? '重生成' : 'AI'/);
+  assert.match(storyNode, /confirmRemoveAsset\(selectedKindAsset\)/);
+  assert.match(storyNode, /confirmRemoveAsset\(asset\)/);
+  assert.match(storyNode, /确认删除资产「\$\{asset\.name\}」/);
+  assert.match(storyNode, /左侧脸部特写，右侧同一人物正面／侧面／背面三视图/);
+  assert.match(storyNode, /默认只展示服装本体，不出现人物或环境/);
   assert.match(videosAction, /setActiveStage\('videos'\)/);
   assert.match(composeAction, /setActiveStage\('compose'\)/);
+  assert.match(storyNode, /data-story-compose-state=\{project\.composeTaskStatus\}/);
+  assert.match(storyNode, /正在合成成片，请稍候/);
+  assert.match(storyNode, /data-story-compose-error="true"/);
+  assert.match(storyNode, /project\.finalVideoUrl \|\| project\.composeTaskStatus === 'failed' \? '重新合成'/);
+  assert.match(storyNode, /const existingTaskId = ACTIVE_TASK_STATUSES\.has\(current\.composeTaskStatus\)[\s\S]*?\? current\.composeTaskId[\s\S]*?: ''/);
+  assert.match(storyNode, /const composeAlreadySucceeded = current\.stage === 'compose'[\s\S]*?current\.composeTaskStatus === 'succeeded'[\s\S]*?Boolean\(current\.finalVideoUrl\)/);
+  assert.match(storyNode, /成片已生成，但保存运行记录失败/);
 });
 
 test('coverage report rejects missing blocks and lost hard constraints', () => {

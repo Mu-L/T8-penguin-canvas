@@ -1136,6 +1136,72 @@ test('host artifact concurrency rejects the third request and drains active/queu
   }
 });
 
+test('host artifact commit rebases onto the live canvas revision after slow media materialization', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-host-artifact-live-revision-'));
+  const config = {
+    INPUT_DIR: path.join(directory, 'input'),
+    OUTPUT_DIR: path.join(directory, 'output'),
+    ASSET_BLOB_DIR: path.join(directory, 'cas'),
+    ASSET_INDEX_STABILITY_ATTEMPTS: 1,
+  };
+  fs.mkdirSync(config.INPUT_DIR, { recursive: true });
+  fs.mkdirSync(config.OUTPUT_DIR, { recursive: true });
+  const database = new ProjectDatabase(':memory:', { autoBackup: false });
+  let releaseDownload;
+  const downloadStarted = new Promise((resolve) => {
+    releaseDownload = resolve;
+  });
+  let finishDownload;
+  const downloadMayFinish = new Promise((resolve) => {
+    finishDownload = resolve;
+  });
+  try {
+    const fixture = createFixture(database, '-live-revision');
+    const indexer = new AssetIndexer(config, database, {
+      blobStore: new AssetBlobStore(config.ASSET_BLOB_DIR),
+      remoteMediaDownload: async (_url, targetPath) => {
+        releaseDownload();
+        await downloadMayFinish;
+        const bytes = Buffer.from('{"story":"final-video"}', 'utf8');
+        fs.writeFileSync(targetPath, bytes, { flag: 'wx', mode: 0o600 });
+        return { byteSize: bytes.length, contentType: 'application/json', status: 200 };
+      },
+    });
+    const committing = indexer.commitHostRunOutputAssets({
+      runId: fixture.run.id,
+      nodeRunId: fixture.nodeRun.id,
+      attemptId: fixture.attempt.id,
+      outputs: [{
+        sourceUrl: 'https://provider.example/story-final.json',
+        outputOrdinal: 0,
+      }],
+    });
+    await downloadStarted;
+    const live = database.saveCanvasSnapshot(fixture.document.canvasId, {
+      ...fixture.document,
+      viewport: { x: 24, y: 12, zoom: 1 },
+    }, {
+      expectedRevision: fixture.document.revision,
+      actorId: 'owner-a',
+      sessionId: 'autosave-during-host-materialization',
+    });
+    assert.equal(live.revision, fixture.document.revision + 1);
+    finishDownload();
+
+    const committed = await committing;
+    assert.equal(committed.duplicate, false);
+    assert.equal(committed.document.revision, live.revision);
+    assert.equal(
+      database.getRunOutputCommitBySlot(fixture.attempt.entityUid, 0).canvasRevision,
+      live.revision,
+    );
+  } finally {
+    finishDownload?.();
+    database.close();
+    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
+});
+
 test('aborting a queued host artifact permit removes the waiter without leaking the active slot', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-host-artifact-abort-permit-'));
   const config = {

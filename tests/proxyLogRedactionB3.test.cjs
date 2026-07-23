@@ -347,6 +347,62 @@ test('B3 refToBuffer, refToGrokImage, and uploadRefToZhenzhen routes reject coll
   }
 });
 
+test('legacy Seedance upload resolves controlled absolute localhost media without an SSRF fetch', async () => {
+  await withProxyFixture(async ({ appServer, outputDir }) => {
+    const filename = 'seedance-controlled-local.png';
+    await sharp({
+      create: {
+        width: 8,
+        height: 8,
+        channels: 4,
+        background: { r: 20, g: 180, b: 90, alpha: 1 },
+      },
+    }).png().toFile(path.join(outputDir, filename));
+
+    const originalFetch = global.fetch;
+    const providerRequests = [];
+    global.fetch = async (url, init = {}) => {
+      providerRequests.push({ url: String(url), body: init.body });
+      if (String(url).endsWith('/v1/files')) {
+        assert.ok(init.body instanceof FormData);
+        return new Response(JSON.stringify({ url: 'https://cdn.example.com/seedance-local.png' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (String(url).endsWith('/seedance/v3/contents/generations/tasks')) {
+        const payload = JSON.parse(String(init.body || '{}'));
+        assert.equal(payload.content?.[1]?.image_url?.url, 'https://cdn.example.com/seedance-local.png');
+        return new Response(JSON.stringify({ id: 'seedance-local-task' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected Provider URL: ${url}`);
+    };
+
+    try {
+      const result = await requestJson(appServer, '/api/proxy/seedance/submit', {
+        taskProvider: 'zhenzhen-legacy',
+        model: 'doubao-seedance-2-0-fast-260128',
+        prompt: 'controlled local upload regression',
+        duration: 4,
+        ratio: '16:9',
+        resolution: '720p',
+        generate_audio: false,
+        firstFrame: `http://127.0.0.1:${config.PORT}/files/output/${filename}?cache=1`,
+      });
+
+      assert.equal(result.status, 200, result.text);
+      assert.equal(result.data?.data?.taskId, 'seedance-local-task');
+      assert.equal(providerRequests.length, 2);
+      assert.ok(providerRequests.every((request) => !request.url.includes('127.0.0.1')));
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+});
+
 test('B3 RunningHub upload route enforces encoded traversal, symlink, max-byte, and media-magic boundaries', async () => {
   await withProxyFixture(async ({ appServer, root, outputDir }) => {
     const outside = path.join(root, 'settings-export.png');

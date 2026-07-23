@@ -19,6 +19,8 @@ const {
 } = require('../services/assetIndexer');
 const { getAssetPreviewPipeline, sanitizePreviewError } = require('../services/assetPreviewPipeline');
 const { safeRemoteMediaDownload } = require('../utils/safeRemoteMediaFetch');
+const { resolveBundledFfmpeg } = require('../providers/llmMedia');
+const { withFfmpegProcessSlot } = require('../utils/ffmpegProcessQueue');
 
 const router = express.Router();
 let projectDatabase = null;
@@ -48,7 +50,9 @@ function getFilesAssetIndexer() {
   return assetIndexer;
 }
 const THUMBNAIL_IMAGE_RE = /\.(png|jpe?g|webp|gif|bmp|avif|tiff?)(?:$|\?)/i;
+const LOCAL_MOV_VIDEO_RE = /\.mov(?:$|[?#])/i;
 const thumbnailInflight = new Map();
+const compatibleVideoPreviewInflight = new Map();
 const LOCAL_IMPORT_EXTENSIONS = new Map([
   ['.png', { kind: 'image', mime: 'image/png' }],
   ['.jpg', { kind: 'image', mime: 'image/jpeg' }],
@@ -454,6 +458,157 @@ router.get('/thumbnail', async (req, res) => {
   } catch (e) {
     const safe = sanitizePreviewError(e);
     return res.status(safe.code === 'preview-queue-full' ? 429 : 500).json({ success: false, code: safe.code, error: safe.message });
+  }
+});
+
+function resolveCompatibleVideoPreviewFfmpeg() {
+  const binary = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+  const resourceRoot = String(process.env.T8PC_RES || '').trim();
+  const candidates = [
+    process.env.T8_VIDEO_PREVIEW_FFMPEG_BIN,
+    resourceRoot && path.join(resourceRoot, 'tools', 'ffmpeg-compat', binary),
+  ].filter(Boolean);
+  try {
+    candidates.push(require('ffmpeg-static'));
+  } catch (_) {
+    // 开发依赖缺失时继续使用项目内置 ffmpeg。
+  }
+  candidates.push(resolveBundledFfmpeg());
+  return candidates.find((candidate) => {
+    try {
+      return Boolean(candidate && fs.existsSync(candidate) && fs.statSync(candidate).isFile());
+    } catch (_) {
+      return false;
+    }
+  }) || candidates.at(-1) || binary;
+}
+
+function compatibleVideoPreviewCacheFile(sourcePath, stat) {
+  const key = crypto
+    .createHash('sha256')
+    .update(`${sourcePath}|${stat.size}|${stat.mtimeMs}|${stat.ctimeMs}|mov-h264-preview-v1`)
+    .digest('hex')
+    .slice(0, 32);
+  return path.join(config.THUMBNAILS_DIR, `video_preview_${key}.mp4`);
+}
+
+async function runCompatibleVideoPreviewFfmpeg(sourcePath, targetPath, options = {}) {
+  const ffmpeg = options.ffmpegPath || resolveCompatibleVideoPreviewFfmpeg();
+  const timeoutMs = Math.max(30_000, Math.min(20 * 60_000, Number(options.timeoutMs) || 10 * 60_000));
+  const args = [
+    '-hide_banner',
+    '-loglevel', 'error',
+    '-y',
+    '-i', sourcePath,
+    '-map', '0:v:0',
+    '-map', '0:a:0?',
+    '-sn',
+    '-dn',
+    '-vf', "scale=w='trunc(min(1280,iw)/2)*2':h=-2",
+    '-c:v', 'libx264',
+    '-preset', 'veryfast',
+    '-crf', '24',
+    '-pix_fmt', 'yuv420p',
+    '-threads', '1',
+    '-c:a', 'aac',
+    '-b:a', '128k',
+    '-movflags', '+faststart',
+    '-max_muxing_queue_size', '4096',
+    '-f', 'mp4',
+    targetPath,
+  ];
+  return withFfmpegProcessSlot(() => new Promise((resolve, reject) => {
+    const child = spawn(ffmpeg, args, {
+      windowsHide: true,
+      stdio: ['ignore', 'ignore', 'pipe'],
+      shell: false,
+    });
+    let stderr = '';
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, timeoutMs);
+    child.stderr?.on('data', (chunk) => {
+      stderr = `${stderr}${String(chunk || '')}`.slice(-16 * 1024);
+    });
+    child.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once('close', (code) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(new Error('MOV 兼容预览转码超时'));
+        return;
+      }
+      if (code !== 0) {
+        reject(new Error(stderr.trim().slice(-1200) || `MOV 兼容预览转码失败: ${code}`));
+        return;
+      }
+      try {
+        const stat = fs.statSync(targetPath);
+        if (!stat.isFile() || stat.size <= 1024) throw new Error('MOV 兼容预览输出无效');
+        resolve(targetPath);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }));
+}
+
+async function ensureCompatibleVideoPreviewFile(sourcePath, sourceStat, targetPath) {
+  if (fs.existsSync(targetPath)) return targetPath;
+  const inflight = compatibleVideoPreviewInflight.get(targetPath);
+  if (inflight) return inflight;
+  const promise = getFilesPreviewPipeline().runEphemeral(async () => {
+    if (fs.existsSync(targetPath)) return targetPath;
+    await writeAtomicTarget(targetPath, (temporary) => (
+      runCompatibleVideoPreviewFfmpeg(sourcePath, temporary)
+    ));
+    const currentStat = fs.statSync(sourcePath);
+    if (currentStat.size !== sourceStat.size || currentStat.mtimeMs !== sourceStat.mtimeMs) {
+      fs.rmSync(targetPath, { force: true });
+      throw new Error('MOV 源文件在生成预览期间发生变化，请重试');
+    }
+    return targetPath;
+  }).finally(() => {
+    compatibleVideoPreviewInflight.delete(targetPath);
+  });
+  compatibleVideoPreviewInflight.set(targetPath, promise);
+  return promise;
+}
+
+// GET /api/files/video-preview?url=/files/input/x.mov
+// Chromium 不支持 Apple ProRes/QuickTime 等常见 MOV 编码。这里仅为本地
+// input/output MOV 生成 H.264/AAC MP4 预览；原 MOV URL 不变，下载、连线与生成仍使用原文件。
+router.get('/video-preview', async (req, res) => {
+  try {
+    const url = String(req.query?.url || '').trim();
+    if (!url || !LOCAL_MOV_VIDEO_RE.test(url)) {
+      return res.status(400).json({ success: false, error: '仅支持本地 MOV 视频兼容预览' });
+    }
+    const sourcePath = resolveLocalFileUrl(url);
+    if (!sourcePath) {
+      return res.status(400).json({ success: false, error: '只支持本地 input/output MOV 视频' });
+    }
+    if (!fs.existsSync(sourcePath)) {
+      return res.status(404).json({ success: false, error: '源 MOV 视频不存在' });
+    }
+    const sourceStat = fs.statSync(sourcePath);
+    if (!sourceStat.isFile() || sourceStat.size <= 0) {
+      return res.status(415).json({ success: false, error: 'MOV 视频文件无效' });
+    }
+    fs.mkdirSync(config.THUMBNAILS_DIR, { recursive: true });
+    const target = compatibleVideoPreviewCacheFile(sourcePath, sourceStat);
+    await ensureCompatibleVideoPreviewFile(sourcePath, sourceStat, target);
+    res.setHeader('Cache-Control', 'private, max-age=0, must-revalidate');
+    res.type('video/mp4');
+    return res.sendFile(target);
+  } catch (error) {
+    const safe = sanitizePreviewError(error);
+    const status = safe.code === 'preview-queue-full' ? 429 : 500;
+    return res.status(status).json({ success: false, code: safe.code, error: safe.message });
   }
 });
 
@@ -1261,9 +1416,13 @@ module.exports.importLocalFile = importLocalFile;
 module.exports.resolveOpenLocalTarget = resolveOpenLocalTarget;
 module.exports.resolveOpenLocalDirectory = (targetPath) => resolveOpenLocalTarget(targetPath).path;
 module.exports._test = {
+  compatibleVideoPreviewCacheFile,
   detectSavedMediaType,
+  ensureCompatibleVideoPreviewFile,
   openMountedLocalSource,
   parseMountedFileUrl,
+  resolveCompatibleVideoPreviewFfmpeg,
+  runCompatibleVideoPreviewFfmpeg,
   safeSavedFilename,
   setFileSaveRouteTestOptions,
   validateSavedMedia,

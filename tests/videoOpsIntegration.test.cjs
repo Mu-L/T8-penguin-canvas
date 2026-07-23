@@ -9,8 +9,102 @@ const videoOpsRouter = require('../backend/src/routes/videoOps');
 const { ProjectDatabase } = require('../backend/src/services/projectDatabase');
 const { resolveBundledFfmpeg, resolveBundledFfprobe } = require('../backend/src/providers/llmMedia');
 
+test('videoOps diagnoses Windows ffmpeg access violations and prepares safe encoder retries', () => {
+  const {
+    ffmpegExitCodeHex,
+    isFfmpegAccessViolationExit,
+    isFfmpegNativeCrashExit,
+    withFfmpegSingleThreadRetry,
+    withFfmpegOpenH264Retry,
+    ffmpegFailureMessage,
+  } = videoOpsRouter._test;
+  assert.equal(ffmpegExitCodeHex(-1073741819), '0xC0000005');
+  assert.equal(isFfmpegAccessViolationExit(3221225477), true);
+  assert.equal(ffmpegExitCodeHex(3221225615), '0xC000008F');
+  assert.equal(isFfmpegNativeCrashExit(3221225615), true);
+  assert.equal(isFfmpegNativeCrashExit(1), false);
+  assert.deepEqual(
+    withFfmpegSingleThreadRetry(['-y', '-i', 'input.mp4', '-c:v', 'libx264', 'output.mp4']),
+    [
+      '-y',
+      '-threads', '1',
+      '-i', 'input.mp4',
+      '-c:v', 'libx264',
+      '-filter_threads', '1',
+      '-filter_complex_threads', '1',
+      '-threads', '1',
+      'output.mp4',
+    ],
+  );
+  assert.equal(withFfmpegSingleThreadRetry(['-threads', '2', 'output.mp4']), null);
+  assert.deepEqual(
+    withFfmpegOpenH264Retry([
+      '-y',
+      '-i', 'input.mp4',
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-crf', '20',
+      '-c:a', 'aac',
+      'output.mp4',
+    ]),
+    [
+      '-y',
+      '-i', 'input.mp4',
+      '-c:v', 'libopenh264',
+      '-c:a', 'aac',
+      '-b:v', '8M',
+      '-maxrate', '12M',
+      '-bufsize', '16M',
+      'output.mp4',
+    ],
+  );
+  assert.equal(withFfmpegOpenH264Retry(['-c:v', 'mpeg4', 'output.mp4']), null);
+  assert.match(ffmpegFailureMessage('Metadata:\n encoder: Lavc63', -1073741819), /Windows 内存访问冲突/);
+  assert.doesNotMatch(ffmpegFailureMessage('Metadata:\n encoder: Lavc63', -1073741819), /Metadata/);
+  assert.match(ffmpegFailureMessage('frame=0', 3221225615), /Windows 原生异常/);
+});
+
+test('videoOps uses a separately packaged modern stable runtime for H.264 encoding', () => {
+  const stableFfmpeg = videoOpsRouter._test.resolveVideoOpsCompatibilityFfmpeg(resolveBundledFfmpeg());
+  assert.equal(path.resolve(stableFfmpeg), path.resolve(require('ffmpeg-static')));
+
+  const version = spawnSync(stableFfmpeg, ['-version'], { encoding: 'utf8' });
+  assert.equal(version.status, 0, version.stderr || version.stdout);
+  assert.match(version.stdout, /ffmpeg version 6\./);
+
+  const filters = spawnSync(stableFfmpeg, ['-hide_banner', '-filters'], { encoding: 'utf8' });
+  assert.equal(filters.status, 0, filters.stderr || filters.stdout);
+  assert.match(filters.stdout, /\bxfade\b/);
+
+  const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  assert.ok(packageJson.build.extraResources.some((item) => (
+    item.from === 'node_modules/ffmpeg-static/ffmpeg.exe'
+    && item.to === 'tools/ffmpeg-compat/ffmpeg.exe'
+  )));
+});
+
+test('videoOps validates composed output with an independent packaged runtime after a native validator crash', async () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../backend/src/routes/videoOps.js'), 'utf8');
+  assert.match(source, /validationCandidates = Array\.from\(new Set\(\[/);
+  assert.match(source, /video validation runtime crashed/);
+  assert.match(source, /retrying with an independent packaged runtime/);
+  assert.match(source, /-filter_complex_threads', '1'/);
+});
+
+test('videoOps re-encodes multi-clip concat instead of copying incompatible H.264 reference frames', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'backend', 'src', 'routes', 'videoOps.js'), 'utf8');
+  const start = source.indexOf('async function concatSegments(');
+  const end = source.indexOf('function buildXfadeFilterGraph', start);
+  const concatBody = start >= 0 && end > start ? source.slice(start, end) : '';
+  assert.match(concatBody, /if \(files\.length === 1\)[\s\S]*?'-c', 'copy'/);
+  assert.match(concatBody, /concat=n=\$\{files\.length\}:v=1:a=1\[v\]\[a\]/);
+  assert.match(concatBody, /'-map', '\[v\]'[\s\S]*?'-map', '\[a\]'/);
+  assert.match(concatBody, /'-c:v', 'libx264'/);
+  assert.match(concatBody, /'-pix_fmt', 'yuv420p'/);
+});
+
 function runFfmpeg(args) {
-  const ffmpeg = resolveBundledFfmpeg();
+  const ffmpeg = videoOpsRouter._test.resolveVideoOpsCompatibilityFfmpeg(resolveBundledFfmpeg());
   const result = spawnSync(ffmpeg, args, { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr || result.stdout);
 }
@@ -447,6 +541,52 @@ test('videoOps composes real clips through bundled ffmpeg even when audio tracks
     try { fs.unlinkSync(outputFile); } catch (_) {}
   } finally {
     for (const file of [clipA, clipB]) {
+      try { fs.unlinkSync(file); } catch (_) {}
+    }
+  }
+});
+
+test('videoOps keeps concurrent compose jobs healthy by serializing bundled media processes', async () => {
+  fs.mkdirSync(config.INPUT_DIR, { recursive: true });
+  fs.mkdirSync(config.OUTPUT_DIR, { recursive: true });
+
+  const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const clip = path.join(config.INPUT_DIR, `video_edit_concurrent_${stamp}.mp4`);
+  const outputFiles = [];
+  runFfmpeg([
+    '-y',
+    '-f', 'lavfi', '-i', 'color=c=green:s=160x90:r=12:d=0.45',
+    '-c:v', 'libx264',
+    '-pix_fmt', 'yuv420p',
+    clip,
+  ]);
+
+  try {
+    const jobs = await Promise.all(Array.from({ length: 3 }, () => (
+      videoOpsRouter._test.composeVideoEdit(
+        [{ url: `/files/input/${path.basename(clip)}`, trimStart: 0 }],
+        {
+          aspect: '16:9',
+          resolution: 'first',
+          transition: 'none',
+          filter: 'none',
+          audio: 'keep',
+        },
+      )
+    )));
+    assert.equal(jobs.length, 3);
+    for (const result of jobs) {
+      assert.match(result.videoUrl, /^\/files\/output\/video_edit_/);
+      assert.ok(result.size > 1000);
+      const output = path.join(config.OUTPUT_DIR, path.basename(result.videoUrl));
+      outputFiles.push(output);
+      assert.ok(fs.existsSync(output));
+      const probe = await videoOpsRouter._test.probeFile(output, null);
+      assert.equal(probe.videoCodec, 'h264');
+      assert.ok(probe.duration >= 0.35);
+    }
+  } finally {
+    for (const file of [clip, ...outputFiles]) {
       try { fs.unlinkSync(file); } catch (_) {}
     }
   }
@@ -1156,11 +1296,11 @@ test('videoOps probes stream metadata through bundled ffprobe JSON', async () =>
   }
 });
 
-test('videoOps exposes native xfade transition graph for high-quality transitions', () => {
+test('videoOps exposes native xfade transition graph for high-quality transitions', async () => {
   const { getTransitionDefinition, hasNativeXfadeSupport, transitionDurationSeconds, buildXfadeFilterGraph } = videoOpsRouter._test;
   assert.equal(getTransitionDefinition('black').xfade, 'fadeblack');
   assert.equal(getTransitionDefinition('pixelize').xfade, 'pixelize');
-  assert.equal(hasNativeXfadeSupport(), true);
+  assert.equal(await hasNativeXfadeSupport(), true);
   assert.equal(transitionDurationSeconds({ transitionDuration: 0.8 }, [{ duration: 0.5 }, { duration: 1.1 }]), 0.45);
 
   const graph = buildXfadeFilterGraph(
@@ -1172,6 +1312,19 @@ test('videoOps exposes native xfade transition graph for high-quality transition
   assert.match(graph.filterComplex, /acrossfade=d=0\.400:c1=tri:c2=tri/);
   assert.equal(graph.videoLabel, 'vxf2');
   assert.equal(graph.audioLabel, 'axf2');
+});
+
+test('videoOps serializes bundled FFmpeg and FFprobe processes through the shared queue', () => {
+  const root = path.resolve(__dirname, '..');
+  const routeSource = fs.readFileSync(path.join(root, 'backend', 'src', 'routes', 'videoOps.js'), 'utf8');
+  const filesSource = fs.readFileSync(path.join(root, 'backend', 'src', 'routes', 'files.js'), 'utf8');
+  const llmMediaSource = fs.readFileSync(path.join(root, 'backend', 'src', 'providers', 'llmMedia.js'), 'utf8');
+  const indexerSource = fs.readFileSync(path.join(root, 'backend', 'src', 'services', 'assetIndexer.js'), 'utf8');
+  assert.match(routeSource, /withFfmpegProcessSlot/);
+  assert.match(filesSource, /withFfmpegProcessSlot/);
+  assert.match(llmMediaSource, /withFfmpegProcessSlot/);
+  assert.match(indexerSource, /withFfmpegProcessSlot/);
+  assert.doesNotMatch(routeSource, /spawnSync\(resolveVideoOpsFfmpeg/);
 });
 
 test('videoOps composes real multi-clip output with native xfade overlap metadata', async () => {

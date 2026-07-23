@@ -9,6 +9,7 @@ const require = createRequire(import.meta.url);
 
 const {
   mediaRefToAbsoluteUrl,
+  normalizeT8LocalMediaRef,
   resolveMediaRef,
   resolveT8LocalMediaPath,
 } = require('../backend/src/providers/mediaResolver.js');
@@ -36,6 +37,33 @@ test('resolveMediaRef returns data URLs unchanged for base64-oriented providers'
   assert.equal(resolved.dataUrl, dataUrl);
   assert.equal(resolved.mime, 'image/png');
   assert.equal(resolved.base64, 'QUJD');
+});
+
+test('normalizeT8LocalMediaRef recognizes only controlled loopback media mounts', () => {
+  assert.equal(
+    normalizeT8LocalMediaRef('http://127.0.0.1:18766/files/output/example.png?cache=1'),
+    '/files/output/example.png?cache=1',
+  );
+  assert.equal(
+    normalizeT8LocalMediaRef('http://localhost:11422/api/resources/file/res_123'),
+    '/api/resources/file/res_123',
+  );
+  assert.equal(
+    normalizeT8LocalMediaRef('http://[::1]:18766/files/input/example.png'),
+    '/files/input/example.png',
+  );
+  assert.equal(
+    normalizeT8LocalMediaRef('http://127.0.0.1:9/files/output/example.png', { allowedPorts: [18766, 11422] }),
+    'http://127.0.0.1:9/files/output/example.png',
+  );
+  assert.equal(
+    normalizeT8LocalMediaRef('http://192.168.1.20/files/output/example.png'),
+    'http://192.168.1.20/files/output/example.png',
+  );
+  assert.equal(
+    normalizeT8LocalMediaRef('http://127.0.0.1:18766/api/files/thumbnail?url=%2Ffiles%2Foutput%2Fa.png'),
+    'http://127.0.0.1:18766/api/files/thumbnail?url=%2Ffiles%2Foutput%2Fa.png',
+  );
 });
 
 test('resolveMediaRef converts local file paths to data URLs and local paths when requested', async () => {
@@ -100,6 +128,10 @@ test('resolveT8LocalMediaPath maps /files/input and /files/output to configured 
   try {
     assert.equal(resolveT8LocalMediaPath('/files/input/a.png'), path.join('C:\\t8\\input', 'a.png'));
     assert.equal(resolveT8LocalMediaPath('/files/output/sub/b.mp4'), path.join('C:\\t8\\output', 'sub', 'b.mp4'));
+    assert.equal(
+      resolveT8LocalMediaPath('http://127.0.0.1:18766/files/output/sub/b.mp4?cache=1'),
+      path.join('C:\\t8\\output', 'sub', 'b.mp4'),
+    );
     assert.equal(resolveT8LocalMediaPath('/api/resources/file/res_123'), '');
   } finally {
     config.INPUT_DIR = oldInput;

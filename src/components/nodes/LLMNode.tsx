@@ -14,7 +14,12 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { LLM_MODELS, DEFAULT_LLM_MODEL, isImageOutputLlm } from '../../providers/models';
+import {
+  CUSTOM_LLM_MODEL_VALUE,
+  LLM_MODELS,
+  isImageOutputLlm,
+  resolveLlmModelSelection,
+} from '../../providers/models';
 import {
   fileToDataUrl,
   generateExternalLlm,
@@ -57,7 +62,7 @@ import type { RunNodeLifecycleReporter } from '../../types/project';
 
 /**
  * LLM / Vision 节点 —— 完全对齐 gpt-image-2-web Chat (index.html L1600 / L8128~L8400)
- *  - 6 个模型: gemini-3.1-flash-lite-preview / gemini-3.5-flash(默认) / gpt-4o / gemini-3.1-pro-preview / gpt-5 / gpt-image-2-all
+ *  - 贞贞工坊常用模型 + Custom 自定义模型名
  *  - temperature(0~2) + max_tokens(100~128000)
  *  - 系统提示词 + localStorage 预设保存/加载
  *  - 图像上传(多模态 vision)
@@ -185,7 +190,12 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
   const chatRef = useCallback((el: HTMLDivElement | null) => attachWheelBlock(el), []);
 
   const d = data as any;
-  const model: string = d?.model || DEFAULT_LLM_MODEL;
+  const modelSelection = resolveLlmModelSelection({
+    model: d?.model,
+    customModel: d?.customModel,
+    useCustomModel: d?.useCustomModel,
+  });
+  const model = modelSelection.model;
   const advancedProviders = useApiKeysStore((s) => s.settings.advancedProviders);
   const llmAdvancedProviders = useMemo(
     () => advancedProvidersForNode(advancedProviders, 'llm'),
@@ -393,6 +403,13 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
     setError(null);
     setWarning(null);
     setStreamingText('');
+    if (modelSelection.isCustom && !model) {
+      const message = '请先填写 Custom 模型名称';
+      setError(message);
+      update({ status: 'error', error: message });
+      logBus.error(message, src);
+      return;
+    }
     const upstream = collectUpstream();
     const resolvedLocalPrompt = resolveMediaMentions(localPrompt, userPromptMentions, orderedImages);
     const userText = (upstream.text || resolvedLocalPrompt || '').trim();
@@ -839,8 +856,16 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
         {!isExternalSelected && <div>
           <label className="text-[10px] text-white/50 block mb-1">模型</label>
           <select
-            value={model}
-            onChange={(e) => update({ model: e.target.value })}
+            value={modelSelection.presetValue}
+            onChange={(e) => {
+              const value = e.target.value;
+              if (value === CUSTOM_LLM_MODEL_VALUE) {
+                const customModel = typeof d?.customModel === 'string' ? d.customModel : '';
+                update({ useCustomModel: true, customModel, model: customModel });
+                return;
+              }
+              update({ useCustomModel: false, model: value });
+            }}
             className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-white/30"
           >
             {LLM_MODELS.map((m) => (
@@ -848,7 +873,24 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
                 {m.label}
               </option>
             ))}
+            <option value={CUSTOM_LLM_MODEL_VALUE} className="bg-zinc-900">
+              Custom / 自定义
+            </option>
           </select>
+          {modelSelection.isCustom && (
+            <input
+              type="text"
+              value={modelSelection.customModelInput}
+              maxLength={200}
+              placeholder="填写贞贞工坊支持的模型名称"
+              onChange={(e) => update({
+                useCustomModel: true,
+                customModel: e.target.value,
+                model: e.target.value,
+              })}
+              className="mt-1.5 w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none placeholder:text-white/25 focus:border-white/30"
+            />
+          )}
         </div>}
 
         {/* 温度 / max_tokens / 流式 */}

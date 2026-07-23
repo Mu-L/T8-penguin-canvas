@@ -1286,6 +1286,31 @@ test('seedance.nz treats absolute loopback URLs on controlled T8 mounts as local
   }
 });
 
+test('seedance.nz reports a missing controlled local file without attempting an SSRF fetch or Provider upload', async () => {
+  seedanceNz.resetCachesForTests();
+  let providerCalls = 0;
+  const missing = `/files/output/seedance-missing-${process.pid}-${Date.now()}.png`;
+  const error = await capturedRejection(seedanceNz.uploadMedia(
+    `http://127.0.0.1:18766${missing}?cache=1`,
+    'image',
+    'test-key',
+    {
+      uploadIntervalMs: 0,
+      fetchImpl: async () => {
+        providerCalls += 1;
+        return jsonResponse({ url: 'https://cdn.example.com/must-not-upload.png' });
+      },
+    },
+  ));
+
+  assert.equal(error.code, 'SEEDANCE_MEDIA_REFERENCE_UNAVAILABLE');
+  assert.equal(error.status, 400);
+  assert.match(error.message, /本地文件不存在或无法读取/);
+  assert.match(error.message, /重新上传原图片/);
+  assert.doesNotMatch(error.message, /127\.0\.0\.1|seedance-missing/);
+  assert.equal(providerCalls, 0);
+});
+
 test('seedance.nz media download enforces byte limit during streaming and cancels before upload', async (t) => {
   seedanceNz.resetCachesForTests();
   let originCalls = 0;

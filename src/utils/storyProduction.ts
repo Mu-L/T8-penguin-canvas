@@ -607,12 +607,15 @@ export function buildLocalStoryAnalysis(scriptInput: string, settings: StorySett
   fallbackCharacterNames(script).forEach((name, index) => assets.push({
     id: stableId('asset-character', name, index), kind: 'character', name,
     description: `${name}的稳定角色设定，保持面部、发型、体型和服装连续`,
-    prompt: `${name}角色设定图，正面、侧面、全身，统一电影写实风格，中性背景`,
+    prompt: `${name}角色身份设定图，纯白背景，左侧脸部特写，右侧同一人物正面、侧面、背面三视图`,
   }));
   assets.push(...fallbackSceneAssets(script, sceneTitle, sceneDescription, settings.visualStyle));
   FALLBACK_PROP_TERMS.filter((term) => script.includes(term)).map((term) => fallbackPropName(script, term)).forEach((name, index) => assets.push({
     id: stableId('asset-prop', name, index), kind: name.includes('外套') ? 'costume' : 'prop', name,
-    description: `剧本中的${name}，外观在所有镜头保持一致`, prompt: `${name}道具设定图，完整外观，电影级材质，中性背景`,
+    description: `剧本中的${name}，外观在所有镜头保持一致`,
+    prompt: name.includes('外套')
+      ? `${name}纯服装设定图，纯白背景，仅展示服装本体的正面、背面和材质细节，不出现人物`
+      : `${name}道具设定图，完整外观，电影级材质，中性背景`,
   }));
   return {
     schema: STORY_ANALYSIS_SCHEMA,
@@ -645,7 +648,8 @@ export function storyAnalysisSystemPrompt(): string {
     `scene: id,title,description,sourceSpan{start,end,text}。\n` +
     `shot: id,sceneId,title,sourceSpan,durationSec(4-15),visualDescription,action,dialogue,voiceover,sfx,camera,lighting,mustInclude[],mustNotInclude[],entityRefs[],assetIds[]。\n` +
     `asset: id,kind(character|scene|prop|costume|audio),name,description,prompt,negativePrompt,requiredByShotIds[]。\n` +
-    `要求：原剧本每一段都由至少一个 shot 的 sourceSpan 覆盖；“不要/没有/始终/只出现/保持”等硬约束不得丢失；角色、场景、道具、服装要用稳定 ID；不要把角色外貌特征和场景陈设无脑拆成独立资产；提示词具体、可生成并保持身份连续。`;
+    `要求：原剧本每一段都由至少一个 shot 的 sourceSpan 覆盖；“不要/没有/始终/只出现/保持”等硬约束不得丢失；角色、场景、道具、服装要用稳定 ID；不要把角色外貌特征和场景陈设无脑拆成独立资产；提示词具体、可生成并保持身份连续。\n` +
+    `角色资产必须规划为纯白底身份设定图：左侧一个清晰脸部特写，右侧同一人物的正面、侧面、背面全身三视图，不得出现环境和额外人物。服装资产必须规划为纯白底服装本体设定图，默认不出现人物、脸、人体或场景；角色与服装必须拆成独立资产。`;
 }
 
 export function storyAnalysisUserPrompt(script: string, settings: StorySettings): string {
@@ -659,6 +663,116 @@ export function storyAnalysisUserPrompt(script: string, settings: StorySettings)
     },
     script,
   });
+}
+
+export interface StoryAssetGenerationSpec {
+  prompt: string;
+  negativePrompt: string;
+  referenceImages: string[];
+  referenceAssetIds: string[];
+  aspectRatio: string;
+}
+
+function joinPromptParts(parts: Array<string | undefined>): string {
+  return parts.map((part) => String(part || '').trim()).filter(Boolean).join('\n');
+}
+
+function joinNegativePromptParts(parts: Array<string | undefined>): string {
+  return Array.from(new Set(
+    parts
+      .flatMap((part) => String(part || '').split(/[，,\n]+/))
+      .map((part) => part.trim())
+      .filter(Boolean),
+  )).join(', ');
+}
+
+/**
+ * Runtime generation constraints are appended here instead of trusting the
+ * analysis model to preserve asset-sheet semantics. This keeps old projects
+ * and manually edited prompts safe as well.
+ */
+export function buildStoryAssetGenerationSpec(
+  projectInput: StoryProject,
+  assetInput: StoryAsset,
+): StoryAssetGenerationSpec {
+  const project = sanitizeStoryProject(projectInput);
+  const asset = project.assets.find((item) => item.id === assetInput.id) || sanitizeAsset(assetInput, 0);
+  const basePrompt = joinPromptParts([asset.prompt, asset.description]);
+  const shared = 'high-quality production reference sheet, consistent design, clean studio lighting, sharp details';
+  let prompt = basePrompt;
+  let negativePrompt = asset.negativePrompt;
+  let referenceAssets: StoryAsset[] = [];
+  let aspectRatio = project.settings.aspectRatio;
+
+  if (asset.kind === 'character') {
+    aspectRatio = '16:9';
+    prompt = joinPromptParts([
+      basePrompt,
+      shared,
+      'Create ONE character identity sheet on a single pure white landscape canvas.',
+      'Layout: on the LEFT, one large unobstructed face close-up; on the RIGHT, the exact same character in three full-body orthographic views: front, side profile, and back.',
+      'All four views must depict one identical person with exactly consistent face, hairstyle, age, body proportions, skin tone, and identity. Neutral expression and neutral standing pose. Simple fitted neutral base clothing so the body silhouette remains readable.',
+      'No environment, no cinematic scene, no props, no furniture, no text, no labels, no borders, and no extra people.',
+    ]);
+    negativePrompt = joinNegativePromptParts([
+      negativePrompt,
+      'environment background, cinematic location, scenery, props, furniture, text, watermark, labels, panel borders',
+      'different identities, multiple characters, extra people, inconsistent face, inconsistent hairstyle, duplicate limbs, cropped body',
+    ]);
+  } else if (asset.kind === 'costume') {
+    aspectRatio = '16:9';
+    const requiredShots = new Set(asset.requiredByShotIds);
+    const characters = project.assets.filter((candidate) => candidate.kind === 'character' && Boolean(candidate.url));
+    const related = characters.filter((candidate) => candidate.requiredByShotIds.some((shotId) => requiredShots.has(shotId)));
+    const reference = related[0] || characters[0];
+    referenceAssets = reference ? [reference] : [];
+    prompt = joinPromptParts([
+      basePrompt,
+      shared,
+      'Create a clothing-only costume design sheet on a single pure white landscape canvas.',
+      'Show only the garment itself: clean front view, back view, and close-up material/construction details. Preserve the specified cut, color, fabric, trim, fasteners, and wear state.',
+      'Do NOT render a person, face, head, hands, body, mannequin, hanger, room, street, or any environmental background.',
+      reference
+        ? `The attached character reference (${reference.name}) is identity continuity guidance only. Do not copy its background. The default output must remain garment-only. If the image model unavoidably renders a wearer, that wearer must be the exact same character identity, face, hairstyle, age, and body proportions from the reference.`
+        : undefined,
+    ]);
+    negativePrompt = joinNegativePromptParts([
+      negativePrompt,
+      'person, people, human, face, head, hands, body, wearer, fashion model, mannequin, hanger',
+      'room, street, office, environmental background, cinematic scene, props, furniture, text, watermark',
+      'changed identity, different face, different hairstyle',
+    ]);
+  } else if (asset.kind === 'prop') {
+    prompt = joinPromptParts([
+      basePrompt,
+      shared,
+      'Isolated prop reference sheet. Show the complete object and useful construction details on a clean neutral or pure white background.',
+      'No person, no hands, no character, no room, and no cinematic environment.',
+    ]);
+    negativePrompt = joinNegativePromptParts([
+      negativePrompt,
+      'person, people, hands, character, room, street, environmental background, text, watermark',
+    ]);
+  } else if (asset.kind === 'scene') {
+    prompt = joinPromptParts([
+      basePrompt,
+      shared,
+      'Environment-only location reference. Establish architecture, spatial layout, entrances, exits, landmarks, lighting anchors, and material palette.',
+      'No characters, no foreground people, and no action scene.',
+    ]);
+    negativePrompt = joinNegativePromptParts([
+      negativePrompt,
+      'person, people, character, crowd, foreground actor, text, watermark',
+    ]);
+  }
+
+  return {
+    prompt,
+    negativePrompt,
+    referenceImages: referenceAssets.map((item) => item.url),
+    referenceAssetIds: referenceAssets.map((item) => item.id),
+    aspectRatio,
+  };
 }
 
 function mergeLockedShot(previous: StoryShot | undefined, next: StoryShot): StoryShot {
@@ -1190,11 +1304,16 @@ export function isStoryShotTaskResumable(shot: StoryShot): boolean {
     && Boolean(shot.taskId && ['seedance-nz', 'zhenzhen-legacy'].includes(shot.taskProvider));
 }
 
-export function selectStoryAssetTargets(projectInput: StoryProject, targetIds: string[] | null = null, retryFailed = false): StoryAsset[] {
+export function selectStoryAssetTargets(
+  projectInput: StoryProject,
+  targetIds: string[] | null = null,
+  retryFailed = false,
+  includeExistingTargets = false,
+): StoryAsset[] {
   const project = sanitizeStoryProject(projectInput);
   return project.assets.filter((asset) => {
     if (targetIds && !targetIds.includes(asset.id)) return false;
-    if (asset.locked || asset.url) return false;
+    if (asset.locked || asset.url && !(includeExistingTargets && targetIds)) return false;
     return retryFailed ? asset.status === 'failed' || asset.status === 'stale' : true;
   });
 }
