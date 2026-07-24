@@ -1,7 +1,24 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.6.6",
-  "lastUpdated": "2026-07-25-v2.6.6-released",
+  "version": "2.6.7",
+  "lastUpdated": "2026-07-25-v2.6.7-release-candidate",
+  "seedanceNzApimartMediaModels": {
+    "status": "release-candidate",
+    "date": "2026-07-25",
+    "releaseIncluded": true,
+    "highlights": [
+      "图像节点“贞贞的平价AI小屋”平台的 GPT2 TAB 新增 zhenzhen-image-g-v2-lowprice；Grok TAB 新增 zhenzhen-image-gk-v15 与 zhenzhen-image-gk-v15-edit。后两项按官方文档归入图像 Grok，而不是误走视频接口。",
+      "视频节点 Veo TAB 新增 zhenzhen-video-g-omni-flash、zhenzhen-video-v31-fast、zhenzhen-video-v31-quality；Grok Video TAB 新增 zhenzhen-video-gk-v15，并保留原有模型和默认项。",
+      "各视频模型分别锁定官方约束：Omni Flash 固定 720p 且不发送时长，支持最多 16 图或 1 视频；Grok Video 1.5 为 6-30 秒、480p/720p、最多 7 图；V31 Fast/Quality 固定 8 秒，Quality 禁止 3 图 reference 模式。",
+      "音频节点保留 Suno 与 Seed Audio，新增 Whisper TAB 和 whisper-1；使用同步 multipart POST /v1/audio/transcriptions，输出文本端口并支持 json、verbose_json、srt、text、vtt，明确拒绝官方不支持的 webm。",
+      "所有新增模型继续复用独立 zhenzhenSd2ApiKey、seedance.nz 安全素材上传、异步图片/视频查询及本地转存链路；Whisper 为同步转写，不进入异步轮询。"
+    ],
+    "verification": [
+      "逐项核对 https://api.seedance.nz/docs/llms.txt 与 F:\\AI-T8-video-onekey\\ComfyUI\\custom_nodes\\ComfyUI_Seedance；具体字段和限制以当前官方文档为准。",
+      "图片、视频、Whisper Provider 合同及前端模型/端口定向测试 66/66 通过，补充核心回归 55/55 通过，TypeScript type-check 通过。",
+      "用户明确授权 v2.6.7 先发布、后补真实 Provider 与协作证据；延期不将任何缺失证据标记为通过。"
+    ]
+  },
   "storyAssetMediaClear": {
     "status": "released-v2.6.6",
     "date": "2026-07-25",

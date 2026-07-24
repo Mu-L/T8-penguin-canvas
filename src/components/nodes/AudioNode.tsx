@@ -6,10 +6,12 @@ import {
   queryAudio,
   submitSeedAudio,
   querySeedAudio,
+  transcribeWhisper,
   uploadAudioForSuno,
   uploadFile as uploadLocalFile,
   type AudioMode,
   type AudioProviderMode,
+  type WhisperResponseFormat,
 } from '../../services/generation';
 import { SUNO_VERSIONS, DEFAULT_SUNO_VERSION } from '../../providers/models';
 import { useUpdateNodeData } from './useUpdateNodeData';
@@ -70,8 +72,12 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
 
   const d = data as any;
   const providerParams = (d?.providerParams && typeof d.providerParams === 'object') ? d.providerParams : {};
-  const audioProviderMode: AudioProviderMode = d?.audioProviderMode === 'seed-audio' ? 'seed-audio' : 'suno';
+  const audioProviderMode: AudioProviderMode = ['seed-audio', 'whisper'].includes(d?.audioProviderMode)
+    ? d.audioProviderMode
+    : 'suno';
   const isSeedAudio = audioProviderMode === 'seed-audio';
+  const isWhisper = audioProviderMode === 'whisper';
+  const isSuno = audioProviderMode === 'suno';
   const mode: AudioMode = d?.mode || 'generate';
   const version: string = d?.version || DEFAULT_SUNO_VERSION;
   const title: string = d?.title || '';
@@ -86,6 +92,10 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
   const seedAudioSpeechRate: number = Number.isInteger(d?.seedAudioSpeechRate) ? d.seedAudioSpeechRate : 0;
   const seedAudioLoudnessRate: number = Number.isInteger(d?.seedAudioLoudnessRate) ? d.seedAudioLoudnessRate : 0;
   const seedAudioPitchRate: number = Number.isInteger(d?.seedAudioPitchRate) ? d.seedAudioPitchRate : 0;
+  const whisperResponseFormat: WhisperResponseFormat = ['json', 'verbose_json', 'srt', 'text', 'vtt'].includes(d?.whisperResponseFormat)
+    ? d.whisperResponseFormat
+    : 'json';
+  const transcript: string = typeof d?.transcript === 'string' ? d.transcript : '';
   // 预传 clipId(手动调起 _sunoUploadAudio 后保存)
   const uploadedClipId: string = d?.uploadedClipId || '';
   const uploadedFilename: string = d?.uploadedFilename || '';
@@ -166,8 +176,10 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
   
   // 分组动态跟随模式: generate 只要文本, cover/extend 需要参考音频
   const previewGroups = useMemo<ReadonlyArray<'text' | 'image' | 'video' | 'audio'>>(
-    () => isSeedAudio ? ['text', 'image', 'audio'] : (mode === 'generate' ? ['text'] : ['text', 'audio']),
-    [isSeedAudio, mode],
+    () => isSeedAudio
+      ? ['text', 'image', 'audio']
+      : isWhisper ? ['audio'] : (mode === 'generate' ? ['text'] : ['text', 'audio']),
+    [isSeedAudio, isWhisper, mode],
   );
   
   // 收集上游: prompt + audioUrl(cover/extend 兼底, 取 ordered 首个, 后补本地拖入)
@@ -208,11 +220,11 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     if (!f) return;
     setError(null);
     try {
-      if (isSeedAudio) {
+      if (isSeedAudio || isWhisper) {
         setUploading(true);
         const uploaded = await uploadLocalFile(f);
         update({ localRefAudio: uploaded.url, uploadedClipId: '', uploadedFilename: f.name });
-        logBus.success(`Seed Audio 参考音频已加入: ${f.name}`, src);
+        logBus.success(`${isWhisper ? 'Whisper 待转写素材' : 'Seed Audio 参考音频'}已加入: ${f.name}`, src);
       } else {
         await uploadFile(f);
       }
@@ -439,7 +451,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     const upstream = collectUpstream();
     const resolvedLocalPrompt = resolveMediaMentions(localPrompt, promptMentions, mentionMaterials);
     const finalPrompt = (upstream.prompt || resolvedLocalPrompt || '').trim();
-    if (!finalPrompt) {
+    if (!isWhisper && !finalPrompt) {
       setError(isSeedAudio ? '请填写音频提示词' : '请填写歌词 / 提示词');
       return;
     }
@@ -447,12 +459,50 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
       setError('Seed Audio 提示词长度必须为 5-2048 字符');
       return;
     }
-    const traceProvider = isSeedAudio ? 'seedance-nz' : 'suno';
-    const traceModel = isSeedAudio ? 'doubao-seed-audio-1.0' : version;
+    const traceProvider = isSeedAudio || isWhisper ? 'seedance-nz' : 'suno';
+    const traceModel = isWhisper ? 'whisper-1' : isSeedAudio ? 'doubao-seed-audio-1.0' : version;
     await reporter?.providerRequest({ provider: traceProvider, model: traceModel });
     taskCompletionSound.primeAudio();
-    update({ status: 'submitting', error: null, tracks: [], audioUrl: undefined });
+    update({ status: 'submitting', error: null, tracks: [], audioUrl: undefined, ...(isWhisper ? { transcript: '', text: '', texts: [] } : {}) });
     try {
+      if (isWhisper) {
+        if (!upstream.audioUrl) {
+          throw new Error('Whisper 必须连接、拖入或上传 1 个音频/视频素材');
+        }
+        logBus.info(`提交 Whisper: whisper-1 · response_format=${whisperResponseFormat}`, src);
+        const result = await transcribeWhisper({
+          audioUrl: upstream.audioUrl,
+          model: 'whisper-1',
+          responseFormat: whisperResponseFormat,
+        });
+        await reporter?.providerResponse({
+          provider: traceProvider,
+          model: traceModel,
+          requestId: result.requestId,
+          transportHttpStatus: result.transportHttpStatus,
+          upstreamHttpStatus: result.upstreamHttpStatus,
+          usage: result.usage,
+          status: 'succeeded',
+          httpStatusSource: 'local-backend',
+        });
+        update({
+          status: 'success',
+          progress: '100%',
+          transcript: result.text,
+          text: result.text,
+          texts: [result.text],
+          lastPrompt: '',
+          provider: traceProvider,
+          apiModel: traceModel,
+          requestId: result.requestId,
+          transportHttpStatus: result.transportHttpStatus,
+          upstreamHttpStatus: result.upstreamHttpStatus,
+          usage: result.usage,
+        });
+        logBus.success(`Whisper 转写完成 · ${result.text.length} 字符`, src);
+        taskCompletionSound.notifyComplete(id, 'audio');
+        return;
+      }
       if (isSeedAudio) {
         const hasSpeaker = !!seedAudioSpeaker.trim();
         const hasImage = upstream.imageUrls.length > 0;
@@ -558,7 +608,9 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     await handleGenerate(reporter);
   }, 'audio', {
     lifecycleAware: true,
-    shouldReuseResult: (nodeData) => shouldReuseGenerationResult('audio', nodeData),
+    shouldReuseResult: (nodeData) => isWhisper
+      ? nodeData?.reuseResult === true && typeof nodeData?.transcript === 'string' && nodeData.transcript.trim().length > 0
+      : shouldReuseGenerationResult('audio', nodeData),
   });
 
   // === 跨节点拖拽: source (输出 tracks 可拖出) ===
@@ -589,8 +641,9 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
   });
 
   const isBusy = status === 'submitting' || status === 'polling';
-  const showRefArea = !isSeedAudio && (mode === 'cover' || mode === 'extend');
+  const showRefArea = isSuno && (mode === 'cover' || mode === 'extend');
   const audioColor = PORT_COLOR.audio;
+  const textColor = PORT_COLOR.text;
 
   return (
     <div
@@ -605,12 +658,17 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
       }}
     >
       <Handle type="target" position={Position.Left} style={{ background: audioColor, border: 0 }} />
-      {/* 双输出口: 轨道 1 / 轨道 2 */}
-      <Handle type="source" id="audio-0" position={Position.Right} style={{ background: audioColor, border: 0, top: '48%' }} />
-      <Handle type="source" id="audio-1" position={Position.Right} style={{ background: audioColor, border: 0, top: '52%' }} />
-      {/* 轨道标签 */}
-      <div className="absolute right-[-2px] text-[8px] font-bold text-violet-300/70 pointer-events-none" style={{ top: '48%', transform: 'translateX(100%) translateY(-50%)' }}>♪1</div>
-      <div className="absolute right-[-2px] text-[8px] font-bold text-violet-300/70 pointer-events-none" style={{ top: '52%', transform: 'translateX(100%) translateY(-50%)' }}>♪2</div>
+      {isWhisper ? (
+        <Handle type="source" id="text" position={Position.Right} style={{ background: textColor, border: 0 }} />
+      ) : (
+        <>
+          {/* 双输出口: 轨道 1 / 轨道 2 */}
+          <Handle type="source" id="audio-0" position={Position.Right} style={{ background: audioColor, border: 0, top: '48%' }} />
+          <Handle type="source" id="audio-1" position={Position.Right} style={{ background: audioColor, border: 0, top: '52%' }} />
+          <div className="absolute right-[-2px] text-[8px] font-bold text-violet-300/70 pointer-events-none" style={{ top: '48%', transform: 'translateX(100%) translateY(-50%)' }}>♪1</div>
+          <div className="absolute right-[-2px] text-[8px] font-bold text-violet-300/70 pointer-events-none" style={{ top: '52%', transform: 'translateX(100%) translateY(-50%)' }}>♪2</div>
+        </>
+      )}
 
       <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10">
         <div
@@ -620,18 +678,19 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           <Music size={13} />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold text-white">音频 · {isSeedAudio ? 'Seed Audio' : 'Suno'}</div>
+          <div className="text-sm font-semibold text-white">音频 · {isWhisper ? 'Whisper' : isSeedAudio ? 'Seed Audio' : 'Suno'}</div>
           <div className="text-[10px] text-white/40 truncate">
-            {isSeedAudio ? 'doubao-seed-audio-1.0 · 国内平价工坊' : `${version} · ${MODES.find((m) => m.id === mode)?.label}`}
+            {isWhisper ? 'whisper-1 · 贞贞的平价AI小屋' : isSeedAudio ? 'doubao-seed-audio-1.0 · 贞贞的平价AI小屋' : `${version} · ${MODES.find((m) => m.id === mode)?.label}`}
           </div>
         </div>
       </div>
 
       <div className="p-2.5 space-y-2" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="grid grid-cols-2 gap-1 rounded border border-white/10 bg-black/15 p-1">
+        <div className="grid grid-cols-3 gap-1 rounded border border-white/10 bg-black/15 p-1">
           {([
             { value: 'suno', label: 'Suno' },
             { value: 'seed-audio', label: 'Seed Audio' },
+            { value: 'whisper', label: 'Whisper' },
           ] as const).map((item) => (
             <button
               key={item.value}
@@ -644,7 +703,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           ))}
         </div>
 
-        {!isSeedAudio && (
+        {isSuno && (
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="text-[10px] text-white/50 block mb-1">模式</label>
@@ -683,14 +742,14 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           data={d}
           update={update}
           context={{
-            providerSource: isSeedAudio ? 'seedance-nz' : 'zhenzhen',
-            model: isSeedAudio ? 'doubao-seed-audio-1.0' : version,
-            apiModel: isSeedAudio ? 'doubao-seed-audio-1.0' : `suno-${version}`,
-            providerKind: isSeedAudio ? 'seed-audio' : 'suno',
+            providerSource: isSeedAudio || isWhisper ? 'seedance-nz' : 'zhenzhen',
+            model: isWhisper ? 'whisper-1' : isSeedAudio ? 'doubao-seed-audio-1.0' : version,
+            apiModel: isWhisper ? 'whisper-1' : isSeedAudio ? 'doubao-seed-audio-1.0' : `suno-${version}`,
+            providerKind: isWhisper ? 'whisper' : isSeedAudio ? 'seed-audio' : 'suno',
           }}
         />
 
-        {!isSeedAudio && (
+        {isSuno && (
         <>
         <div>
           <label className="text-[10px] text-white/50 block mb-1">标题</label>
@@ -714,6 +773,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
         </div>
         </>
         )}
+        {!isWhisper && (
         <div>
           <label className="text-[10px] text-white/50 block mb-1">{isSeedAudio ? '音频提示词' : '歌词 / 提示词'}</label>
           <MentionPromptInput
@@ -729,6 +789,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
             className="w-full h-16 resize-none rounded bg-white/5 border border-white/10 px-2 py-1 text-[11px] text-white outline-none focus:border-white/30 placeholder:text-white/30"
           />
         </div>
+        )}
 
         {isSeedAudio && (
           <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.05] p-2 space-y-2">
@@ -773,7 +834,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           </div>
         )}
 
-        {!isSeedAudio && (
+        {isSuno && (
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="text-[10px] text-white/50 block mb-1">Seed (0=随机)</label>
@@ -812,10 +873,10 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           isDark={isDark}
           isPixel={isPixel}
           groups={previewGroups}
-          title={isSeedAudio ? '上游素材 · Seed Audio 参考' : mode === 'generate' ? '上游素材 · 歌词提示' : '上游素材 · 参考音频'}
+          title={isWhisper ? '待转写素材 · 音频 / MP4' : isSeedAudio ? '上游素材 · Seed Audio 参考' : mode === 'generate' ? '上游素材 · 歌词提示' : '上游素材 · 参考音频'}
         />
 
-        {isSeedAudio && (localRefImage || localRefAudio) && (
+        {(isSeedAudio || isWhisper) && (localRefImage || localRefAudio) && (
           <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.05] p-2 space-y-1">
             <div className="flex items-center justify-between gap-2 text-[10px] text-cyan-100/75">
               <span>本地参考素材</span>
@@ -826,13 +887,40 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           </div>
         )}
 
-        {isSeedAudio && (
+        {(isSeedAudio || isWhisper) && (
           <div className="flex gap-1.5">
-            <input ref={fileInputRef} type="file" accept="audio/*,.mp3,.wav,.flac,.ogg" className="hidden" onChange={onSelectFile} />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={isWhisper ? 'audio/*,video/mp4,.mp3,.wav,.flac,.m4a,.mp4,.ogg,.opus,.aac,.aiff,.aif' : 'audio/*,.mp3,.wav,.flac,.ogg'}
+              className="hidden"
+              onChange={onSelectFile}
+            />
             <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading} className="flex-1 flex items-center justify-center gap-1 rounded bg-white/5 py-1 text-[10px] text-cyan-100 hover:bg-white/10 disabled:opacity-50">
               {uploading ? <Loader2 size={10} className="animate-spin" /> : <Upload size={10} />}
-              {uploading ? '导入中…' : '导入参考音频'}
+              {uploading ? '导入中…' : isWhisper ? '导入待转写音频 / MP4' : '导入参考音频'}
             </button>
+          </div>
+        )}
+
+        {isWhisper && (
+          <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.05] p-2 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="text-[11px] font-semibold text-cyan-100">Whisper 语音转文字</div>
+                <div className="text-[10px] leading-relaxed text-white/40">支持 mp3、wav、flac、m4a、mp4、ogg、opus、aac、aiff；官方接口不支持 webm。</div>
+              </div>
+              <select
+                value={whisperResponseFormat}
+                onChange={(e) => update({ whisperResponseFormat: e.target.value })}
+                className="rounded bg-white/5 border border-white/10 px-2 py-1 text-[10px] text-white outline-none"
+                title="返回格式"
+              >
+                {(['json', 'verbose_json', 'srt', 'text', 'vtt'] as const).map((item) => (
+                  <option key={item} value={item} className="bg-zinc-900">{item}</option>
+                ))}
+              </select>
+            </div>
           </div>
         )}
 
@@ -890,7 +978,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
 
         <ReuseResultToggle
           checked={d?.reuseResult === true}
-          hasResult={hasReusableGenerationResult('audio', d)}
+          hasResult={isWhisper ? transcript.trim().length > 0 : hasReusableGenerationResult('audio', d)}
           onChange={(checked) => update({ reuseResult: checked })}
           accentColor="#a78bfa"
         />
@@ -900,7 +988,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
             onClick={() => requestCanvasNodeRun(id)}
             className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded bg-violet-500/20 hover:bg-violet-500/30 text-violet-200 text-xs font-medium transition-colors"
           >
-            <Sparkles size={12} /> 生成音频
+            <Sparkles size={12} /> {isWhisper ? '开始转写' : '生成音频'}
           </button>
         ) : (
           <button
@@ -914,8 +1002,15 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
         {isBusy && (
           <div className="flex items-center gap-1 text-[10px] text-violet-200/80">
             <Loader2 size={11} className="animate-spin" />
-            {status === 'submitting' ? '提交任务...' : `轮询中 ${pollProgress}`}
+            {isWhisper ? '正在转写...' : status === 'submitting' ? '提交任务...' : `轮询中 ${pollProgress}`}
             {taskId && <span className="ml-auto text-white/30">{taskId.slice(0, 10)}…</span>}
+          </div>
+        )}
+
+        {isWhisper && transcript && (
+          <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.05] px-2 py-1.5">
+            <div className="mb-1 text-[10px] font-semibold text-cyan-100/80">转写结果</div>
+            <div className="max-h-28 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-white/75">{transcript}</div>
           </div>
         )}
 

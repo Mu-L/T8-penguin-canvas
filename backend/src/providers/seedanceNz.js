@@ -30,10 +30,35 @@ const ZHENZHEN_IMAGE_G2_MODELS = new Set([
   ZHENZHEN_IMAGE_G2_T2I_MODEL,
   ZHENZHEN_IMAGE_G2_I2I_MODEL,
 ]);
+const ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL = 'zhenzhen-image-g-v2-lowprice';
+const ZHENZHEN_IMAGE_GK_V15_MODEL = 'zhenzhen-image-gk-v15';
+const ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL = 'zhenzhen-image-gk-v15-edit';
+const ZHENZHEN_APIMART_IMAGE_MODELS = new Set([
+  ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
+  ZHENZHEN_IMAGE_GK_V15_MODEL,
+  ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL,
+]);
+const ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL = 'zhenzhen-video-g-omni-flash';
+const ZHENZHEN_VIDEO_GK_V15_MODEL = 'zhenzhen-video-gk-v15';
+const ZHENZHEN_VIDEO_V31_FAST_MODEL = 'zhenzhen-video-v31-fast';
+const ZHENZHEN_VIDEO_V31_QUALITY_MODEL = 'zhenzhen-video-v31-quality';
+const ZHENZHEN_APIMART_VIDEO_MODELS = new Set([
+  ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL,
+  ZHENZHEN_VIDEO_GK_V15_MODEL,
+  ZHENZHEN_VIDEO_V31_FAST_MODEL,
+  ZHENZHEN_VIDEO_V31_QUALITY_MODEL,
+]);
+const ZHENZHEN_APIMART_GK_RATIOS = new Set(['1:1', '16:9', '9:16', '3:2', '2:3']);
+const ZHENZHEN_APIMART_VEO_RATIOS = new Set(['16:9', '9:16']);
+const ZHENZHEN_APIMART_VEO_RESOLUTIONS = new Set(['720p', '1080p', '4k']);
+const WHISPER_MODEL = 'whisper-1';
+const WHISPER_RESPONSE_FORMATS = new Set(['json', 'verbose_json', 'srt', 'text', 'vtt']);
+const WHISPER_FILE_EXTENSIONS = new Set(['.mp3', '.wav', '.flac', '.m4a', '.mp4', '.ogg', '.opus', '.aac', '.aiff', '.aif']);
 const ZHENZHEN_IMAGE_G2_RATIOS = new Set(RATIOS);
 const IMAGE_MODELS = new Set([
   ...Object.values(IMAGE_MODEL_PAIRS).flat(),
   ...ZHENZHEN_IMAGE_G2_MODELS,
+  ...ZHENZHEN_APIMART_IMAGE_MODELS,
 ]);
 const IMAGE_RESOLUTIONS = new Set(['1k', '2k']);
 const IMAGE_OUTPUT_FORMATS = new Set(['jpeg', 'png']);
@@ -961,6 +986,10 @@ async function uploadMedia(source, kind, apiKey, options = {}) {
 }
 
 async function buildPayload(request, apiKey, options = {}) {
+  const requestedModel = String(request.model || '').trim().toLowerCase();
+  if (ZHENZHEN_APIMART_VIDEO_MODELS.has(requestedModel)) {
+    return buildApimartVideoPayload(request, apiKey, options);
+  }
   const taskType = deriveTaskType(request);
   ensureMediaLimits(taskType, request);
   const model = resolveModel(request.model, taskType);
@@ -1052,6 +1081,137 @@ function normalizeImageMetadata(request = {}) {
   return metadata;
 }
 
+async function uploadApimartImages(sources, apiKey, options = {}) {
+  const images = [];
+  for (const source of sources) {
+    images.push(await uploadMedia(source, 'image', apiKey, {
+      ...options,
+      maxBytes: IMAGE_REFERENCE_MAX_BYTES,
+      allowedMimes: ['image/jpeg', 'image/png', 'image/webp'],
+    }));
+  }
+  return images;
+}
+
+function normalizePositiveInteger(value, fallback, min, max, label) {
+  const number = value === undefined || value === null || value === '' ? fallback : Number(value);
+  if (!Number.isInteger(number) || number < min || number > max) {
+    throw new Error(`${label}必须是 ${min}-${max} 的整数`);
+  }
+  return number;
+}
+
+function normalizeApimartPrompt(value, label) {
+  const prompt = String(value || '').trim();
+  if (!prompt) throw new Error(`${label}必须填写提示词`);
+  return prompt;
+}
+
+async function buildApimartImagePayload(request, apiKey, options = {}) {
+  const model = String(request.model || '').trim().toLowerCase();
+  if (!ZHENZHEN_APIMART_IMAGE_MODELS.has(model)) {
+    throw new Error(`未知 APIMart 图像模型：${model || '(空)'}`);
+  }
+  const prompt = normalizeApimartPrompt(request.prompt, model);
+  const refs = normalizeList(request.images || request.refImages);
+  const n = normalizePositiveInteger(request.n, 1, 1, 10, 'APIMart 图片生成数量 n ');
+  const payload = { model, prompt, n };
+
+  if (model === ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL) {
+    if (refs.length > 16) throw new Error(`${model} 最多支持 16 张参考图`);
+    const resolution = String(request.resolution || '1k').trim().toLowerCase();
+    if (!['1k', '2k', '4k'].includes(resolution)) {
+      throw new Error(`${model} 分辨率只支持 1k、2k 或 4k`);
+    }
+    const size = String(request.size || request.ratio || '1:1').trim().toLowerCase();
+    if (!size || (!/^\d+:\d+$/.test(size) && !/^\d+x\d+$/.test(size))) {
+      throw new Error(`${model} size 必须是宽高比（如 16:9）或 WxH`);
+    }
+    payload.size = size;
+    payload.metadata = { resolution };
+    if (refs.length) payload.images = await uploadApimartImages(refs, apiKey, options);
+    return { payload, model, taskType: refs.length ? 'i2i' : 't2i' };
+  }
+
+  const size = String(request.size || request.ratio || '1:1').trim().toLowerCase();
+  if (!ZHENZHEN_APIMART_GK_RATIOS.has(size)) {
+    throw new Error(`${model} size 只支持 1:1、16:9、9:16、3:2 或 2:3`);
+  }
+  payload.size = size;
+  if (model === ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL) {
+    if (refs.length === 0) throw new Error(`${model} 必须提供 1 张参考图`);
+    payload.images = await uploadApimartImages(refs.slice(0, 1), apiKey, options);
+    return { payload, model, taskType: 'i2i' };
+  }
+  if (refs.length) throw new Error(`${model} 是文生图模型，不接受参考图；需要编辑图片请使用 ${ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL}`);
+  return { payload, model, taskType: 't2i' };
+}
+
+async function buildApimartVideoPayload(request, apiKey, options = {}) {
+  const model = String(request.model || '').trim().toLowerCase();
+  if (!ZHENZHEN_APIMART_VIDEO_MODELS.has(model)) {
+    throw new Error(`未知 APIMart 视频模型：${model || '(空)'}`);
+  }
+  const refs = normalizeList(request.images || request.refImages);
+  const videoSources = normalizeList(request.videos);
+  const prompt = String(request.prompt || '').trim();
+  const payload = { model, metadata: {} };
+  if (prompt) payload.prompt = prompt;
+
+  if (model === ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL) {
+    if (refs.length > 16) throw new Error(`${model} 最多支持 16 张参考图`);
+    if (videoSources.length > 1) throw new Error(`${model} 最多支持 1 个参考视频`);
+    const extendFromTaskId = String(request.extend_from_task_id || request.extendFromTaskId || '').trim();
+    if (videoSources.length && extendFromTaskId) {
+      throw new Error(`${model} 的 video_url 与 extend_from_task_id 不能同时使用`);
+    }
+    if (!prompt && refs.length === 0 && videoSources.length === 0 && !extendFromTaskId) {
+      throw new Error(`${model} 至少需要 prompt、参考图、参考视频或续作任务 ID 之一`);
+    }
+    payload.metadata.resolution = '720p';
+    payload.metadata.ratio = String(request.ratio || '16:9').trim();
+    if (refs.length) payload.images = await uploadApimartImages(refs, apiKey, options);
+    if (videoSources.length) {
+      payload.metadata.video_url = await uploadMedia(videoSources[0], 'video', apiKey, options);
+    }
+    if (extendFromTaskId) payload.metadata.extend_from_task_id = extendFromTaskId;
+    return { payload, model, taskType: refs.length || videoSources.length ? 'multi' : 't2v' };
+  }
+
+  const ratio = String(request.ratio || '16:9').trim().toLowerCase();
+  if (model === ZHENZHEN_VIDEO_GK_V15_MODEL) {
+    if (!prompt) throw new Error(`${model} 必须填写提示词`);
+    if (!ZHENZHEN_APIMART_GK_RATIOS.has(ratio)) {
+      throw new Error(`${model} 比例只支持 16:9、9:16、1:1、3:2 或 2:3`);
+    }
+    if (refs.length > 7) throw new Error(`${model} 最多支持 7 张参考图`);
+    const seconds = normalizePositiveInteger(request.duration ?? request.seconds, 6, 6, 30, `${model} 时长 `);
+    const resolution = String(request.resolution || '720p').trim().toLowerCase();
+    if (!['480p', '720p'].includes(resolution)) throw new Error(`${model} 分辨率只支持 480p 或 720p`);
+    payload.seconds = String(seconds);
+    payload.metadata = { resolution, ratio };
+    if (refs.length) payload.images = await uploadApimartImages(refs, apiKey, options);
+    return { payload, model, taskType: refs.length ? 'i2v' : 't2v' };
+  }
+
+  if (!prompt) throw new Error(`${model} 必须填写提示词`);
+  if (!ZHENZHEN_APIMART_VEO_RATIOS.has(ratio)) {
+    throw new Error(`${model} 比例只支持 16:9 或 9:16`);
+  }
+  const resolution = String(request.resolution || '720p').trim().toLowerCase();
+  if (!ZHENZHEN_APIMART_VEO_RESOLUTIONS.has(resolution)) {
+    throw new Error(`${model} 分辨率只支持 720p、1080p 或 4k`);
+  }
+  const maxRefs = model === ZHENZHEN_VIDEO_V31_FAST_MODEL ? 3 : 2;
+  if (refs.length > maxRefs) {
+    throw new Error(`${model} 最多支持 ${maxRefs} 张参考图${model === ZHENZHEN_VIDEO_V31_QUALITY_MODEL ? '（quality 禁止 3 图 reference 模式）' : ''}`);
+  }
+  payload.seconds = '8';
+  payload.metadata = { resolution, ratio };
+  if (refs.length) payload.images = await uploadApimartImages(refs, apiKey, options);
+  return { payload, model, taskType: refs.length ? 'i2v' : 't2v' };
+}
+
 function normalizeZhenzhenImageG2Prompt(value) {
   const prompt = String(value || '').trim();
   if (!prompt) throw new Error('Zhenzhen Image G-2 必须填写提示词');
@@ -1112,6 +1272,9 @@ async function buildZhenzhenImageG2Payload(request, apiKey, options = {}) {
 
 async function buildImagePayload(request, apiKey, options = {}) {
   const requestedModel = String(request.model || '').trim().toLowerCase();
+  if (ZHENZHEN_APIMART_IMAGE_MODELS.has(requestedModel)) {
+    return buildApimartImagePayload(request, apiKey, options);
+  }
   if (ZHENZHEN_IMAGE_G2_MODELS.has(requestedModel)) {
     return buildZhenzhenImageG2Payload(request, apiKey, options);
   }
@@ -1693,7 +1856,7 @@ async function buildAudioPayload(request, apiKey, options = {}) {
 }
 
 async function submitAudioTask(request, apiKey, options = {}) {
-  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”');
+  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
   const fetchImpl = getFetchImpl(options);
   const baseUrl = cleanBaseUrl(options.baseUrl);
   const built = await buildAudioPayload(request, apiKey, options);
@@ -1712,7 +1875,7 @@ async function submitAudioTask(request, apiKey, options = {}) {
 }
 
 async function queryAudioTask(taskId, apiKey, options = {}) {
-  if (!String(apiKey || '').trim()) throw new Error('缺少贞贞的平价AI工坊（国内） API Key');
+  if (!String(apiKey || '').trim()) throw new Error('缺少贞贞的平价AI小屋 API Key');
   const fetchImpl = getFetchImpl(options);
   const baseUrl = cleanBaseUrl(options.baseUrl);
   const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/audio/generations/${encodeURIComponent(taskId)}`, {
@@ -1736,8 +1899,77 @@ async function queryAudioTask(taskId, apiKey, options = {}) {
   };
 }
 
+function whisperExtension(file = {}) {
+  const nameExtension = path.extname(String(file.fileName || '')).toLowerCase();
+  if (WHISPER_FILE_EXTENSIONS.has(nameExtension)) return nameExtension;
+  const mime = String(file.mime || '').split(';')[0].trim().toLowerCase();
+  const mimeExtensions = {
+    'audio/mpeg': '.mp3',
+    'audio/wav': '.wav',
+    'audio/x-wav': '.wav',
+    'audio/flac': '.flac',
+    'audio/mp4': '.m4a',
+    'video/mp4': '.mp4',
+    'audio/ogg': '.ogg',
+    'audio/opus': '.opus',
+    'audio/aac': '.aac',
+    'audio/aiff': '.aiff',
+    'audio/x-aiff': '.aiff',
+  };
+  return mimeExtensions[mime] || '';
+}
+
+async function transcribeAudio(request, apiKey, options = {}) {
+  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
+  const source = String(request.audioUrl || request.audio || request.source || '').trim();
+  if (!source) throw new Error('Whisper 必须连接或上传 1 个音频/视频素材');
+  const model = String(request.model || WHISPER_MODEL).trim().toLowerCase();
+  if (model !== WHISPER_MODEL) throw new Error(`Whisper 仅支持模型 ${WHISPER_MODEL}`);
+  const responseFormat = String(request.response_format || request.responseFormat || 'json').trim().toLowerCase();
+  if (!WHISPER_RESPONSE_FORMATS.has(responseFormat)) {
+    throw new Error('Whisper response_format 只支持 json、verbose_json、srt、text 或 vtt');
+  }
+
+  const file = await mediaBuffer(source, 'audio', 50 * 1024 * 1024, options);
+  const extension = whisperExtension(file);
+  if (!extension) {
+    throw new Error('Whisper 不支持该文件格式；仅支持 mp3、wav、flac、m4a、mp4、ogg、opus、aac、aiff，不支持 webm');
+  }
+  const baseName = path.basename(String(file.fileName || 'whisper-input'), path.extname(String(file.fileName || '')));
+  const fileName = `${baseName || 'whisper-input'}${extension}`;
+  const fetchImpl = getFetchImpl(options);
+  const baseUrl = cleanBaseUrl(options.baseUrl);
+  const form = new FormData();
+  form.append('file', new Blob([file.buffer], { type: file.mime || defaultMime('audio') }), fileName);
+  form.append('model', WHISPER_MODEL);
+  form.append('response_format', responseFormat);
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/audio/transcriptions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
+  }, options, 'seedance.nz Whisper 转写');
+  const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+  let data;
+  if (contentType.includes('application/json')) {
+    data = await responseJson(response, 'seedance.nz Whisper 转写');
+  } else {
+    data = await response.text();
+  }
+  if (!response.ok) throw createUpstreamError(data, response);
+  const text = typeof data === 'string'
+    ? data
+    : String(data?.text || data?.data?.text || data?.result?.text || '').trim();
+  if (!text) throw new Error('Whisper 转写完成但未返回文本');
+  return {
+    text,
+    model: WHISPER_MODEL,
+    responseFormat,
+    ...safeProviderTrace(response, typeof data === 'object' ? data : {}),
+  };
+}
+
 async function submitImageTask(request, apiKey, options = {}) {
-  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”');
+  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
   const fetchImpl = getFetchImpl(options);
   const baseUrl = cleanBaseUrl(options.baseUrl);
   const built = await buildImagePayload(request, apiKey, options);
@@ -1768,7 +2000,7 @@ function normalizeImageTaskStatus(value) {
 }
 
 async function queryImageTask(taskId, apiKey, options = {}) {
-  if (!String(apiKey || '').trim()) throw new Error('缺少贞贞的平价AI工坊（国内） API Key');
+  if (!String(apiKey || '').trim()) throw new Error('缺少贞贞的平价AI小屋 API Key');
   const fetchImpl = getFetchImpl(options);
   const baseUrl = cleanBaseUrl(options.baseUrl);
   const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/image/generations/${encodeURIComponent(taskId)}`, {
@@ -1792,7 +2024,7 @@ async function queryImageTask(taskId, apiKey, options = {}) {
 }
 
 async function submitTask(request, apiKey, options = {}) {
-  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”');
+  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
   const fetchImpl = getFetchImpl(options);
   const baseUrl = cleanBaseUrl(options.baseUrl);
   const built = await buildPayload(request, apiKey, options);
@@ -1819,7 +2051,7 @@ function normalizeStatus(value) {
 }
 
 async function queryTask(taskId, apiKey, options = {}) {
-  if (!String(apiKey || '').trim()) throw new Error('缺少贞贞的平价AI工坊（国内） API Key');
+  if (!String(apiKey || '').trim()) throw new Error('缺少贞贞的平价AI小屋 API Key');
   const fetchImpl = getFetchImpl(options);
   const baseUrl = cleanBaseUrl(options.baseUrl);
   const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/videos/${encodeURIComponent(taskId)}`, {
@@ -1877,6 +2109,15 @@ module.exports = {
   ZHENZHEN_IMAGE_G2_MODELS,
   ZHENZHEN_IMAGE_G2_RATIOS,
   ZHENZHEN_IMAGE_G2_T2I_MODEL,
+  ZHENZHEN_APIMART_IMAGE_MODELS,
+  ZHENZHEN_APIMART_VIDEO_MODELS,
+  ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
+  ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL,
+  ZHENZHEN_IMAGE_GK_V15_MODEL,
+  ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL,
+  ZHENZHEN_VIDEO_GK_V15_MODEL,
+  ZHENZHEN_VIDEO_V31_FAST_MODEL,
+  ZHENZHEN_VIDEO_V31_QUALITY_MODEL,
   ZHENZHEN_UPSCALER_MODEL,
   ZHENZHEN_UPSCALER_RESOLUTIONS,
   PROVIDER_ID,
@@ -1885,6 +2126,8 @@ module.exports = {
   SEED_AUDIO_FORMATS,
   SEED_AUDIO_MODEL,
   SEED_AUDIO_SAMPLE_RATES,
+  WHISPER_MODEL,
+  WHISPER_RESPONSE_FORMATS,
   WAN27_SPICY_MODEL,
   WAN27_SPICY_RESOLUTIONS,
   buildAudioPayload,
@@ -1895,6 +2138,8 @@ module.exports = {
   buildHappyHorsePayload,
   buildWanPayload,
   buildPayload,
+  buildApimartImagePayload,
+  buildApimartVideoPayload,
   buildImagePayload,
   buildZhenzhenImageG2Payload,
   deriveTaskType,
@@ -1915,5 +2160,6 @@ module.exports = {
   submitImageTask,
   submitTask,
   submitWanTask,
+  transcribeAudio,
   uploadMedia,
 };

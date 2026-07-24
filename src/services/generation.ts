@@ -285,11 +285,17 @@ export async function queryImageStatus(taskId: string, apiModel?: string): Promi
 export interface SeedreamNzSubmitRequest {
   prompt: string;
   images?: string[];
-  model?: 'zhenzhen-image-g2-t2i' | 'zhenzhen-image-g2-i2i';
+  model?:
+    | 'zhenzhen-image-g2-t2i'
+    | 'zhenzhen-image-g2-i2i'
+    | 'zhenzhen-image-g-v2-lowprice'
+    | 'zhenzhen-image-gk-v15'
+    | 'zhenzhen-image-gk-v15-edit';
   modelFamily?: 'domestic' | 'overseas';
-  resolution?: '1k' | '2k';
+  resolution?: '1k' | '2k' | '4k';
   ratio?: 'adaptive' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16' | '21:9';
   size?: string;
+  n?: number;
   output_format?: 'png' | 'jpeg';
 }
 
@@ -1250,7 +1256,36 @@ export async function querySeedance(
 // 完全对齐主项目 gpt-image-2-web 的 runSuno / runSunoCover / runSunoExtend
 // ========================================================================
 export type AudioMode = 'generate' | 'cover' | 'extend';
-export type AudioProviderMode = 'suno' | 'seed-audio';
+export type AudioProviderMode = 'suno' | 'seed-audio' | 'whisper';
+export type WhisperResponseFormat = 'json' | 'verbose_json' | 'srt' | 'text' | 'vtt';
+
+export interface WhisperTranscribeRequest {
+  audioUrl: string;
+  model?: 'whisper-1';
+  responseFormat?: WhisperResponseFormat;
+}
+
+export interface WhisperTranscribeResult extends ProviderTransportTrace {
+  text: string;
+  model: 'whisper-1';
+  responseFormat: WhisperResponseFormat;
+}
+
+export async function transcribeWhisper(req: WhisperTranscribeRequest): Promise<WhisperTranscribeResult> {
+  const r = await fetch('/api/proxy/audio/whisper/transcribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      audioUrl: req.audioUrl,
+      model: req.model || 'whisper-1',
+      response_format: req.responseFormat || 'json',
+    }),
+  });
+  const data = await safeJsonResponse(r, '贞贞的平价AI小屋 Whisper 转写');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r) as WhisperTranscribeResult;
+}
+
 export interface AudioSubmitRequest {
   mode: AudioMode;
   prompt?: string;

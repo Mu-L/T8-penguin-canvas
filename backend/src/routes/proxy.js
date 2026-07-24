@@ -402,6 +402,30 @@ function declaredMediaKind(contentType) {
   return 'unsupported';
 }
 
+function mediaContentTypesCompatible(
+  declaredMime,
+  detectedMime,
+  declaredKind,
+  detectedKind,
+  allowSameKindSubtypeMismatch,
+) {
+  if (!declaredMime || declaredMime === 'application/octet-stream' || declaredMime === 'binary/octet-stream') {
+    return true;
+  }
+  if (!detectedMime || declaredMime === detectedMime) return true;
+  // The file signature is authoritative for both the persisted extension and
+  // the media subtype. CDNs and RH workflows frequently serve a genuine media
+  // file with a stale/generic subtype (for example an ISO-BMFF QuickTime file
+  // as video/mp4, or a PNG as image/jpeg). Once both sides independently agree
+  // on the same safe top-level media kind, an exact subtype match adds no
+  // security value and incorrectly rejects valid outputs. Cross-kind
+  // declarations, HTML/JSON, archives and unknown signatures are still denied.
+  return allowSameKindSubtypeMismatch === true
+    && !!declaredKind
+    && declaredKind !== 'unsupported'
+    && declaredKind === detectedKind;
+}
+
 function validateProxyMediaBuffer(buffer, contentType, options = {}) {
   const allowedKinds = new Set(options.allowedKinds || ['image', 'video', 'audio']);
   const maximum = Number(options.maxBytes) || PROXY_MEDIA_REFERENCE_MAX_BYTES;
@@ -417,11 +441,22 @@ function validateProxyMediaBuffer(buffer, contentType, options = {}) {
   }
   if (declaredKind && !allowedKinds.has(declaredKind)) throw new Error('远程素材 Content-Type 不在允许范围内');
   const declaredMime = normalizedContentType(contentType);
-  if (declaredMime && declaredMime !== 'application/octet-stream' && declaredMime !== 'binary/octet-stream'
-    && detectedMime && declaredMime !== detectedMime) {
+  if (!mediaContentTypesCompatible(
+    declaredMime,
+    detectedMime,
+    declaredKind,
+    detectedKind,
+    options.allowSameKindSubtypeMismatch,
+  )) {
     throw new Error('远程素材 Content-Type 与文件魔数子类型不一致');
   }
-  return { detectedKind, detectedMime, contentType: detectedMime || declaredMime };
+  return {
+    detectedKind,
+    detectedMime,
+    declaredMime,
+    contentType: detectedMime || declaredMime,
+    contentTypeMismatch: !!declaredMime && !!detectedMime && declaredMime !== detectedMime,
+  };
 }
 
 async function fetchProxyRemoteMedia(url, options = {}) {
@@ -443,6 +478,7 @@ async function fetchProxyRemoteMedia(url, options = {}) {
   const verified = validateProxyMediaBuffer(remote.buffer, remote.contentType, {
     allowedKinds: options.allowedKinds,
     maxBytes: maximum,
+    allowSameKindSubtypeMismatch: options.allowSameKindSubtypeMismatch,
   });
   return { ...remote, ...verified };
 }
@@ -1572,6 +1608,7 @@ async function saveRemoteImageDetailed(url, _providerFetchImpl, materializationK
       const remote = await fetchProxyRemoteMedia(url, {
         allowedKinds: ['image'],
         maxBytes: PROXY_IMAGE_REFERENCE_MAX_BYTES,
+        allowSameKindSubtypeMismatch: true,
         deadlineMs: remainingMs,
         idleTimeoutMs: Math.min(IMAGE_OUTPUT_MATERIALIZATION_IDLE_TIMEOUT_MS, remainingMs),
         accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif,image/bmp,image/tiff;q=0.9',
@@ -1617,6 +1654,7 @@ async function saveRemoteAudioDetailed(url, materializationKey = '') {
       const remote = await fetchProxyRemoteMedia(url, {
         allowedKinds: ['audio'],
         maxBytes: PROXY_AUDIO_REFERENCE_MAX_BYTES,
+        allowSameKindSubtypeMismatch: true,
         accept: 'audio/mpeg,audio/mp4,audio/wav,audio/ogg,audio/flac;q=0.9',
       });
       const buf = remote.buffer;
@@ -2560,7 +2598,7 @@ router.post('/image/seedance-nz/submit', async (req, res) => {
   const settings = loadRawSettings();
   const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
   if (!apiKey) {
-    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”' });
+    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI小屋 API Key”' });
   }
   try {
     const result = await seedanceNz.submitImageTask(req.body || {}, apiKey);
@@ -2597,7 +2635,7 @@ router.get('/image/seedance-nz/status/:tid', async (req, res) => {
   const remembered = recallTaskMeta(req.params.tid, 'seedance-nz-image');
   const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
   if (!apiKey) {
-    return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
+    return res.status(400).json({ success: false, error: '缺少贞贞的平价AI小屋 API Key' });
   }
   try {
     const result = await seedanceNz.queryImageTask(req.params.tid, apiKey);
@@ -3195,6 +3233,34 @@ router.get('/audio/seed-audio/status/:tid', async (req, res) => {
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
       error: proxyPublicError(error, 'Seed Audio 查询失败', [apiKey]),
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+router.post('/audio/whisper/transcribe', async (req, res) => {
+  const settings = loadRawSettings();
+  const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) {
+    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI小屋 API Key”' });
+  }
+  try {
+    const result = await seedanceNz.transcribeAudio(req.body || {}, apiKey);
+    return res.json({
+      success: true,
+      data: {
+        text: result.text,
+        model: result.model,
+        responseFormat: result.responseFormat,
+        ...seedanceNzTrace(result),
+      },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    proxyRouteError('proxy/audio/whisper/transcribe 错误', error, [apiKey]);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: proxyPublicError(error, 'Whisper 转写失败', [apiKey]),
       ...seedanceNzTrace(error),
     });
   }
@@ -4657,6 +4723,7 @@ async function saveRemoteVideoDetailed(url, _providerFetchImpl, materializationK
         const remote = await fetchProxyRemoteMedia(url, {
           allowedKinds: ['video'],
           maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
+          allowSameKindSubtypeMismatch: true,
           accept: 'video/mp4,video/webm,video/quicktime,video/x-matroska;q=0.9',
         });
         const buf = remote.buffer;
@@ -6673,6 +6740,7 @@ router.get('/runninghub/query', async (req, res) => {
           const downloaded = await fetchProxyRemoteMedia(remote, {
             allowedKinds: ['image', 'video', 'audio'],
             maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
+            allowSameKindSubtypeMismatch: true,
           });
           let buf = downloaded.buffer;
           let ext = verifiedProxyMediaExtension(downloaded);

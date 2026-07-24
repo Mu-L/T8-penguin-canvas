@@ -291,7 +291,7 @@ test('Seedream NZ selector distinguishes domestic and Dola overseas model famili
   assert.match(node, /Dola Seedream 5\.0 Pro（海外模型）/);
   assert.match(node, /dola-seedream-5\.0-pro-t2i/);
   assert.match(node, /dola-seedream-5\.0-pro-i2i/);
-  assert.match(node, /modelFamily: isZhenzhenImageG2 \? undefined : seedreamNzModelFamily/);
+  assert.match(node, /modelFamily: isZhenzhenBudgetImageSelected \? undefined : seedreamNzModelFamily/);
   assert.match(generation, /modelFamily\?: 'domestic' \| 'overseas'/);
   assert.match(provider, /dola-seedream-5\.0-pro-t2i/);
   assert.match(provider, /dola-seedream-5\.0-pro-i2i/);
@@ -315,10 +315,40 @@ test('audio node exposes Seed Audio without replacing Suno and supports image/au
     label: '音频',
     category: 'core',
     inputs: ['text', 'image', 'audio'],
-    outputs: ['audio'],
+    outputs: ['audio', 'text'],
     executable: true,
   });
   assert.match(apiSettings, /Happy Horse、Hailuo、Kling、Vidu、Upscaler、Seedream、Zhenzhen Image G-2 与 Seed Audio/);
+});
+
+test('APIMart image, video and Whisper models are wired to the budget provider without replacing existing tabs', () => {
+  const imageNode = read('../src/components/nodes/ImageNode.tsx');
+  const videoNode = read('../src/components/nodes/VideoNode.tsx');
+  const audioNode = read('../src/components/nodes/AudioNode.tsx');
+  const models = read('../src/providers/models.ts');
+  const generation = read('../src/services/generation.ts');
+  const proxy = read('../backend/src/routes/proxy.js');
+
+  for (const model of [
+    'zhenzhen-image-g-v2-lowprice',
+    'zhenzhen-image-gk-v15',
+    'zhenzhen-image-gk-v15-edit',
+    'zhenzhen-video-g-omni-flash',
+    'zhenzhen-video-gk-v15',
+    'zhenzhen-video-v31-fast',
+    'zhenzhen-video-v31-quality',
+  ]) {
+    assert.match(models, new RegExp(model.replaceAll('.', '\\.')));
+  }
+  assert.match(imageNode, /贞贞的平价AI小屋 · \$\{apiModel\}/);
+  assert.match(videoNode, /贞贞的平价AI小屋 · \{apiModel\}/);
+  assert.match(videoNode, /querySeedance\(tid, 'seedance-nz'\)/);
+  assert.match(audioNode, /audioProviderMode === 'whisper'/);
+  assert.match(audioNode, /whisper-1 · 贞贞的平价AI小屋/);
+  assert.match(audioNode, /开始转写/);
+  assert.match(audioNode, /官方接口不支持 webm/);
+  assert.match(generation, /\/api\/proxy\/audio\/whisper\/transcribe/);
+  assert.match(proxy, /seedanceNz\.transcribeAudio/);
 });
 
 test('proxy keeps Happy Horse and Seed Audio on the domestic key and stores outputs locally', () => {

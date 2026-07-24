@@ -52,18 +52,45 @@ export const GPT_IMAGE_2_ZHENZHEN_SIZE_VARIANTS: Record<string, '2K' | '4K'> = {
 
 export const ZHENZHEN_IMAGE_G2_T2I_MODEL = 'zhenzhen-image-g2-t2i';
 export const ZHENZHEN_IMAGE_G2_I2I_MODEL = 'zhenzhen-image-g2-i2i';
+export const ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL = 'zhenzhen-image-g-v2-lowprice';
+export const ZHENZHEN_IMAGE_GK_V15_MODEL = 'zhenzhen-image-gk-v15';
+export const ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL = 'zhenzhen-image-gk-v15-edit';
 export const ZHENZHEN_IMAGE_G2_MODELS = [
   ZHENZHEN_IMAGE_G2_T2I_MODEL,
   ZHENZHEN_IMAGE_G2_I2I_MODEL,
 ] as const;
-export const ZHENZHEN_IMAGE_G2_MODEL_OPTIONS = [
+export const ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS = [
   { value: ZHENZHEN_IMAGE_G2_T2I_MODEL, label: ZHENZHEN_IMAGE_G2_T2I_MODEL },
   { value: ZHENZHEN_IMAGE_G2_I2I_MODEL, label: ZHENZHEN_IMAGE_G2_I2I_MODEL },
+  { value: ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL, label: ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL },
+] as const;
+export const ZHENZHEN_BUDGET_GROK_MODEL_OPTIONS = [
+  { value: ZHENZHEN_IMAGE_GK_V15_MODEL, label: ZHENZHEN_IMAGE_GK_V15_MODEL },
+  { value: ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL, label: ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL },
+] as const;
+export const ZHENZHEN_IMAGE_G2_MODEL_OPTIONS = ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS.slice(0, 2);
+export const ZHENZHEN_APIMART_IMAGE_MODELS = [
+  ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
+  ZHENZHEN_IMAGE_GK_V15_MODEL,
+  ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL,
+] as const;
+export const ZHENZHEN_BUDGET_IMAGE_MODELS = [
+  ...ZHENZHEN_IMAGE_G2_MODELS,
+  ...ZHENZHEN_APIMART_IMAGE_MODELS,
 ] as const;
 export const ZHENZHEN_IMAGE_G2_RATIOS = ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'];
+export const ZHENZHEN_IMAGE_GK_V15_RATIOS = ['1:1', '16:9', '9:16', '3:2', '2:3'];
 
 export function isZhenzhenImageG2Model(apiModel: string | undefined | null): boolean {
   return (ZHENZHEN_IMAGE_G2_MODELS as readonly string[]).includes(String(apiModel || '').trim());
+}
+
+export function isZhenzhenApimartImageModel(apiModel: string | undefined | null): boolean {
+  return (ZHENZHEN_APIMART_IMAGE_MODELS as readonly string[]).includes(String(apiModel || '').trim());
+}
+
+export function isZhenzhenBudgetImageModel(apiModel: string | undefined | null): boolean {
+  return (ZHENZHEN_BUDGET_IMAGE_MODELS as readonly string[]).includes(String(apiModel || '').trim());
 }
 
 export function gptImage2ZhenzhenVariantSize(apiModel: string | undefined | null): '2K' | '4K' | null {
@@ -456,8 +483,26 @@ export interface VideoModelDef {
 }
 
 // Veo 系列子模型。第一项是切到 Veo 分类时的默认具体模型。
+export const ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL = 'zhenzhen-video-g-omni-flash';
+export const ZHENZHEN_VIDEO_GK_V15_MODEL = 'zhenzhen-video-gk-v15';
+export const ZHENZHEN_VIDEO_V31_FAST_MODEL = 'zhenzhen-video-v31-fast';
+export const ZHENZHEN_VIDEO_V31_QUALITY_MODEL = 'zhenzhen-video-v31-quality';
+export const ZHENZHEN_APIMART_VIDEO_MODELS = [
+  ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL,
+  ZHENZHEN_VIDEO_GK_V15_MODEL,
+  ZHENZHEN_VIDEO_V31_FAST_MODEL,
+  ZHENZHEN_VIDEO_V31_QUALITY_MODEL,
+] as const;
+
+export function isZhenzhenApimartVideoModel(apiModel: string | undefined | null): boolean {
+  return (ZHENZHEN_APIMART_VIDEO_MODELS as readonly string[]).includes(String(apiModel || '').trim());
+}
+
 const VEO_MODELS = [
   { value: 'veo-omni-10s', label: 'veo-omni-10s' },
+  { value: ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL, label: ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL },
+  { value: ZHENZHEN_VIDEO_V31_FAST_MODEL, label: ZHENZHEN_VIDEO_V31_FAST_MODEL },
+  { value: ZHENZHEN_VIDEO_V31_QUALITY_MODEL, label: ZHENZHEN_VIDEO_V31_QUALITY_MODEL },
   { value: 'veo3', label: 'veo3' },
   { value: 'veo3-fast', label: 'veo3-fast' },
   { value: 'veo3-pro', label: 'veo3-pro' },
@@ -484,6 +529,7 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     description: 'xAI Grok Video (最多 7 张参考图)',
     apiModelOptions: [
       { value: 'grok-video-3', label: 'grok-video-3（新版1.5）' },
+      { value: ZHENZHEN_VIDEO_GK_V15_MODEL, label: ZHENZHEN_VIDEO_GK_V15_MODEL },
       { value: 'grok-1.5-video-6s', label: 'grok-1.5-video-6s（Zhenzhen New）' },
       { value: 'grok-1.5-video-10s', label: 'grok-1.5-video-10s（Zhenzhen New）' },
       { value: 'grok-1.5-video-15s', label: 'grok-1.5-video-15s（Zhenzhen New）' },

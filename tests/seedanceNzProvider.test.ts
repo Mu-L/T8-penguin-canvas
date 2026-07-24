@@ -206,6 +206,161 @@ test('seedance.nz builds official Seedream t2i and i2i payloads without mixing v
   assert.equal('seconds' in i2i.payload, false);
 });
 
+test('seedance.nz APIMart image models follow the documented low-price and Grok payloads', async () => {
+  seedanceNz.resetCachesForTests();
+  let uploadIndex = 0;
+  const fetchImpl = async (url: string) => {
+    assert.match(url, /\/v1\/files\/upload$/);
+    uploadIndex += 1;
+    return jsonResponse({ url: `https://cdn.example.com/apimart-image-${uploadIndex}.png` });
+  };
+
+  const lowPrice = await seedanceNz.buildApimartImagePayload({
+    model: 'zhenzhen-image-g-v2-lowprice',
+    prompt: 'A product photograph',
+    size: '16:9',
+    resolution: '4k',
+    n: 3,
+    images: [TINY_PNG_A, TINY_PNG_B],
+  }, 'test-key', { fetchImpl, uploadIntervalMs: 0 });
+  assert.deepEqual(lowPrice, {
+    model: 'zhenzhen-image-g-v2-lowprice',
+    taskType: 'i2i',
+    payload: {
+      model: 'zhenzhen-image-g-v2-lowprice',
+      prompt: 'A product photograph',
+      n: 3,
+      size: '16:9',
+      metadata: { resolution: '4k' },
+      images: [
+        'https://cdn.example.com/apimart-image-1.png',
+        'https://cdn.example.com/apimart-image-2.png',
+      ],
+    },
+  });
+
+  const grokText = await seedanceNz.buildApimartImagePayload({
+    model: 'zhenzhen-image-gk-v15',
+    prompt: 'A cinematic skyline',
+    size: '3:2',
+    n: 2,
+  }, 'test-key');
+  assert.deepEqual(grokText.payload, {
+    model: 'zhenzhen-image-gk-v15',
+    prompt: 'A cinematic skyline',
+    n: 2,
+    size: '3:2',
+  });
+
+  const grokEdit = await seedanceNz.buildApimartImagePayload({
+    model: 'zhenzhen-image-gk-v15-edit',
+    prompt: 'Replace the sky',
+    size: '16:9',
+    images: [TINY_PNG_A, TINY_PNG_B],
+  }, 'test-key', { fetchImpl, uploadIntervalMs: 0 });
+  assert.equal(grokEdit.taskType, 'i2i');
+  assert.deepEqual(grokEdit.payload.images, ['https://cdn.example.com/apimart-image-1.png']);
+
+  await assert.rejects(
+    seedanceNz.buildApimartImagePayload({
+      model: 'zhenzhen-image-gk-v15',
+      prompt: 'Must stay text-to-image',
+      images: [TINY_PNG_A],
+    }, 'test-key', { fetchImpl, uploadIntervalMs: 0 }),
+    /文生图模型，不接受参考图/,
+  );
+});
+
+test('seedance.nz APIMart video models preserve each documented duration and reference constraint', async () => {
+  seedanceNz.resetCachesForTests();
+  let uploadIndex = 0;
+  const fetchImpl = async (url: string) => {
+    assert.match(url, /\/v1\/files\/upload$/);
+    uploadIndex += 1;
+    return jsonResponse({ url: `https://cdn.example.com/apimart-video-ref-${uploadIndex}` });
+  };
+
+  const omni = await seedanceNz.buildApimartVideoPayload({
+    model: 'zhenzhen-video-g-omni-flash',
+    prompt: '',
+    ratio: '9:16',
+    images: [TINY_PNG_A],
+    videos: [TINY_MP4],
+  }, 'test-key', { fetchImpl, uploadIntervalMs: 0 });
+  assert.equal(omni.payload.model, 'zhenzhen-video-g-omni-flash');
+  assert.deepEqual(omni.payload.metadata, {
+    resolution: '720p',
+    ratio: '9:16',
+    video_url: 'https://cdn.example.com/apimart-video-ref-2',
+  });
+  assert.deepEqual(omni.payload.images, ['https://cdn.example.com/apimart-video-ref-1']);
+  assert.equal('seconds' in omni.payload, false);
+
+  const grok = await seedanceNz.buildApimartVideoPayload({
+    model: 'zhenzhen-video-gk-v15',
+    prompt: 'A slow dolly shot',
+    duration: 30,
+    ratio: '2:3',
+    resolution: '480p',
+    images: [TINY_PNG_A],
+  }, 'test-key', { fetchImpl, uploadIntervalMs: 0 });
+  assert.equal(grok.payload.seconds, '30');
+  assert.deepEqual(grok.payload.metadata, { resolution: '480p', ratio: '2:3' });
+
+  const veoFast = await seedanceNz.buildApimartVideoPayload({
+    model: 'zhenzhen-video-v31-fast',
+    prompt: 'Fast camera move',
+    duration: 15,
+    ratio: '16:9',
+    resolution: '4K',
+  }, 'test-key');
+  assert.equal(veoFast.payload.seconds, '8');
+  assert.deepEqual(veoFast.payload.metadata, { resolution: '4k', ratio: '16:9' });
+
+  await assert.rejects(
+    seedanceNz.buildApimartVideoPayload({
+      model: 'zhenzhen-video-v31-quality',
+      prompt: 'Quality render',
+      images: [TINY_PNG_A, TINY_PNG_A, TINY_PNG_A],
+    }, 'test-key', { fetchImpl, uploadIntervalMs: 0 }),
+    /最多支持 2 张参考图/,
+  );
+});
+
+test('seedance.nz Whisper uses the documented synchronous multipart transcription endpoint', async () => {
+  let calledUrl = '';
+  let submittedForm: FormData | null = null;
+  const result = await seedanceNz.transcribeAudio({
+    audioUrl: TINY_MP3,
+    model: 'whisper-1',
+    responseFormat: 'verbose_json',
+  }, 'test-key', {
+    baseUrl: 'https://api.seedance.nz',
+    fetchImpl: async (url: string, init?: RequestInit) => {
+      calledUrl = url;
+      assert.equal(init?.method, 'POST');
+      assert.equal((init?.headers as Record<string, string>)?.Authorization, 'Bearer test-key');
+      assert.ok(init?.body instanceof FormData);
+      submittedForm = init.body as FormData;
+      return jsonResponse({ text: 'documented transcript' });
+    },
+  });
+
+  assert.equal(calledUrl, 'https://api.seedance.nz/v1/audio/transcriptions');
+  assert.equal(submittedForm?.get('model'), 'whisper-1');
+  assert.equal(submittedForm?.get('response_format'), 'verbose_json');
+  assert.equal((submittedForm?.get('file') as File)?.name, 'seedance-audio.mp3');
+  assert.equal(result.text, 'documented transcript');
+
+  await assert.rejects(
+    seedanceNz.transcribeAudio({
+      audioUrl: 'data:audio/webm;base64,GkXfo0AgQoaBAULygQFC8oEE',
+      model: 'whisper-1',
+    }, 'test-key', { fetchImpl: async () => jsonResponse({ text: 'must not submit' }) }),
+    /不支持该文件格式/,
+  );
+});
+
 test('seedance.nz builds documented Zhenzhen Image G-2 t2i and i2i payloads', async () => {
   seedanceNz.resetCachesForTests();
   const t2i = await seedanceNz.buildImagePayload({

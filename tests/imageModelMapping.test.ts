@@ -4,10 +4,15 @@ import fs from 'node:fs';
 
 import {
   IMAGE_MODELS,
+  ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS,
+  ZHENZHEN_BUDGET_GROK_MODEL_OPTIONS,
+  ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
   ZHENZHEN_IMAGE_G2_I2I_MODEL,
   ZHENZHEN_IMAGE_G2_MODEL_OPTIONS,
   ZHENZHEN_IMAGE_G2_RATIOS,
   ZHENZHEN_IMAGE_G2_T2I_MODEL,
+  ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL,
+  ZHENZHEN_IMAGE_GK_V15_MODEL,
   gptImage2ZhenzhenVariantSize,
   isFalModel,
   isZhenzhenImageG2Model,
@@ -107,16 +112,34 @@ test('Zhenzhen Image G-2 models live under the separate budget platform and keep
   assert.equal(isZhenzhenImageG2Model(ZHENZHEN_IMAGE_G2_I2I_MODEL), true);
   assert.equal(isFalModel(ZHENZHEN_IMAGE_G2_T2I_MODEL), false);
   assert.deepEqual(ZHENZHEN_IMAGE_G2_RATIOS, ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9']);
-  assert.match(imageNodeSource, /isSeedreamNz \|\| isZhenzhenImageG2/);
-  assert.match(imageNodeSource, /imageBuiltinSource === 'seedance-nz' \|\| isZhenzhenImageG2Model\(savedApiModel\)/);
+  assert.match(imageNodeSource, /isSeedreamNz \|\| isZhenzhenBudgetImageSelected/);
+  assert.match(imageNodeSource, /imageBuiltinSource === 'seedance-nz' \|\| isZhenzhenBudgetImageModel\(savedApiModel\)/);
   assert.match(imageNodeSource, /value="builtin:seedance-nz"[\s\S]*贞贞的平价AI小屋/);
   assert.match(imageNodeSource, /builtinApiModelOptions\.map\(\(opt\) =>/);
-  assert.match(imageNodeSource, /model: isZhenzhenImageG2 \? apiModel as/);
+  assert.match(imageNodeSource, /model: isZhenzhenBudgetImageSelected/);
   assert.match(imageNodeSource, /resolution: isZhenzhenImageG2/);
   assert.match(imageNodeSource, /图生图模式：必须提供 1–10 张参考图/);
   assert.match(imageNodeSource, /文生图模式：只使用 Prompt，已连接的参考图不会发送/);
   assert.match(proxySource, /seedanceNz\.submitImageTask/);
   assert.doesNotMatch(proxySource, /raw === 'zhenzhen-image-g2-t2i'\) return 'gpt-image-2'/);
+});
+
+test('new APIMart images are isolated in the budget GPT2 and Grok tabs', () => {
+  assert.deepEqual(
+    ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS.map((option) => option.value),
+    [
+      ZHENZHEN_IMAGE_G2_T2I_MODEL,
+      ZHENZHEN_IMAGE_G2_I2I_MODEL,
+      ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
+    ],
+  );
+  assert.deepEqual(
+    ZHENZHEN_BUDGET_GROK_MODEL_OPTIONS.map((option) => option.value),
+    [ZHENZHEN_IMAGE_GK_V15_MODEL, ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL],
+  );
+  assert.match(imageNodeSource, /modelDef\.id === 'grok-image' \? ZHENZHEN_BUDGET_GROK_MODEL_OPTIONS/);
+  assert.match(imageNodeSource, /isZhenzhenGrokImageEdit/);
+  assert.match(imageNodeSource, /必须提供 1 张参考图/);
 });
 
 test('Seedream V5 Pro is isolated behind its own image protocol and supports up to 10 edit references', () => {

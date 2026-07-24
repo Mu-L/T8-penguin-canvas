@@ -24,11 +24,18 @@ import {
   DEFAULT_MJ_RATIO,
   DEFAULT_MJ_SPEED,
   gptImage2ZhenzhenVariantSize,
+  isZhenzhenApimartImageModel,
+  isZhenzhenBudgetImageModel,
   isZhenzhenImageG2Model,
+  ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS,
+  ZHENZHEN_BUDGET_GROK_MODEL_OPTIONS,
+  ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
   ZHENZHEN_IMAGE_G2_I2I_MODEL,
-  ZHENZHEN_IMAGE_G2_MODEL_OPTIONS,
   ZHENZHEN_IMAGE_G2_RATIOS,
   ZHENZHEN_IMAGE_G2_T2I_MODEL,
+  ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL,
+  ZHENZHEN_IMAGE_GK_V15_MODEL,
+  ZHENZHEN_IMAGE_GK_V15_RATIOS,
 } from '../../providers/models';
 import {
   submitImageAsync,
@@ -381,27 +388,51 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   const sizeLevel = d?.sizeLevel || modelDef.defaultSize;
   // 子模型变体(对齐 gpt-image-2-web 的 g_model/n_model)
   const savedApiModel = typeof d?.apiModel === 'string' ? d.apiModel : '';
-  // 旧画布没有 imageBuiltinSource；保存过 G-2 模型时自动归入平价 AI 小屋。
+  // 旧画布没有 imageBuiltinSource；保存过平价小屋模型时自动恢复对应平台。
+  const isBudgetImageTab = modelDef.id === 'gpt-image-2' || modelDef.id === 'grok-image';
   const isZhenzhenBudgetImageSelected = !isExternalSelected
-    && modelDef.id === 'gpt-image-2'
-    && (d?.imageBuiltinSource === 'seedance-nz' || isZhenzhenImageG2Model(savedApiModel));
+    && isBudgetImageTab
+    && (d?.imageBuiltinSource === 'seedance-nz' || isZhenzhenBudgetImageModel(savedApiModel));
+  const budgetDefaultApiModel = modelDef.id === 'grok-image'
+    ? ZHENZHEN_IMAGE_GK_V15_MODEL
+    : ZHENZHEN_IMAGE_G2_T2I_MODEL;
   const builtinApiModelOptions = isZhenzhenBudgetImageSelected
-    ? ZHENZHEN_IMAGE_G2_MODEL_OPTIONS
+    ? (modelDef.id === 'grok-image' ? ZHENZHEN_BUDGET_GROK_MODEL_OPTIONS : ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS)
     : modelDef.apiModelOptions;
   const apiModel = builtinApiModelOptions.some((opt) => opt.value === savedApiModel)
     ? savedApiModel
-    : (isZhenzhenBudgetImageSelected ? ZHENZHEN_IMAGE_G2_T2I_MODEL : modelDef.apiModel);
+    : (isZhenzhenBudgetImageSelected ? budgetDefaultApiModel : modelDef.apiModel);
   const isZhenzhenImageG2 = isZhenzhenBudgetImageSelected && isZhenzhenImageG2Model(apiModel);
   const isZhenzhenImageG2I2I = apiModel === ZHENZHEN_IMAGE_G2_I2I_MODEL;
-  const seedanceNzProviderLabel = isZhenzhenImageG2
+  const isZhenzhenApimartImage = isZhenzhenBudgetImageSelected && isZhenzhenApimartImageModel(apiModel);
+  const isZhenzhenLowpriceImage = apiModel === ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL;
+  const isZhenzhenGrokImage = apiModel === ZHENZHEN_IMAGE_GK_V15_MODEL;
+  const isZhenzhenGrokImageEdit = apiModel === ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL;
+  const seedanceNzProviderLabel = isZhenzhenBudgetImageSelected
     ? '贞贞的平价AI小屋'
     : '贞贞的平价AI工坊（国内）';
-  const effectiveAspectRatios = isZhenzhenImageG2 ? ZHENZHEN_IMAGE_G2_RATIOS : modelDef.aspectRatios;
+  const effectiveAspectRatios = isZhenzhenImageG2
+    ? ZHENZHEN_IMAGE_G2_RATIOS
+    : (isZhenzhenGrokImage || isZhenzhenGrokImageEdit)
+      ? ZHENZHEN_IMAGE_GK_V15_RATIOS
+      : isZhenzhenLowpriceImage
+        ? modelDef.aspectRatios.filter((item) => item !== 'Auto')
+        : modelDef.aspectRatios;
   const effectiveAspectRatio = effectiveAspectRatios.includes(aspectRatio)
     ? aspectRatio
-    : (isZhenzhenImageG2 ? 'adaptive' : modelDef.defaultAspectRatio);
-  const effectiveSizes = isZhenzhenImageG2 ? ['1K'] : modelDef.sizes;
-  const effectiveSizeLevel = isZhenzhenImageG2 ? '1K' : sizeLevel;
+    : (isZhenzhenImageG2 ? 'adaptive' : '1:1');
+  const effectiveSizes = isZhenzhenImageG2
+    ? ['1K']
+    : isZhenzhenLowpriceImage
+      ? ['1K', '2K', '4K']
+      : (isZhenzhenGrokImage || isZhenzhenGrokImageEdit)
+        ? []
+        : modelDef.sizes;
+  const effectiveSizeLevel = isZhenzhenImageG2
+    ? '1K'
+    : isZhenzhenLowpriceImage && !['1K', '2K', '4K'].includes(sizeLevel)
+      ? '1K'
+      : sizeLevel;
 
   // ========== FAL 渠道识别及参数(不影响其他模型) ==========
   const isFal = isFalModel(apiModel);
@@ -410,7 +441,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   const isStandardGptImage2 = !isExternalSelected
     && modelDef.paramKind === 'gpt-size'
     && !isFal
-    && !isZhenzhenImageG2;
+    && !isZhenzhenBudgetImageSelected;
   const gptImageQuality: 'auto' | 'high' | 'medium' | 'low' = ['auto', 'high', 'medium', 'low'].includes(d?.gptImageQuality)
     ? d.gptImageQuality
     : 'auto';
@@ -473,8 +504,14 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   // 参考图上限(FAL 使用 FAL_REGISTRY.maxRefs,其他走原设计)
   const maxRefs = isExternalSelected
     ? Math.max(8, modelDef.maxReferenceImages || 0)
-    : isZhenzhenImageG2
+    : isZhenzhenImageG2I2I
       ? 10
+      : isZhenzhenLowpriceImage
+        ? 16
+        : isZhenzhenGrokImageEdit
+          ? 1
+          : (isZhenzhenImageG2 || isZhenzhenGrokImage)
+            ? 0
       : (falDef?.maxRefs ?? modelDef.maxReferenceImages);
   const status: 'idle' | 'generating' | 'success' | 'error' = d?.status || 'idle';
   const imageUrl = d?.imageUrl as string | undefined;
@@ -546,6 +583,19 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   // 切换模型时,如果当前比例/尺寸不在新模型选项里则重置
   const switchModel = (mId: string) => {
     const newDef = IMAGE_MODELS.find((m) => m.id === mId) || IMAGE_MODELS[0];
+    if (isZhenzhenBudgetImageSelected && (newDef.id === 'gpt-image-2' || newDef.id === 'grok-image')) {
+      const nextApiModel = newDef.id === 'grok-image'
+        ? ZHENZHEN_IMAGE_GK_V15_MODEL
+        : ZHENZHEN_IMAGE_G2_T2I_MODEL;
+      update({
+        model: newDef.id,
+        apiModel: nextApiModel,
+        imageBuiltinSource: 'seedance-nz',
+        aspectRatio: newDef.id === 'grok-image' ? '1:1' : 'adaptive',
+        sizeLevel: newDef.id === 'grok-image' ? '' : '1K',
+      });
+      return;
+    }
     const patch: any = { model: mId, apiModel: newDef.apiModel, imageBuiltinSource: 'zhenzhen' };
     if (newDef.paramKind === 'mj') {
       if (!d?.mjVersion) patch.mjVersion = DEFAULT_MJ_VERSION;
@@ -561,18 +611,27 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
 
   const switchApiModel = (nextApiModel: string) => {
     const nextSize = gptImage2ZhenzhenVariantSize(nextApiModel);
-    if (isZhenzhenImageG2Model(nextApiModel)) {
-      const nextRatio = ZHENZHEN_IMAGE_G2_RATIOS.includes(aspectRatio) ? aspectRatio : 'adaptive';
+    if (isZhenzhenBudgetImageModel(nextApiModel)) {
+      const nextModel = nextApiModel === ZHENZHEN_IMAGE_GK_V15_MODEL || nextApiModel === ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL
+        ? 'grok-image'
+        : 'gpt-image-2';
+      const nextRatio = isZhenzhenImageG2Model(nextApiModel)
+        ? (ZHENZHEN_IMAGE_G2_RATIOS.includes(aspectRatio) ? aspectRatio : 'adaptive')
+        : nextModel === 'grok-image'
+          ? (ZHENZHEN_IMAGE_GK_V15_RATIOS.includes(aspectRatio) ? aspectRatio : '1:1')
+          : (aspectRatio !== 'Auto' && IMAGE_MODELS[0].aspectRatios.includes(aspectRatio) ? aspectRatio : '1:1');
       update({
-        model: 'gpt-image-2',
+        model: nextModel,
         apiModel: nextApiModel,
         imageBuiltinSource: 'seedance-nz',
-        sizeLevel: '1K',
+        sizeLevel: nextApiModel === ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL
+          ? (['1K', '2K', '4K'].includes(sizeLevel) ? sizeLevel : '1K')
+          : isZhenzhenImageG2Model(nextApiModel) ? '1K' : '',
         aspectRatio: nextRatio,
       });
       return;
     }
-    const leavingG2Patch = isZhenzhenImageG2 ? { aspectRatio: modelDef.defaultAspectRatio } : {};
+    const leavingG2Patch = isZhenzhenBudgetImageSelected ? { aspectRatio: modelDef.defaultAspectRatio } : {};
     update(nextSize
       ? { apiModel: nextApiModel, imageBuiltinSource: 'zhenzhen', sizeLevel: nextSize, ...leavingG2Patch }
       : { apiModel: nextApiModel, imageBuiltinSource: 'zhenzhen', ...leavingG2Patch });
@@ -676,6 +735,11 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
       logBus.error('生成中止: G-2 图生图缺少参考图', src);
       return;
     }
+    if (isZhenzhenGrokImageEdit && upstreamImages.length === 0) {
+      setError(`${ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL} 必须提供 1 张参考图`);
+      logBus.error('生成中止: Grok Image 1.5 编辑缺少参考图', src);
+      return;
+    }
     if (isSeedream && !isSeedreamNz && !/^\d+x\d+$/.test(seedreamResolvedSize)) {
       setError('Seedream 自定义尺寸格式应为 宽x高，例如 2048x1536');
       logBus.error(`生成中止: Seedream 尺寸格式无效 ${seedreamResolvedSize || '(空)'}`, src);
@@ -696,7 +760,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
       ? providerSelection.provider.id
       : isFal
         ? 'fal'
-        : isSeedreamNz || isZhenzhenImageG2
+        : isSeedreamNz || isZhenzhenBudgetImageSelected
           ? 'seedance-nz'
           : isMj
             ? 'zhenzhen-mj'
@@ -705,7 +769,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
       ? externalProviderModel
       : isSeedreamNz
         ? seedreamNzUiModel
-        : isZhenzhenImageG2
+        : isZhenzhenBudgetImageSelected
           ? apiModel
         : isMj
           ? mjVersion
@@ -1131,19 +1195,33 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         throw new Error(`FAL 超时: ${(maxPoll * interval) / 1000}s 未完成`);
       }
 
-      // seedance.nz has a separate asynchronous image API for Seedream and
-      // Zhenzhen Image G-2. Keep it isolated from the legacy GPT2/Seedream route.
-      if (isSeedreamNz || isZhenzhenImageG2) {
+      // seedance.nz uses a dedicated asynchronous image protocol for Seedream,
+      // Zhenzhen Image G-2 and APIMart image models.
+      if (isSeedreamNz || isZhenzhenBudgetImageSelected) {
         if (!zhenzhenSd2ApiKey) throw new Error(`请先在 API 设置中填写“${seedanceNzProviderLabel} API Key”`);
-        const providerRefs = isZhenzhenImageG2 && !isZhenzhenImageG2I2I ? [] : allRefs;
-        const expectedModel = isZhenzhenImageG2
+        const providerRefs = isZhenzhenImageG2 && !isZhenzhenImageG2I2I
+          ? []
+          : isZhenzhenGrokImage
+            ? []
+            : isZhenzhenGrokImageEdit
+              ? allRefs.slice(0, 1)
+              : allRefs;
+        const expectedModel = isZhenzhenBudgetImageSelected
           ? apiModel
           : seedreamNzModelFamily === 'overseas'
             ? (providerRefs.length ? 'dola-seedream-5.0-pro-i2i' : 'dola-seedream-5.0-pro-t2i')
             : (providerRefs.length ? 'seedream-v5-pro-i2i' : 'seedream-v5-pro-t2i');
-        const imageFamilyLabel = isZhenzhenImageG2 ? 'Zhenzhen Image G-2' : 'Seedream';
+        const imageFamilyLabel = isZhenzhenImageG2
+          ? 'Zhenzhen Image G-2'
+          : isZhenzhenApimartImage
+            ? 'APIMart Image'
+            : 'Seedream';
         const sizeLabel = isZhenzhenImageG2
           ? '1k'
+          : isZhenzhenLowpriceImage
+            ? `${effectiveSizeLevel.toLowerCase()} · ${effectiveAspectRatio}`
+            : (isZhenzhenGrokImage || isZhenzhenGrokImageEdit)
+              ? effectiveAspectRatio
           : (seedreamNzResolution === 'custom' ? seedreamNzResolvedSize : seedreamNzResolution);
         logBus.info(
           `${seedanceNzProviderLabel} ${imageFamilyLabel} 提交: model=${expectedModel} 参考图=${providerRefs.length} 尺寸=${sizeLabel}`,
@@ -1152,16 +1230,28 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         const submit = await submitSeedreamNz({
           prompt: finalPrompt,
           images: providerRefs,
-          model: isZhenzhenImageG2 ? apiModel as 'zhenzhen-image-g2-t2i' | 'zhenzhen-image-g2-i2i' : undefined,
-          modelFamily: isZhenzhenImageG2 ? undefined : seedreamNzModelFamily,
+          model: isZhenzhenBudgetImageSelected
+            ? apiModel as
+              | 'zhenzhen-image-g2-t2i'
+              | 'zhenzhen-image-g2-i2i'
+              | 'zhenzhen-image-g-v2-lowprice'
+              | 'zhenzhen-image-gk-v15'
+              | 'zhenzhen-image-gk-v15-edit'
+            : undefined,
+          modelFamily: isZhenzhenBudgetImageSelected ? undefined : seedreamNzModelFamily,
           resolution: isZhenzhenImageG2
             ? '1k'
+            : isZhenzhenLowpriceImage
+              ? effectiveSizeLevel.toLowerCase() as '1k' | '2k' | '4k'
             : (seedreamNzResolution === 'custom' ? undefined : seedreamNzResolution),
           ratio: isZhenzhenImageG2
             ? effectiveAspectRatio as 'adaptive' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16' | '21:9'
             : undefined,
-          size: !isZhenzhenImageG2 && seedreamNzResolution === 'custom' ? seedreamNzResolvedSize : undefined,
-          output_format: isZhenzhenImageG2 ? undefined : seedreamOutputFormat,
+          size: isZhenzhenApimartImage
+            ? effectiveAspectRatio
+            : !isZhenzhenImageG2 && seedreamNzResolution === 'custom' ? seedreamNzResolvedSize : undefined,
+          n: isZhenzhenApimartImage ? 1 : undefined,
+          output_format: isZhenzhenBudgetImageSelected ? undefined : seedreamOutputFormat,
         });
         if (!isCurrentGenerationRun(runId)) return;
         const taskId = submit.taskId;
@@ -1530,8 +1620,8 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
                     onChange={(e) => {
                       const nextId = e.target.value;
                       if (nextId === 'zhenzhen') {
-                        const leavingBudgetPlatform = modelDef.id === 'gpt-image-2'
-                          && (d?.imageBuiltinSource === 'seedance-nz' || isZhenzhenImageG2Model(savedApiModel));
+                        const leavingBudgetPlatform = isBudgetImageTab
+                          && (d?.imageBuiltinSource === 'seedance-nz' || isZhenzhenBudgetImageModel(savedApiModel));
                         update({
                           providerSource: 'zhenzhen',
                           providerId: '',
@@ -2021,13 +2111,15 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         </div>
 
         {/* 模型 TAB 切换(对应主项目 gpt-image-2-web Tab 0/1/2) */}
-        {!isExternalSelected && !isZhenzhenBudgetImageSelected && <div>
+        {!isExternalSelected && <div>
           <label className="text-[10px] text-white/50 block mb-1">模型</label>
           <div
             className={`flex gap-0.5 p-0.5 rounded ${isPixel ? '' : 'bg-white/5'}`}
             style={isPixel ? { background: 'var(--px-muted)', border: '1.5px solid var(--px-ink)' } : undefined}
           >
-            {IMAGE_MODELS.map((m) => {
+            {IMAGE_MODELS
+              .filter((m) => !isZhenzhenBudgetImageSelected || m.id === 'gpt-image-2' || m.id === 'grok-image')
+              .map((m) => {
               const isActive = m.id === model;
               return (
                 <button
@@ -2104,13 +2196,19 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           </div>
         )}
 
-        {isZhenzhenImageG2 && !isExternalSelected && (
+        {isZhenzhenBudgetImageSelected && !isExternalSelected && (
           <div className="rounded border border-cyan-400/25 bg-cyan-500/5 px-2 py-1.5 text-[10px] leading-4 text-cyan-100/80">
-            <div>贞贞的平价AI小屋 · 异步 G-2 · 固定 1K</div>
+            <div>贞贞的平价AI小屋 · {apiModel}</div>
             <div>
-              {isZhenzhenImageG2I2I
-                ? '图生图模式：必须提供 1–10 张参考图。'
-                : '文生图模式：只使用 Prompt，已连接的参考图不会发送。'}
+              {isZhenzhenImageG2
+                ? isZhenzhenImageG2I2I
+                  ? '图生图模式：必须提供 1–10 张参考图；固定 1K。'
+                  : '文生图模式：只使用 Prompt，已连接的参考图不会发送；固定 1K。'
+                : isZhenzhenLowpriceImage
+                  ? 'GPT Image 2 平价模型：支持 1K/2K/4K，可选 1–16 张参考图。'
+                  : isZhenzhenGrokImageEdit
+                    ? 'Grok Image 1.5 编辑：必须提供参考图，仅使用第 1 张。'
+                    : 'Grok Image 1.5 文生图：只使用 Prompt，不发送参考图。'}
             </div>
             {!zhenzhenSd2ApiKey && <div className="text-amber-300">尚未配置“贞贞的平价AI小屋 API Key”</div>}
           </div>
@@ -2122,12 +2220,12 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           data={d}
           update={update}
           context={{
-            providerSource: isExternalSelected ? providerSelection.providerSource : ((isSeedreamNz || isZhenzhenImageG2) ? 'seedance-nz' : 'zhenzhen'),
+            providerSource: isExternalSelected ? providerSelection.providerSource : ((isSeedreamNz || isZhenzhenBudgetImageSelected) ? 'seedance-nz' : 'zhenzhen'),
             providerId: providerSelection.providerId,
             providerModel: isExternalSelected ? externalProviderModel : (isSeedreamNz ? seedreamNzUiModel : apiModel),
             model: modelDef.id,
             apiModel,
-            providerKind: isFal ? 'fal' : (isZhenzhenImageG2 ? 'zhenzhen-image-g2' : modelDef.paramKind),
+            providerKind: isFal ? 'fal' : (isZhenzhenBudgetImageSelected ? 'seedance-nz-image' : modelDef.paramKind),
           }}
         />
 
@@ -2709,11 +2807,11 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             groups={['text', 'image']}
             title={isMj
               ? '主参考图 · 上游+本地'
-              : isZhenzhenImageG2 && !isZhenzhenImageG2I2I
-                ? '参考图 · G-2 文生图模式不会发送'
+              : (isZhenzhenImageG2 && !isZhenzhenImageG2I2I) || isZhenzhenGrokImage
+                ? '参考图 · 当前文生图模型不会发送'
                 : '参考图 · 上游+本地'}
             imageUploadAction={
-              (!isZhenzhenImageG2 || isZhenzhenImageG2I2I) && orderedImages.length < maxRefs
+              maxRefs > 0 && orderedImages.length < maxRefs
                 ? {
                     onClick: handlePickFile,
                     title: '上传本地参考图',
