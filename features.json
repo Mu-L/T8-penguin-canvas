@@ -1,13 +1,33 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.6.5",
-  "lastUpdated": "2026-07-24-v2.6.5-release-authorized",
+  "lastUpdated": "2026-07-24-v2.6.5-released",
   "electronReleaseV265": {
     "version": "2.6.5",
-    "status": "release-authorized-evidence-deferred",
+    "status": "released-postrelease-evidence-pending",
     "date": "2026-07-24",
+    "releasedAt": "2026-07-24T11:33:40Z",
     "releaseUrl": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.6.5",
+    "sourceCommit": "8ec70e4be67333852c76f9c0b07726040c9c7b55",
     "tag": "v2.6.5",
+    "artifacts": {
+      "installer": {
+        "name": "T8-PenguinCanvas-Setup-2.6.5.exe",
+        "bytes": 1300242801,
+        "sha256": "dd9b0f057339d9d009e84d15ba6bf683b1213d9e7fbb0dde3cf0be77937e93e0",
+        "sha512": "cfjNYk77XdCKn+H2naPuuThbIPzjBxYwLkXHnPp9sBPR9Jvl7nRUzb3OcvCrPhL81TU4hz6Vvr3OYecMNHN6TQ=="
+      },
+      "blockmap": {
+        "name": "T8-PenguinCanvas-Setup-2.6.5.exe.blockmap",
+        "bytes": 1355339,
+        "sha256": "9f07fc7895dd95023bb64beb72989d47a180668e21cde6237f6094280fb08156"
+      },
+      "latest": {
+        "name": "latest.yml",
+        "bytes": 362,
+        "sha256": "323d08d28a37b364f656c1f05a4bba1fd6ec7e59c5a03dd7713dd539c5616eab"
+      }
+    },
     "description": "代理/TUN 全链路生成与下载兼容、工作流医生可选开关、RunningHub 站点显示同步，以及贞贞平价 AI 小屋 LLM/Story 接入的自动更新版。",
     "highlights": [
       "所有生成链路统一支持 TUN/VPN/Fake-IP 场景：远程图片、视频、音频和 3D 素材在安全校验前通过独立公共 DNS 回源真实地址；只对可信公网结果下载，不放宽本机、内网、链接和内容类型边界。",
@@ -19,8 +39,9 @@
     ],
     "verification": [
       "已完成相关单元/合同测试与 TypeScript 检查；平价 AI 小屋模型目录、非流式和 SSE 请求已用维护者提供的测试 Key 实测成功，测试 Key 未写入源码、配置、日志或发布资产。",
-      "正式发布前继续执行公开源码检查、RH 发布清单、生产构建、加密后端、私有前后端 sidecar、运行时归档与 Electron post-build 门禁。",
-      "Electron/NSIS 正式打包只触发一次；不执行 FFmpeg 视频转码或额外冷启动压力测试，避免增加本机 CPU 和原生进程负载。",
+      "公开源码检查、RH 14 个启用工具/11 个分类发布清单、生产构建、加密后端、私有前后端 sidecar、两项运行时归档与 Electron post-build 门禁均已通过。",
+      "正式命令首次在 Electron 构建前因延期契约仍指向旧版本而失败关闭；修正并测试精确 v2.6.5 契约后，Electron Builder/NSIS 实际打包只执行一次，并以 Idle 优先级、单逻辑核心完成。全程没有执行 FFmpeg 视频转码或额外冷启动压力测试。",
+      "GitHub 草稿 metadata、三项资产完整回下载、最终 tag/Latest/digest/size 校验均通过，Release recovery 已清除；v2.6.5 为非草稿、非预发布和 Latest。",
       "F8-F10 真实双设备、三个隔离客户端、公共 HTTPS/TLS/SNI、红队与负载证据按用户明确授权在发布后补充；延期不会把任何证据检查标记为通过。"
     ],
     "releaseBoundary": "本版只允许在证据清单完全不存在、版本精确为 2.6.5、发布目标为固定 40 位源码提交且显式设置 owner-approved-post-release-v2.6.5 时先发布；损坏、过期或不匹配的证据仍失败关闭。Electron/NSIS 正式打包只触发一次。"
