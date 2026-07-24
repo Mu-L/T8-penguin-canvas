@@ -10,13 +10,13 @@ https://www.runninghub.cn/?inviteCode=rh-v1121
 My favorite girl Go YounJung
 # 🐧 贞贞的无限画布（企鹅共创版） · T8-penguin-canvas
 
-> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.6.5
+> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.6.6
 >
 > GitHub：<https://github.com/T8mars/T8-penguin-canvas>
 
 一个面向 AI 创作的 **节点式画布**：拖拽节点、连线编排、生成图像 / 视频 / 音频、调用 LLM、串接 RunningHub 工作流，叠加批量执行、智能对齐、打组、主题模板与终端日志。Web 浏览器和桌面端均可使用。
 
-![status](https://img.shields.io/badge/version-v2.6.5-brightgreen) ![node](https://img.shields.io/badge/node-57-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
+![status](https://img.shields.io/badge/version-v2.6.6-brightgreen) ![node](https://img.shields.io/badge/node-57-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
 
 ---
 
@@ -37,6 +37,7 @@ My favorite girl Go YounJung
 
 - 🎨 **57 个节点**，覆盖文本 / 图像 / 视频 / 音频 / LLM / RunningHub / ComfyUI / 3D / 工具 / 辅助 / 工具箱 / 输出预览 / 上传素材 / 素材集 / 批量打标 / 随机路由 / Story 全自动制片
 - 🧺 **画布级批量导入 + 素材合集打散**：上传节点支持一次选择多张图 / 多个视频 / 多段音频；也可直接把剪贴板或文件拖到画布，同类型多素材自动形成合集，上传和输出合集都可一键打散为多个独立素材节点
+- 🌐 **v2.6.6 TUN 下载与 Story 资产稳定性自动更新版**：生成结果在 TUN/Fake-IP 下优先沿当前代理下载，代理关闭或映射失效后安全回退公网 DNS/DoH，且不会重复提交生成任务。图像节点独立展示“贞贞的平价AI小屋”与 G-2 模型；Story 补充启动状态、白话失败原因和只清空媒体、不删除资产设定的操作。
 - 🌐 **v2.6.5 代理网络与 LLM 平台稳定性自动更新版**：图片、视频、音频和 3D 生成结果支持 TUN/VPN/Fake-IP 公网回源下载，代理切换后自动刷新连接并返回白话诊断；工作流医生改为默认关闭的可选开关，RunningHub 站点显示会跟随 WebApp 实际站点。LLM / Vision 与 Story 新增“贞贞的平价AI小屋”和文档锁定的 20 个模型。
 - ✂️ **v2.6.4 RH 视频能力层与 FFmpeg 稳定性自动更新版**：上传/输出视频左侧新增 RH“抠像”，调用持久化视频抠像能力并输出独立视频素材；同步补强 MOV/ProRes 浏览器预览、FFmpeg/FFprobe 路径与兼容运行时、Story 视频合成和花屏防护、合成失败诊断及任务恢复。LLM 新增常用模型和 Custom 自定义模型，Story 资产生成、重生成、删除及成片流程继续完善。
 - 🧰 **v2.6.3 画布交互与批量执行稳定性自动更新版**：恢复复制粘贴和 Alt 拖动复制，允许多个生成任务并行启动并隔离各自运行令牌；修复组/子工作流端口被误判为未知类型。新增自定义并联循环、GPT Image 2 质量与内容审查、即梦 CLI 1.4.14 帮助与 Seedream 5.0 Pro、Grok 登录入口，以及上传/输出视频“当前帧”截图。

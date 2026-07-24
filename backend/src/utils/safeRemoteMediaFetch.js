@@ -377,6 +377,7 @@ async function resolvePublicAddress(
   lookupImpl = dns.lookup,
   allowPrivateForTests = false,
   publicLookupImpl = resolveTunPublicDns,
+  acceptTunFake = true,
 ) {
   const normalizedHostname = normalizeAddress(hostname);
   const bypass = privateAddressAllowedForTests(allowPrivateForTests, normalizedHostname);
@@ -397,10 +398,20 @@ async function resolvePublicAddress(
     const family = Number(record?.family) || detectedFamily;
     return { address, family, detectedFamily };
   });
-  // Some TUN implementations return a Fake-IP A record together with a real
-  // AAAA (or the reverse). Any Fake-IP answer means the system resolver result
-  // is synthetic, so discard the whole set and obtain one coherent public set.
-  if (normalizedRecords.length && normalizedRecords.some((record) => isTunFakeAddress(record.address))) {
+  // A Fake-IP returned for a hostname is a routing token owned by the active
+  // TUN, not the real destination. Keep it as the first connection path so
+  // Clash/sing-box can apply the user's domain rules. Literal Fake-IP URLs are
+  // still rejected above. If that connection fails, the caller falls back to
+  // independently resolved public addresses without weakening the SSRF policy.
+  const tunFakeRecord = normalizedRecords.find((record) => isTunFakeAddress(record.address));
+  if (tunFakeRecord && acceptTunFake) {
+    return {
+      address: tunFakeRecord.address,
+      family: tunFakeRecord.family,
+      tunFake: true,
+    };
+  }
+  if (tunFakeRecord) {
     records = await publicLookupImpl(normalizedHostname);
     normalizedRecords = records.map((record) => {
       const address = normalizeAddress(record?.address);
@@ -417,6 +428,7 @@ async function resolvePublicAddress(
   return {
     address: normalizedRecords[0].address,
     family: normalizedRecords[0].family,
+    tunFake: false,
   };
 }
 
@@ -698,16 +710,46 @@ async function openSafeRemoteResponse(inputUrl, options, state, initialRedirectC
     const target = parseRemoteUrl(currentUrl, options);
     if (previousTarget && previousTarget.origin !== target.origin) sensitiveHeadersAllowed = false;
     const privateTestSetting = options.allowPrivateForTests;
-    const pinned = await withinDeadline(
+    let pinned = await withinDeadline(
       resolvePublicAddress(
         target.hostname,
         options.lookupImpl || dns.lookup,
         privateTestSetting,
         options.publicLookupImpl || resolveTunPublicDns,
+        options.acceptTunFake !== false,
       ),
       state,
     );
-    const response = await issuePinnedRequest(target, pinned, requestHeaders(options, sensitiveHeadersAllowed), state);
+    let response;
+    try {
+      response = await issuePinnedRequest(
+        target,
+        pinned,
+        requestHeaders(options, sensitiveHeadersAllowed),
+        state,
+      );
+    } catch (error) {
+      if (!pinned.tunFake) throw error;
+      // TUN may have been disabled after the task was submitted or may not own
+      // this Fake-IP anymore. Resolve the same hostname independently and retry
+      // only this idempotent download; the generation request is never replayed.
+      pinned = await withinDeadline(
+        resolvePublicAddress(
+          target.hostname,
+          async (name) => (options.publicLookupImpl || resolveTunPublicDns)(name),
+          privateTestSetting,
+          options.publicLookupImpl || resolveTunPublicDns,
+          false,
+        ),
+        state,
+      );
+      response = await issuePinnedRequest(
+        target,
+        pinned,
+        requestHeaders(options, sensitiveHeadersAllowed),
+        state,
+      );
+    }
     const status = Number(response.statusCode || 0);
     if (status >= 300 && status < 400 && response.headers.location) {
       response.resume();
@@ -960,6 +1002,7 @@ async function safeRemoteUpload(inputUrl, options = {}) {
       options.lookupImpl || dns.lookup,
       options.allowPrivateForTests,
       options.publicLookupImpl || resolveTunPublicDns,
+      options.acceptTunFake !== false,
     ),
     state,
   );

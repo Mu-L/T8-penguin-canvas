@@ -26,7 +26,9 @@ import {
   gptImage2ZhenzhenVariantSize,
   isZhenzhenImageG2Model,
   ZHENZHEN_IMAGE_G2_I2I_MODEL,
+  ZHENZHEN_IMAGE_G2_MODEL_OPTIONS,
   ZHENZHEN_IMAGE_G2_RATIOS,
+  ZHENZHEN_IMAGE_G2_T2I_MODEL,
 } from '../../providers/models';
 import {
   submitImageAsync,
@@ -178,6 +180,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   const generationRunRef = useRef(0);
 
   const [error, setError] = useState<string | null>(null);
+  const [downloadNotice, setDownloadNotice] = useState<string | null>(null);
   const d = data as any;
   const model = d?.model || IMAGE_MODELS[0].id;
   const modelDef = useMemo(() => IMAGE_MODELS.find((m) => m.id === model) || IMAGE_MODELS[0], [model]);
@@ -378,11 +381,21 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   const sizeLevel = d?.sizeLevel || modelDef.defaultSize;
   // 子模型变体(对齐 gpt-image-2-web 的 g_model/n_model)
   const savedApiModel = typeof d?.apiModel === 'string' ? d.apiModel : '';
-  const apiModel = modelDef.apiModelOptions.some((opt) => opt.value === savedApiModel)
+  // 旧画布没有 imageBuiltinSource；保存过 G-2 模型时自动归入平价 AI 小屋。
+  const isZhenzhenBudgetImageSelected = !isExternalSelected
+    && modelDef.id === 'gpt-image-2'
+    && (d?.imageBuiltinSource === 'seedance-nz' || isZhenzhenImageG2Model(savedApiModel));
+  const builtinApiModelOptions = isZhenzhenBudgetImageSelected
+    ? ZHENZHEN_IMAGE_G2_MODEL_OPTIONS
+    : modelDef.apiModelOptions;
+  const apiModel = builtinApiModelOptions.some((opt) => opt.value === savedApiModel)
     ? savedApiModel
-    : modelDef.apiModel;
-  const isZhenzhenImageG2 = !isExternalSelected && isZhenzhenImageG2Model(apiModel);
+    : (isZhenzhenBudgetImageSelected ? ZHENZHEN_IMAGE_G2_T2I_MODEL : modelDef.apiModel);
+  const isZhenzhenImageG2 = isZhenzhenBudgetImageSelected && isZhenzhenImageG2Model(apiModel);
   const isZhenzhenImageG2I2I = apiModel === ZHENZHEN_IMAGE_G2_I2I_MODEL;
+  const seedanceNzProviderLabel = isZhenzhenImageG2
+    ? '贞贞的平价AI小屋'
+    : '贞贞的平价AI工坊（国内）';
   const effectiveAspectRatios = isZhenzhenImageG2 ? ZHENZHEN_IMAGE_G2_RATIOS : modelDef.aspectRatios;
   const effectiveAspectRatio = effectiveAspectRatios.includes(aspectRatio)
     ? aspectRatio
@@ -533,7 +546,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   // 切换模型时,如果当前比例/尺寸不在新模型选项里则重置
   const switchModel = (mId: string) => {
     const newDef = IMAGE_MODELS.find((m) => m.id === mId) || IMAGE_MODELS[0];
-    const patch: any = { model: mId, apiModel: newDef.apiModel };
+    const patch: any = { model: mId, apiModel: newDef.apiModel, imageBuiltinSource: 'zhenzhen' };
     if (newDef.paramKind === 'mj') {
       if (!d?.mjVersion) patch.mjVersion = DEFAULT_MJ_VERSION;
       if (!d?.mjAr) patch.mjAr = DEFAULT_MJ_RATIO;
@@ -550,13 +563,19 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
     const nextSize = gptImage2ZhenzhenVariantSize(nextApiModel);
     if (isZhenzhenImageG2Model(nextApiModel)) {
       const nextRatio = ZHENZHEN_IMAGE_G2_RATIOS.includes(aspectRatio) ? aspectRatio : 'adaptive';
-      update({ apiModel: nextApiModel, sizeLevel: '1K', aspectRatio: nextRatio });
+      update({
+        model: 'gpt-image-2',
+        apiModel: nextApiModel,
+        imageBuiltinSource: 'seedance-nz',
+        sizeLevel: '1K',
+        aspectRatio: nextRatio,
+      });
       return;
     }
     const leavingG2Patch = isZhenzhenImageG2 ? { aspectRatio: modelDef.defaultAspectRatio } : {};
     update(nextSize
-      ? { apiModel: nextApiModel, sizeLevel: nextSize, ...leavingG2Patch }
-      : { apiModel: nextApiModel, ...leavingG2Patch });
+      ? { apiModel: nextApiModel, imageBuiltinSource: 'zhenzhen', sizeLevel: nextSize, ...leavingG2Patch }
+      : { apiModel: nextApiModel, imageBuiltinSource: 'zhenzhen', ...leavingG2Patch });
   };
 
   // 从上游节点 + 本地上传按用户排序后的顺序聚合 prompt + 参考图
@@ -631,6 +650,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
 
   const handleGenerate = async (reporter?: RunNodeLifecycleReporter) => {
     setError(null);
+    setDownloadNotice(null);
     const { prompt: upstreamPrompt, images: upstreamImages } = collectUpstream();
     const resolvedLocalPrompt = resolveMediaMentions(localPrompt, promptMentions, mentionMaterials);
     const comfyProviderPrompt = isComfyExternal
@@ -892,6 +912,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           });
           if (String(q.status || '').toLowerCase() === 'materializing') {
             update({ progress: '100% · 正在下载' });
+            setDownloadNotice(q.error || '图片已经生成，正在通过当前 TUN/代理或直连网络保存到本机。');
             if (i === 0 || (i + 1) % 10 === 0) {
               logBus.warn(
                 q.error || 'MJ 图片已生成，正在适配 TUN/代理网络并安全下载，不会重新提交任务',
@@ -1058,6 +1079,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           });
           if (st === 'materializing') {
             update({ progress: '100% · 正在下载' });
+            setDownloadNotice(q.error || '图片已经生成，正在通过当前 TUN/代理或直连网络保存到本机。');
             if (i === 0 || (i + 1) % 10 === 0) {
               logBus.warn(
                 q.error || 'FAL 图片已生成，正在适配 TUN/代理网络并安全下载，不会重新提交任务',
@@ -1112,7 +1134,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
       // seedance.nz has a separate asynchronous image API for Seedream and
       // Zhenzhen Image G-2. Keep it isolated from the legacy GPT2/Seedream route.
       if (isSeedreamNz || isZhenzhenImageG2) {
-        if (!zhenzhenSd2ApiKey) throw new Error('请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”');
+        if (!zhenzhenSd2ApiKey) throw new Error(`请先在 API 设置中填写“${seedanceNzProviderLabel} API Key”`);
         const providerRefs = isZhenzhenImageG2 && !isZhenzhenImageG2I2I ? [] : allRefs;
         const expectedModel = isZhenzhenImageG2
           ? apiModel
@@ -1124,7 +1146,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           ? '1k'
           : (seedreamNzResolution === 'custom' ? seedreamNzResolvedSize : seedreamNzResolution);
         logBus.info(
-          `贞贞的平价AI工坊 ${imageFamilyLabel} 提交: model=${expectedModel} 参考图=${providerRefs.length} 尺寸=${sizeLabel}`,
+          `${seedanceNzProviderLabel} ${imageFamilyLabel} 提交: model=${expectedModel} 参考图=${providerRefs.length} 尺寸=${sizeLabel}`,
           src,
         );
         const submit = await submitSeedreamNz({
@@ -1143,7 +1165,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         });
         if (!isCurrentGenerationRun(runId)) return;
         const taskId = submit.taskId;
-        if (!taskId) throw new Error(`贞贞的平价AI工坊（国内）${imageFamilyLabel} 未返回任务 ID`);
+        if (!taskId) throw new Error(`${seedanceNzProviderLabel}${imageFamilyLabel} 未返回任务 ID`);
         await reporter?.providerSubmitted({
           provider: traceProvider,
           model: traceModel,
@@ -1184,9 +1206,10 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           const queryStatus = String(query.status || '').toLowerCase();
           if (queryStatus === 'materializing') {
             update({ progress: '100% · 正在下载' });
+            setDownloadNotice(query.error || '图片已经生成，正在通过当前 TUN/代理或直连网络保存到本机。');
             if (i === 0 || (i + 1) % 10 === 0) {
               logBus.warn(
-                query.error || `贞贞的平价AI工坊（国内）${imageFamilyLabel} 已生成，正在适配 TUN/代理网络并安全下载`,
+                query.error || `${seedanceNzProviderLabel}${imageFamilyLabel} 已生成，正在适配 TUN/代理网络并安全下载`,
                 src,
               );
             }
@@ -1194,8 +1217,8 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           }
           if (queryStatus === 'completed' || queryStatus === 'success' || queryStatus === 'done') {
             const url = query.urls?.[0];
-            if (!url) throw new Error(`贞贞的平价AI工坊（国内）${imageFamilyLabel} 任务完成但未返回图片`);
-            logBus.success(`贞贞的平价AI工坊（国内）${imageFamilyLabel} 完成 → ${url}`, src);
+            if (!url) throw new Error(`${seedanceNzProviderLabel}${imageFamilyLabel} 任务完成但未返回图片`);
+            logBus.success(`${seedanceNzProviderLabel}${imageFamilyLabel} 完成 → ${url}`, src);
             update({
               status: 'success',
               progress: '100%',
@@ -1225,10 +1248,10 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             return;
           }
           if (queryStatus === 'failed' || queryStatus === 'failure' || queryStatus === 'error') {
-            throw new Error(query.error || `贞贞的平价AI工坊（国内）${imageFamilyLabel} 任务失败`);
+            throw new Error(query.error || `${seedanceNzProviderLabel}${imageFamilyLabel} 任务失败`);
           }
         }
-        throw new Error(`贞贞的平价AI工坊（国内）${imageFamilyLabel} 超时: ${(maxPoll * interval) / 1000}s 未完成`);
+        throw new Error(`${seedanceNzProviderLabel}${imageFamilyLabel} 超时: ${(maxPoll * interval) / 1000}s 未完成`);
       }
 
       // ============ 原有标准路径(GPT2 standard / nano-banana / nano-banana-pro 未动) ============
@@ -1334,6 +1357,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         if (st === 'materializing') {
           nextPollDelay = Math.max(interval, Math.min(30_000, Number(q.retryAfterMs) || 5_000));
           update({ progress: '100% · 正在下载' });
+          setDownloadNotice(q.error || '图片已经生成，正在通过当前 TUN/代理或直连网络保存到本机。');
           if (i === 0 || (i + 1) % 10 === 0) {
             logBus.warn(
               q.error || '图片已生成，正在适配 TUN/代理网络并安全下载，不会重新提交任务',
@@ -1466,6 +1490,8 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           <div className="text-[10px] text-white/40">
             {isExternalSelected && providerSelection.provider
               ? `${providerSelection.provider.label || providerSelection.provider.id} · ${externalProviderModel || '未选模型'}`
+              : isZhenzhenBudgetImageSelected
+                ? `贞贞的平价AI小屋 · ${apiModel}`
               : isSeedreamNz
                 ? `贞贞的平价AI工坊（国内） · ${seedreamNzUiModel}`
                 : `${modelDef.label} · ${modelDef.description}`}
@@ -1476,26 +1502,64 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
 
       {/* 配置区 */}
       <div className="p-2.5 space-y-2" onMouseDown={(e) => e.stopPropagation()}>
-        {imageAdvancedProviders.length > 0 && (
-          <div className="rounded border border-white/10 bg-white/[0.03] p-2 space-y-2">
+        <div className="rounded border border-white/10 bg-white/[0.03] p-2 space-y-2">
             <button
               type="button"
               onClick={() => update({ advancedProviderOpen: !d?.advancedProviderOpen })}
               className="w-full flex items-center justify-between text-[10px] font-semibold text-white/70 hover:text-white"
             >
               <span>高级来源</span>
-              <span>{isExternalSelected && providerSelection.provider ? providerSelection.provider.label : '默认贞贞工坊'}</span>
+              <span>
+                {isExternalSelected && providerSelection.provider
+                  ? providerSelection.provider.label
+                  : isZhenzhenBudgetImageSelected
+                    ? '贞贞的平价AI小屋'
+                    : '默认贞贞工坊'}
+              </span>
             </button>
             {d?.advancedProviderOpen && (
               <div className="space-y-2">
                 <div>
                   <label className="text-[10px] text-white/50 block mb-1">平台</label>
                   <select
-                    value={isExternalSelected ? providerSelection.providerId : 'zhenzhen'}
+                    value={isExternalSelected
+                      ? providerSelection.providerId
+                      : isZhenzhenBudgetImageSelected
+                        ? 'builtin:seedance-nz'
+                        : 'zhenzhen'}
                     onChange={(e) => {
                       const nextId = e.target.value;
                       if (nextId === 'zhenzhen') {
-                        update({ providerSource: 'zhenzhen', providerId: '', providerModel: '', ...clearModelscopeLoraParams() });
+                        const leavingBudgetPlatform = modelDef.id === 'gpt-image-2'
+                          && (d?.imageBuiltinSource === 'seedance-nz' || isZhenzhenImageG2Model(savedApiModel));
+                        update({
+                          providerSource: 'zhenzhen',
+                          providerId: '',
+                          providerModel: '',
+                          imageBuiltinSource: 'zhenzhen',
+                          ...(leavingBudgetPlatform
+                            ? {
+                                apiModel: modelDef.apiModel,
+                                aspectRatio: modelDef.defaultAspectRatio,
+                                sizeLevel: modelDef.defaultSize,
+                              }
+                            : {}),
+                          ...clearModelscopeLoraParams(),
+                        });
+                        return;
+                      }
+                      if (nextId === 'builtin:seedance-nz') {
+                        update({
+                          providerSource: 'zhenzhen',
+                          providerId: '',
+                          providerModel: '',
+                          imageBuiltinSource: 'seedance-nz',
+                          model: 'gpt-image-2',
+                          apiModel: ZHENZHEN_IMAGE_G2_T2I_MODEL,
+                          aspectRatio: 'adaptive',
+                          sizeLevel: '1K',
+                          ...clearModelscopeLoraParams(),
+                        });
                         return;
                       }
                       const provider = imageAdvancedProviders.find((item) => item.id === nextId);
@@ -1512,6 +1576,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
                     className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
                   >
                     <option value="zhenzhen" style={{ background: '#18181b', color: '#ffffff' }}>贞贞工坊（默认）</option>
+                    <option value="builtin:seedance-nz" style={{ background: '#18181b', color: '#ffffff' }}>贞贞的平价AI小屋</option>
                     {imageAdvancedProviders.map((provider) => (
                       <option key={provider.id} value={provider.id} style={{ background: '#18181b', color: '#ffffff' }}>
                         {provider.label || provider.id}
@@ -1953,11 +2018,10 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
                 )}
               </div>
             )}
-          </div>
-        )}
+        </div>
 
         {/* 模型 TAB 切换(对应主项目 gpt-image-2-web Tab 0/1/2) */}
-        {!isExternalSelected && <div>
+        {!isExternalSelected && !isZhenzhenBudgetImageSelected && <div>
           <label className="text-[10px] text-white/50 block mb-1">模型</label>
           <div
             className={`flex gap-0.5 p-0.5 rounded ${isPixel ? '' : 'bg-white/5'}`}
@@ -2033,7 +2097,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
               style={{ background: '#18181b', color: '#ffffff' }}
               className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
             >
-              {modelDef.apiModelOptions.map((opt) => (
+              {builtinApiModelOptions.map((opt) => (
                 <option key={opt.value} value={opt.value} style={{ background: '#18181b', color: '#ffffff' }}>{opt.label}</option>
               ))}
             </select>
@@ -2042,13 +2106,13 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
 
         {isZhenzhenImageG2 && !isExternalSelected && (
           <div className="rounded border border-cyan-400/25 bg-cyan-500/5 px-2 py-1.5 text-[10px] leading-4 text-cyan-100/80">
-            <div>贞贞的平价AI工坊（国内） · 异步 G-2 · 固定 1K</div>
+            <div>贞贞的平价AI小屋 · 异步 G-2 · 固定 1K</div>
             <div>
               {isZhenzhenImageG2I2I
                 ? '图生图模式：必须提供 1–10 张参考图。'
                 : '文生图模式：只使用 Prompt，已连接的参考图不会发送。'}
             </div>
-            {!zhenzhenSd2ApiKey && <div className="text-amber-300">尚未配置“贞贞的平价AI工坊（国内） API Key”</div>}
+            {!zhenzhenSd2ApiKey && <div className="text-amber-300">尚未配置“贞贞的平价AI小屋 API Key”</div>}
           </div>
         )}
 
@@ -2729,6 +2793,13 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           >
             <Sparkles size={12} /> 生成
           </button>
+        )}
+
+        {status === 'generating' && downloadNotice && (
+          <div className="flex items-start gap-1 text-[10px] text-amber-200 bg-amber-500/10 border border-amber-500/20 rounded px-2 py-1">
+            <AlertCircle size={11} className="mt-0.5 flex-shrink-0" />
+            <span className="break-all">{downloadNotice}</span>
+          </div>
         )}
 
         {error && (

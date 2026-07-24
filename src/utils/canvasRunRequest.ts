@@ -1,8 +1,14 @@
 export const CANVAS_NODE_RUN_REQUEST_EVENT = 't8:canvas-node-run-request' as const;
 
+export interface CanvasNodeRunRequestOutcome {
+  accepted: boolean;
+  error?: string;
+}
+
 export interface CanvasNodeRunRequestDetail {
   nodeId: string;
   requestId?: string;
+  onSettled?: (outcome: CanvasNodeRunRequestOutcome) => void;
 }
 
 const RUN_REQUEST_ID_PATTERN = /^[a-zA-Z0-9._:-]{8,160}$/;
@@ -21,14 +27,25 @@ export function createCanvasNodeRunRequestId(nodeId: string, purpose: string): s
  * pipeline. Node components must not call the run bus or their provider handler
  * from a primary idle action.
  */
-export function requestCanvasNodeRun(nodeId: string, options: { requestId?: string } = {}): boolean {
+export function requestCanvasNodeRun(
+  nodeId: string,
+  options: {
+    requestId?: string;
+    onSettled?: (outcome: CanvasNodeRunRequestOutcome) => void;
+  } = {},
+): boolean {
   const normalizedNodeId = String(nodeId || '').trim();
   if (!normalizedNodeId || typeof window === 'undefined') return false;
   const requestId = String(options.requestId || '').trim();
   if (requestId && !RUN_REQUEST_ID_PATTERN.test(requestId)) return false;
+  const onSettled = typeof options.onSettled === 'function' ? options.onSettled : undefined;
 
   window.dispatchEvent(new CustomEvent<CanvasNodeRunRequestDetail>(CANVAS_NODE_RUN_REQUEST_EVENT, {
-    detail: { nodeId: normalizedNodeId, ...(requestId ? { requestId } : {}) },
+    detail: {
+      nodeId: normalizedNodeId,
+      ...(requestId ? { requestId } : {}),
+      ...(onSettled ? { onSettled } : {}),
+    },
   }));
   return true;
 }

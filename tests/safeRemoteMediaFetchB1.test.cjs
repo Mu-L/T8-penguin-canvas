@@ -138,10 +138,10 @@ test('DNS resolution fails closed when any answer is invalid or non-public', asy
     { address: '93.184.216.34', family: 4 },
     { address: '2001:4860:4860::8888', family: 6 },
   ]);
-  assert.deepEqual(pinned, { address: '93.184.216.34', family: 4 });
+  assert.deepEqual(pinned, { address: '93.184.216.34', family: 4, tunFake: false });
 });
 
-test('TUN Fake-IP is re-resolved through independent public DNS without allowing arbitrary private addresses', async () => {
+test('hostname-bound TUN Fake-IP stays on the TUN path and explicit fallback uses public DNS', async () => {
   let publicLookups = 0;
   const resolved = await resolvePublicAddress(
     'cdn.example',
@@ -152,8 +152,8 @@ test('TUN Fake-IP is re-resolved through independent public DNS without allowing
       return [{ address: '93.184.216.34', family: 4 }];
     },
   );
-  assert.deepEqual(resolved, { address: '93.184.216.34', family: 4 });
-  assert.equal(publicLookups, 1);
+  assert.deepEqual(resolved, { address: '198.18.12.34', family: 4, tunFake: true });
+  assert.equal(publicLookups, 0);
 
   const mixedTunAnswer = await resolvePublicAddress(
     'mixed-tun.example',
@@ -164,7 +164,20 @@ test('TUN Fake-IP is re-resolved through independent public DNS without allowing
     false,
     async () => [{ address: '1.1.1.1', family: 4 }],
   );
-  assert.deepEqual(mixedTunAnswer, { address: '1.1.1.1', family: 4 });
+  assert.deepEqual(mixedTunAnswer, { address: '198.18.12.35', family: 4, tunFake: true });
+
+  const publicFallback = await resolvePublicAddress(
+    'cdn.example',
+    async () => [{ address: '198.18.12.34', family: 4 }],
+    false,
+    async () => {
+      publicLookups += 1;
+      return [{ address: '93.184.216.34', family: 4 }];
+    },
+    false,
+  );
+  assert.deepEqual(publicFallback, { address: '93.184.216.34', family: 4, tunFake: false });
+  assert.equal(publicLookups, 1);
 
   await assert.rejects(
     resolvePublicAddress(
@@ -188,7 +201,7 @@ test('TUN Fake-IP is re-resolved through independent public DNS without allowing
     false,
     async () => [{ address: '1.1.1.1', family: 4 }],
   );
-  assert.deepEqual(recoveredAfterDnsFailure, { address: '1.1.1.1', family: 4 });
+  assert.deepEqual(recoveredAfterDnsFailure, { address: '1.1.1.1', family: 4, tunFake: false });
 });
 
 test('TUN public resolution falls back to encrypted DNS when UDP DNS is intercepted with Fake-IP', async () => {

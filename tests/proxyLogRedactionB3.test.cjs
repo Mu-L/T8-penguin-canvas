@@ -7,6 +7,7 @@ const path = require('node:path');
 const { PassThrough } = require('node:stream');
 const express = require('express');
 const sharp = require('sharp');
+const { resolvePublicAddress } = require('../backend/src/utils/safeRemoteMediaFetch');
 
 const config = require('../backend/src/config');
 const originalProxyMediaMaxBytes = process.env.T8_PROXY_MEDIA_REFERENCE_MAX_BYTES;
@@ -1492,6 +1493,28 @@ test('B3 Zhenzhen image routes bound Provider JSON and expose only normalized re
   });
 });
 
+test('B3 hostname-bound TUN Fake-IP stays on the TUN path without opening literal Fake-IP URLs', async () => {
+  let publicDnsCalls = 0;
+  const pinned = await resolvePublicAddress(
+    'generated.example',
+    async () => [{ address: '198.18.9.25', family: 4 }],
+    false,
+    async () => {
+      publicDnsCalls += 1;
+      return [{ address: '203.0.113.25', family: 4 }];
+    },
+  );
+  assert.deepEqual(pinned, { address: '198.18.9.25', family: 4, tunFake: true });
+  assert.equal(publicDnsCalls, 0, 'normal TUN downloads must use the active Fake-IP mapping first');
+  await assert.rejects(
+    resolvePublicAddress(
+      '198.18.9.25',
+      async () => [{ address: '198.18.9.25', family: 4 }],
+    ),
+    (error) => error?.code === 'private_address',
+  );
+});
+
 test('B3 completed image tasks retry transient downloads and expose actionable safe failure reasons', async () => {
   await withProxyFixture(async ({ appServer, outputDir }) => {
     const originalFetch = global.fetch;
@@ -1547,6 +1570,7 @@ test('B3 completed image tasks retry transient downloads and expose actionable s
       const tunOutput = `http://cdn.example:${outputServer.address().port}/generated.png?token=provider-signed-secret`;
       proxyRouter._test.setProxySafeRemoteTestOptions({
         lookupImpl: async () => [{ address: '198.18.0.25', family: 4 }],
+        acceptTunFake: false,
         publicLookupImpl: async () => {
           throw Object.assign(new Error('public DNS temporarily unavailable'), {
             code: 'tun_dns_fallback_failed',
@@ -1569,6 +1593,7 @@ test('B3 completed image tasks retry transient downloads and expose actionable s
 
       proxyRouter._test.setProxySafeRemoteTestOptions({
         lookupImpl: async () => [{ address: '198.18.0.25', family: 4 }],
+        acceptTunFake: false,
         publicLookupImpl: async () => [{ address: '127.0.0.1', family: 4 }],
         allowPrivateForTests: true,
       });
@@ -1669,6 +1694,7 @@ test('B3 video, audio, and RunningHub completed tasks survive TUN Fake-IP and re
       try {
         proxyRouter._test.setProxySafeRemoteTestOptions({
           lookupImpl: async () => [{ address: '198.18.1.25', family: 4 }],
+          acceptTunFake: false,
           publicLookupImpl: async () => {
             throw Object.assign(new Error('independent DNS temporarily unavailable'), {
               code: 'tun_dns_fallback_failed',
@@ -1689,6 +1715,7 @@ test('B3 video, audio, and RunningHub completed tasks survive TUN Fake-IP and re
 
         proxyRouter._test.setProxySafeRemoteTestOptions({
           lookupImpl: async () => [{ address: '198.18.1.25', family: 4 }],
+          acceptTunFake: false,
           publicLookupImpl: async () => [{ address: '127.0.0.1', family: 4 }],
           allowPrivateForTests: true,
         });

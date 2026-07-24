@@ -1,7 +1,84 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.6.5",
-  "lastUpdated": "2026-07-24-v2.6.5-released",
+  "version": "2.6.6",
+  "lastUpdated": "2026-07-25-v2.6.6-release-candidate",
+  "storyAssetMediaClear": {
+    "status": "release-candidate",
+    "date": "2026-07-25",
+    "releaseIncluded": true,
+    "highlights": [
+      "Story“准备资产”阶段的每张角色、场景、道具、服装和声音卡片新增可见“清空”按钮，与红色“删除整个资产”明确分离。",
+      "清空只移除当前图片、音频及生成任务/错误状态，保留资产名称、类型、描述、正负提示词、锁定状态和镜头关联；依赖镜头按既有失效传播规则标记为待更新。",
+      "卡片与右侧资产详情共用同一确认和持久化路径；生成中的资产禁止清空，异常中断或仅残留任务状态的资产也可恢复为空白待处理状态。"
+    ],
+    "verification": [
+      "Story 资产清空与卡片交互专项断言、Story 生产流程回归和 TypeScript type-check 通过。",
+      "未调用真实 Provider、未生产构建、未打包、未提交、未推送或发布。"
+    ]
+  },
+  "tunFakeIpDownloadRootFix": {
+    "status": "release-candidate",
+    "date": "2026-07-25",
+    "releaseIncluded": true,
+    "highlights": [
+      "修正生成结果安全下载层对 TUN Fake-IP 的处理：域名由系统解析到 198.18.0.0/15 时，优先保留 Fake-IP 交给当前 TUN 按原域名、Host 与 TLS SNI 下载，不再一律绕过 TUN 强制公网 DNS 直连。",
+      "运行中关闭 TUN、Fake-IP 映射过期或对应连接失败时，同一个幂等下载会自动改用独立公共 DNS/DoH 的真实公网地址重试；不会重新提交生成任务或产生二次费用。",
+      "字面量内网/Fake-IP URL、普通私网解析、跨重定向敏感头、媒体大小与文件魔数检查继续失败关闭；没有取消 SSRF 和内容安全边界。",
+      "图像单轮本地转存改为 25 秒有界预算，失败会尽快返回可恢复原因供同一任务继续下载，避免一次状态查询内部连续等待数分钟；图像节点下载阶段同步显示真实恢复原因。",
+      "修复位于图像、视频、音频、RunningHub 与流式落盘共用的安全远程媒体层，非仅修改图像轮询文案。"
+    ],
+    "verification": [
+      "安全代理/下载链路回归 28/28 通过，新增断言确认域名绑定的 TUN Fake-IP 优先保留，同时字面量 Fake-IP 仍在连接前拒绝。",
+      "节点运行与停止回归 10/10 通过，TypeScript type-check 通过。",
+      "使用不产生生成费用的 https://httpbin.org/image/png 完成真实 DNS、HTTPS、媒体校验与 8090-byte 下载冒烟；当前开发机该次 DNS 为公网地址，未冒充真实 TUN 设备证据。",
+      "未调用真实生成 Provider、未生产构建、未打包、未提交、未推送或发布。"
+    ]
+  },
+  "storyRunFeedbackAndBudgetName": {
+    "status": "release-candidate",
+    "date": "2026-07-25",
+    "releaseIncluded": true,
+    "highlights": [
+      "Story 高级设置中的图像与 Seedance 视频国内来源统一更名为“贞贞的平价AI小屋”，自动来源显示为“自动（优先平价AI小屋）”。",
+      "Story 平价AI小屋图像模型直接复用独立 G-2 模型目录，zhenzhen-image-g2-t2i 与 zhenzhen-image-g2-i2i 不再因图像节点平台拆分而在 Story 中变成空列表。",
+      "Canvas 节点运行请求新增启动结果回传；Story 点击分析剧本或其他生产操作后立即显示提交中状态，持久化 Run 创建、体检或并发冲突失败会回到 Story 页显示真实可行动原因。",
+      "异常退出后的恢复代次确认失败会白话提示完全重启应用或开发服务，并明确本次没有调用模型、不会产生费用；数据库恢复与运行证据的失败关闭保护没有放宽。"
+    ],
+    "verification": [
+      "本地开发页面已验证图像与视频来源名称、G-2 两模型列表，以及恢复确认失败时的 Story 页内反馈；随后只重启单个后端监听进程，/api/status 返回 ok。",
+      "Story、Canvas 运行边界与图像模型映射定向回归 37/37 通过，复跑 Story/Canvas 核心回归 28/28 通过，TypeScript type-check 通过。",
+      "未调用真实 Provider、未生产构建、未打包、未提交、未推送或发布。"
+    ]
+  },
+  "imageBudgetProviderSeparation": {
+    "status": "release-candidate",
+    "date": "2026-07-25",
+    "releaseIncluded": true,
+    "highlights": [
+      "图像节点高级来源新增独立内置平台“贞贞的平价AI小屋”，即使没有配置扩展 Provider 也始终可选。",
+      "zhenzhen-image-g2-t2i 与 zhenzhen-image-g2-i2i 已从默认贞贞工坊 GPT2 模型列表移出，只在平价AI小屋平台显示。",
+      "旧画布已保存任一 G-2 模型时会自动识别为平价AI小屋；切回默认贞贞工坊时恢复 GPT Image 2 默认模型和参数。",
+      "只调整前端平台归类与持久化，G-2 仍使用原有独立 seedance.nz 异步提交、查询和本地转存链路。"
+    ],
+    "verification": [
+      "图像模型映射、Seedream NZ 路由和 seedance.nz Provider 聚焦回归 47/47 通过。",
+      "TypeScript type-check 通过；未调用真实 Provider、未生产构建、未打包、未提交、未推送或发布。"
+    ]
+  },
+  "electronReleaseV266": {
+    "version": "2.6.6",
+    "status": "release-authorized-postrelease-evidence-pending",
+    "date": "2026-07-25",
+    "tag": "v2.6.6",
+    "description": "TUN/Fake-IP 全生成链路下载、图像平台拆分，以及 Story 启动反馈和资产清空的稳定性自动更新版。",
+    "highlights": [
+      "域名解析到 TUN Fake-IP 时优先保留代理映射下载；TUN 中途关闭或映射失效时，同一个幂等素材下载自动回退到独立公共 DNS/DoH，不重复提交生成任务。",
+      "生成结果单轮转存采用有界等待并返回真实可恢复原因，图像节点明确显示“已生成、正在下载”，避免状态查询长时间假死。",
+      "图像节点新增独立“贞贞的平价AI小屋”平台，G-2 文生图/图生图模型从默认贞贞工坊列表移入该平台；旧画布保存的 G-2 配置自动兼容迁移。",
+      "Story 的平价线路命名与模型列表同步；分析剧本等动作显示提交状态和可行动错误，准备资产阶段新增只清空媒体、不删除资产设定与镜头关联的操作。"
+    ],
+    "releaseBoundary": "用户明确授权 v2.6.6 先发布、后补真实证据；延期绝不把缺失证据标记为通过。正式 Electron/NSIS 打包只允许触发一次，Canvas Agent/zcanvas 本地实验不进入本版公开源码。"
+  },
   "electronReleaseV265": {
     "version": "2.6.5",
     "status": "released-postrelease-evidence-pending",

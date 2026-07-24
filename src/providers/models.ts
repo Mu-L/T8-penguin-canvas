@@ -56,6 +56,10 @@ export const ZHENZHEN_IMAGE_G2_MODELS = [
   ZHENZHEN_IMAGE_G2_T2I_MODEL,
   ZHENZHEN_IMAGE_G2_I2I_MODEL,
 ] as const;
+export const ZHENZHEN_IMAGE_G2_MODEL_OPTIONS = [
+  { value: ZHENZHEN_IMAGE_G2_T2I_MODEL, label: ZHENZHEN_IMAGE_G2_T2I_MODEL },
+  { value: ZHENZHEN_IMAGE_G2_I2I_MODEL, label: ZHENZHEN_IMAGE_G2_I2I_MODEL },
+] as const;
 export const ZHENZHEN_IMAGE_G2_RATIOS = ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'];
 
 export function isZhenzhenImageG2Model(apiModel: string | undefined | null): boolean {
@@ -80,8 +84,6 @@ export const IMAGE_MODELS: ImageModelDef[] = [
       { value: 'gpt-image-2', label: 'gpt-image-2' },
       { value: 'gpt-image-2-2K', label: 'gpt-image-2-2K' },
       { value: 'gpt-image-2-4K', label: 'gpt-image-2-4K' },
-      { value: ZHENZHEN_IMAGE_G2_T2I_MODEL, label: ZHENZHEN_IMAGE_G2_T2I_MODEL },
-      { value: ZHENZHEN_IMAGE_G2_I2I_MODEL, label: ZHENZHEN_IMAGE_G2_I2I_MODEL },
       { value: 'gpt-image-2-fal', label: 'gpt-image-2-fal' },
     ],
     aspectRatios: GPT_RATIOS,

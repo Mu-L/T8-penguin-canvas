@@ -332,16 +332,28 @@ test('canvas node request is bounded to one normalized node id and optional exac
     });
     assert.equal(requestCanvasNodeRun('  node-7  '), true);
     const requestId = createCanvasNodeRunRequestId('node-7', 'retry-failed');
+    const onSettled = () => undefined;
     assert.match(requestId, /^[a-zA-Z0-9._:-]{8,160}$/);
-    assert.equal(requestCanvasNodeRun('node-7', { requestId }), true);
+    assert.equal(requestCanvasNodeRun('node-7', { requestId, onSettled }), true);
     assert.equal(requestCanvasNodeRun('node-7', { requestId: 'bad id' }), false);
     assert.equal(requestCanvasNodeRun('   '), false);
     assert.equal(dispatched.length, 2);
     assert.equal(dispatched[0].type, CANVAS_NODE_RUN_REQUEST_EVENT);
     assert.deepEqual((dispatched[0] as CustomEvent).detail, { nodeId: 'node-7' });
-    assert.deepEqual((dispatched[1] as CustomEvent).detail, { nodeId: 'node-7', requestId });
+    assert.deepEqual((dispatched[1] as CustomEvent).detail, { nodeId: 'node-7', requestId, onSettled });
   } finally {
     if (descriptor) Object.defineProperty(globalThis, 'window', descriptor);
     else delete (globalThis as { window?: unknown }).window;
   }
+});
+
+test('Canvas reports whether a component run request actually started', () => {
+  const canvasSource = readFileSync(new URL('../src/components/Canvas.tsx', import.meta.url), 'utf8');
+  const requestHandler = canvasSource.slice(
+    canvasSource.indexOf('const handleCanvasNodeRunRequest = (event: Event) => {'),
+    canvasSource.indexOf("window.addEventListener(CANVAS_NODE_RUN_REQUEST_EVENT"),
+  );
+  assert.match(requestHandler, /return runNodesByOrder|handleRunGroup\(\[nodeId\]/);
+  assert.match(requestHandler, /count > 0[\s\S]*?onSettled\?\.\(\{ accepted: true \}\)/);
+  assert.match(requestHandler, /\.catch\(\(error\)[\s\S]*?onSettled\?\.\(\{ accepted: false, error: message \}\)/);
 });

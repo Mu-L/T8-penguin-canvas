@@ -9268,9 +9268,9 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       const executable = subNodes.filter((n) => n.type && EXECUTABLE_NODE_TYPES.has(n.type));
       if (executable.length === 0) {
         alert('所选节点中没有可执行节点');
-        return;
+        return 0;
       }
-      await runNodesByOrder(subNodes, subEdges, {
+      return runNodesByOrder(subNodes, subEdges, {
         ...options,
         preflightContextNodes: options.preflightContextNodes || nodes,
         preflightContextEdges: options.preflightContextEdges || edges,
@@ -9290,6 +9290,21 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       void handleRunGroup([nodeId], {
         actionKind: 'run-single',
         ...(requestId ? { requestId } : {}),
+      }).then((count) => {
+        if (count > 0) {
+          detail?.onSettled?.({ accepted: true });
+          return;
+        }
+        detail?.onSettled?.({
+          accepted: false,
+          error: count === 0
+            ? '当前节点不是可执行节点，未启动运行。'
+            : '本次运行未启动；请检查运行体检提示，或等待同一节点的现有任务结束后重试。',
+        });
+      }).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error || '未知错误');
+        logBus.error(`运行请求未启动：${message}`, '运行');
+        detail?.onSettled?.({ accepted: false, error: message });
       });
     };
     window.addEventListener(CANVAS_NODE_RUN_REQUEST_EVENT, handleCanvasNodeRunRequest);
@@ -13637,7 +13652,9 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         )}
         {/* 选中可执行节点时的浮动操作栏 (执行 / 中止 / 关闭) */}
         <NodeActionBar
-          onRunNode={(nodeId) => handleRunGroup([nodeId])}
+          onRunNode={async (nodeId) => {
+            await handleRunGroup([nodeId]);
+          }}
           onStopRun={handleCancelRun}
         />
         </ReactFlow>

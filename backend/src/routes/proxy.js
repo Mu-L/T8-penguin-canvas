@@ -426,10 +426,16 @@ function validateProxyMediaBuffer(buffer, contentType, options = {}) {
 
 async function fetchProxyRemoteMedia(url, options = {}) {
   const maximum = Number(options.maxBytes) || PROXY_MEDIA_REFERENCE_MAX_BYTES;
+  const deadlineMs = Number(options.deadlineMs) > 0
+    ? Number(options.deadlineMs)
+    : PROXY_REMOTE_DEADLINE_MS;
+  const idleTimeoutMs = Number(options.idleTimeoutMs) > 0
+    ? Number(options.idleTimeoutMs)
+    : PROXY_REMOTE_IDLE_TIMEOUT_MS;
   const remote = await safeRemoteMediaFetch(url, proxySafeRemoteOptions({
     maxBytes: maximum,
-    deadlineMs: PROXY_REMOTE_DEADLINE_MS,
-    idleTimeoutMs: PROXY_REMOTE_IDLE_TIMEOUT_MS,
+    deadlineMs,
+    idleTimeoutMs,
     maxRedirects: 4,
     accept: options.accept || 'image/*,video/*,audio/*,application/octet-stream;q=0.5',
     userAgent: 'T8-PenguinCanvas-ProviderProxy/1.0',
@@ -1412,6 +1418,21 @@ async function saveRemoteImage(url, _providerFetchImpl, materializationKey = '')
 }
 
 const IMAGE_OUTPUT_RETRY_DELAYS_MS = Object.freeze([0, 250, 1_000]);
+// A completed Provider task must not monopolize one status request for minutes.
+// The frontend can safely retry the same task ID, so keep each image
+// materialization round short and return a recoverable 202 with the real cause.
+const IMAGE_OUTPUT_MATERIALIZATION_DEADLINE_MS = boundedProxyInteger(
+  process.env.T8_IMAGE_OUTPUT_MATERIALIZATION_DEADLINE_MS,
+  25_000,
+  1_000,
+  90_000,
+);
+const IMAGE_OUTPUT_MATERIALIZATION_IDLE_TIMEOUT_MS = boundedProxyInteger(
+  process.env.T8_IMAGE_OUTPUT_MATERIALIZATION_IDLE_TIMEOUT_MS,
+  8_000,
+  1_000,
+  30_000,
+);
 
 const REMOTE_OUTPUT_KIND_LABELS = Object.freeze({
   image: { noun: '图片', object: '图片', code: 'image' },
@@ -1532,13 +1553,27 @@ function retryableImageOutputError(error) {
 
 async function saveRemoteImageDetailed(url, _providerFetchImpl, materializationKey = '') {
   let lastError = null;
+  const deadlineAt = Date.now() + IMAGE_OUTPUT_MATERIALIZATION_DEADLINE_MS;
   for (let attempt = 0; attempt < IMAGE_OUTPUT_RETRY_DELAYS_MS.length; attempt += 1) {
     const delay = IMAGE_OUTPUT_RETRY_DELAYS_MS[attempt];
-    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+    if (delay > 0) {
+      if (Date.now() + delay >= deadlineAt) {
+        lastError = Object.assign(new Error('图片结果下载超过单轮等待时间'), { code: 'fetch_timeout' });
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs <= 0) {
+      lastError = Object.assign(new Error('图片结果下载超过单轮等待时间'), { code: 'fetch_timeout' });
+      break;
+    }
     try {
       const remote = await fetchProxyRemoteMedia(url, {
         allowedKinds: ['image'],
         maxBytes: PROXY_IMAGE_REFERENCE_MAX_BYTES,
+        deadlineMs: remainingMs,
+        idleTimeoutMs: Math.min(IMAGE_OUTPUT_MATERIALIZATION_IDLE_TIMEOUT_MS, remainingMs),
         accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif,image/bmp,image/tiff;q=0.9',
       });
       const buf = remote.buffer;
