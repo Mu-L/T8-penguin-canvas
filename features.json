@@ -1,9 +1,9 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.6.6",
-  "lastUpdated": "2026-07-25-v2.6.6-release-candidate",
+  "lastUpdated": "2026-07-25-v2.6.6-released",
   "storyAssetMediaClear": {
-    "status": "release-candidate",
+    "status": "released-v2.6.6",
     "date": "2026-07-25",
     "releaseIncluded": true,
     "highlights": [
@@ -13,11 +13,11 @@
     ],
     "verification": [
       "Story 资产清空与卡片交互专项断言、Story 生产流程回归和 TypeScript type-check 通过。",
-      "未调用真实 Provider、未生产构建、未打包、未提交、未推送或发布。"
+      "未为该交互改动额外调用真实 Provider；已随 v2.6.6 正式源码、Electron 安装包和自动更新 Release 发布。"
     ]
   },
   "tunFakeIpDownloadRootFix": {
-    "status": "release-candidate",
+    "status": "released-v2.6.6",
     "date": "2026-07-25",
     "releaseIncluded": true,
     "highlights": [
@@ -31,11 +31,11 @@
       "安全代理/下载链路回归 28/28 通过，新增断言确认域名绑定的 TUN Fake-IP 优先保留，同时字面量 Fake-IP 仍在连接前拒绝。",
       "节点运行与停止回归 10/10 通过，TypeScript type-check 通过。",
       "使用不产生生成费用的 https://httpbin.org/image/png 完成真实 DNS、HTTPS、媒体校验与 8090-byte 下载冒烟；当前开发机该次 DNS 为公网地址，未冒充真实 TUN 设备证据。",
-      "未调用真实生成 Provider、未生产构建、未打包、未提交、未推送或发布。"
+      "未为下载修复额外调用真实生成 Provider；已随 v2.6.6 正式源码、Electron 安装包和自动更新 Release 发布。"
     ]
   },
   "storyRunFeedbackAndBudgetName": {
-    "status": "release-candidate",
+    "status": "released-v2.6.6",
     "date": "2026-07-25",
     "releaseIncluded": true,
     "highlights": [
@@ -47,11 +47,11 @@
     "verification": [
       "本地开发页面已验证图像与视频来源名称、G-2 两模型列表，以及恢复确认失败时的 Story 页内反馈；随后只重启单个后端监听进程，/api/status 返回 ok。",
       "Story、Canvas 运行边界与图像模型映射定向回归 37/37 通过，复跑 Story/Canvas 核心回归 28/28 通过，TypeScript type-check 通过。",
-      "未调用真实 Provider、未生产构建、未打包、未提交、未推送或发布。"
+      "未为 Story 反馈修复额外调用真实 Provider；已随 v2.6.6 正式源码、Electron 安装包和自动更新 Release 发布。"
     ]
   },
   "imageBudgetProviderSeparation": {
-    "status": "release-candidate",
+    "status": "released-v2.6.6",
     "date": "2026-07-25",
     "releaseIncluded": true,
     "highlights": [
@@ -62,22 +62,50 @@
     ],
     "verification": [
       "图像模型映射、Seedream NZ 路由和 seedance.nz Provider 聚焦回归 47/47 通过。",
-      "TypeScript type-check 通过；未调用真实 Provider、未生产构建、未打包、未提交、未推送或发布。"
+      "TypeScript type-check 通过；未为平台归类改动额外调用真实 Provider，已随 v2.6.6 正式源码、Electron 安装包和自动更新 Release 发布。"
     ]
   },
   "electronReleaseV266": {
     "version": "2.6.6",
-    "status": "release-authorized-postrelease-evidence-pending",
+    "status": "released-postrelease-evidence-pending",
     "date": "2026-07-25",
+    "releasedAt": "2026-07-24T19:20:27Z",
+    "releaseUrl": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.6.6",
+    "sourceCommit": "799f0d8ef436751183a6cfbc6e061ff1699d5b4f",
     "tag": "v2.6.6",
     "description": "TUN/Fake-IP 全生成链路下载、图像平台拆分，以及 Story 启动反馈和资产清空的稳定性自动更新版。",
+    "artifacts": {
+      "installer": {
+        "name": "T8-PenguinCanvas-Setup-2.6.6.exe",
+        "bytes": 1302993291,
+        "sha256": "d9fefac5bba0eda6fd2ac3696b8af757d1a311a7226eb57a8359a0117b7f8d78",
+        "sha512": "hedVyaZYOjdL9Wamk64PEaqfMxg5C5SaQ/mPGfgM46wUeJ2WaWXklSjYsrjbxCsBBGfc7sxyWdbxSLaz9iJesw=="
+      },
+      "blockmap": {
+        "name": "T8-PenguinCanvas-Setup-2.6.6.exe.blockmap",
+        "bytes": 1357506,
+        "sha256": "d58fff0df899d04859e26084396b1070181b12cd52992a1870d0941dc2746d90"
+      },
+      "metadata": {
+        "name": "latest.yml",
+        "bytes": 362,
+        "sha256": "8777f66a30deab64322d031677469c7a49ed7c1077cb40e01c9dbf62550d7df9"
+      }
+    },
     "highlights": [
       "域名解析到 TUN Fake-IP 时优先保留代理映射下载；TUN 中途关闭或映射失效时，同一个幂等素材下载自动回退到独立公共 DNS/DoH，不重复提交生成任务。",
       "生成结果单轮转存采用有界等待并返回真实可恢复原因，图像节点明确显示“已生成、正在下载”，避免状态查询长时间假死。",
       "图像节点新增独立“贞贞的平价AI小屋”平台，G-2 文生图/图生图模型从默认贞贞工坊列表移入该平台；旧画布保存的 G-2 配置自动兼容迁移。",
       "Story 的平价线路命名与模型列表同步；分析剧本等动作显示提交状态和可行动错误，准备资产阶段新增只清空媒体、不删除资产设定与镜头关联的操作。"
     ],
-    "releaseBoundary": "用户明确授权 v2.6.6 先发布、后补真实证据；延期绝不把缺失证据标记为通过。正式 Electron/NSIS 打包只允许触发一次，Canvas Agent/zcanvas 本地实验不进入本版公开源码。"
+    "verification": [
+      "安全下载独立回归 10/10、后端代理与发布证据 32/32、Story/Image/Canvas 定向回归 37/37、TypeScript、公开源码、RH 14 个启用工具/11 个分类、发布工作树与生产构建门禁均通过。",
+      "正式 dist:release 完整构建只触发一次；post-build 发现历史复用的 remove-ai-watermarks 归档存在 29 个 CRC 错误后失败关闭，未上传坏包。随后以低优先级重建该单项归档并对 47734 个文件完成 CRC 校验，只从既有 win-unpacked 恢复封装 NSIS，没有重跑 TypeScript/Vite、后端加密、原生模块或 Electron 应用打包，也未执行 FFmpeg 转码或额外冷启动。",
+      "修复后的正式包通过 remove-ai-watermarks/ParseHub 两项归档 SHA-256、CRC、入口文件、FFmpeg/ffprobe、私有扩展、安装包、blockmap 与 latest.yml 严格 post-build 门禁。",
+      "GitHub 草稿三项资产 metadata、完整回下载、最终 tag/Latest/digest/size 校验均通过，Release recovery 已清除；v2.6.6 为非草稿、非预发布和 Latest，tag 与 Release target 固定指向 799f0d8ef436751183a6cfbc6e061ff1699d5b4f。",
+      "F8-F10 真实双设备、三个隔离客户端、公共 HTTPS/TLS/SNI、红队与负载证据按用户明确授权在发布后补充；延期没有产生任何 passed 检查。"
+    ],
+    "releaseBoundary": "用户明确授权 v2.6.6 先发布、后补真实证据；延期绝不把缺失证据标记为通过。Canvas Agent/zcanvas 本地实验不进入本版公开源码和安装包。"
   },
   "electronReleaseV265": {
     "version": "2.6.5",
