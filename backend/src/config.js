@@ -224,7 +224,7 @@ const config = {
   // 三套 API Key 默认值(均可在 settings 中覆盖)
   // 贞贞工坊 / LLM 独立 Key 强制走 https://ai.t8star.org
   ZHENZHEN_BASE_URL: 'https://ai.t8star.org',
-  // 贞贞 SD2 独立链路，只用于 api.seedance.nz 的 Seedance 2.0 API。
+  // 贞贞平价 AI 小屋链路：api.seedance.nz 的 LLM、Seedance 2.0、图片、音频等 API。
   ZHENZHEN_SD2_BASE_URL: 'https://api.seedance.nz',
   RH_BASE_URL: 'https://www.runninghub.cn',
   RH_INTL_BASE_URL: 'https://www.runninghub.ai',

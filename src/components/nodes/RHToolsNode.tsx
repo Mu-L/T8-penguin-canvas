@@ -33,6 +33,7 @@ import { useHasAutoOutput } from './useHasAutoOutput';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
 import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { hasReusableGenerationResult, shouldReuseGenerationResult } from '../../utils/reuseGenerationResult';
+import { resolveRunningHubDisplaySite } from '../../utils/runningHubResolvedSite';
 import type { RunNodeLifecycleReporter } from '../../types/project';
 import { useUpstreamMaterials, type Material } from './useUpstreamMaterials';
 import { useOrderedMaterials } from './useOrderedMaterials';
@@ -155,6 +156,7 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
   const importBackup = ctx?.importBackup;
 
   const d = data as any;
+  const appInfo: any = d?.appInfo;
   // 启动器
   const activeCategoryId: string = d?.rhToolsActiveCategoryId || ALL;
   const searchQuery: string = d?.rhToolsSearchQuery || '';
@@ -162,20 +164,20 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
   const activeApp: RHTool | undefined = activeAppId ? tools.find((t) => t.id === activeAppId) : undefined;
   const webappId: string = activeApp?.webappId || '';
   const configuredRhSite: RhSite = activeApp?.rhSite === 'intl' ? 'intl' : 'cn';
-  const activeRhSiteRef = useRef<RhSite>(configuredRhSite);
+  const displayedRhSite = resolveRunningHubDisplaySite(configuredRhSite, webappId, appInfo);
+  const activeRhSiteRef = useRef<RhSite>(displayedRhSite);
   // 运行态（与 RunningHubNode 字段对齐）
   const instanceType: string = d?.instanceType || '';
   const status: 'idle' | 'submitting' | 'polling' | 'success' | 'error' = d?.status || 'idle';
   const taskId: string | undefined = d?.taskId;
   const urls: string[] = d?.urls || [];
-  const appInfo: any = d?.appInfo;
   const paramValues: Record<string, RhParamValue> = d?.paramValues || {};
   const paramMentions: Record<string, MediaMention[]> =
     d?.paramMentions && typeof d.paramMentions === 'object' ? d.paramMentions : {};
 
   useEffect(() => {
-    activeRhSiteRef.current = configuredRhSite;
-  }, [activeAppId, configuredRhSite]);
+    activeRhSiteRef.current = displayedRhSite;
+  }, [activeAppId, displayedRhSite]);
 
   // 主题色（青调 cyan，与 RunningHubNode 一致）—— v1.2.10.2 修复某些主题下紫色面板过于伤眼问题
   // v1.2.10.3: 像素风不再用 cyan 混入, 改走 RunningHubNode 同款糖果调色板（px-surface/px-muted/px-ink/px-yellow）
@@ -615,7 +617,16 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
           if (elapsed % 6 === 0) {
             logBus.debug(`[${elapsed * 5}s] status=${r.status} code=${r.code} urls=${r.urls?.length || 0}`, src);
           }
-          if (r.status === 'SUCCESS') {
+          const normalizedStatus = String(r.status || '').trim().toUpperCase();
+          if (normalizedStatus === 'MATERIALIZING') {
+            update({ status: 'polling', rhCode: r.code, error: '' });
+            if (elapsed === 1 || elapsed % 6 === 0) {
+              logBus.warn(
+                r.error || 'RH 结果已经生成，正在适配 TUN/代理网络并安全下载；原任务会保留，不会重复提交',
+                src,
+              );
+            }
+          } else if (normalizedStatus === 'SUCCESS') {
             const list: string[] = Array.isArray(r.urls) ? r.urls : [];
             const isImg = (u: string) => /\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(u);
             const isVid = (u: string) => /\.(mp4|webm|mov|m4v|mkv)$/i.test(u);
@@ -654,7 +665,7 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
               httpStatusSource: 'local-backend',
             });
             finish(true);
-          } else if (r.status === 'FAILED') {
+          } else if (normalizedStatus === 'FAILED') {
             let reason: string;
             if (r.failReason == null) {
               reason = `RH 失败 code=${r.code}`;
@@ -713,7 +724,9 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
     setFetchingInfo(true);
     try {
       const info = await fetchRhAppInfo(webappId, activeRhSiteRef.current);
-      if (info?.rhSite) activeRhSiteRef.current = info.rhSite;
+      if (info?.rhSite === 'intl' || info?.rhSite === 'cn') {
+        activeRhSiteRef.current = info.rhSite;
+      }
       const list: any[] = info?.nodeInfoList || [];
       logBus.info(`拉取应用信息 · webappId=${webappId} · ${list.length} 个字段`, src);
       const next: Record<string, RhParamValue> = { ...paramValues };
@@ -1024,7 +1037,7 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
               {activeApp.title}
             </div>
             <div className="text-[10px] truncate" style={{ color: subText }}>
-              {activeApp.description || `webappId: ${webappId}`} · {configuredRhSite === 'intl' ? '海外站' : '国内站'}
+              {activeApp.description || `webappId: ${webappId}`} · {displayedRhSite === 'intl' ? '海外站' : '国内站'}
             </div>
           </div>
         </div>

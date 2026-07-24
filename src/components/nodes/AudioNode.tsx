@@ -269,7 +269,15 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
             completed: r.completed,
             total: r.total,
           });
-          if (r.status === 'SUCCESS' && r.tracks.length > 0) {
+          if (String(r.status || '').toUpperCase() === 'MATERIALIZING') {
+            update({ status: 'polling', progress: '100% · 正在下载' });
+            if (elapsed === 1 || elapsed % 10 === 0) {
+              logBus.warn(
+                r.error || '音频已经生成，正在适配 TUN/代理网络并安全下载；原任务会保留，不会重复提交',
+                src,
+              );
+            }
+          } else if (r.status === 'SUCCESS' && r.tracks.length > 0) {
             stopPoll();
             // 双输出口: audioUrl=轨1, audioUrl_1=轨2
             update({
@@ -348,7 +356,15 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
             status: normalizedStatus,
             progress: currentProgress,
           });
-          if (normalizedStatus === 'succeeded' && result.audioUrl) {
+          if (normalizedStatus === 'materializing') {
+            update({ status: 'polling', progress: '100% · 正在下载' });
+            if (elapsed === 1 || elapsed % 10 === 0) {
+              logBus.warn(
+                result.error || 'Seed Audio 已经生成，正在适配 TUN/代理网络并安全下载；原任务会保留，不会重复提交',
+                src,
+              );
+            }
+          } else if (normalizedStatus === 'succeeded' && result.audioUrl) {
             stopPoll();
             const seedTrack = {
               id: tid,

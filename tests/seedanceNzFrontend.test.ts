@@ -57,6 +57,38 @@ test('all interval-based generation polling never overlaps a slow status request
   assert.match(rhToolsNode, /let pollInFlight = false;[\s\S]*?if \(pollInFlight\) return;/);
 });
 
+test('all async generation surfaces retain completed tasks while TUN output is materializing', () => {
+  const imageNode = read('../src/components/nodes/ImageNode.tsx');
+  const videoNode = read('../src/components/nodes/VideoNode.tsx');
+  const seedanceNode = read('../src/components/nodes/SeedanceNode.tsx');
+  const audioNode = read('../src/components/nodes/AudioNode.tsx');
+  const runningHubNode = read('../src/components/nodes/RunningHubNode.tsx');
+  const rhToolsNode = read('../src/components/nodes/RHToolsNode.tsx');
+  const rhToolbox = read('../src/services/rhToolbox.ts');
+  const falToolbox = read('../src/services/falToolbox.ts');
+  const panorama = read('../src/components/nodes/Panorama3DNode.tsx');
+  const director = read('../src/components/nodes/DirectorStoryboardNode.tsx');
+  const story = read('../src/components/nodes/StoryNode.tsx');
+
+  for (const source of [
+    imageNode,
+    videoNode,
+    seedanceNode,
+    audioNode,
+    runningHubNode,
+    rhToolsNode,
+    rhToolbox,
+    falToolbox,
+    panorama,
+    director,
+    story,
+  ]) {
+    assert.match(source, /materializing/i);
+  }
+  assert.match(rhToolbox, /remoteTaskCompleted = true;[\s\S]*?正在适配 TUN\/代理网络并安全下载/);
+  assert.match(story, /音频已经生成，正在适配 TUN\/代理网络并安全下载/);
+});
+
 test('proxy routes seedance.nz independently and immediately stores completed output locally', () => {
   const proxy = read('../backend/src/routes/proxy.js');
   const settings = read('../backend/src/routes/settings.js');
@@ -64,8 +96,8 @@ test('proxy routes seedance.nz independently and immediately stores completed ou
   assert.match(proxy, /requestedTaskProvider === seedanceNz\.PROVIDER_ID/);
   assert.match(proxy, /seedanceNz\.submitTask/);
   assert.match(proxy, /seedanceNz\.queryTask/);
-  assert.match(proxy, /saveRemoteVideo\([\s\S]*?result\.videoUrl,[\s\S]*?seedanceNz\.fetchRemote,[\s\S]*?seedanceNz\.PROVIDER_ID/);
-  assert.match(proxy, /saveRemoteVideo\(vUrl, null, `zhenzhen-legacy:\$\{taskId\}`\)/);
+  assert.match(proxy, /materializeRemoteTaskOutput\(\{[\s\S]*?remoteUrl: result\.videoUrl,[\s\S]*?kind: 'video',[\s\S]*?materializationKey: `\$\{seedanceNz\.PROVIDER_ID\}:\$\{taskId\}`,[\s\S]*?providerFetchImpl: seedanceNz\.fetchRemote/);
+  assert.match(proxy, /materializeRemoteTaskOutput\(\{[\s\S]*?status: st,[\s\S]*?remoteUrl: vUrl,[\s\S]*?kind: 'video',[\s\S]*?materializationKey: `zhenzhen-legacy:\$\{taskId\}`/);
   assert.match(proxy, /provider: 'zhenzhen-legacy'/);
   assert.match(settings, /zhenzhenSd2ApiKey/);
   assert.match(settings, /zhenzhenSd2BaseUrl: config\.ZHENZHEN_SD2_BASE_URL/);
@@ -294,6 +326,6 @@ test('proxy keeps Happy Horse and Seed Audio on the domestic key and stores outp
   assert.match(proxy, /seedanceNz\.submitHappyHorseTask/);
   assert.match(proxy, /seedanceNz\.submitAudioTask/);
   assert.match(proxy, /settings\?\.zhenzhenSd2ApiKey/);
-  assert.match(proxy, /saveRemoteVideo\(result\.videoUrl, seedanceNz\.fetchRemote, `happyhorse-nz:\$\{req\.params\.tid\}`\)/);
-  assert.match(proxy, /saveRemoteAudio\(result\.audioUrl, `seed-audio-nz:\$\{req\.params\.tid\}:0`\)/);
+  assert.match(proxy, /materializeRemoteTaskOutput\(\{[\s\S]*?remoteUrl: result\.videoUrl,[\s\S]*?kind: 'video',[\s\S]*?materializationKey: `happyhorse-nz:\$\{req\.params\.tid\}`,[\s\S]*?providerFetchImpl: seedanceNz\.fetchRemote/);
+  assert.match(proxy, /materializeRemoteTaskOutput\(\{[\s\S]*?remoteUrl: result\.audioUrl,[\s\S]*?kind: 'audio',[\s\S]*?materializationKey: `seed-audio-nz:\$\{req\.params\.tid\}:0`/);
 });

@@ -6,6 +6,7 @@ const { spawn, spawnSync } = require('child_process');
 const config = require('../config');
 const { mediaRefToAbsoluteUrl, resolveMediaRef, mimeFromPath } = require('./mediaResolver');
 const { providerTrace } = require('./providerTrace');
+const { safeRemoteMediaFetch } = require('../utils/safeRemoteMediaFetch');
 const jimengCliCompatibility = require('../shared/jimengCliCompatibility.json');
 
 const JIMENG_CLI_SUPPORTED_VERSION = jimengCliCompatibility.supportedVersion;
@@ -604,12 +605,24 @@ async function defaultStoreOutput(value, kind, options = {}) {
   }
   localPath = windowsPathFromWsl(localPath);
   if (/^https?:\/\//i.test(text)) {
-    const fetchImpl = options.fetchImpl || fetch;
-    const res = await fetchImpl(text);
-    if (!res.ok) throw new Error(`即梦结果下载失败：HTTP ${res.status}`);
-    const contentType = typeof res.headers?.get === 'function' ? res.headers.get('content-type') : '';
-    ext = outputExtFromMime(contentType, ext);
-    buf = Buffer.from(await res.arrayBuffer());
+    if (options.fetchImpl) {
+      const res = await options.fetchImpl(text);
+      if (!res.ok) throw new Error(`即梦结果下载失败：HTTP ${res.status}`);
+      const contentType = typeof res.headers?.get === 'function' ? res.headers.get('content-type') : '';
+      ext = outputExtFromMime(contentType, ext);
+      buf = Buffer.from(await res.arrayBuffer());
+    } else {
+      const remote = await safeRemoteMediaFetch(text, {
+        allowedKinds: [kind],
+        maxBytes: kind === 'video' ? 1024 * 1024 * 1024 : 64 * 1024 * 1024,
+        deadlineMs: 5 * 60 * 1000,
+        idleTimeoutMs: 30 * 1000,
+        maxRedirects: 4,
+        userAgent: 'T8-PenguinCanvas-JimengCLI/1.0',
+      });
+      ext = outputExtFromMime(remote.contentType, ext);
+      buf = remote.buffer;
+    }
   } else if (fs.existsSync(localPath)) {
     const existingOutputUrl = outputUrlForLocalPath(localPath);
     if (existingOutputUrl) return existingOutputUrl;

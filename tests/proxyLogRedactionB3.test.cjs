@@ -262,6 +262,74 @@ test('B3 Provider fetch deadline covers DNS, connect, TLS, and response headers'
   }
 });
 
+test('B3 Provider GET refreshes stale TUN connections once while POST is never replayed', async () => {
+  const originalFetch = global.fetch;
+  let calls = 0;
+  try {
+    global.fetch = async () => {
+      calls += 1;
+      if (calls === 1) {
+        throw Object.assign(new TypeError('fetch failed'), {
+          cause: Object.assign(new Error('socket reset after TUN switch'), { code: 'ECONNRESET' }),
+        });
+      }
+      return new Response('ok', { status: 200 });
+    };
+    const recovered = await proxyRouter._test.fetchProviderResponse(
+      'https://provider.example/query',
+      { method: 'GET' },
+      'Provider query',
+    );
+    assert.equal(recovered.status, 200);
+    assert.equal(calls, 2, 'read-only Provider queries may retry once after refreshing the connection pool');
+
+    calls = 0;
+    global.fetch = async () => {
+      calls += 1;
+      throw Object.assign(new TypeError('fetch failed'), {
+        cause: Object.assign(new Error('network unreachable after TUN switch'), { code: 'ENETUNREACH' }),
+      });
+    };
+    await assert.rejects(
+      proxyRouter._test.fetchProviderResponse(
+        'https://provider.example/generate',
+        { method: 'POST', body: '{"prompt":"safe"}' },
+        'Provider submit',
+      ),
+      (error) => {
+        assert.equal(error?.code, 'provider_network_unavailable');
+        assert.equal(error?.status, 503);
+        assert.equal(error?.recoverable, true);
+        assert.doesNotMatch(String(error?.message || ''), /关闭.*(?:代理|TUN|VPN)/);
+        return true;
+      },
+    );
+    assert.equal(calls, 1, 'generation POST must not be replayed because that could duplicate work or charges');
+
+    calls = 0;
+    global.fetch = async () => {
+      calls += 1;
+      if (calls === 1) {
+        throw Object.assign(new TypeError('fetch failed'), {
+          cause: Object.assign(new Error('socket reset after TUN switch'), { code: 'ECONNRESET' }),
+        });
+      }
+      return new Response('ok', { status: 200 });
+    };
+    const recoveredReadPost = await proxyRouter._test.fetchProviderResponse(
+      'https://provider.example/task/outputs',
+      { method: 'POST', body: '{"taskId":"existing-task"}' },
+      'Provider read-only POST query',
+      { retryNetwork: true },
+    );
+    assert.equal(recoveredReadPost.status, 200);
+    assert.equal(calls, 2, 'explicitly marked read-only POST queries may retry without resubmitting generation');
+  } finally {
+    global.fetch = originalFetch;
+    await proxyRouter._test.resetProviderDispatcherForTests();
+  }
+});
+
 test('B3 refToBuffer, refToGrokImage, and uploadRefToZhenzhen routes reject collaborator private media before connect', async () => {
   let privateHits = 0;
   const privateServer = await listen((_req, res) => {
@@ -1476,19 +1544,59 @@ test('B3 completed image tasks retry transient downloads and expose actionable s
       assert.match(expired.data?.error || '', /HTTP 410/);
       assert.doesNotMatch(expired.text, /provider-signed-secret|expired\.png/);
 
+      const tunOutput = `http://cdn.example:${outputServer.address().port}/generated.png?token=provider-signed-secret`;
       proxyRouter._test.setProxySafeRemoteTestOptions({
         lookupImpl: async () => [{ address: '198.18.0.25', family: 4 }],
+        publicLookupImpl: async () => {
+          throw Object.assign(new Error('public DNS temporarily unavailable'), {
+            code: 'tun_dns_fallback_failed',
+          });
+        },
       });
       global.fetch = async () => new Response(JSON.stringify({
         status: 'completed',
         progress: '100%',
-        result: { image_url: 'https://cdn.example/private.png?token=provider-signed-secret' },
+        result: { image_url: tunOutput },
       }), { status: 200, headers: { 'content-type': 'application/json' } });
-      const blocked = await requestGet(appServer, '/api/proxy/image/status/fake-ip-image-task?model=gpt-image-2');
-      assert.equal(blocked.status, 502, blocked.text);
-      assert.equal(blocked.data?.code, 'image_download_proxy_dns_blocked');
-      assert.match(blocked.data?.error || '', /DNS|代理|Fake-IP/);
-      assert.doesNotMatch(blocked.text, /cdn\.example|provider-signed-secret/);
+      const waitingForTunDns = await requestGet(appServer, '/api/proxy/image/status/fake-ip-image-task?model=gpt-image-2');
+      assert.equal(waitingForTunDns.status, 202, waitingForTunDns.text);
+      assert.equal(waitingForTunDns.data?.success, true);
+      assert.equal(waitingForTunDns.data?.data?.status, 'materializing');
+      assert.equal(waitingForTunDns.data?.data?.recoverable, true);
+      assert.equal(waitingForTunDns.data?.code, 'image_download_tun_dns_recovering');
+      assert.match(waitingForTunDns.data?.data?.error || '', /TUN Fake-IP|自动重试/);
+      assert.doesNotMatch(waitingForTunDns.text, /cdn\.example|provider-signed-secret/);
+
+      proxyRouter._test.setProxySafeRemoteTestOptions({
+        lookupImpl: async () => [{ address: '198.18.0.25', family: 4 }],
+        publicLookupImpl: async () => [{ address: '127.0.0.1', family: 4 }],
+        allowPrivateForTests: true,
+      });
+      const recoveredWithTunEnabled = await requestGet(appServer, '/api/proxy/image/status/fake-ip-image-task?model=gpt-image-2');
+      assert.equal(recoveredWithTunEnabled.status, 200, recoveredWithTunEnabled.text);
+      assert.equal(recoveredWithTunEnabled.data?.data?.status, 'completed');
+      assert.match(recoveredWithTunEnabled.data?.data?.urls?.[0] || '', /^\/files\/output\/img_task_/);
+
+      let arbitraryPrivateFallbacks = 0;
+      proxyRouter._test.setProxySafeRemoteTestOptions({
+        lookupImpl: async () => [{ address: '192.168.20.30', family: 4 }],
+        publicLookupImpl: async () => {
+          arbitraryPrivateFallbacks += 1;
+          return [{ address: '127.0.0.1', family: 4 }];
+        },
+      });
+      global.fetch = async () => new Response(JSON.stringify({
+        status: 'completed',
+        progress: '100%',
+        result: {
+          image_url: `http://private.example:${outputServer.address().port}/private.png?token=provider-signed-secret`,
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+      const blockedPrivate = await requestGet(appServer, '/api/proxy/image/status/private-image-task?model=gpt-image-2');
+      assert.equal(blockedPrivate.status, 502, blockedPrivate.text);
+      assert.equal(blockedPrivate.data?.code, 'image_download_private_address_blocked');
+      assert.equal(arbitraryPrivateFallbacks, 0);
+      assert.doesNotMatch(blockedPrivate.text, /private\.example|provider-signed-secret/);
 
       global.fetch = async () => new Response(JSON.stringify({
         status: 'finished',
@@ -1505,6 +1613,107 @@ test('B3 completed image tasks retry transient downloads and expose actionable s
       await closeServer(outputServer);
     }
   });
+});
+
+test('B3 video, audio, and RunningHub completed tasks survive TUN Fake-IP and resume the same task', async () => {
+  const videoBytes = Buffer.concat([
+    Buffer.from([0x00, 0x00, 0x00, 0x14]),
+    Buffer.from('ftypisom', 'ascii'),
+    Buffer.alloc(8),
+  ]);
+  const audioBytes = Buffer.concat([Buffer.from('ID3'), Buffer.alloc(32, 0x5a)]);
+  const outputServer = await listen((req, res) => {
+    if (req.url?.startsWith('/result.mp4')) {
+      res.writeHead(200, { 'content-type': 'video/mp4', 'content-length': videoBytes.length });
+      res.end(videoBytes);
+      return;
+    }
+    if (req.url?.startsWith('/result.mp3')) {
+      res.writeHead(200, { 'content-type': 'audio/mpeg', 'content-length': audioBytes.length });
+      res.end(audioBytes);
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  try {
+    await withProxyFixture(async ({ appServer, outputDir }) => {
+      const signedVideo = `http://result.example:${outputServer.address().port}/result.mp4?token=video-secret`;
+      const signedAudio = `http://result.example:${outputServer.address().port}/result.mp3?token=audio-secret`;
+      let providerQueries = 0;
+      const originalFetch = global.fetch;
+      global.fetch = async (url) => {
+        providerQueries += 1;
+        const target = String(url);
+        if (target.includes('/suno/feed/')) {
+          return new Response(JSON.stringify([{
+            id: 'tun-audio-task',
+            clip_id: 'tun-audio-task',
+            status: 'complete',
+            audio_url: signedAudio,
+            metadata: { duration: 1 },
+          }]), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (target.includes('/task/openapi/outputs')) {
+          return new Response(JSON.stringify({
+            code: 0,
+            data: [{ fileUrl: signedVideo, fileType: 'mp4' }],
+          }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        return new Response(JSON.stringify({
+          status: 'SUCCESS',
+          video_url: signedVideo,
+          progress: '100%',
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      };
+      try {
+        proxyRouter._test.setProxySafeRemoteTestOptions({
+          lookupImpl: async () => [{ address: '198.18.1.25', family: 4 }],
+          publicLookupImpl: async () => {
+            throw Object.assign(new Error('independent DNS temporarily unavailable'), {
+              code: 'tun_dns_fallback_failed',
+            });
+          },
+        });
+
+        const videoWaiting = await requestGet(appServer, '/api/proxy/video/query?taskId=tun-video-task&model=veo-3.1');
+        const audioWaiting = await requestGet(appServer, '/api/proxy/audio/query?clipIds=tun-audio-task&saveLocal=false');
+        const rhWaiting = await requestGet(appServer, '/api/proxy/runninghub/query?taskId=tun-rh-task&site=cn');
+        for (const response of [videoWaiting, audioWaiting, rhWaiting]) {
+          assert.equal(response.status, 202, response.text);
+          assert.equal(response.data?.success, true);
+          assert.equal(String(response.data?.data?.status).toUpperCase(), 'MATERIALIZING');
+          assert.equal(response.data?.data?.recoverable, true);
+          assert.doesNotMatch(response.text, /result\.example|video-secret|audio-secret/);
+        }
+
+        proxyRouter._test.setProxySafeRemoteTestOptions({
+          lookupImpl: async () => [{ address: '198.18.1.25', family: 4 }],
+          publicLookupImpl: async () => [{ address: '127.0.0.1', family: 4 }],
+          allowPrivateForTests: true,
+        });
+
+        const videoRecovered = await requestGet(appServer, '/api/proxy/video/query?taskId=tun-video-task&model=veo-3.1');
+        const audioRecovered = await requestGet(appServer, '/api/proxy/audio/query?clipIds=tun-audio-task&saveLocal=false');
+        const rhRecovered = await requestGet(appServer, '/api/proxy/runninghub/query?taskId=tun-rh-task&site=cn');
+        assert.equal(videoRecovered.status, 200, videoRecovered.text);
+        assert.equal(videoRecovered.data?.data?.status, 'SUCCESS');
+        assert.match(videoRecovered.data?.data?.videoUrl || '', /^\/files\/output\/vid_task_/);
+        assert.equal(audioRecovered.status, 200, audioRecovered.text);
+        assert.equal(audioRecovered.data?.data?.status, 'SUCCESS');
+        assert.match(audioRecovered.data?.data?.tracks?.[0]?.audioUrl || '', /^\/files\/output\/audio_task_/);
+        assert.equal(rhRecovered.status, 200, rhRecovered.text);
+        assert.equal(rhRecovered.data?.data?.status, 'SUCCESS');
+        assert.match(rhRecovered.data?.data?.urls?.[0] || '', /^\/files\/output\/rh_task_/);
+        assert.equal(providerQueries, 6, 'recovery must query the same tasks without submitting replacements');
+        assert.equal(fs.readdirSync(outputDir).length, 3);
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
+  } finally {
+    await closeServer(outputServer);
+  }
 });
 
 test('B3 Zhenzhen video and Seedance routes bound Provider JSON and redact failures', async () => {

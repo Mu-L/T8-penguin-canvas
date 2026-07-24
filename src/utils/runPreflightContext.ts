@@ -318,6 +318,34 @@ function builtInCredentialNotice(node: Node, settings: ApiSettings): RunPrefligh
     }
   }
   const { source } = selectedProviderFields(node);
+
+  if (node.type === 'story') {
+    const mode = String(data.storyRunMode || 'all');
+    const project = data.storyProject && typeof data.storyProject === 'object'
+      ? data.storyProject as Record<string, unknown>
+      : {};
+    const shots = Array.isArray(project.shots) ? project.shots : [];
+    const usesLlm = mode === 'analyze' || (mode === 'all' && shots.length === 0);
+    if (!usesLlm) return null;
+    if (source === 'seedance-nz' || data.llmApiSource === 'seedance-nz') {
+      return configuredSecret(settings.zhenzhenSd2ApiKey)
+        ? null
+        : capabilityNotice(
+            node,
+            'provider.seedance-nz-credential-missing',
+            '未检测到 Story 所选“贞贞的平价AI小屋”所需的 API Key。请点击右上角齿轮打开“API 设置”，填写并保存，然后重新运行。',
+          );
+    }
+    if (source && source !== 'zhenzhen') return null;
+    return configuredSecret(settings.llmApiKey)
+      ? null
+      : capabilityNotice(
+          node,
+          'provider.llm-credential-missing',
+          '未检测到 Story 所选“贞贞AI工坊内置LLM”所需的独立 LLM API Key。请点击右上角齿轮打开“API 设置”，填写并保存，然后重新运行。',
+        );
+  }
+
   if (source && source !== 'zhenzhen') return null;
 
   if (node.type === 'image') {
@@ -383,10 +411,20 @@ function builtInCredentialNotice(node: Node, settings: ApiSettings): RunPrefligh
       : capabilityNotice(node, 'provider.suno-credential-missing', missingOverseasCredentialMessage('Suno 音频模型', 'suno'));
   }
 
+  if (node.type === 'llm' && data.llmApiSource === 'seedance-nz') {
+    return configuredSecret(settings.zhenzhenSd2ApiKey)
+      ? null
+      : capabilityNotice(
+          node,
+          'provider.seedance-nz-credential-missing',
+          '未检测到“贞贞的平价AI工坊（国内） API Key”。请点击右上角齿轮打开“API 设置”，填写并保存，然后重新运行。',
+        );
+  }
+
   if (node.type === 'llm' || node.type === 'batch-tagger') {
     return configuredSecret(settings.llmApiKey)
       ? null
-      : capabilityNotice(node, 'provider.llm-credential-missing', '未检测到当前语言模型所需的“LLM 独立 API Key”。请点击右上角齿轮打开“API 设置”，填写并保存，然后重新运行。');
+      : capabilityNotice(node, 'provider.llm-credential-missing', '未检测到当前语言模型所需的“贞贞的AI工坊-独立 LLM API Key”。请点击右上角齿轮打开“API 设置”，填写并保存，然后重新运行。');
   }
 
   if (['runninghub', 'runninghub-wallet', 'rh-tools', 'rh-toolbox'].includes(String(node.type || ''))) {

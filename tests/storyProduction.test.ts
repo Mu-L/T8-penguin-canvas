@@ -106,6 +106,8 @@ test('story provider settings preserve canonical built-ins and configured extern
     settings: {
       ...base.settings,
       llmModel: 'gpt-5',
+      llmApiSource: 'seedance-nz',
+      llmNzModel: 'qwen/qwen3.7-plus',
       llmProviderSource: 'openai-compatible',
       llmProviderId: 'openai-local',
       llmProviderModel: 'gpt-5.1-custom',
@@ -122,6 +124,8 @@ test('story provider settings preserve canonical built-ins and configured extern
     },
   });
   assert.equal(configured.settings.llmModel, 'gpt-5');
+  assert.equal(configured.settings.llmApiSource, 'seedance-nz');
+  assert.equal(configured.settings.llmNzModel, 'qwen/qwen3.7-plus');
   assert.equal(configured.settings.llmProviderId, 'openai-local');
   assert.equal(configured.settings.imageModel, 'gpt-image-2-fal');
   assert.equal(configured.settings.imageProviderModel, 'Qwen/Qwen-Image-2512');
@@ -131,9 +135,11 @@ test('story provider settings preserve canonical built-ins and configured extern
 
   const invalid = sanitizeStoryProject({
     ...base,
-    settings: { ...base.settings, llmModel: 'gpt-5.4', imageModel: 'made-up-image', videoModel: 'made-up-video', videoNzModel: 'made-up-nz' },
+    settings: { ...base.settings, llmModel: 'gpt-5.4', llmApiSource: 'made-up-source', llmNzModel: 'made-up-llm', imageModel: 'made-up-image', videoModel: 'made-up-video', videoNzModel: 'made-up-nz' },
   });
   assert.equal(invalid.settings.llmModel, 'gemini-3.5-flash');
+  assert.equal(invalid.settings.llmApiSource, 'zhenzhen');
+  assert.equal(invalid.settings.llmNzModel, 'bytedance/doubao-seed-2.0-mini');
   assert.equal(invalid.settings.imageModel, 'zhenzhen-image-g2-t2i');
   assert.equal(invalid.settings.videoModel, 'doubao-seedance-2-0-fast-260128');
   assert.equal(invalid.settings.videoNzModel, 'fast');
@@ -478,6 +484,9 @@ test('story node is wired into shared schema, Canvas and roadmap', () => {
   assert.match(storyNode, /getVideoEditJob\(existingTaskId\)/);
   assert.match(storyNode, /productionRevision !== capturedRevision/);
   assert.match(storyNode, /LLM_MODELS/);
+  assert.match(storyNode, /SEEDANCE_NZ_LLM_MODELS/);
+  assert.match(storyNode, /贞贞AI工坊内置LLM[\s\S]*贞贞的平价AI小屋/);
+  assert.match(storyNode, /generateLlm\(\{ source: builtinSource, model,/);
   assert.match(storyNode, /IMAGE_MODELS\.find\(\(item\) => item\.id === 'gpt-image-2'\)/);
   assert.match(storyNode, /LEGACY_SEEDANCE_MODEL_OPTIONS/);
   assert.match(storyNode, /SEEDANCE_NZ_MODEL_OPTIONS/);

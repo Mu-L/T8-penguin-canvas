@@ -10,7 +10,9 @@ const test = require('node:test');
 const {
   isLoopbackAddress,
   isPrivateAddress,
+  isTunFakeAddress,
   resolvePublicAddress,
+  resolveTunPublicDns,
   safeRemoteMediaDownload,
   safeRemoteMediaFetch,
   safeRemoteJsonFetch,
@@ -113,6 +115,9 @@ test('non-public address classifier only permits ordinary globally-routable unic
   assert.equal(isLoopbackAddress('127.200.1.2'), true);
   assert.equal(isLoopbackAddress('::ffff:127.0.0.1'), true);
   assert.equal(isLoopbackAddress('::ffff:8.8.8.8'), false);
+  assert.equal(isTunFakeAddress('198.18.0.1'), true);
+  assert.equal(isTunFakeAddress('198.19.255.254'), true);
+  assert.equal(isTunFakeAddress('192.168.1.1'), false);
 });
 
 test('DNS resolution fails closed when any answer is invalid or non-public', async () => {
@@ -134,6 +139,85 @@ test('DNS resolution fails closed when any answer is invalid or non-public', asy
     { address: '2001:4860:4860::8888', family: 6 },
   ]);
   assert.deepEqual(pinned, { address: '93.184.216.34', family: 4 });
+});
+
+test('TUN Fake-IP is re-resolved through independent public DNS without allowing arbitrary private addresses', async () => {
+  let publicLookups = 0;
+  const resolved = await resolvePublicAddress(
+    'cdn.example',
+    async () => [{ address: '198.18.12.34', family: 4 }],
+    false,
+    async () => {
+      publicLookups += 1;
+      return [{ address: '93.184.216.34', family: 4 }];
+    },
+  );
+  assert.deepEqual(resolved, { address: '93.184.216.34', family: 4 });
+  assert.equal(publicLookups, 1);
+
+  const mixedTunAnswer = await resolvePublicAddress(
+    'mixed-tun.example',
+    async () => [
+      { address: '198.18.12.35', family: 4 },
+      { address: '2606:4700:4700::1111', family: 6 },
+    ],
+    false,
+    async () => [{ address: '1.1.1.1', family: 4 }],
+  );
+  assert.deepEqual(mixedTunAnswer, { address: '1.1.1.1', family: 4 });
+
+  await assert.rejects(
+    resolvePublicAddress(
+      'private.example',
+      async () => [{ address: '192.168.1.20', family: 4 }],
+      false,
+      async () => {
+        publicLookups += 1;
+        return [{ address: '93.184.216.34', family: 4 }];
+      },
+    ),
+    (error) => error?.code === 'private_address',
+  );
+  assert.equal(publicLookups, 1, 'ordinary private addresses must never invoke the TUN fallback');
+
+  const recoveredAfterDnsFailure = await resolvePublicAddress(
+    'after-tun.example',
+    async () => {
+      throw Object.assign(new Error('temporary DNS failure'), { code: 'EAI_AGAIN' });
+    },
+    false,
+    async () => [{ address: '1.1.1.1', family: 4 }],
+  );
+  assert.deepEqual(recoveredAfterDnsFailure, { address: '1.1.1.1', family: 4 });
+});
+
+test('TUN public resolution falls back to encrypted DNS when UDP DNS is intercepted with Fake-IP', async () => {
+  let udpAttempts = 0;
+  let dohAttempts = 0;
+  const resolved = await resolveTunPublicDns('cdn.example', {
+    dnsServers: ['1.1.1.1'],
+    dohEndpoints: [{ address: '1.1.1.1', servername: 'cloudflare-dns.com' }],
+    resolveFromServer: async () => {
+      udpAttempts += 1;
+      return [{ address: '198.18.20.30', family: 4 }];
+    },
+    resolveFromDoh: async () => {
+      dohAttempts += 1;
+      return [{ address: '93.184.216.34', family: 4 }];
+    },
+  });
+  assert.deepEqual(resolved, [{ address: '93.184.216.34', family: 4 }]);
+  assert.equal(udpAttempts, 1);
+  assert.equal(dohAttempts, 1);
+
+  await assert.rejects(
+    resolveTunPublicDns('private.example', {
+      dnsServers: [],
+      dohEndpoints: [{ address: '8.8.8.8', servername: 'dns.google' }],
+      resolveFromDoh: async () => [{ address: '192.168.1.9', family: 4 }],
+    }),
+    (error) => error?.code === 'tun_dns_fallback_failed',
+  );
 });
 
 test('URL credentials and caller protocol restrictions are enforced before I/O', async () => {

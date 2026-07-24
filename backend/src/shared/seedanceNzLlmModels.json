@@ -1,0 +1,22 @@
+[
+  "bytedance/doubao-seed-2.0-code",
+  "bytedance/doubao-seed-2.0-lite",
+  "bytedance/doubao-seed-2.0-mini",
+  "bytedance/doubao-seed-2.0-pro",
+  "bytedance/doubao-seed-2.1-pro",
+  "bytedance/doubao-seed-2.1-turbo",
+  "bytedance/doubao-seed-evolving",
+  "deepseek/deepseek-v4-flash",
+  "deepseek/deepseek-v4-pro",
+  "glm-5",
+  "glm-5-turbo",
+  "glm-5.1",
+  "glm-5.2",
+  "glm-5v-turbo",
+  "minimax/minimax-m2.7",
+  "qwen/qwen3.6-flash",
+  "qwen/qwen3.6-max-preview",
+  "qwen/qwen3.6-plus",
+  "qwen/qwen3.7-max",
+  "qwen/qwen3.7-plus"
+]

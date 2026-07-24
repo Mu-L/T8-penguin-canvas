@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
+import {
+  resolveRunningHubDisplaySite,
+  resolvedRhSiteFromAppInfo,
+} from '../src/utils/runningHubResolvedSite.ts';
 
 const require = createRequire(import.meta.url);
 const routing = require('../backend/src/providers/runninghubSite.js');
@@ -41,11 +45,30 @@ test('RunningHub automatic site fallback is limited to credentials and missing a
   assert.equal(routing.shouldRetryRhSiteResponse({ status: 500 }, { msg: 'server busy' }), false);
 });
 
+test('RunningHub display follows the WebApp site resolved by app-info', () => {
+  const webappId = '2059288938585616386';
+
+  assert.equal(
+    resolveRunningHubDisplaySite('cn', webappId, { webappId, rhSite: 'intl' }),
+    'intl',
+  );
+  assert.equal(
+    resolveRunningHubDisplaySite('intl', webappId, { webappId, rhSite: 'cn' }),
+    'cn',
+  );
+  assert.equal(
+    resolveRunningHubDisplaySite('cn', 'new-app', { webappId: 'old-app', rhSite: 'intl' }),
+    'cn',
+  );
+  assert.equal(resolvedRhSiteFromAppInfo({ rhSite: 'intl' }, webappId), 'intl');
+});
+
 test('RunningHub settings and RH node surfaces expose independent domestic and overseas configuration', () => {
   const settingsRoute = readFileSync(new URL('../backend/src/routes/settings.js', import.meta.url), 'utf8');
   const apiSettings = readFileSync(new URL('../src/components/ApiSettings.tsx', import.meta.url), 'utf8');
   const generation = readFileSync(new URL('../src/services/generation.ts', import.meta.url), 'utf8');
   const runningHubNode = readFileSync(new URL('../src/components/nodes/RunningHubNode.tsx', import.meta.url), 'utf8');
+  const rhToolsNode = readFileSync(new URL('../src/components/nodes/RHToolsNode.tsx', import.meta.url), 'utf8');
   const rhToolsEditor = readFileSync(new URL('../src/components/nodes/RHToolEditorModal.tsx', import.meta.url), 'utf8');
   const rhToolbox = readFileSync(new URL('../src/utils/rhToolbox.ts', import.meta.url), 'utf8');
 
@@ -57,6 +80,11 @@ test('RunningHub settings and RH node surfaces expose independent domestic and o
   assert.match(generation, /site=\$\{encodeURIComponent\(site\)\}/);
   assert.match(runningHubNode, /国内站 · runninghub\.cn/);
   assert.match(runningHubNode, /海外站 · runninghub\.ai/);
+  assert.match(runningHubNode, /resolveRunningHubDisplaySite\(storedRhSite, webappId, appInfo\)/);
+  assert.match(runningHubNode, /update\(\{ rhSite: resolvedAppInfoSite \}\)/);
+  assert.match(runningHubNode, /webappId: e\.target\.value,\s+appInfo: null,/);
+  assert.match(rhToolsNode, /resolveRunningHubDisplaySite\(configuredRhSite, webappId, appInfo\)/);
+  assert.match(rhToolsNode, /displayedRhSite === 'intl' \? '海外站' : '国内站'/);
   assert.match(rhToolsEditor, /aria-label="RunningHub 站点"/);
   assert.match(rhToolbox, /rhSite\?: 'cn' \| 'intl'/);
 });

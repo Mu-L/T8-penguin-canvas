@@ -256,7 +256,25 @@ export async function runRhToolboxTool(options: RunRhToolboxToolOptions): Promis
           upstreamHttpStatus: query.upstreamHttpStatus,
           usage: query.usage,
         });
-        if (query.status === 'SUCCESS') {
+        const normalizedStatus = String(query.status || '').trim().toUpperCase();
+        if (normalizedStatus === 'MATERIALIZING') {
+          // Provider 已经完成，当前只剩结果文件转存。即使随后本地轮询超时，
+          // 也不能再向 RunningHub 发送取消，更不能重新提交付费任务。
+          remoteTaskCompleted = true;
+          lastError = query.error || 'RH 结果已经生成，正在适配 TUN/代理网络并安全下载；原任务会保留';
+          progress?.({
+            stage: 'poll',
+            message: lastError,
+            taskId,
+            pollCount,
+            requestId: query.requestId,
+            transportHttpStatus: query.transportHttpStatus,
+            upstreamHttpStatus: query.upstreamHttpStatus,
+            usage: query.usage,
+          });
+          continue;
+        }
+        if (normalizedStatus === 'SUCCESS') {
           remoteTaskCompleted = true;
           const classified = classifyRhToolboxOutputs(query.urls || []);
           progress?.({
@@ -283,7 +301,7 @@ export async function runRhToolboxTool(options: RunRhToolboxToolOptions): Promis
             usage: query.usage,
           };
         }
-        if (query.status === 'FAILED') {
+        if (normalizedStatus === 'FAILED') {
           remoteTaskCompleted = true;
           throw new Error(normalizeFailedReason(query.failReason));
         }

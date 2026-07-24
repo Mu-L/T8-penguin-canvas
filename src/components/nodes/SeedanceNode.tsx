@@ -357,7 +357,15 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
           } else if (elapsed % 3 === 0) {
             logBus.debug(`[${elapsed}/${MAX}] status=${r.status}`, src);
           }
-          if (r.status === 'succeeded' && r.videoUrl) {
+          if (String(r.status || '').toLowerCase() === 'materializing') {
+            update({ status: 'polling', progress: '100% · 正在下载' });
+            if (elapsed === 1 || elapsed % 10 === 0) {
+              logBus.warn(
+                r.error || 'Seedance 视频已经生成，正在适配 TUN/代理网络并安全下载；原任务会保留，不会重复提交',
+                src,
+              );
+            }
+          } else if (r.status === 'succeeded' && r.videoUrl) {
             pollRejectRef.current = null;
             stopPoll();
             update({

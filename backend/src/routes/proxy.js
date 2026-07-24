@@ -9,7 +9,9 @@ const crypto = require('node:crypto');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
+const { Agent: UndiciAgent } = require('undici');
 const config = require('../config');
+const seedanceNzLlmModels = require('../shared/seedanceNzLlmModels.json');
 const { getWhitePng } = require('../utils/whitePng');
 const { tryDecodeDuckPayload } = require('../utils/duckPayload');
 const { normalizeLlmMessageMedia } = require('../providers/llmMedia');
@@ -115,6 +117,82 @@ const FAL_POLL_MAX_JSON_DEPTH = 64;
 const FAL_POLL_MAX_JSON_NODES = 50_000;
 let proxySafeRemoteTestOptions = null;
 const providerResponseTimings = new WeakMap();
+let providerDispatcher = null;
+
+const PROVIDER_NETWORK_ERROR_CODES = new Set([
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ETIMEDOUT',
+  'ESOCKETTIMEDOUT',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_SOCKET',
+]);
+
+function createProviderDispatcher() {
+  return new UndiciAgent({
+    keepAliveTimeout: 1_000,
+    keepAliveMaxTimeout: 5_000,
+    connectTimeout: Math.min(PROXY_REMOTE_DEADLINE_MS, 15_000),
+  });
+}
+
+function currentProviderDispatcher() {
+  if (!providerDispatcher) providerDispatcher = createProviderDispatcher();
+  return providerDispatcher;
+}
+
+function rotateProviderDispatcher() {
+  const previous = providerDispatcher;
+  providerDispatcher = createProviderDispatcher();
+  if (previous) void previous.close().catch(() => {});
+}
+
+async function resetProviderDispatcherForTests() {
+  const previous = providerDispatcher;
+  providerDispatcher = null;
+  if (previous) await previous.close().catch(() => {});
+}
+
+function providerNetworkCause(error) {
+  let current = error;
+  let depth = 0;
+  while (current?.cause && current.cause !== current && depth < 8) {
+    current = current.cause;
+    depth += 1;
+  }
+  return current || error;
+}
+
+function isProviderNetworkError(error) {
+  const cause = providerNetworkCause(error);
+  const code = String(cause?.code || error?.code || '').trim().toUpperCase();
+  const message = String(cause?.message || error?.message || '').toLowerCase();
+  return PROVIDER_NETWORK_ERROR_CODES.has(code)
+    || /fetch failed|failed to fetch|network error|socket|connect/.test(message);
+}
+
+function providerNetworkFailure(error, label) {
+  const cause = providerNetworkCause(error);
+  const causeCode = String(cause?.code || error?.code || '').trim().toUpperCase();
+  let message;
+  if (['ENOTFOUND', 'EAI_AGAIN'].includes(causeCode)) {
+    message = `${label}：本机当前无法解析 API 平台域名。应用已刷新网络连接；请检查 TUN/VPN/系统代理或 DNS 状态后重试原节点。`;
+  } else if (/certificate|cert_|self signed|unable to verify|tls|ssl/i.test(`${causeCode} ${cause?.message || ''}`)) {
+    message = `${label}：HTTPS 证书校验失败。请检查系统时间、代理证书或安全软件的 HTTPS 扫描。`;
+  } else {
+    message = `${label}：本机到 API 平台的连接在代理/TUN/VPN 切换后失效。连接池已刷新；为避免重复生成或扣费，提交请求不会自动重发，请等待几秒后重试原节点。`;
+  }
+  return providerResponseError(
+    'provider_network_unavailable',
+    message,
+    { status: 503, causeCode: causeCode || 'NETWORK_ERROR', recoverable: true },
+  );
+}
 
 function proxySafeRemoteOptions(base) {
   if (!proxySafeRemoteTestOptions) return base;
@@ -141,40 +219,58 @@ function providerFetchDeadlineMs() {
   );
 }
 
-async function fetchProviderResponse(url, init = {}, label = 'Provider') {
+async function fetchProviderResponse(url, init = {}, label = 'Provider', options = {}) {
   const deadlineMs = providerFetchDeadlineMs();
   const deadlineAt = Date.now() + deadlineMs;
-  const controller = new AbortController();
   const upstreamSignal = init?.signal;
-  const abortFromUpstream = () => controller.abort(upstreamSignal?.reason);
-  if (upstreamSignal?.aborted) abortFromUpstream();
-  else upstreamSignal?.addEventListener?.('abort', abortFromUpstream, { once: true });
+  const method = String(init?.method || 'GET').trim().toUpperCase();
+  const safeReadRequest = (method === 'GET' || method === 'HEAD') && !init?.body;
+  const maxAttempts = safeReadRequest || options?.retryNetwork === true ? 2 : 1;
+  let lastError = null;
 
-  let timeout;
-  let timeoutError = null;
-  const timeoutPromise = new Promise((_, reject) => {
-    timeout = setTimeout(() => {
-      timeoutError = providerResponseTimeout(label, 'deadline');
-      controller.abort(timeoutError);
-      reject(timeoutError);
-    }, deadlineMs);
-  });
-  try {
-    const response = await Promise.race([
-      fetch(url, { ...init, signal: controller.signal }),
-      timeoutPromise,
-    ]);
-    if (response && typeof response === 'object') {
-      providerResponseTimings.set(response, { deadlineAt, label });
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const remaining = deadlineAt - Date.now();
+    if (remaining <= 0) throw providerResponseTimeout(label, 'deadline');
+    const controller = new AbortController();
+    const abortFromUpstream = () => controller.abort(upstreamSignal?.reason);
+    if (upstreamSignal?.aborted) abortFromUpstream();
+    else upstreamSignal?.addEventListener?.('abort', abortFromUpstream, { once: true });
+
+    let timeout;
+    let timeoutError = null;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeout = setTimeout(() => {
+        timeoutError = providerResponseTimeout(label, 'deadline');
+        controller.abort(timeoutError);
+        reject(timeoutError);
+      }, remaining);
+    });
+    try {
+      const response = await Promise.race([
+        fetch(url, {
+          ...init,
+          dispatcher: init?.dispatcher || currentProviderDispatcher(),
+          signal: controller.signal,
+        }),
+        timeoutPromise,
+      ]);
+      if (response && typeof response === 'object') {
+        providerResponseTimings.set(response, { deadlineAt, label });
+      }
+      return response;
+    } catch (error) {
+      if (timeoutError) throw timeoutError;
+      if (upstreamSignal?.aborted) throw upstreamSignal.reason || error;
+      if (!isProviderNetworkError(error)) throw error;
+      lastError = error;
+      rotateProviderDispatcher();
+      if (attempt + 1 >= maxAttempts) throw providerNetworkFailure(error, label);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      upstreamSignal?.removeEventListener?.('abort', abortFromUpstream);
     }
-    return response;
-  } catch (error) {
-    if (timeoutError) throw timeoutError;
-    throw error;
-  } finally {
-    if (timeout) clearTimeout(timeout);
-    upstreamSignal?.removeEventListener?.('abort', abortFromUpstream);
   }
+  throw providerNetworkFailure(lastError, label);
 }
 
 function proxyErrorStatus(error, fallback = 500) {
@@ -1317,87 +1413,121 @@ async function saveRemoteImage(url, _providerFetchImpl, materializationKey = '')
 
 const IMAGE_OUTPUT_RETRY_DELAYS_MS = Object.freeze([0, 250, 1_000]);
 
-function imageOutputDownloadFailure(error) {
+const REMOTE_OUTPUT_KIND_LABELS = Object.freeze({
+  image: { noun: '图片', object: '图片', code: 'image' },
+  video: { noun: '视频', object: '视频', code: 'video' },
+  audio: { noun: '音频', object: '音频', code: 'audio' },
+  model3d: { noun: '3D 素材', object: '3D 素材', code: 'model3d' },
+  media: { noun: '生成结果', object: '结果文件', code: 'media' },
+});
+
+function remoteOutputDownloadFailure(error, kind = 'media') {
+  const label = REMOTE_OUTPUT_KIND_LABELS[kind] || REMOTE_OUTPUT_KIND_LABELS.media;
   const code = String(error?.code || '').trim();
   const message = String(error?.message || '').trim();
   const status = Number(error?.status || 0);
+  if (code.startsWith('tun_dns_fallback_')) {
+    return {
+      code: `${label.code}_download_tun_dns_recovering`,
+      message: `${label.noun}已经生成；检测到 TUN Fake-IP，应用正在通过独立公共 DNS 获取真实结果地址并自动重试，不会重新提交生成任务。`,
+      recoverable: true,
+      retryAfterMs: 5_000,
+    };
+  }
   if (code === 'private_address') {
     return {
-      code: 'image_download_proxy_dns_blocked',
-      message: '图片已经生成，但本机 DNS 或代理把结果地址解析成了内网/Fake-IP，安全下载已阻止。请关闭 Clash/VPN/系统代理后重试，或把代理 DNS 改为返回真实公网 IP。',
+      code: `${label.code}_download_private_address_blocked`,
+      message: `${label.noun}已经生成，但结果地址实际指向本机或内网，已拒绝访问。TUN Fake-IP 会自动回源解析；如果仍出现此提示，请联系 API 平台检查结果地址。`,
     };
   }
   if (['ENOTFOUND', 'EAI_AGAIN'].includes(code) || /getaddrinfo|dns/i.test(message)) {
     return {
-      code: 'image_download_dns_failed',
-      message: '图片已经生成，但本机无法解析结果图片域名。请检查 DNS、代理或网络连接后重试。',
+      code: `${label.code}_download_dns_failed`,
+      message: `${label.noun}已经生成，但本机暂时无法解析${label.object}域名。应用会保留原任务并自动重试，请检查 DNS、代理或网络状态。`,
+      recoverable: true,
+      retryAfterMs: 5_000,
     };
   }
   if (code === 'fetch_timeout' || ['ETIMEDOUT', 'ESOCKETTIMEDOUT'].includes(code)) {
     return {
-      code: 'image_download_timeout',
-      message: '图片已经生成，但从结果服务器下载图片超时。请检查代理或网络后重试。',
+      code: `${label.code}_download_timeout`,
+      message: `${label.noun}已经生成，但从结果服务器下载${label.object}超时。应用会保留原任务并自动重试。`,
+      recoverable: true,
+      retryAfterMs: 5_000,
     };
   }
   if (code === 'remote_http_error') {
     return {
-      code: 'image_download_http_error',
-      message: `图片已经生成，但结果服务器下载失败${status ? `（HTTP ${status}）` : ''}。可能是临时链接过期、代理拦截或结果服务器异常，请重试。`,
+      code: `${label.code}_download_http_error`,
+      message: `${label.noun}已经生成，但结果服务器下载失败${status ? `（HTTP ${status}）` : ''}。可能是临时链接、代理链路或结果服务器短暂异常。`,
+      recoverable: status === 408 || status === 425 || status === 429 || status >= 500,
+      retryAfterMs: 5_000,
     };
   }
   if (['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'remote_response_aborted'].includes(code)) {
     return {
-      code: 'image_download_network_failed',
-      message: '图片已经生成，但本机与结果服务器的连接被拒绝或中断。请检查防火墙、代理、VPN 和网络后重试。',
+      code: `${label.code}_download_network_failed`,
+      message: `${label.noun}已经生成，但本机与结果服务器的连接被拒绝或中断。应用会刷新连接并保留原任务自动重试。`,
+      recoverable: true,
+      retryAfterMs: 5_000,
     };
   }
   if (/certificate|cert_|self signed|unable to verify|tls|ssl/i.test(`${code} ${message}`)) {
     return {
-      code: 'image_download_tls_failed',
-      message: '图片已经生成，但结果服务器的 HTTPS 证书校验失败。请检查系统时间、代理证书或杀毒软件的 HTTPS 扫描。',
+      code: `${label.code}_download_tls_failed`,
+      message: `${label.noun}已经生成，但结果服务器的 HTTPS 证书校验失败。请检查系统时间、代理证书或安全软件的 HTTPS 扫描。`,
     };
   }
   if (code === 'item_too_large' || /超过.+bytes|大小限制/i.test(message)) {
     return {
-      code: 'image_download_too_large',
-      message: '图片已经生成，但结果图片超过本地安全下载大小限制。',
+      code: `${label.code}_download_too_large`,
+      message: `${label.noun}已经生成，但${label.object}超过本地安全下载大小限制。`,
     };
   }
   if (/Content-Type|文件魔数|媒体类型|归档容器|图片格式/i.test(message)) {
     return {
-      code: 'image_download_invalid_content',
-      message: '图片已经生成，但下载到的内容不是有效图片。常见原因是代理、登录页或安全软件替换了图片响应。',
+      code: `${label.code}_download_invalid_content`,
+      message: `${label.noun}已经生成，但下载到的内容不是有效${label.object}。常见原因是代理、登录页或安全软件替换了响应。`,
     };
   }
   if (code === 'ENOSPC') {
     return {
-      code: 'image_output_disk_full',
-      message: '图片已经生成，但本机磁盘空间不足，无法保存到输出目录。请释放磁盘空间后重试。',
+      code: `${label.code}_output_disk_full`,
+      message: `${label.noun}已经生成，但本机磁盘空间不足，无法保存到输出目录。请释放磁盘空间后重试。`,
     };
   }
   if (['EACCES', 'EPERM', 'EROFS', 'download_write_failed'].includes(code)) {
     return {
-      code: 'image_output_not_writable',
-      message: '图片已经生成，但本机输出目录无法写入。请检查文件夹权限、杀毒软件拦截或受控文件夹访问设置。',
+      code: `${label.code}_output_not_writable`,
+      message: `${label.noun}已经生成，但本机输出目录无法写入。请检查文件夹权限、安全软件拦截或受控文件夹访问设置。`,
     };
   }
   const safeDetail = safeDiagnosticText(message, 140);
   return {
-    code: 'image_download_failed',
+    code: `${label.code}_download_failed`,
     message: safeDetail
-      ? `图片已经生成，但本机下载或保存结果失败：${safeDetail}`
-      : '图片已经生成，但本机下载或保存结果失败。请检查网络、代理、磁盘和输出目录权限。',
+      ? `${label.noun}已经生成，但本机下载或保存结果失败：${safeDetail}`
+      : `${label.noun}已经生成，但本机下载或保存结果失败。请检查网络、代理、磁盘和输出目录权限。`,
   };
 }
 
-function retryableImageOutputError(error) {
+function imageOutputDownloadFailure(error) {
+  return remoteOutputDownloadFailure(error, 'image');
+}
+
+function retryableRemoteOutputError(error) {
   const code = String(error?.code || '').trim();
   const status = Number(error?.status || 0);
+  if (code.startsWith('tun_dns_fallback_')) return true;
   if (code === 'remote_http_error') return status === 408 || status === 425 || status === 429 || status >= 500;
   return new Set([
     'fetch_timeout', 'remote_response_aborted', 'ECONNREFUSED', 'ECONNRESET',
     'EHOSTUNREACH', 'ENETUNREACH', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT', 'ESOCKETTIMEDOUT',
   ]).has(code);
+}
+
+function retryableImageOutputError(error) {
+  return retryableRemoteOutputError(error);
 }
 
 async function saveRemoteImageDetailed(url, _providerFetchImpl, materializationKey = '') {
@@ -1439,19 +1569,34 @@ async function boundedProviderHttpError(response, label) {
 
 // ========== 工具:保存上游返回的音频到本地 ==========
 async function saveRemoteAudio(url, materializationKey = '') {
-  try {
-    const remote = await fetchProxyRemoteMedia(url, {
-      allowedKinds: ['audio'],
-      maxBytes: PROXY_AUDIO_REFERENCE_MAX_BYTES,
-      accept: 'audio/mpeg,audio/mp4,audio/wav,audio/ogg,audio/flac;q=0.9',
-    });
-    const buf = remote.buffer;
-    const ext = verifiedProxyMediaExtension(remote);
-    return storeMaterializedOutputBuffer(buf, 'audio', ext, materializationKey);
-  } catch (e) {
-    proxyRouteError('转存音频失败', e);
-    return null;
+  const result = await saveRemoteAudioDetailed(url, materializationKey);
+  return result.url || null;
+}
+
+async function saveRemoteAudioDetailed(url, materializationKey = '') {
+  let lastError = null;
+  for (let attempt = 0; attempt < IMAGE_OUTPUT_RETRY_DELAYS_MS.length; attempt += 1) {
+    const delay = IMAGE_OUTPUT_RETRY_DELAYS_MS[attempt];
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+    try {
+      const remote = await fetchProxyRemoteMedia(url, {
+        allowedKinds: ['audio'],
+        maxBytes: PROXY_AUDIO_REFERENCE_MAX_BYTES,
+        accept: 'audio/mpeg,audio/mp4,audio/wav,audio/ogg,audio/flac;q=0.9',
+      });
+      const buf = remote.buffer;
+      const ext = verifiedProxyMediaExtension(remote);
+      return {
+        url: storeMaterializedOutputBuffer(buf, 'audio', ext, materializationKey),
+        error: null,
+      };
+    } catch (error) {
+      lastError = error;
+      if (!retryableRemoteOutputError(error)) break;
+    }
   }
+  proxyRouteError('转存音频失败', lastError);
+  return { url: '', error: remoteOutputDownloadFailure(lastError, 'audio') };
 }
 
 // 处理 b64_json 格式
@@ -1997,7 +2142,120 @@ function completedImageOutputError(materialized) {
   const reason = first || (materialized?.itemCount > 0
     ? { code: 'image_output_unusable', message: '图片已经生成，但返回的图片内容无法使用。' }
     : { code: 'image_output_missing', message: '上游任务已经完成，但响应中没有可识别的图片地址。请保留任务 ID 并联系 API 平台检查该任务。' });
-  return Object.assign(new Error(reason.message), { code: reason.code, status: 502, imageOutputFailure: true });
+  const recoverable = reason.recoverable === true;
+  return Object.assign(new Error(reason.message), {
+    code: reason.code,
+    status: recoverable ? 202 : 502,
+    imageOutputFailure: true,
+    recoverable,
+    retryAfterMs: recoverable ? Math.max(2_000, Number(reason.retryAfterMs) || 5_000) : 0,
+  });
+}
+
+function sendCompletedImageOutputFailure(res, failure, data = {}) {
+  if (failure?.recoverable) {
+    return res.status(202).json({
+      success: true,
+      code: failure.code,
+      message: failure.message,
+      data: {
+        ...data,
+        status: 'materializing',
+        progress: '100%',
+        code: failure.code,
+        error: failure.message,
+        recoverable: true,
+        retryAfterMs: failure.retryAfterMs,
+      },
+    });
+  }
+  return res.status(failure?.status || 502).json({
+    success: false,
+    code: failure?.code || 'image_output_unusable',
+    error: failure?.message || '图片结果无法保存。',
+    ...(Object.keys(data).length ? { data } : {}),
+  });
+}
+
+function completedRemoteOutputError(materialized, kind = 'media') {
+  const label = REMOTE_OUTPUT_KIND_LABELS[kind] || REMOTE_OUTPUT_KIND_LABELS.media;
+  const first = materialized?.error || materialized?.failures?.[0];
+  const reason = first || (Number(materialized?.itemCount || 0) > 0
+    ? {
+      code: `${label.code}_output_unusable`,
+      message: `${label.noun}已经生成，但返回的${label.object}内容无法使用。`,
+    }
+    : {
+      code: `${label.code}_output_missing`,
+      message: `上游任务已经完成，但响应中没有可识别的${label.object}地址。请保留任务 ID 并联系 API 平台检查该任务。`,
+    });
+  const recoverable = reason.recoverable === true;
+  return Object.assign(new Error(reason.message), {
+    code: reason.code,
+    status: recoverable ? 202 : 502,
+    remoteOutputFailure: true,
+    recoverable,
+    retryAfterMs: recoverable ? Math.max(2_000, Number(reason.retryAfterMs) || 5_000) : 0,
+  });
+}
+
+function sendCompletedRemoteOutputFailure(res, failure, data = {}, options = {}) {
+  const statusValue = options.status || 'materializing';
+  const defaultCode = options.defaultCode || 'output_unusable';
+  const defaultMessage = options.defaultMessage || '生成结果无法保存。';
+  if (failure?.recoverable) {
+    return res.status(202).json({
+      success: true,
+      code: failure.code,
+      message: failure.message,
+      data: {
+        ...data,
+        status: statusValue,
+        progress: '100%',
+        code: failure.code,
+        error: failure.message,
+        recoverable: true,
+        retryAfterMs: failure.retryAfterMs,
+      },
+    });
+  }
+  return res.status(failure?.status || 502).json({
+    success: false,
+    code: failure?.code || defaultCode,
+    error: failure?.message || defaultMessage,
+    ...(Object.keys(data).length ? { data } : {}),
+  });
+}
+
+async function materializeRemoteTaskOutput({
+  status,
+  completedStatuses = ['succeeded', 'success', 'completed'],
+  remoteUrl,
+  kind,
+  materializationKey,
+  providerFetchImpl,
+}) {
+  const normalized = String(status || '').trim().toLowerCase();
+  if (!completedStatuses.includes(normalized)) return { url: '', failure: null };
+  if (!remoteUrl) {
+    return {
+      url: '',
+      failure: completedRemoteOutputError({ itemCount: 0 }, kind),
+    };
+  }
+  const saved = kind === 'video'
+    ? await saveRemoteVideoDetailed(remoteUrl, providerFetchImpl, materializationKey)
+    : kind === 'audio'
+      ? await saveRemoteAudioDetailed(remoteUrl, materializationKey)
+      : await saveRemoteImageDetailed(remoteUrl, providerFetchImpl, materializationKey);
+  if (saved.url) return { url: saved.url, failure: null };
+  return {
+    url: '',
+    failure: completedRemoteOutputError({
+      itemCount: 1,
+      failures: saved.error ? [saved.error] : [],
+    }, kind),
+  };
 }
 
 // LLM 多模态 image_url 预处理:
@@ -2311,12 +2569,7 @@ router.get('/image/seedance-nz/status/:tid', async (req, res) => {
     if (result.status === 'succeeded') {
       if (!result.imageUrl) {
         const failure = completedImageOutputError({ itemCount: 0, failures: [] });
-        return res.status(failure.status).json({
-          success: false,
-          code: failure.code,
-          error: failure.message,
-          ...seedanceNzTrace(result),
-        });
+        return sendCompletedImageOutputFailure(res, failure, seedanceNzTrace(result));
       }
       const saved = await saveRemoteImageDetailed(
         result.imageUrl,
@@ -2328,12 +2581,7 @@ router.get('/image/seedance-nz/status/:tid', async (req, res) => {
           itemCount: 1,
           failures: saved.error ? [saved.error] : [],
         });
-        return res.status(failure.status).json({
-          success: false,
-          code: failure.code,
-          error: failure.message,
-          ...seedanceNzTrace(result),
-        });
+        return sendCompletedImageOutputFailure(res, failure, seedanceNzTrace(result));
       }
       return res.json({
         success: true,
@@ -2415,24 +2663,33 @@ router.get('/video/happyhorse/status/:tid', async (req, res) => {
   if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
   try {
     const result = await seedanceNz.queryTask(req.params.tid, apiKey);
-    let videoUrl = '';
-    if (result.status === 'succeeded' && result.videoUrl) {
-      videoUrl = await saveRemoteVideo(result.videoUrl, seedanceNz.fetchRemote, `happyhorse-nz:${req.params.tid}`);
-      if (!videoUrl) return res.status(502).json({ success: false, error: 'Happy Horse 输出素材未通过安全下载校验' });
+    const materialized = await materializeRemoteTaskOutput({
+      status: result.status,
+      remoteUrl: result.videoUrl,
+      kind: 'video',
+      materializationKey: `happyhorse-nz:${req.params.tid}`,
+      providerFetchImpl: seedanceNz.fetchRemote,
+    });
+    const responseData = {
+      status: result.status,
+      progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
+      videoUrl: materialized.url,
+      failReason: result.status === 'failed'
+        ? safeDiagnosticText(result.failReason || 'Happy Horse 任务失败', 240, [apiKey])
+        : '',
+      model: remembered?.model || '',
+      taskType: remembered?.taskType || '',
+      ...seedanceNzTrace(result),
+    };
+    if (materialized.failure) {
+      return sendCompletedRemoteOutputFailure(res, materialized.failure, responseData, {
+        defaultCode: 'happyhorse_output_unusable',
+        defaultMessage: 'Happy Horse 视频结果无法保存。',
+      });
     }
     return res.json({
       success: true,
-      data: {
-        status: result.status,
-        progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
-        videoUrl,
-        failReason: result.status === 'failed'
-          ? safeDiagnosticText(result.failReason || 'Happy Horse 任务失败', 240, [apiKey])
-          : '',
-        model: remembered?.model || '',
-        taskType: remembered?.taskType || '',
-        ...seedanceNzTrace(result),
-      },
+      data: responseData,
     });
   } catch (error) {
     const status = Number(error?.status || 500);
@@ -2485,24 +2742,33 @@ router.get('/video/hailuo/status/:tid', async (req, res) => {
   if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
   try {
     const result = await seedanceNz.queryTask(req.params.tid, apiKey);
-    let videoUrl = '';
-    if (result.status === 'succeeded' && result.videoUrl) {
-      videoUrl = await saveRemoteVideo(result.videoUrl, seedanceNz.fetchRemote, `hailuo-nz:${req.params.tid}`);
-      if (!videoUrl) return res.status(502).json({ success: false, error: 'Hailuo 2.3 输出素材未通过安全下载校验' });
+    const materialized = await materializeRemoteTaskOutput({
+      status: result.status,
+      remoteUrl: result.videoUrl,
+      kind: 'video',
+      materializationKey: `hailuo-nz:${req.params.tid}`,
+      providerFetchImpl: seedanceNz.fetchRemote,
+    });
+    const responseData = {
+      status: result.status,
+      progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
+      videoUrl: materialized.url,
+      failReason: result.status === 'failed'
+        ? safeDiagnosticText(result.failReason || 'Hailuo 2.3 任务失败', 240, [apiKey])
+        : '',
+      model: remembered?.model || '',
+      taskType: remembered?.taskType || '',
+      ...seedanceNzTrace(result),
+    };
+    if (materialized.failure) {
+      return sendCompletedRemoteOutputFailure(res, materialized.failure, responseData, {
+        defaultCode: 'hailuo_output_unusable',
+        defaultMessage: 'Hailuo 2.3 视频结果无法保存。',
+      });
     }
     return res.json({
       success: true,
-      data: {
-        status: result.status,
-        progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
-        videoUrl,
-        failReason: result.status === 'failed'
-          ? safeDiagnosticText(result.failReason || 'Hailuo 2.3 任务失败', 240, [apiKey])
-          : '',
-        model: remembered?.model || '',
-        taskType: remembered?.taskType || '',
-        ...seedanceNzTrace(result),
-      },
+      data: responseData,
     });
   } catch (error) {
     const status = Number(error?.status || 500);
@@ -2555,24 +2821,33 @@ router.get('/video/kling/status/:tid', async (req, res) => {
   if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
   try {
     const result = await seedanceNz.queryTask(req.params.tid, apiKey);
-    let videoUrl = '';
-    if (result.status === 'succeeded' && result.videoUrl) {
-      videoUrl = await saveRemoteVideo(result.videoUrl, seedanceNz.fetchRemote, `kling-nz:${req.params.tid}`);
-      if (!videoUrl) return res.status(502).json({ success: false, error: 'Kling 输出素材未通过安全下载校验' });
+    const materialized = await materializeRemoteTaskOutput({
+      status: result.status,
+      remoteUrl: result.videoUrl,
+      kind: 'video',
+      materializationKey: `kling-nz:${req.params.tid}`,
+      providerFetchImpl: seedanceNz.fetchRemote,
+    });
+    const responseData = {
+      status: result.status,
+      progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
+      videoUrl: materialized.url,
+      failReason: result.status === 'failed'
+        ? safeDiagnosticText(result.failReason || 'Kling 任务失败', 240, [apiKey])
+        : '',
+      model: remembered?.model || '',
+      taskType: remembered?.taskType || '',
+      ...seedanceNzTrace(result),
+    };
+    if (materialized.failure) {
+      return sendCompletedRemoteOutputFailure(res, materialized.failure, responseData, {
+        defaultCode: 'kling_output_unusable',
+        defaultMessage: 'Kling 视频结果无法保存。',
+      });
     }
     return res.json({
       success: true,
-      data: {
-        status: result.status,
-        progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
-        videoUrl,
-        failReason: result.status === 'failed'
-          ? safeDiagnosticText(result.failReason || 'Kling 任务失败', 240, [apiKey])
-          : '',
-        model: remembered?.model || '',
-        taskType: remembered?.taskType || '',
-        ...seedanceNzTrace(result),
-      },
+      data: responseData,
     });
   } catch (error) {
     const status = Number(error?.status || 500);
@@ -2625,24 +2900,33 @@ router.get('/video/upscaler/status/:tid', async (req, res) => {
   if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
   try {
     const result = await seedanceNz.queryTask(req.params.tid, apiKey);
-    let videoUrl = '';
-    if (result.status === 'succeeded' && result.videoUrl) {
-      videoUrl = await saveRemoteVideo(result.videoUrl, seedanceNz.fetchRemote, `upscaler-nz:${req.params.tid}`);
-      if (!videoUrl) return res.status(502).json({ success: false, error: 'Zhenzhen Upscaler 输出素材未通过安全下载校验' });
+    const materialized = await materializeRemoteTaskOutput({
+      status: result.status,
+      remoteUrl: result.videoUrl,
+      kind: 'video',
+      materializationKey: `upscaler-nz:${req.params.tid}`,
+      providerFetchImpl: seedanceNz.fetchRemote,
+    });
+    const responseData = {
+      status: result.status,
+      progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
+      videoUrl: materialized.url,
+      failReason: result.status === 'failed'
+        ? safeDiagnosticText(result.failReason || 'Zhenzhen Upscaler 任务失败', 240, [apiKey])
+        : '',
+      model: remembered?.model || '',
+      taskType: remembered?.taskType || '',
+      ...seedanceNzTrace(result),
+    };
+    if (materialized.failure) {
+      return sendCompletedRemoteOutputFailure(res, materialized.failure, responseData, {
+        defaultCode: 'upscaler_output_unusable',
+        defaultMessage: 'Zhenzhen Upscaler 视频结果无法保存。',
+      });
     }
     return res.json({
       success: true,
-      data: {
-        status: result.status,
-        progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
-        videoUrl,
-        failReason: result.status === 'failed'
-          ? safeDiagnosticText(result.failReason || 'Zhenzhen Upscaler 任务失败', 240, [apiKey])
-          : '',
-        model: remembered?.model || '',
-        taskType: remembered?.taskType || '',
-        ...seedanceNzTrace(result),
-      },
+      data: responseData,
     });
   } catch (error) {
     const status = Number(error?.status || 500);
@@ -2695,24 +2979,33 @@ router.get('/video/vidu/status/:tid', async (req, res) => {
   if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
   try {
     const result = await seedanceNz.queryTask(req.params.tid, apiKey);
-    let videoUrl = '';
-    if (result.status === 'succeeded' && result.videoUrl) {
-      videoUrl = await saveRemoteVideo(result.videoUrl, seedanceNz.fetchRemote, `vidu-nz:${req.params.tid}`);
-      if (!videoUrl) return res.status(502).json({ success: false, error: 'Vidu Q3 输出素材未通过安全下载校验' });
+    const materialized = await materializeRemoteTaskOutput({
+      status: result.status,
+      remoteUrl: result.videoUrl,
+      kind: 'video',
+      materializationKey: `vidu-nz:${req.params.tid}`,
+      providerFetchImpl: seedanceNz.fetchRemote,
+    });
+    const responseData = {
+      status: result.status,
+      progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
+      videoUrl: materialized.url,
+      failReason: result.status === 'failed'
+        ? safeDiagnosticText(result.failReason || 'Vidu Q3 任务失败', 240, [apiKey])
+        : '',
+      model: remembered?.model || '',
+      taskType: remembered?.taskType || '',
+      ...seedanceNzTrace(result),
+    };
+    if (materialized.failure) {
+      return sendCompletedRemoteOutputFailure(res, materialized.failure, responseData, {
+        defaultCode: 'vidu_output_unusable',
+        defaultMessage: 'Vidu Q3 视频结果无法保存。',
+      });
     }
     return res.json({
       success: true,
-      data: {
-        status: result.status,
-        progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
-        videoUrl,
-        failReason: result.status === 'failed'
-          ? safeDiagnosticText(result.failReason || 'Vidu Q3 任务失败', 240, [apiKey])
-          : '',
-        model: remembered?.model || '',
-        taskType: remembered?.taskType || '',
-        ...seedanceNzTrace(result),
-      },
+      data: responseData,
     });
   } catch (error) {
     const status = Number(error?.status || 500);
@@ -2765,24 +3058,33 @@ router.get('/video/wan/status/:tid', async (req, res) => {
   if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
   try {
     const result = await seedanceNz.queryTask(req.params.tid, apiKey);
-    let videoUrl = '';
-    if (result.status === 'succeeded' && result.videoUrl) {
-      videoUrl = await saveRemoteVideo(result.videoUrl, seedanceNz.fetchRemote, `wan-nz:${req.params.tid}`);
-      if (!videoUrl) return res.status(502).json({ success: false, error: 'Wan 输出素材未通过安全下载校验' });
+    const materialized = await materializeRemoteTaskOutput({
+      status: result.status,
+      remoteUrl: result.videoUrl,
+      kind: 'video',
+      materializationKey: `wan-nz:${req.params.tid}`,
+      providerFetchImpl: seedanceNz.fetchRemote,
+    });
+    const responseData = {
+      status: result.status,
+      progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
+      videoUrl: materialized.url,
+      failReason: result.status === 'failed'
+        ? safeDiagnosticText(result.failReason || 'Wan 任务失败', 240, [apiKey])
+        : '',
+      model: remembered?.model || '',
+      taskType: remembered?.taskType || '',
+      ...seedanceNzTrace(result),
+    };
+    if (materialized.failure) {
+      return sendCompletedRemoteOutputFailure(res, materialized.failure, responseData, {
+        defaultCode: 'wan_output_unusable',
+        defaultMessage: 'Wan 视频结果无法保存。',
+      });
     }
     return res.json({
       success: true,
-      data: {
-        status: result.status,
-        progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
-        videoUrl,
-        failReason: result.status === 'failed'
-          ? safeDiagnosticText(result.failReason || 'Wan 任务失败', 240, [apiKey])
-          : '',
-        model: remembered?.model || '',
-        taskType: remembered?.taskType || '',
-        ...seedanceNzTrace(result),
-      },
+      data: responseData,
     });
   } catch (error) {
     const status = Number(error?.status || 500);
@@ -2826,23 +3128,31 @@ router.get('/audio/seed-audio/status/:tid', async (req, res) => {
   if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
   try {
     const result = await seedanceNz.queryAudioTask(req.params.tid, apiKey);
-    let audioUrl = '';
-    if (result.status === 'succeeded' && result.audioUrl) {
-      audioUrl = await saveRemoteAudio(result.audioUrl, `seed-audio-nz:${req.params.tid}:0`);
-      if (!audioUrl) return res.status(502).json({ success: false, error: 'Seed Audio 输出素材未通过安全下载校验' });
+    const materialized = await materializeRemoteTaskOutput({
+      status: result.status,
+      remoteUrl: result.audioUrl,
+      kind: 'audio',
+      materializationKey: `seed-audio-nz:${req.params.tid}:0`,
+    });
+    const responseData = {
+      status: result.status,
+      progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
+      audioUrl: materialized.url,
+      failReason: result.status === 'failed'
+        ? safeDiagnosticText(result.failReason || 'Seed Audio 任务失败', 240, [apiKey])
+        : '',
+      model: remembered?.model || '',
+      ...seedanceNzTrace(result),
+    };
+    if (materialized.failure) {
+      return sendCompletedRemoteOutputFailure(res, materialized.failure, responseData, {
+        defaultCode: 'seed_audio_output_unusable',
+        defaultMessage: 'Seed Audio 结果无法保存。',
+      });
     }
     return res.json({
       success: true,
-      data: {
-        status: result.status,
-        progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
-        audioUrl,
-        failReason: result.status === 'failed'
-          ? safeDiagnosticText(result.failReason || 'Seed Audio 任务失败', 240, [apiKey])
-          : '',
-        model: remembered?.model || '',
-        ...seedanceNzTrace(result),
-      },
+      data: responseData,
     });
   } catch (error) {
     const status = Number(error?.status || 500);
@@ -3047,12 +3357,7 @@ router.get('/image/status/:tid', async (req, res) => {
     }
     if (SUCCESS.includes(status)) {
       const failure = completedImageOutputError(materialized);
-      return res.status(failure.status).json({
-        success: false,
-        code: failure.code,
-        error: failure.message,
-        data: { status: 'materialization_failed', progress: '100%', code: failure.code },
-      });
+      return sendCompletedImageOutputFailure(res, failure);
     }
     if (FAILURE.includes(status)) {
       return res.json({
@@ -3093,7 +3398,17 @@ async function pollImageTask(taskId, apiKey, maxRetries = 1800, interval = 2000)
         return materialized.urls[0];
       }
       if (['success', 'completed', 'complete', 'done', 'finished'].includes(st)) {
-        throw completedImageOutputError(materialized);
+        const failure = completedImageOutputError(materialized);
+        if (failure.recoverable) {
+          if (i === 0 || (i + 1) % 15 === 0) {
+            console.warn(
+              '[poll] 图片已生成，等待本机网络恢复后转存:',
+              safeDiagnosticText(failure.message, 200, [apiKey]),
+            );
+          }
+          continue;
+        }
+        throw failure;
       }
       if (['failure', 'failed', 'error', 'cancelled', 'canceled'].includes(st) || imageApiFailed(data)) {
         console.error('[poll] 任务失败:', opaqueDiagnosticSummary('reason', imageError(data) || st));
@@ -3371,10 +3686,10 @@ router.post('/image/fal/submit', async (req, res) => {
       const materialized = await saveImageItemsFromResultDetailed(data);
       if (!materialized.urls.length) {
         const failure = completedImageOutputError(materialized);
-        return res.status(failure.status).json({
+        return res.status(502).json({
           success: false,
           code: failure.code,
-          error: failure.message,
+          error: `${failure.message} 此接口未返回可继续查询的任务 ID，请网络恢复后重新生成。`,
         });
       }
       return res.json({ success: true, data: { sync: true, urls: materialized.urls, endpoint } });
@@ -3449,22 +3764,14 @@ router.post('/image/fal/query', async (req, res) => {
       });
       if (!materialized.urls.length) {
         const failure = completedImageOutputError(materialized);
-        return res.status(failure.status).json({
-          success: false,
-          code: failure.code,
-          error: failure.message,
-        });
+        return sendCompletedImageOutputFailure(res, failure);
       }
       return res.json({ success: true, data: { status: 'completed', urls: materialized.urls } });
     }
     const st = String(data.status || '').toUpperCase();
     if (st === 'COMPLETED' || st === 'SUCCESS') {
       const failure = completedImageOutputError({ itemCount: 0, failures: [] });
-      return res.status(failure.status).json({
-        success: false,
-        code: failure.code,
-        error: failure.message,
-      });
+      return sendCompletedImageOutputFailure(res, failure);
     }
     if (st === 'FAILED' || st === 'CANCELLED') {
       return res.json({
@@ -3626,11 +3933,7 @@ router.get('/mj/task/:id', async (req, res) => {
       }
       if (!imageUrls.length) {
         const failure = completedImageOutputError({ itemCount: references.length, failures });
-        return res.status(failure.status).json({
-          success: false,
-          code: failure.code,
-          error: failure.message,
-        });
+        return sendCompletedImageOutputFailure(res, failure);
       }
     }
     return res.json({
@@ -3689,6 +3992,31 @@ router.post('/mj/upload', async (req, res) => {
 });
 
 // ========== POST /api/proxy/llm — LLM Chat(独立 Key) ==========
+const SEEDANCE_NZ_LLM_MODEL_SET = new Set(seedanceNzLlmModels);
+
+function resolveBuiltInLlmProvider(settings, requestedSource, model) {
+  const source = requestedSource === 'seedance-nz' ? 'seedance-nz' : 'zhenzhen';
+  if (source === 'seedance-nz') {
+    const normalizedModel = String(model || '').trim();
+    return {
+      source,
+      apiKey: String(settings?.zhenzhenSd2ApiKey || ''),
+      baseUrl: config.ZHENZHEN_SD2_BASE_URL,
+      label: '贞贞的平价AI小屋',
+      modelAllowed: SEEDANCE_NZ_LLM_MODEL_SET.has(normalizedModel),
+      missingKeyError: '未配置贞贞的平价AI工坊（国内） API Key',
+    };
+  }
+  return {
+    source,
+    apiKey: String(settings?.llmApiKey || ''),
+    baseUrl: config.ZHENZHEN_BASE_URL,
+    label: '贞贞的AI工坊-独立LLM Key',
+    modelAllowed: true,
+    missingKeyError: '未配置 LLM 独立 API Key',
+  };
+}
+
 function hasLlmVideoParts(messages) {
   if (!Array.isArray(messages)) return false;
   return messages.some((msg) => Array.isArray(msg?.content) && msg.content.some((part) => (
@@ -3852,12 +4180,19 @@ async function pipeSanitizedProviderSse(req, res, response, label, exactSecrets 
 //   - 完全对齐 gpt-image-2-web _doSendChat (index.html L8128~L8305)
 router.post('/llm', async (req, res) => {
   const settings = loadRawSettings();
-  if (!settings?.llmApiKey) {
-    return res.status(400).json({ success: false, error: '未配置 LLM 独立 API Key' });
-  }
-  const { model, messages, temperature, max_tokens, stream } = req.body || {};
+  const { model, messages, temperature, max_tokens, stream, source } = req.body || {};
   if (!model || !messages) {
     return res.status(400).json({ success: false, error: 'model 和 messages 必填' });
+  }
+  const provider = resolveBuiltInLlmProvider(settings, source, model);
+  if (!provider.apiKey) {
+    return res.status(400).json({ success: false, error: provider.missingKeyError });
+  }
+  if (!provider.modelAllowed) {
+    return res.status(400).json({
+      success: false,
+      error: `贞贞的平价AI小屋不支持模型 ${String(model).slice(0, 240)}，请从平台模型列表重新选择。`,
+    });
   }
   const inputHadVideos = hasLlmVideoParts(messages);
 
@@ -3874,7 +4209,7 @@ router.post('/llm', async (req, res) => {
     return res.status(400).json({ success: false, error: proxyPublicError(e, '多模态素材预处理失败') });
   }
 
-  const upstream = `${config.ZHENZHEN_BASE_URL}/v1/chat/completions`;
+  const upstream = `${String(provider.baseUrl || '').replace(/\/+$/, '')}/v1/chat/completions`;
   const payload = {
     model,
     messages: normalizedMessages,
@@ -3888,7 +4223,7 @@ router.post('/llm', async (req, res) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${settings.llmApiKey}`,
+        Authorization: `Bearer ${provider.apiKey}`,
       },
       body: JSON.stringify(payload),
     });
@@ -3899,7 +4234,7 @@ router.post('/llm', async (req, res) => {
         const providerError = await boundedProviderHttpError(r, 'LLM stream failed');
         return res.status(r.status).json({ success: false, error: providerError.message });
       }
-      await pipeSanitizedProviderSse(req, res, r, 'LLM stream', [settings.llmApiKey]);
+      await pipeSanitizedProviderSse(req, res, r, `${provider.label} LLM stream`, [provider.apiKey]);
       return;
     }
 
@@ -3958,14 +4293,14 @@ router.post('/llm', async (req, res) => {
     const finishReason = safeDiagnosticText(
       choice?.finish_reason || choice?.finishReason || '',
       80,
-      [settings.llmApiKey],
+      [provider.apiKey],
     );
     const usage = normalizeLlmUsage(data?.usage);
     const requestId = safeMjTaskId(data?.id || r.headers?.get?.('x-request-id'));
     res.json({
       success: true,
       data: {
-        content: redactExactSecrets(typeof content === 'string' ? content : '', [settings.llmApiKey]),
+        content: redactExactSecrets(typeof content === 'string' ? content : '', [provider.apiKey]),
         imageUrls,
         model: String(model).slice(0, 240),
         finishReason,
@@ -3976,8 +4311,8 @@ router.post('/llm', async (req, res) => {
     });
   } catch (e) {
     if (res.headersSent || res.destroyed) return;
-    proxyRouteError('proxy/llm 错误', e, [settings.llmApiKey]);
-    res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e, '请求失败', [settings.llmApiKey]) });
+    proxyRouteError('proxy/llm 错误', e, [provider.apiKey]);
+    res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e, '请求失败', [provider.apiKey]) });
   }
 });
 
@@ -4256,6 +4591,11 @@ function resetVideoMaterializationCacheForTests() {
 }
 
 async function saveRemoteVideo(url, _providerFetchImpl, materializationKey = '') {
+  const result = await saveRemoteVideoDetailed(url, _providerFetchImpl, materializationKey);
+  return result.url || null;
+}
+
+async function saveRemoteVideoDetailed(url, _providerFetchImpl, materializationKey = '') {
   const cacheKey = String(materializationKey || '').trim();
   if (cacheKey) {
     const cached = videoMaterializationCache.get(cacheKey);
@@ -4266,7 +4606,7 @@ async function saveRemoteVideo(url, _providerFetchImpl, materializationKey = '')
         cached,
         VIDEO_MATERIALIZATION_MAX_ENTRIES,
       );
-      return cached;
+      return { url: cached, error: null };
     }
     if (cached) videoMaterializationCache.delete(cacheKey);
     const pending = videoMaterializationInFlight.get(cacheKey);
@@ -4274,28 +4614,35 @@ async function saveRemoteVideo(url, _providerFetchImpl, materializationKey = '')
   }
 
   const materialize = (async () => {
-    try {
-      const remote = await fetchProxyRemoteMedia(url, {
-        allowedKinds: ['video'],
-        maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
-        accept: 'video/mp4,video/webm,video/quicktime,video/x-matroska;q=0.9',
-      });
-      const buf = remote.buffer;
-      const ext = verifiedProxyMediaExtension(remote);
-      const localUrl = storeMaterializedOutputBuffer(buf, 'vid', ext, cacheKey);
-      if (cacheKey) {
-        setBoundedRegistryEntry(
-          videoMaterializationCache,
-          cacheKey,
-          localUrl,
-          VIDEO_MATERIALIZATION_MAX_ENTRIES,
-        );
+    let lastError = null;
+    for (let attempt = 0; attempt < IMAGE_OUTPUT_RETRY_DELAYS_MS.length; attempt += 1) {
+      const delay = IMAGE_OUTPUT_RETRY_DELAYS_MS[attempt];
+      if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+      try {
+        const remote = await fetchProxyRemoteMedia(url, {
+          allowedKinds: ['video'],
+          maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
+          accept: 'video/mp4,video/webm,video/quicktime,video/x-matroska;q=0.9',
+        });
+        const buf = remote.buffer;
+        const ext = verifiedProxyMediaExtension(remote);
+        const localUrl = storeMaterializedOutputBuffer(buf, 'vid', ext, cacheKey);
+        if (cacheKey) {
+          setBoundedRegistryEntry(
+            videoMaterializationCache,
+            cacheKey,
+            localUrl,
+            VIDEO_MATERIALIZATION_MAX_ENTRIES,
+          );
+        }
+        return { url: localUrl, error: null };
+      } catch (error) {
+        lastError = error;
+        if (!retryableRemoteOutputError(error)) break;
       }
-      return localUrl;
-    } catch (e) {
-      proxyRouteError('转存视频失败', e);
-      return null;
     }
+    proxyRouteError('转存视频失败', lastError);
+    return { url: '', error: remoteOutputDownloadFailure(lastError, 'video') };
   })();
 
   if (!cacheKey) return materialize;
@@ -4482,9 +4829,19 @@ router.post('/video/fal/submit', async (req, res) => {
     // 同步返回: result.video.url 或同类 video_url/url 字段
     const syncVideoUrl = getFalVideoUrl(data);
     if (syncVideoUrl) {
-      const local = await saveRemoteVideo(syncVideoUrl);
-      if (!local) return res.status(502).json({ success: false, error: 'FAL 视频输出未通过安全下载校验' });
-      return res.json({ success: true, data: { sync: true, videoUrl: local, endpoint } });
+      const saved = await saveRemoteVideoDetailed(syncVideoUrl);
+      if (!saved.url) {
+        const failure = completedRemoteOutputError({
+          itemCount: 1,
+          failures: saved.error ? [saved.error] : [],
+        }, 'video');
+        return res.status(502).json({
+          success: false,
+          code: failure.code,
+          error: `${failure.message} 此同步响应没有可继续查询的任务，网络恢复后请重新运行。`,
+        });
+      }
+      return res.json({ success: true, data: { sync: true, videoUrl: saved.url, endpoint } });
     }
 
     // 异步: request_id + response_url
@@ -4552,9 +4909,21 @@ router.post('/video/fal/query', async (req, res) => {
     // 完成: video.url 或同类 video_url/url 字段
     const finishedVideoUrl = getFalVideoUrl(data);
     if (finishedVideoUrl) {
-      const local = await saveRemoteVideo(finishedVideoUrl, null, `video-fal:${requestId}`);
-      if (!local) return res.status(502).json({ success: false, error: 'FAL 视频输出未通过安全下载校验' });
-      return res.json({ success: true, data: { status: 'completed', videoUrl: local } });
+      const saved = await saveRemoteVideoDetailed(finishedVideoUrl, null, `video-fal:${requestId}`);
+      if (!saved.url) {
+        const failure = completedRemoteOutputError({
+          itemCount: 1,
+          failures: saved.error ? [saved.error] : [],
+        }, 'video');
+        return sendCompletedRemoteOutputFailure(res, failure, {
+          requestId,
+          falStatus: String(data.status || ''),
+        }, {
+          defaultCode: 'fal_video_output_unusable',
+          defaultMessage: 'FAL 视频结果无法保存。',
+        });
+      }
+      return res.json({ success: true, data: { status: 'completed', videoUrl: saved.url } });
     }
     const st = String(data.status || '').toUpperCase();
     if (st === 'FAILED' || st === 'CANCELLED') {
@@ -4679,10 +5048,12 @@ function collectFalToolboxText(value, out = []) {
 }
 
 async function saveRemoteFalToolboxFile(url, kind, materializationKey = '') {
-  if (/^\/(files|output|input)\//i.test(String(url || ''))) return null;
-  if (kind === 'image') return saveRemoteImage(url, null, materializationKey);
-  if (kind === 'video') return saveRemoteVideo(url, null, materializationKey);
-  if (kind === 'audio') return saveRemoteAudio(url, materializationKey);
+  if (/^\/(files|output|input)\//i.test(String(url || ''))) {
+    return { url: String(url), error: null };
+  }
+  if (kind === 'image') return saveRemoteImageDetailed(url, null, materializationKey);
+  if (kind === 'video') return saveRemoteVideoDetailed(url, null, materializationKey);
+  if (kind === 'audio') return saveRemoteAudioDetailed(url, materializationKey);
   try {
     const cleanUrl = String(url || '').split(/[?#]/)[0];
     const match = cleanUrl.match(/\.([a-z0-9]{2,8})$/i);
@@ -4715,10 +5086,13 @@ async function saveRemoteFalToolboxFile(url, kind, materializationKey = '') {
       if (!parsed?.asset?.version) throw new Error('FAL glTF 结构无效');
     }
     const prefix = kind === 'model3d' ? 'model3d' : 'fal';
-    return storeMaterializedOutputBuffer(buf, prefix, ext, materializationKey);
+    return {
+      url: storeMaterializedOutputBuffer(buf, prefix, ext, materializationKey),
+      error: null,
+    };
   } catch (e) {
     proxyRouteError('转存 FAL 文件失败', e);
-    return null;
+    return { url: '', error: remoteOutputDownloadFailure(e, kind === 'model3d' ? 'model3d' : 'media') };
   }
 }
 
@@ -4731,6 +5105,7 @@ async function extractFalToolboxOutputs(data, outputSchema, materializationScope
   const modelUrls = [];
   const textOutputs = [];
   const jsonOutputs = [];
+  const failures = [];
   const seenRemoteOutputs = new Set();
   let materializationIndex = 0;
 
@@ -4766,13 +5141,16 @@ async function extractFalToolboxOutputs(data, outputSchema, materializationScope
           ? `${materializationScope}:${kind}:${materializationIndex}`
           : '';
         materializationIndex += 1;
-        const local = await saveRemoteFalToolboxFile(remote, kind, materializationKey);
-        if (!local) continue;
-        urls.push(local);
-        if (kind === 'image') imageUrls.push(local);
-        else if (kind === 'video') videoUrls.push(local);
-        else if (kind === 'audio') audioUrls.push(local);
-        else if (kind === 'model3d') modelUrls.push(local);
+        const saved = await saveRemoteFalToolboxFile(remote, kind, materializationKey);
+        if (!saved.url) {
+          if (saved.error) failures.push(saved.error);
+          continue;
+        }
+        urls.push(saved.url);
+        if (kind === 'image') imageUrls.push(saved.url);
+        else if (kind === 'video') videoUrls.push(saved.url);
+        else if (kind === 'audio') audioUrls.push(saved.url);
+        else if (kind === 'model3d') modelUrls.push(saved.url);
       }
     }
   }
@@ -4785,6 +5163,7 @@ async function extractFalToolboxOutputs(data, outputSchema, materializationScope
     modelUrls: Array.from(new Set(modelUrls)),
     textOutputs: Array.from(new Set(textOutputs.filter(Boolean))),
     jsonOutputs,
+    failures,
   };
 }
 
@@ -4961,8 +5340,27 @@ router.post('/fal-toolbox/submit', async (req, res) => {
     }
 
     const output = await extractFalToolboxOutputs(data, outputSchema);
+    if (output.failures.length > 0) {
+      const failure = completedRemoteOutputError({
+        itemCount: output.urls.length + output.failures.length,
+        failures: output.failures,
+      }, 'media');
+      return res.status(502).json({
+        success: false,
+        code: failure.code,
+        error: `${failure.message} 此同步响应没有可继续查询的任务，网络恢复后请重新运行。`,
+      });
+    }
+    if (['COMPLETED', 'COMPLETE', 'DONE', 'SUCCEEDED', 'SUCCESS'].includes(st)) {
+      const failure = completedRemoteOutputError({ itemCount: 0 }, 'video');
+      return sendCompletedRemoteOutputFailure(res, failure, { requestId, falStatus: st }, {
+        defaultCode: 'fal_video_output_missing',
+        defaultMessage: 'FAL 视频任务已完成，但没有返回视频地址。',
+      });
+    }
     if (falToolboxHasOutput(output)) {
-      return res.json({ success: true, data: { sync: true, endpoint, ...output } });
+      const { failures: _failures, ...safeOutput } = output;
+      return res.json({ success: true, data: { sync: true, endpoint, ...safeOutput } });
     }
 
     const requestId = safeFalRequestId(data?.request_id || data?.requestId);
@@ -5046,8 +5444,24 @@ router.post('/fal-toolbox/query', async (req, res) => {
         return res.json({ success: false, data: { status: 'failed', error: `FAL ${st}`, falStatus: st, requestId } });
       }
       const statusOutput = await extractFalToolboxOutputs(statusData, outputSchema, `fal-toolbox:${requestId}`);
+      if (statusOutput.failures.length > 0) {
+        const failure = completedRemoteOutputError({
+          itemCount: statusOutput.urls.length + statusOutput.failures.length,
+          failures: statusOutput.failures,
+        }, 'media');
+        const { failures: _failures, ...safeOutput } = statusOutput;
+        return sendCompletedRemoteOutputFailure(res, failure, {
+          requestId,
+          falStatus: st,
+          ...safeOutput,
+        }, {
+          defaultCode: 'fal_toolbox_output_unusable',
+          defaultMessage: 'FAL 工具箱结果无法保存。',
+        });
+      }
       if (falToolboxHasOutput(statusOutput)) {
-        return res.json({ success: true, data: { status: 'completed', requestId, ...statusOutput } });
+        const { failures: _failures, ...safeOutput } = statusOutput;
+        return res.json({ success: true, data: { status: 'completed', requestId, ...safeOutput } });
       }
       if (st && !FAL_TOOLBOX_COMPLETED.has(st)) {
         return res.json({ success: true, data: { status: 'pending', falStatus: st, requestId } });
@@ -5073,8 +5487,24 @@ router.post('/fal-toolbox/query', async (req, res) => {
       return res.json({ success: false, data: { status: 'failed', error: `FAL ${resultStatus}`, falStatus: resultStatus, requestId } });
     }
     const output = await extractFalToolboxOutputs(resultResp.data, outputSchema, `fal-toolbox:${requestId}`);
+    if (output.failures.length > 0) {
+      const failure = completedRemoteOutputError({
+        itemCount: output.urls.length + output.failures.length,
+        failures: output.failures,
+      }, 'media');
+      const { failures: _failures, ...safeOutput } = output;
+      return sendCompletedRemoteOutputFailure(res, failure, {
+        requestId,
+        falStatus: resultStatus,
+        ...safeOutput,
+      }, {
+        defaultCode: 'fal_toolbox_output_unusable',
+        defaultMessage: 'FAL 工具箱结果无法保存。',
+      });
+    }
     if (falToolboxHasOutput(output)) {
-      return res.json({ success: true, data: { status: 'completed', requestId, ...output } });
+      const { failures: _failures, ...safeOutput } = output;
+      return res.json({ success: true, data: { status: 'completed', requestId, ...safeOutput } });
     }
     return res.json({ success: true, data: { status: 'pending', falStatus: resultStatus || falToolboxStatusValue(statusData) || 'IN_PROGRESS', requestId } });
   } catch (e) {
@@ -5307,10 +5737,24 @@ router.get('/video/query', async (req, res) => {
     let videoUrl = null;
     if (st === 'SUCCESS') {
       const remote = getFalVideoUrl(data);
-      if (remote) {
-        videoUrl = await saveRemoteVideo(remote, null, `zhenzhen-video:${taskId}`);
-        if (!videoUrl) return res.status(502).json({ success: false, error: '视频输出未通过安全下载校验' });
+      const materialized = await materializeRemoteTaskOutput({
+        status: st,
+        completedStatuses: ['success'],
+        remoteUrl: remote,
+        kind: 'video',
+        materializationKey: `zhenzhen-video:${taskId}`,
+      });
+      if (materialized.failure) {
+        return sendCompletedRemoteOutputFailure(res, materialized.failure, {
+          taskId,
+          failReason: null,
+        }, {
+          status: 'MATERIALIZING',
+          defaultCode: 'video_output_unusable',
+          defaultMessage: '视频结果无法保存。',
+        });
       }
+      videoUrl = materialized.url;
     }
     res.json({
       success: true,
@@ -5529,29 +5973,34 @@ router.get('/seedance/query', async (req, res) => {
     const apiKey = rememberedMeta?.apiKey || settings?.zhenzhenSd2ApiKey || '';
     try {
       const result = await seedanceNz.queryTask(taskId, apiKey);
-      let videoUrl = '';
-      if (result.status === 'succeeded' && result.videoUrl) {
-        videoUrl = await saveRemoteVideo(
-          result.videoUrl,
-          seedanceNz.fetchRemote,
-          `${seedanceNz.PROVIDER_ID}:${taskId}`,
-        );
-        if (!videoUrl) return res.status(502).json({ success: false, error: 'Seedance 输出素材未通过安全下载校验' });
+      const materialized = await materializeRemoteTaskOutput({
+        status: result.status,
+        remoteUrl: result.videoUrl,
+        kind: 'video',
+        materializationKey: `${seedanceNz.PROVIDER_ID}:${taskId}`,
+        providerFetchImpl: seedanceNz.fetchRemote,
+      });
+      const responseData = {
+        status: result.status,
+        progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
+        videoUrl: materialized.url,
+        failReason: result.status === 'failed'
+          ? safeDiagnosticText(result.failReason || 'Seedance 任务失败', 240, [apiKey])
+          : '',
+        taskProvider: seedanceNz.PROVIDER_ID,
+        model: rememberedMeta?.model || '',
+        taskType: rememberedMeta?.taskType || '',
+        ...seedanceNzTrace(result),
+      };
+      if (materialized.failure) {
+        return sendCompletedRemoteOutputFailure(res, materialized.failure, responseData, {
+          defaultCode: 'seedance_output_unusable',
+          defaultMessage: 'Seedance 视频结果无法保存。',
+        });
       }
       return res.json({
         success: true,
-        data: {
-          status: result.status,
-          progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
-          videoUrl,
-          failReason: result.status === 'failed'
-            ? safeDiagnosticText(result.failReason || 'Seedance 任务失败', 240, [apiKey])
-            : '',
-          taskProvider: seedanceNz.PROVIDER_ID,
-          model: rememberedMeta?.model || '',
-          taskType: rememberedMeta?.taskType || '',
-          ...seedanceNzTrace(result),
-        },
+        data: responseData,
       });
     } catch (e) {
       proxyRouteError('proxy/seedance/query seedance.nz 错误', e, [apiKey]);
@@ -5628,11 +6077,22 @@ router.get('/seedance/query', async (req, res) => {
       }
       if (!vUrl) vUrl = data?.video_url || data?.videoUrl;
 
-      if (vUrl) {
-        // 转存到本地
-        videoUrl = await saveRemoteVideo(vUrl, null, `zhenzhen-legacy:${taskId}`);
-        if (!videoUrl) return res.status(502).json({ success: false, error: 'Seedance 输出素材未通过安全下载校验' });
+      const materialized = await materializeRemoteTaskOutput({
+        status: st,
+        remoteUrl: vUrl,
+        kind: 'video',
+        materializationKey: `zhenzhen-legacy:${taskId}`,
+      });
+      if (materialized.failure) {
+        return sendCompletedRemoteOutputFailure(res, materialized.failure, {
+          taskId,
+          taskProvider: 'zhenzhen-legacy',
+        }, {
+          defaultCode: 'seedance_output_unusable',
+          defaultMessage: 'Seedance 视频结果无法保存。',
+        });
       }
+      videoUrl = materialized.url;
     }
 
     return res.json({
@@ -5802,12 +6262,16 @@ router.get('/audio/query', async (req, res) => {
     const data = await parseJsonResponse(r, 'Suno query');
     const clips = Array.isArray(data) ? data : (data?.clips || []);
     const tracks = [];
+    const materializationFailures = [];
     for (const [clipIndex, c] of clips.entries()) {
       if (c?.status === 'complete' && c?.audio_url) {
         const clipId = String(c.clip_id || c.id || '').trim();
         const materializationId = clipId || `${ids}:${clipIndex}`;
-        const localUrl = await saveRemoteAudio(c.audio_url, `suno:${materializationId}:audio`);
-        if (!localUrl) continue;
+        const savedAudio = await saveRemoteAudioDetailed(c.audio_url, `suno:${materializationId}:audio`);
+        if (!savedAudio.url) {
+          if (savedAudio.error) materializationFailures.push(savedAudio.error);
+          continue;
+        }
         const coverSource = c.image_large_url || c.image_url || '';
         const localImageUrl = coverSource
           ? await saveRemoteImage(coverSource, null, `suno:${materializationId}:cover`)
@@ -5815,13 +6279,41 @@ router.get('/audio/query', async (req, res) => {
         tracks.push({
           id: c.id || c.clip_id,
           clipId: c.clip_id || c.id,
-          audioUrl: localUrl,
+          audioUrl: savedAudio.url,
           imageUrl: localImageUrl || '',
           title: safeDiagnosticText(c.title || '', 240, [apiKey]),
           tags: safeDiagnosticText(c.tags || '', 500, [apiKey]),
           duration: c.metadata?.duration || 0,
         });
       }
+    }
+    if (materializationFailures.length > 0) {
+      const failure = completedRemoteOutputError({
+        itemCount: materializationFailures.length,
+        failures: materializationFailures,
+      }, 'audio');
+      return sendCompletedRemoteOutputFailure(res, failure, {
+        tracks,
+        total: clips.length,
+        completed: tracks.length,
+      }, {
+        status: 'MATERIALIZING',
+        defaultCode: 'suno_output_unusable',
+        defaultMessage: 'Suno 音频结果无法保存。',
+      });
+    }
+    const completedClips = clips.filter((clip) => String(clip?.status || '').toLowerCase() === 'complete');
+    if (clips.length > 0 && completedClips.length === clips.length && tracks.length === 0) {
+      const failure = completedRemoteOutputError({ itemCount: 0 }, 'audio');
+      return sendCompletedRemoteOutputFailure(res, failure, {
+        tracks,
+        total: clips.length,
+        completed: 0,
+      }, {
+        status: 'FAILED',
+        defaultCode: 'suno_output_missing',
+        defaultMessage: 'Suno 任务已完成，但没有返回音频地址。',
+      });
     }
     const allDone = clips.length > 0 && tracks.length === clips.length;
     res.json({
@@ -6097,7 +6589,7 @@ router.get('/runninghub/query', async (req, res) => {
         method: 'POST',
         headers: { Host: candidate.host, 'Content-Type': 'application/json', Authorization: `Bearer ${candidate.apiKey}` },
         body: JSON.stringify({ apiKey: candidate.apiKey, taskId }),
-      });
+      }, `RH ${candidate.label}查询接口`, { retryNetwork: true });
       const data = await parseJsonResponse(r, `RH ${candidate.label}查询接口`);
       selectedCandidate = candidate;
       selectedData = data;
@@ -6114,6 +6606,7 @@ router.get('/runninghub/query', async (req, res) => {
     let urls = [];
     if (taskCode === '0') {
       status = 'SUCCESS';
+      const materializationFailures = [];
       // RH outputs 返回结构兼容：
       //   ① data: [{fileUrl, fileType}, ...]                  // 常见 (AI 应用)
       //   ② data: { outputs: [...] }                            // 包一层的变体
@@ -6124,6 +6617,18 @@ router.get('/runninghub/query', async (req, res) => {
       if (arr.length === 0) {
         const shape = JSON.stringify(summarizeRunningHubOutputShape(data.data)).slice(0, 1800);
         console.warn(`[RH/query] taskId=${taskId} code=0 but no output urls. shape=${shape}`);
+        const failure = completedRemoteOutputError({ itemCount: 0 }, 'media');
+        return sendCompletedRemoteOutputFailure(res, failure, {
+          taskId,
+          urls: [],
+          code: Number.isFinite(Number(data.code)) ? Number(data.code) : data.code,
+          site: selectedCandidate.id,
+          fallbackUsed: selectedCandidate.id !== requestedSite,
+        }, {
+          status: 'FAILED',
+          defaultCode: 'runninghub_output_missing',
+          defaultMessage: 'RunningHub 任务已完成，但没有返回素材地址。',
+        });
       }
       // 转存所有产物到本地
       for (const [outputIndex, it] of arr.entries()) {
@@ -6162,10 +6667,25 @@ router.get('/runninghub/query', async (req, res) => {
           ));
         } catch (downloadError) {
           console.warn(`[RH/query] save output failed taskId=${taskId} ${opaqueDiagnosticSummary('url', remote)} error=${safeDiagnosticText(downloadError?.message || downloadError, 200)}`);
+          materializationFailures.push(remoteOutputDownloadFailure(downloadError, 'media'));
         }
       }
-      if (arr.length > 0 && urls.length === 0) {
-        return res.status(502).json({ success: false, error: 'RunningHub 输出均未通过安全下载校验' });
+      if (materializationFailures.length > 0) {
+        const failure = completedRemoteOutputError({
+          itemCount: arr.length,
+          failures: materializationFailures,
+        }, 'media');
+        return sendCompletedRemoteOutputFailure(res, failure, {
+          taskId,
+          urls,
+          code: Number.isFinite(Number(data.code)) ? Number(data.code) : data.code,
+          site: selectedCandidate.id,
+          fallbackUsed: selectedCandidate.id !== requestedSite,
+        }, {
+          status: 'MATERIALIZING',
+          defaultCode: 'runninghub_output_unusable',
+          defaultMessage: 'RunningHub 结果无法保存。',
+        });
       }
     } else if (taskCode === '804') status = 'RUNNING';
     else if (taskCode === '813') status = 'QUEUED';
@@ -6380,7 +6900,9 @@ module.exports._test = Object.freeze({
   opaqueDiagnosticSummary,
   parseJsonResponse,
   resetFalTaskRegistryMemoryForTests,
+  resetProviderDispatcherForTests,
   resetVideoMaterializationCacheForTests,
+  resolveBuiltInLlmProvider,
   resolveMountedFileReference,
   safeDiagnosticText,
   safeFalRequestId,

@@ -35,6 +35,10 @@ import {
   rhParamKey,
   type RhParamValue,
 } from '../../utils/rhTextBinding';
+import {
+  resolveRunningHubDisplaySite,
+  resolvedRhSiteFromAppInfo,
+} from '../../utils/runningHubResolvedSite';
 
 /**
  * RunningHubNode - 主工作流节点
@@ -152,7 +156,10 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
 
   const d = data as any;
   const webappId: string = d?.webappId || '';
-  const rhSite: RhSite = d?.rhSite === 'intl' ? 'intl' : 'cn';
+  const appInfo: any = d?.appInfo;
+  const storedRhSite: RhSite = d?.rhSite === 'intl' ? 'intl' : 'cn';
+  const resolvedAppInfoSite = resolvedRhSiteFromAppInfo(appInfo, webappId);
+  const rhSite: RhSite = resolveRunningHubDisplaySite(storedRhSite, webappId, appInfo);
   const activeRhSiteRef = useRef<RhSite>(rhSite);
   const instanceType: string = d?.instanceType || '';
   const status: 'idle' | 'submitting' | 'polling' | 'success' | 'error' = d?.status || 'idle';
@@ -165,10 +172,13 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
   }, [rhSite]);
 
   const applyResolvedRhSite = (site?: RhSite) => {
-    if (!site || site === activeRhSiteRef.current) return;
+    if (!site) return;
+    const previousSite = activeRhSiteRef.current;
     activeRhSiteRef.current = site;
-    update({ rhSite: site });
-    logBus.info(`RH 站点已自动切换为${site === 'intl' ? '海外站' : '国内站'}`, src);
+    if (site !== storedRhSite) update({ rhSite: site });
+    if (site !== previousSite || site !== storedRhSite) {
+      logBus.info(`RH 站点已自动切换为${site === 'intl' ? '海外站' : '国内站'}`, src);
+    }
   };
   const cancelInFlightRef = useRef(false);
   const [cancelling, setCancelling] = useState(false);
@@ -177,12 +187,18 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
   const runCancelTargets = useRunBusStore((s) => s.cancelTargets);
   const lastRunCancelSeqRef = useRef(runCancelSeq);
   const urls: string[] = d?.urls || [];
-  const appInfo: any = d?.appInfo;
   // paramValues: 在节点内为每个 nodeInfoList 条目保存的当前编辑值
   // 结构: { 'nodeId::fieldName': { value: string; sourceFromUpstream?: boolean; sourceMaterialId?: string; sourceRhNodeId?: string } }
   const paramValues: Record<string, RhParamValue> = d?.paramValues || {};
   const paramMentions: Record<string, MediaMention[]> =
     d?.paramMentions && typeof d.paramMentions === 'object' ? d.paramMentions : {};
+
+  useEffect(() => {
+    if (resolvedAppInfoSite && resolvedAppInfoSite !== storedRhSite) {
+      activeRhSiteRef.current = resolvedAppInfoSite;
+      update({ rhSite: resolvedAppInfoSite });
+    }
+  }, [resolvedAppInfoSite, storedRhSite, update]);
 
   const stopPoll = (reason?: Error) => {
     if (pollTimer.current) {
@@ -558,7 +574,15 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
           if (elapsed % 6 === 0) {
             logBus.debug(`[${elapsed * 5}s] status=${r.status} code=${r.code} urls=${r.urls?.length || 0}`, src);
           }
-          if (r.status === 'SUCCESS') {
+          if (String(r.status || '').toUpperCase() === 'MATERIALIZING') {
+            update({ status: 'polling', progress: '100% · 正在下载', rhCode: r.code });
+            if (elapsed === 1 || elapsed % 10 === 0) {
+              logBus.warn(
+                r.error || 'RunningHub 任务已经完成，正在适配 TUN/代理网络并安全下载输出；不会重复提交任务',
+                src,
+              );
+            }
+          } else if (r.status === 'SUCCESS') {
             // 按后缀分流到 imageUrl/videoUrl/audioUrl，避免视频 url 被填到 imageUrl 导致
             // OutputNode 当图片渲染而空白。
             const list: string[] = Array.isArray(r.urls) ? r.urls : [];
@@ -944,7 +968,13 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
             <input
               type="text"
               value={webappId}
-              onChange={(e) => update({ webappId: e.target.value })}
+              onChange={(e) => update({
+                webappId: e.target.value,
+                appInfo: null,
+                paramValues: {},
+                taskId: '',
+                urls: [],
+              })}
               placeholder="1234567890"
               className="flex-1 rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-white/30 placeholder:text-white/30"
             />

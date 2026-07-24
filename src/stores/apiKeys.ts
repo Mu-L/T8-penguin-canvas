@@ -4,6 +4,7 @@ import * as api from '../services/api';
 
 // 主 Key 的固定 base URL
 export const FIXED_ZHENZHEN_BASE = 'https://ai.t8star.org';
+// 沿用历史字段名，实际承载贞贞平价 AI 小屋的 LLM / 视频 / 图片 / 音频接口。
 export const FIXED_ZHENZHEN_SD2_BASE = 'https://api.seedance.nz';
 export const RH_BASE = 'https://www.runninghub.cn';
 export const RH_INTL_BASE = 'https://www.runninghub.ai';

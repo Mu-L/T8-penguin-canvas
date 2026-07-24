@@ -1,9 +1,11 @@
 const canvasNodeSchema = require('../shared/canvasNodeSchema.json');
+const seedanceNzLlmModels = require('../shared/seedanceNzLlmModels.json');
 
 const RUN_INTENT_AUTHORITY_SCHEMA = 't8-run-intent-authority-v1';
 const MAX_CANVAS_NODES = 20_000;
 const MAX_CANVAS_EDGES = 20_000;
 const MAX_REQUESTED_NODE_IDS = 2_000;
+const SEEDANCE_NZ_LLM_MODEL_SET = new Set(seedanceNzLlmModels);
 
 const EXECUTABLE_NODE_TYPES = new Set(
   (Array.isArray(canvasNodeSchema.types) ? canvasNodeSchema.types : [])
@@ -367,7 +369,37 @@ function providerDeclarationForNode(node, context = {}) {
         };
   }
 
+  if (type === 'grok-oauth-agent') {
+    const mode = boundedString(data.mode, 40) || 'chat';
+    const models = {
+      chat: boundedString(data.chatModel) || 'grok-4.3',
+      image: boundedString(data.imageModel) || 'grok-imagine-image',
+      video: boundedString(data.videoModel) || 'grok-imagine-video',
+      tts: boundedString(data.ttsModel) || 'xai-tts',
+      stt: boundedString(data.sttModel) || 'xai-stt',
+    };
+    const model = models[mode];
+    if (!model) {
+      throw authorityError('intent_execution_model_unresolved', 'Grok OAuth Agent 模式无效，无法证明实际模型', [node.id]);
+    }
+    return { provider: 'grok-oauth', model };
+  }
+
   if (type === 'llm') {
+    if (data.llmApiSource === 'seedance-nz') {
+      const model = boundedString(data.providerModel) || 'bytedance/doubao-seed-2.0-mini';
+      if (!SEEDANCE_NZ_LLM_MODEL_SET.has(model)) {
+        throw authorityError(
+          'intent_execution_model_unresolved',
+          '贞贞的平价AI小屋模型不在已验证模型列表中',
+          [node.id],
+        );
+      }
+      return {
+        provider: 'seedance-nz',
+        model,
+      };
+    }
     return {
       provider: 'zhenzhen',
       model: boundedString(data.model) || DEFAULT_LLM_MODEL,

@@ -61,6 +61,9 @@ import {
   gptImage2ZhenzhenVariantSize,
   isFalModel,
 } from '../../providers/models';
+import {
+  SEEDANCE_NZ_LLM_MODELS,
+} from '../../config/llm';
 import { cancelVideoEditJob, composeVideoEditAsync, getVideoEditJob } from '../../services/videoOps';
 import * as api from '../../services/api';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
@@ -152,6 +155,7 @@ const GPT_IMAGE_2_OPTIONS = IMAGE_MODELS.find((item) => item.id === 'gpt-image-2
 const LEGACY_GPT_IMAGE_2_MODELS = new Set(['gpt-image-2-all', 'gpt-image-2', 'gpt-image-2-2K', 'gpt-image-2-4K']);
 
 type StoryProviderChoice = 'builtin' | `advanced:${string}`;
+type StoryLlmPlatformChoice = 'builtin:zhenzhen' | 'builtin:seedance-nz' | `advanced:${string}`;
 type StoryImagePlatformChoice = 'builtin:legacy' | 'builtin:seedance-nz' | 'builtin:fal' | `advanced:${string}`;
 
 function advancedChoice(providerId: string): `advanced:${string}` {
@@ -328,7 +332,9 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
     providerId: project.settings.videoProviderId,
     providerModel: project.settings.videoProviderModel,
   }), [advancedProviders, project.settings.videoProviderId, project.settings.videoProviderModel, project.settings.videoProviderSource]);
-  const llmChoice: StoryProviderChoice = llmSelection.available ? advancedChoice(llmSelection.providerId) : 'builtin';
+  const llmChoice: StoryLlmPlatformChoice = llmSelection.available
+    ? advancedChoice(llmSelection.providerId)
+    : project.settings.llmApiSource === 'seedance-nz' ? 'builtin:seedance-nz' : 'builtin:zhenzhen';
   const imageChoice: StoryImagePlatformChoice = imageSelection.available
     ? advancedChoice(imageSelection.providerId)
     : builtInImagePlatform(project.settings.imageModel);
@@ -443,14 +449,20 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
     const usesLlm = mode === 'analyze' || (mode === 'all' && projectRef.current.shots.length === 0);
     const usesImage = !usesLlm && (mode === 'assets-missing' || mode === 'asset-one' && assetTarget?.kind !== 'audio' || mode === 'all' && projectRef.current.assets.some((asset) => !asset.url));
     const selection = usesLlm ? llmSelection : usesImage ? imageSelection : videoSelection;
-    const builtinModel = usesLlm ? projectRef.current.settings.llmModel : usesImage ? projectRef.current.settings.imageModel : effectiveVideoModel;
+    const storySettings = projectRef.current.settings;
+    const builtinModel = usesLlm
+      ? storySettings.llmApiSource === 'seedance-nz' ? storySettings.llmNzModel : storySettings.llmModel
+      : usesImage ? storySettings.imageModel : effectiveVideoModel;
     updateNode({
       storyRunMode: mode,
       storyRunTargetId: targetId,
       storyRunRequestId: requestId,
-      providerSource: selection.available ? selection.providerSource : 'zhenzhen',
+      providerSource: selection.available
+        ? selection.providerSource
+        : usesLlm ? storySettings.llmApiSource : 'zhenzhen',
       providerId: selection.available ? selection.providerId : '',
       providerModel: selection.available ? selection.providerModel : builtinModel,
+      llmApiSource: usesLlm ? storySettings.llmApiSource : undefined,
     });
     window.requestAnimationFrame(() => {
       if (requestCanvasNodeRun(id, { requestId })) return;
@@ -496,8 +508,13 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
     let payload: StoryAnalysisPayload;
     let source: StoryProject['analysisSource'] = 'llm';
     const external = llmSelection.available ? llmSelection : null;
-    const provider = external?.providerSource || 'zhenzhen';
-    const model = external?.providerModel || current.settings.llmModel;
+    const builtinSource = current.settings.llmApiSource;
+    const provider = external?.providerSource || builtinSource;
+    const model = external?.providerModel || (
+      builtinSource === 'seedance-nz'
+        ? current.settings.llmNzModel
+        : current.settings.llmModel
+    );
     const runLlm = (messages: Array<{ role: 'system' | 'user'; content: string }>, temperature: number) => external
       ? generateExternalLlm({
         providerId: external.providerId,
@@ -507,7 +524,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
         max_tokens: 32768,
         messages,
       })
-      : generateLlm({ model, temperature, max_tokens: 32768, messages });
+      : generateLlm({ source: builtinSource, model, temperature, max_tokens: 32768, messages });
     try {
       await reporter.providerRequest({ provider, model, jobKind: 'story-analysis' });
       const result = await runLlm([
@@ -624,12 +641,22 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
         pollCount += 1;
         const result = await queryAudio(taskClipIds, true);
         await reporter.polling({ provider: taskProvider, model, upstreamTaskId: taskId, requestId: result.requestId, transportHttpStatus: result.transportHttpStatus, upstreamHttpStatus: result.upstreamHttpStatus, usage: result.usage, pollCount, status: result.status, progress: `${result.completed}/${result.total}`, jobId: assetId, jobKind: 'story-audio-asset', httpStatusSource: 'local-backend' });
-        if (String(result.status).toUpperCase() === 'SUCCESS' && result.tracks[0]?.audioUrl) {
+        const status = String(result.status || '').toUpperCase();
+        if (status === 'MATERIALIZING') {
+          if (pollCount === 1 || pollCount % 10 === 0) {
+            logBus.warn(
+              result.error || `${asset.name} 音频已经生成，正在适配 TUN/代理网络并安全下载；不会重复提交任务`,
+              `story:${id.slice(0, 6)}`,
+            );
+          }
+          continue;
+        }
+        if (status === 'SUCCESS' && result.tracks[0]?.audioUrl) {
           url = result.tracks[0].audioUrl;
           await reporter.providerResponse({ provider: taskProvider, model, upstreamTaskId: taskId, requestId: result.requestId, transportHttpStatus: result.transportHttpStatus, upstreamHttpStatus: result.upstreamHttpStatus, usage: result.usage, pollCount, status: 'succeeded', jobId: assetId, jobKind: 'story-audio-asset', httpStatusSource: 'local-backend' });
           break;
         }
-        if (['FAILED', 'ERROR', 'CANCELLED'].includes(String(result.status).toUpperCase())) throw new Error(`${asset.name} 音频生成失败`);
+        if (['FAILED', 'ERROR', 'CANCELLED'].includes(status)) throw new Error(`${asset.name} 音频生成失败`);
       }
     } else if (external) {
       const result = await generateExternalImage({
@@ -674,6 +701,15 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
         const result = await querySeedreamNz(taskId);
         await reporter.polling({ provider: taskProvider, model, upstreamTaskId: taskId, requestId: result.requestId, transportHttpStatus: result.transportHttpStatus, upstreamHttpStatus: result.upstreamHttpStatus, usage: result.usage, pollCount, status: result.status, progress: result.progress, jobId: assetId, jobKind: 'story-asset', httpStatusSource: 'local-backend' });
         const status = String(result.status || '').toLowerCase();
+        if (status === 'materializing') {
+          if (pollCount === 1 || pollCount % 10 === 0) {
+            logBus.warn(
+              result.error || `${asset.name} 已经生成，正在适配 TUN/代理网络并安全下载；不会重复提交任务`,
+              `story:${id.slice(0, 6)}`,
+            );
+          }
+          continue;
+        }
         if (['completed', 'succeeded', 'success', 'done'].includes(status)) {
           url = String(result.urls?.[0] || '');
           if (!url) throw new Error(`${asset.name} 已完成但没有图片`);
@@ -714,13 +750,23 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
           pollCount += 1;
           const result = await queryImageFal({ endpoint: taskEndpoint, requestId: taskId });
           await reporter.polling({ provider: taskProvider, model, upstreamTaskId: taskId, requestId: result.requestId, transportHttpStatus: result.transportHttpStatus, upstreamHttpStatus: result.upstreamHttpStatus, usage: result.usage, pollCount, status: result.status, jobId: assetId, jobKind: 'story-asset', httpStatusSource: 'local-backend' });
-          if (result.status === 'completed') {
+          const status = String(result.status || '').toLowerCase();
+          if (status === 'materializing') {
+            if (pollCount === 1 || pollCount % 10 === 0) {
+              logBus.warn(
+                result.error || `${asset.name} 已经生成，正在适配 TUN/代理网络并安全下载；不会重复提交任务`,
+                `story:${id.slice(0, 6)}`,
+              );
+            }
+            continue;
+          }
+          if (status === 'completed') {
             url = String(result.urls?.[0] || '');
             if (!url) throw new Error(`${asset.name} 已完成但没有图片`);
             await reporter.providerResponse({ provider: taskProvider, model, upstreamTaskId: taskId, requestId: result.requestId, transportHttpStatus: result.transportHttpStatus, upstreamHttpStatus: result.upstreamHttpStatus, usage: result.usage, pollCount, status: 'succeeded', jobId: assetId, jobKind: 'story-asset', httpStatusSource: 'local-backend' });
             break;
           }
-          if (result.status === 'failed') throw new Error(result.error || `${asset.name} 生成失败`);
+          if (status === 'failed') throw new Error(result.error || `${asset.name} 生成失败`);
         }
       }
     } else {
@@ -1075,6 +1121,12 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
       pollCount += 1;
       const result = await querySeedance(taskId, taskProvider as any);
       await reporter.polling({ provider: result.taskProvider || taskProvider, model: result.model || resolvedModel, upstreamTaskId: taskId, requestId: result.requestId, transportHttpStatus: result.transportHttpStatus, upstreamHttpStatus: result.upstreamHttpStatus, usage: result.usage, pollCount, status: result.status, progress: result.progress, jobId: job.id, jobKind: 'story-shot', httpStatusSource: 'local-backend' });
+      if (String(result.status || '').toLowerCase() === 'materializing' && (pollCount === 1 || pollCount % 10 === 0)) {
+        logBus.warn(
+          result.error || `${job.title} 已经生成，正在适配 TUN/代理网络并安全下载；不会重复提交任务`,
+          `story:${id.slice(0, 6)}`,
+        );
+      }
       if (result.status === 'succeeded' && result.videoUrl) {
         await reporter.providerResponse({ provider: result.taskProvider || taskProvider, model: result.model || resolvedModel, upstreamTaskId: taskId, requestId: result.requestId, transportHttpStatus: result.transportHttpStatus, upstreamHttpStatus: result.upstreamHttpStatus, usage: result.usage, pollCount, status: 'succeeded', jobId: job.id, jobKind: 'story-shot', httpStatusSource: 'local-backend' });
         return result.videoUrl;
@@ -1641,10 +1693,24 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
   const compactProgress = `${progress.assets.completed}/${progress.assets.total} 资产 · ${progress.videos.completed}/${progress.videos.total} 视频`;
 
   const selectLlmPlatform = (value: string) => {
+    if (value === 'builtin:zhenzhen' || value === 'builtin:seedance-nz') {
+      updateSettings({
+        llmApiSource: value === 'builtin:seedance-nz' ? 'seedance-nz' : 'zhenzhen',
+        llmProviderSource: 'zhenzhen',
+        llmProviderId: '',
+        llmProviderModel: '',
+      });
+      return;
+    }
     const providerId = providerIdFromChoice(value);
     const provider = llmProviders.find((item) => item.id === providerId);
     if (!provider) {
-      updateSettings({ llmProviderSource: 'zhenzhen', llmProviderId: '', llmProviderModel: '' });
+      updateSettings({
+        llmApiSource: 'zhenzhen',
+        llmProviderSource: 'zhenzhen',
+        llmProviderId: '',
+        llmProviderModel: '',
+      });
       return;
     }
     updateSettings({
@@ -1689,7 +1755,14 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
     const labelClass = compact ? 'block text-[9px] text-white/45' : 'block text-[11px] text-white/50';
     const llmModels = llmSelection.available && llmSelection.provider
       ? advancedProviderModelOptions(llmSelection.provider, 'llm').map((value) => ({ value, label: value }))
-      : LLM_MODELS.map((item) => ({ value: item.id, label: item.label }));
+      : project.settings.llmApiSource === 'seedance-nz'
+        ? SEEDANCE_NZ_LLM_MODELS.map((value) => ({ value, label: value }))
+        : LLM_MODELS.map((item) => ({ value: item.id, label: item.label }));
+    const selectedLlmModel = llmSelection.available
+      ? llmSelection.providerModel
+      : project.settings.llmApiSource === 'seedance-nz'
+        ? project.settings.llmNzModel
+        : project.settings.llmModel;
     const imageModels = imageSelection.available && imageSelection.provider
       ? advancedProviderModelOptions(imageSelection.provider, 'image').map((value) => ({ value, label: value }))
       : builtInImageOptions(imageChoice);
@@ -1698,8 +1771,8 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
       : effectiveVideoBuiltinSource === 'seedance-nz' ? SEEDANCE_NZ_MODEL_OPTIONS : LEGACY_SEEDANCE_MODEL_OPTIONS;
     return <div className={`space-y-2 ${compact ? 'rounded-xl border border-white/10 bg-black/20 p-2.5' : ''}`}>
       <div className="grid grid-cols-2 gap-2">
-        <label className={labelClass}>语言 API 平台<select value={llmChoice} onChange={(event) => selectLlmPlatform(event.target.value)} className={selectClass}><option value="builtin">贞贞内置 LLM</option>{llmProviders.map((provider) => <option key={provider.id} value={advancedChoice(provider.id)}>{provider.label} · {provider.protocol}</option>)}</select></label>
-        <label className={labelClass}>语言模型<select value={llmSelection.available ? llmSelection.providerModel : project.settings.llmModel} onChange={(event) => llmSelection.available ? updateSettings({ llmProviderModel: event.target.value }) : updateSettings({ llmModel: event.target.value })} className={selectClass}>{llmModels.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+        <label className={labelClass}>语言 API 平台<select value={llmChoice} onChange={(event) => selectLlmPlatform(event.target.value)} className={selectClass}><option value="builtin:zhenzhen">贞贞AI工坊内置LLM</option><option value="builtin:seedance-nz">贞贞的平价AI小屋</option>{llmProviders.map((provider) => <option key={provider.id} value={advancedChoice(provider.id)}>{provider.label} · {provider.protocol}</option>)}</select></label>
+        <label className={labelClass}>语言模型<select value={selectedLlmModel} onChange={(event) => llmSelection.available ? updateSettings({ llmProviderModel: event.target.value }) : project.settings.llmApiSource === 'seedance-nz' ? updateSettings({ llmNzModel: event.target.value }) : updateSettings({ llmModel: event.target.value })} className={selectClass}>{llmModels.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <label className={labelClass}>图像 API 平台<select value={imageChoice} onChange={(event) => selectImagePlatform(event.target.value)} className={selectClass}><option value="builtin:legacy">贞贞 AI 工坊（海外）</option><option value="builtin:seedance-nz">贞贞平价 AI 工坊（国内）</option><option value="builtin:fal">FAL（贞贞线路）</option>{imageProviders.map((provider) => <option key={provider.id} value={advancedChoice(provider.id)}>{provider.label} · {provider.protocol}</option>)}</select></label>
@@ -1711,6 +1784,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
       </div>
       {!videoSelection.available && <label className={labelClass}>视频模型<select value={effectiveVideoModel} onChange={(event) => effectiveVideoBuiltinSource === 'seedance-nz' ? updateSettings({ videoNzModel: event.target.value }) : updateSettings({ videoModel: event.target.value })} className={selectClass}>{videoModels.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>}
       {!imageSelection.available && project.settings.imageModel === ZHENZHEN_IMAGE_G2_I2I_MODEL && <p className="text-[9px] text-amber-200">G-2 图生图需要参考图，Story 缺失资产不会使用该模型生成。</p>}
+      {!llmSelection.available && project.settings.llmApiSource === 'seedance-nz' && !hasDomesticKey && <p className="text-[9px] text-amber-200">尚未配置贞贞的平价AI小屋 API Key。</p>}
       {!videoSelection.available && effectiveVideoBuiltinSource === 'seedance-nz' && !hasDomesticKey && <p className="text-[9px] text-amber-200">尚未配置贞贞平价 AI 工坊（国内）API Key。</p>}
     </div>;
   };

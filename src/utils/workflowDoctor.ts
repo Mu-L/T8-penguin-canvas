@@ -623,7 +623,13 @@ function diagnoseProviders(nodes: Node[], context: WorkflowDoctorContext, issues
     if (!kind) continue;
     const data = (node.data || {}) as Record<string, unknown>;
     const isBatchTagger = node.type === 'batch-tagger';
-    const source = String((isBatchTagger ? data.batchTagProviderSource : undefined) || data.providerSource || '').trim();
+    const isSeedanceNzLlm = node.type === 'llm' && data.llmApiSource === 'seedance-nz';
+    const source = String(
+      (isBatchTagger ? data.batchTagProviderSource : undefined)
+      || (isSeedanceNzLlm ? data.llmApiSource : undefined)
+      || data.providerSource
+      || '',
+    ).trim();
     const providerId = String((isBatchTagger ? data.batchTagProviderId : undefined) || data.providerId || '').trim();
     const selectedModel = String(
       (isBatchTagger ? data.batchTagProviderModel : undefined)

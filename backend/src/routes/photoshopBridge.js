@@ -8,6 +8,7 @@ const config = require('../config');
 const settingsRouter = require('./settings');
 const { maskAdvancedProviders, normalizeAdvancedProviders } = require('../providers/registry');
 const { generateImageWithProvider } = require('../providers/adapters');
+const { isLoopbackAddress, safeRemoteMediaFetch } = require('../utils/safeRemoteMediaFetch');
 
 const router = express.Router();
 
@@ -436,6 +437,34 @@ function writeOutputBuffer(buffer, ext) {
   return `/files/output/${filename}`;
 }
 
+function trustedLocalProviderOrigins(provider = {}) {
+  const candidates = [
+    provider.baseUrl,
+    ...(Array.isArray(provider?.comfyuiConfig?.instances) ? provider.comfyuiConfig.instances : []),
+  ];
+  const origins = new Set();
+  for (const candidate of candidates) {
+    const raw = typeof candidate === 'string' ? candidate : candidate?.baseUrl || candidate?.url;
+    try {
+      const parsed = new URL(String(raw || '').trim());
+      if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && isLoopbackAddress(parsed.hostname)) {
+        origins.add(parsed.origin);
+      }
+    } catch (_) {}
+  }
+  return origins;
+}
+
+function isTrustedLocalProviderOutput(value, trustedOrigins) {
+  if (!(trustedOrigins instanceof Set) || trustedOrigins.size === 0) return false;
+  try {
+    const parsed = new URL(String(value || '').trim());
+    return isLoopbackAddress(parsed.hostname) && trustedOrigins.has(parsed.origin);
+  } catch (_) {
+    return false;
+  }
+}
+
 async function saveOneMediaOutput(url, options = {}) {
   const text = String(url || '').trim();
   if (!text) return '';
@@ -445,12 +474,27 @@ async function saveOneMediaOutput(url, options = {}) {
     return writeOutputBuffer(Buffer.from(dataMatch[2], 'base64'), ext);
   }
   if (/^https?:\/\//i.test(text)) {
-    const fetchImpl = options.fetchImpl || fetch;
-    const res = await fetchImpl(text);
-    if (!res.ok) throw new Error(`下载 Photoshop 生成输出失败：HTTP ${res.status}`);
-    const mime = typeof res.headers?.get === 'function' ? res.headers.get('content-type') : '';
-    const ext = outputExtFromMime(mime, outputExtFromUrl(text, '.png'));
-    const buf = Buffer.from(await res.arrayBuffer());
+    if (options.fetchImpl || isTrustedLocalProviderOutput(text, options.trustedLocalOrigins)) {
+      const res = await (options.fetchImpl || fetch)(text);
+      if (!res.ok) throw new Error(`下载 Photoshop 生成输出失败：HTTP ${res.status}`);
+      const mime = typeof res.headers?.get === 'function' ? res.headers.get('content-type') : '';
+      const ext = outputExtFromMime(mime, outputExtFromUrl(text, '.png'));
+      const buf = Buffer.from(await res.arrayBuffer());
+      return writeOutputBuffer(buf, ext);
+    }
+    const remote = await safeRemoteMediaFetch(text, {
+      allowedKinds: ['image'],
+      maxBytes: 64 * 1024 * 1024,
+      deadlineMs: 2 * 60 * 1000,
+      idleTimeoutMs: 30 * 1000,
+      maxRedirects: 4,
+      userAgent: 'T8-PenguinCanvas-PhotoshopBridge/1.0',
+    });
+    const ext = outputExtFromMime(
+      remote.contentType,
+      outputExtFromUrl(remote.finalUrl || text, '.png'),
+    );
+    const buf = remote.buffer;
     return writeOutputBuffer(buf, ext);
   }
   if (text.startsWith('/files/output/')) return text;
@@ -802,7 +846,9 @@ router.post('/image', express.json({ limit: '80mb' }), async (req, res) => {
       });
     }
     const remoteImageUrls = Array.isArray(result.imageUrls) ? result.imageUrls : [];
-    const imageUrls = await saveImageOutputs(remoteImageUrls);
+    const imageUrls = await saveImageOutputs(remoteImageUrls, {
+      trustedLocalOrigins: trustedLocalProviderOrigins(provider),
+    });
     const payload = {
       ...result,
       provider: safeProviderForResponse(provider),

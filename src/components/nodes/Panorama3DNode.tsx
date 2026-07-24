@@ -3704,6 +3704,16 @@ const Panorama3DNode = (p: NodeProps) => {
           update({ progress: q.progress });
           logBus.debug(`3D全景轮询 ${i + 1}/${maxPoll}: ${q.status} ${q.progress}`, `panorama:${p.id.slice(0, 6)}`);
         }
+        if (String(q.status || '').toLowerCase() === 'materializing') {
+          update({ progress: '100% · 正在下载' });
+          if (i === 0 || (i + 1) % 10 === 0) {
+            logBus.warn(
+              q.error || '3D 全景已经生成，正在适配 TUN/代理网络并安全下载；原任务会保留，不会重复提交',
+              `panorama:${p.id.slice(0, 6)}`,
+            );
+          }
+          continue;
+        }
         if (q.status === 'completed' && q.urls?.length) {
           applyGeneratedPanorama(q.urls[0], { mode, prompt, promptFinal: finalPrompt, sizeLevel, referenceUrl });
           logBus.success(`3D全景生成完成 → ${q.urls[0]}`, `panorama:${p.id.slice(0, 6)}`);

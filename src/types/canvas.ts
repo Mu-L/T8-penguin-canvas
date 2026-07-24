@@ -664,7 +664,7 @@ export interface ApiSettings {
   zhenzhenApiKey: string;
   zhenzhenBaseUrl: string; // 锁定 https://ai.t8star.org
   zhenzhenSd2ApiKey: string;
-  zhenzhenSd2BaseUrl: string; // 锁定 https://api.seedance.nz
+  zhenzhenSd2BaseUrl: string; // 历史字段名；锁定贞贞平价 AI 小屋 https://api.seedance.nz
   rhApiKey: string;
   rhBaseUrl: string; // https://www.runninghub.cn
   rhIntlApiKey: string;

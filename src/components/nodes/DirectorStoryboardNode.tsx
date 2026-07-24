@@ -1371,12 +1371,13 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
               error: { message },
             });
           } else {
+            const isMaterializing = String(query.status || '').toLowerCase() === 'materializing';
             setJobPatch(job, {
               status: 'polling',
               taskId: result.taskId,
               taskProvider: query.taskProvider || result.taskProvider || null,
               error: null,
-              progress: query.progress || '处理中',
+              progress: isMaterializing ? '100% · 正在下载' : query.progress || '处理中',
             });
             if (job.kind === 'bridge') {
               patchBridge(job.id.replace(/^bridge-/, ''), {
@@ -1392,6 +1393,12 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
                 taskId: result.taskId,
                 taskProvider: query.taskProvider || result.taskProvider || null,
               });
+            }
+            if (isMaterializing) {
+              logBus.warn(
+                query.error || `${job.title} 已经生成，正在适配 TUN/代理网络并安全下载；不会重复提交任务`,
+                src,
+              );
             }
             await reporter?.providerResponse(responseTrace);
           }
@@ -1685,7 +1692,9 @@ const DirectorStoryboardNode = ({ id, data, selected }: NodeProps) => {
         status: 'polling',
         taskId: submitted.taskId,
         taskProvider: result.taskProvider || submittedProvider,
-        progress: result.progress || `${pct}%`,
+        progress: String(result.status || '').toLowerCase() === 'materializing'
+          ? '100% · 正在下载'
+          : result.progress || `${pct}%`,
       });
       if (elapsed === 1 || elapsed % 3 === 0) {
         logBus.debug(`${job.title} 轮询 ${elapsed}/${maxPoll} · ${result.status} · ${result.progress || `${pct}%`}`, src);

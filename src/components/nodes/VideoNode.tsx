@@ -576,7 +576,15 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             lastProgress = currentProgress;
             logBus.debug(`[${elapsed}/${MAX}] status=${r.status} progress=${currentProgress}`, src);
           }
-          if (['SUCCESS', 'SUCCEEDED', 'COMPLETED'].includes(normalizedStatus) && r.videoUrl) {
+          if (normalizedStatus === 'MATERIALIZING') {
+            update({ status: 'polling', progress: '100% · 正在下载' });
+            if (elapsed === 1 || elapsed % 10 === 0) {
+              logBus.warn(
+                r.error || '视频已经生成，正在适配 TUN/代理网络并安全下载；原任务会保留，不会重复提交',
+                src,
+              );
+            }
+          } else if (['SUCCESS', 'SUCCEEDED', 'COMPLETED'].includes(normalizedStatus) && r.videoUrl) {
             pollRejectRef.current = null;
             stopPoll();
             update({
@@ -701,7 +709,15 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             return;
           }
           if (elapsed % 10 === 0) logBus.debug(`[FAL ${elapsed}/${MAX}] status=${r.status}`, src);
-          if (r.status === 'completed' && r.videoUrl) {
+          if (String(r.status || '').toLowerCase() === 'materializing') {
+            update({ status: 'polling', progress: '100% · 正在下载' });
+            if (elapsed === 1 || elapsed % 10 === 0) {
+              logBus.warn(
+                r.error || 'FAL 视频已经生成，正在适配 TUN/代理网络并安全下载；不会重复提交任务',
+                src,
+              );
+            }
+          } else if (r.status === 'completed' && r.videoUrl) {
             pollRejectRef.current = null;
             stopPoll();
             update({

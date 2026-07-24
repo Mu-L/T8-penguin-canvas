@@ -59,6 +59,11 @@ import {
   normalizeExcludedMaterialIds,
 } from '../../utils/materialExclusion';
 import type { RunNodeLifecycleReporter } from '../../types/project';
+import {
+  DEFAULT_SEEDANCE_NZ_LLM_MODEL,
+  SEEDANCE_NZ_LLM_MODELS,
+  resolveSeedanceNzLlmModel,
+} from '../../config/llm';
 
 /**
  * LLM / Vision 节点 —— 完全对齐 gpt-image-2-web Chat (index.html L1600 / L8128~L8400)
@@ -210,11 +215,16 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
     [advancedProviders, d?.providerSource, d?.providerId, d?.providerModel],
   );
   const isExternalSelected = providerSelection.available && providerSelection.providerSource !== 'zhenzhen';
-  const savedExternalMissing = !!d?.providerSource && d.providerSource !== 'zhenzhen' && !providerSelection.available;
+  const isSeedanceNzSelected = !isExternalSelected && d?.llmApiSource === 'seedance-nz';
+  const savedExternalMissing = !isSeedanceNzSelected
+    && !!d?.providerSource
+    && d.providerSource !== 'zhenzhen'
+    && !providerSelection.available;
   const externalModelOptions = providerSelection.provider
     ? advancedProviderModelOptions(providerSelection.provider, 'llm')
     : [];
   const externalProviderModel = providerSelection.providerModel || externalModelOptions[0] || '';
+  const seedanceNzModel = resolveSeedanceNzLlmModel(d?.providerModel);
   const status: 'idle' | 'generating' | 'success' | 'error' = d?.status || 'idle';
     // 用户输入框值: 改用 d.userPrompt 私有字段（避免与对下游开放的 d.prompt=助手回复 冲突，
     // 否则下游 useUpstreamMaterials 会同时 pushText(d.prompt) + pushText(d.reply) 出现两条文本）
@@ -252,9 +262,11 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
     });
   }, [d?.consumedTexts, update]);
 
-  const activeModel = isExternalSelected ? externalProviderModel : model;
+  const activeModel = isExternalSelected
+    ? externalProviderModel
+    : isSeedanceNzSelected ? seedanceNzModel : model;
   const src = `LLM·${activeModel || model}·#${id.slice(-4)}`;
-  const isImgOut = !isExternalSelected && isImageOutputLlm(model);
+  const isImgOut = !isExternalSelected && !isSeedanceNzSelected && isImageOutputLlm(model);
 
   // 上游素材实时订阅(跟随上游 data 变化重渲染) —— 用于节点内预览。
   // 跟 ImageNode / SeedanceNode 同一套机制(useNodeConnections + useNodesData),
@@ -403,7 +415,7 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
     setError(null);
     setWarning(null);
     setStreamingText('');
-    if (modelSelection.isCustom && !model) {
+    if (!isSeedanceNzSelected && modelSelection.isCustom && !model) {
       const message = '请先填写 Custom 模型名称';
       setError(message);
       update({ status: 'error', error: message });
@@ -422,14 +434,18 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
       return;
     }
     const llmVideoOptions = { llmVideoMode, videoMaxWidth, videoMaxHeight, videoMaxBase64Mb, videoCrf, videoFrameCount };
-    const traceProvider = isExternalSelected && providerSelection.provider ? providerSelection.provider.id : 'zhenzhen';
+    const traceProvider = isExternalSelected && providerSelection.provider
+      ? providerSelection.provider.id
+      : isSeedanceNzSelected ? 'seedance-nz' : 'zhenzhen';
     const traceModel = activeModel || model;
     await reporter?.providerRequest({ provider: traceProvider, model: traceModel });
 
     taskCompletionSound.primeAudio();
     update({ status: 'generating', error: null });
     logBus.info(
-      `发送到 ${isExternalSelected && providerSelection.provider ? providerSelection.provider.label : model} · ${
+      `发送到 ${isExternalSelected && providerSelection.provider
+        ? providerSelection.provider.label
+        : isSeedanceNzSelected ? '贞贞的平价AI小屋' : model} · ${
         !isExternalSelected && useStream && !isImgOut && userVideos.length === 0 ? 'SSE' : '非流式'
       } · imgs=${userImages.length} · videos=${userVideos.length}${userVideos.length ? ` · ${llmVideoMode}` : ''}`,
       src,
@@ -451,7 +467,14 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
         const ctrl = new AbortController();
         abortRef.current = ctrl;
         const streamResult = await generateLlmStream(
-          { model, messages, temperature, max_tokens: maxTokens, ...llmVideoOptions },
+          {
+            source: isSeedanceNzSelected ? 'seedance-nz' : 'zhenzhen',
+            model: activeModel,
+            messages,
+            temperature,
+            max_tokens: maxTokens,
+            ...llmVideoOptions,
+          },
           {
             onDelta: (chunk) => setStreamingText((s) => s + chunk),
             signal: ctrl.signal,
@@ -510,7 +533,14 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
               ...llmVideoOptions,
               providerParams: d?.providerParams || {},
             })
-          : await generateLlm({ model, messages, temperature, max_tokens: maxTokens, ...llmVideoOptions });
+          : await generateLlm({
+              source: isSeedanceNzSelected ? 'seedance-nz' : 'zhenzhen',
+              model: activeModel,
+              messages,
+              temperature,
+              max_tokens: maxTokens,
+              ...llmVideoOptions,
+            });
         const replyText = res.content || '';
         if (res.usage) await reporter?.providerUsage({
           provider: traceProvider,
@@ -769,7 +799,9 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
           <div className="text-[10px] text-white/40 truncate">
             {isExternalSelected && providerSelection.provider
               ? `${providerSelection.provider.label || providerSelection.provider.id} · ${externalProviderModel || '未选模型'}`
-              : '独立 Key · 5 模型 · 多模态 · 流式'}
+              : isSeedanceNzSelected
+                ? `贞贞的平价AI小屋 · ${seedanceNzModel}`
+                : '贞贞的AI工坊 · 独立 LLM Key · 多模态 · 流式'}
           </div>
         </div>
         {history.length > 0 && (
@@ -784,32 +816,54 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
       </div>
 
       <div className="p-2.5 space-y-2" onMouseDown={(e) => e.stopPropagation()}>
-        {llmAdvancedProviders.length > 0 && (
-          <div className="rounded border border-white/10 bg-white/[0.03] p-2 space-y-2">
+        <div className="rounded border border-white/10 bg-white/[0.03] p-2 space-y-2">
             <button
               type="button"
               onClick={() => update({ advancedProviderOpen: !d?.advancedProviderOpen })}
               className="w-full flex items-center justify-between text-[10px] font-semibold text-white/70 hover:text-white"
             >
               <span>高级来源</span>
-              <span>{isExternalSelected && providerSelection.provider ? providerSelection.provider.label : '默认 LLM Key'}</span>
+              <span>
+                {isExternalSelected && providerSelection.provider
+                  ? providerSelection.provider.label
+                  : isSeedanceNzSelected
+                    ? '贞贞的平价AI小屋'
+                    : '贞贞的AI工坊-独立LLM Key(默认)'}
+              </span>
             </button>
             {d?.advancedProviderOpen && (
               <div className="space-y-2">
                 <div>
                   <label className="text-[10px] text-white/50 block mb-1">平台</label>
                   <select
-                    value={isExternalSelected ? providerSelection.providerId : 'zhenzhen'}
+                    value={isExternalSelected
+                      ? providerSelection.providerId
+                      : isSeedanceNzSelected ? 'seedance-nz' : 'zhenzhen'}
                     onChange={(e) => {
                       const nextId = e.target.value;
                       if (nextId === 'zhenzhen') {
-                        update({ providerSource: 'zhenzhen', providerId: '', providerModel: '' });
+                        update({
+                          llmApiSource: 'zhenzhen',
+                          providerSource: 'zhenzhen',
+                          providerId: '',
+                          providerModel: '',
+                        });
+                        return;
+                      }
+                      if (nextId === 'seedance-nz') {
+                        update({
+                          llmApiSource: 'seedance-nz',
+                          providerSource: 'zhenzhen',
+                          providerId: '',
+                          providerModel: DEFAULT_SEEDANCE_NZ_LLM_MODEL,
+                        });
                         return;
                       }
                       const provider = llmAdvancedProviders.find((item) => item.id === nextId);
                       if (!provider) return;
                       const nextModels = advancedProviderModelOptions(provider, 'llm');
                       update({
+                        llmApiSource: 'zhenzhen',
                         providerSource: provider.protocol,
                         providerId: provider.id,
                         providerModel: nextModels[0] || '',
@@ -819,7 +873,12 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
                     style={{ background: '#18181b', color: '#ffffff' }}
                     className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
                   >
-                    <option value="zhenzhen" style={{ background: '#18181b', color: '#ffffff' }}>LLM 独立 Key（默认）</option>
+                    <option value="zhenzhen" style={{ background: '#18181b', color: '#ffffff' }}>
+                      贞贞的AI工坊-独立LLM Key(默认)
+                    </option>
+                    <option value="seedance-nz" style={{ background: '#18181b', color: '#ffffff' }}>
+                      贞贞的平价AI小屋
+                    </option>
                     {llmAdvancedProviders.map((provider) => (
                       <option key={provider.id} value={provider.id} style={{ background: '#18181b', color: '#ffffff' }}>
                         {provider.label || provider.id}
@@ -842,6 +901,26 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
                     </select>
                   </div>
                 )}
+                {isSeedanceNzSelected && (
+                  <div>
+                    <label className="text-[10px] text-white/50 block mb-1">平价小屋模型</label>
+                    <select
+                      value={seedanceNzModel}
+                      onChange={(e) => update({ providerModel: e.target.value })}
+                      style={{ background: '#18181b', color: '#ffffff' }}
+                      className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
+                    >
+                      {SEEDANCE_NZ_LLM_MODELS.map((modelId) => (
+                        <option key={modelId} value={modelId} style={{ background: '#18181b', color: '#ffffff' }}>
+                          {modelId}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="mt-1 text-[9px] leading-snug text-white/40">
+                      使用“贞贞的平价AI工坊（国内） API Key”，接口为 api.seedance.nz。
+                    </div>
+                  </div>
+                )}
                 {savedExternalMissing && (
                   <div className="text-[10px] text-amber-200 bg-amber-500/10 border border-amber-500/20 rounded px-2 py-1">
                     当前画布记录的扩展平台未启用或不存在，已临时回到默认来源。
@@ -850,10 +929,9 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
               </div>
             )}
           </div>
-        )}
 
         {/* 模型 */}
-        {!isExternalSelected && <div>
+        {!isExternalSelected && !isSeedanceNzSelected && <div>
           <label className="text-[10px] text-white/50 block mb-1">模型</label>
           <select
             value={modelSelection.presetValue}

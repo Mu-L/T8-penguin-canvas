@@ -6,6 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 const config = require('../config');
 const { runLocalHooks } = require('../extensions/runtimeHooks');
+const { safeRemoteMediaFetch } = require('../utils/safeRemoteMediaFetch');
 
 const router = express.Router();
 
@@ -94,11 +95,19 @@ async function saveOneMediaOutput(url, kind = 'image') {
     return writeOutputBuffer(Buffer.from(dataMatch[2], 'base64'), outputExtFromMime(dataMatch[1], defaultExtForKind(kind)));
   }
   if (/^https?:\/\//i.test(text)) {
-    const res = await fetch(text);
-    if (!res.ok) throw new Error(`下载 Grok OAuth 输出失败：HTTP ${res.status}`);
-    const mime = typeof res.headers?.get === 'function' ? res.headers.get('content-type') : '';
-    const ext = outputExtFromMime(mime, outputExtFromUrl(text, defaultExtForKind(kind)));
-    return writeOutputBuffer(Buffer.from(await res.arrayBuffer()), ext);
+    const remote = await safeRemoteMediaFetch(text, {
+      allowedKinds: [kind],
+      maxBytes: kind === 'video' ? 1024 * 1024 * 1024 : kind === 'audio' ? 256 * 1024 * 1024 : 64 * 1024 * 1024,
+      deadlineMs: 5 * 60 * 1000,
+      idleTimeoutMs: 30 * 1000,
+      maxRedirects: 4,
+      userAgent: 'T8-PenguinCanvas-GrokOAuth/1.0',
+    });
+    const ext = outputExtFromMime(
+      remote.contentType,
+      outputExtFromUrl(remote.finalUrl || text, defaultExtForKind(kind)),
+    );
+    return writeOutputBuffer(remote.buffer, ext);
   }
   return text;
 }

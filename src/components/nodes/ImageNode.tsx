@@ -890,6 +890,16 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             status: q.status,
             progress: q.progress,
           });
+          if (String(q.status || '').toLowerCase() === 'materializing') {
+            update({ progress: '100% · 正在下载' });
+            if (i === 0 || (i + 1) % 10 === 0) {
+              logBus.warn(
+                q.error || 'MJ 图片已生成，正在适配 TUN/代理网络并安全下载，不会重新提交任务',
+                src,
+              );
+            }
+            continue;
+          }
           if (q.status === 'FAILURE') {
             throw new Error(`MJ 失败: ${q.failReason || '未知错误'}`);
           }
@@ -1046,6 +1056,16 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             status: st,
             providerStatus: q.falStatus,
           });
+          if (st === 'materializing') {
+            update({ progress: '100% · 正在下载' });
+            if (i === 0 || (i + 1) % 10 === 0) {
+              logBus.warn(
+                q.error || 'FAL 图片已生成，正在适配 TUN/代理网络并安全下载，不会重新提交任务',
+                src,
+              );
+            }
+            continue;
+          }
           if (st === 'completed') {
             const url = q.urls?.[0];
             if (!url) throw new Error('FAL 任务完成但未返回图片');
@@ -1162,6 +1182,16 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             update({ progress: query.progress });
           }
           const queryStatus = String(query.status || '').toLowerCase();
+          if (queryStatus === 'materializing') {
+            update({ progress: '100% · 正在下载' });
+            if (i === 0 || (i + 1) % 10 === 0) {
+              logBus.warn(
+                query.error || `贞贞的平价AI工坊（国内）${imageFamilyLabel} 已生成，正在适配 TUN/代理网络并安全下载`,
+                src,
+              );
+            }
+            continue;
+          }
           if (queryStatus === 'completed' || queryStatus === 'success' || queryStatus === 'done') {
             const url = query.urls?.[0];
             if (!url) throw new Error(`贞贞的平价AI工坊（国内）${imageFamilyLabel} 任务完成但未返回图片`);
@@ -1273,8 +1303,10 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
       const maxPoll = 1800;     // 最多 1800 次
       const interval = 2000;    // 每 2 秒一次
       let lastProg = '5%';
+      let nextPollDelay = interval;
       for (let i = 0; i < maxPoll; i++) {
-        await new Promise((r) => setTimeout(r, interval));
+        await new Promise((r) => setTimeout(r, nextPollDelay));
+        nextPollDelay = interval;
         if (!isCurrentGenerationRun(runId)) return;
         const q = await queryImageStatus(taskId, apiModel);
         if (!isCurrentGenerationRun(runId)) return;
@@ -1299,6 +1331,17 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           logBus.debug(`[${i + 1}/${maxPoll}] status=${q.status} progress=${q.progress}`, src);
         }
         const st = String(q.status || '').toLowerCase();
+        if (st === 'materializing') {
+          nextPollDelay = Math.max(interval, Math.min(30_000, Number(q.retryAfterMs) || 5_000));
+          update({ progress: '100% · 正在下载' });
+          if (i === 0 || (i + 1) % 10 === 0) {
+            logBus.warn(
+              q.error || '图片已生成，正在适配 TUN/代理网络并安全下载，不会重新提交任务',
+              src,
+            );
+          }
+          continue;
+        }
         if (st === 'completed' || st === 'success' || st === 'done') {
           const url = q.urls?.[0];
           if (!url) throw new Error(q.error || '任务已完成，但本机没有拿到图片；请查看 Logs 中的下载失败原因');

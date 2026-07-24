@@ -12,6 +12,7 @@ const {
   testProviderConnection,
 } = require('../providers/adapters');
 const { resolveMediaRef } = require('../providers/mediaResolver');
+const { isLoopbackAddress, safeRemoteMediaFetch } = require('../utils/safeRemoteMediaFetch');
 
 const router = express.Router();
 const EXTERNAL_GENERATION_TIMEOUT_MS = 60 * 60 * 1000;
@@ -101,6 +102,34 @@ function defaultExtForKind(kind) {
   return '.png';
 }
 
+function trustedLocalOutputOrigins(provider = {}) {
+  const candidates = [
+    provider.baseUrl,
+    ...(Array.isArray(provider?.comfyuiConfig?.instances) ? provider.comfyuiConfig.instances : []),
+  ];
+  const origins = new Set();
+  for (const candidate of candidates) {
+    const raw = typeof candidate === 'string' ? candidate : candidate?.baseUrl || candidate?.url;
+    try {
+      const parsed = new URL(String(raw || '').trim());
+      if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && isLoopbackAddress(parsed.hostname)) {
+        origins.add(parsed.origin);
+      }
+    } catch (_) {}
+  }
+  return origins;
+}
+
+function isTrustedLocalOutputUrl(value, trustedOrigins) {
+  if (!(trustedOrigins instanceof Set) || trustedOrigins.size === 0) return false;
+  try {
+    const parsed = new URL(String(value || '').trim());
+    return isLoopbackAddress(parsed.hostname) && trustedOrigins.has(parsed.origin);
+  } catch (_) {
+    return false;
+  }
+}
+
 async function saveOneMediaOutput(url, kind = 'image', options = {}) {
   const text = String(url || '').trim();
   if (!text) return '';
@@ -110,12 +139,27 @@ async function saveOneMediaOutput(url, kind = 'image', options = {}) {
     return writeOutputBuffer(Buffer.from(dataMatch[2], 'base64'), ext);
   }
   if (/^https?:\/\//i.test(text)) {
-    const fetchImpl = options.fetchImpl || fetch;
-    const res = await fetchImpl(text);
-    if (!res.ok) throw new Error(`下载扩展平台输出失败：HTTP ${res.status}`);
-    const mime = typeof res.headers?.get === 'function' ? res.headers.get('content-type') : '';
-    const ext = outputExtFromMime(mime, outputExtFromUrl(text, defaultExtForKind(kind)));
-    const buf = Buffer.from(await res.arrayBuffer());
+    if (options.fetchImpl || isTrustedLocalOutputUrl(text, options.trustedLocalOrigins)) {
+      const res = await (options.fetchImpl || fetch)(text);
+      if (!res.ok) throw new Error(`下载扩展平台输出失败：HTTP ${res.status}`);
+      const mime = typeof res.headers?.get === 'function' ? res.headers.get('content-type') : '';
+      const ext = outputExtFromMime(mime, outputExtFromUrl(text, defaultExtForKind(kind)));
+      const buf = Buffer.from(await res.arrayBuffer());
+      return writeOutputBuffer(buf, ext);
+    }
+    const remote = await safeRemoteMediaFetch(text, {
+      allowedKinds: [kind],
+      maxBytes: kind === 'video' ? 1024 * 1024 * 1024 : kind === 'audio' ? 256 * 1024 * 1024 : 64 * 1024 * 1024,
+      deadlineMs: 5 * 60 * 1000,
+      idleTimeoutMs: 30 * 1000,
+      maxRedirects: 4,
+      userAgent: 'T8-PenguinCanvas-ExternalProvider/1.0',
+    });
+    const ext = outputExtFromMime(
+      remote.contentType,
+      outputExtFromUrl(remote.finalUrl || text, defaultExtForKind(kind)),
+    );
+    const buf = remote.buffer;
     return writeOutputBuffer(buf, ext);
   }
   if (text.startsWith('/files/output/')) return text;
@@ -126,6 +170,18 @@ function outputSaveFailure(error) {
   const cause = error?.cause || error;
   const code = String(cause?.code || error?.code || '').trim();
   const message = String(error?.message || cause?.message || error || '').trim();
+  if (code.startsWith('tun_dns_fallback_')) {
+    return {
+      code: 'output_download_tun_dns_recovering',
+      error: '检测到 TUN Fake-IP，应用已尝试通过独立公共 DNS 获取真实结果地址；当前回源暂未成功，请保留任务并稍后重试。',
+    };
+  }
+  if (code === 'private_address') {
+    return {
+      code: 'output_download_private_address_blocked',
+      error: '结果地址实际指向本机或内网，已拒绝访问；TUN Fake-IP 会自动回源解析。',
+    };
+  }
   if (['ENOTFOUND', 'EAI_AGAIN'].includes(code) || /getaddrinfo|dns/i.test(message)) {
     return { code: 'output_download_dns_failed', error: '本机无法解析结果文件域名，请检查 DNS、代理或网络连接。' };
   }
@@ -421,10 +477,11 @@ router.post('/image', async (req, res) => {
     const remoteImageUrls = Array.isArray(result.imageUrls) ? result.imageUrls : [];
     const remoteVideoUrls = Array.isArray(result.videoUrls) ? result.videoUrls : [];
     const remoteAudioUrls = Array.isArray(result.audioUrls) ? result.audioUrls : [];
+    const outputSaveOptions = { trustedLocalOrigins: trustedLocalOutputOrigins(resolved.provider) };
     const [savedImages, savedVideos, savedAudios] = await Promise.all([
-      saveMediaOutputs('image', remoteImageUrls),
-      saveMediaOutputs('video', remoteVideoUrls),
-      saveMediaOutputs('audio', remoteAudioUrls),
+      saveMediaOutputs('image', remoteImageUrls, outputSaveOptions),
+      saveMediaOutputs('video', remoteVideoUrls, outputSaveOptions),
+      saveMediaOutputs('audio', remoteAudioUrls, outputSaveOptions),
     ]);
     const imageUrls = savedImages.urls;
     const videoUrls = savedVideos.urls;
@@ -625,7 +682,9 @@ router.post('/web-image', async (req, res) => {
     }
 
     const remoteImageUrls = Array.isArray(imageResult.imageUrls) ? imageResult.imageUrls : [];
-    const savedImages = await saveMediaOutputs('image', remoteImageUrls);
+    const savedImages = await saveMediaOutputs('image', remoteImageUrls, {
+      trustedLocalOrigins: trustedLocalOutputOrigins(resolved.provider),
+    });
     const imageUrls = savedImages.urls;
     if (!imageUrls.length) {
       const firstFailure = savedImages.errors[0];

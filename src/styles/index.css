@@ -817,6 +817,26 @@ html[data-theme-visual] .t8-canvas-shell .t8-control-rail .react-flow__controls,
   position: relative;
 }
 
+.t8-control-rail-doctor {
+  position: relative;
+}
+
+html[data-theme-visual] .t8-canvas-shell .t8-control-rail-doctor,
+.t8-canvas-shell[data-theme-visual] .t8-control-rail-doctor {
+  background: var(--t8-flow-controls-bg) !important;
+  border-color: var(--t8-flow-controls-border) !important;
+  color: var(--t8-flow-controls-fg) !important;
+}
+
+html[data-theme-visual] .t8-canvas-shell .t8-control-rail-doctor:hover,
+html[data-theme-visual] .t8-canvas-shell .t8-control-rail-doctor.is-active,
+.t8-canvas-shell[data-theme-visual] .t8-control-rail-doctor:hover,
+.t8-canvas-shell[data-theme-visual] .t8-control-rail-doctor.is-active {
+  background: var(--t8-flow-controls-button-hover-bg) !important;
+  border-color: var(--t8-flow-controls-accent) !important;
+  color: var(--t8-flow-controls-accent) !important;
+}
+
 html[data-theme-visual] .t8-canvas-shell .t8-control-rail-placement-shelf,
 .t8-canvas-shell[data-theme-visual] .t8-control-rail-placement-shelf {
   background: var(--t8-flow-controls-bg) !important;

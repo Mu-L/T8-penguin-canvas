@@ -16,6 +16,21 @@ const DEFAULT_JSON_MAX_NODES = 50_000;
 const DEFAULT_UPLOAD_RESPONSE_MAX_BYTES = 64 * 1024;
 const REQUEST_WRITE_CHUNK_BYTES = 64 * 1024;
 const SUPPORTED_PROTOCOLS = new Set(['http:', 'https:']);
+const TUN_FAKE_IPV4_NETWORK = 0xc6120000;
+const TUN_FAKE_IPV4_PREFIX_LENGTH = 15;
+const TUN_PUBLIC_DNS_TIMEOUT_MS = 3_000;
+const TUN_PUBLIC_DNS_SERVERS = Object.freeze(
+  String(process.env.T8_TUN_PUBLIC_DNS_SERVERS || '223.5.5.5,1.1.1.1,8.8.8.8')
+    .split(',')
+    .map((value) => value.trim())
+    .filter((value, index, all) => net.isIP(value) && all.indexOf(value) === index)
+    .slice(0, 4),
+);
+const TUN_DOH_ENDPOINTS = Object.freeze([
+  Object.freeze({ address: '1.1.1.1', servername: 'cloudflare-dns.com' }),
+  Object.freeze({ address: '8.8.8.8', servername: 'dns.google' }),
+]);
+const TUN_DOH_MAX_BYTES = 64 * 1024;
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
   'content-length',
@@ -58,6 +73,15 @@ function parseIpv4Number(value) {
 function matchesIpv4Cidr(value, network, prefixLength) {
   const mask = prefixLength === 0 ? 0 : (0xffffffff << (32 - prefixLength)) >>> 0;
   return ((value & mask) >>> 0) === ((network & mask) >>> 0);
+}
+
+function isTunFakeAddress(value) {
+  const ipv4 = parseIpv4Number(value);
+  return ipv4 !== null && matchesIpv4Cidr(
+    ipv4,
+    TUN_FAKE_IPV4_NETWORK,
+    TUN_FAKE_IPV4_PREFIX_LENGTH,
+  );
 }
 
 // IANA special-purpose ranges that are not ordinary globally-routable unicast
@@ -179,20 +203,212 @@ function privateAddressAllowedForTests(setting, hostname) {
   return typeof setting === 'function' && setting(normalizeAddress(hostname)) === true;
 }
 
-async function resolvePublicAddress(hostname, lookupImpl = dns.lookup, allowPrivateForTests = false) {
+async function resolveFromPublicDnsServer(hostname, server) {
+  const resolver = new dns.Resolver();
+  resolver.setServers([server]);
+  let timer;
+  try {
+    const settled = await Promise.race([
+      Promise.allSettled([
+        resolver.resolve4(hostname),
+        resolver.resolve6(hostname),
+      ]),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          resolver.cancel();
+          reject(remoteMediaError('tun_dns_fallback_timeout', 'TUN 公共 DNS 回源解析超时。'));
+        }, TUN_PUBLIC_DNS_TIMEOUT_MS);
+      }),
+    ]);
+    const records = [];
+    for (const [index, result] of settled.entries()) {
+      if (result.status !== 'fulfilled') continue;
+      const family = index === 0 ? 4 : 6;
+      for (const value of result.value || []) {
+        const address = normalizeAddress(value);
+        if (net.isIP(address) === family) records.push({ address, family });
+      }
+    }
+    return records;
+  } finally {
+    if (timer) clearTimeout(timer);
+    resolver.cancel();
+  }
+}
+
+function normalizedTunPublicRecords(records) {
+  const normalized = [];
+  for (const record of records || []) {
+    const address = normalizeAddress(record?.address);
+    const detectedFamily = net.isIP(address);
+    const family = Number(record?.family) || detectedFamily;
+    if (!detectedFamily || family !== detectedFamily) continue;
+    normalized.push({ address, family });
+  }
+  return normalized;
+}
+
+function parseDohAnswer(data) {
+  if (Number(data?.Status) !== 0 || !Array.isArray(data?.Answer)) return [];
+  const records = [];
+  for (const answer of data.Answer) {
+    const type = Number(answer?.type);
+    const address = normalizeAddress(answer?.data);
+    if (type === 1 && net.isIPv4(address)) records.push({ address, family: 4 });
+    else if (type === 28 && net.isIPv6(address)) records.push({ address, family: 6 });
+  }
+  return records;
+}
+
+function resolveDohRecordType(hostname, endpoint, type) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let total = 0;
+    const chunks = [];
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      callback(value);
+    };
+    const request = https.request({
+      protocol: 'https:',
+      hostname: endpoint.address,
+      port: 443,
+      servername: endpoint.servername,
+      method: 'GET',
+      path: `/dns-query?name=${encodeURIComponent(hostname)}&type=${encodeURIComponent(type)}`,
+      agent: false,
+      headers: {
+        Host: endpoint.servername,
+        Accept: 'application/dns-json',
+        Connection: 'close',
+        'User-Agent': 'T8-PenguinCanvas/1.0',
+      },
+      timeout: TUN_PUBLIC_DNS_TIMEOUT_MS,
+    }, (response) => {
+      if (Number(response.statusCode || 0) < 200 || Number(response.statusCode || 0) >= 300) {
+        response.resume();
+        finish(reject, remoteMediaError(
+          'tun_dns_fallback_doh_http',
+          `加密 DNS 回源返回 HTTP ${Number(response.statusCode || 0) || 'unknown'}。`,
+        ));
+        return;
+      }
+      response.on('data', (chunk) => {
+        if (settled) return;
+        total += chunk.length;
+        if (total > TUN_DOH_MAX_BYTES) {
+          response.destroy();
+          finish(reject, remoteMediaError('tun_dns_fallback_doh_too_large', '加密 DNS 回源响应过大。'));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      response.on('end', () => {
+        if (settled) return;
+        try {
+          finish(resolve, parseDohAnswer(JSON.parse(Buffer.concat(chunks, total).toString('utf8'))));
+        } catch (error) {
+          finish(reject, remoteMediaError('tun_dns_fallback_doh_invalid', '加密 DNS 回源响应无效。', { cause: error }));
+        }
+      });
+      response.on('error', (error) => finish(reject, error));
+    });
+    request.once('timeout', () => request.destroy(
+      remoteMediaError('tun_dns_fallback_doh_timeout', '加密 DNS 回源超时。'),
+    ));
+    request.once('error', (error) => finish(reject, error));
+    request.end();
+  });
+}
+
+async function resolveFromPublicDoh(hostname, endpoint) {
+  const settled = await Promise.allSettled([
+    resolveDohRecordType(hostname, endpoint, 'A'),
+    resolveDohRecordType(hostname, endpoint, 'AAAA'),
+  ]);
+  return settled.flatMap((result) => result.status === 'fulfilled' ? result.value : []);
+}
+
+async function resolveTunPublicDns(hostname, options = {}) {
+  const dnsServers = Array.isArray(options.dnsServers) ? options.dnsServers : TUN_PUBLIC_DNS_SERVERS;
+  const dohEndpoints = Array.isArray(options.dohEndpoints) ? options.dohEndpoints : TUN_DOH_ENDPOINTS;
+  const resolveFromServer = options.resolveFromServer || resolveFromPublicDnsServer;
+  const resolveFromDoh = options.resolveFromDoh || resolveFromPublicDoh;
+  let lastError = null;
+  for (const server of dnsServers) {
+    try {
+      const records = normalizedTunPublicRecords(await resolveFromServer(hostname, server));
+      if (!records.length) continue;
+      if (records.some((record) => isPrivateAddress(record.address))) {
+        lastError = remoteMediaError('tun_dns_fallback_private', '公共 DNS 返回了非公网地址。');
+        continue;
+      }
+      return records;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  // Clash Fake-IP/TUN 常会劫持全部 UDP/53，即便显式指定 1.1.1.1 仍返回
+  // 198.18.0.0/15。此时直接连接可信 DoH 的固定公网 IP，并使用正确
+  // TLS SNI/Host 取得真实记录；不依赖系统 DNS，也不会放宽任意内网地址。
+  for (const endpoint of dohEndpoints) {
+    try {
+      const records = normalizedTunPublicRecords(await resolveFromDoh(hostname, endpoint));
+      if (!records.length) continue;
+      if (records.some((record) => isPrivateAddress(record.address))) {
+        lastError = remoteMediaError('tun_dns_fallback_private', '加密 DNS 返回了非公网地址。');
+        continue;
+      }
+      return records;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw remoteMediaError(
+    'tun_dns_fallback_failed',
+    '检测到 TUN Fake-IP，但无法通过独立公共 DNS 或加密 DNS 获取真实公网地址。',
+    { cause: lastError },
+  );
+}
+
+async function resolvePublicAddress(
+  hostname,
+  lookupImpl = dns.lookup,
+  allowPrivateForTests = false,
+  publicLookupImpl = resolveTunPublicDns,
+) {
   const normalizedHostname = normalizeAddress(hostname);
   const bypass = privateAddressAllowedForTests(allowPrivateForTests, normalizedHostname);
   if (!normalizedHostname || (!bypass && net.isIP(normalizedHostname) && isPrivateAddress(normalizedHostname))) {
     throw remoteMediaError('private_address', '远程地址不是全球可路由单播地址，已拒绝访问。');
   }
-  const lookedUp = await lookupImpl(normalizedHostname, { all: true, verbatim: true });
-  const records = Array.isArray(lookedUp) ? lookedUp : (lookedUp ? [lookedUp] : []);
-  const normalizedRecords = records.map((record) => {
+  let lookedUp;
+  try {
+    lookedUp = await lookupImpl(normalizedHostname, { all: true, verbatim: true });
+  } catch (error) {
+    if (!['ENOTFOUND', 'EAI_AGAIN'].includes(String(error?.code || '').toUpperCase())) throw error;
+    lookedUp = await publicLookupImpl(normalizedHostname);
+  }
+  let records = Array.isArray(lookedUp) ? lookedUp : (lookedUp ? [lookedUp] : []);
+  let normalizedRecords = records.map((record) => {
     const address = normalizeAddress(record?.address);
     const detectedFamily = net.isIP(address);
     const family = Number(record?.family) || detectedFamily;
     return { address, family, detectedFamily };
   });
+  // Some TUN implementations return a Fake-IP A record together with a real
+  // AAAA (or the reverse). Any Fake-IP answer means the system resolver result
+  // is synthetic, so discard the whole set and obtain one coherent public set.
+  if (normalizedRecords.length && normalizedRecords.some((record) => isTunFakeAddress(record.address))) {
+    records = await publicLookupImpl(normalizedHostname);
+    normalizedRecords = records.map((record) => {
+      const address = normalizeAddress(record?.address);
+      const detectedFamily = net.isIP(address);
+      const family = Number(record?.family) || detectedFamily;
+      return { address, family, detectedFamily };
+    });
+  }
   if (!normalizedRecords.length || normalizedRecords.some((record) => (
     !record.detectedFamily || record.family !== record.detectedFamily || (!bypass && isPrivateAddress(record.address))
   ))) {
@@ -483,7 +699,12 @@ async function openSafeRemoteResponse(inputUrl, options, state, initialRedirectC
     if (previousTarget && previousTarget.origin !== target.origin) sensitiveHeadersAllowed = false;
     const privateTestSetting = options.allowPrivateForTests;
     const pinned = await withinDeadline(
-      resolvePublicAddress(target.hostname, options.lookupImpl || dns.lookup, privateTestSetting),
+      resolvePublicAddress(
+        target.hostname,
+        options.lookupImpl || dns.lookup,
+        privateTestSetting,
+        options.publicLookupImpl || resolveTunPublicDns,
+      ),
       state,
     );
     const response = await issuePinnedRequest(target, pinned, requestHeaders(options, sensitiveHeadersAllowed), state);
@@ -734,7 +955,12 @@ async function safeRemoteUpload(inputUrl, options = {}) {
   const responseMaxBytes = positiveInteger(options.maxResponseBytes, DEFAULT_UPLOAD_RESPONSE_MAX_BYTES);
   const state = createTransferState({ ...normalizedOptions, maxBytes: responseMaxBytes, maxRedirects: 0 });
   const pinned = await withinDeadline(
-    resolvePublicAddress(target.hostname, options.lookupImpl || dns.lookup, options.allowPrivateForTests),
+    resolvePublicAddress(
+      target.hostname,
+      options.lookupImpl || dns.lookup,
+      options.allowPrivateForTests,
+      options.publicLookupImpl || resolveTunPublicDns,
+    ),
     state,
   );
   const body = normalizedBodyParts(options.bodyParts ?? options.body);
@@ -861,8 +1087,10 @@ module.exports = {
   assertJsonComplexity,
   isLoopbackAddress,
   isPrivateAddress,
+  isTunFakeAddress,
   normalizeAddress,
   resolvePublicAddress,
+  resolveTunPublicDns,
   safeRemoteMediaDownload,
   safeRemoteMediaFetch,
   safeRemoteJsonFetch,

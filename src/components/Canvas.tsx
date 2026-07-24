@@ -71,6 +71,10 @@ import {
   shouldPreserveAutoOutputMaterialNode,
   writeOutputMaterialPersistenceSetting,
 } from '../utils/outputMaterialPersistence';
+import {
+  readWorkflowDoctorEnabled,
+  writeWorkflowDoctorEnabled,
+} from '../utils/workflowDoctorPreference';
 import { shouldCollectNodeTextOutput } from '../utils/imageNodeOutputMode';
 import {
   buildDirectorStoryboardOutputNodeData,
@@ -4454,6 +4458,9 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
 
   // 批量运行状态
   const [isRunning, setIsRunning] = useState(false);
+  const [workflowDoctorEnabled, setWorkflowDoctorEnabled] = useState(() =>
+    readWorkflowDoctorEnabled(),
+  );
   const activeCanvasRunsRef = useRef(new Set<ActiveCanvasRunControl>());
   const activeRunPlansRef = useRef(new Map<symbol, Set<string>>());
   const runLaunchQueueRef = useRef(createRunLaunchQueue());
@@ -8433,6 +8440,22 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     resolve?.(confirmed);
   }, []);
 
+  const toggleWorkflowDoctor = useCallback(() => {
+    const next = !workflowDoctorEnabled;
+    writeWorkflowDoctorEnabled(next);
+    if (!next) {
+      runPreflightAbortRef.current?.abort();
+      settleRunPreflightDecision(false);
+    }
+    setWorkflowDoctorEnabled(next);
+    logBus.info(
+      next
+        ? '工作流医生已开启：运行前会检查配置、素材、策略与费用风险。'
+        : '工作流医生已关闭：运行时不再执行医生诊断或弹出医生阻断。',
+      '工作流医生',
+    );
+  }, [settleRunPreflightDecision, workflowDoctorEnabled]);
+
   const handleCancelRunPreflight = useCallback(() => {
     runPreflightAbortRef.current?.abort();
     settleRunPreflightDecision(false);
@@ -8504,26 +8527,94 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     selectedNodeIds: string[],
     options: RunNodesByOrderOptions,
   ): Promise<PossibleDerivedExecutionScope | null> => {
-    if (runPreflightPendingRef.current) {
-      logBus.warn('已有运行体检正在进行，请先完成或取消当前预览', '运行体检');
-      return null;
-    }
     const captureExecutionSnapshot = () => captureRunExecutionSnapshot(options.runIntentSnapshot);
     const snapshot = captureExecutionSnapshot();
     if (!snapshot) {
-      logBus.warn('当前项目或画布身份尚未稳定，已停止运行', '运行体检');
+      logBus.warn('当前项目或画布身份尚未稳定，已停止运行', '运行');
       return null;
     }
-
-    runPreflightPendingRef.current = true;
-    const controller = new AbortController();
-    runPreflightAbortRef.current = controller;
 
     const abortError = () => {
       const error = new Error('run preflight aborted');
       error.name = 'AbortError';
       return error;
     };
+    const buildDerivedScope = async (signal?: AbortSignal) => {
+      const throwIfAborted = () => {
+        if (signal?.aborted) throw abortError();
+      };
+      throwIfAborted();
+      const dependencyDefinitions = new Map<string, SubflowDefinition>();
+      const rootDefinitions = preflightNodes
+        .filter((node) => node.type === 'subflow')
+        .map((node) => (node.data as Record<string, unknown> | undefined)?.definition)
+        .filter((definition): definition is SubflowDefinition => Boolean(
+          definition
+          && typeof definition === 'object'
+          && typeof (definition as SubflowDefinition).id === 'string'
+          && Number.isInteger(Number((definition as SubflowDefinition).version)),
+        ));
+      for (const rootDefinition of rootDefinitions) {
+        throwIfAborted();
+        try {
+          const loaded = await loadSubflowDependencyDefinitions(
+            rootDefinition,
+            (reference) => api.getSubflow(
+              reference.definitionId,
+              reference.version,
+              reference.projectId || snapshot.projectId,
+              { signal },
+            ),
+          );
+          loaded.forEach((definition, key) => dependencyDefinitions.set(key, definition));
+        } catch (error) {
+          if (signal?.aborted) throw abortError();
+          // The pure scope builder turns a missing fixed dependency into a
+          // stable structural blocker without guessing a different version.
+        }
+      }
+      throwIfAborted();
+      return buildPossibleDerivedExecutionScope({
+        nodes: preflightNodes,
+        edges: preflightEdges,
+        executionNodeIds: selectedNodeIds,
+        requestId: options.requestId,
+        resolveSubflowDefinition: (reference: SubflowDependencyRef) => (
+          dependencyDefinitions.get(subflowDependencyMapKey(reference)) || null
+        ),
+      });
+    };
+
+    if (!workflowDoctorEnabled) {
+      try {
+        const derivedScope = await buildDerivedScope();
+        if (!isSameRunPreflightExecutionSnapshot(snapshot, captureExecutionSnapshot())) {
+          logBus.warn('准备运行期间画布已变化，请重新运行', '运行');
+          return null;
+        }
+        if (!derivedScope.coverageComplete) {
+          logBus.warn(
+            derivedScope.blockers[0]?.title || '执行图无法完整解析，请检查连线或节点后重试',
+            '运行',
+          );
+          return null;
+        }
+        return derivedScope;
+      } catch (error) {
+        console.warn('[run-scope] failed:', error);
+        logBus.warn('执行图准备失败，请检查工作流后重试', '运行');
+        return null;
+      }
+    }
+
+    if (runPreflightPendingRef.current) {
+      logBus.warn('已有运行体检正在进行，请先完成或取消当前预览', '运行体检');
+      return null;
+    }
+
+    runPreflightPendingRef.current = true;
+    const controller = new AbortController();
+    runPreflightAbortRef.current = controller;
     const throwIfAborted = () => {
       if (controller.signal.aborted) throw abortError();
     };
@@ -8534,45 +8625,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       const latestDerivedScopeRef: { current: PossibleDerivedExecutionScope | null } = { current: null };
       const preparePreview = async () => {
         throwIfAborted();
-        const dependencyDefinitions = new Map<string, SubflowDefinition>();
-        const rootDefinitions = preflightNodes
-          .filter((node) => node.type === 'subflow')
-          .map((node) => (node.data as Record<string, unknown> | undefined)?.definition)
-          .filter((definition): definition is SubflowDefinition => Boolean(
-            definition
-            && typeof definition === 'object'
-            && typeof (definition as SubflowDefinition).id === 'string'
-            && Number.isInteger(Number((definition as SubflowDefinition).version)),
-          ));
-        for (const rootDefinition of rootDefinitions) {
-          throwIfAborted();
-          try {
-            const loaded = await loadSubflowDependencyDefinitions(
-              rootDefinition,
-              (reference) => api.getSubflow(
-                reference.definitionId,
-                reference.version,
-                reference.projectId || snapshot.projectId,
-                { signal: controller.signal },
-              ),
-            );
-            loaded.forEach((definition, key) => dependencyDefinitions.set(key, definition));
-          } catch (error) {
-            if (controller.signal.aborted) throw abortError();
-            // The pure scope builder turns the missing fixed dependency into a
-            // stable blocker. Never substitute a latest version or guess.
-          }
-        }
-        throwIfAborted();
-        const derivedScope = buildPossibleDerivedExecutionScope({
-          nodes: preflightNodes,
-          edges: preflightEdges,
-          executionNodeIds: selectedNodeIds,
-          requestId: options.requestId,
-          resolveSubflowDefinition: (reference: SubflowDependencyRef) => (
-            dependencyDefinitions.get(subflowDependencyMapKey(reference)) || null
-          ),
-        });
+        const derivedScope = await buildDerivedScope(controller.signal);
         latestDerivedScopeRef.current = derivedScope;
         const diagnosticScope = buildRunPreflightDiagnosticScope({
           nodes: derivedScope.nodes,
@@ -8729,7 +8782,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       runPreflightPresentedDigestRef.current = null;
       setRunPreflightModal(null);
     }
-  }, [captureRunExecutionSnapshot, presentRunPreflightPreview]);
+  }, [captureRunExecutionSnapshot, presentRunPreflightPreview, workflowDoctorEnabled]);
 
   // ===== 批量运行 =====
   // 通用: 在指定节点子集上拓扑排序 + 串行调 runBus
@@ -12844,6 +12897,23 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     <>
       <div className="t8-control-rail nodrag nopan" data-canvas-floating-ui="control-rail">
         <div className="t8-control-stack">
+          <button
+            type="button"
+            className={`t8-control-rail-help t8-control-rail-doctor t8-mini-icon-button${workflowDoctorEnabled ? ' is-active' : ''}`}
+            data-canvas-floating-ui="workflow-doctor-toggle"
+            data-workflow-doctor-enabled={workflowDoctorEnabled ? 'true' : 'false'}
+            aria-label={workflowDoctorEnabled ? '关闭工作流医生' : '开启工作流医生'}
+            title={workflowDoctorEnabled
+              ? '工作流医生：已开启（点击关闭运行前诊断）'
+              : '工作流医生：已关闭（点击开启运行前诊断）'}
+            aria-pressed={workflowDoctorEnabled}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleWorkflowDoctor();
+            }}
+          >
+            <LucideIcons.Stethoscope size={16} />
+          </button>
           <button
             type="button"
             className={`t8-control-rail-help t8-control-rail-placement-shelf t8-mini-icon-button${!placementShelfHidden ? ' is-active' : ''}`}

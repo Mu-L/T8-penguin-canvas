@@ -263,6 +263,9 @@ export interface ImageQueryResult extends ProviderTransportTrace {
   progress: string;
   urls?: string[];
   error?: string;
+  code?: string;
+  recoverable?: boolean;
+  retryAfterMs?: number;
 }
 
 // apiModel 透传给后端，让轮询阶段复用与 submit 一致的分类 API Key
@@ -378,6 +381,9 @@ export interface FalQueryResult extends ProviderTransportTrace {
   status: 'pending' | 'completed' | 'failed' | string;
   urls?: string[];
   error?: string;
+  code?: string;
+  recoverable?: boolean;
+  retryAfterMs?: number;
   falStatus?: string;
 }
 
@@ -470,6 +476,10 @@ export interface MjTaskResult extends ProviderTransportTrace {
   imageUrl?: string;
   imageUrls?: string[];   // 4 张子图
   failReason?: string;
+  error?: string;
+  code?: string;
+  recoverable?: boolean;
+  retryAfterMs?: number;
 }
 
 export async function queryMjTask(taskId: string, speed: MjSpeed = 'fast'): Promise<MjTaskResult> {
@@ -499,6 +509,10 @@ export async function queryMjTask(taskId: string, speed: MjSpeed = 'fast'): Prom
     imageUrl: d.image_url || d.imageUrl,
     imageUrls,
     failReason: d.fail_reason || d.failReason,
+    error: d.error,
+    code: d.code,
+    recoverable: d.recoverable,
+    retryAfterMs: d.retryAfterMs,
     ...providerTransportTrace(d, r),
   };
 }
@@ -534,6 +548,8 @@ export interface LlmMessage {
 export interface GenerateLlmRequest {
   model: string;
   messages: LlmMessage[];
+  /** 内置 LLM 平台；缺省保持贞贞 AI 工坊独立 LLM Key。 */
+  source?: 'zhenzhen' | 'seedance-nz';
   temperature?: number;
   max_tokens?: number;
   /** 视频传入方式：frames 默认用内置 ffmpeg 抽关键帧；native-base64 发送压缩原视频；url 转绝对 URL。 */
@@ -781,6 +797,9 @@ export interface VideoFalQueryResult extends ProviderTransportTrace {
   status: 'pending' | 'completed' | 'failed' | string;
   videoUrl?: string;
   error?: string;
+  code?: string;
+  recoverable?: boolean;
+  retryAfterMs?: number;
   falStatus?: string;
 }
 
@@ -863,6 +882,10 @@ export interface VideoQueryResult extends ProviderTransportTrace {
   progress?: string;
   videoUrl?: string | null;
   failReason?: string | null;
+  error?: string;
+  code?: string;
+  recoverable?: boolean;
+  retryAfterMs?: number;
 }
 
 // model 透传给后端，让轮询阶段复用与 submit 一致的分类 API Key
@@ -911,6 +934,10 @@ export interface HappyHorseQueryResult extends ProviderTransportTrace {
   progress?: string | number;
   videoUrl?: string | null;
   failReason?: string | null;
+  error?: string;
+  code?: string;
+  recoverable?: boolean;
+  retryAfterMs?: number;
 }
 
 export async function queryHappyHorse(taskId: string): Promise<HappyHorseQueryResult> {
@@ -1198,6 +1225,10 @@ export interface SeedanceQueryResult extends ProviderTransportTrace {
   progress?: string;
   videoUrl?: string | null;
   failReason?: string | null;
+  error?: string;
+  code?: string;
+  recoverable?: boolean;
+  retryAfterMs?: number;
   taskProvider?: Exclude<SeedanceTaskProvider, 'auto'>;
   model?: string;
   taskType?: 't2v' | 'i2v' | 'multi';
@@ -1264,6 +1295,10 @@ export interface AudioQueryResult extends ProviderTransportTrace {
   tracks: AudioTrack[];
   total: number;
   completed: number;
+  error?: string;
+  code?: string;
+  recoverable?: boolean;
+  retryAfterMs?: number;
 }
 
 /**
@@ -1313,6 +1348,10 @@ export interface SeedAudioQueryResult extends ProviderTransportTrace {
   audioUrl?: string | null;
   remoteAudioUrl?: string | null;
   failReason?: string | null;
+  error?: string;
+  code?: string;
+  recoverable?: boolean;
+  retryAfterMs?: number;
 }
 
 export async function querySeedAudio(taskId: string): Promise<SeedAudioQueryResult> {
@@ -1376,6 +1415,9 @@ export interface RhQueryResult extends ProviderTransportTrace {
   code?: number;
   site?: RhSite;
   fallbackUsed?: boolean;
+  error?: string;
+  recoverable?: boolean;
+  retryAfterMs?: number;
 }
 
 export async function queryRh(taskId: string, site: RhSite = 'cn'): Promise<RhQueryResult> {

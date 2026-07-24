@@ -2,6 +2,7 @@ import type { DirectorStoryboardInputShot } from './directorStoryboard';
 import type { VideoEditClip } from './videoEdit';
 import type { CanvasProviderSource } from '../types/canvas';
 import { IMAGE_MODELS, LLM_MODELS } from '../providers/models.ts';
+import { resolveSeedanceNzLlmModel } from '../config/llm.ts';
 import {
   LEGACY_SEEDANCE_MODEL_OPTIONS,
   SEEDANCE_NZ_MODEL_OPTIONS,
@@ -38,6 +39,8 @@ export interface StorySettings {
   pace: 'slow' | 'balanced' | 'fast';
   visualStyle: string;
   llmModel: string;
+  llmNzModel: string;
+  llmApiSource: 'zhenzhen' | 'seedance-nz';
   llmProviderSource: CanvasProviderSource;
   llmProviderId: string;
   llmProviderModel: string;
@@ -272,6 +275,8 @@ export function defaultStorySettings(): StorySettings {
     pace: 'balanced',
     visualStyle: '电影写实，高对比叙事光，角色与服装在所有镜头保持一致',
     llmModel: 'gemini-3.5-flash',
+    llmNzModel: resolveSeedanceNzLlmModel(''),
+    llmApiSource: 'zhenzhen',
     llmProviderSource: 'zhenzhen',
     llmProviderId: '',
     llmProviderModel: '',
@@ -335,6 +340,8 @@ function sanitizeSettings(value: unknown): StorySettings {
     pace: pace === 'slow' || pace === 'fast' ? pace : 'balanced',
     visualStyle: stringValue(raw.visualStyle, defaults.visualStyle),
     llmModel: STORY_LLM_MODELS.has(stringValue(raw.llmModel)) ? stringValue(raw.llmModel) : defaults.llmModel,
+    llmNzModel: resolveSeedanceNzLlmModel(raw.llmNzModel),
+    llmApiSource: raw.llmApiSource === 'seedance-nz' ? 'seedance-nz' : 'zhenzhen',
     llmProviderSource: safeProviderSource(raw.llmProviderSource),
     llmProviderId: stringValue(raw.llmProviderId),
     llmProviderModel: stringValue(raw.llmProviderModel),

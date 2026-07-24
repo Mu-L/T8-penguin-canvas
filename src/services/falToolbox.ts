@@ -248,6 +248,18 @@ export async function runFalToolboxTool(options: RunFalToolboxToolOptions): Prom
     if (query.status === 'failed') {
       throw new Error(query.error || 'FAL 任务失败');
     }
+    if (String(query.status || '').toLowerCase() === 'materializing') {
+      progress?.({
+        stage: 'poll',
+        message: query.error || '结果已经生成，正在适配 TUN/代理网络并安全下载；原任务会保留',
+        requestId,
+        pollCount,
+        transportHttpStatus: query.transportHttpStatus,
+        upstreamHttpStatus: query.upstreamHttpStatus,
+        usage: query.usage,
+      });
+      continue;
+    }
     const classified = classifyFalToolboxOutputs(query);
     if (query.status === 'completed' || classified.urls.length || classified.textOutputs.length) {
       progress?.({
