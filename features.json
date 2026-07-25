@@ -1,9 +1,40 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.6.8",
-  "lastUpdated": "2026-07-25-v2.6.8-release-candidate",
+  "lastUpdated": "2026-07-25-v2.6.8-released",
+  "release": {
+    "status": "released",
+    "version": "2.6.8",
+    "date": "2026-07-25",
+    "tag": "v2.6.8",
+    "sourceTarget": "41097025671baddfce7d171bfc41c64bb2d0af87",
+    "releaseUrl": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.6.8",
+    "latest": true,
+    "autoUpdateAssets": {
+      "installer": {
+        "name": "T8-PenguinCanvas-Setup-2.6.8.exe",
+        "size": 1303124391,
+        "sha256": "4baabc603f62e1dea43bac2f8be10147686b5abc84aac6704e0797c4b2a96cae"
+      },
+      "blockmap": {
+        "name": "T8-PenguinCanvas-Setup-2.6.8.exe.blockmap",
+        "size": 1357957,
+        "sha256": "42f3caf452fe2169a662935771781a79e9ca6c11fd72c44917b7f7cb71056cc8"
+      },
+      "latestYml": {
+        "name": "latest.yml",
+        "size": 362,
+        "sha256": "d3e2f0b242822253d014d50217fec077ae043668c7228f3ea1f9e4de46b999cf"
+      }
+    },
+    "verification": [
+      "GitHub Release 已正式发布、非草稿、非预发布并标记为 Latest；Tag v2.6.8 精确指向封存源码提交。",
+      "三项自动更新资产的 GitHub size / SHA-256 元数据与本地 sealed recovery 清单完全一致。",
+      "用户明确授权先发布、后补真实证据；受当前 GitHub 回下载链路约 80KB/s 影响，1.2GB 安装器的完整远端回下载哈希证据仍待发布后补齐，未标记为通过。"
+    ]
+  },
   "seedanceNzMidjourneyActions": {
-    "status": "release-candidate",
+    "status": "released-v2.6.8",
     "date": "2026-07-25",
     "releaseIncluded": true,
     "highlights": [
@@ -20,7 +51,7 @@
     ]
   },
   "seedanceNzSunoActions": {
-    "status": "release-candidate",
+    "status": "released-v2.6.8",
     "date": "2026-07-25",
     "releaseIncluded": true,
     "highlights": [
@@ -35,7 +66,7 @@
     ]
   },
   "imagePromptAdjustmentAssistant": {
-    "status": "release-candidate",
+    "status": "released-v2.6.8",
     "date": "2026-07-25",
     "releaseIncluded": true,
     "highlights": [
@@ -50,7 +81,7 @@
     ]
   },
   "imageLongEdgeScaling": {
-    "status": "release-candidate",
+    "status": "released-v2.6.8",
     "date": "2026-07-25",
     "releaseIncluded": true,
     "highlights": [
@@ -64,7 +95,7 @@
     ]
   },
   "canvasZoomTextReadability": {
-    "status": "release-candidate",
+    "status": "released-v2.6.8",
     "date": "2026-07-25",
     "releaseIncluded": true,
     "highlights": [
