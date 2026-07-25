@@ -29,6 +29,146 @@ const TINY_PNG_B = 'data:image/png;base64,iVBORw0KGgox';
 const TINY_MP3 = 'data:audio/mpeg;base64,SUQzAwAAAAA=';
 const TINY_MP4 = 'data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb20=';
 
+test('seedance.nz Suno catalog is an explicit 31-action whitelist', () => {
+  const operations = Object.keys(seedanceNz.SUNO_ACTION_SPECS);
+  assert.equal(operations.length, 31);
+  assert.equal(operations[0], 'suno-generation');
+  assert.equal(operations.at(-1), 'suno-add-stem');
+  assert.equal(seedanceNz.SUNO_ACTION_SPECS['suno-generation'].action, '');
+  assert.equal(seedanceNz.SUNO_ACTION_SPECS['suno-generate-mp4'].action, 'generate-mp4');
+  assert.deepEqual(seedanceNz.SUNO_VERSIONS, ['v3.5', 'v4', 'v4.5', 'v4.5+', 'v4.5-all', 'v5', 'v5.5']);
+});
+
+test('seedance.nz builds every documented Suno action with model=suno and only its allowed fields', async () => {
+  const common = {
+    prompt: 'A cinematic electronic song about a rainy city',
+    version: 'v5.5',
+    custom: true,
+    instrumental: false,
+    title: 'Rain City',
+    style: 'cinematic electronic',
+    vocal_gender: 'f',
+    tags: 'cinematic, electronic',
+    audioFilePath: TINY_MP3,
+    audio_url: TINY_MP3,
+    audio_urls: [TINY_MP3],
+    task_id: 'task_source_a',
+    task_id_2: 'task_source_b',
+    task_ids: ['task_source_a', 'task_source_b'],
+    audio_index: 1,
+    continue_at: 10,
+    start_s: 2,
+    end_s: 8,
+    duration_s: 3,
+    speed: 1.1,
+    name: 'Rain Voice',
+  };
+  const fetchImpl = async (url: string) => {
+    assert.match(url, /\/v1\/files\/upload$/);
+    return jsonResponse({ url: 'https://cdn.example.com/reference.mp3' });
+  };
+
+  for (const operation of Object.keys(seedanceNz.SUNO_ACTION_SPECS)) {
+    seedanceNz.resetCachesForTests();
+    const built = await seedanceNz.buildSunoMusicPayload(
+      { operation, ...common },
+      'test-key',
+      { fetchImpl, uploadIntervalMs: 0 },
+    );
+    const spec = seedanceNz.SUNO_ACTION_SPECS[operation];
+    assert.equal(built.operation, operation);
+    assert.equal(built.action, operation === 'suno-generation' ? '' : operation.slice(5));
+    assert.equal(built.payload.model, 'suno');
+    for (const field of Object.keys(built.payload)) {
+      assert.ok(field === 'model' || spec.allowedFields.includes(field), `${operation} leaked field ${field}`);
+    }
+    for (const field of spec.requiredFields) {
+      assert.notEqual(built.payload[field], undefined, `${operation} missing ${field}`);
+    }
+  }
+});
+
+test('seedance.nz rejects unknown Suno routes and invalid action contracts before fetch', async () => {
+  await assert.rejects(
+    seedanceNz.buildSunoMusicPayload({ operation: 'suno-not-real' }, 'test-key'),
+    /未知 Suno 操作/,
+  );
+  await assert.rejects(
+    seedanceNz.buildSunoMusicPayload({
+      operation: 'suno-mashup',
+      task_ids: ['only-one'],
+      prompt: 'mix them',
+      version: 'v5.5',
+    }, 'test-key'),
+    /必须填写 2 个 task_id/,
+  );
+  await assert.rejects(
+    seedanceNz.buildSunoMusicPayload({
+      operation: 'suno-crop',
+      task_id: 'task_a',
+      start_s: 9,
+      end_s: 2,
+    }, 'test-key'),
+    /end_s 必须大于 start_s/,
+  );
+});
+
+test('seedance.nz submits and queries Suno through the official music endpoints', async () => {
+  const seen: Array<{ url: string; body?: any }> = [];
+  const fetchImpl = async (url: string, init?: RequestInit) => {
+    seen.push({
+      url,
+      body: init?.body && typeof init.body === 'string' ? JSON.parse(init.body) : undefined,
+    });
+    if (url.endsWith('/v1/music/generations')) {
+      return jsonResponse({ data: { task_id: 'music_task_1', status: 'pending' } });
+    }
+    if (url.endsWith('/v1/music/tasks/music_task_1')) {
+      return jsonResponse({
+        data: {
+          task_id: 'music_task_1',
+          status: 'completed',
+          progress: 100,
+          result: {
+            music: [{
+              id: 'track_1',
+              title: 'Rain City',
+              audio_url: 'https://cdn.example.com/rain.mp3',
+              image_url: 'https://cdn.example.com/rain.png',
+            }],
+          },
+        },
+      });
+    }
+    throw new Error(`unexpected URL ${url}`);
+  };
+
+  const submitted = await seedanceNz.submitSunoMusicTask({
+    operation: 'suno-generation',
+    prompt: 'A cinematic electronic song about a rainy city',
+    version: 'v5.5',
+  }, 'test-key', { fetchImpl });
+  assert.equal(submitted.taskId, 'music_task_1');
+  assert.equal(submitted.status, 'pending');
+  assert.equal(seen[0].url, `${seedanceNz.BASE_URL}/v1/music/generations`);
+  assert.deepEqual(seen[0].body, {
+    model: 'suno',
+    version: 'v5.5',
+    prompt: 'A cinematic electronic song about a rainy city',
+  });
+
+  const queried = await seedanceNz.querySunoMusicTask('music_task_1', 'test-key', {
+    fetchImpl,
+    resultFamily: 'audio',
+  });
+  assert.equal(queried.status, 'succeeded');
+  assert.deepEqual(queried.artifacts, [
+    { url: 'https://cdn.example.com/rain.mp3', kind: 'audio' },
+    { url: 'https://cdn.example.com/rain.png', kind: 'image' },
+  ]);
+  assert.equal(queried.music[0].title, 'Rain City');
+});
+
 async function listen(handler: Parameters<typeof createServer>[0]) {
   const server = createServer(handler);
   server.on('connection', (socket) => socket.on('error', () => {}));

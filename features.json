@@ -1,7 +1,81 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.6.7",
-  "lastUpdated": "2026-07-25-v2.6.7-released",
+  "version": "2.6.8",
+  "lastUpdated": "2026-07-25-v2.6.8-release-candidate",
+  "seedanceNzMidjourneyActions": {
+    "status": "release-candidate",
+    "date": "2026-07-25",
+    "releaseIncluded": true,
+    "highlights": [
+      "图像节点 MJ TAB 在“贞贞的平价AI小屋”平台新增独立 Midjourney 动作工作台，覆盖 imagine、blend、describe、edits、upscale、variation、high/low variation、reroll、zoom、pan、inpaint、modal、video、remix strong/subtle 共 16 项官方动作。",
+      "每项动作使用独立字段与白话校验：参考图数量、源任务、按钮或索引、缩放/平移方向、局部重绘蒙版、视频首尾帧与运动参数均按官方契约动态显示；inpaint 返回的 MODAL 会自动带入 modal 后续提交。",
+      "平价AI小屋走独立 /v1/midjourney/generations 与 /v1/midjourney/tasks/{task_id} 链路，图片、视频、文字和按钮结果统一转存并持久化；原贞贞AI工坊 MJ 的 /api/proxy/mj/* 路由、配置和运行逻辑保持不变，两个平台互不串线。",
+      "图片来源在上传前严格校验数量，不会静默截断；异步完成仅在图片、视频或文字结果完成本地保存后才向节点返回完成状态，API Key 始终只从本机设置读取。"
+    ],
+    "verification": [
+      "逐项核对 https://api.seedance.nz/docs/llms.txt 与 F:\\AI-T8-video-onekey\\ComfyUI\\custom_nodes\\ComfyUI_Seedance；实时 /api/midjourney/actions 返回的 16 项动作与本地白名单完全一致。",
+      "16 项动作的请求构造、字段白名单、参考素材边界、同步/异步响应、MODAL 过渡、前端平台隔离与结果持久化定向回归 77/77 通过，TypeScript type-check 通过。",
+      "使用本机已配置凭据完成真实 midjourney-describe 与 midjourney-imagine 代表性调用：任务成功结束，Describe 返回文本，Imagine 返回网格/子图和动作按钮；其余依赖既有任务/按钮的动作由官方协议、ComfyUI 已通过实现和本地合同测试覆盖，未伪报为逐项真实付费调用。",
+      "用户明确授权 v2.6.8 先发布、后补协作与安装包回下载证据；延期不将任何缺失证据标记为通过。"
+    ]
+  },
+  "seedanceNzSunoActions": {
+    "status": "release-candidate",
+    "date": "2026-07-25",
+    "releaseIncluded": true,
+    "highlights": [
+      "音频节点 Suno TAB 新增独立“贞贞的平价AI小屋”平台，完整提供官方 31 项音乐生成、歌词、上传、续写、翻唱、灵感、混音、分轨、母带、MIDI、BPM、Persona、Vox、采样和编辑动作。",
+      "动作面板只显示当前操作需要的字段，并严格校验 task_id、音轨索引、时间范围、速度、版本和参考音频；原贞贞AI工坊 Suno 三模式、专属 Key 与旧画布数据保持不变。",
+      "平价AI小屋使用独立 /v1/music/generations[/:action] 与 /v1/music/tasks/{task_id} 协议，音频、视频、图片、文字和 MIDI 结果按真实类型本地持久化，完成但无可用结果时返回真实下载原因。"
+    ],
+    "verification": [
+      "逐项核对 https://api.seedance.nz/docs/llms.txt 与 ComfyUI_Seedance 的已通过实现；31 项动作目录、允许字段、版本和结果类型使用显式白名单。",
+      "Provider 请求构造、未知动作拒绝、同步/异步响应、前端平台隔离与敏感日志脱敏回归通过，TypeScript type-check 通过。",
+      "用户明确授权 v2.6.8 先发布、后补未覆盖动作的真实付费 Provider 证据；延期不将任何缺失证据标记为通过。"
+    ]
+  },
+  "imagePromptAdjustmentAssistant": {
+    "status": "release-candidate",
+    "date": "2026-07-25",
+    "releaseIncluded": true,
+    "highlights": [
+      "图像节点 Prompt 区新增轻量“图像调节助手”：固定浮层提供 12 类、每类严格 20 项、共 240 项中英双语原子调节，覆盖人景融合、光影、皮肤、材质、清晰度、构图、色彩、镜头、参考一致性、结构修复、氛围和动态。",
+      "交互支持分类 LIST、即时搜索、同类自动替换、跨类组合、显式冲突移除、撤销和清空；选中摘要常驻 Prompt 下方，参考图专属项在无参考图时显示禁用原因，浅色、深色和像素主题使用同一紧凑入口。",
+      "调节项以稳定 ID、目录版本和语义快照单独持久化，不覆盖用户本地 Prompt、上游文本或 @ 素材引用；生成时统一编译为可见后缀，并保持 upstreamPrompt || localPrompt 的原有优先级。",
+      "普通图像 Provider 与声明正向 Prompt 字段的 ComfyUI 图像工作流共用同一个最终 Prompt 事实源；无 Prompt 字段的 ComfyUI 工作流保持原行为。该功能完全本地，不调用模型、不产生费用。"
+    ],
+    "verification": [
+      "目录、快照、冲突、编译顺序、语言、参考图能力和组件接线定向测试 36/36 通过，TypeScript type-check 通过。",
+      "本地真实页面完成打开、搜索、跨类组合、同类替换、撤销、清空、Esc 关闭与焦点恢复验收；像素主题下浮层保持固定尺寸并独立于画布缩放。"
+    ]
+  },
+  "imageLongEdgeScaling": {
+    "status": "release-candidate",
+    "date": "2026-07-25",
+    "releaseIncluded": true,
+    "highlights": [
+      "上传图像与输出素材图像区新增轻量 1K / 2K 长边按钮；选择后按 1024 或 2048 像素等比缩小，并将缩放结果传给下载、拖拽和后续节点。",
+      "不会放大小图，不改变宽高比；JPEG 使用最高质量 4:4:4、WebP 使用无损模式、PNG 保持无损，仅改变像素尺寸而不额外降低质量。",
+      "缩放过程显示明确状态并阻止未完成结果向下游传播；切回原图、追加、删除、集合打散和刷新持久化均保持来源与缩放结果对应。"
+    ],
+    "verification": [
+      "长边纯函数、后端真实图片缩放路由、上传/输出节点持久化与交互专项测试通过，TypeScript type-check 通过。",
+      "该能力为本地 Sharp 图像处理，不调用 Provider、不产生模型费用。"
+    ]
+  },
+  "canvasZoomTextReadability": {
+    "status": "release-candidate",
+    "date": "2026-07-25",
+    "releaseIncluded": true,
+    "highlights": [
+      "画布在低于 90% 缩放时自动关闭节点上的 filter / backdrop-filter 合成层，避免 Chromium 先把整张节点位图化再缩放而导致文字发糊。",
+      "缩放结束后将视口平移量吸附到设备像素，并按 detail / compact / overview 三档切换可读性样式；节点位置、尺寸和画布数据不被修改。",
+      "详细缩放仍保留完整玻璃效果，浅色、深色与强主题共享同一可读性护栏。"
+    ],
+    "verification": [
+      "缩放阈值、设备像素吸附、Canvas 属性与样式契约专项测试通过，TypeScript type-check 通过。"
+    ]
+  },
   "seedanceNzApimartMediaModels": {
     "status": "released-v2.6.7",
     "date": "2026-07-25",

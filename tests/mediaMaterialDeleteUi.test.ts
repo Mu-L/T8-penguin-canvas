@@ -27,7 +27,7 @@ test('upload and output material nodes expose per-material delete actions', () =
   assert.match(output, /t8-output-image-media--grid/);
   assert.match(output, /grid grid-cols-2 gap-1\.5/);
   assert.match(output, /t8-material-action-button/);
-  assert.match(output, /iconSize=\{collected\.images\.length >= 2 \? 10 : 14\}/);
+  assert.match(output, /iconSize=\{displayImageUrls\.length >= 2 \? 10 : 14\}/);
 
   const css = read('../src/styles/index.css');
   assert.match(css, /\.t8-output-image-media--grid\s*\{[\s\S]*height:\s*auto\s*!important/);

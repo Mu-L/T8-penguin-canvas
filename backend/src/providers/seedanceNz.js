@@ -166,6 +166,249 @@ const VIDU_Q3_MAX_SHORT_PLAY_ASSETS = 14;
 const SEED_AUDIO_MODEL = 'doubao-seed-audio-1.0';
 const SEED_AUDIO_FORMATS = new Set(['wav', 'mp3', 'pcm', 'ogg_opus']);
 const SEED_AUDIO_SAMPLE_RATES = new Set(['8000', '16000', '24000', '32000', '44100']);
+const SUNO_VERSIONS = Object.freeze(['v3.5', 'v4', 'v4.5', 'v4.5+', 'v4.5-all', 'v5', 'v5.5']);
+const SUNO_INSPO_VERSIONS = Object.freeze(['v4', 'v4.5', 'v4.5+', 'v4.5-all', 'v5', 'v5.5']);
+const SUNO_REPLACE_VERSIONS = Object.freeze(['v4', 'v4.5+', 'v5', 'v5.5']);
+const SUNO_REMASTER_VERSIONS = Object.freeze(['v4.5+', 'v5', 'v5.5']);
+const SUNO_V5_VERSIONS = Object.freeze(['v5', 'v5.5']);
+const SUNO_MAX_REFERENCE_AUDIOS = 4;
+const MIDJOURNEY_SPEEDS = new Set(['relax', 'fast', 'turbo']);
+const MIDJOURNEY_VERSIONS = new Set(['5', '5.1', '5.2', '6', '6.1', '7', '8.1', '8.2']);
+const MIDJOURNEY_DIMENSIONS = new Set(['SQUARE', 'PORTRAIT', 'LANDSCAPE']);
+const MIDJOURNEY_QUALITIES = new Set(['0.25', '0.5', '1', '2']);
+const MIDJOURNEY_DIRECTIONS = new Set(['left', 'right', 'up', 'down']);
+const MIDJOURNEY_VIDEO_TYPES = new Set([
+  'vid_1.1_i2v_480',
+  'vid_1.1_i2v_720',
+  'vid_1.1_i2v_start_end_480',
+  'vid_1.1_i2v_start_end_720',
+]);
+const MIDJOURNEY_ANIMATE_MODES = new Set(['manual', 'auto']);
+const MIDJOURNEY_MOTIONS = new Set(['low', 'high']);
+const MIDJOURNEY_BATCH_SIZES = new Set([1, 2, 4]);
+const MIDJOURNEY_STRUCTURED_FIELDS = Object.freeze([
+  'size',
+  'quality',
+  'style',
+  'version',
+  'seed',
+  'negative_prompt',
+  'stylize',
+  'chaos',
+  'weird',
+  'tile',
+  'niji',
+  'iw',
+  'cw',
+  'sw',
+  'cref',
+  'sref',
+  'dref',
+  'dw',
+  'repeat',
+  'raw',
+  'draft',
+  'hd',
+  'stop',
+  'extra',
+]);
+const midjourneyActionSpec = (
+  action,
+  executionMode,
+  requiredFields,
+  requiredOneOf,
+  allowedFields,
+  resultFamily,
+) => Object.freeze({
+  action,
+  executionMode,
+  requiredFields: Object.freeze(requiredFields),
+  requiredOneOf: Object.freeze(requiredOneOf.map((group) => Object.freeze(group))),
+  allowedFields: Object.freeze(allowedFields),
+  resultFamily,
+});
+const MIDJOURNEY_ACTION_SPECS = Object.freeze({
+  'midjourney-imagine': midjourneyActionSpec(
+    'imagine',
+    'async',
+    ['prompt'],
+    [],
+    ['prompt', 'image_urls', 'speed', 'metadata', ...MIDJOURNEY_STRUCTURED_FIELDS],
+    'image',
+  ),
+  'midjourney-blend': midjourneyActionSpec(
+    'blend',
+    'async',
+    ['image_urls'],
+    [],
+    ['image_urls', 'dimensions', 'size', 'speed', 'metadata'],
+    'image',
+  ),
+  'midjourney-describe': midjourneyActionSpec(
+    'describe',
+    'sync_or_async',
+    ['image_urls'],
+    [],
+    ['image_urls', 'speed', 'metadata'],
+    'text',
+  ),
+  'midjourney-edits': midjourneyActionSpec(
+    'edits',
+    'async',
+    ['prompt', 'image_urls'],
+    [],
+    ['prompt', 'image_urls', 'speed', 'metadata', ...MIDJOURNEY_STRUCTURED_FIELDS],
+    'image',
+  ),
+  'midjourney-upscale': midjourneyActionSpec(
+    'upscale',
+    'async',
+    ['task_id'],
+    [['index', 'custom_id']],
+    ['task_id', 'index', 'custom_id', 'speed', 'metadata'],
+    'image',
+  ),
+  'midjourney-variation': midjourneyActionSpec(
+    'variation',
+    'async',
+    ['task_id'],
+    [['index', 'custom_id']],
+    ['task_id', 'index', 'custom_id', 'speed', 'metadata'],
+    'image',
+  ),
+  'midjourney-high-variation': midjourneyActionSpec(
+    'high-variation',
+    'async',
+    ['task_id'],
+    [['index', 'custom_id']],
+    ['task_id', 'index', 'custom_id', 'speed', 'metadata'],
+    'image',
+  ),
+  'midjourney-low-variation': midjourneyActionSpec(
+    'low-variation',
+    'async',
+    ['task_id'],
+    [['index', 'custom_id']],
+    ['task_id', 'index', 'custom_id', 'speed', 'metadata'],
+    'image',
+  ),
+  'midjourney-reroll': midjourneyActionSpec(
+    'reroll',
+    'async',
+    ['task_id'],
+    [],
+    ['task_id', 'custom_id', 'speed', 'metadata'],
+    'image',
+  ),
+  'midjourney-zoom': midjourneyActionSpec(
+    'zoom',
+    'async',
+    ['task_id'],
+    [],
+    ['task_id', 'index', 'custom_id', 'zoom_ratio', 'speed', 'metadata'],
+    'image',
+  ),
+  'midjourney-pan': midjourneyActionSpec(
+    'pan',
+    'async',
+    ['task_id'],
+    [['direction', 'custom_id']],
+    ['task_id', 'index', 'direction', 'custom_id', 'speed', 'metadata'],
+    'image',
+  ),
+  'midjourney-inpaint': midjourneyActionSpec(
+    'inpaint',
+    'modal_stage',
+    ['task_id'],
+    [],
+    ['task_id', 'index', 'custom_id', 'speed', 'metadata'],
+    'modal',
+  ),
+  'midjourney-modal': midjourneyActionSpec(
+    'modal',
+    'async',
+    ['task_id'],
+    [],
+    ['task_id', 'prompt', 'mask_url', 'speed', 'metadata'],
+    'image',
+  ),
+  'midjourney-video': midjourneyActionSpec(
+    'video',
+    'async',
+    [],
+    [['image_urls', 'task_id']],
+    ['prompt', 'image_urls', 'task_id', 'index', 'video_type', 'animate_mode', 'motion', 'batch_size', 'end_url'],
+    'video',
+  ),
+  'midjourney-remix-strong': midjourneyActionSpec(
+    'remix-strong',
+    'async',
+    ['task_id', 'index'],
+    [],
+    ['task_id', 'index', 'prompt', 'speed'],
+    'image',
+  ),
+  'midjourney-remix-subtle': midjourneyActionSpec(
+    'remix-subtle',
+    'async',
+    ['task_id', 'index'],
+    [],
+    ['task_id', 'index', 'prompt', 'speed'],
+    'image',
+  ),
+});
+const sunoActionSpec = (
+  action,
+  requiredFields,
+  allowedFields,
+  resultFamily,
+  referenceType = 'none',
+  allowedVersions = [],
+  defaultVersion = '',
+  sync = false,
+) => Object.freeze({
+  action,
+  requiredFields: Object.freeze(requiredFields),
+  allowedFields: Object.freeze(allowedFields),
+  resultFamily,
+  referenceType,
+  allowedVersions: Object.freeze(allowedVersions),
+  defaultVersion,
+  sync,
+});
+const SUNO_ACTION_SPECS = Object.freeze({
+  'suno-generation': sunoActionSpec('', ['version', 'prompt'], ['version', 'prompt', 'custom', 'instrumental', 'title', 'style', 'vocal_gender'], 'audio', 'none', SUNO_VERSIONS),
+  'suno-lyrics': sunoActionSpec('lyrics', ['prompt'], ['prompt'], 'text'),
+  'suno-upload': sunoActionSpec('upload', ['audioFilePath'], ['audioFilePath'], 'audio', 'url'),
+  'suno-extend': sunoActionSpec('extend', ['task_id', 'continue_at'], ['task_id', 'audio_index', 'continue_at', 'version'], 'audio', 'task_audio', SUNO_VERSIONS, 'v5.5'),
+  'suno-cover-song': sunoActionSpec('cover-song', ['task_id', 'prompt'], ['task_id', 'audio_index', 'prompt', 'version'], 'audio', 'task_audio', SUNO_VERSIONS, 'v5.5'),
+  'suno-inspo': sunoActionSpec('inspo', ['audio_urls'], ['audio_urls', 'version'], 'audio', 'url', SUNO_INSPO_VERSIONS, 'v5.5'),
+  'suno-mashup': sunoActionSpec('mashup', ['task_ids', 'prompt'], ['task_ids', 'prompt', 'version'], 'audio', 'mashup', SUNO_VERSIONS, 'v5.5'),
+  'suno-upsample-tags': sunoActionSpec('upsample-tags', ['tags'], ['tags'], 'text', 'none', [], '', true),
+  'suno-sounds': sunoActionSpec('sounds', ['prompt'], ['prompt', 'version'], 'audio', 'none', SUNO_V5_VERSIONS, 'v5.5'),
+  'suno-create-voice': sunoActionSpec('create-voice', ['audio_url'], ['audio_url'], 'text', 'url'),
+  'suno-stems': sunoActionSpec('stems', ['task_id'], ['task_id', 'audio_index'], 'audio', 'task_audio'),
+  'suno-stems-all': sunoActionSpec('stems-all', ['task_id'], ['task_id', 'audio_index'], 'audio', 'task_audio'),
+  'suno-wav': sunoActionSpec('wav', ['task_id'], ['task_id', 'audio_index'], 'audio', 'task_audio'),
+  'suno-generate-mp4': sunoActionSpec('generate-mp4', ['task_id'], ['task_id', 'audio_index'], 'video', 'task_audio'),
+  'suno-concat': sunoActionSpec('concat', ['task_id'], ['task_id', 'audio_index'], 'audio', 'task_audio'),
+  'suno-crop': sunoActionSpec('crop', ['task_id', 'start_s', 'end_s'], ['task_id', 'audio_index', 'start_s', 'end_s'], 'audio', 'task_audio'),
+  'suno-fade-in': sunoActionSpec('fade-in', ['task_id', 'duration_s'], ['task_id', 'audio_index', 'duration_s'], 'audio', 'task_audio'),
+  'suno-fade-out': sunoActionSpec('fade-out', ['task_id', 'duration_s'], ['task_id', 'audio_index', 'duration_s'], 'audio', 'task_audio'),
+  'suno-remove-section': sunoActionSpec('remove-section', ['task_id', 'start_s', 'end_s'], ['task_id', 'audio_index', 'start_s', 'end_s'], 'audio', 'task_audio'),
+  'suno-replace-music': sunoActionSpec('replace-music', ['task_id', 'start_s', 'end_s'], ['task_id', 'audio_index', 'start_s', 'end_s', 'version'], 'audio', 'task_audio', SUNO_REPLACE_VERSIONS, 'v5.5'),
+  'suno-adjust-speed': sunoActionSpec('adjust-speed', ['task_id', 'speed'], ['task_id', 'audio_index', 'speed'], 'audio', 'task_audio'),
+  'suno-remaster': sunoActionSpec('remaster', ['task_id'], ['task_id', 'audio_index', 'version'], 'audio', 'task_audio', SUNO_REMASTER_VERSIONS, 'v5.5'),
+  'suno-midi': sunoActionSpec('midi', ['task_id'], ['task_id', 'audio_index'], 'file', 'task_audio'),
+  'suno-bpm': sunoActionSpec('bpm', ['task_id'], ['task_id', 'audio_index'], 'text', 'task_audio'),
+  'suno-aligned-lyrics': sunoActionSpec('aligned-lyrics', ['task_id'], ['task_id', 'audio_index'], 'text', 'task_audio'),
+  'suno-persona': sunoActionSpec('persona', ['task_id', 'name'], ['task_id', 'audio_index', 'name'], 'text', 'task_audio'),
+  'suno-vox': sunoActionSpec('vox', ['task_id'], ['task_id', 'audio_index'], 'audio', 'task_audio'),
+  'suno-sample': sunoActionSpec('sample', ['task_id', 'start_s', 'end_s', 'prompt'], ['task_id', 'audio_index', 'prompt', 'start_s', 'end_s', 'version'], 'audio', 'task_audio', SUNO_VERSIONS, 'v5.5'),
+  'suno-add-vocals': sunoActionSpec('add-vocals', ['task_id', 'prompt'], ['task_id', 'audio_index', 'prompt', 'version'], 'audio', 'task_audio', SUNO_V5_VERSIONS, 'v5.5'),
+  'suno-add-instrumental': sunoActionSpec('add-instrumental', ['task_id', 'prompt'], ['task_id', 'audio_index', 'prompt', 'version'], 'audio', 'task_audio', SUNO_V5_VERSIONS, 'v5.5'),
+  'suno-add-stem': sunoActionSpec('add-stem', ['task_id', 'prompt'], ['task_id', 'audio_index', 'prompt', 'version'], 'audio', 'task_audio', ['v5.5'], 'v5.5'),
+});
 const IMAGE_REFERENCE_MAX_BYTES = 10 * 1024 * 1024;
 const DEFAULT_UPLOAD_INTERVAL_MS = 6100;
 const DEFAULT_UPLOAD_CACHE_TTL_MS = 20 * 60 * 60 * 1000;
@@ -983,6 +1226,514 @@ async function uploadMedia(source, kind, apiKey, options = {}) {
     uploadCache.delete(cacheKey);
     throw error;
   }
+}
+
+function midjourneyText(value) {
+  return String(value ?? '').trim();
+}
+
+function midjourneyInteger(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback;
+}
+
+function midjourneyNumber(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function midjourneyRequiredValuePresent(value) {
+  return value !== undefined && value !== null && value !== '' && (!Array.isArray(value) || value.length > 0);
+}
+
+function midjourneyMetadata(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  let parsed = value;
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      throw new Error('Midjourney metadata 必须是有效的 JSON 对象');
+    }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Midjourney metadata 必须是 JSON 对象');
+  }
+  return parsed;
+}
+
+function validateMidjourneyStructuredCompatibility(payload) {
+  const version = midjourneyText(payload.version);
+  const niji = payload.niji === true;
+  if (niji && version && !new Set(['5', '6', '7']).has(version)) {
+    throw new Error('启用 niji 时，Midjourney version 只能为 5、6 或 7');
+  }
+  if (payload.raw && version === '5') {
+    throw new Error('Midjourney raw 需要 version 5.1 或更高');
+  }
+  if (payload.draft && version && !new Set(['7', '8.1', '8.2']).has(version)) {
+    throw new Error('Midjourney draft 只支持 version 7、8.1 或 8.2');
+  }
+  if (payload.hd && version && !new Set(['8.1', '8.2']).has(version)) {
+    throw new Error('Midjourney hd 只支持 version 8.1 或 8.2');
+  }
+  if (payload.stop !== undefined && version) {
+    const supported = niji
+      ? new Set(['5', '6'])
+      : new Set(['5', '5.1', '5.2', '6', '6.1']);
+    if (!supported.has(version)) {
+      throw new Error(`Midjourney ${niji ? 'Niji' : '主模型'} version ${version} 不支持 stop`);
+    }
+  }
+}
+
+async function buildMidjourneyPayload(request, apiKey, options = {}) {
+  const operation = midjourneyText(request.operation || request.model).toLowerCase();
+  const spec = MIDJOURNEY_ACTION_SPECS[operation];
+  if (!spec) throw new Error(`不支持的 Midjourney 功能：${operation || '(空)'}`);
+  const allowed = new Set(spec.allowedFields);
+  const payload = {};
+
+  const prompt = midjourneyText(request.prompt);
+  if (allowed.has('prompt') && prompt) payload.prompt = prompt;
+
+  const imageSources = normalizeList(request.image_urls || request.imageUrls || request.images);
+  if (operation === 'midjourney-blend' && (imageSources.length < 2 || imageSources.length > 4)) {
+    throw new Error('midjourney-blend 必须提供 2–4 张图片');
+  }
+  if (operation === 'midjourney-describe' && imageSources.length !== 1) {
+    throw new Error('midjourney-describe 必须且只能提供 1 张图片');
+  }
+  if (operation === 'midjourney-imagine' && imageSources.length > 4) {
+    throw new Error('midjourney-imagine 最多支持 4 张图片');
+  }
+  if (operation === 'midjourney-edits' && (imageSources.length < 1 || imageSources.length > 4)) {
+    throw new Error('midjourney-edits 必须提供 1–4 张图片');
+  }
+  if (operation === 'midjourney-video' && imageSources.length > 1) {
+    throw new Error('midjourney-video 直接图片模式必须且只能提供 1 张首帧');
+  }
+  if (allowed.has('image_urls') && imageSources.length) {
+    payload.image_urls = [];
+    for (const source of imageSources) {
+      payload.image_urls.push(await uploadMedia(source, 'image', apiKey, options));
+    }
+  }
+
+  const taskId = midjourneyText(request.task_id || request.taskId);
+  if (allowed.has('task_id') && taskId) payload.task_id = taskId;
+  const customId = midjourneyText(request.custom_id || request.customId);
+  if (allowed.has('custom_id') && customId) payload.custom_id = customId;
+
+  const rawIndex = request.index;
+  const index = midjourneyInteger(rawIndex, -1);
+  if (allowed.has('index') && index >= 0 && !customId) payload.index = index;
+
+  const speed = midjourneyText(request.speed).toLowerCase();
+  if (allowed.has('speed') && speed && speed !== 'unset') {
+    if (!MIDJOURNEY_SPEEDS.has(speed)) throw new Error('Midjourney speed 只支持 relax、fast 或 turbo');
+    payload.speed = speed;
+  }
+
+  const size = midjourneyText(request.size);
+  if (allowed.has('size') && size) payload.size = size;
+  const dimensions = midjourneyText(request.dimensions).toUpperCase();
+  if (allowed.has('dimensions') && dimensions && dimensions !== 'UNSET' && !size) {
+    if (!MIDJOURNEY_DIMENSIONS.has(dimensions)) {
+      throw new Error('Midjourney blend dimensions 只支持 SQUARE、PORTRAIT 或 LANDSCAPE');
+    }
+    payload.dimensions = dimensions;
+  }
+
+  if (allowed.has('direction') && !customId) {
+    const direction = midjourneyText(request.direction).toLowerCase();
+    if (direction && direction !== 'unset') {
+      if (!MIDJOURNEY_DIRECTIONS.has(direction)) {
+        throw new Error('Midjourney pan direction 只支持 left、right、up 或 down');
+      }
+      payload.direction = direction;
+    }
+  }
+  if (allowed.has('zoom_ratio') && !customId) {
+    const zoomRatio = midjourneyNumber(request.zoom_ratio ?? request.zoomRatio, 2);
+    if (zoomRatio < 1 || zoomRatio > 2) throw new Error('Midjourney zoom_ratio 必须在 1.0–2.0 之间');
+    payload.zoom_ratio = zoomRatio;
+  }
+
+  if (allowed.has('mask_url')) {
+    const maskSource = midjourneyText(request.mask_url || request.maskUrl);
+    if (maskSource) {
+      payload.mask_url = await uploadMedia(maskSource, 'image', apiKey, {
+        ...options,
+        cacheVariant: 'midjourney-mask',
+        allowedMimes: ['image/png'],
+      });
+    }
+  }
+  if (allowed.has('end_url')) {
+    const endSource = midjourneyText(request.end_url || request.endUrl);
+    if (endSource) payload.end_url = await uploadMedia(endSource, 'image', apiKey, options);
+  }
+
+  if (operation === 'midjourney-video') {
+    const videoType = midjourneyText(request.video_type || request.videoType || 'vid_1.1_i2v_480').toLowerCase();
+    const animateMode = midjourneyText(request.animate_mode || request.animateMode || 'manual').toLowerCase();
+    const motion = midjourneyText(request.motion || 'low').toLowerCase();
+    const batchSize = midjourneyInteger(request.batch_size ?? request.batchSize, 1);
+    if (!MIDJOURNEY_VIDEO_TYPES.has(videoType)) throw new Error('Midjourney video_type 不受支持');
+    if (!MIDJOURNEY_ANIMATE_MODES.has(animateMode)) throw new Error('Midjourney animate_mode 只支持 manual 或 auto');
+    if (!MIDJOURNEY_MOTIONS.has(motion)) throw new Error('Midjourney motion 只支持 low 或 high');
+    if (!MIDJOURNEY_BATCH_SIZES.has(batchSize)) throw new Error('Midjourney batch_size 只支持 1、2 或 4');
+    payload.video_type = videoType;
+    payload.animate_mode = animateMode;
+    payload.motion = motion;
+    payload.batch_size = batchSize;
+  }
+
+  const quality = midjourneyText(request.quality);
+  if (allowed.has('quality') && quality && quality !== 'unset') {
+    if (!MIDJOURNEY_QUALITIES.has(quality)) throw new Error('Midjourney quality 只支持 0.25、0.5、1 或 2');
+    payload.quality = quality;
+  }
+  const version = midjourneyText(request.version);
+  if (allowed.has('version') && version && version !== 'unset') {
+    if (!MIDJOURNEY_VERSIONS.has(version)) throw new Error('Midjourney version 不受支持');
+    payload.version = version;
+  }
+
+  for (const field of ['style', 'negative_prompt', 'extra']) {
+    const value = midjourneyText(request[field]);
+    if (allowed.has(field) && value) payload[field] = value;
+  }
+  for (const field of ['cref', 'sref', 'dref']) {
+    const value = midjourneyText(request[field]);
+    if (allowed.has(field) && value) payload[field] = await uploadMedia(value, 'image', apiKey, options);
+  }
+
+  const sentinelIntegers = {
+    seed: -1,
+    stylize: -1,
+    chaos: -1,
+    weird: -1,
+    cw: -1,
+    sw: -1,
+    repeat: 0,
+    stop: 0,
+  };
+  for (const [field, sentinel] of Object.entries(sentinelIntegers)) {
+    if (!allowed.has(field)) continue;
+    const value = midjourneyInteger(request[field], sentinel);
+    if (value > sentinel) payload[field] = value;
+  }
+  if (payload.repeat === 1 || (payload.repeat !== undefined && (payload.repeat < 2 || payload.repeat > 40))) {
+    throw new Error('Midjourney repeat 必须为 0（不传）或 2–40');
+  }
+  if (payload.stop !== undefined && (payload.stop < 10 || payload.stop > 100)) {
+    throw new Error('Midjourney stop 必须为 0（不传）或 10–100');
+  }
+
+  for (const field of ['iw', 'dw']) {
+    if (!allowed.has(field)) continue;
+    const value = midjourneyNumber(request[field], -1);
+    if (value >= 0) payload[field] = value;
+  }
+  for (const field of ['tile', 'niji', 'raw', 'draft', 'hd']) {
+    if (allowed.has(field) && request[field] === true) payload[field] = true;
+  }
+  validateMidjourneyStructuredCompatibility(payload);
+
+  if (allowed.has('metadata')) {
+    const metadata = midjourneyMetadata(request.metadata ?? request.metadata_json);
+    if (metadata !== undefined) payload.metadata = metadata;
+  }
+
+  const imageCount = Array.isArray(payload.image_urls) ? payload.image_urls.length : 0;
+
+  const oneBasedActions = new Set([
+    'midjourney-upscale',
+    'midjourney-variation',
+    'midjourney-high-variation',
+    'midjourney-low-variation',
+    'midjourney-remix-strong',
+    'midjourney-remix-subtle',
+  ]);
+  if (oneBasedActions.has(operation) && !customId && (payload.index < 1 || payload.index > 4)) {
+    throw new Error(`${operation} 的 index 必须为 1–4`);
+  }
+  if (
+    new Set(['midjourney-zoom', 'midjourney-pan', 'midjourney-inpaint']).has(operation)
+    && payload.index !== undefined
+    && (payload.index < 1 || payload.index > 4)
+  ) {
+    throw new Error(`${operation} 的 index 必须为 1–4`);
+  }
+
+  if (operation === 'midjourney-modal') {
+    const mode = midjourneyText(request.modal_mode || request.modalMode || 'region').toLowerCase();
+    if (!new Set(['region', 'outpaint']).has(mode)) throw new Error('Midjourney modal_mode 只支持 region 或 outpaint');
+    if (mode === 'region' && !payload.mask_url) throw new Error('midjourney-modal 局部重绘必须提供 PNG 遮罩图');
+    if (mode === 'outpaint') delete payload.mask_url;
+  }
+
+  if (operation === 'midjourney-video') {
+    const hasImages = imageCount > 0;
+    const hasTask = !!payload.task_id;
+    if (hasImages === hasTask) throw new Error('midjourney-video 必须且只能选择首帧图片或任务 ID');
+    if (hasImages && imageCount !== 1) throw new Error('midjourney-video 直接图片模式必须且只能提供 1 张首帧');
+    if (hasImages && !prompt) throw new Error('midjourney-video 直接图片模式必须填写 Prompt');
+    if (payload.animate_mode === 'auto' && (!hasTask || payload.index === undefined)) {
+      throw new Error('midjourney-video 自动动画模式必须提供任务 ID 和 0–3 索引');
+    }
+    if (hasImages && payload.index !== undefined) throw new Error('midjourney-video 的 index 仅适用于任务 ID 模式');
+    if (hasTask && payload.index !== undefined && (payload.index < 0 || payload.index > 3)) {
+      throw new Error('midjourney-video 任务索引必须为 0–3');
+    }
+    const hasEnd = !!payload.end_url;
+    const isStartEnd = payload.video_type.includes('_start_end_');
+    if (hasEnd && !isStartEnd) {
+      const resolution = payload.video_type.includes('720') ? '720' : '480';
+      payload.video_type = `vid_1.1_i2v_start_end_${resolution}`;
+    } else if (isStartEnd && !hasEnd) {
+      throw new Error('Midjourney 首尾帧视频模式必须提供尾帧图片');
+    }
+  }
+
+  for (const field of spec.requiredFields) {
+    if (!midjourneyRequiredValuePresent(payload[field])) throw new Error(`${operation} 缺少必填参数：${field}`);
+  }
+  for (const group of spec.requiredOneOf) {
+    if (!group.some((field) => midjourneyRequiredValuePresent(payload[field]))) {
+      throw new Error(`${operation} 必须提供 ${group.join(' 或 ')}`);
+    }
+  }
+
+  return {
+    operation,
+    action: spec.action,
+    executionMode: spec.executionMode,
+    resultFamily: spec.resultFamily,
+    payload: Object.fromEntries(Object.entries(payload).filter(([key]) => allowed.has(key))),
+  };
+}
+
+const MIDJOURNEY_ENVELOPE_KEYS = Object.freeze(['data', 'result', 'task', 'output']);
+const MIDJOURNEY_TASK_KEYS = new Set([
+  'status',
+  'task_id',
+  'image_urls',
+  'images',
+  'video_urls',
+  'videos',
+  'grid_image_url',
+  'description',
+  'prompt',
+  'text',
+  'buttons',
+]);
+
+function midjourneyTaskId(value, depth = 0) {
+  if (depth > 8 || value == null) return '';
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const taskId = midjourneyTaskId(item, depth + 1);
+      if (taskId) return taskId;
+    }
+    return '';
+  }
+  if (typeof value !== 'object') return '';
+  for (const key of ['task_id', 'id']) {
+    const candidate = midjourneyText(value[key]);
+    if (/^[A-Za-z0-9][A-Za-z0-9._:\-]{0,255}$/.test(candidate)) return candidate;
+  }
+  for (const key of MIDJOURNEY_ENVELOPE_KEYS) {
+    const taskId = midjourneyTaskId(value[key], depth + 1);
+    if (taskId) return taskId;
+  }
+  return '';
+}
+
+function midjourneyTaskData(value, depth = 0) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || depth > 8) return null;
+  const data = value.data;
+  const candidates = Array.isArray(data) ? data : [data];
+  for (const candidate of candidates) {
+    const unwrapped = midjourneyTaskData(candidate, depth + 1);
+    if (unwrapped) return unwrapped;
+  }
+  if (Object.keys(value).some((key) => MIDJOURNEY_TASK_KEYS.has(key))) return value;
+  for (const key of ['result', 'task', 'output']) {
+    const nested = midjourneyTaskData(value[key], depth + 1);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+function midjourneyContainers(value) {
+  const containers = [];
+  const queue = [value];
+  const seen = new Set();
+  while (queue.length) {
+    const item = queue.shift();
+    if (Array.isArray(item)) {
+      queue.push(...item.filter((child) => child && typeof child === 'object'));
+      continue;
+    }
+    if (!item || typeof item !== 'object' || seen.has(item)) continue;
+    seen.add(item);
+    containers.push(item);
+    for (const key of MIDJOURNEY_ENVELOPE_KEYS) {
+      const nested = item[key];
+      if (nested && typeof nested === 'object') queue.push(nested);
+    }
+  }
+  return containers;
+}
+
+function appendMidjourneyUrl(target, value) {
+  const url = midjourneyText(value);
+  if (/^https?:\/\//i.test(url) && !target.includes(url)) target.push(url);
+}
+
+function collectMidjourneyUrls(target, value, keys) {
+  if (typeof value === 'string') {
+    appendMidjourneyUrl(target, value);
+    return;
+  }
+  if (!Array.isArray(value)) return;
+  for (const item of value) {
+    if (typeof item === 'string') appendMidjourneyUrl(target, item);
+    else if (item && typeof item === 'object') {
+      for (const key of keys) appendMidjourneyUrl(target, item[key]);
+    }
+  }
+}
+
+function sanitizeMidjourneyButtons(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 80).map((item) => {
+    if (typeof item === 'string') return { label: item.slice(0, 160), customId: item.slice(0, 512) };
+    if (!item || typeof item !== 'object') return null;
+    const customId = midjourneyText(item.custom_id || item.customId || item.id).slice(0, 512);
+    const label = midjourneyText(item.label || item.name || item.emoji || item.text).slice(0, 160);
+    return customId || label ? { customId, label: label || customId } : null;
+  }).filter(Boolean);
+}
+
+function normalizeMidjourneyResponse(data) {
+  const task = midjourneyTaskData(data);
+  const containers = midjourneyContainers(data);
+  if (task) containers.unshift(task);
+  const imageUrls = [];
+  const videoUrls = [];
+  let gridImageUrl = '';
+  let text = '';
+  let status = '';
+  let progress = '';
+  let buttons = [];
+
+  for (const container of containers) {
+    if (!status && container.status !== undefined) status = midjourneyText(container.status).toUpperCase();
+    if (!progress && container.progress !== undefined) progress = safeProgress(container.progress);
+    if (!gridImageUrl) {
+      const candidate = midjourneyText(container.grid_image_url || container.gridImageUrl);
+      if (/^https?:\/\//i.test(candidate)) gridImageUrl = candidate;
+    }
+    collectMidjourneyUrls(imageUrls, container.image_urls || container.imageUrls, ['url', 'image_url', 'imageUrl']);
+    collectMidjourneyUrls(imageUrls, container.images, ['url', 'image_url', 'imageUrl']);
+    appendMidjourneyUrl(imageUrls, container.image_url || container.imageUrl);
+    collectMidjourneyUrls(videoUrls, container.video_urls || container.videoUrls, ['url', 'video_url', 'videoUrl']);
+    collectMidjourneyUrls(videoUrls, container.videos, ['url', 'video_url', 'videoUrl']);
+    appendMidjourneyUrl(videoUrls, container.video_url || container.videoUrl);
+    if (!buttons.length) buttons = sanitizeMidjourneyButtons(container.buttons);
+  }
+  for (const key of ['description', 'text', 'prompt']) {
+    for (const container of containers) {
+      const candidate = midjourneyText(container[key]);
+      if (candidate && !/^https?:\/\//i.test(candidate)) {
+        text = candidate;
+        break;
+      }
+    }
+    if (text) break;
+  }
+  if (gridImageUrl) {
+    const index = imageUrls.indexOf(gridImageUrl);
+    if (index >= 0) imageUrls.splice(index, 1);
+  }
+  return {
+    taskId: midjourneyTaskId(data),
+    status,
+    progress,
+    imageUrls,
+    gridImageUrl,
+    videoUrls,
+    text,
+    buttons,
+  };
+}
+
+function normalizeMidjourneyStatus(value) {
+  const status = midjourneyText(value).toUpperCase();
+  if (new Set(['SUCCESS', 'SUCCEEDED', 'COMPLETED', 'COMPLETE']).has(status)) return 'succeeded';
+  if (status === 'MODAL') return 'modal';
+  if (new Set(['CANCEL', 'FAILURE', 'FAILED', 'ERROR', 'CANCELLED', 'CANCELED']).has(status)) return 'failed';
+  if (new Set(['IN_PROGRESS', 'PROCESSING', 'RUNNING']).has(status)) return 'running';
+  return 'pending';
+}
+
+async function submitMidjourneyAction(request, apiKey, options = {}) {
+  if (!midjourneyText(apiKey)) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
+  const built = await buildMidjourneyPayload(request, apiKey, options);
+  const fetchImpl = getFetchImpl(options);
+  const baseUrl = cleanBaseUrl(options.baseUrl);
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/midjourney/generations/${built.action}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(built.payload),
+  }, options, `seedance.nz Midjourney ${built.action} 提交`);
+  const data = await responseJson(response, `seedance.nz Midjourney ${built.action} 提交`);
+  if (!response.ok) throw createUpstreamError(data, response);
+  const normalized = normalizeMidjourneyResponse(data);
+  if (!normalized.taskId && !normalized.text && !normalized.imageUrls.length && !normalized.videoUrls.length && !normalized.gridImageUrl) {
+    throw invalidResponseError(`seedance.nz Midjourney ${built.action} 提交`, response);
+  }
+  return {
+    operation: built.operation,
+    action: built.action,
+    executionMode: built.executionMode,
+    resultFamily: built.resultFamily,
+    sync: !normalized.taskId,
+    ...normalized,
+    ...safeProviderTrace(response, data, { pollCount: 0 }),
+  };
+}
+
+async function queryMidjourneyTask(taskId, apiKey, options = {}) {
+  if (!midjourneyText(apiKey)) throw new Error('缺少贞贞的平价AI小屋 API Key');
+  const safeTaskId = requiredTaskId(taskId, 'seedance.nz Midjourney 任务查询');
+  const fetchImpl = getFetchImpl(options);
+  const baseUrl = cleanBaseUrl(options.baseUrl);
+  const response = await fetchProviderResponse(
+    fetchImpl,
+    `${baseUrl}/v1/midjourney/tasks/${encodeURIComponent(safeTaskId)}`,
+    { headers: { Authorization: `Bearer ${apiKey}` } },
+    options,
+    'seedance.nz Midjourney 任务查询',
+  );
+  const data = await responseJson(response, 'seedance.nz Midjourney 任务查询');
+  if (!response.ok) throw createUpstreamError(data, response);
+  const normalized = normalizeMidjourneyResponse(data);
+  const status = normalizeMidjourneyStatus(normalized.status);
+  return {
+    ...normalized,
+    taskId: normalized.taskId || safeTaskId,
+    status,
+    failReason: status === 'failed' ? 'Midjourney 任务失败' : '',
+    ...safeProviderTrace(response, data),
+  };
 }
 
 async function buildPayload(request, apiKey, options = {}) {
@@ -1811,6 +2562,250 @@ async function submitWanTask(request, apiKey, options = {}) {
   return { taskId, model: built.model, taskType: built.taskType, ...safeProviderTrace(response, data, { pollCount: 0 }) };
 }
 
+function normalizeSunoOperation(value) {
+  const operation = String(value || 'suno-generation').trim();
+  if (!Object.prototype.hasOwnProperty.call(SUNO_ACTION_SPECS, operation)) {
+    throw new Error(`未知 Suno 操作：${operation}`);
+  }
+  return operation;
+}
+
+function sunoTaskIdFromResponse(value, depth = 0) {
+  if (depth > 8 || value == null) return '';
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const taskId = sunoTaskIdFromResponse(item, depth + 1);
+      if (taskId) return taskId;
+    }
+    return '';
+  }
+  if (typeof value !== 'object') return '';
+  for (const key of ['task_id', 'id']) {
+    const candidate = String(value[key] || '').trim();
+    if (/^[A-Za-z0-9][A-Za-z0-9._:\-]{0,255}$/.test(candidate)) return candidate;
+  }
+  for (const key of ['data', 'result', 'task']) {
+    const taskId = sunoTaskIdFromResponse(value[key], depth + 1);
+    if (taskId) return taskId;
+  }
+  return '';
+}
+
+function sunoRequiredValuePresent(value) {
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value === 'boolean') return true;
+  return String(value ?? '').trim().length > 0;
+}
+
+function finiteSunoNumber(value, field, { min = 0, integer = false } = {}) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < min) throw new Error(`Suno 参数 ${field} 必须是大于等于 ${min} 的数字`);
+  return integer ? Math.trunc(number) : number;
+}
+
+async function buildSunoMusicPayload(request, apiKey, options = {}) {
+  const operation = normalizeSunoOperation(request.operation);
+  const spec = SUNO_ACTION_SPECS[operation];
+  const payload = { model: 'suno' };
+  const input = request && typeof request === 'object' ? request : {};
+
+  if (spec.allowedVersions.length > 0) {
+    const version = String(input.version || spec.defaultVersion || '').trim();
+    if (!spec.allowedVersions.includes(version)) {
+      throw new Error(`${operation} 的 version 仅支持：${spec.allowedVersions.join('、')}`);
+    }
+    payload.version = version;
+  }
+
+  for (const field of spec.allowedFields) {
+    if (field === 'version' || field === 'audioFilePath' || field === 'audio_url' || field === 'audio_urls' || field === 'task_ids') continue;
+    if (field === 'custom' || field === 'instrumental') {
+      if (input[field] !== undefined) payload[field] = input[field] === true;
+      continue;
+    }
+    if (field === 'audio_index') {
+      payload.audio_index = finiteSunoNumber(input.audio_index ?? 1, field, { min: 1, integer: true });
+      continue;
+    }
+    if (['continue_at', 'start_s', 'end_s', 'duration_s', 'speed'].includes(field)) {
+      if (input[field] !== undefined && input[field] !== '') {
+        payload[field] = finiteSunoNumber(input[field], field, { min: field === 'speed' ? 0.01 : 0 });
+      }
+      continue;
+    }
+    if (input[field] !== undefined && input[field] !== null) {
+      const text = String(input[field]).trim();
+      if (text) payload[field] = text;
+    }
+  }
+
+  if (spec.referenceType === 'mashup') {
+    const rawTaskIds = Array.isArray(input.task_ids)
+      ? input.task_ids
+      : [input.task_id, input.task_id_2];
+    payload.task_ids = rawTaskIds.map((item) => String(item || '').trim()).filter(Boolean);
+    if (payload.task_ids.length !== 2) throw new Error('Suno 双曲混合必须填写 2 个 task_id');
+  } else if (operation === 'suno-upload') {
+    const source = String(input.audioFilePath || input.audio_url || normalizeList(input.audioUrls)[0] || '').trim();
+    if (source) payload.audioFilePath = await uploadMedia(source, 'audio', apiKey, options);
+  } else if (operation === 'suno-create-voice') {
+    const source = String(input.audio_url || input.audioFilePath || normalizeList(input.audioUrls)[0] || '').trim();
+    if (source) payload.audio_url = await uploadMedia(source, 'audio', apiKey, options);
+  } else if (operation === 'suno-inspo') {
+    const sources = normalizeList(input.audio_urls || input.audioUrls).slice(0, SUNO_MAX_REFERENCE_AUDIOS);
+    if (sources.length) {
+      payload.audio_urls = [];
+      for (const source of sources) payload.audio_urls.push(await uploadMedia(source, 'audio', apiKey, options));
+    }
+  }
+
+  for (const field of spec.requiredFields) {
+    if (!sunoRequiredValuePresent(payload[field])) throw new Error(`${operation} 缺少必填参数：${field}`);
+  }
+  if (payload.start_s !== undefined && payload.end_s !== undefined && payload.end_s <= payload.start_s) {
+    throw new Error('Suno 参数 end_s 必须大于 start_s');
+  }
+
+  return {
+    operation,
+    action: spec.action,
+    resultFamily: spec.resultFamily,
+    sync: spec.sync,
+    payload,
+  };
+}
+
+function sunoMediaKind(key, url) {
+  const keyText = String(key || '').toLowerCase();
+  let extension = '';
+  try {
+    extension = path.extname(new URL(url).pathname).toLowerCase();
+  } catch {}
+  if (keyText.includes('image') || ['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(extension)) return 'image';
+  if (keyText.includes('video') || keyText.includes('mp4') || ['.mp4', '.mov', '.mkv', '.avi', '.webm'].includes(extension)) return 'video';
+  if (keyText.includes('audio') || keyText.includes('wav') || ['.mp3', '.wav', '.flac', '.ogg', '.opus', '.m4a', '.aac'].includes(extension)) return 'audio';
+  return 'file';
+}
+
+function collectSunoArtifacts(value, key = '', artifacts = [], seen = new Set(), depth = 0) {
+  if (depth > 12 || value == null) return artifacts;
+  if (Array.isArray(value)) {
+    for (const item of value) collectSunoArtifacts(item, key, artifacts, seen, depth + 1);
+    return artifacts;
+  }
+  if (typeof value === 'object') {
+    for (const [childKey, child] of Object.entries(value)) {
+      collectSunoArtifacts(child, childKey, artifacts, seen, depth + 1);
+    }
+    return artifacts;
+  }
+  if (typeof value !== 'string') return artifacts;
+  const url = value.trim();
+  if (!/^https?:\/\//i.test(url) || seen.has(url)) return artifacts;
+  seen.add(url);
+  artifacts.push({ url, kind: sunoMediaKind(key, url) });
+  return artifacts;
+}
+
+function extractSunoText(value, depth = 0) {
+  if (depth > 10 || value == null) return '';
+  if (typeof value === 'string') return /^https?:\/\//i.test(value.trim()) ? '' : value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    const simple = value.filter((item) => ['string', 'number', 'boolean'].includes(typeof item));
+    return simple.length === value.length && simple.length > 0 ? JSON.stringify(simple) : '';
+  }
+  if (typeof value !== 'object') return '';
+  for (const key of ['text', 'lyrics', 'tags', 'aligned_lyrics', 'bpm', 'persona_id', 'voice_id', 'audio_id', 'content', 'message']) {
+    if (value[key] === undefined) continue;
+    const text = extractSunoText(value[key], depth + 1);
+    if (text) return text;
+  }
+  if (Array.isArray(value.music)) {
+    for (const item of value.music) {
+      for (const key of ['lyrics', 'title', 'audio_id']) {
+        const text = extractSunoText(item?.[key], depth + 1);
+        if (text) return text;
+      }
+    }
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (['id', 'task_id', 'status', 'progress'].includes(key)) continue;
+    const text = extractSunoText(child, depth + 1);
+    if (text) return text;
+  }
+  return '';
+}
+
+function normalizeSunoMusicResponse(data, options = {}) {
+  const rawData = data?.data;
+  const taskData = Array.isArray(rawData)
+    ? (rawData.find((item) => item && typeof item === 'object') || {})
+    : rawData && typeof rawData === 'object' ? rawData : data;
+  const resultData = taskData?.result !== undefined ? taskData.result : taskData;
+  const rawStatus = String(taskData?.status || data?.status || '').trim().toLowerCase();
+  const taskId = sunoTaskIdFromResponse(data);
+  let status = normalizeStatus(rawStatus);
+  if (!rawStatus && (!taskId || options.sync)) status = 'succeeded';
+  const artifacts = collectSunoArtifacts(resultData);
+  const music = Array.isArray(resultData?.music) ? resultData.music : [];
+  // Provider failure bodies are intentionally not reflected to the client:
+  // some upstreams echo request headers or signed URLs inside nested errors.
+  const failReason = status === 'failed' ? 'Suno 任务失败' : '';
+  return {
+    taskId,
+    status,
+    progress: safeProgress(taskData?.progress ?? data?.progress),
+    resultFamily: options.resultFamily || 'audio',
+    artifacts,
+    music,
+    text: extractSunoText(resultData),
+    failReason,
+  };
+}
+
+async function submitSunoMusicTask(request, apiKey, options = {}) {
+  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
+  const fetchImpl = getFetchImpl(options);
+  const baseUrl = cleanBaseUrl(options.baseUrl);
+  const built = await buildSunoMusicPayload(request, apiKey, options);
+  const suffix = built.action ? `/${built.action}` : '';
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/music/generations${suffix}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(built.payload),
+  }, options, `seedance.nz ${built.operation} 提交`);
+  const data = await responseJson(response, `seedance.nz ${built.operation} 提交`);
+  if (!response.ok) throw createUpstreamError(data, response);
+  return {
+    operation: built.operation,
+    action: built.action,
+    ...normalizeSunoMusicResponse(data, { sync: built.sync, resultFamily: built.resultFamily }),
+    ...safeProviderTrace(response, data, { pollCount: 0 }),
+  };
+}
+
+async function querySunoMusicTask(taskId, apiKey, options = {}) {
+  if (!String(apiKey || '').trim()) throw new Error('缺少贞贞的平价AI小屋 API Key');
+  const safeTaskId = requiredTaskId(taskId, 'seedance.nz Suno 任务查询');
+  const fetchImpl = getFetchImpl(options);
+  const baseUrl = cleanBaseUrl(options.baseUrl);
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/music/tasks/${encodeURIComponent(safeTaskId)}`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  }, options, 'seedance.nz Suno 任务查询');
+  const data = await responseJson(response, 'seedance.nz Suno 任务查询');
+  if (!response.ok) throw createUpstreamError(data, response);
+  return {
+    ...normalizeSunoMusicResponse(data, { resultFamily: options.resultFamily }),
+    taskId: safeTaskId,
+    ...safeProviderTrace(response, data),
+  };
+}
+
 async function buildAudioPayload(request, apiKey, options = {}) {
   const model = String(request.model || SEED_AUDIO_MODEL).trim();
   if (model !== SEED_AUDIO_MODEL) throw new Error(`未知 Seed Audio 模型：${model}`);
@@ -2105,6 +3100,16 @@ module.exports = {
   IMAGE_MODEL_PAIRS,
   IMAGE_MODELS,
   IMAGE_RESOLUTIONS,
+  MIDJOURNEY_ACTION_SPECS,
+  MIDJOURNEY_ANIMATE_MODES,
+  MIDJOURNEY_BATCH_SIZES,
+  MIDJOURNEY_DIMENSIONS,
+  MIDJOURNEY_DIRECTIONS,
+  MIDJOURNEY_MOTIONS,
+  MIDJOURNEY_QUALITIES,
+  MIDJOURNEY_SPEEDS,
+  MIDJOURNEY_VERSIONS,
+  MIDJOURNEY_VIDEO_TYPES,
   ZHENZHEN_IMAGE_G2_I2I_MODEL,
   ZHENZHEN_IMAGE_G2_MODELS,
   ZHENZHEN_IMAGE_G2_RATIOS,
@@ -2126,11 +3131,14 @@ module.exports = {
   SEED_AUDIO_FORMATS,
   SEED_AUDIO_MODEL,
   SEED_AUDIO_SAMPLE_RATES,
+  SUNO_ACTION_SPECS,
+  SUNO_VERSIONS,
   WHISPER_MODEL,
   WHISPER_RESPONSE_FORMATS,
   WAN27_SPICY_MODEL,
   WAN27_SPICY_RESOLUTIONS,
   buildAudioPayload,
+  buildSunoMusicPayload,
   buildHailuoPayload,
   buildKlingPayload,
   buildUpscalerPayload,
@@ -2141,25 +3149,31 @@ module.exports = {
   buildApimartImagePayload,
   buildApimartVideoPayload,
   buildImagePayload,
+  buildMidjourneyPayload,
   buildZhenzhenImageG2Payload,
   deriveTaskType,
   fetchRemote: secureFetch,
   normalizePromptMentions,
   normalizeResolution,
   queryImageTask,
+  queryMidjourneyTask,
   queryAudioTask,
+  querySunoMusicTask,
   queryTask,
   resetCachesForTests,
   resolveModel,
   submitAudioTask,
+  submitSunoMusicTask,
   submitHailuoTask,
   submitKlingTask,
   submitUpscalerTask,
   submitViduTask,
   submitHappyHorseTask,
   submitImageTask,
+  submitMidjourneyAction,
   submitTask,
   submitWanTask,
   transcribeAudio,
   uploadMedia,
+  normalizeMidjourneyResponse,
 };

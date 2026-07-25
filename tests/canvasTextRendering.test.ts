@@ -41,3 +41,17 @@ test('canvas nodes strip decorative text blur across themes', () => {
     /#root \.t8-canvas-shell \.react-flow__node,\s*#root \.t8-canvas-shell \.react-flow__node :where\([\s\S]*button,[\s\S]*span,[\s\S]*textarea,[\s\S]*th[\s\S]*\) \{[\s\S]*-webkit-text-stroke:\s*0 !important;[\s\S]*text-shadow:\s*none !important;[\s\S]*\}/,
   );
 });
+
+test('low zoom canvas nodes disable compositor filters that resample text', () => {
+  const css = read('../src/styles/index.css');
+  const canvas = read('../src/components/Canvas.tsx');
+
+  assert.match(css, /data-canvas-zoom-readability="compact"/);
+  assert.match(css, /data-canvas-zoom-readability="overview"/);
+  assert.match(css, /react-flow__node:not\(\.react-flow__node-groupBox\)[\s\S]*filter:\s*none !important;/);
+  assert.match(css, /-webkit-backdrop-filter:\s*none !important;/);
+  assert.match(css, /backdrop-filter:\s*none !important;/);
+  assert.match(css, /text-rendering:\s*geometricPrecision !important;/);
+  assert.match(canvas, /data-canvas-zoom-readability=\{canvasZoomReadability\}/);
+  assert.match(canvas, /onMove=\{handleViewportMove\}/);
+});

@@ -774,6 +774,143 @@ export const SUNO_VERSIONS: Array<{ value: string; label: string }> = [
 ];
 export const DEFAULT_SUNO_VERSION = 'v5.5';
 
+export type SunoNzOperation =
+  | 'suno-generation'
+  | 'suno-lyrics'
+  | 'suno-upload'
+  | 'suno-extend'
+  | 'suno-cover-song'
+  | 'suno-inspo'
+  | 'suno-mashup'
+  | 'suno-upsample-tags'
+  | 'suno-sounds'
+  | 'suno-create-voice'
+  | 'suno-stems'
+  | 'suno-stems-all'
+  | 'suno-wav'
+  | 'suno-generate-mp4'
+  | 'suno-concat'
+  | 'suno-crop'
+  | 'suno-fade-in'
+  | 'suno-fade-out'
+  | 'suno-remove-section'
+  | 'suno-replace-music'
+  | 'suno-adjust-speed'
+  | 'suno-remaster'
+  | 'suno-midi'
+  | 'suno-bpm'
+  | 'suno-aligned-lyrics'
+  | 'suno-persona'
+  | 'suno-vox'
+  | 'suno-sample'
+  | 'suno-add-vocals'
+  | 'suno-add-instrumental'
+  | 'suno-add-stem';
+
+export type SunoNzResultFamily = 'audio' | 'text' | 'video' | 'file';
+export type SunoNzReferenceType = 'none' | 'url' | 'task_audio' | 'mashup';
+export type SunoNzField =
+  | 'prompt'
+  | 'version'
+  | 'custom'
+  | 'instrumental'
+  | 'title'
+  | 'style'
+  | 'vocal_gender'
+  | 'tags'
+  | 'audioFilePath'
+  | 'audio_url'
+  | 'audio_urls'
+  | 'task_id'
+  | 'task_ids'
+  | 'audio_index'
+  | 'continue_at'
+  | 'start_s'
+  | 'end_s'
+  | 'duration_s'
+  | 'speed'
+  | 'name';
+
+export interface SunoNzActionDef {
+  value: SunoNzOperation;
+  label: string;
+  action: string;
+  requiredFields: readonly SunoNzField[];
+  allowedVersions: readonly string[];
+  defaultVersion?: string;
+  resultFamily: SunoNzResultFamily;
+  referenceType: SunoNzReferenceType;
+}
+
+export const SUNO_NZ_VERSIONS = ['v3.5', 'v4', 'v4.5', 'v4.5+', 'v4.5-all', 'v5', 'v5.5'] as const;
+const SUNO_NZ_INSPO_VERSIONS = ['v4', 'v4.5', 'v4.5+', 'v4.5-all', 'v5', 'v5.5'] as const;
+const SUNO_NZ_REPLACE_VERSIONS = ['v4', 'v4.5+', 'v5', 'v5.5'] as const;
+const SUNO_NZ_REMASTER_VERSIONS = ['v4.5+', 'v5', 'v5.5'] as const;
+const SUNO_NZ_V5_VERSIONS = ['v5', 'v5.5'] as const;
+
+const sunoNzAction = (
+  value: SunoNzOperation,
+  label: string,
+  requiredFields: readonly SunoNzField[],
+  resultFamily: SunoNzResultFamily,
+  referenceType: SunoNzReferenceType = 'none',
+  allowedVersions: readonly string[] = [],
+  defaultVersion?: string,
+): SunoNzActionDef => ({
+  value,
+  label,
+  action: value === 'suno-generation' ? '' : value.slice('suno-'.length),
+  requiredFields,
+  allowedVersions,
+  defaultVersion,
+  resultFamily,
+  referenceType,
+});
+
+/**
+ * api.seedance.nz 官方 Suno 31 项动作。
+ * 这里使用显式目录，前后端都不会根据用户输入拼接未知 action 路径。
+ */
+export const SUNO_NZ_ACTIONS: readonly SunoNzActionDef[] = [
+  sunoNzAction('suno-generation', '音乐生成', ['version', 'prompt'], 'audio', 'none', SUNO_NZ_VERSIONS),
+  sunoNzAction('suno-lyrics', '生成歌词', ['prompt'], 'text'),
+  sunoNzAction('suno-upload', '上传音频', ['audioFilePath'], 'audio', 'url'),
+  sunoNzAction('suno-extend', '续写', ['task_id', 'continue_at'], 'audio', 'task_audio', SUNO_NZ_VERSIONS, 'v5.5'),
+  sunoNzAction('suno-cover-song', '翻唱 / 换风格', ['task_id', 'prompt'], 'audio', 'task_audio', SUNO_NZ_VERSIONS, 'v5.5'),
+  sunoNzAction('suno-inspo', '灵感参考', ['audio_urls'], 'audio', 'url', SUNO_NZ_INSPO_VERSIONS, 'v5.5'),
+  sunoNzAction('suno-mashup', '双曲混合', ['task_ids', 'prompt'], 'audio', 'mashup', SUNO_NZ_VERSIONS, 'v5.5'),
+  sunoNzAction('suno-upsample-tags', '扩写风格标签', ['tags'], 'text'),
+  sunoNzAction('suno-sounds', '生成音效', ['prompt'], 'audio', 'none', SUNO_NZ_V5_VERSIONS, 'v5.5'),
+  sunoNzAction('suno-create-voice', '创建音色', ['audio_url'], 'text', 'url'),
+  sunoNzAction('suno-stems', '单分轨', ['task_id'], 'audio', 'task_audio'),
+  sunoNzAction('suno-stems-all', '全分轨', ['task_id'], 'audio', 'task_audio'),
+  sunoNzAction('suno-wav', '导出 WAV', ['task_id'], 'audio', 'task_audio'),
+  sunoNzAction('suno-generate-mp4', '生成 MP4 / MV', ['task_id'], 'video', 'task_audio'),
+  sunoNzAction('suno-concat', '拼接完整歌曲', ['task_id'], 'audio', 'task_audio'),
+  sunoNzAction('suno-crop', '裁剪', ['task_id', 'start_s', 'end_s'], 'audio', 'task_audio'),
+  sunoNzAction('suno-fade-in', '淡入', ['task_id', 'duration_s'], 'audio', 'task_audio'),
+  sunoNzAction('suno-fade-out', '淡出', ['task_id', 'duration_s'], 'audio', 'task_audio'),
+  sunoNzAction('suno-remove-section', '删除片段', ['task_id', 'start_s', 'end_s'], 'audio', 'task_audio'),
+  sunoNzAction('suno-replace-music', '替换片段', ['task_id', 'start_s', 'end_s'], 'audio', 'task_audio', SUNO_NZ_REPLACE_VERSIONS, 'v5.5'),
+  sunoNzAction('suno-adjust-speed', '调整速度', ['task_id', 'speed'], 'audio', 'task_audio'),
+  sunoNzAction('suno-remaster', '母带处理', ['task_id'], 'audio', 'task_audio', SUNO_NZ_REMASTER_VERSIONS, 'v5.5'),
+  sunoNzAction('suno-midi', '生成 MIDI', ['task_id'], 'file', 'task_audio'),
+  sunoNzAction('suno-bpm', '分析 BPM', ['task_id'], 'text', 'task_audio'),
+  sunoNzAction('suno-aligned-lyrics', '对齐歌词', ['task_id'], 'text', 'task_audio'),
+  sunoNzAction('suno-persona', '创建 Persona', ['task_id', 'name'], 'text', 'task_audio'),
+  sunoNzAction('suno-vox', '提取人声片段', ['task_id'], 'audio', 'task_audio'),
+  sunoNzAction('suno-sample', '采样生成', ['task_id', 'start_s', 'end_s', 'prompt'], 'audio', 'task_audio', SUNO_NZ_VERSIONS, 'v5.5'),
+  sunoNzAction('suno-add-vocals', '添加人声', ['task_id', 'prompt'], 'audio', 'task_audio', SUNO_NZ_V5_VERSIONS, 'v5.5'),
+  sunoNzAction('suno-add-instrumental', '添加伴奏', ['task_id', 'prompt'], 'audio', 'task_audio', SUNO_NZ_V5_VERSIONS, 'v5.5'),
+  sunoNzAction('suno-add-stem', '添加 Stem', ['task_id', 'prompt'], 'audio', 'task_audio', ['v5.5'], 'v5.5'),
+] as const;
+
+export const DEFAULT_SUNO_NZ_OPERATION: SunoNzOperation = 'suno-generation';
+
+export function getSunoNzActionDef(value: unknown): SunoNzActionDef {
+  return SUNO_NZ_ACTIONS.find((item) => item.value === value) || SUNO_NZ_ACTIONS[0];
+}
+
 // ========== LLM/Vision ==========
 // 完全对齐 gpt-image-2-web Chat Tab(index.html L1600 chat_model select)
 // 默认: gemini-3.5-flash

@@ -3,6 +3,7 @@
  * 所有请求走 /api/proxy/* (后端会注入对应 Key 并转存结果)
  */
 import type { AdvancedProviderConfig } from '../types/canvas';
+import type { SunoNzOperation, SunoNzResultFamily } from '../providers/models';
 import { normalizeProviderErrorMessage } from '../utils/providerErrorMessage.ts';
 
 export interface ProviderTransportTrace {
@@ -318,6 +319,112 @@ export async function querySeedreamNz(taskId: string): Promise<ImageQueryResult>
     data.data || { status: data.success ? 'pending' : 'failed', progress: '0%', error: data?.error },
     r,
   );
+}
+
+export type MidjourneyNzOperation =
+  | 'midjourney-blend'
+  | 'midjourney-describe'
+  | 'midjourney-edits'
+  | 'midjourney-high-variation'
+  | 'midjourney-imagine'
+  | 'midjourney-inpaint'
+  | 'midjourney-low-variation'
+  | 'midjourney-modal'
+  | 'midjourney-pan'
+  | 'midjourney-remix-strong'
+  | 'midjourney-remix-subtle'
+  | 'midjourney-reroll'
+  | 'midjourney-upscale'
+  | 'midjourney-variation'
+  | 'midjourney-video'
+  | 'midjourney-zoom';
+
+export interface MidjourneyNzSubmitRequest {
+  operation: MidjourneyNzOperation;
+  prompt?: string;
+  images?: string[];
+  task_id?: string;
+  index?: number;
+  custom_id?: string;
+  speed?: 'relax' | 'fast' | 'turbo';
+  dimensions?: 'SQUARE' | 'PORTRAIT' | 'LANDSCAPE';
+  size?: string;
+  direction?: 'left' | 'right' | 'up' | 'down';
+  zoom_ratio?: number;
+  modal_mode?: 'region' | 'outpaint';
+  mask_url?: string;
+  video_type?:
+    | 'vid_1.1_i2v_480'
+    | 'vid_1.1_i2v_720'
+    | 'vid_1.1_i2v_start_end_480'
+    | 'vid_1.1_i2v_start_end_720';
+  animate_mode?: 'manual' | 'auto';
+  motion?: 'low' | 'high';
+  batch_size?: 1 | 2 | 4;
+  end_url?: string;
+  quality?: '0.25' | '0.5' | '1' | '2';
+  style?: string;
+  version?: '5' | '5.1' | '5.2' | '6' | '6.1' | '7' | '8.1' | '8.2';
+  seed?: number;
+  negative_prompt?: string;
+  stylize?: number;
+  chaos?: number;
+  weird?: number;
+  tile?: boolean;
+  niji?: boolean;
+  iw?: number;
+  cw?: number;
+  sw?: number;
+  cref?: string;
+  sref?: string;
+  dref?: string;
+  dw?: number;
+  repeat?: number;
+  raw?: boolean;
+  draft?: boolean;
+  hd?: boolean;
+  stop?: number;
+  extra?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface MidjourneyNzTaskResult extends ProviderTransportTrace {
+  sync?: boolean;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'modal' | 'materializing' | string;
+  progress?: string;
+  taskId?: string;
+  action?: string;
+  operation?: MidjourneyNzOperation | string;
+  resultFamily?: 'image' | 'video' | 'text' | 'modal' | string;
+  imageUrls?: string[];
+  videoUrls?: string[];
+  text?: string;
+  buttons?: Array<{ customId?: string; label?: string }>;
+  error?: string;
+  code?: string;
+  recoverable?: boolean;
+  retryAfterMs?: number;
+}
+
+export async function submitMidjourneyNz(req: MidjourneyNzSubmitRequest): Promise<MidjourneyNzTaskResult> {
+  const r = await fetch('/api/proxy/image/seedance-nz/midjourney/submit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  const data = await safeJsonResponse(r, '贞贞的平价AI小屋 Midjourney 任务提交');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data || {}, r) as MidjourneyNzTaskResult;
+}
+
+export async function queryMidjourneyNz(taskId: string): Promise<MidjourneyNzTaskResult> {
+  const r = await fetch(`/api/proxy/image/seedance-nz/midjourney/status/${encodeURIComponent(taskId)}`);
+  const data = await safeJsonResponse(r, '贞贞的平价AI小屋 Midjourney 任务查询');
+  if (!r.ok) throw providerResponseError(r, data);
+  return withProviderTransportTrace(
+    data.data || { status: data.success ? 'pending' : 'failed', error: data?.error },
+    r,
+  ) as MidjourneyNzTaskResult;
 }
 
 // ========================================================================
@@ -1257,6 +1364,7 @@ export async function querySeedance(
 // ========================================================================
 export type AudioMode = 'generate' | 'cover' | 'extend';
 export type AudioProviderMode = 'suno' | 'seed-audio' | 'whisper';
+export type SunoPlatform = 'zhenzhen' | 'seedance-nz';
 export type WhisperResponseFormat = 'json' | 'verbose_json' | 'srt' | 'text' | 'vtt';
 
 export interface WhisperTranscribeRequest {
@@ -1348,6 +1456,76 @@ export async function queryAudio(clipIds: string[], saveLocal: boolean = true): 
   const data = await r.json();
   if (!r.ok || !data.success) throw providerResponseError(r, data);
   return withProviderTransportTrace(data.data, r);
+}
+
+export interface SunoNzSubmitRequest {
+  operation: SunoNzOperation;
+  prompt?: string;
+  version?: string;
+  custom?: boolean;
+  instrumental?: boolean;
+  title?: string;
+  style?: string;
+  vocal_gender?: string;
+  tags?: string;
+  audioFilePath?: string;
+  audio_url?: string;
+  audio_urls?: string[];
+  audioUrls?: string[];
+  task_id?: string;
+  task_id_2?: string;
+  task_ids?: string[];
+  audio_index?: number;
+  continue_at?: number;
+  start_s?: number;
+  end_s?: number;
+  duration_s?: number;
+  speed?: number;
+  name?: string;
+}
+
+export interface SunoNzArtifact {
+  kind: 'audio' | 'video' | 'image' | 'file';
+  url: string;
+}
+
+export interface SunoNzTaskResult extends ProviderTransportTrace {
+  taskId?: string;
+  operation?: SunoNzOperation;
+  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'materializing' | string;
+  progress?: string | number;
+  resultFamily: SunoNzResultFamily;
+  text?: string;
+  tracks: AudioTrack[];
+  audioUrls: string[];
+  videoUrls: string[];
+  imageUrls: string[];
+  fileUrls: string[];
+  artifacts: SunoNzArtifact[];
+  partialFailures?: Array<{ code?: string; message?: string; recoverable?: boolean }>;
+  failReason?: string;
+  error?: string;
+  code?: string;
+  recoverable?: boolean;
+  retryAfterMs?: number;
+}
+
+export async function submitSunoNz(req: SunoNzSubmitRequest): Promise<SunoNzTaskResult> {
+  const r = await fetch('/api/proxy/audio/suno-nz/submit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  const data = await safeJsonResponse(r, '贞贞的平价AI小屋 Suno');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r) as SunoNzTaskResult;
+}
+
+export async function querySunoNz(taskId: string): Promise<SunoNzTaskResult> {
+  const r = await fetch(`/api/proxy/audio/suno-nz/status/${encodeURIComponent(taskId)}`);
+  const data = await safeJsonResponse(r, '贞贞的平价AI小屋 Suno');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r) as SunoNzTaskResult;
 }
 
 export interface SeedAudioSubmitRequest {

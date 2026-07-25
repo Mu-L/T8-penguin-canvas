@@ -24,6 +24,15 @@ async function postOp<T = any>(path: string, body: any): Promise<T> {
 export const opResize = (imageUrl: string, width?: number, height?: number, fit?: string) =>
   postOp<{ imageUrl: string }>('resize', { imageUrl, width, height, fit });
 
+export const opResizeLongEdge = (imageUrl: string, longEdge: 1024 | 2048) =>
+  postOp<{
+    imageUrl: string;
+    width: number;
+    height: number;
+    longEdge: 1024 | 2048;
+    resized: boolean;
+  }>('resize-long-edge', { imageUrl, longEdge });
+
 export const opUpscale = (imageUrl: string, scale: number) =>
   postOp<{ imageUrl: string; scale: number }>('upscale', { imageUrl, scale });
 

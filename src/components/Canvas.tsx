@@ -39,6 +39,11 @@ import { topologicalSort } from '../utils/topologicalSort';
 import { excludeRandomRouteBranchDescendants } from '../utils/randomRoute';
 import { createRunLaunchQueue } from '../utils/runLaunchQueue';
 import { installGlobalWheelBlockObserver } from '../utils/wheelBlock';
+import {
+  resolveCanvasZoomReadabilityTier,
+  snapCanvasViewportToDevicePixels,
+  type CanvasZoomReadabilityTier,
+} from '../utils/canvasZoomReadability';
 // v1.2.10.5: 节点落点防重叠解析器 (单节点/整组双模式 + 兜底+toast+飞镜)
 import {
   placeSingleNode,
@@ -3738,6 +3743,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   const allowEmptySaveCanvasIdsRef = useRef<Set<string>>(new Set());
   const edgeMotionReleaseTimerRef = useRef<number | null>(null);
   const [viewportMoving, setViewportMoving] = useState(false);
+  const [canvasZoomReadability, setCanvasZoomReadability] = useState<CanvasZoomReadabilityTier>('detail');
   const [nodeDragging, setNodeDragging] = useState(false);
   const [dragSaveTick, setDragSaveTick] = useState(0);
   const loadedRef = useRef(loaded);
@@ -4180,13 +4186,28 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     setViewportMoving(true);
   }, [clearEdgeMotionReleaseTimer, restoreRadialViewportLock]);
 
-  const handleViewportMoveEnd = useCallback(() => {
+  const handleViewportMove = useCallback((_event: unknown, viewport: { x: number; y: number; zoom: number }) => {
+    const nextTier = resolveCanvasZoomReadabilityTier(viewport.zoom);
+    setCanvasZoomReadability((currentTier) => currentTier === nextTier ? currentTier : nextTier);
+  }, []);
+
+  const handleViewportMoveEnd = useCallback((_event: unknown, viewport: { x: number; y: number; zoom: number }) => {
     if (radialViewportLockRef.current) {
       restoreRadialViewportLock();
       return;
     }
+    const snappedViewport = snapCanvasViewportToDevicePixels(
+      viewport,
+      typeof window === 'undefined' ? 1 : window.devicePixelRatio,
+    );
+    if (
+      Math.abs(snappedViewport.x - viewport.x) > 0.001 ||
+      Math.abs(snappedViewport.y - viewport.y) > 0.001
+    ) {
+      void setViewport(snappedViewport);
+    }
     releaseEdgeMotionSoon(setViewportMoving);
-  }, [releaseEdgeMotionSoon, restoreRadialViewportLock]);
+  }, [releaseEdgeMotionSoon, restoreRadialViewportLock, setViewport]);
 
   // ===== SHIFT+拖拽 Handle 批量移线 =====
   // 按住 SHIFT 从节点入口(target handle)拖出，可一次性把所有入边移到另一个节点的入口。
@@ -13102,6 +13123,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       data-edge-motion={edgeMotionMode}
       data-edge-load={heavyEdgeMotion ? 'heavy' : undefined}
       data-canvas-surface-load={heavyCanvasSurface ? 'heavy' : 'normal'}
+      data-canvas-zoom-readability={canvasZoomReadability}
       data-canvas-node-count={nodes.length}
       data-canvas-edge-count={edges.length}
       style={{ background: bgColor }}
@@ -13399,6 +13421,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
           onNodeDrag={onNodeDrag}
           onNodeDragStop={onNodeDragStop}
           onMoveStart={handleViewportMoveStart}
+          onMove={handleViewportMove}
           onMoveEnd={handleViewportMoveEnd}
           onSelectionContextMenu={onSelectionContextMenu}
           onNodeContextMenu={onNodeContextMenu}

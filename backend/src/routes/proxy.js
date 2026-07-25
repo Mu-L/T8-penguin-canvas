@@ -2331,6 +2331,115 @@ async function materializeRemoteTaskOutput({
   };
 }
 
+async function saveRemoteSunoFileDetailed(url, materializationKey = '') {
+  let lastError = null;
+  for (let attempt = 0; attempt < IMAGE_OUTPUT_RETRY_DELAYS_MS.length; attempt += 1) {
+    const delay = IMAGE_OUTPUT_RETRY_DELAYS_MS[attempt];
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+    try {
+      const remote = await safeRemoteMediaFetch(url, proxySafeRemoteOptions({
+        maxBytes: PROXY_AUDIO_REFERENCE_MAX_BYTES,
+        deadlineMs: PROXY_REMOTE_DEADLINE_MS,
+        idleTimeoutMs: PROXY_REMOTE_IDLE_TIMEOUT_MS,
+        maxRedirects: 4,
+        accept: 'audio/midi,audio/x-midi,application/x-midi,application/octet-stream;q=0.8',
+        userAgent: 'T8-PenguinCanvas-Suno-File/1.0',
+      }));
+      const buffer = remote.buffer;
+      if (!Buffer.isBuffer(buffer) || buffer.length < 14) throw new Error('Suno 文件为空或不完整');
+      if (buffer.subarray(0, 4).toString('ascii') !== 'MThd') {
+        throw new Error('Suno 文件不是有效的 MIDI 文件');
+      }
+      return {
+        url: storeMaterializedOutputBuffer(buffer, 'suno_midi', 'mid', materializationKey),
+        error: null,
+      };
+    } catch (error) {
+      lastError = error;
+      if (!retryableRemoteOutputError(error)) break;
+    }
+  }
+  proxyRouteError('转存 Suno 文件失败', lastError);
+  return { url: '', error: remoteOutputDownloadFailure(lastError, 'media') };
+}
+
+async function materializeSunoNzResult(result, taskId) {
+  const normalizedStatus = String(result?.status || '').trim().toLowerCase();
+  const completed = ['succeeded', 'success', 'completed'].includes(normalizedStatus);
+  const output = {
+    status: result?.status || 'pending',
+    progress: result?.progress || '',
+    resultFamily: result?.resultFamily || 'audio',
+    text: result?.text || '',
+    tracks: [],
+    audioUrls: [],
+    videoUrls: [],
+    imageUrls: [],
+    fileUrls: [],
+    artifacts: [],
+    failures: [],
+    itemCount: 0,
+  };
+  if (!completed) return output;
+
+  const artifacts = Array.isArray(result?.artifacts) ? result.artifacts : [];
+  output.itemCount = artifacts.length;
+  for (const [index, artifact] of artifacts.entries()) {
+    const kind = String(artifact?.kind || 'file');
+    const remoteUrl = String(artifact?.url || '').trim();
+    if (!remoteUrl) continue;
+    const materializationKey = `suno-nz:${taskId || 'sync'}:${index}:${kind}`;
+    let saved;
+    if (kind === 'audio') saved = await saveRemoteAudioDetailed(remoteUrl, materializationKey);
+    else if (kind === 'video') saved = await saveRemoteVideoDetailed(remoteUrl, null, materializationKey);
+    else if (kind === 'image') saved = await saveRemoteImageDetailed(remoteUrl, null, materializationKey);
+    else saved = await saveRemoteSunoFileDetailed(remoteUrl, materializationKey);
+    if (!saved?.url) {
+      if (saved?.error) output.failures.push(saved.error);
+      continue;
+    }
+    output.artifacts.push({ kind, url: saved.url });
+    if (kind === 'audio') output.audioUrls.push(saved.url);
+    else if (kind === 'video') output.videoUrls.push(saved.url);
+    else if (kind === 'image') output.imageUrls.push(saved.url);
+    else output.fileUrls.push(saved.url);
+  }
+
+  const music = Array.isArray(result?.music) ? result.music : [];
+  output.tracks = output.audioUrls.map((audioUrl, index) => {
+    const item = music[index] && typeof music[index] === 'object' ? music[index] : {};
+    return {
+      id: String(item.id || item.audio_id || `${taskId || 'sync'}:${index}`),
+      clipId: String(item.audio_id || item.id || taskId || ''),
+      audioUrl,
+      imageUrl: output.imageUrls[index] || output.imageUrls[0] || '',
+      title: safeDiagnosticText(item.title || '', 240),
+      tags: safeDiagnosticText(item.tags || item.style || '', 500),
+      duration: Number(item.duration || item.duration_s || 0) || 0,
+    };
+  });
+  return output;
+}
+
+function sunoNzCompletedOutputFailure(result, materialized) {
+  const family = String(result?.resultFamily || 'audio');
+  const familyUrls = family === 'video'
+    ? materialized.videoUrls
+    : family === 'file' ? materialized.fileUrls : materialized.audioUrls;
+  if (family !== 'text' && familyUrls.length > 0) return null;
+  if (materialized.failures.length > 0) {
+    return completedRemoteOutputError({
+      itemCount: materialized.itemCount,
+      failures: materialized.failures,
+    }, family === 'file' ? 'media' : family);
+  }
+  if (family === 'text') {
+    if (String(materialized.text || '').trim()) return null;
+    return completedRemoteOutputError({ itemCount: 0 }, 'media');
+  }
+  return completedRemoteOutputError({ itemCount: materialized.itemCount }, family === 'file' ? 'media' : family);
+}
+
 // LLM 多模态 image_url 预处理:
 //   上游 LLM 服务(贞贞工坊)无法访问本地 /files/* 路径,需提前转成 base64 dataURL inline。
 //   - data: 保留
@@ -2691,6 +2800,241 @@ router.get('/image/seedance-nz/status/:tid', async (req, res) => {
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
       error: proxyPublicError(error, 'seedance.nz 图像查询失败', [apiKey]),
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+async function materializeSeedanceNzMidjourneyResult(result, taskId, resultFamilyHint = '') {
+  const resultFamily = String(resultFamilyHint || result?.resultFamily || '').trim().toLowerCase();
+  const imageRefs = [...new Set([
+    String(result?.gridImageUrl || '').trim(),
+    ...(Array.isArray(result?.imageUrls) ? result.imageUrls : []),
+  ].filter(Boolean))];
+  const videoRefs = [...new Set((Array.isArray(result?.videoUrls) ? result.videoUrls : []).filter(Boolean))];
+  const imageUrls = [];
+  const videoUrls = [];
+  const failures = [];
+
+  for (const [index, ref] of imageRefs.entries()) {
+    const saved = await saveRemoteImageDetailed(
+      ref,
+      seedanceNz.fetchRemote,
+      `seedance-nz-midjourney:${taskId || 'sync'}:image:${index}`,
+    );
+    if (saved.url) imageUrls.push(saved.url);
+    else if (saved.error) failures.push(saved.error);
+  }
+  for (const [index, ref] of videoRefs.entries()) {
+    const saved = await saveRemoteVideoDetailed(
+      ref,
+      seedanceNz.fetchRemote,
+      `seedance-nz-midjourney:${taskId || 'sync'}:video:${index}`,
+    );
+    if (saved.url) videoUrls.push(saved.url);
+    else if (saved.error) failures.push(saved.error);
+  }
+
+  const text = String(result?.text || '').trim();
+  const hasExpectedOutput = resultFamily === 'text'
+    ? !!text
+    : resultFamily === 'video'
+      ? videoUrls.length > 0
+      : imageUrls.length > 0 || videoUrls.length > 0 || !!text;
+  let failure = null;
+  if (!hasExpectedOutput) {
+    failure = completedRemoteOutputError({
+      itemCount: imageRefs.length + videoRefs.length,
+      failures,
+    }, resultFamily === 'video' ? 'video' : resultFamily === 'text' ? 'media' : 'image');
+  }
+  return {
+    imageUrls,
+    videoUrls,
+    text,
+    buttons: Array.isArray(result?.buttons) ? result.buttons : [],
+    failures,
+    failure,
+  };
+}
+
+// 贞贞的平价AI小屋 Midjourney v1 动作协议。该路由与上方原贞贞AI工坊
+// /mj/* 三路由完全隔离，避免 API Key、动作参数和轮询协议互相串线。
+router.post('/image/seedance-nz/midjourney/submit', async (req, res) => {
+  const settings = loadRawSettings();
+  const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) {
+    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI小屋 API Key”' });
+  }
+  try {
+    const result = await seedanceNz.submitMidjourneyAction(req.body || {}, apiKey);
+    const taskId = String(result.taskId || '').trim();
+    if (taskId) {
+      rememberTaskKey(taskId, apiKey, {
+        provider: 'seedance-nz-midjourney',
+        operation: result.operation,
+        action: result.action,
+        resultFamily: result.resultFamily,
+      });
+    }
+    const upstreamStatus = String(result.status || '').trim().toLowerCase();
+    if (upstreamStatus === 'modal') {
+      return res.json({
+        success: true,
+        data: {
+          sync: true,
+          status: 'modal',
+          progress: result.progress || '',
+          taskId,
+          action: result.action,
+          operation: result.operation,
+          resultFamily: 'modal',
+          buttons: result.buttons || [],
+          ...seedanceNzTrace(result),
+        },
+      });
+    }
+    if (!taskId || result.sync) {
+      const materialized = await materializeSeedanceNzMidjourneyResult(
+        result,
+        taskId || `sync-${diagnosticDigest(`${result.operation}:${Date.now()}`)}`,
+        result.resultFamily,
+      );
+      if (materialized.failure) {
+        return sendCompletedRemoteOutputFailure(res, materialized.failure, {
+          action: result.action,
+          operation: result.operation,
+          resultFamily: result.resultFamily,
+          taskId,
+          ...seedanceNzTrace(result),
+        });
+      }
+      return res.json({
+        success: true,
+        data: {
+          sync: true,
+          status: 'completed',
+          progress: '100%',
+          taskId,
+          action: result.action,
+          operation: result.operation,
+          resultFamily: result.resultFamily,
+          imageUrls: materialized.imageUrls,
+          videoUrls: materialized.videoUrls,
+          text: materialized.text,
+          buttons: materialized.buttons,
+          ...seedanceNzTrace(result),
+        },
+      });
+    }
+    return res.json({
+      success: true,
+      data: {
+        sync: false,
+        status: 'pending',
+        progress: result.progress || '0%',
+        taskId,
+        action: result.action,
+        operation: result.operation,
+        resultFamily: result.resultFamily,
+        buttons: result.buttons || [],
+        ...seedanceNzTrace(result),
+      },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    proxyRouteError('proxy/image/seedance-nz/midjourney/submit 错误', error, [apiKey]);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: proxyPublicError(error, '平价AI小屋 Midjourney 请求失败', [apiKey]),
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+router.get('/image/seedance-nz/midjourney/status/:tid', async (req, res) => {
+  const settings = loadRawSettings();
+  const remembered = recallTaskMeta(req.params.tid, 'seedance-nz-midjourney');
+  const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) {
+    return res.status(400).json({ success: false, error: '缺少贞贞的平价AI小屋 API Key' });
+  }
+  try {
+    const result = await seedanceNz.queryMidjourneyTask(req.params.tid, apiKey);
+    const taskId = String(result.taskId || req.params.tid).trim();
+    if (result.status === 'modal') {
+      return res.json({
+        success: true,
+        data: {
+          status: 'modal',
+          progress: result.progress || '',
+          taskId,
+          action: remembered?.action || 'inpaint',
+          operation: remembered?.operation || 'midjourney-inpaint',
+          resultFamily: 'modal',
+          buttons: result.buttons || [],
+          ...seedanceNzTrace(result),
+        },
+      });
+    }
+    if (result.status === 'succeeded') {
+      const resultFamily = remembered?.resultFamily
+        || (result.videoUrls?.length ? 'video' : result.text ? 'text' : 'image');
+      const materialized = await materializeSeedanceNzMidjourneyResult(result, taskId, resultFamily);
+      if (materialized.failure) {
+        return sendCompletedRemoteOutputFailure(res, materialized.failure, {
+          taskId,
+          action: remembered?.action || '',
+          operation: remembered?.operation || '',
+          resultFamily,
+          ...seedanceNzTrace(result),
+        });
+      }
+      return res.json({
+        success: true,
+        data: {
+          status: 'completed',
+          progress: '100%',
+          taskId,
+          action: remembered?.action || '',
+          operation: remembered?.operation || '',
+          resultFamily,
+          imageUrls: materialized.imageUrls,
+          videoUrls: materialized.videoUrls,
+          text: materialized.text,
+          buttons: materialized.buttons,
+          ...seedanceNzTrace(result),
+        },
+      });
+    }
+    if (result.status === 'failed') {
+      return res.json({
+        success: false,
+        data: {
+          status: 'failed',
+          progress: seedreamNzProgress(result.progress, '100%'),
+          taskId,
+          error: result.failReason || 'Midjourney 任务失败',
+          ...seedanceNzTrace(result),
+        },
+      });
+    }
+    return res.json({
+      success: true,
+      data: {
+        status: result.status,
+        progress: seedreamNzProgress(result.progress),
+        taskId,
+        buttons: result.buttons || [],
+        ...seedanceNzTrace(result),
+      },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    proxyRouteError('proxy/image/seedance-nz/midjourney/status 错误', error, [apiKey]);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: proxyPublicError(error, '平价AI小屋 Midjourney 查询失败', [apiKey]),
       ...seedanceNzTrace(error),
     });
   }
@@ -3165,6 +3509,105 @@ router.get('/video/wan/status/:tid', async (req, res) => {
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
       error: proxyPublicError(error, 'Wan 2.7 Spicy 查询失败', [apiKey]),
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+function sunoNzResponseData(result, materialized, remembered = {}) {
+  return {
+    taskId: result?.taskId || remembered?.taskId || '',
+    operation: result?.operation || remembered?.operation || '',
+    status: materialized?.status || result?.status || 'pending',
+    progress: safeDiagnosticText(materialized?.progress || result?.progress || '', 80),
+    resultFamily: result?.resultFamily || remembered?.resultFamily || 'audio',
+    text: safeDiagnosticText(materialized?.text || result?.text || '', 100_000),
+    tracks: materialized?.tracks || [],
+    audioUrls: materialized?.audioUrls || [],
+    videoUrls: materialized?.videoUrls || [],
+    imageUrls: materialized?.imageUrls || [],
+    fileUrls: materialized?.fileUrls || [],
+    artifacts: materialized?.artifacts || [],
+    partialFailures: (materialized?.failures || []).map((failure) => ({
+      code: safeDiagnosticText(failure?.code || 'output_unusable', 120),
+      message: safeDiagnosticText(failure?.message || '部分结果保存失败', 500),
+      recoverable: failure?.recoverable === true,
+    })),
+    failReason: result?.status === 'failed'
+      ? safeDiagnosticText(result?.failReason || 'Suno 任务失败', 500)
+      : '',
+    ...seedanceNzTrace(result),
+  };
+}
+
+router.post('/audio/suno-nz/submit', async (req, res) => {
+  const settings = loadRawSettings();
+  const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) {
+    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI小屋 API Key”' });
+  }
+  try {
+    const result = await seedanceNz.submitSunoMusicTask(req.body || {}, apiKey);
+    if (result.taskId) {
+      rememberTaskKey(result.taskId, apiKey, {
+        provider: 'suno-nz',
+        taskId: result.taskId,
+        operation: result.operation,
+        resultFamily: result.resultFamily,
+      });
+    }
+    const materialized = await materializeSunoNzResult(result, result.taskId || `sync:${result.operation}`);
+    const responseData = sunoNzResponseData(result, materialized);
+    if (String(result.status || '').toLowerCase() === 'succeeded') {
+      const failure = sunoNzCompletedOutputFailure(result, materialized);
+      if (failure) {
+        return sendCompletedRemoteOutputFailure(res, failure, responseData, {
+          defaultCode: 'suno_nz_output_unusable',
+          defaultMessage: 'Suno 结果无法保存。',
+        });
+      }
+    }
+    return res.json({ success: true, data: responseData });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    proxyRouteError('proxy/audio/suno-nz/submit 错误', error, [apiKey]);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: proxyPublicError(error, 'Suno 请求失败', [apiKey]),
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+router.get('/audio/suno-nz/status/:tid', async (req, res) => {
+  const settings = loadRawSettings();
+  const remembered = recallTaskMeta(req.params.tid, 'suno-nz');
+  const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI小屋 API Key' });
+  try {
+    const result = await seedanceNz.querySunoMusicTask(req.params.tid, apiKey, {
+      resultFamily: remembered?.resultFamily,
+    });
+    result.operation = remembered?.operation || '';
+    result.resultFamily = remembered?.resultFamily || result.resultFamily;
+    const materialized = await materializeSunoNzResult(result, req.params.tid);
+    const responseData = sunoNzResponseData(result, materialized, remembered);
+    if (String(result.status || '').toLowerCase() === 'succeeded') {
+      const failure = sunoNzCompletedOutputFailure(result, materialized);
+      if (failure) {
+        return sendCompletedRemoteOutputFailure(res, failure, responseData, {
+          defaultCode: 'suno_nz_output_unusable',
+          defaultMessage: 'Suno 结果无法保存。',
+        });
+      }
+    }
+    return res.json({ success: true, data: responseData });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    proxyRouteError('proxy/audio/suno-nz/status 错误', error, [apiKey]);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: proxyPublicError(error, 'Suno 查询失败', [apiKey]),
       ...seedanceNzTrace(error),
     });
   }

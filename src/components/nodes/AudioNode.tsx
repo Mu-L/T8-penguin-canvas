@@ -4,6 +4,8 @@ import { AlertCircle, Loader2, Music, Sparkles, Square, Upload, X } from 'lucide
 import {
   submitAudio,
   queryAudio,
+  submitSunoNz,
+  querySunoNz,
   submitSeedAudio,
   querySeedAudio,
   transcribeWhisper,
@@ -11,9 +13,18 @@ import {
   uploadFile as uploadLocalFile,
   type AudioMode,
   type AudioProviderMode,
+  type SunoPlatform,
+  type SunoNzTaskResult,
   type WhisperResponseFormat,
 } from '../../services/generation';
-import { SUNO_VERSIONS, DEFAULT_SUNO_VERSION } from '../../providers/models';
+import {
+  SUNO_VERSIONS,
+  DEFAULT_SUNO_VERSION,
+  DEFAULT_SUNO_NZ_OPERATION,
+  SUNO_NZ_ACTIONS,
+  getSunoNzActionDef,
+  type SunoNzOperation,
+} from '../../providers/models';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useHasAutoOutput } from './useHasAutoOutput';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
@@ -78,10 +89,32 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
   const isSeedAudio = audioProviderMode === 'seed-audio';
   const isWhisper = audioProviderMode === 'whisper';
   const isSuno = audioProviderMode === 'suno';
+  const sunoPlatform: SunoPlatform = d?.sunoPlatform === 'seedance-nz' ? 'seedance-nz' : 'zhenzhen';
+  const isSunoNz = isSuno && sunoPlatform === 'seedance-nz';
+  const sunoNzOperation: SunoNzOperation = getSunoNzActionDef(d?.sunoNzOperation || DEFAULT_SUNO_NZ_OPERATION).value;
+  const sunoNzAction = getSunoNzActionDef(sunoNzOperation);
   const mode: AudioMode = d?.mode || 'generate';
   const version: string = d?.version || DEFAULT_SUNO_VERSION;
+  const sunoNzVersion = sunoNzAction.allowedVersions.includes(d?.sunoNzVersion)
+    ? d.sunoNzVersion
+    : sunoNzAction.defaultVersion || sunoNzAction.allowedVersions[0] || '';
   const title: string = d?.title || '';
   const tags: string = d?.tags || '';
+  const sunoStyle: string = d?.sunoStyle || '';
+  const sunoVocalGender: string = d?.sunoVocalGender || '';
+  const sunoCustom: boolean = d?.sunoCustom === true;
+  const sunoInstrumental: boolean = d?.sunoInstrumental === true;
+  const sunoTaskRef: string = d?.sunoTaskRef || '';
+  const sunoTaskRef2: string = d?.sunoTaskRef2 || '';
+  const sunoAudioIndex: number = Number.isInteger(d?.sunoAudioIndex) && d.sunoAudioIndex > 0 ? d.sunoAudioIndex : 1;
+  const sunoStartSeconds: number = Number.isFinite(d?.sunoStartSeconds) ? d.sunoStartSeconds : 0;
+  const sunoEndSeconds: number = Number.isFinite(d?.sunoEndSeconds) ? d.sunoEndSeconds : 10;
+  const sunoDurationSeconds: number = Number.isFinite(d?.sunoDurationSeconds) ? d.sunoDurationSeconds : 3;
+  const sunoSpeed: number = Number.isFinite(d?.sunoSpeed) ? d.sunoSpeed : 1;
+  const sunoPersonaName: string = d?.sunoPersonaName || '';
+  const sunoResultText: string = typeof d?.sunoResultText === 'string' ? d.sunoResultText : '';
+  const sunoVideoUrls: string[] = Array.isArray(d?.sunoVideoUrls) ? d.sunoVideoUrls : [];
+  const sunoFileUrls: string[] = Array.isArray(d?.sunoFileUrls) ? d.sunoFileUrls : [];
   const localPrompt: string = d?.prompt || '';
   const promptMentions: MediaMention[] = Array.isArray(d?.promptMentions) ? d.promptMentions : [];
   const seed: number = typeof d?.seed === 'number' ? d.seed : 0;
@@ -178,8 +211,8 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
   const previewGroups = useMemo<ReadonlyArray<'text' | 'image' | 'video' | 'audio'>>(
     () => isSeedAudio
       ? ['text', 'image', 'audio']
-      : isWhisper ? ['audio'] : (mode === 'generate' ? ['text'] : ['text', 'audio']),
-    [isSeedAudio, isWhisper, mode],
+      : isWhisper ? ['audio'] : isSunoNz ? ['text', 'audio'] : (mode === 'generate' ? ['text'] : ['text', 'audio']),
+    [isSeedAudio, isWhisper, isSunoNz, mode],
   );
   
   // 收集上游: prompt + audioUrl(cover/extend 兼底, 取 ordered 首个, 后补本地拖入)
@@ -187,7 +220,8 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     const prompt = orderedTexts.map((t) => t.url).filter((s) => !!s).join('\n').trim();
     const audioUrl = orderedAudios[0]?.url || localRefAudio || '';
     const imageUrls = [...orderedImages.map((item) => item.url), localRefImage].filter(Boolean).slice(0, 1);
-    const audioUrls = [...orderedAudios.map((item) => item.url), localRefAudio].filter((value, index, values) => !!value && values.indexOf(value) === index).slice(0, 3);
+    const maxAudios = isSunoNz ? 4 : 3;
+    const audioUrls = [...orderedAudios.map((item) => item.url), localRefAudio].filter((value, index, values) => !!value && values.indexOf(value) === index).slice(0, maxAudios);
     return { prompt, audioUrl, imageUrls, audioUrls };
   };
 
@@ -220,11 +254,12 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     if (!f) return;
     setError(null);
     try {
-      if (isSeedAudio || isWhisper) {
+      if (isSeedAudio || isWhisper || isSunoNz) {
         setUploading(true);
         const uploaded = await uploadLocalFile(f);
         update({ localRefAudio: uploaded.url, uploadedClipId: '', uploadedFilename: f.name });
-        logBus.success(`${isWhisper ? 'Whisper 待转写素材' : 'Seed Audio 参考音频'}已加入: ${f.name}`, src);
+        const targetLabel = isWhisper ? 'Whisper 待转写素材' : isSeedAudio ? 'Seed Audio 参考音频' : 'Suno 参考音频';
+        logBus.success(`${targetLabel}已加入: ${f.name}`, src);
       } else {
         await uploadFile(f);
       }
@@ -446,24 +481,156 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     });
   };
 
+  const finishSunoNzResult = async (
+    result: SunoNzTaskResult,
+    reporter?: RunNodeLifecycleReporter,
+    pollCount = 0,
+  ) => {
+    const resultTracks = Array.isArray(result.tracks) ? result.tracks : [];
+    const resultText = String(result.text || '').trim();
+    const videoUrls = Array.isArray(result.videoUrls) ? result.videoUrls : [];
+    const fileUrls = Array.isArray(result.fileUrls) ? result.fileUrls : [];
+    update({
+      status: 'success',
+      progress: '100%',
+      taskId: result.taskId || taskId,
+      tracks: resultTracks,
+      audioUrl: resultTracks[0]?.audioUrl || result.audioUrls?.[0] || '',
+      audioUrl_1: resultTracks[1]?.audioUrl || result.audioUrls?.[1] || '',
+      videoUrl: videoUrls[0] || '',
+      videos: videoUrls,
+      fileUrls,
+      sunoVideoUrls: videoUrls,
+      sunoFileUrls: fileUrls,
+      imageUrls: result.imageUrls || [],
+      sunoResultText: resultText,
+      text: resultText,
+      texts: resultText ? [resultText] : [],
+      provider: 'seedance-nz',
+      model: sunoNzOperation,
+      apiModel: sunoNzOperation,
+      requestId: result.requestId,
+      transportHttpStatus: result.transportHttpStatus,
+      upstreamHttpStatus: result.upstreamHttpStatus,
+      usage: result.usage,
+      pollCount,
+      partialFailures: result.partialFailures || [],
+    });
+    await reporter?.providerResponse({
+      provider: 'seedance-nz',
+      model: sunoNzOperation,
+      upstreamTaskId: result.taskId || taskId,
+      requestId: result.requestId,
+      transportHttpStatus: result.transportHttpStatus,
+      upstreamHttpStatus: result.upstreamHttpStatus,
+      usage: result.usage,
+      pollCount,
+      status: 'succeeded',
+      httpStatusSource: 'local-backend',
+    });
+    if (result.partialFailures?.length) {
+      logBus.warn(`Suno 已完成，但有 ${result.partialFailures.length} 个附属结果保存失败；已保留可用结果`, src);
+    }
+    logBus.success(
+      `Suno ${sunoNzOperation} 完成 · 音频${resultTracks.length} / 视频${videoUrls.length} / 文件${fileUrls.length}${resultText ? ' / 文本1' : ''}`,
+      src,
+    );
+    taskCompletionSound.notifyComplete(id, 'audio');
+  };
+
+  const startSunoNzPolling = (tid: string, reporter?: RunNodeLifecycleReporter): Promise<void> => {
+    stopPoll();
+    return new Promise<void>((resolve, reject) => {
+      let elapsed = 0;
+      let pollInFlight = false;
+      pollTimer.current = window.setInterval(async () => {
+        if (pollInFlight) return;
+        elapsed += 1;
+        if (elapsed > SUNO_MAX_POLL) {
+          stopPoll();
+          const message = 'Suno 轮询超时 (60min)，任务 ID 已保留，可稍后重试';
+          setError(message);
+          update({ status: 'error', error: message });
+          reject(new Error(message));
+          return;
+        }
+        pollInFlight = true;
+        try {
+          const result = await querySunoNz(tid);
+          const normalizedStatus = String(result.status || '').trim().toLowerCase();
+          await reporter?.polling({
+            provider: 'seedance-nz',
+            model: sunoNzOperation,
+            taskId: tid,
+            requestId: result.requestId,
+            transportHttpStatus: result.transportHttpStatus,
+            upstreamHttpStatus: result.upstreamHttpStatus,
+            usage: result.usage,
+            httpStatusSource: 'local-backend',
+            pollCount: elapsed,
+            pollLimit: SUNO_MAX_POLL,
+            status: normalizedStatus,
+            progress: result.progress,
+          });
+          if (normalizedStatus === 'materializing') {
+            update({ status: 'polling', progress: '100% · 正在下载' });
+          } else if (normalizedStatus === 'succeeded') {
+            stopPoll();
+            await finishSunoNzResult(result, reporter, elapsed);
+            resolve();
+          } else if (normalizedStatus === 'failed') {
+            stopPoll();
+            const message = result.failReason || result.error || 'Suno 任务失败';
+            setError(message);
+            update({ status: 'error', error: message });
+            reject(new Error(message));
+          } else {
+            update({ status: 'polling', progress: String(result.progress || `#${elapsed}`) });
+          }
+        } catch (pollError: any) {
+          logBus.warn(`Suno 轮询出错: ${pollError?.message || pollError}`, src);
+        } finally {
+          pollInFlight = false;
+        }
+      }, 4000);
+    });
+  };
+
   const handleGenerate = async (reporter?: RunNodeLifecycleReporter) => {
     setError(null);
     const upstream = collectUpstream();
     const resolvedLocalPrompt = resolveMediaMentions(localPrompt, promptMentions, mentionMaterials);
     const finalPrompt = (upstream.prompt || resolvedLocalPrompt || '').trim();
-    if (!isWhisper && !finalPrompt) {
+    const sunoNzNeedsPrompt = sunoNzAction.requiredFields.includes('prompt');
+    if (!isWhisper && !isSunoNz && !finalPrompt) {
       setError(isSeedAudio ? '请填写音频提示词' : '请填写歌词 / 提示词');
+      return;
+    }
+    if (isSunoNz && sunoNzNeedsPrompt && !finalPrompt) {
+      setError(`${sunoNzOperation} 需要填写提示词`);
       return;
     }
     if (isSeedAudio && (finalPrompt.length < 5 || finalPrompt.length > 2048)) {
       setError('Seed Audio 提示词长度必须为 5-2048 字符');
       return;
     }
-    const traceProvider = isSeedAudio || isWhisper ? 'seedance-nz' : 'suno';
-    const traceModel = isWhisper ? 'whisper-1' : isSeedAudio ? 'doubao-seed-audio-1.0' : version;
+    const traceProvider = isSeedAudio || isWhisper || isSunoNz ? 'seedance-nz' : 'suno';
+    const traceModel = isWhisper ? 'whisper-1' : isSeedAudio ? 'doubao-seed-audio-1.0' : isSunoNz ? sunoNzOperation : version;
     await reporter?.providerRequest({ provider: traceProvider, model: traceModel });
     taskCompletionSound.primeAudio();
-    update({ status: 'submitting', error: null, tracks: [], audioUrl: undefined, ...(isWhisper ? { transcript: '', text: '', texts: [] } : {}) });
+    update({
+      status: 'submitting',
+      error: null,
+      tracks: [],
+      audioUrl: undefined,
+      audioUrl_1: undefined,
+      videoUrl: undefined,
+      videos: [],
+      fileUrls: [],
+      sunoVideoUrls: [],
+      sunoFileUrls: [],
+      ...(isWhisper || isSunoNz ? { transcript: '', sunoResultText: '', text: '', texts: [] } : {}),
+    });
     try {
       if (isWhisper) {
         if (!upstream.audioUrl) {
@@ -541,6 +708,87 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
         await startSeedAudioPolling(result.taskId, reporter);
         return;
       }
+      if (isSunoNz) {
+        const referenceTaskId = sunoTaskRef.trim() || String(taskId || '').trim();
+        const sourceAudios = upstream.audioUrls;
+        if (sunoNzAction.referenceType === 'url' && sourceAudios.length === 0) {
+          throw new Error(`${sunoNzOperation} 需要连接、拖入或导入参考音频`);
+        }
+        if (sunoNzAction.referenceType === 'task_audio' && !referenceTaskId) {
+          throw new Error(`${sunoNzOperation} 需要填写来源 task_id；可直接使用本节点上一次任务 ID`);
+        }
+        if (sunoNzAction.referenceType === 'mashup' && (!referenceTaskId || !sunoTaskRef2.trim())) {
+          throw new Error('suno-mashup 需要填写两个来源 task_id');
+        }
+        if (sunoNzOperation === 'suno-upsample-tags' && !tags.trim()) {
+          throw new Error('suno-upsample-tags 需要填写风格 Tags');
+        }
+        if (sunoNzOperation === 'suno-persona' && !sunoPersonaName.trim()) {
+          throw new Error('suno-persona 需要填写 Persona 名称');
+        }
+
+        logBus.info(`提交平价AI小屋 Suno: ${sunoNzOperation}${sunoNzVersion ? ` · ${sunoNzVersion}` : ''}`, src);
+        const result = await submitSunoNz({
+          operation: sunoNzOperation,
+          prompt: finalPrompt || undefined,
+          version: sunoNzVersion || undefined,
+          custom: sunoCustom,
+          instrumental: sunoInstrumental,
+          title: title.trim() || undefined,
+          style: sunoStyle.trim() || undefined,
+          vocal_gender: sunoVocalGender || undefined,
+          tags: tags.trim() || undefined,
+          audioFilePath: sunoNzOperation === 'suno-upload' ? upstream.audioUrl : undefined,
+          audio_url: sunoNzOperation === 'suno-create-voice' ? upstream.audioUrl : undefined,
+          audio_urls: sunoNzOperation === 'suno-inspo' ? sourceAudios : undefined,
+          task_id: referenceTaskId || undefined,
+          task_id_2: sunoTaskRef2.trim() || undefined,
+          task_ids: sunoNzAction.referenceType === 'mashup'
+            ? [referenceTaskId, sunoTaskRef2.trim()]
+            : undefined,
+          audio_index: sunoAudioIndex,
+          continue_at: sunoNzOperation === 'suno-extend' ? continueAt : undefined,
+          start_s: ['suno-crop', 'suno-remove-section', 'suno-replace-music', 'suno-sample'].includes(sunoNzOperation)
+            ? sunoStartSeconds
+            : undefined,
+          end_s: ['suno-crop', 'suno-remove-section', 'suno-replace-music', 'suno-sample'].includes(sunoNzOperation)
+            ? sunoEndSeconds
+            : undefined,
+          duration_s: ['suno-fade-in', 'suno-fade-out'].includes(sunoNzOperation)
+            ? sunoDurationSeconds
+            : undefined,
+          speed: sunoNzOperation === 'suno-adjust-speed' ? sunoSpeed : undefined,
+          name: sunoNzOperation === 'suno-persona' ? sunoPersonaName.trim() : undefined,
+        });
+        const normalizedStatus = String(result.status || '').trim().toLowerCase();
+        if (result.taskId) {
+          await reporter?.providerSubmitted({
+            provider: traceProvider,
+            model: traceModel,
+            upstreamTaskId: result.taskId,
+            requestId: result.requestId,
+            transportHttpStatus: result.transportHttpStatus,
+            upstreamHttpStatus: result.upstreamHttpStatus,
+            usage: result.usage,
+            httpStatusSource: 'local-backend',
+          });
+          update({
+            status: normalizedStatus === 'succeeded' ? 'success' : 'polling',
+            taskId: result.taskId,
+            sunoTaskRef: result.taskId,
+            lastPrompt: finalPrompt,
+            progress: String(result.progress || '0%'),
+          });
+        }
+        if (normalizedStatus === 'succeeded') {
+          await finishSunoNzResult(result, reporter, 0);
+          return;
+        }
+        if (normalizedStatus === 'failed') throw new Error(result.failReason || result.error || 'Suno 任务失败');
+        if (!result.taskId) throw new Error('Suno 请求已接受，但既未返回结果也未返回 task_id');
+        await startSunoNzPolling(result.taskId, reporter);
+        return;
+      }
       // cover/extend: 如预传 clipId 为空但上游有 audioUrl, 则自动上传
       let clipIdForRef = uploadedClipId;
       if ((mode === 'cover' || mode === 'extend') && !clipIdForRef && upstream.audioUrl) {
@@ -610,6 +858,13 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     lifecycleAware: true,
     shouldReuseResult: (nodeData) => isWhisper
       ? nodeData?.reuseResult === true && typeof nodeData?.transcript === 'string' && nodeData.transcript.trim().length > 0
+      : isSunoNz
+        ? nodeData?.reuseResult === true && (
+            hasReusableGenerationResult('audio', nodeData)
+            || (typeof nodeData?.sunoResultText === 'string' && nodeData.sunoResultText.trim().length > 0)
+            || (Array.isArray(nodeData?.sunoVideoUrls) && nodeData.sunoVideoUrls.length > 0)
+            || (Array.isArray(nodeData?.sunoFileUrls) && nodeData.sunoFileUrls.length > 0)
+          )
       : shouldReuseGenerationResult('audio', nodeData),
   });
 
@@ -641,9 +896,11 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
   });
 
   const isBusy = status === 'submitting' || status === 'polling';
-  const showRefArea = isSuno && (mode === 'cover' || mode === 'extend');
+  const showRefArea = isSuno && !isSunoNz && (mode === 'cover' || mode === 'extend');
+  const showSunoNzAudioImport = isSunoNz && sunoNzAction.referenceType === 'url';
   const audioColor = PORT_COLOR.audio;
   const textColor = PORT_COLOR.text;
+  const videoColor = PORT_COLOR.video;
 
   return (
     <div
@@ -658,8 +915,10 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
       }}
     >
       <Handle type="target" position={Position.Left} style={{ background: audioColor, border: 0 }} />
-      {isWhisper ? (
+      {isWhisper || (isSunoNz && sunoNzAction.resultFamily === 'text') ? (
         <Handle type="source" id="text" position={Position.Right} style={{ background: textColor, border: 0 }} />
+      ) : isSunoNz && sunoNzAction.resultFamily === 'video' ? (
+        <Handle type="source" id="video" position={Position.Right} style={{ background: videoColor, border: 0 }} />
       ) : (
         <>
           {/* 双输出口: 轨道 1 / 轨道 2 */}
@@ -680,7 +939,13 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold text-white">音频 · {isWhisper ? 'Whisper' : isSeedAudio ? 'Seed Audio' : 'Suno'}</div>
           <div className="text-[10px] text-white/40 truncate">
-            {isWhisper ? 'whisper-1 · 贞贞的平价AI小屋' : isSeedAudio ? 'doubao-seed-audio-1.0 · 贞贞的平价AI小屋' : `${version} · ${MODES.find((m) => m.id === mode)?.label}`}
+            {isWhisper
+              ? 'whisper-1 · 贞贞的平价AI小屋'
+              : isSeedAudio
+                ? 'doubao-seed-audio-1.0 · 贞贞的平价AI小屋'
+                : isSunoNz
+                  ? `${sunoNzOperation} · 贞贞的平价AI小屋`
+                  : `${version} · ${MODES.find((m) => m.id === mode)?.label}`}
           </div>
         </div>
       </div>
@@ -704,6 +969,25 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
         </div>
 
         {isSuno && (
+          <div className="rounded border border-violet-300/20 bg-violet-400/[0.05] p-2">
+            <label className="text-[10px] text-white/50 block mb-1">Suno API 平台</label>
+            <select
+              value={sunoPlatform}
+              onChange={(e) => update({
+                sunoPlatform: e.target.value,
+                status: 'idle',
+                error: null,
+                taskId: undefined,
+              })}
+              className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-violet-300/40"
+            >
+              <option value="zhenzhen" className="bg-zinc-900">贞贞的AI工坊（原有）</option>
+              <option value="seedance-nz" className="bg-zinc-900">贞贞的平价AI小屋</option>
+            </select>
+          </div>
+        )}
+
+        {isSuno && !isSunoNz && (
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="text-[10px] text-white/50 block mb-1">模式</label>
@@ -736,20 +1020,65 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
         </div>
         )}
 
+        {isSunoNz && (
+          <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.05] p-2 space-y-2">
+            <div>
+              <label className="text-[10px] text-white/50 block mb-1">Suno 操作（31 项）</label>
+              <select
+                value={sunoNzOperation}
+                onChange={(e) => {
+                  const next = getSunoNzActionDef(e.target.value);
+                  update({
+                    sunoNzOperation: next.value,
+                    sunoNzVersion: next.defaultVersion || next.allowedVersions[0] || '',
+                    status: 'idle',
+                    error: null,
+                  });
+                }}
+                className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-cyan-300/40"
+              >
+                {SUNO_NZ_ACTIONS.map((item) => (
+                  <option key={item.value} value={item.value} className="bg-zinc-900">
+                    {item.value} · {item.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {sunoNzAction.allowedVersions.length > 0 && (
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">版本</label>
+                <select
+                  value={sunoNzVersion}
+                  onChange={(e) => update({ sunoNzVersion: e.target.value })}
+                  className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none"
+                >
+                  {sunoNzAction.allowedVersions.map((item) => (
+                    <option key={item} value={item} className="bg-zinc-900">{item}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div className="text-[10px] leading-relaxed text-white/45">
+              官方路径：{sunoNzAction.action ? `/v1/music/generations/${sunoNzAction.action}` : '/v1/music/generations'}
+              {' · '}结果：{sunoNzAction.resultFamily}
+            </div>
+          </div>
+        )}
+
         <LocalNodeAddonSlot
           nodeId={id}
           nodeType="audio"
           data={d}
           update={update}
           context={{
-            providerSource: isSeedAudio || isWhisper ? 'seedance-nz' : 'zhenzhen',
-            model: isWhisper ? 'whisper-1' : isSeedAudio ? 'doubao-seed-audio-1.0' : version,
-            apiModel: isWhisper ? 'whisper-1' : isSeedAudio ? 'doubao-seed-audio-1.0' : `suno-${version}`,
+            providerSource: isSeedAudio || isWhisper || isSunoNz ? 'seedance-nz' : 'zhenzhen',
+            model: isWhisper ? 'whisper-1' : isSeedAudio ? 'doubao-seed-audio-1.0' : isSunoNz ? sunoNzOperation : version,
+            apiModel: isWhisper ? 'whisper-1' : isSeedAudio ? 'doubao-seed-audio-1.0' : isSunoNz ? sunoNzOperation : `suno-${version}`,
             providerKind: isWhisper ? 'whisper' : isSeedAudio ? 'seed-audio' : 'suno',
           }}
         />
 
-        {isSuno && (
+        {isSuno && !isSunoNz && (
         <>
         <div>
           <label className="text-[10px] text-white/50 block mb-1">标题</label>
@@ -773,9 +1102,45 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
         </div>
         </>
         )}
-        {!isWhisper && (
+        {isSunoNz && sunoNzOperation === 'suno-generation' && (
+          <div className="rounded border border-white/10 bg-black/10 p-2 space-y-2">
+            <div>
+              <label className="text-[10px] text-white/50 block mb-1">标题（可选）</label>
+              <input value={title} onChange={(e) => update({ title: e.target.value })} placeholder="My Song" className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none" />
+            </div>
+            <div>
+              <label className="text-[10px] text-white/50 block mb-1">风格（可选）</label>
+              <input value={sunoStyle} onChange={(e) => update({ sunoStyle: e.target.value })} placeholder="pop, cinematic, female vocal" className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none" />
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              <label className="flex items-center gap-1.5 rounded border border-white/10 px-2 py-1 text-[10px] text-white/65">
+                <input type="checkbox" checked={sunoCustom} onChange={(e) => update({ sunoCustom: e.target.checked })} />
+                自定义模式
+              </label>
+              <label className="flex items-center gap-1.5 rounded border border-white/10 px-2 py-1 text-[10px] text-white/65">
+                <input type="checkbox" checked={sunoInstrumental} onChange={(e) => update({ sunoInstrumental: e.target.checked })} />
+                纯音乐
+              </label>
+            </div>
+            <div>
+              <label className="text-[10px] text-white/50 block mb-1">人声性别（可选）</label>
+              <select value={sunoVocalGender} onChange={(e) => update({ sunoVocalGender: e.target.value })} className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none">
+                <option value="" className="bg-zinc-900">自动</option>
+                <option value="m" className="bg-zinc-900">男声</option>
+                <option value="f" className="bg-zinc-900">女声</option>
+              </select>
+            </div>
+          </div>
+        )}
+        {isSunoNz && sunoNzOperation === 'suno-upsample-tags' && (
+          <div>
+            <label className="text-[10px] text-white/50 block mb-1">风格 Tags</label>
+            <input value={tags} onChange={(e) => update({ tags: e.target.value })} placeholder="pop, cinematic, energetic" className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none" />
+          </div>
+        )}
+        {!isWhisper && (!isSunoNz || sunoNzAction.requiredFields.includes('prompt')) && (
         <div>
-          <label className="text-[10px] text-white/50 block mb-1">{isSeedAudio ? '音频提示词' : '歌词 / 提示词'}</label>
+          <label className="text-[10px] text-white/50 block mb-1">{isSeedAudio ? '音频提示词' : sunoNzOperation === 'suno-lyrics' ? '歌词主题 / 要求' : '歌词 / 提示词'}</label>
           <MentionPromptInput
             title="音频歌词 / 提示词"
             value={localPrompt}
@@ -789,6 +1154,73 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
             className="w-full h-16 resize-none rounded bg-white/5 border border-white/10 px-2 py-1 text-[11px] text-white outline-none focus:border-white/30 placeholder:text-white/30"
           />
         </div>
+        )}
+
+        {isSunoNz && (sunoNzAction.referenceType === 'task_audio' || sunoNzAction.referenceType === 'mashup') && (
+          <div className="rounded border border-violet-300/20 bg-violet-400/[0.04] p-2 space-y-2">
+            <div>
+              <label className="text-[10px] text-white/50 block mb-1">来源 task_id</label>
+              <input
+                value={sunoTaskRef}
+                onChange={(e) => update({ sunoTaskRef: e.target.value })}
+                placeholder={taskId ? `留空使用本节点上次任务 ${taskId.slice(0, 10)}…` : '粘贴来源 Suno task_id'}
+                className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none placeholder:text-white/25"
+              />
+            </div>
+            {sunoNzAction.referenceType === 'mashup' && (
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">第二个 task_id</label>
+                <input value={sunoTaskRef2} onChange={(e) => update({ sunoTaskRef2: e.target.value })} placeholder="第二首歌曲 task_id" className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none" />
+              </div>
+            )}
+            {sunoNzAction.referenceType === 'task_audio' && (
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">音频序号（audio_index）</label>
+                <input type="number" min={1} value={sunoAudioIndex} onChange={(e) => update({ sunoAudioIndex: Math.max(1, Number(e.target.value) || 1) })} className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none" />
+              </div>
+            )}
+          </div>
+        )}
+
+        {isSunoNz && ['suno-crop', 'suno-remove-section', 'suno-replace-music', 'suno-sample'].includes(sunoNzOperation) && (
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] text-white/50 block mb-1">开始秒数</label>
+              <input type="number" min={0} step="0.1" value={sunoStartSeconds} onChange={(e) => update({ sunoStartSeconds: Number(e.target.value) || 0 })} className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none" />
+            </div>
+            <div>
+              <label className="text-[10px] text-white/50 block mb-1">结束秒数</label>
+              <input type="number" min={0} step="0.1" value={sunoEndSeconds} onChange={(e) => update({ sunoEndSeconds: Number(e.target.value) || 0 })} className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none" />
+            </div>
+          </div>
+        )}
+
+        {isSunoNz && sunoNzOperation === 'suno-extend' && (
+          <div>
+            <label className="text-[10px] text-white/50 block mb-1">续写起点（秒）</label>
+            <input type="number" min={0} step="0.1" value={continueAt} onChange={(e) => update({ continueAt: Number(e.target.value) || 0 })} className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none" />
+          </div>
+        )}
+
+        {isSunoNz && ['suno-fade-in', 'suno-fade-out'].includes(sunoNzOperation) && (
+          <div>
+            <label className="text-[10px] text-white/50 block mb-1">渐变时长（秒）</label>
+            <input type="number" min={0} step="0.1" value={sunoDurationSeconds} onChange={(e) => update({ sunoDurationSeconds: Number(e.target.value) || 0 })} className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none" />
+          </div>
+        )}
+
+        {isSunoNz && sunoNzOperation === 'suno-adjust-speed' && (
+          <div>
+            <label className="text-[10px] text-white/50 block mb-1">速度倍率</label>
+            <input type="number" min={0.01} step="0.05" value={sunoSpeed} onChange={(e) => update({ sunoSpeed: Number(e.target.value) || 1 })} className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none" />
+          </div>
+        )}
+
+        {isSunoNz && sunoNzOperation === 'suno-persona' && (
+          <div>
+            <label className="text-[10px] text-white/50 block mb-1">Persona 名称</label>
+            <input value={sunoPersonaName} onChange={(e) => update({ sunoPersonaName: e.target.value })} placeholder="例如：雨夜女声" className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none" />
+          </div>
         )}
 
         {isSeedAudio && (
@@ -834,7 +1266,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           </div>
         )}
 
-        {isSuno && (
+        {isSuno && !isSunoNz && (
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="text-[10px] text-white/50 block mb-1">Seed (0=随机)</label>
@@ -873,10 +1305,16 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           isDark={isDark}
           isPixel={isPixel}
           groups={previewGroups}
-          title={isWhisper ? '待转写素材 · 音频 / MP4' : isSeedAudio ? '上游素材 · Seed Audio 参考' : mode === 'generate' ? '上游素材 · 歌词提示' : '上游素材 · 参考音频'}
+          title={isWhisper
+            ? '待转写素材 · 音频 / MP4'
+            : isSeedAudio
+              ? '上游素材 · Seed Audio 参考'
+              : isSunoNz
+                ? '上游素材 · 文本 / 最多 4 段音频'
+                : mode === 'generate' ? '上游素材 · 歌词提示' : '上游素材 · 参考音频'}
         />
 
-        {(isSeedAudio || isWhisper) && (localRefImage || localRefAudio) && (
+        {(isSeedAudio || isWhisper || showSunoNzAudioImport) && (localRefImage || localRefAudio) && (
           <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.05] p-2 space-y-1">
             <div className="flex items-center justify-between gap-2 text-[10px] text-cyan-100/75">
               <span>本地参考素材</span>
@@ -887,7 +1325,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           </div>
         )}
 
-        {(isSeedAudio || isWhisper) && (
+        {(isSeedAudio || isWhisper || showSunoNzAudioImport) && (
           <div className="flex gap-1.5">
             <input
               ref={fileInputRef}
@@ -898,7 +1336,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
             />
             <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading} className="flex-1 flex items-center justify-center gap-1 rounded bg-white/5 py-1 text-[10px] text-cyan-100 hover:bg-white/10 disabled:opacity-50">
               {uploading ? <Loader2 size={10} className="animate-spin" /> : <Upload size={10} />}
-              {uploading ? '导入中…' : isWhisper ? '导入待转写音频 / MP4' : '导入参考音频'}
+              {uploading ? '导入中…' : isWhisper ? '导入待转写音频 / MP4' : isSunoNz ? '导入 Suno 参考音频（至少 6 秒）' : '导入参考音频'}
             </button>
           </div>
         )}
@@ -976,9 +1414,23 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           </div>
         )}
 
+        {isSunoNz && taskId && (
+          <div className="rounded border border-white/10 bg-black/10 px-2 py-1.5">
+            <div className="mb-1 flex items-center justify-between text-[10px] text-white/45">
+              <span>本次 task_id（后续处理可直接使用）</span>
+              <button type="button" onClick={() => navigator.clipboard?.writeText(taskId)} className="text-cyan-200 hover:text-cyan-100">复制</button>
+            </div>
+            <div className="select-all break-all font-mono text-[10px] text-white/70">{taskId}</div>
+          </div>
+        )}
+
         <ReuseResultToggle
           checked={d?.reuseResult === true}
-          hasResult={isWhisper ? transcript.trim().length > 0 : hasReusableGenerationResult('audio', d)}
+          hasResult={isWhisper
+            ? transcript.trim().length > 0
+            : isSunoNz
+              ? hasReusableGenerationResult('audio', d) || !!sunoResultText || sunoVideoUrls.length > 0 || sunoFileUrls.length > 0
+              : hasReusableGenerationResult('audio', d)}
           onChange={(checked) => update({ reuseResult: checked })}
           accentColor="#a78bfa"
         />
@@ -988,7 +1440,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
             onClick={() => requestCanvasNodeRun(id)}
             className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded bg-violet-500/20 hover:bg-violet-500/30 text-violet-200 text-xs font-medium transition-colors"
           >
-            <Sparkles size={12} /> {isWhisper ? '开始转写' : '生成音频'}
+            <Sparkles size={12} /> {isWhisper ? '开始转写' : isSunoNz ? `执行 ${sunoNzAction.label}` : '生成音频'}
           </button>
         ) : (
           <button
@@ -1002,7 +1454,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
         {isBusy && (
           <div className="flex items-center gap-1 text-[10px] text-violet-200/80">
             <Loader2 size={11} className="animate-spin" />
-            {isWhisper ? '正在转写...' : status === 'submitting' ? '提交任务...' : `轮询中 ${pollProgress}`}
+            {isWhisper ? '正在转写...' : status === 'submitting' ? '提交任务...' : pollProgress.includes('正在下载') ? pollProgress : `轮询中 ${pollProgress}`}
             {taskId && <span className="ml-auto text-white/30">{taskId.slice(0, 10)}…</span>}
           </div>
         )}
@@ -1011,6 +1463,43 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.05] px-2 py-1.5">
             <div className="mb-1 text-[10px] font-semibold text-cyan-100/80">转写结果</div>
             <div className="max-h-28 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-white/75">{transcript}</div>
+          </div>
+        )}
+
+        {isSunoNz && sunoResultText && (
+          <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.05] px-2 py-1.5">
+            <div className="mb-1 text-[10px] font-semibold text-cyan-100/80">{sunoNzAction.label}结果</div>
+            <div className="max-h-36 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-white/75">{sunoResultText}</div>
+          </div>
+        )}
+
+        {isSunoNz && sunoVideoUrls.length > 0 && !hasAutoOutput && (
+          <div className="space-y-2">
+            {sunoVideoUrls.map((url, index) => (
+              <video
+                key={`${url}:${index}`}
+                src={url}
+                controls
+                className="w-full rounded border border-white/10 bg-black"
+                data-drag-source
+                data-drag-kind="video"
+                data-drag-url={url}
+                data-drag-preview={url}
+                data-drag-node-id={id}
+                onMouseDown={(e) => beginMaterialDrag(e, { kind: 'video', url, sourceNodeId: id, previewUrl: url })}
+              />
+            ))}
+          </div>
+        )}
+
+        {isSunoNz && sunoFileUrls.length > 0 && (
+          <div className="rounded border border-white/10 bg-white/[0.03] p-2 space-y-1">
+            <div className="text-[10px] font-semibold text-white/60">结果文件</div>
+            {sunoFileUrls.map((url, index) => (
+              <a key={`${url}:${index}`} href={url} download className="block truncate text-[10px] text-cyan-200 hover:underline">
+                下载文件 {index + 1} · {url.split('/').pop()}
+              </a>
+            ))}
           </div>
         )}
 

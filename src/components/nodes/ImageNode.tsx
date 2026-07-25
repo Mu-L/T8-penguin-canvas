@@ -49,6 +49,10 @@ import {
   queryMjTask,
   uploadMjImage,
   buildMjPrompt,
+  submitMidjourneyNz,
+  queryMidjourneyNz,
+  type MidjourneyNzOperation,
+  type MidjourneyNzTaskResult,
   generateExternalImage,
   type MjSpeed,
 } from '../../services/generation';
@@ -89,6 +93,16 @@ import { canonicalizeComfyFieldsByWorkflow, comfyFieldInputValue } from '../../u
 import { LocalNodeAddonSlot } from 'virtual:t8-local-extensions';
 import type { RunNodeLifecycleReporter } from '../../types/project';
 import JimengCliHelpButton from './JimengCliHelpButton';
+import {
+  combinePromptWithImageAdjustments,
+  normalizeImagePromptAdjustmentSelections,
+  type ImagePromptAdjustmentSelection,
+} from '../../data/imagePromptAdjustments';
+import MidjourneyNzPanel from './MidjourneyNzPanel';
+import {
+  buildMidjourneyNzRequest,
+  midjourneyNzRequiresPrompt,
+} from '../../utils/midjourneyNz';
 
 /**
  * ImageNode - 图像生成(ZhenzhenMagic)
@@ -393,6 +407,10 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   const isZhenzhenBudgetImageSelected = !isExternalSelected
     && isBudgetImageTab
     && (d?.imageBuiltinSource === 'seedance-nz' || isZhenzhenBudgetImageModel(savedApiModel));
+  const isZhenzhenBudgetMjSelected = !isExternalSelected
+    && modelDef.paramKind === 'mj'
+    && d?.imageBuiltinSource === 'seedance-nz';
+  const isZhenzhenBudgetPlatformSelected = isZhenzhenBudgetImageSelected || isZhenzhenBudgetMjSelected;
   const budgetDefaultApiModel = modelDef.id === 'grok-image'
     ? ZHENZHEN_IMAGE_GK_V15_MODEL
     : ZHENZHEN_IMAGE_G2_T2I_MODEL;
@@ -408,7 +426,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   const isZhenzhenLowpriceImage = apiModel === ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL;
   const isZhenzhenGrokImage = apiModel === ZHENZHEN_IMAGE_GK_V15_MODEL;
   const isZhenzhenGrokImageEdit = apiModel === ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL;
-  const seedanceNzProviderLabel = isZhenzhenBudgetImageSelected
+  const seedanceNzProviderLabel = isZhenzhenBudgetPlatformSelected
     ? '贞贞的平价AI小屋'
     : '贞贞的平价AI工坊（国内）';
   const effectiveAspectRatios = isZhenzhenImageG2
@@ -467,6 +485,8 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
 
   // ========== MJ 渠道识别及参数(完全对齐 gpt-image-2-web mj_* 控件 L1552~L1580) ==========
   const isMj = modelDef.paramKind === 'mj';
+  const mjNzOperation = (d?.mjNzOperation || 'midjourney-imagine') as MidjourneyNzOperation;
+  const mjNzVideoSource: 'image' | 'task' = d?.mjNzVideoSource === 'task' ? 'task' : 'image';
   const isGrokImage = modelDef.paramKind === 'grok-image';
   const isSeedream = modelDef.paramKind === 'seedream-v5';
   const seedreamApiSource: 'zhenzhen' | 'seedance-nz' = d?.seedreamApiSource === 'seedance-nz' ? 'seedance-nz' : 'zhenzhen';
@@ -515,9 +535,18 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
       : (falDef?.maxRefs ?? modelDef.maxReferenceImages);
   const status: 'idle' | 'generating' | 'success' | 'error' = d?.status || 'idle';
   const imageUrl = d?.imageUrl as string | undefined;
+  const videoUrl = d?.videoUrl as string | undefined;
+  const outputText = typeof d?.outputText === 'string' ? d.outputText : '';
   const localPrompt = d?.prompt || '';
   const imageOnlyOutput = d?.imageOnlyOutput !== false;
   const promptMentions: MediaMention[] = Array.isArray(d?.promptMentions) ? d.promptMentions : [];
+  const imagePromptAdjustments = useMemo(
+    () => normalizeImagePromptAdjustmentSelections(d?.imagePromptAdjustments),
+    [d?.imagePromptAdjustments],
+  );
+  const updateImagePromptAdjustments = (next: ImagePromptAdjustmentSelection[]) => {
+    update({ imagePromptAdjustments: next });
+  };
   // 节点内本地上传的参考图(除了上游接入的,这里是手动上传)
   const refImages: string[] = Array.isArray(d?.referenceImages) ? d.referenceImages : [];
 
@@ -583,7 +612,20 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   // 切换模型时,如果当前比例/尺寸不在新模型选项里则重置
   const switchModel = (mId: string) => {
     const newDef = IMAGE_MODELS.find((m) => m.id === mId) || IMAGE_MODELS[0];
-    if (isZhenzhenBudgetImageSelected && (newDef.id === 'gpt-image-2' || newDef.id === 'grok-image')) {
+    if (
+      isZhenzhenBudgetPlatformSelected
+      && (newDef.id === 'gpt-image-2' || newDef.id === 'grok-image' || newDef.id === 'midjourney')
+    ) {
+      if (newDef.id === 'midjourney') {
+        update({
+          model: newDef.id,
+          apiModel: newDef.apiModel,
+          imageBuiltinSource: 'seedance-nz',
+          mjNzOperation: d?.mjNzOperation || 'midjourney-imagine',
+          mjNzSpeed: d?.mjNzSpeed || 'fast',
+        });
+        return;
+      }
       const nextApiModel = newDef.id === 'grok-image'
         ? ZHENZHEN_IMAGE_GK_V15_MODEL
         : ZHENZHEN_IMAGE_G2_T2I_MODEL;
@@ -718,12 +760,35 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
     const resolvedComfyPrompt = isComfyExternal
       ? resolveMediaMentions(comfyProviderPrompt || localPrompt, promptMentions, mentionMaterials)
       : '';
-    const finalPrompt = (upstreamPrompt || (isComfyExternal ? resolvedComfyPrompt : resolvedLocalPrompt) || '').trim();
+    const basePrompt = (
+      upstreamPrompt
+      || (isComfyExternal ? resolvedComfyPrompt : resolvedLocalPrompt)
+      || ''
+    ).trim();
+    const compiledPrompt = (!isComfyExternal || comfyHasPromptField)
+      ? combinePromptWithImageAdjustments(
+          basePrompt,
+          imagePromptAdjustments,
+          {
+            hasReferenceImages: upstreamImages.length > 0,
+            language: 'auto',
+          },
+        )
+      : { finalPrompt: basePrompt, active: [], inactive: [], text: '', language: 'zh' as const };
+    const finalPrompt = compiledPrompt.finalPrompt;
     const src = `image:${id.slice(0, 6)}`;
-    if (!finalPrompt && (!isComfyExternal || comfyHasPromptField)) {
+    const promptRequired = !isZhenzhenBudgetMjSelected
+      || midjourneyNzRequiresPrompt(mjNzOperation, mjNzVideoSource);
+    if (!basePrompt && promptRequired && (!isComfyExternal || comfyHasPromptField)) {
       setError('未连接 text 节点也未填写 prompt');
       logBus.error('生成中止: 缺少 prompt', src);
       return;
+    }
+    if (compiledPrompt.inactive.length > 0) {
+      logBus.info(
+        `图像调节未应用: ${compiledPrompt.inactive.map((item) => `${item.labelZh}（${item.reason}）`).join('、')}`,
+        src,
+      );
     }
     if (isZhenzhenImageG2 && finalPrompt.length > 20000) {
       setError('Zhenzhen Image G-2 提示词不能超过 20000 字符');
@@ -760,7 +825,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
       ? providerSelection.provider.id
       : isFal
         ? 'fal'
-        : isSeedreamNz || isZhenzhenBudgetImageSelected
+        : isSeedreamNz || isZhenzhenBudgetPlatformSelected
           ? 'seedance-nz'
           : isMj
             ? 'zhenzhen-mj'
@@ -771,6 +836,8 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         ? seedreamNzUiModel
         : isZhenzhenBudgetImageSelected
           ? apiModel
+        : isZhenzhenBudgetMjSelected
+          ? mjNzOperation
         : isMj
           ? mjVersion
           : apiModel;
@@ -882,6 +949,195 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
 
       // ============ MJ 路径(对齐 gpt-image-2-web runMJ L4437~L4716) ============
       if (isMj) {
+        if (isZhenzhenBudgetMjSelected) {
+          if (!zhenzhenSd2ApiKey) {
+            throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
+          }
+          if (mjNzOperation === 'midjourney-blend' && (allRefs.length < 2 || allRefs.length > 4)) {
+            throw new Error('midjourney-blend 必须提供 2–4 张参考图');
+          }
+          if (mjNzOperation === 'midjourney-describe' && allRefs.length !== 1) {
+            throw new Error('midjourney-describe 必须且只能提供 1 张参考图');
+          }
+          if (mjNzOperation === 'midjourney-edits' && (allRefs.length < 1 || allRefs.length > 4)) {
+            throw new Error('midjourney-edits 必须提供 1–4 张参考图');
+          }
+          if (
+            mjNzOperation === 'midjourney-video'
+            && mjNzVideoSource === 'image'
+            && allRefs.length < 1
+          ) {
+            throw new Error('midjourney-video 直接图片模式必须提供 1 张首帧参考图');
+          }
+          if (
+            mjNzOperation === 'midjourney-video'
+            && mjNzVideoSource === 'image'
+            && String(d?.mjNzVideoType || '').includes('_start_end_')
+            && allRefs.length < 2
+          ) {
+            throw new Error('Midjourney 首尾帧视频模式还需要第 2 张参考图作为尾帧');
+          }
+          if (
+            mjNzOperation === 'midjourney-modal'
+            && d?.mjNzModalMode !== 'outpaint'
+            && allRefs.length < 1
+          ) {
+            throw new Error('Midjourney 局部重绘必须把 PNG 遮罩作为第 1 张参考图');
+          }
+
+          const request = buildMidjourneyNzRequest(d, finalPrompt, allRefs);
+          logBus.info(
+            `平价AI小屋 MJ 提交: action=${mjNzOperation} ref=${allRefs.length} task=${request.task_id ? 'yes' : 'no'}`,
+            src,
+          );
+          const submit = await submitMidjourneyNz(request);
+          if (!isCurrentGenerationRun(runId)) return;
+          const submittedTaskId = String(submit.taskId || '').trim();
+          if (submittedTaskId) {
+            await reporter?.providerSubmitted({
+              provider: traceProvider,
+              model: traceModel,
+              upstreamTaskId: submittedTaskId,
+              requestId: submit.requestId,
+              transportHttpStatus: submit.transportHttpStatus,
+              upstreamHttpStatus: submit.upstreamHttpStatus,
+              usage: submit.usage,
+              httpStatusSource: 'local-backend',
+            });
+          }
+
+          const finishMidjourneyNz = async (
+            result: MidjourneyNzTaskResult,
+            pollCount = 0,
+          ): Promise<boolean> => {
+            const resultStatus = String(result.status || '').toLowerCase();
+            const taskId = String(result.taskId || submittedTaskId || '').trim();
+            if (resultStatus === 'modal') {
+              update({
+                status: 'idle',
+                progress: '等待遮罩 / Modal',
+                taskId,
+                mjNzLastTaskId: taskId,
+                mjNzSourceTaskId: taskId,
+                mjNzOperation: 'midjourney-modal',
+                mjNzButtons: result.buttons || [],
+                error: null,
+              });
+              logBus.success('Midjourney 已进入 MODAL：请连接 PNG 遮罩后再次生成', src);
+              await reporter?.providerResponse({
+                provider: traceProvider,
+                model: traceModel,
+                upstreamTaskId: taskId,
+                requestId: result.requestId || submit.requestId,
+                transportHttpStatus: result.transportHttpStatus,
+                upstreamHttpStatus: result.upstreamHttpStatus,
+                usage: result.usage,
+                pollCount,
+                status: 'succeeded',
+                httpStatusSource: 'local-backend',
+              });
+              return true;
+            }
+            if (!['completed', 'success', 'succeeded', 'done'].includes(resultStatus)) return false;
+            const imageUrls = Array.isArray(result.imageUrls) ? result.imageUrls : [];
+            const videoUrls = Array.isArray(result.videoUrls) ? result.videoUrls : [];
+            const outputText = String(result.text || '').trim();
+            const resultFamily = String(result.resultFamily || (
+              videoUrls.length ? 'video' : outputText ? 'text' : 'image'
+            ));
+            if (!imageUrls.length && !videoUrls.length && !outputText) {
+              throw new Error('Midjourney 任务完成但没有返回可用结果');
+            }
+            update({
+              status: 'success',
+              progress: '100%',
+              imageUrl: imageUrls[0] || null,
+              imageUrls,
+              videoUrl: videoUrls[0] || null,
+              videoUrls,
+              outputText,
+              textSegments: outputText ? [outputText] : [],
+              imageOnlyOutput: resultFamily === 'text' ? false : imageOnlyOutput,
+              lastPrompt: finalPrompt,
+              usedI2I: allRefs.length > 0,
+              taskId: taskId || d?.taskId,
+              mjNzLastTaskId: taskId || d?.mjNzLastTaskId,
+              mjNzButtons: result.buttons || [],
+              mjNzResultFamily: resultFamily,
+              requestId: result.requestId,
+              transportHttpStatus: result.transportHttpStatus,
+              upstreamHttpStatus: result.upstreamHttpStatus,
+              usage: result.usage,
+              pollCount,
+            });
+            logBus.success(
+              `平价AI小屋 MJ 完成 · ${resultFamily}${imageUrls.length ? ` · 图片 ${imageUrls.length}` : ''}${videoUrls.length ? ` · 视频 ${videoUrls.length}` : ''}${outputText ? ' · 文本' : ''}`,
+              src,
+            );
+            taskCompletionSound.notifyComplete(id, resultFamily === 'video' ? 'video' : 'image');
+            await reporter?.providerResponse({
+              provider: traceProvider,
+              model: traceModel,
+              upstreamTaskId: taskId,
+              requestId: result.requestId || submit.requestId,
+              transportHttpStatus: result.transportHttpStatus,
+              upstreamHttpStatus: result.upstreamHttpStatus,
+              usage: result.usage,
+              pollCount,
+              status: 'succeeded',
+              httpStatusSource: 'local-backend',
+            });
+            return true;
+          };
+
+          if (await finishMidjourneyNz(submit)) return;
+          if (!submittedTaskId) throw new Error('Midjourney 未返回任务 ID 或同步结果');
+          update({
+            progress: submit.progress || '5%',
+            taskId: submittedTaskId,
+            mjNzLastTaskId: submittedTaskId,
+            mjNzButtons: submit.buttons || [],
+          });
+
+          const interval = Math.max(1, Math.min(30, Number(d?.mjNzPollInterval) || 3)) * 1000;
+          const maxPoll = Math.max(minPollCountForTimeout(interval), 1200);
+          let nextPollDelay = interval;
+          for (let i = 0; i < maxPoll; i++) {
+            await new Promise((resolve) => setTimeout(resolve, nextPollDelay));
+            nextPollDelay = interval;
+            if (!isCurrentGenerationRun(runId)) return;
+            const query = await queryMidjourneyNz(submittedTaskId);
+            if (!isCurrentGenerationRun(runId)) return;
+            await reporter?.polling({
+              provider: traceProvider,
+              model: traceModel,
+              taskId: submittedTaskId,
+              requestId: query.requestId,
+              transportHttpStatus: query.transportHttpStatus,
+              upstreamHttpStatus: query.upstreamHttpStatus,
+              usage: query.usage,
+              httpStatusSource: 'local-backend',
+              pollCount: i + 1,
+              pollLimit: maxPoll,
+              status: query.status,
+              progress: query.progress,
+            });
+            const queryStatus = String(query.status || '').toLowerCase();
+            if (queryStatus === 'materializing') {
+              nextPollDelay = Math.max(interval, Math.min(30_000, Number(query.retryAfterMs) || 5_000));
+              update({ progress: '100% · 正在下载' });
+              setDownloadNotice(query.error || 'Midjourney 已生成，正在保存结果到本机。');
+              continue;
+            }
+            if (query.progress) update({ progress: query.progress });
+            if (await finishMidjourneyNz(query, i + 1)) return;
+            if (['failed', 'failure', 'error'].includes(queryStatus)) {
+              throw new Error(query.error || 'Midjourney 任务失败');
+            }
+          }
+          throw new Error(`Midjourney 轮询超时：${Math.round((maxPoll * interval) / 1000)} 秒`);
+        }
+
         logBus.info(
           `MJ提交: version=${mjVersion} ar=${mjAr} speed=${mjSpeed} ref=${allRefs.length} sref=${mjSrefImages.length} oref=${mjOrefImages.length} prompt="${finalPrompt.slice(0, 60)}${finalPrompt.length > 60 ? '…' : ''}"`,
           src,
@@ -1580,8 +1836,8 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           <div className="text-[10px] text-white/40">
             {isExternalSelected && providerSelection.provider
               ? `${providerSelection.provider.label || providerSelection.provider.id} · ${externalProviderModel || '未选模型'}`
-              : isZhenzhenBudgetImageSelected
-                ? `贞贞的平价AI小屋 · ${apiModel}`
+              : isZhenzhenBudgetPlatformSelected
+                ? `贞贞的平价AI小屋 · ${isZhenzhenBudgetMjSelected ? mjNzOperation : apiModel}`
               : isSeedreamNz
                 ? `贞贞的平价AI工坊（国内） · ${seedreamNzUiModel}`
                 : `${modelDef.label} · ${modelDef.description}`}
@@ -1602,7 +1858,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
               <span>
                 {isExternalSelected && providerSelection.provider
                   ? providerSelection.provider.label
-                  : isZhenzhenBudgetImageSelected
+                  : isZhenzhenBudgetPlatformSelected
                     ? '贞贞的平价AI小屋'
                     : '默认贞贞工坊'}
               </span>
@@ -1614,14 +1870,14 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
                   <select
                     value={isExternalSelected
                       ? providerSelection.providerId
-                      : isZhenzhenBudgetImageSelected
+                      : isZhenzhenBudgetPlatformSelected
                         ? 'builtin:seedance-nz'
                         : 'zhenzhen'}
                     onChange={(e) => {
                       const nextId = e.target.value;
                       if (nextId === 'zhenzhen') {
-                        const leavingBudgetPlatform = isBudgetImageTab
-                          && (d?.imageBuiltinSource === 'seedance-nz' || isZhenzhenBudgetImageModel(savedApiModel));
+                        const leavingBudgetPlatform = d?.imageBuiltinSource === 'seedance-nz'
+                          || isZhenzhenBudgetImageModel(savedApiModel);
                         update({
                           providerSource: 'zhenzhen',
                           providerId: '',
@@ -1970,6 +2226,9 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
                                   isDark={isDark}
                                   isPixel={isPixel}
                                   promptTemplateKind="image"
+                                  imagePromptAdjustments={imagePromptAdjustments}
+                                  onImagePromptAdjustmentsChange={updateImagePromptAdjustments}
+                                  imagePromptAdjustmentHasReferenceImages={orderedImages.length > 0}
                                   className="w-full min-h-[68px] resize-y rounded bg-white/5 border border-white/10 px-2 py-1 text-[11px] text-white outline-none focus:border-cyan-300/60 placeholder:text-white/30"
                                 />
                                 {orderedTexts.length > 0 && (
@@ -2118,7 +2377,10 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             style={isPixel ? { background: 'var(--px-muted)', border: '1.5px solid var(--px-ink)' } : undefined}
           >
             {IMAGE_MODELS
-              .filter((m) => !isZhenzhenBudgetImageSelected || m.id === 'gpt-image-2' || m.id === 'grok-image')
+              .filter((m) => !isZhenzhenBudgetPlatformSelected
+                || m.id === 'gpt-image-2'
+                || m.id === 'grok-image'
+                || m.id === 'midjourney')
               .map((m) => {
               const isActive = m.id === model;
               return (
@@ -2198,7 +2460,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
 
         {isZhenzhenBudgetImageSelected && !isExternalSelected && (
           <div className="rounded border border-cyan-400/25 bg-cyan-500/5 px-2 py-1.5 text-[10px] leading-4 text-cyan-100/80">
-            <div>贞贞的平价AI小屋 · {apiModel}</div>
+            <div>{`贞贞的平价AI小屋 · ${apiModel}`}</div>
             <div>
               {isZhenzhenImageG2
                 ? isZhenzhenImageG2I2I
@@ -2220,12 +2482,16 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           data={d}
           update={update}
           context={{
-            providerSource: isExternalSelected ? providerSelection.providerSource : ((isSeedreamNz || isZhenzhenBudgetImageSelected) ? 'seedance-nz' : 'zhenzhen'),
+            providerSource: isExternalSelected ? providerSelection.providerSource : ((isSeedreamNz || isZhenzhenBudgetPlatformSelected) ? 'seedance-nz' : 'zhenzhen'),
             providerId: providerSelection.providerId,
             providerModel: isExternalSelected ? externalProviderModel : (isSeedreamNz ? seedreamNzUiModel : apiModel),
             model: modelDef.id,
             apiModel,
-            providerKind: isFal ? 'fal' : (isZhenzhenBudgetImageSelected ? 'seedance-nz-image' : modelDef.paramKind),
+            providerKind: isFal
+              ? 'fal'
+              : isZhenzhenBudgetMjSelected
+                ? 'seedance-nz-midjourney'
+                : (isZhenzhenBudgetImageSelected ? 'seedance-nz-image' : modelDef.paramKind),
           }}
         />
 
@@ -2587,7 +2853,16 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         )}
 
         {/* ========== MJ 专属参数面板(完全对齐 gpt-image-2-web mj_* 控件 L1552~L1580) ========== */}
-        {!isExternalSelected && isMj && (
+        {!isExternalSelected && isMj && isZhenzhenBudgetMjSelected && (
+          <MidjourneyNzPanel
+            data={d}
+            update={update}
+            imageCount={orderedImages.length}
+            hasApiKey={!!zhenzhenSd2ApiKey}
+          />
+        )}
+
+        {!isExternalSelected && isMj && !isZhenzhenBudgetMjSelected && (
           <div className="space-y-2 rounded border border-purple-400/30 bg-purple-500/5 p-2">
             <div className="text-[10px] text-purple-300 font-semibold tracking-wide">
               ✨ Midjourney(严格对齐主项目 runMJ)
@@ -2853,6 +3128,9 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             isDark={isDark}
             isPixel={isPixel}
             promptTemplateKind="image"
+            imagePromptAdjustments={imagePromptAdjustments}
+            onImagePromptAdjustmentsChange={updateImagePromptAdjustments}
+            imagePromptAdjustmentHasReferenceImages={orderedImages.length > 0}
             className="w-full h-14 resize-none rounded bg-white/5 border border-white/10 px-2 py-1 text-[11px] text-white outline-none focus:border-white/30 placeholder:text-white/30"
           />
         </div>}
@@ -2931,6 +3209,28 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             }
             title="Ctrl+拖拽可送到其他节点"
           />
+        </div>
+      )}
+      {isZhenzhenBudgetMjSelected && videoUrl && !hasAutoOutput && (
+        <div className="border-t border-white/10 p-2">
+          <video
+            src={videoUrl}
+            controls
+            preload="metadata"
+            className="w-full rounded bg-black"
+            data-drag-source
+            data-drag-kind="video"
+            data-drag-url={videoUrl}
+            data-drag-preview={videoUrl}
+            data-drag-node-id={id}
+          />
+        </div>
+      )}
+      {isZhenzhenBudgetMjSelected && outputText && !hasAutoOutput && (
+        <div className="border-t border-white/10 p-2">
+          <div className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-cyan-300/15 bg-cyan-500/5 p-2 text-[10px] leading-4 text-cyan-50/80">
+            {outputText}
+          </div>
         </div>
       )}
     </div>

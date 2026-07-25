@@ -23,7 +23,9 @@ import MediaMetadataBadge from '../MediaMetadataBadge';
 import RhImageCapabilityRail from '../RhImageCapabilityRail';
 import RhVideoCapabilityRail from '../RhVideoCapabilityRail';
 import SmartImage from '../SmartImage';
+import ImageLongEdgeButtons from '../ImageLongEdgeButtons';
 import { useMaterialDropTarget } from '../../hooks/useMaterialDropTarget';
+import { useImageLongEdgeOutputs } from '../../hooks/useImageLongEdgeOutputs';
 import { useDragMaterialStore, type MaterialPayload } from '../../stores/dragMaterial';
 import ResizableCorners from './ResizableCorners';
 import { saveAssetToDisk } from '../../services/api';
@@ -149,6 +151,7 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
   const [rhVideoCapabilityBusy, setRhVideoCapabilityBusy] = useState(false);
   const [capturingFrameKey, setCapturingFrameKey] = useState<string | null>(null);
   const [videoFrameError, setVideoFrameError] = useState('');
+  const [imageLongEdgeError, setImageLongEdgeError] = useState('');
   const videoFrameTimesRef = useRef(new Map<string, number>());
   const activeTemplate = useMemo(
     () => resolveThemeTemplate(templateId, customTemplates),
@@ -527,6 +530,18 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
 
     return out;
   }, [upstreamNodes, upstreamSig, handleMap, d.pickKind, d.pickIndex, d.directOutputSingleSnapshot, d.directImageUrl, d.directImageUrls, d.directVideoUrl, d.directVideoUrls, d.directAudioUrl, d.directAudioUrls, d.directModelUrl, d.directModelUrls, d.modelUrl, d.modelUrls, d.directOutputText, d.directTextSegments, d.hiddenMaterialUrls, d.rhDuckDecoded]);
+
+  const reportImageLongEdgeError = useCallback((message: string) => {
+    setImageLongEdgeError(message);
+  }, []);
+  const imageLongEdge = useImageLongEdgeOutputs({
+    sourceUrls: collected.images,
+    data: d,
+    update,
+    onError: reportImageLongEdgeError,
+  });
+  const displayImageUrls = imageLongEdge.previewUrls;
+  const publishedImageUrls = imageLongEdge.outputUrls;
 
   // 文本编辑
   const overrideText: string = typeof d.outputText === 'string' ? d.outputText : '';
@@ -1087,9 +1102,9 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
       prompt: passText,
       text: passText,
       reply: passText,
-      imageUrl: collected.images[0] || '',
-      imageUrls: collected.images.slice(),
-      urls: collected.images.slice(),
+      imageUrl: publishedImageUrls[0] || '',
+      imageUrls: publishedImageUrls.slice(),
+      urls: publishedImageUrls.slice(),
       videoUrl: collected.videos[0] || '',
       audioUrl: collected.audios[0] || '',
       audioUrl_1: collected.audios[1] || '', // 透传 Suno 双轨副轨避免串联丢失
@@ -1129,7 +1144,7 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
       JSON.stringify(cur.segments) !== JSON.stringify(next.segments);
     if (changed) update(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [displayText, collected]);
+  }, [displayText, collected, publishedImageUrls]);
 
   // === v1.2.10.2: 自动保存到本地路径 ===
   // 设计要点:
@@ -1158,7 +1173,7 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
   // === 选中节点上方浮动「Edit」按钮 ===
   // 仅当节点被选中且至少存在一张图像时出现，等价于双击图像触发
   // ImageEditModal（裁剪 / 宫格切分），多图时编辑第一张。
-  const hasEditableImages = collected.images.length > 0;
+  const hasEditableImages = displayImageUrls.length > 0 && (imageLongEdge.limit === 0 || imageLongEdge.ready);
   const canEditImage = selected && hasEditableImages;
   const showRhCapabilityRail = (selected || rhCapabilityBusy) && hasEditableImages;
   const videoSourceItems = useMemo(
@@ -1172,7 +1187,7 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
   const showRhVideoCapabilityRail = (selected || rhVideoCapabilityBusy) && collected.videos.length > 0;
   const onClickEditTopBtn = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (collected.images.length > 0) setEditingUrl(collected.images[0]);
+    if (displayImageUrls.length > 0) setEditingUrl(displayImageUrls[0]);
   };
 
   const runSecondaryAction = async (reporter: RunNodeLifecycleReporter) => {
@@ -1258,7 +1273,7 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
       <RhImageCapabilityRail
         secondaryActionNodeId={id}
         queueSecondaryAction={queueSecondaryAction}
-        sourceUrls={collected.images}
+        sourceUrls={publishedImageUrls}
         accent={effectiveAccent}
         isDark={isDark}
         style={{ display: showRhCapabilityRail ? 'flex' : 'none' }}
@@ -1465,32 +1480,47 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
         )}
 
         {/* 图像区 */}
-        {collected.images.length > 0 && (
+        {displayImageUrls.length > 0 && (
           <div className="group/output-images space-y-1">
             <div className={`flex items-center gap-1.5 text-[10px] ${isDark ? 'text-white/50' : 'text-zinc-500'}`}>
               <ImageIcon size={11} />
-              <span className="flex-1">图像 ({collected.images.length})</span>
-              <CollectionSplitButton
-                count={collected.images.length}
-                kindLabel="图像"
-                onSplit={() => splitOutputCollection('image', collected.images)}
-                className="opacity-100 transition sm:opacity-0 sm:group-hover/output-images:opacity-100 sm:focus-within:opacity-100"
+              <span className="flex-1">
+                图像 ({displayImageUrls.length})
+                {imageLongEdge.busy ? ' · 缩放中' : ''}
+              </span>
+              <ImageLongEdgeButtons
+                value={imageLongEdge.limit}
+                busy={imageLongEdge.busy}
+                onChange={imageLongEdge.selectLimit}
               />
+              {(imageLongEdge.limit === 0 || imageLongEdge.ready) && (
+                <CollectionSplitButton
+                  count={displayImageUrls.length}
+                  kindLabel="图像"
+                  onSplit={() => splitOutputCollection('image', publishedImageUrls)}
+                  className="opacity-100 transition sm:opacity-0 sm:group-hover/output-images:opacity-100 sm:focus-within:opacity-100"
+                />
+              )}
             </div>
+            {imageLongEdgeError && (
+              <div className="rounded border border-red-400/30 bg-red-500/10 px-2 py-1 text-[10px] text-red-300">
+                {imageLongEdgeError}
+              </div>
+            )}
             {/* 单张：全宽大图预览；多张：2 列原比例预览，操作按钮放在图片上方，避免遮挡下载。 */}
             <div
               className={
-                collected.images.length >= 2
+                displayImageUrls.length >= 2
                   ? 'grid grid-cols-2 gap-1.5'
                   : 'space-y-1'
               }
             >
-              {collected.images.map((u, i) => (
+              {displayImageUrls.map((u, i) => (
                 <div key={i} className="group group/output-image-card space-y-0.5">
                   <div className="relative">
                     <div
                       className={
-                        collected.images.length >= 2
+                        displayImageUrls.length >= 2
                           ? 't8-output-image-action-stack t8-output-image-action-stack--compact t8-output-image-action-stack--above z-10 mb-1 flex flex-row justify-end gap-1 opacity-100'
                           : 't8-output-image-action-stack absolute right-1.5 top-1.5 z-10 flex flex-col gap-1 opacity-100 transition sm:opacity-0 sm:group-hover/output-image-card:opacity-100 sm:focus-within:opacity-100'
                       }
@@ -1514,12 +1544,12 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
                           openImageCompare(u);
                         }}
                       >
-                        <GitCompare size={collected.images.length >= 2 ? 10 : 13} />
+                        <GitCompare size={displayImageUrls.length >= 2 ? 10 : 13} />
                       </button>
                       <ImageHoverPreview
                         src={u}
                         alt={`图像 ${i + 1}`}
-                        iconSize={collected.images.length >= 2 ? 10 : 14}
+                        iconSize={displayImageUrls.length >= 2 ? 10 : 14}
                         buttonClassName="t8-material-action-button p-0 shadow-md transition"
                       />
                       <button
@@ -1539,23 +1569,25 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          handleRemoveOutputMaterial('image', u);
+                          if (editingUrl === u) setEditingUrl(null);
+                          if (compareState?.resultUrl === u) setCompareState(null);
+                          handleRemoveOutputMaterial('image', collected.images[i] || u);
                         }}
                       >
-                        <Trash2 size={collected.images.length >= 2 ? 10 : 13} />
+                        <Trash2 size={displayImageUrls.length >= 2 ? 10 : 13} />
                       </button>
                     </div>
                     <SmartImage
                       src={u}
                       alt={`图像 ${i + 1}`}
-                      className={`t8-output-image-media${collected.images.length >= 2 ? ' t8-output-image-media--grid' : ''} w-full rounded block cursor-zoom-in`}
-                      thumbSize={collected.images.length >= 2 ? 420 : 720}
+                      className={`t8-output-image-media${displayImageUrls.length >= 2 ? ' t8-output-image-media--grid' : ''} w-full rounded block cursor-zoom-in`}
+                      thumbSize={displayImageUrls.length >= 2 ? 420 : 720}
                       style={{
                         background: '#0008',
                         objectFit: 'contain',
-                        maxHeight: collected.images.length >= 2 ? 180 : 480,
+                        maxHeight: displayImageUrls.length >= 2 ? 180 : 480,
                       }}
-                      data-drag-source
+                      data-drag-source={imageLongEdge.limit === 0 || imageLongEdge.ready ? true : undefined}
                       data-drag-kind="image"
                       data-drag-url={u}
                       data-drag-preview={u}
@@ -1565,9 +1597,11 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
                       data-prompt-template-category="image-reference-edit"
                       data-prompt-template-prompt={mediaPromptByUrl.get(u)?.prompt || displayText}
                       data-prompt-template-negative={mediaPromptByUrl.get(u)?.negative || ''}
-                      onMouseDown={(e) =>
-                        beginMaterialDrag(e, { kind: 'image', url: u, sourceNodeId: id, previewUrl: u })
-                      }
+                      onMouseDown={(e) => {
+                        if (imageLongEdge.limit === 0 || imageLongEdge.ready) {
+                          beginMaterialDrag(e, { kind: 'image', url: u, sourceNodeId: id, previewUrl: u });
+                        }
+                      }}
                       onDoubleClick={(e) => {
                         e.stopPropagation();
                         setEditingUrl(u);
@@ -1579,13 +1613,13 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
                     <span className="truncate flex-1" title={u}>{u.split('/').pop()}</span>
                     <MediaMetadataBadge kind="image" url={u} />
                     <a
-                      href={u}
+                      href={imageLongEdge.limit === 0 || imageLongEdge.ready ? u : undefined}
                       target="_blank"
                       rel="noopener noreferrer"
                       download
                       className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded ${
                         isDark ? 'hover:bg-white/10 text-white/60' : 'hover:bg-black/10 text-zinc-600'
-                      }`}
+                      } ${imageLongEdge.limit !== 0 && !imageLongEdge.ready ? 'pointer-events-none opacity-40' : ''}`}
                     >
                       <Download size={10} /> 下载
                     </a>

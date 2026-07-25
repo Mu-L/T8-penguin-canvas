@@ -6,6 +6,7 @@ import {
   SEEDANCE_NZ_RATIO_OPTIONS,
   SEEDANCE_NZ_NATIVE_RESOLUTION_OPTIONS,
 } from '../src/config/seedance.ts';
+import { SUNO_NZ_ACTIONS } from '../src/providers/models.ts';
 import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 const read = (relative: string) => readFileSync(new URL(relative, import.meta.url), 'utf8');
@@ -40,6 +41,26 @@ test('SD2 node exposes built-in provider choices and preserves provider during p
   assert.match(generation, /taskProvider=\$\{encodeURIComponent\(taskProvider\)\}/);
 });
 
+test('audio node exposes the official 31-action Suno platform without replacing legacy Suno', () => {
+  const audioNode = read('../src/components/nodes/AudioNode.tsx');
+  const generation = read('../src/services/generation.ts');
+  const proxy = read('../backend/src/routes/proxy.js');
+
+  assert.equal(SUNO_NZ_ACTIONS.length, 31);
+  assert.equal(new Set(SUNO_NZ_ACTIONS.map((item) => item.value)).size, 31);
+  assert.equal(SUNO_NZ_ACTIONS[0].value, 'suno-generation');
+  assert.equal(SUNO_NZ_ACTIONS.at(-1)?.value, 'suno-add-stem');
+  assert.match(audioNode, /贞贞的AI工坊（原有）/);
+  assert.match(audioNode, /贞贞的平价AI小屋/);
+  assert.match(audioNode, /SUNO_NZ_ACTIONS\.map/);
+  assert.match(audioNode, /submitAudio\(\{/);
+  assert.match(audioNode, /submitSunoNz\(\{/);
+  assert.match(generation, /\/api\/proxy\/audio\/suno-nz\/submit/);
+  assert.match(generation, /\/api\/proxy\/audio\/suno-nz\/status\//);
+  assert.match(proxy, /router\.post\('\/audio\/suno-nz\/submit'/);
+  assert.match(proxy, /router\.get\('\/audio\/suno-nz\/status\/:tid'/);
+});
+
 test('all interval-based generation polling never overlaps a slow status request', () => {
   const seedanceNode = read('../src/components/nodes/SeedanceNode.tsx');
   const videoNode = read('../src/components/nodes/VideoNode.tsx');
@@ -51,8 +72,8 @@ test('all interval-based generation polling never overlaps a slow status request
   assert.equal((videoNode.match(/let pollInFlight = false;/g) || []).length, 2);
   assert.equal((videoNode.match(/if \(pollInFlight\) return;/g) || []).length, 2);
   assert.equal((videoNode.match(/pollInFlight = false;/g) || []).length, 4);
-  assert.equal((audioNode.match(/let pollInFlight = false;/g) || []).length, 2);
-  assert.equal((audioNode.match(/if \(pollInFlight\) return;/g) || []).length, 2);
+  assert.equal((audioNode.match(/let pollInFlight = false;/g) || []).length, 3);
+  assert.equal((audioNode.match(/if \(pollInFlight\) return;/g) || []).length, 3);
   assert.match(runningHubNode, /let pollInFlight = false;[\s\S]*?if \(pollInFlight\) return;/);
   assert.match(rhToolsNode, /let pollInFlight = false;[\s\S]*?if \(pollInFlight\) return;/);
 });

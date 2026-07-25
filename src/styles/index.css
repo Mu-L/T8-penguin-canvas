@@ -9876,3 +9876,38 @@ html[data-theme-visual="saint-seiya"] .t8-generation-target-icon {
   -webkit-text-stroke: 0 !important;
   text-shadow: none !important;
 }
+
+/*
+ * React Flow scales the complete node subtree. At fractional zoom, a filter or
+ * backdrop-filter promotes the node to an offscreen bitmap and Chromium then
+ * resamples both that bitmap and its glyphs. Keep the full glass treatment at
+ * detail zoom, but remove compositor filters below 90% so text stays vector-
+ * rendered for as long as the browser can preserve it.
+ */
+#root .t8-canvas-shell:is(
+  [data-canvas-zoom-readability="compact"],
+  [data-canvas-zoom-readability="overview"]
+) .react-flow__node:not(.react-flow__node-groupBox),
+#root .t8-canvas-shell:is(
+  [data-canvas-zoom-readability="compact"],
+  [data-canvas-zoom-readability="overview"]
+) .react-flow__node:not(.react-flow__node-groupBox) > div:first-child,
+#root .t8-canvas-shell:is(
+  [data-canvas-zoom-readability="compact"],
+  [data-canvas-zoom-readability="overview"]
+) .react-flow__node:not(.react-flow__node-groupBox) [style*="backdrop-filter"] {
+  filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+#root .t8-canvas-shell:is(
+  [data-canvas-zoom-readability="compact"],
+  [data-canvas-zoom-readability="overview"]
+) .react-flow__node,
+#root .t8-canvas-shell:is(
+  [data-canvas-zoom-readability="compact"],
+  [data-canvas-zoom-readability="overview"]
+) .react-flow__node * {
+  text-rendering: geometricPrecision !important;
+}

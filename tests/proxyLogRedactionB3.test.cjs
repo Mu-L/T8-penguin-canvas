@@ -999,6 +999,169 @@ test('B3 RunningHub output filenames come only from verified media magic and sta
   assert.match(serverSource, /mountUserMediaStatic\('\/files\/output'/);
 });
 
+test('B3 RH media validation trusts verified magic for same-kind subtype drift and still rejects unsafe mismatches', () => {
+  const png = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.alloc(16),
+  ]);
+  const mp3 = Buffer.concat([Buffer.from('ID3'), Buffer.alloc(16)]);
+  const quickTime = Buffer.concat([
+    Buffer.from([0x00, 0x00, 0x00, 0x14]),
+    Buffer.from('ftypqt  ', 'ascii'),
+    Buffer.alloc(8),
+  ]);
+  const mp4 = Buffer.concat([
+    Buffer.from([0x00, 0x00, 0x00, 0x14]),
+    Buffer.from('ftypisom', 'ascii'),
+    Buffer.alloc(8),
+  ]);
+  const sameKindCases = [
+    {
+      bytes: png,
+      declared: 'image/jpeg',
+      allowedKinds: ['image'],
+      detected: 'image/png',
+      extension: 'png',
+    },
+    {
+      bytes: quickTime,
+      declared: 'video/mp4',
+      allowedKinds: ['video'],
+      detected: 'video/quicktime',
+      extension: 'mov',
+    },
+    {
+      bytes: mp4,
+      declared: 'video/quicktime',
+      allowedKinds: ['video'],
+      detected: 'video/mp4',
+      extension: 'mp4',
+    },
+    {
+      bytes: mp3,
+      declared: 'audio/wav',
+      allowedKinds: ['audio'],
+      detected: 'audio/mpeg',
+      extension: 'mp3',
+    },
+  ];
+  for (const fixture of sameKindCases) {
+    const verified = proxyRouter._test.validateProxyMediaBuffer(
+      fixture.bytes,
+      fixture.declared,
+      {
+        allowedKinds: fixture.allowedKinds,
+        maxBytes: 1024,
+        allowSameKindSubtypeMismatch: true,
+      },
+    );
+    assert.equal(verified.detectedMime, fixture.detected);
+    assert.equal(verified.contentType, fixture.detected);
+    assert.equal(verified.contentTypeMismatch, true);
+    assert.equal(proxyRouter._test.verifiedProxyMediaExtension(verified), fixture.extension);
+  }
+  assert.throws(
+    () => proxyRouter._test.validateProxyMediaBuffer(png, 'image/jpeg', {
+      allowedKinds: ['image'],
+      maxBytes: 1024,
+    }),
+    /Content-Type.*子类型/,
+    'untrusted input uploads keep exact subtype checking unless a completed output explicitly opts in',
+  );
+
+  for (const [bytes, declared, allowedKinds] of [
+    [png, 'video/mp4', ['image', 'video', 'audio']],
+    [mp3, 'image/png', ['image', 'video', 'audio']],
+    [quickTime, 'audio/mp4', ['image', 'video', 'audio']],
+    [png, 'text/html', ['image']],
+    [Buffer.from('<html>not media</html>'), 'image/png', ['image']],
+    [Buffer.concat([Buffer.from('PK\x03\x04', 'binary'), Buffer.alloc(16)]), 'application/octet-stream', ['image', 'video', 'audio']],
+  ]) {
+    assert.throws(
+      () => proxyRouter._test.validateProxyMediaBuffer(bytes, declared, { allowedKinds, maxBytes: 1024 }),
+      /Content-Type|魔数|归档容器/,
+    );
+  }
+});
+
+test('B3 RunningHub materializes mixed image, video, and audio outputs despite same-kind CDN subtype drift', async () => {
+  const fixtures = {
+    '/image': {
+      declared: 'image/jpeg',
+      buffer: Buffer.concat([
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        Buffer.alloc(16),
+      ]),
+      extension: 'png',
+    },
+    '/video': {
+      declared: 'video/mp4',
+      buffer: Buffer.concat([
+        Buffer.from([0x00, 0x00, 0x00, 0x14]),
+        Buffer.from('ftypqt  ', 'ascii'),
+        Buffer.alloc(8),
+      ]),
+      extension: 'mov',
+    },
+    '/audio': {
+      declared: 'audio/wav',
+      buffer: Buffer.concat([Buffer.from('ID3'), Buffer.alloc(16)]),
+      extension: 'mp3',
+    },
+  };
+  const assetServer = await listen((req, res) => {
+    const fixture = fixtures[req.url];
+    if (!fixture) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    res.writeHead(200, {
+      'content-type': fixture.declared,
+      'content-length': fixture.buffer.length,
+    });
+    res.end(fixture.buffer);
+  });
+  const assetBase = `http://rh-mixed-output.test:${assetServer.address().port}`;
+  try {
+    await withProxyFixture(async ({ appServer, outputDir }) => {
+      proxyRouter._test.setProxySafeRemoteTestOptions({
+        allowPrivateForTests: (hostname) => hostname === 'rh-mixed-output.test',
+        lookupImpl: async () => [{ address: '127.0.0.1', family: 4 }],
+      });
+      const originalFetch = global.fetch;
+      global.fetch = async () => new Response(JSON.stringify({
+        code: 0,
+        data: Object.keys(fixtures).map((pathname) => ({
+          fileUrl: `${assetBase}${pathname}`,
+        })),
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+      try {
+        const response = await requestGet(
+          appServer,
+          '/api/proxy/runninghub/query?taskId=rh-mixed-subtype-drift&site=cn',
+        );
+        assert.equal(response.status, 200, response.text);
+        assert.equal(response.data?.data?.status, 'SUCCESS');
+        assert.equal(response.data?.data?.urls?.length, 3);
+        const outputExtensions = response.data.data.urls.map((url) => path.extname(url)).sort();
+        assert.deepEqual(outputExtensions, ['.mov', '.mp3', '.png']);
+        assert.deepEqual(
+          fs.readdirSync(outputDir).map((name) => path.extname(name)).sort(),
+          ['.mov', '.mp3', '.png'],
+        );
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
+  } finally {
+    await closeServer(assetServer);
+  }
+});
+
 test('B3 Suno audio validation preserves the supported format matrix by magic bytes', () => {
   const mp4Box = (type, payload) => {
     const body = Buffer.from(payload);
