@@ -1,9 +1,9 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.6.7",
-  "lastUpdated": "2026-07-25-v2.6.7-release-candidate",
+  "lastUpdated": "2026-07-25-v2.6.7-released",
   "seedanceNzApimartMediaModels": {
-    "status": "release-candidate",
+    "status": "released-v2.6.7",
     "date": "2026-07-25",
     "releaseIncluded": true,
     "highlights": [
@@ -16,7 +16,9 @@
     "verification": [
       "逐项核对 https://api.seedance.nz/docs/llms.txt 与 F:\\AI-T8-video-onekey\\ComfyUI\\custom_nodes\\ComfyUI_Seedance；具体字段和限制以当前官方文档为准。",
       "图片、视频、Whisper Provider 合同及前端模型/端口定向测试 66/66 通过，补充核心回归 55/55 通过，TypeScript type-check 通过。",
-      "用户明确授权 v2.6.7 先发布、后补真实 Provider 与协作证据；延期不将任何缺失证据标记为通过。"
+      "v2.6.7 已发布为 GitHub Latest Release：https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.6.7；source/tag 固定 eea356ee3ab03680326a58e04f2176a3fef8ccc1。",
+      "GitHub 端安装包、blockmap、latest.yml 的大小与 SHA256 分别验证为 1303033328 / 0ce2f26d08b0d4384001c91f63c72e8cfff822e2a9aff239e22d27052f982440、1357378 / 6c7bb010ede578602127bc29e607d6172d8b5b1af4635969d93796a3a1006ddf、362 / fc10cd1b781f1d6fbdc2e596a23ff73a24eea31dac351003f8f0cdb377a357df。",
+      "用户明确授权 v2.6.7 先发布、后补真实 Provider、协作与安装包完整回下载证据；延期不将任何缺失证据标记为通过。"
     ]
   },
   "storyAssetMediaClear": {
