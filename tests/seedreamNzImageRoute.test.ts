@@ -21,14 +21,22 @@ test('Seedream NZ proxy uses the independent SD2 key and stores completed output
   const validPng = await sharp({
     create: { width: 2, height: 2, channels: 4, background: { r: 220, g: 120, b: 40, alpha: 1 } },
   }).png().toBuffer();
+  const secondValidPng = await sharp({
+    create: { width: 2, height: 2, channels: 4, background: { r: 40, g: 120, b: 220, alpha: 1 } },
+  }).png().toBuffer();
   let mediaDownloads = 0;
   const mediaApp = express();
   mediaApp.get('/seedream-result.png', (_req, res) => {
     mediaDownloads += 1;
     res.type('image/png').send(validPng);
   });
+  mediaApp.get('/seedream-result-2.png', (_req, res) => {
+    mediaDownloads += 1;
+    res.type('image/png').send(secondValidPng);
+  });
   const mediaServer = await listen(mediaApp);
   const mediaUrl = `http://media.test:${mediaServer.address().port}/seedream-result.png?token=seedream-output-secret&signature=seedream-signature`;
+  const secondMediaUrl = `http://media.test:${mediaServer.address().port}/seedream-result-2.png?token=seedream-output-secret-2&signature=seedream-signature-2`;
   t.after(() => mediaServer.close());
   const config = require('../backend/src/config.js');
   const oldConfig = { SETTINGS_FILE: config.SETTINGS_FILE, OUTPUT_DIR: config.OUTPUT_DIR };
@@ -63,6 +71,7 @@ test('Seedream NZ proxy uses the independent SD2 key and stores completed output
     status: 'succeeded',
     progress: '100%',
     imageUrl: mediaUrl,
+    imageUrls: [mediaUrl, secondMediaUrl],
     raw: { data: { status: 'SUCCESS' } },
   });
   t.after(() => Object.assign(seedanceNz, originals));
@@ -121,10 +130,14 @@ test('Seedream NZ proxy uses the independent SD2 key and stores completed output
     .then((response) => response.json());
   assert.equal(status.success, true);
   assert.equal(status.data.status, 'completed');
+  assert.equal(status.data.urls.length, 2);
   assert.match(status.data.urls[0], /^\/files\/output\/img_/);
+  assert.match(status.data.urls[1], /^\/files\/output\/img_/);
   assert.equal(Object.hasOwn(status.data, 'remoteUrls'), false);
   assert.doesNotMatch(JSON.stringify(status), /seedream-output-secret|seedream-signature|media\.test/);
-  assert.equal(fs.readdirSync(config.OUTPUT_DIR).length, 1);
-  assert.equal(mediaDownloads, 1);
-  assert.deepEqual(safeLookupHosts, ['media.test']);
+  for (const localUrl of status.data.urls) {
+    assert.equal(fs.existsSync(path.join(config.OUTPUT_DIR, path.basename(localUrl))), true);
+  }
+  assert.equal(mediaDownloads, 2);
+  assert.deepEqual(safeLookupHosts, ['media.test', 'media.test']);
 });

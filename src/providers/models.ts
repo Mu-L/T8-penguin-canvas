@@ -55,6 +55,9 @@ export const ZHENZHEN_IMAGE_G2_I2I_MODEL = 'zhenzhen-image-g2-i2i';
 export const ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL = 'zhenzhen-image-g-v2-lowprice';
 export const ZHENZHEN_IMAGE_GK_V15_MODEL = 'zhenzhen-image-gk-v15';
 export const ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL = 'zhenzhen-image-gk-v15-edit';
+export const ZHENZHEN_IMAGE_NB_2_LITE_MODEL = 'zhenzhen-image-nb-2-lite';
+export const ZHENZHEN_IMAGE_NB_2_MODEL = 'zhenzhen-image-nb-2';
+export const ZHENZHEN_IMAGE_NB_PRO_MODEL = 'zhenzhen-image-nb-pro';
 export const ZHENZHEN_IMAGE_G2_MODELS = [
   ZHENZHEN_IMAGE_G2_T2I_MODEL,
   ZHENZHEN_IMAGE_G2_I2I_MODEL,
@@ -68,11 +71,21 @@ export const ZHENZHEN_BUDGET_GROK_MODEL_OPTIONS = [
   { value: ZHENZHEN_IMAGE_GK_V15_MODEL, label: ZHENZHEN_IMAGE_GK_V15_MODEL },
   { value: ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL, label: ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL },
 ] as const;
+export const ZHENZHEN_BUDGET_BANANA_2_MODEL_OPTIONS = [
+  { value: ZHENZHEN_IMAGE_NB_2_MODEL, label: ZHENZHEN_IMAGE_NB_2_MODEL },
+  { value: ZHENZHEN_IMAGE_NB_2_LITE_MODEL, label: ZHENZHEN_IMAGE_NB_2_LITE_MODEL },
+] as const;
+export const ZHENZHEN_BUDGET_BANANA_PRO_MODEL_OPTIONS = [
+  { value: ZHENZHEN_IMAGE_NB_PRO_MODEL, label: ZHENZHEN_IMAGE_NB_PRO_MODEL },
+] as const;
 export const ZHENZHEN_IMAGE_G2_MODEL_OPTIONS = ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS.slice(0, 2);
 export const ZHENZHEN_APIMART_IMAGE_MODELS = [
   ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
   ZHENZHEN_IMAGE_GK_V15_MODEL,
   ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL,
+  ZHENZHEN_IMAGE_NB_2_LITE_MODEL,
+  ZHENZHEN_IMAGE_NB_2_MODEL,
+  ZHENZHEN_IMAGE_NB_PRO_MODEL,
 ] as const;
 export const ZHENZHEN_BUDGET_IMAGE_MODELS = [
   ...ZHENZHEN_IMAGE_G2_MODELS,
@@ -80,6 +93,13 @@ export const ZHENZHEN_BUDGET_IMAGE_MODELS = [
 ] as const;
 export const ZHENZHEN_IMAGE_G2_RATIOS = ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'];
 export const ZHENZHEN_IMAGE_GK_V15_RATIOS = ['1:1', '16:9', '9:16', '3:2', '2:3'];
+export const ZHENZHEN_IMAGE_NB_STANDARD_RATIOS = [
+  '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9',
+];
+export const ZHENZHEN_IMAGE_NB_EXTREME_RATIOS = [
+  '1:1', '1:4', '1:8', '2:3', '3:2', '3:4', '4:1',
+  '4:3', '4:5', '5:4', '8:1', '9:16', '16:9', '21:9',
+];
 
 export function isZhenzhenImageG2Model(apiModel: string | undefined | null): boolean {
   return (ZHENZHEN_IMAGE_G2_MODELS as readonly string[]).includes(String(apiModel || '').trim());
@@ -459,14 +479,25 @@ export function grokVideo15NewSizeFromRatio(ratioOrSize: string): '1280x720' | '
   return '1280x720';
 }
 
+export type VideoBuiltinSource = 'zhenzhen' | 'seedance-nz';
+
+export interface VideoModelOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+  builtinSource?: VideoBuiltinSource;
+}
+
 export interface VideoModelDef {
   id: string;                // 节点默认 model 字段(也是上游真实 model)
   label: string;             // 主选项显示名
   kind: VideoKind;
   provider: ProviderType;
+  // 同一个 Tab 可以同时收录两套内置平台的模型；未标注时属于贞贞 AI 工坊。
+  builtinSource?: VideoBuiltinSource;
   description?: string;
   // 子模型下拉(参考项目 类似 gpt-image-2-web 的 g_model / veo_model / gk_model)
-  apiModelOptions: Array<{ value: string; label: string; disabled?: boolean }>;
+  apiModelOptions: VideoModelOption[];
   // 比例/尺寸 — 字段名上游各不同,这里只是 UI 选项
   ratios: string[];
   defaultRatio: string;
@@ -487,11 +518,13 @@ export const ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL = 'zhenzhen-video-g-omni-flash';
 export const ZHENZHEN_VIDEO_GK_V15_MODEL = 'zhenzhen-video-gk-v15';
 export const ZHENZHEN_VIDEO_V31_FAST_MODEL = 'zhenzhen-video-v31-fast';
 export const ZHENZHEN_VIDEO_V31_QUALITY_MODEL = 'zhenzhen-video-v31-quality';
+export const ZHENZHEN_VIDEO_V31_LITE_MODEL = 'zhenzhen-video-v31-lite';
 export const ZHENZHEN_APIMART_VIDEO_MODELS = [
   ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL,
   ZHENZHEN_VIDEO_GK_V15_MODEL,
   ZHENZHEN_VIDEO_V31_FAST_MODEL,
   ZHENZHEN_VIDEO_V31_QUALITY_MODEL,
+  ZHENZHEN_VIDEO_V31_LITE_MODEL,
 ] as const;
 
 export function isZhenzhenApimartVideoModel(apiModel: string | undefined | null): boolean {
@@ -500,9 +533,10 @@ export function isZhenzhenApimartVideoModel(apiModel: string | undefined | null)
 
 const VEO_MODELS = [
   { value: 'veo-omni-10s', label: 'veo-omni-10s' },
-  { value: ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL, label: ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL },
-  { value: ZHENZHEN_VIDEO_V31_FAST_MODEL, label: ZHENZHEN_VIDEO_V31_FAST_MODEL },
-  { value: ZHENZHEN_VIDEO_V31_QUALITY_MODEL, label: ZHENZHEN_VIDEO_V31_QUALITY_MODEL },
+  { value: ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL, label: ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL, builtinSource: 'seedance-nz' as const },
+  { value: ZHENZHEN_VIDEO_V31_FAST_MODEL, label: ZHENZHEN_VIDEO_V31_FAST_MODEL, builtinSource: 'seedance-nz' as const },
+  { value: ZHENZHEN_VIDEO_V31_QUALITY_MODEL, label: ZHENZHEN_VIDEO_V31_QUALITY_MODEL, builtinSource: 'seedance-nz' as const },
+  { value: ZHENZHEN_VIDEO_V31_LITE_MODEL, label: ZHENZHEN_VIDEO_V31_LITE_MODEL, builtinSource: 'seedance-nz' as const },
   { value: 'veo3', label: 'veo3' },
   { value: 'veo3-fast', label: 'veo3-fast' },
   { value: 'veo3-pro', label: 'veo3-pro' },
@@ -529,7 +563,7 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     description: 'xAI Grok Video (最多 7 张参考图)',
     apiModelOptions: [
       { value: 'grok-video-3', label: 'grok-video-3（新版1.5）' },
-      { value: ZHENZHEN_VIDEO_GK_V15_MODEL, label: ZHENZHEN_VIDEO_GK_V15_MODEL },
+      { value: ZHENZHEN_VIDEO_GK_V15_MODEL, label: ZHENZHEN_VIDEO_GK_V15_MODEL, builtinSource: 'seedance-nz' },
       { value: 'grok-1.5-video-6s', label: 'grok-1.5-video-6s（Zhenzhen New）' },
       { value: 'grok-1.5-video-10s', label: 'grok-1.5-video-10s（Zhenzhen New）' },
       { value: 'grok-1.5-video-15s', label: 'grok-1.5-video-15s（Zhenzhen New）' },
@@ -586,6 +620,7 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     label: 'Wan',
     kind: 'wan',
     provider: 'zhenzhen',
+    builtinSource: 'seedance-nz',
     description: 'Wan 2.7 Spicy · 宽审核图生视频',
     apiModelOptions: [
       { value: 'wan-2.7-spicy-i2v', label: 'wan-2.7-spicy-i2v（图生视频）' },
@@ -604,6 +639,7 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     label: 'Happy Horse',
     kind: 'happyhorse',
     provider: 'zhenzhen',
+    builtinSource: 'seedance-nz',
     description: 'Happy Horse 1.1 · 文生/图生/参考图生视频',
     apiModelOptions: [
       { value: 'happyhorse-1.1-t2v', label: 'happyhorse-1.1-t2v（文生视频）' },
@@ -624,6 +660,7 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     label: 'Hailuo',
     kind: 'hailuo',
     provider: 'zhenzhen',
+    builtinSource: 'seedance-nz',
     description: 'Hailuo 2.3 · 文生/图生/Fast 图生视频',
     apiModelOptions: [
       { value: 'hailuo-2.3-t2v-standard', label: 'hailuo-2.3-t2v-standard（文生标准）' },
@@ -647,6 +684,7 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     label: 'Vidu',
     kind: 'vidu',
     provider: 'zhenzhen',
+    builtinSource: 'seedance-nz',
     description: 'Vidu Q3 · 文生/图生/首尾帧/参考生视频/短剧成片',
     apiModelOptions: [
       { value: 'vidu-q3-turbo-t2v', label: 'vidu-q3-turbo-t2v（文生 Turbo）' },
@@ -679,6 +717,7 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     label: 'Kling',
     kind: 'kling',
     provider: 'zhenzhen',
+    builtinSource: 'seedance-nz',
     description: 'Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑',
     apiModelOptions: [
       { value: 'kling-v3.0-std-t2v', label: 'kling-v3.0-std-t2v（文生标准）' },
@@ -717,6 +756,7 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     label: 'Upscaler',
     kind: 'upscaler',
     provider: 'zhenzhen',
+    builtinSource: 'seedance-nz',
     description: 'Zhenzhen Upscaler · 单个 MP4 视频高清化',
     apiModelOptions: [
       { value: 'zhenzhen-upscaler', label: 'zhenzhen-upscaler' },
@@ -745,6 +785,44 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     maxRefImages: 3,
   },
 ];
+
+export function videoModelOptionSource(
+  model: VideoModelDef,
+  option: VideoModelOption,
+): VideoBuiltinSource {
+  return option.builtinSource || model.builtinSource || 'zhenzhen';
+}
+
+export function videoModelOptionsForSource(
+  model: VideoModelDef,
+  source: VideoBuiltinSource,
+): VideoModelOption[] {
+  return model.apiModelOptions.filter((option) => videoModelOptionSource(model, option) === source);
+}
+
+export function videoModelsForSource(source: VideoBuiltinSource): VideoModelDef[] {
+  return VIDEO_MODELS.filter(
+    (model) => model.kind !== 'seedance' && videoModelOptionsForSource(model, source).length > 0,
+  );
+}
+
+/**
+ * 兼容旧画布：旧数据只有 model，没有 videoBuiltinSource。
+ * 精确命中目录时恢复真实来源；未知模型交给调用方回退到贞贞 AI 工坊。
+ */
+export function inferVideoBuiltinSource(apiModel: unknown): VideoBuiltinSource | null {
+  const savedModel = String(apiModel || '').trim();
+  if (!savedModel) return null;
+  for (const model of VIDEO_MODELS) {
+    if (model.id === savedModel) {
+      const sources = new Set(model.apiModelOptions.map((option) => videoModelOptionSource(model, option)));
+      return sources.size === 1 ? Array.from(sources)[0] : model.builtinSource || 'zhenzhen';
+    }
+    const option = model.apiModelOptions.find((item) => item.value === savedModel);
+    if (option) return videoModelOptionSource(model, option);
+  }
+  return null;
+}
 
 // ========== 音频(Suno) ==========
 export interface AudioModelDef {

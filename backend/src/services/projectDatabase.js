@@ -3,6 +3,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { TextDecoder, types: utilTypes } = require('util');
+const { isMainThread } = require('node:worker_threads');
 const BetterSqlite3 = require('better-sqlite3');
 const {
   canTransitionReviewLifecycle,
@@ -5565,7 +5566,10 @@ const PROJECT_DATABASE_OWNER_GUARD_MIGRATION_SCHEMA_SQL = `
 
 function projectDatabaseOwnerGuardTestBypass(options = {}) {
   if (options.unsafeDisableOwnerGuardForTests !== true) return false;
-  if (process.env.NODE_TEST_CONTEXT) return true;
+  const isolatedTestWorker = !isMainThread
+    && process.env.NODE_ENV === 'test'
+    && process.env.T8_PROJECT_DATABASE_UNSAFE_TEST_WORKER === '1';
+  if (process.env.NODE_TEST_CONTEXT || isolatedTestWorker) return true;
   throw new ProjectDatabaseOwnerUnavailableError(
     '项目数据库进程所有权测试旁路不能在生产运行时启用',
     { phase: 'unsafe-test-bypass-rejected' },
@@ -5799,6 +5803,12 @@ function acquireProjectDatabaseOwner(filename, ownerFilename, protectedFilenames
     });
     if (storageError !== error) throw storageError;
     if (error instanceof ProjectDatabaseOwnerUnavailableError) throw error;
+    if (code === 'ERR_DLOPEN_FAILED' || /NODE_MODULE_VERSION/i.test(String(error?.message || ''))) {
+      throw new ProjectDatabaseOwnerUnavailableError(
+        '本机 SQLite 原生依赖与当前 Electron 版本不匹配；请运行 npm run rebuild:electron 后重试',
+        { phase: 'native-binding-incompatible', errorCode: code || 'ERR_DLOPEN_FAILED' },
+      );
+    }
     throw new ProjectDatabaseOwnerUnavailableError(
       '无法建立项目数据库进程所有权，已停止启动',
       { phase: 'guard-acquire-failed', errorCode: error?.code || null },
@@ -19332,7 +19342,9 @@ class ProjectDatabase {
             currentRevision: document.revision,
           });
         }
-        if (existing.actor_id !== actorId) throw new CanvasPatchPermissionError();
+        if (existing.actor_id !== actorId && options.allowExactDuplicateAcrossActors !== true) {
+          throw new CanvasPatchPermissionError();
+        }
         if (existing.preview_digest !== suppliedPreviewDigest) {
           throw new CanvasPatchConflictError('previewDigest 与已应用 Patch 不一致', {
             code: 'canvas_patch_preview_mismatch',
@@ -19584,18 +19596,34 @@ class ProjectDatabase {
       throw new CanvasPatchPermissionError('画布不属于当前项目');
     }
     const actorId = normalizeCanvasPatchPrincipal(options.actorId, 'local-owner', 'actorId');
+    const includeAllActors = options.includeAllActors === true;
+    const includeRequestDigest = options.includeRequestDigest === true;
     const limit = Math.min(100, Math.max(1, Math.trunc(Number(options.limit) || 50)));
-    return this.db.prepare(`
-      SELECT patch_id, summary, diagnostics_json, base_revision, applied_revision,
+    const rows = includeAllActors
+      ? this.db.prepare(`
+        SELECT patch_id, summary, diagnostics_json, request_digest, base_revision, applied_revision,
+               reverted_revision, actor_id, status, operation_count, guard_version, created_at, reverted_at
+        FROM canvas_patch_applications
+        WHERE project_id = ? AND canvas_id = ?
+        ORDER BY created_at DESC, patch_id DESC LIMIT ?
+      `).all(document.projectId, document.canvasId, limit)
+      : this.db.prepare(`
+      SELECT patch_id, summary, diagnostics_json, request_digest, base_revision, applied_revision,
              reverted_revision, actor_id, status, operation_count, guard_version, created_at, reverted_at
       FROM canvas_patch_applications
       WHERE project_id = ? AND canvas_id = ? AND actor_id = ?
       ORDER BY created_at DESC, patch_id DESC LIMIT ?
-    `).all(document.projectId, document.canvasId, actorId, limit).map((row) => {
+    `).all(document.projectId, document.canvasId, actorId, limit);
+    return rows.map((row) => {
       const diagnostics = parseJson(row.diagnostics_json, []);
       const summary = safePatchValue(row.summary, 'summary');
       return {
         patchId: safeIdentifier(row.patch_id),
+        ...(includeRequestDigest ? {
+          requestDigest: /^[a-f0-9]{64}$/i.test(String(row.request_digest || ''))
+            ? String(row.request_digest).toLowerCase()
+            : '',
+        } : {}),
         summary: typeof summary === 'string' ? summary : '[redacted]',
         diagnosticsResolved: (Array.isArray(diagnostics) ? diagnostics : [])
           .slice(0, 100)
@@ -19608,10 +19636,62 @@ class ProjectDatabase {
         operationCount: Number(row.operation_count),
         createdAt: Number(row.created_at),
         revertedAt: row.reverted_at == null ? null : Number(row.reverted_at),
-        canRevert: row.status === 'applied' && row.actor_id === actorId
+        canRevert: row.status === 'applied' && (includeAllActors || row.actor_id === actorId)
           && Number(row.guard_version) === CANVAS_PROVENANCE_GUARD_VERSION,
       };
     });
+  }
+
+  getCanvasPatchApplication(canvasId, rawPatchId, options = {}) {
+    const document = this.getCanvas(canvasId);
+    if (!document) return null;
+    if (options.projectId != null && String(options.projectId) !== document.projectId) {
+      throw new CanvasPatchPermissionError('画布不属于当前项目');
+    }
+    const patchId = normalizeCanvasPatchId(rawPatchId);
+    const row = this.db.prepare(`
+      SELECT patch_id, summary, diagnostics_json, request_digest, preview_digest,
+             base_revision, applied_revision, reverted_revision, actor_id, status,
+             operation_count, affected_node_ids_json, affected_edge_ids_json,
+             changes_json, guard_version, created_at, reverted_at
+      FROM canvas_patch_applications
+      WHERE project_id = ? AND canvas_id = ? AND patch_id = ?
+    `).get(document.projectId, document.canvasId, patchId);
+    if (!row) return null;
+    const actorId = normalizeCanvasPatchPrincipal(options.actorId, 'local-owner', 'actorId');
+    if (options.includeAllActors !== true && row.actor_id !== actorId) {
+      throw new CanvasPatchPermissionError();
+    }
+    const diagnostics = parseJson(row.diagnostics_json, []);
+    const summary = safePatchValue(row.summary, 'summary');
+    return {
+      patchId: safeIdentifier(row.patch_id),
+      ...(options.includeRequestDigest === true ? {
+        requestDigest: /^[a-f0-9]{64}$/i.test(String(row.request_digest || ''))
+          ? String(row.request_digest).toLowerCase()
+          : '',
+      } : {}),
+      previewDigest: /^[a-f0-9]{64}$/i.test(String(row.preview_digest || ''))
+        ? String(row.preview_digest).toLowerCase()
+        : '',
+      summary: typeof summary === 'string' ? summary : '[redacted]',
+      diagnosticsResolved: (Array.isArray(diagnostics) ? diagnostics : [])
+        .slice(0, 100)
+        .map((value) => safeIdentifier(value)),
+      baseRevision: Number(row.base_revision),
+      appliedRevision: Number(row.applied_revision),
+      revertedRevision: row.reverted_revision == null ? null : Number(row.reverted_revision),
+      actorId: safeIdentifier(row.actor_id),
+      status: row.status === 'reverted' ? 'reverted' : 'applied',
+      operationCount: Number(row.operation_count),
+      affectedNodeIds: parseJson(row.affected_node_ids_json, []),
+      affectedEdgeIds: parseJson(row.affected_edge_ids_json, []),
+      changes: parseJson(row.changes_json, []),
+      createdAt: Number(row.created_at),
+      revertedAt: row.reverted_at == null ? null : Number(row.reverted_at),
+      canRevert: row.status === 'applied'
+        && Number(row.guard_version) === CANVAS_PROVENANCE_GUARD_VERSION,
+    };
   }
 
   revertCanvasPatch(canvasId, rawPatchId, options = {}) {
@@ -19624,6 +19704,11 @@ class ProjectDatabase {
     this._assertProjectDatabaseMutationTransaction('coordinator');
     const patchId = normalizeCanvasPatchId(rawPatchId);
     const actorId = normalizeCanvasPatchPrincipal(options.actorId, 'local-owner', 'actorId');
+    const patchOwnerActorId = normalizeCanvasPatchPrincipal(
+      options.patchOwnerActorId,
+      actorId,
+      'patchOwnerActorId',
+    );
     const sessionId = normalizeCanvasPatchPrincipal(options.sessionId, 'local-session', 'sessionId');
     if (options.expectedRevision != null
       && (!Number.isInteger(Number(options.expectedRevision)) || Number(options.expectedRevision) < 1)) {
@@ -19640,7 +19725,7 @@ class ProjectDatabase {
         WHERE project_id = ? AND canvas_id = ? AND patch_id = ?
       `).get(document.projectId, document.canvasId, patchId);
       if (!row) throw new CanvasPatchNotFoundError();
-      if (row.actor_id !== actorId) throw new CanvasPatchPermissionError();
+      if (row.actor_id !== patchOwnerActorId) throw new CanvasPatchPermissionError();
       if (row.status === 'reverted') {
         return {
           patchId,
@@ -32787,6 +32872,7 @@ let singleton = null;
 function getProjectDatabase(config) {
   if (!singleton) singleton = new ProjectDatabase(config.PROJECT_DB_FILE, {
     backupFilename: config.PROJECT_DB_BACKUP_FILE,
+    projectDatabaseStoragePolicy32: config.PROJECT_DB_STORAGE_POLICY_32,
   });
   return singleton;
 }

@@ -2890,6 +2890,8 @@ export async function updateProjectNodeRun(runId: string, nodeRunId: string, pat
 }
 
 export async function createProjectRunAttempt(runId: string, nodeRunId: string, input: {
+  id?: string;
+  entityUid?: string;
   provider?: string;
   model?: string;
   upstreamTaskId?: string;
@@ -3603,6 +3605,17 @@ export interface UploadResourceLocalFileContext {
   sourceNodeType?: string;
 }
 
+export interface UploadResourceLocalFileProgress {
+  loaded: number;
+  total: number | null;
+  percent: number | null;
+}
+
+export interface UploadResourceLocalFileOptions {
+  signal?: AbortSignal;
+  onProgress?: (progress: UploadResourceLocalFileProgress) => void;
+}
+
 export interface AddResourcePosePayload {
   poseBackup: Record<string, any>;
   categoryId?: string;
@@ -3670,25 +3683,100 @@ export function addResourceItem(payload: AddResourcePayload) {
   });
 }
 
-export async function uploadResourceLocalFile(file: File, context: UploadResourceLocalFileContext = {}): Promise<UploadedResourceLocalFile> {
+function parseUploadedResourceLocalFile(payload: unknown, status: number): UploadedResourceLocalFile {
+  const json = payload && typeof payload === 'object'
+    ? payload as { success?: boolean; error?: string; message?: string; data?: UploadedResourceLocalFile }
+    : null;
+  if (status < 200 || status >= 300 || !json?.success) {
+    throw new Error(json?.error || json?.message || `HTTP ${status}`);
+  }
+  if (!json.data?.url) {
+    throw new Error('文件上传接口未返回可用地址');
+  }
+  return json.data;
+}
+
+function creatorUploadAbortError() {
+  return new DOMException('附件上传已取消', 'AbortError');
+}
+
+export async function uploadResourceLocalFile(
+  file: File,
+  context: UploadResourceLocalFileContext = {},
+  options: UploadResourceLocalFileOptions = {},
+): Promise<UploadedResourceLocalFile> {
   const fd = new FormData();
   fd.append('file', file);
   for (const [key, value] of Object.entries(context)) {
     const normalized = String(value || '').trim();
     if (normalized) fd.append(key, normalized);
   }
+
+  if (options.onProgress && typeof XMLHttpRequest !== 'undefined') {
+    return await new Promise<UploadedResourceLocalFile>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      const cleanup = () => {
+        options.signal?.removeEventListener('abort', abort);
+        xhr.upload.onprogress = null;
+        xhr.onload = null;
+        xhr.onerror = null;
+        xhr.onabort = null;
+      };
+      const finish = (callback: () => void) => {
+        cleanup();
+        callback();
+      };
+      const abort = () => {
+        if (xhr.readyState !== XMLHttpRequest.DONE) xhr.abort();
+      };
+
+      if (options.signal?.aborted) {
+        reject(creatorUploadAbortError());
+        return;
+      }
+      options.signal?.addEventListener('abort', abort, { once: true });
+      xhr.open('POST', `${BASE}/files/upload`);
+      xhr.responseType = 'json';
+      xhr.upload.onprogress = (event) => {
+        const total = event.lengthComputable && event.total > 0 ? event.total : null;
+        options.onProgress?.({
+          loaded: Math.max(0, event.loaded),
+          total,
+          percent: total === null
+            ? null
+            : Math.max(0, Math.min(100, Math.round((event.loaded / total) * 100))),
+        });
+      };
+      xhr.onload = () => {
+        let payload: unknown = xhr.response;
+        if (!payload) {
+          try {
+            payload = JSON.parse(xhr.responseText);
+          } catch {
+            payload = null;
+          }
+        }
+        try {
+          const uploaded = parseUploadedResourceLocalFile(payload, xhr.status);
+          finish(() => resolve(uploaded));
+        } catch (error) {
+          finish(() => reject(error));
+        }
+      };
+      xhr.onerror = () => finish(() => reject(new Error('附件上传网络连接失败')));
+      xhr.onabort = () => finish(() => reject(creatorUploadAbortError()));
+      options.onProgress?.({ loaded: 0, total: file.size || null, percent: 0 });
+      xhr.send(fd);
+    });
+  }
+
   const res = await fetch(`${BASE}/files/upload`, {
     method: 'POST',
     body: fd,
+    signal: options.signal,
   });
   const json = await res.json().catch(() => null);
-  if (!res.ok || !json?.success) {
-    throw new Error(json?.error || json?.message || `HTTP ${res.status}`);
-  }
-  if (!json?.data?.url) {
-    throw new Error('文件上传接口未返回可用地址');
-  }
-  return json.data;
+  return parseUploadedResourceLocalFile(json, res.status);
 }
 
 export function addResourceSet(payload: AddResourceSetPayload) {

@@ -638,7 +638,7 @@ const RHToolboxNode = ({ id, data, selected }: NodeProps) => {
         ...manifest,
         tools: manifest.tools.map((tool) => (tool.id === activeTool.id ? activeTool : tool)),
       });
-      const onProgress = (progress: RunRhToolboxProgress) => {
+      const onProgress = async (progress: RunRhToolboxProgress) => {
         setProgressMessage(progress.message);
         if (progress.taskId) activeTaskIdRef.current = progress.taskId;
         if (progress.taskId && progress.stage !== 'cancel') update({ status: progress.stage === 'poll' ? 'polling' : 'submitting', taskId: progress.taskId });
@@ -656,9 +656,9 @@ const RHToolboxNode = ({ id, data, selected }: NodeProps) => {
           stage: progress.stage,
           message: progress.message,
         };
-        if (progress.stage === 'poll') void reporter?.polling(payload);
-        else if (progress.stage === 'submit' && progress.taskId) void reporter?.providerSubmitted(payload);
-        else void reporter?.progress(payload);
+        if (progress.stage === 'poll') await reporter?.polling(payload);
+        else if (progress.stage === 'submit' && progress.taskId) await reporter?.providerSubmitted(payload);
+        else await reporter?.progress(payload);
         if (progress.taskId && stopRequestedRef.current) {
           void handleStop();
         }
@@ -677,6 +677,7 @@ const RHToolboxNode = ({ id, data, selected }: NodeProps) => {
         userParams: resolvedUserParams,
         instanceType,
         signal: aborter.signal,
+        submissionKey: reporter?.providerSubmissionKey,
         onProgress,
       });
       const textOutputs = result.textOutputs.filter(Boolean);

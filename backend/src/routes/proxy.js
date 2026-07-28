@@ -35,8 +35,18 @@ const {
   safeRemoteMediaFetch,
   safeRemoteUpload,
 } = require('../utils/safeRemoteMediaFetch');
+const {
+  providerSubmissionContextMiddleware,
+  currentProviderSubmissionKey,
+  providerIdempotencyHeaders,
+} = require('../services/providerSubmissionContext');
+const {
+  commitMaterializedOutputBuffer,
+  isCommittedMaterializedOutputUrl,
+} = require('../services/materializedOutputStore');
 
 const router = express.Router();
+router.use(providerSubmissionContextMiddleware);
 
 function diagnosticDigest(value) {
   return crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex').slice(0, 12);
@@ -112,6 +122,18 @@ const PROXY_REMOTE_IDLE_TIMEOUT_MS = boundedProxyInteger(
   1_000,
   60_000,
 );
+const PROVIDER_CONNECT_TIMEOUT_MS = boundedProxyInteger(
+  process.env.T8_PROVIDER_CONNECT_TIMEOUT_MS,
+  3_000,
+  500,
+  30_000,
+);
+const PROVIDER_NETWORK_RETRY_DELAY_MS = boundedProxyInteger(
+  process.env.T8_PROVIDER_NETWORK_RETRY_DELAY_MS,
+  3_000,
+  0,
+  30_000,
+);
 const FAL_POLL_MAX_BYTES = 2 * 1024 * 1024;
 const FAL_POLL_MAX_JSON_DEPTH = 64;
 const FAL_POLL_MAX_JSON_NODES = 50_000;
@@ -135,9 +157,11 @@ const PROVIDER_NETWORK_ERROR_CODES = new Set([
 
 function createProviderDispatcher() {
   return new UndiciAgent({
-    keepAliveTimeout: 1_000,
-    keepAliveMaxTimeout: 5_000,
-    connectTimeout: Math.min(PROXY_REMOTE_DEADLINE_MS, 15_000),
+    // A socket opened before a TUN/VPN route switch must never be reused for
+    // the next Provider call. Undici documents pipelining=0 as disabling
+    // keep-alive, so every request resolves and connects against current state.
+    pipelining: 0,
+    connectTimeout: Math.min(PROXY_REMOTE_DEADLINE_MS, PROVIDER_CONNECT_TIMEOUT_MS),
   });
 }
 
@@ -176,21 +200,32 @@ function isProviderNetworkError(error) {
     || /fetch failed|failed to fetch|network error|socket|connect/.test(message);
 }
 
-function providerNetworkFailure(error, label) {
+function providerNetworkFailure(error, label, options = {}) {
   const cause = providerNetworkCause(error);
   const causeCode = String(cause?.code || error?.code || '').trim().toUpperCase();
+  const retryAttempted = options.retryAttempted === true;
   let message;
   if (['ENOTFOUND', 'EAI_AGAIN'].includes(causeCode)) {
-    message = `${label}：本机当前无法解析 API 平台域名。应用已刷新网络连接；请检查 TUN/VPN/系统代理或 DNS 状态后重试原节点。`;
+    message = retryAttempted
+      ? `${label}：应用已用新连接和相同提交标识自动重试，但本机仍无法解析 API 平台域名。原任务不会重复提交，请在 3 秒后重试。`
+      : `${label}：本机当前无法解析 API 平台域名。应用已刷新网络连接；请在 3 秒后重试原节点。`;
   } else if (/certificate|cert_|self signed|unable to verify|tls|ssl/i.test(`${causeCode} ${cause?.message || ''}`)) {
     message = `${label}：HTTPS 证书校验失败。请检查系统时间、代理证书或安全软件的 HTTPS 扫描。`;
   } else {
-    message = `${label}：本机到 API 平台的连接在代理/TUN/VPN 切换后失效。连接池已刷新；为避免重复生成或扣费，提交请求不会自动重发，请等待几秒后重试原节点。`;
+    message = retryAttempted
+      ? `${label}：应用已在代理/TUN/VPN 切换后用新连接和相同提交标识自动恢复，但 API 平台仍不可达。原任务不会重复提交，请在 3 秒后重试。`
+      : `${label}：本机到 API 平台的连接中断。应用已刷新连接；请在 3 秒后重试原节点。`;
   }
   return providerResponseError(
     'provider_network_unavailable',
     message,
-    { status: 503, causeCode: causeCode || 'NETWORK_ERROR', recoverable: true },
+    {
+      status: 503,
+      causeCode: causeCode || 'NETWORK_ERROR',
+      recoverable: true,
+      retryAfterMs: PROVIDER_NETWORK_RETRY_DELAY_MS,
+      retryAttempted,
+    },
   );
 }
 
@@ -219,13 +254,35 @@ function providerFetchDeadlineMs() {
   );
 }
 
+function providerRetryDelayMs() {
+  return boundedProxyInteger(
+    proxySafeRemoteTestOptions?.providerRetryDelayMs,
+    PROVIDER_NETWORK_RETRY_DELAY_MS,
+    0,
+    30_000,
+  );
+}
+
+function replayableProviderBody(body) {
+  if (body === undefined || body === null || typeof body === 'string') return true;
+  if (Buffer.isBuffer(body) || ArrayBuffer.isView(body) || body instanceof ArrayBuffer) return true;
+  if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) return true;
+  if (typeof FormData !== 'undefined' && body instanceof FormData) return true;
+  if (typeof Blob !== 'undefined' && body instanceof Blob) return true;
+  return false;
+}
+
 async function fetchProviderResponse(url, init = {}, label = 'Provider', options = {}) {
   const deadlineMs = providerFetchDeadlineMs();
   const deadlineAt = Date.now() + deadlineMs;
   const upstreamSignal = init?.signal;
   const method = String(init?.method || 'GET').trim().toUpperCase();
   const safeReadRequest = (method === 'GET' || method === 'HEAD') && !init?.body;
-  const maxAttempts = safeReadRequest || options?.retryNetwork === true ? 2 : 1;
+  const submissionKey = currentProviderSubmissionKey();
+  const replayableSubmission = ['POST', 'PUT', 'PATCH'].includes(method)
+    && Boolean(submissionKey)
+    && replayableProviderBody(init?.body);
+  const maxAttempts = safeReadRequest || options?.retryNetwork === true || replayableSubmission ? 2 : 1;
   let lastError = null;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -246,9 +303,11 @@ async function fetchProviderResponse(url, init = {}, label = 'Provider', options
       }, remaining);
     });
     try {
+      const requestHeaders = providerIdempotencyHeaders(init?.headers, method);
       const response = await Promise.race([
         fetch(url, {
           ...init,
+          headers: requestHeaders,
           dispatcher: init?.dispatcher || currentProviderDispatcher(),
           signal: controller.signal,
         }),
@@ -264,13 +323,21 @@ async function fetchProviderResponse(url, init = {}, label = 'Provider', options
       if (!isProviderNetworkError(error)) throw error;
       lastError = error;
       rotateProviderDispatcher();
-      if (attempt + 1 >= maxAttempts) throw providerNetworkFailure(error, label);
+      if (attempt + 1 >= maxAttempts) {
+        throw providerNetworkFailure(error, label, { retryAttempted: attempt > 0 });
+      }
+      const retryDelay = providerRetryDelayMs();
+      if (retryDelay > 0) {
+        const retryRemaining = deadlineAt - Date.now();
+        if (retryRemaining <= retryDelay) throw providerResponseTimeout(label, 'deadline');
+        await new Promise((resolve) => setTimeout(resolve, retryDelay));
+      }
     } finally {
       if (timeout) clearTimeout(timeout);
       upstreamSignal?.removeEventListener?.('abort', abortFromUpstream);
     }
   }
-  throw providerNetworkFailure(lastError, label);
+  throw providerNetworkFailure(lastError, label, { retryAttempted: maxAttempts > 1 });
 }
 
 function proxyErrorStatus(error, fallback = 500) {
@@ -1426,25 +1493,14 @@ async function invalidateZhenzhenProviderKey(providerContext, apiKey, errorText)
 }
 
 function storeMaterializedOutputBuffer(buffer, prefix, extension, materializationKey = '') {
-  const cacheKey = String(materializationKey || '').trim();
-  const digest = cacheKey
-    ? crypto.createHash('sha256').update(cacheKey, 'utf8').digest('hex').slice(0, 24)
-    : '';
-  const filename = digest
-    ? `${prefix}_task_${digest}.${extension}`
-    : `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${extension}`;
-  const filePath = path.join(config.OUTPUT_DIR, filename);
-  fs.mkdirSync(config.OUTPUT_DIR, { recursive: true });
-  if (digest) {
-    try {
-      const stat = fs.statSync(filePath);
-      if (stat.isFile() && stat.size > 0) return `/files/output/${filename}`;
-    } catch (_) {
-      // First materialization for this task output.
-    }
-  }
-  fs.writeFileSync(filePath, buffer);
-  return `/files/output/${filename}`;
+  const committed = commitMaterializedOutputBuffer({
+    outputDir: config.OUTPUT_DIR,
+    buffer,
+    prefix,
+    extension,
+    materializationKey,
+  });
+  return `/files/output/${committed.filename}`;
 }
 
 // ========== 工具:保存上游返回的图像到本地 ==========
@@ -1453,7 +1509,7 @@ async function saveRemoteImage(url, _providerFetchImpl, materializationKey = '')
   return result.url || null;
 }
 
-const IMAGE_OUTPUT_RETRY_DELAYS_MS = Object.freeze([0, 250, 1_000]);
+const IMAGE_OUTPUT_RETRY_DELAYS_MS = Object.freeze([0, 3_000, 3_000]);
 // A completed Provider task must not monopolize one status request for minutes.
 // The frontend can safely retry the same task ID, so keep each image
 // materialization round short and return a recoverable 202 with the real cause.
@@ -1465,10 +1521,11 @@ const IMAGE_OUTPUT_MATERIALIZATION_DEADLINE_MS = boundedProxyInteger(
 );
 const IMAGE_OUTPUT_MATERIALIZATION_IDLE_TIMEOUT_MS = boundedProxyInteger(
   process.env.T8_IMAGE_OUTPUT_MATERIALIZATION_IDLE_TIMEOUT_MS,
-  8_000,
+  3_000,
   1_000,
   30_000,
 );
+const REMOTE_OUTPUT_RETRY_AFTER_MS = 3_000;
 
 const REMOTE_OUTPUT_KIND_LABELS = Object.freeze({
   image: { noun: '图片', object: '图片', code: 'image' },
@@ -1488,7 +1545,7 @@ function remoteOutputDownloadFailure(error, kind = 'media') {
       code: `${label.code}_download_tun_dns_recovering`,
       message: `${label.noun}已经生成；检测到 TUN Fake-IP，应用正在通过独立公共 DNS 获取真实结果地址并自动重试，不会重新提交生成任务。`,
       recoverable: true,
-      retryAfterMs: 5_000,
+      retryAfterMs: REMOTE_OUTPUT_RETRY_AFTER_MS,
     };
   }
   if (code === 'private_address') {
@@ -1502,7 +1559,7 @@ function remoteOutputDownloadFailure(error, kind = 'media') {
       code: `${label.code}_download_dns_failed`,
       message: `${label.noun}已经生成，但本机暂时无法解析${label.object}域名。应用会保留原任务并自动重试，请检查 DNS、代理或网络状态。`,
       recoverable: true,
-      retryAfterMs: 5_000,
+      retryAfterMs: REMOTE_OUTPUT_RETRY_AFTER_MS,
     };
   }
   if (code === 'fetch_timeout' || ['ETIMEDOUT', 'ESOCKETTIMEDOUT'].includes(code)) {
@@ -1510,7 +1567,7 @@ function remoteOutputDownloadFailure(error, kind = 'media') {
       code: `${label.code}_download_timeout`,
       message: `${label.noun}已经生成，但从结果服务器下载${label.object}超时。应用会保留原任务并自动重试。`,
       recoverable: true,
-      retryAfterMs: 5_000,
+      retryAfterMs: REMOTE_OUTPUT_RETRY_AFTER_MS,
     };
   }
   if (code === 'remote_http_error') {
@@ -1518,7 +1575,7 @@ function remoteOutputDownloadFailure(error, kind = 'media') {
       code: `${label.code}_download_http_error`,
       message: `${label.noun}已经生成，但结果服务器下载失败${status ? `（HTTP ${status}）` : ''}。可能是临时链接、代理链路或结果服务器短暂异常。`,
       recoverable: status === 408 || status === 425 || status === 429 || status >= 500,
-      retryAfterMs: 5_000,
+      retryAfterMs: REMOTE_OUTPUT_RETRY_AFTER_MS,
     };
   }
   if (['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'remote_response_aborted'].includes(code)) {
@@ -1526,7 +1583,7 @@ function remoteOutputDownloadFailure(error, kind = 'media') {
       code: `${label.code}_download_network_failed`,
       message: `${label.noun}已经生成，但本机与结果服务器的连接被拒绝或中断。应用会刷新连接并保留原任务自动重试。`,
       recoverable: true,
-      retryAfterMs: 5_000,
+      retryAfterMs: REMOTE_OUTPUT_RETRY_AFTER_MS,
     };
   }
   if (/certificate|cert_|self signed|unable to verify|tls|ssl/i.test(`${code} ${message}`)) {
@@ -1686,11 +1743,7 @@ function saveBase64Image(b64) {
       maxBytes: PROXY_IMAGE_REFERENCE_MAX_BYTES,
     });
     const ext = extFromContentType(verified.contentType) || 'png';
-    const filename = `img_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
-    const filePath = path.join(config.OUTPUT_DIR, filename);
-    fs.mkdirSync(config.OUTPUT_DIR, { recursive: true });
-    fs.writeFileSync(filePath, buf);
-    return `/files/output/${filename}`;
+    return storeMaterializedOutputBuffer(buf, 'img', ext);
   } catch (e) {
     console.error('⚠ 解析 b64 失败:', e.message);
     return null;
@@ -2221,7 +2274,7 @@ function completedImageOutputError(materialized) {
     status: recoverable ? 202 : 502,
     imageOutputFailure: true,
     recoverable,
-    retryAfterMs: recoverable ? Math.max(2_000, Number(reason.retryAfterMs) || 5_000) : 0,
+    retryAfterMs: recoverable ? Math.max(2_000, Number(reason.retryAfterMs) || REMOTE_OUTPUT_RETRY_AFTER_MS) : 0,
   });
 }
 
@@ -2268,7 +2321,7 @@ function completedRemoteOutputError(materialized, kind = 'media') {
     status: recoverable ? 202 : 502,
     remoteOutputFailure: true,
     recoverable,
-    retryAfterMs: recoverable ? Math.max(2_000, Number(reason.retryAfterMs) || 5_000) : 0,
+    retryAfterMs: recoverable ? Math.max(2_000, Number(reason.retryAfterMs) || REMOTE_OUTPUT_RETRY_AFTER_MS) : 0,
   });
 }
 
@@ -2749,19 +2802,30 @@ router.get('/image/seedance-nz/status/:tid', async (req, res) => {
   try {
     const result = await seedanceNz.queryImageTask(req.params.tid, apiKey);
     if (result.status === 'succeeded') {
-      if (!result.imageUrl) {
+      const remoteImageUrls = [...new Set(
+        (Array.isArray(result.imageUrls) && result.imageUrls.length ? result.imageUrls : [result.imageUrl])
+          .map((value) => String(value || '').trim())
+          .filter(Boolean),
+      )];
+      if (!remoteImageUrls.length) {
         const failure = completedImageOutputError({ itemCount: 0, failures: [] });
         return sendCompletedImageOutputFailure(res, failure, seedanceNzTrace(result));
       }
-      const saved = await saveRemoteImageDetailed(
-        result.imageUrl,
-        seedanceNz.fetchRemote,
-        `seedance-nz-image:${req.params.tid}:0`,
-      );
-      if (!saved.url) {
+      const urls = [];
+      const failures = [];
+      for (const [index, remoteUrl] of remoteImageUrls.entries()) {
+        const saved = await saveRemoteImageDetailed(
+          remoteUrl,
+          seedanceNz.fetchRemote,
+          `seedance-nz-image:${req.params.tid}:${index}`,
+        );
+        if (saved.url) urls.push(saved.url);
+        else if (saved.error) failures.push(saved.error);
+      }
+      if (urls.length !== remoteImageUrls.length) {
         const failure = completedImageOutputError({
-          itemCount: 1,
-          failures: saved.error ? [saved.error] : [],
+          itemCount: remoteImageUrls.length,
+          failures,
         });
         return sendCompletedImageOutputFailure(res, failure, seedanceNzTrace(result));
       }
@@ -2770,7 +2834,7 @@ router.get('/image/seedance-nz/status/:tid', async (req, res) => {
         data: {
           status: 'completed',
           progress: '100%',
-          urls: [saved.url],
+          urls,
           ...seedanceNzTrace(result),
         },
       });
@@ -3044,7 +3108,7 @@ router.post('/video/happyhorse/submit', async (req, res) => {
   const settings = loadRawSettings();
   const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
   if (!apiKey) {
-    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”' });
+    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI小屋 API Key”' });
   }
   try {
     const result = await seedanceNz.submitHappyHorseTask(req.body || {}, apiKey);
@@ -3077,7 +3141,7 @@ router.get('/video/happyhorse/status/:tid', async (req, res) => {
   const settings = loadRawSettings();
   const remembered = recallTaskMeta(req.params.tid, 'happyhorse-nz');
   const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
-  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
+  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI小屋 API Key' });
   try {
     const result = await seedanceNz.queryTask(req.params.tid, apiKey);
     const materialized = await materializeRemoteTaskOutput({
@@ -3123,7 +3187,7 @@ router.post('/video/hailuo/submit', async (req, res) => {
   const settings = loadRawSettings();
   const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
   if (!apiKey) {
-    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”' });
+    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI小屋 API Key”' });
   }
   try {
     const result = await seedanceNz.submitHailuoTask(req.body || {}, apiKey);
@@ -3156,7 +3220,7 @@ router.get('/video/hailuo/status/:tid', async (req, res) => {
   const settings = loadRawSettings();
   const remembered = recallTaskMeta(req.params.tid, 'hailuo-nz');
   const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
-  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
+  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI小屋 API Key' });
   try {
     const result = await seedanceNz.queryTask(req.params.tid, apiKey);
     const materialized = await materializeRemoteTaskOutput({
@@ -3202,7 +3266,7 @@ router.post('/video/kling/submit', async (req, res) => {
   const settings = loadRawSettings();
   const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
   if (!apiKey) {
-    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”' });
+    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI小屋 API Key”' });
   }
   try {
     const result = await seedanceNz.submitKlingTask(req.body || {}, apiKey);
@@ -3235,7 +3299,7 @@ router.get('/video/kling/status/:tid', async (req, res) => {
   const settings = loadRawSettings();
   const remembered = recallTaskMeta(req.params.tid, 'kling-nz');
   const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
-  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
+  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI小屋 API Key' });
   try {
     const result = await seedanceNz.queryTask(req.params.tid, apiKey);
     const materialized = await materializeRemoteTaskOutput({
@@ -3281,7 +3345,7 @@ router.post('/video/upscaler/submit', async (req, res) => {
   const settings = loadRawSettings();
   const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
   if (!apiKey) {
-    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”' });
+    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI小屋 API Key”' });
   }
   try {
     const result = await seedanceNz.submitUpscalerTask(req.body || {}, apiKey);
@@ -3314,7 +3378,7 @@ router.get('/video/upscaler/status/:tid', async (req, res) => {
   const settings = loadRawSettings();
   const remembered = recallTaskMeta(req.params.tid, 'upscaler-nz');
   const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
-  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
+  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI小屋 API Key' });
   try {
     const result = await seedanceNz.queryTask(req.params.tid, apiKey);
     const materialized = await materializeRemoteTaskOutput({
@@ -3360,7 +3424,7 @@ router.post('/video/vidu/submit', async (req, res) => {
   const settings = loadRawSettings();
   const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
   if (!apiKey) {
-    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”' });
+    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI小屋 API Key”' });
   }
   try {
     const result = await seedanceNz.submitViduTask(req.body || {}, apiKey);
@@ -3393,7 +3457,7 @@ router.get('/video/vidu/status/:tid', async (req, res) => {
   const settings = loadRawSettings();
   const remembered = recallTaskMeta(req.params.tid, 'vidu-nz');
   const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
-  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
+  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI小屋 API Key' });
   try {
     const result = await seedanceNz.queryTask(req.params.tid, apiKey);
     const materialized = await materializeRemoteTaskOutput({
@@ -3439,7 +3503,7 @@ router.post('/video/wan/submit', async (req, res) => {
   const settings = loadRawSettings();
   const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
   if (!apiKey) {
-    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”' });
+    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI小屋 API Key”' });
   }
   try {
     const result = await seedanceNz.submitWanTask(req.body || {}, apiKey);
@@ -3472,7 +3536,7 @@ router.get('/video/wan/status/:tid', async (req, res) => {
   const settings = loadRawSettings();
   const remembered = recallTaskMeta(req.params.tid, 'wan-nz');
   const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
-  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
+  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI小屋 API Key' });
   try {
     const result = await seedanceNz.queryTask(req.params.tid, apiKey);
     const materialized = await materializeRemoteTaskOutput({
@@ -3617,7 +3681,7 @@ router.post('/audio/seed-audio/submit', async (req, res) => {
   const settings = loadRawSettings();
   const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
   if (!apiKey) {
-    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”' });
+    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI小屋 API Key”' });
   }
   try {
     const result = await seedanceNz.submitAudioTask(req.body || {}, apiKey);
@@ -3641,7 +3705,7 @@ router.get('/audio/seed-audio/status/:tid', async (req, res) => {
   const settings = loadRawSettings();
   const remembered = recallTaskMeta(req.params.tid, 'seed-audio-nz');
   const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
-  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI工坊（国内） API Key' });
+  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI小屋 API Key' });
   try {
     const result = await seedanceNz.queryAudioTask(req.params.tid, apiKey);
     const materialized = await materializeRemoteTaskOutput({
@@ -3695,6 +3759,7 @@ router.post('/audio/whisper/transcribe', async (req, res) => {
         text: result.text,
         model: result.model,
         responseFormat: result.responseFormat,
+        segments: Array.isArray(result.segments) ? result.segments : [],
         ...seedanceNzTrace(result),
       },
     });
@@ -4548,7 +4613,7 @@ function resolveBuiltInLlmProvider(settings, requestedSource, model) {
       baseUrl: config.ZHENZHEN_SD2_BASE_URL,
       label: '贞贞的平价AI小屋',
       modelAllowed: SEEDANCE_NZ_LLM_MODEL_SET.has(normalizedModel),
-      missingKeyError: '未配置贞贞的平价AI工坊（国内） API Key',
+      missingKeyError: '未配置贞贞的平价AI小屋 API Key',
     };
   }
   return {
@@ -5119,14 +5184,7 @@ const videoMaterializationCache = new Map();
 const videoMaterializationInFlight = new Map();
 
 function materializedOutputExists(localUrl) {
-  const match = String(localUrl || '').match(/^\/files\/output\/([^/?#]+)$/);
-  if (!match || path.basename(match[1]) !== match[1]) return false;
-  try {
-    const stat = fs.statSync(path.join(config.OUTPUT_DIR, match[1]));
-    return stat.isFile() && stat.size > 0;
-  } catch (_) {
-    return false;
-  }
+  return isCommittedMaterializedOutputUrl(config.OUTPUT_DIR, localUrl);
 }
 
 function resetVideoMaterializationCacheForTests() {
@@ -7442,6 +7500,7 @@ module.exports._test = Object.freeze({
   FAL_TOOLBOX_AUTHORITY,
   fetchProxyRemoteMedia,
   fetchFalPollJson,
+  storeMaterializedOutputBuffer,
   fetchProviderResponse,
   opaqueDiagnosticSummary,
   parseJsonResponse,

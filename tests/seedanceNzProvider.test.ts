@@ -411,6 +411,79 @@ test('seedance.nz APIMart image models follow the documented low-price and Grok 
   );
 });
 
+test('seedance.nz Nano Banana models enforce their documented resolution, ratio, count, and reference contracts', async () => {
+  seedanceNz.resetCachesForTests();
+  let uploadIndex = 0;
+  const fetchImpl = async () => {
+    uploadIndex += 1;
+    return jsonResponse({ url: `https://cdn.example.com/nb-reference-${uploadIndex}.png` });
+  };
+
+  const lite = await seedanceNz.buildApimartImagePayload({
+    model: 'zhenzhen-image-nb-2-lite',
+    prompt: 'Four clean product variations',
+    resolution: '1k',
+    size: '1:8',
+    n: 4,
+    images: [TINY_PNG_A],
+  }, 'test-key', { fetchImpl, uploadIntervalMs: 0 });
+  assert.deepEqual(lite.payload, {
+    model: 'zhenzhen-image-nb-2-lite',
+    prompt: 'Four clean product variations',
+    n: 4,
+    size: '1:8',
+    metadata: { resolution: '1k' },
+    images: ['https://cdn.example.com/nb-reference-1.png'],
+  });
+
+  const banana2 = await seedanceNz.buildApimartImagePayload({
+    model: 'zhenzhen-image-nb-2',
+    prompt: 'A wide landscape',
+    resolution: '0.5k',
+    size: '8:1',
+  }, 'test-key');
+  assert.deepEqual(banana2.payload.metadata, { resolution: '0.5k' });
+  assert.equal(banana2.payload.size, '8:1');
+
+  const pro = await seedanceNz.buildApimartImagePayload({
+    model: 'zhenzhen-image-nb-pro',
+    prompt: 'A premium editorial portrait',
+    resolution: '4k',
+    size: '4:5',
+  }, 'test-key');
+  assert.deepEqual(pro.payload.metadata, { resolution: '4k' });
+  assert.equal(pro.payload.n, 1);
+
+  await assert.rejects(
+    seedanceNz.buildApimartImagePayload({
+      model: 'zhenzhen-image-nb-2-lite',
+      prompt: 'Wrong resolution',
+      resolution: '2k',
+      size: '1:1',
+    }, 'test-key'),
+    /不支持分辨率 2k/,
+  );
+  await assert.rejects(
+    seedanceNz.buildApimartImagePayload({
+      model: 'zhenzhen-image-nb-pro',
+      prompt: 'Wrong extreme ratio',
+      resolution: '1k',
+      size: '1:8',
+    }, 'test-key'),
+    /不支持比例 1:8/,
+  );
+  await assert.rejects(
+    seedanceNz.buildApimartImagePayload({
+      model: 'zhenzhen-image-nb-2',
+      prompt: 'Wrong count',
+      resolution: '1k',
+      size: '1:1',
+      n: 2,
+    }, 'test-key'),
+    /图片数量 n 固定为 1/,
+  );
+});
+
 test('seedance.nz APIMart video models preserve each documented duration and reference constraint', async () => {
   seedanceNz.resetCachesForTests();
   let uploadIndex = 0;
@@ -457,6 +530,24 @@ test('seedance.nz APIMart video models preserve each documented duration and ref
   assert.equal(veoFast.payload.seconds, '8');
   assert.deepEqual(veoFast.payload.metadata, { resolution: '4k', ratio: '16:9' });
 
+  const veoLite = await seedanceNz.buildApimartVideoPayload({
+    model: 'zhenzhen-video-v31-lite',
+    prompt: 'A calm camera move through a gallery',
+    duration: 30,
+    ratio: '9:16',
+    resolution: '1080p',
+  }, 'test-key');
+  assert.deepEqual(veoLite, {
+    model: 'zhenzhen-video-v31-lite',
+    taskType: 't2v',
+    payload: {
+      model: 'zhenzhen-video-v31-lite',
+      prompt: 'A calm camera move through a gallery',
+      seconds: '8',
+      metadata: { resolution: '1080p', ratio: '9:16' },
+    },
+  });
+
   await assert.rejects(
     seedanceNz.buildApimartVideoPayload({
       model: 'zhenzhen-video-v31-quality',
@@ -464,6 +555,14 @@ test('seedance.nz APIMart video models preserve each documented duration and ref
       images: [TINY_PNG_A, TINY_PNG_A, TINY_PNG_A],
     }, 'test-key', { fetchImpl, uploadIntervalMs: 0 }),
     /最多支持 2 张参考图/,
+  );
+  await assert.rejects(
+    seedanceNz.buildApimartVideoPayload({
+      model: 'zhenzhen-video-v31-lite',
+      prompt: 'Text-only means no reference image',
+      images: [TINY_PNG_A],
+    }, 'test-key', { fetchImpl, uploadIntervalMs: 0 }),
+    /仅支持文生视频，不接受参考图或参考视频/,
   );
 });
 
@@ -482,7 +581,14 @@ test('seedance.nz Whisper uses the documented synchronous multipart transcriptio
       assert.equal((init?.headers as Record<string, string>)?.Authorization, 'Bearer test-key');
       assert.ok(init?.body instanceof FormData);
       submittedForm = init.body as FormData;
-      return jsonResponse({ text: 'documented transcript' });
+      return jsonResponse({
+        text: 'documented transcript',
+        segments: [
+          { start: 1.2344, end: 3.4567, text: ' first line ' },
+          { start: 4, end: 3, text: 'invalid backwards segment' },
+          { start: 7, end: 8.5, text: 'second\nline' },
+        ],
+      });
     },
   });
 
@@ -491,6 +597,33 @@ test('seedance.nz Whisper uses the documented synchronous multipart transcriptio
   assert.equal(submittedForm?.get('response_format'), 'verbose_json');
   assert.equal((submittedForm?.get('file') as File)?.name, 'seedance-audio.mp3');
   assert.equal(result.text, 'documented transcript');
+  assert.deepEqual(result.segments, [
+    { start: 1.234, end: 3.457, text: 'first line' },
+    { start: 7, end: 8.5, text: 'second line' },
+  ]);
+
+  let submittedVideoForm: FormData | null = null;
+  const videoResult = await seedanceNz.transcribeAudio({
+    audioUrl: TINY_MP4,
+    model: 'whisper-1',
+    responseFormat: 'json',
+  }, 'test-key', {
+    baseUrl: 'https://api.seedance.nz',
+    fetchImpl: async (_url: string, init?: RequestInit) => {
+      submittedVideoForm = init?.body as FormData;
+      return jsonResponse({ text: 'mp4 transcript' });
+    },
+  });
+  assert.equal(
+    (submittedVideoForm?.get('file') as File)?.type,
+    'video/mp4',
+  );
+  assert.equal(
+    (submittedVideoForm?.get('file') as File)?.name,
+    'seedance-audio.mp4',
+  );
+  assert.equal(videoResult.text, 'mp4 transcript');
+  assert.deepEqual(videoResult.segments, []);
 
   await assert.rejects(
     seedanceNz.transcribeAudio({
@@ -639,6 +772,28 @@ test('seedance.nz Seedream submit and query use the documented image endpoints',
   assert.equal(submitted.model, 'seedream-v5-pro-t2i');
   assert.equal(queried.status, 'succeeded');
   assert.equal(queried.imageUrl, 'https://cdn.example.com/result.png');
+  assert.deepEqual(queried.imageUrls, ['https://cdn.example.com/result.png']);
+});
+
+test('seedance.nz image query preserves every returned image URL for multi-output workflows', async () => {
+  const queried = await seedanceNz.queryImageTask('image-task-many', 'test-key', {
+    baseUrl: 'https://api.seedance.nz',
+    fetchImpl: async () => jsonResponse({
+      data: {
+        status: 'SUCCESS',
+        progress: '100%',
+        result_urls: [
+          'https://cdn.example.com/result-a.png',
+          { image_url: 'https://cdn.example.com/result-b.png' },
+        ],
+      },
+    }),
+  });
+  assert.equal(queried.imageUrl, 'https://cdn.example.com/result-a.png');
+  assert.deepEqual(queried.imageUrls, [
+    'https://cdn.example.com/result-a.png',
+    'https://cdn.example.com/result-b.png',
+  ]);
 });
 
 test('seedance.nz builds all three Happy Horse payload modes without mixing Seedance fields', async () => {

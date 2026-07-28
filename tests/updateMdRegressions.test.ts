@@ -85,8 +85,8 @@ test('canvas exposes Figma send, placement shelf, and external file drag protoco
   assert.match(canvas, /data-canvas-floating-ui="radial-settings-toggle"/);
   const controlStackIndex = canvas.indexOf('className="t8-control-stack"');
   assert.ok(
-    canvas.indexOf('data-canvas-floating-ui="radial-settings-toggle"', controlStackIndex) <
-      canvas.indexOf('data-canvas-floating-ui="model-help-toggle"', controlStackIndex),
+    canvas.indexOf('data-canvas-floating-ui="model-help-toggle"', controlStackIndex) <
+      canvas.indexOf('data-canvas-floating-ui="placement-shelf-toggle"', controlStackIndex),
   );
   assert.match(styles, /\.t8-control-rail[\s\S]*flex-direction:\s*row/);
   assert.match(styles, /\.t8-placement-shelf/);
@@ -274,6 +274,18 @@ test('topbar canvas tutorial panel replaces RH ApiKey shortcut in latest apps', 
   assert.match(app, /RH API分离设置/);
   assert.match(app, /BV11zNM6jEQR/);
   assert.match(app, /_G9xLFd0DN0/);
+  assert.match(app, /教程第十七弹/);
+  assert.match(app, /支持贞贞的平价AI小屋的全套LLM模型/);
+  assert.match(app, /gpt-image-2低价版,grok image,midjourney 8\.2/);
+  assert.match(app, /veo-omni\(支持视频编辑\),grok-video 1\.5/);
+  assert.match(app, /音频转译whisper-1,音乐模型suno5\.5/);
+  assert.match(app, /新增工作流医生/);
+  assert.match(app, /新增story全自动制片/);
+  assert.match(app, /循环器重新增自定义并发模式/);
+  assert.match(app, /RH工具箱新增视频抠像功能/);
+  assert.match(app, /新增海螺视频，vidu视频，happyhorse视频，Wan视频，可灵视频支持/);
+  assert.match(app, /BV1ob3g6pESq/);
+  assert.match(app, /B-2ICzUtcNU/);
   assert.ok(app.indexOf('画布教程') < app.indexOf('最新应用'));
   assert.doesNotMatch(app, /获取 RH ApiKey/);
   assert.doesNotMatch(app, /enterprise-api\/consumerApi/);
@@ -299,4 +311,13 @@ test('topbar canvas tutorial panel replaces RH ApiKey shortcut in latest apps', 
   assert.match(features, /RH API分离设置/);
   assert.match(features, /BV11zNM6jEQR/);
   assert.match(features, /_G9xLFd0DN0/);
+  assert.match(features, /教程第十七弹/);
+  assert.match(features, /支持贞贞的平价AI小屋的全套LLM模型/);
+  assert.match(features, /gpt-image-2低价版,grok image,midjourney 8\.2/);
+  assert.match(features, /veo-omni\(支持视频编辑\),grok-video 1\.5/);
+  assert.match(features, /新增工作流医生/);
+  assert.match(features, /新增story全自动制片/);
+  assert.match(features, /RH工具箱新增视频抠像功能/);
+  assert.match(features, /BV1ob3g6pESq/);
+  assert.match(features, /B-2ICzUtcNU/);
 });

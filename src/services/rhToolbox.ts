@@ -49,7 +49,8 @@ export interface RunRhToolboxToolOptions {
   instanceType?: string;
   appInfo?: any;
   signal?: AbortSignal;
-  onProgress?: (progress: RunRhToolboxProgress) => void;
+  submissionKey?: string | null;
+  onProgress?: (progress: RunRhToolboxProgress) => void | Promise<void>;
 }
 
 export interface RunRhToolboxToolResult extends RhToolboxOutputClassification, ProviderTransportTrace {
@@ -96,7 +97,7 @@ function hasInputValue(value: unknown): boolean {
 async function resolveRhToolboxInputValues(
   tool: RhToolboxTool,
   rawValues: Record<string, string | string[]>,
-  onProgress?: (progress: RunRhToolboxProgress) => void,
+  onProgress?: (progress: RunRhToolboxProgress) => void | Promise<void>,
   signal?: AbortSignal,
   siteState: { current: RhSite } = { current: 'cn' },
 ): Promise<Record<string, string | string[]>> {
@@ -111,7 +112,7 @@ async function resolveRhToolboxInputValues(
       const v = String(value || '').trim();
       if (!v) continue;
       if (isMediaInputKind(input.kind) && input.uploadAsset !== false) {
-        onProgress?.({ stage: 'upload', message: `上传 ${input.label || input.key}` });
+        await onProgress?.({ stage: 'upload', message: `上传 ${input.label || input.key}` });
         const uploaded = await uploadRhAsset(v, siteState.current);
         if (uploaded.site) siteState.current = uploaded.site;
         next.push(uploaded.fileName || v);
@@ -139,16 +140,16 @@ function normalizeFailedReason(reason: any, fallback = 'RH 工具箱任务失败
 async function cancelSubmittedRhTask(
   taskId: string,
   site: RhSite,
-  progress?: (progress: RunRhToolboxProgress) => void,
+  progress?: (progress: RunRhToolboxProgress) => void | Promise<void>,
 ): Promise<void> {
   if (!taskId) return;
-  progress?.({ stage: 'cancel', message: '取消 RH 后台任务', taskId });
+  await progress?.({ stage: 'cancel', message: '取消 RH 后台任务', taskId });
   try {
     await cancelRh(taskId, site);
-    progress?.({ stage: 'cancel', message: '已请求取消 RH 后台任务', taskId });
+    await progress?.({ stage: 'cancel', message: '已请求取消 RH 后台任务', taskId });
   } catch (error: any) {
     const message = `取消 RH 后台任务失败：${error?.message || error}`;
-    progress?.({
+    await progress?.({
       stage: 'error',
       message,
       taskId,
@@ -169,7 +170,7 @@ export async function runRhToolboxTool(options: RunRhToolboxToolOptions): Promis
 
   const progress = options.onProgress;
   const siteState: { current: RhSite } = { current: tool.rhSite === 'intl' ? 'intl' : 'cn' };
-  progress?.({ stage: 'prepare', message: `准备运行 ${tool.title}` });
+  await progress?.({ stage: 'prepare', message: `准备运行 ${tool.title}` });
 
   const picked = pickRhToolboxInputs(tool, options.inputs || {});
   const explicitInputValues = options.inputValues || {};
@@ -185,7 +186,7 @@ export async function runRhToolboxTool(options: RunRhToolboxToolOptions): Promis
   const appInfo = options.appInfo || (tool.runtime?.fetchAppInfo === false
     ? undefined
     : await (async () => {
-        progress?.({ stage: 'app-info', message: '读取 RH 应用字段' });
+        await progress?.({ stage: 'app-info', message: '读取 RH 应用字段' });
         const info = await fetchRhAppInfo(tool.webappId, siteState.current);
         if (info?.rhSite) siteState.current = info.rhSite;
         return info;
@@ -209,17 +210,17 @@ export async function runRhToolboxTool(options: RunRhToolboxToolOptions): Promis
     await cancelSubmittedRhTask(taskId, siteState.current, progress);
   };
   try {
-    progress?.({ stage: 'submit', message: '提交 RH 任务' });
+    await progress?.({ stage: 'submit', message: '提交 RH 任务' });
     const submitResult = await submitRh({
       webappId: tool.webappId,
       nodeInfoList,
       instanceType: options.instanceType || tool.runtime?.instanceType || undefined,
       site: siteState.current,
-    });
+    }, { submissionKey: options.submissionKey });
     taskId = submitResult.taskId;
     siteState.current = submitResult.site || siteState.current;
     if (!taskId) throw new Error('RH 未返回 taskId');
-    progress?.({
+    await progress?.({
       stage: 'submit',
       message: '已提交 RH 任务',
       taskId,
@@ -240,13 +241,13 @@ export async function runRhToolboxTool(options: RunRhToolboxToolOptions): Promis
 
     for (let pollCount = 1; pollCount <= maxPolls; pollCount += 1) {
       assertNotAborted(options.signal);
-      progress?.({ stage: 'poll', message: `轮询中 ${pollCount}/${maxPolls}`, taskId, pollCount });
+      await progress?.({ stage: 'poll', message: `轮询中 ${pollCount}/${maxPolls}`, taskId, pollCount });
       await delay(pollIntervalMs, options.signal);
       try {
         const query = await queryRh(taskId, siteState.current);
         if (query.site) siteState.current = query.site;
         lastRaw = query;
-        progress?.({
+        await progress?.({
           stage: 'poll',
           message: `轮询响应 ${pollCount}/${maxPolls}`,
           taskId,
@@ -262,7 +263,7 @@ export async function runRhToolboxTool(options: RunRhToolboxToolOptions): Promis
           // 也不能再向 RunningHub 发送取消，更不能重新提交付费任务。
           remoteTaskCompleted = true;
           lastError = query.error || 'RH 结果已经生成，正在适配 TUN/代理网络并安全下载；原任务会保留';
-          progress?.({
+          await progress?.({
             stage: 'poll',
             message: lastError,
             taskId,
@@ -277,7 +278,7 @@ export async function runRhToolboxTool(options: RunRhToolboxToolOptions): Promis
         if (normalizedStatus === 'SUCCESS') {
           remoteTaskCompleted = true;
           const classified = classifyRhToolboxOutputs(query.urls || []);
-          progress?.({
+          await progress?.({
             stage: 'success',
             message: `完成 · ${classified.urls.length} 个输出`,
             taskId,
@@ -311,7 +312,7 @@ export async function runRhToolboxTool(options: RunRhToolboxToolOptions): Promis
       }
     }
 
-    progress?.({ stage: 'error', message: lastError || 'RH 工具箱轮询超时', taskId });
+    await progress?.({ stage: 'error', message: lastError || 'RH 工具箱轮询超时', taskId });
     if (!remoteTaskCompleted) await cancelTaskIfNeeded();
     throw new Error(lastError || 'RH 工具箱轮询超时');
   } catch (error) {

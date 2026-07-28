@@ -115,6 +115,12 @@ import {
   type CollaborationOperationDraft,
   type CollaborationPresenceValue,
 } from '../utils/collaborationStructure';
+import {
+  beginCollaborationRunOperation,
+  completeCollaborationRunOperation,
+  readCollaborationRunOperation,
+  type CollaborationRunOperation,
+} from '../utils/collaborationRunOperation';
 import CollaborationAssetUpload from './CollaborationAssetUpload';
 import CollaborationReviewPanel, {
   type CollaborationReviewApiEnvelope,
@@ -2137,6 +2143,14 @@ function isDefinitiveCollaborationOperationRejection(error: unknown) {
     && ![408, 425, 429].includes(status);
 }
 
+function availableLocalStorage(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
 function availableSessionStorage(): Storage | null {
   try {
     return window.sessionStorage;
@@ -2206,7 +2220,12 @@ function Workspace() {
   const [participantSessionAction, setParticipantSessionAction] = useState<'rotate' | 'logout' | null>(null);
   const [participantSessionConfirmation, setParticipantSessionConfirmation] = useState<'rotate' | 'logout' | null>(null);
   const [displayName, setDisplayName] = useState(() => localStorage.getItem('t8-collab-display-name') || `访客-${Math.random().toString(36).slice(2, 6)}`);
+  const [runIntentRecoveryRetry, setRunIntentRecoveryRetry] = useState(0);
   const webSocketRef = useRef<WebSocket | null>(null);
+  const runIntentSubmittingKeysRef = useRef(new Set<string>());
+  const runIntentRecoveryAttemptedRef = useRef('');
+  const runIntentRecoveryScopeRef = useRef('');
+  const runIntentRecoveryTimerRef = useRef<number | null>(null);
   const sessionRef = useRef<Session | null>(null);
   const authoritativeDocumentRef = useRef<VersionedCanvasData | null>(null);
   const authoritativeGenerationRef = useRef<string | null>(null);
@@ -4983,35 +5002,152 @@ function Workspace() {
     removeTextConflict(item);
   }, [removeTextConflict]);
 
-  const requestRun = () => {
-    if (!canRun || !document) return;
+  const submitCollaborationRunOperation = useCallback(async (
+    operation: CollaborationRunOperation,
+    recovered = false,
+  ) => {
+    if (runIntentSubmittingKeysRef.current.has(operation.idempotencyKey)) return;
+    runIntentSubmittingKeysRef.current.add(operation.idempotencyKey);
     let mutationFence: CollaborationMutationFence;
-    try { mutationFence = captureMutationFence(); } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
-      return;
-    }
-    const selected = nodes.filter((node) => node.selected).map((node) => node.id);
-    void collaborationMutationRequest<RunIntent>(mutationFence, '/api/collab/run-intents', {
-      method: 'POST',
-      body: JSON.stringify({
-        canvasId: document.canvasId,
-        canvasRevision: document.revision,
-        nodeIds: selected,
-        idempotencyKey: `remote:${session?.memberId}:${Date.now()}`,
-      }),
-    }).then((rawIntent) => {
+    try {
+      mutationFence = captureMutationFence();
+      const rawIntent = await collaborationMutationRequest<RunIntent>(
+        mutationFence,
+        '/api/collab/run-intents',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            canvasId: operation.canvasId,
+            canvasRevision: operation.canvasRevision,
+            nodeIds: operation.nodeIds,
+            idempotencyKey: operation.idempotencyKey,
+          }),
+        },
+      );
       assertMutationFenceCurrent(mutationFence);
-      const intent = normalizeCollaborationRunIntentView(rawIntent, document.canvasId);
-      if (!intent || intent.requestedBy !== session?.memberId) {
+      const activeSession = sessionRef.current;
+      const intent = normalizeCollaborationRunIntentView(rawIntent, operation.canvasId);
+      if (!activeSession
+        || intent?.canvasId !== operation.canvasId
+        || intent?.requestedBy !== operation.memberId
+        || operation.projectId !== activeSession.projectId
+        || operation.memberId !== activeSession.memberId) {
         throw new Error('主机返回的运行请求未通过当前成员作用域校验。');
       }
+      completeCollaborationRunOperation(
+        availableLocalStorage(),
+        operation,
+        operation.idempotencyKey,
+      );
+      if (runIntentRecoveryTimerRef.current !== null) {
+        window.clearTimeout(runIntentRecoveryTimerRef.current);
+        runIntentRecoveryTimerRef.current = null;
+      }
+      runIntentRecoveryAttemptedRef.current = '';
       setOwnRunIntents((current) => ({
         ...current,
         [intent.id]: mergeCollaborationRunIntentView(current[intent.id], intent),
       }));
-      setStatus('运行请求已发送给画布所有者');
-    }).catch((error) => setStatus(error instanceof Error ? error.message : String(error)));
-  };
+      setStatus(recovered ? '已恢复并确认上次运行请求' : '运行请求已发送给画布所有者');
+    } catch (error) {
+      const definitive = isDefinitiveCollaborationOperationRejection(error);
+      if (definitive) {
+        completeCollaborationRunOperation(
+          availableLocalStorage(),
+          operation,
+          operation.idempotencyKey,
+        );
+      } else if (recovered && runIntentRecoveryAttemptedRef.current === operation.idempotencyKey) {
+        runIntentRecoveryAttemptedRef.current = '';
+        if (runIntentRecoveryTimerRef.current !== null) {
+          window.clearTimeout(runIntentRecoveryTimerRef.current);
+        }
+        runIntentRecoveryTimerRef.current = window.setTimeout(() => {
+          runIntentRecoveryTimerRef.current = null;
+          setRunIntentRecoveryRetry((current) => current + 1);
+        }, 2_000);
+      }
+      setStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      runIntentSubmittingKeysRef.current.delete(operation.idempotencyKey);
+    }
+  }, [
+    assertMutationFenceCurrent,
+    captureMutationFence,
+    collaborationMutationRequest,
+  ]);
+
+  const requestRun = useCallback(() => {
+    const activeSession = sessionRef.current;
+    if (!canRun || !document || !activeSession) return;
+    const storage = availableLocalStorage();
+    if (!storage) {
+      setStatus('浏览器无法保存运行请求身份；为避免重复生成，本次未提交。请允许本站本地存储后重试。');
+      return;
+    }
+    try {
+      const selected = nodes.filter((node) => node.selected).map((node) => node.id);
+      const operation = beginCollaborationRunOperation(storage, {
+        projectId: activeSession.projectId,
+        canvasId: document.canvasId,
+        memberId: activeSession.memberId,
+      }, document.revision, selected);
+      void submitCollaborationRunOperation(operation);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }, [canRun, document, nodes, submitCollaborationRunOperation]);
+
+  useEffect(() => () => {
+    if (runIntentRecoveryTimerRef.current !== null) {
+      window.clearTimeout(runIntentRecoveryTimerRef.current);
+      runIntentRecoveryTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    const activeSession = sessionRef.current;
+    const recoveryGeneration = normalizeCollaborationRecoveryGeneration(
+      authoritativeGenerationRef.current,
+    );
+    const scopeIdentity = activeSession
+      ? [
+        activeSession.projectId,
+        activeSession.canvasId,
+        activeSession.memberId,
+        activeSession.id,
+        activeSession.authorizationEpoch,
+        recoveryGeneration,
+      ].join(':')
+      : '';
+    if (runIntentRecoveryScopeRef.current !== scopeIdentity) {
+      runIntentRecoveryScopeRef.current = scopeIdentity;
+      runIntentRecoveryAttemptedRef.current = '';
+    }
+    if (!activeSession
+      || !canRun
+      || !document
+      || document.canvasId !== activeSession.canvasId
+      || connectionState.phase !== 'online'
+      || !socketScopeReady
+      || !scopeIdentity) return;
+    const operation = readCollaborationRunOperation(availableLocalStorage(), {
+      projectId: activeSession.projectId,
+      canvasId: activeSession.canvasId,
+      memberId: activeSession.memberId,
+    });
+    if (!operation || runIntentRecoveryAttemptedRef.current === operation.idempotencyKey) return;
+    runIntentRecoveryAttemptedRef.current = operation.idempotencyKey;
+    void submitCollaborationRunOperation(operation, true);
+  }, [
+    canRun,
+    connectionState.phase,
+    document,
+    runIntentRecoveryRetry,
+    session,
+    socketScopeReady,
+    submitCollaborationRunOperation,
+  ]);
 
   const cancelOwnRunIntent = async (intent: CollaborationRunIntentView) => {
     const activeSession = sessionRef.current;

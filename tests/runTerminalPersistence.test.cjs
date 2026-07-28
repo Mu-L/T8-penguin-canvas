@@ -74,6 +74,90 @@ test('NodeRun creation, state transitions, and terminal evidence commit atomical
   t.after(() => closeServer(server));
   const baseUrl = `http://127.0.0.1:${server.address().port}/api/project-runs`;
 
+  const ambiguousNode = database.createNodeRun({
+    runId: run.id,
+    nodeId: 'provider-node-ambiguous',
+    status: 'running',
+  });
+  const ambiguousAttempt = database.createAttempt({
+    nodeRunId: ambiguousNode.id,
+    provider: 'test',
+    model: 'model-ambiguous',
+    status: 'running',
+    metadata: {
+      providerSubmission: {
+        version: 1,
+        submissionKey: 'submission-ambiguous',
+        expectedOutput: true,
+        state: 'ambiguous',
+      },
+    },
+  });
+  const ambiguousTerminal = await patchJson(
+    `${baseUrl}/${run.id}/nodes/${ambiguousNode.id}/attempts/${ambiguousAttempt.id}/terminal`,
+    { status: 'succeeded' },
+  );
+  assert.equal(ambiguousTerminal.response.status, 409);
+  assert.equal(ambiguousTerminal.body.code, 'provider_submission_not_verified');
+  assert.equal(database.getNodeRun(ambiguousNode.id).status, 'running');
+  assert.equal(database.getAttempt(ambiguousAttempt.id).status, 'running');
+
+  const unlinkedNode = database.createNodeRun({
+    runId: run.id,
+    nodeId: 'provider-node-unlinked',
+    status: 'running',
+  });
+  const unlinkedAttempt = database.createAttempt({
+    nodeRunId: unlinkedNode.id,
+    provider: 'test',
+    model: 'model-unlinked',
+    status: 'running',
+    metadata: {
+      providerSubmission: {
+        version: 1,
+        submissionKey: 'submission-unlinked',
+        expectedOutput: true,
+        state: 'verified',
+      },
+    },
+  });
+  const unlinkedTerminal = await patchJson(
+    `${baseUrl}/${run.id}/nodes/${unlinkedNode.id}/attempts/${unlinkedAttempt.id}/terminal`,
+    { status: 'succeeded' },
+  );
+  assert.equal(unlinkedTerminal.response.status, 409);
+  assert.equal(unlinkedTerminal.body.code, 'provider_submission_output_missing');
+  assert.equal(database.getNodeRun(unlinkedNode.id).status, 'running');
+  assert.equal(database.getAttempt(unlinkedAttempt.id).status, 'running');
+
+  const verifiedNode = database.createNodeRun({
+    runId: run.id,
+    nodeId: 'provider-node-verified',
+    status: 'running',
+    outputRefs: ['asset-verified'],
+  }, { allowOutputRefs: true });
+  const verifiedAttempt = database.createAttempt({
+    nodeRunId: verifiedNode.id,
+    provider: 'test',
+    model: 'model-verified',
+    status: 'running',
+    metadata: {
+      providerSubmission: {
+        version: 1,
+        submissionKey: 'submission-verified',
+        expectedOutput: true,
+        state: 'verified',
+      },
+    },
+  });
+  const verifiedTerminal = await patchJson(
+    `${baseUrl}/${run.id}/nodes/${verifiedNode.id}/attempts/${verifiedAttempt.id}/terminal`,
+    { status: 'succeeded' },
+  );
+  assert.equal(verifiedTerminal.response.status, 200);
+  assert.equal(database.getNodeRun(verifiedNode.id).status, 'succeeded');
+  assert.equal(database.getAttempt(verifiedAttempt.id).status, 'succeeded');
+
   const appendRunEvent = database.appendRunEvent.bind(database);
   database.appendRunEvent = (runId, event) => {
     if (event.nodeRunId === 'node-create-rollback' && event.type === 'node.queued') {

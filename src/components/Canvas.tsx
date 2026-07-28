@@ -44,6 +44,7 @@ import {
   snapCanvasViewportToDevicePixels,
   type CanvasZoomReadabilityTier,
 } from '../utils/canvasZoomReadability';
+import { buildCreatorCanvasContext } from '../utils/creatorAgentContext';
 // v1.2.10.5: 节点落点防重叠解析器 (单节点/整组双模式 + 兜底+toast+飞镜)
 import {
   placeSingleNode,
@@ -191,6 +192,7 @@ import CanvasToolbar from './CanvasToolbar';
 import ProjectWorkbench from './ProjectWorkbench';
 import GenerationHistoryPanel from './GenerationHistoryPanel';
 import TerminalPanel from './TerminalPanel';
+import CreatorAgentPanel from './CreatorAgentPanel';
 import NodeActionBar from './NodeActionBar';
 import RadialNodeMenu from './RadialNodeMenu';
 import RadialMenuSettingsModal from './RadialMenuSettingsModal';
@@ -3164,7 +3166,38 @@ type ModelUsageHelpSection = {
   items?: readonly string[];
 };
 
-const MODEL_USAGE_HELP_SECTIONS: readonly ModelUsageHelpSection[] = [
+type ModelUsageHelpTabId = 'budget-house' | 'workshop';
+
+const ZHENZHEN_BUDGET_HOUSE_MODEL_USAGE_HELP_SECTIONS: readonly ModelUsageHelpSection[] = [
+  {
+    title: '渠道与宽审核',
+    paragraphs: [
+      '与贞贞的AI工坊不同，模型以国内模型以及一些海外核心模型为主，使用完全不同的渠道，部分模型价格更优惠。',
+      '支持宽审核开通；请合规使用，需要宽审核版 Seedream 等模型可联系 T8 开通。除版权内容外，图像及视频均可正常生成。',
+    ],
+  },
+  {
+    title: '视频模型',
+    items: [
+      'Seedance 2.0 官方特价版：价格比字节签约价格还优惠一点，不排队、不卡人脸，并支持宽审核（版权除外）。720P 约 1 元/秒，480P Mini 不到 0.25 元/秒。',
+      'zhenzhen-video-gk-v15：480P 15 秒约 0.35 元，720P 15 秒约 0.63 元；模型能力类似 Grok Imagine 1.5。',
+      'zhenzhen-video-g-omni-flash：支持视频编辑；模型能力类似 Veo Omni。',
+    ],
+  },
+  {
+    title: '图像模型',
+    items: [
+      'zhenzhen-image-g-v2-lowprice：特价 1K 不到 0.04 元、2K 约 0.09 元、4K 约 0.12 元；模型能力类似 GPT Image 2。',
+      'zhenzhen-image-nb-2：1K / 2K 约 0.16 元，4K 约 0.24 元；模型能力类似 Nano Banana 2。',
+      'zhenzhen-image-nb-pro：1K 约 0.32 元，4K 约 0.41 元；模型能力类似 Nano Banana Pro。',
+      'midjourney-imagine：4 图约 0.39 元起，支持 V8.2。',
+      'dola-seedream-5.0-pro-i2i：敏感类目最佳模型，需要联系 T8 开通。',
+      'zhenzhen-image-gk-v15-edit：审核等级比 dola-seedream-5.0-pro-i2i 稍高、比其他模型低，作为第二推荐；模型能力类似 Grok Image 1.5 Edit。',
+    ],
+  },
+];
+
+const ZHENZHEN_WORKSHOP_MODEL_USAGE_HELP_SECTIONS: readonly ModelUsageHelpSection[] = [
   {
     title: '特别注意事项',
     paragraphs: [
@@ -3210,6 +3243,23 @@ const MODEL_USAGE_HELP_SECTIONS: readonly ModelUsageHelpSection[] = [
     paragraphs: [
       'LLM模型有时候因为官方问题会出现速度慢，失败等现象，这时候换个模型即可或者换一下分组即可，预置了多个模型。',
     ],
+  },
+];
+
+const MODEL_USAGE_HELP_TABS: readonly {
+  id: ModelUsageHelpTabId;
+  label: string;
+  sections: readonly ModelUsageHelpSection[];
+}[] = [
+  {
+    id: 'budget-house',
+    label: '贞贞的平价AI小屋',
+    sections: ZHENZHEN_BUDGET_HOUSE_MODEL_USAGE_HELP_SECTIONS,
+  },
+  {
+    id: 'workshop',
+    label: '贞贞的AI工坊',
+    sections: ZHENZHEN_WORKSHOP_MODEL_USAGE_HELP_SECTIONS,
   },
 ];
 
@@ -3734,6 +3784,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   const canvasRevisionsRef = useRef<Map<string, number>>(new Map());
   const canvasMutationQueuesRef = useRef<Map<string, Promise<void>>>(new Map());
   const patchPreviewBaselinesRef = useRef<Map<string, { canvasId: string; revision: number; snapshot: string; mutationEpoch: number }>>(new Map());
+  const handledBrowserHandoffsRef = useRef(new Set<string>());
   const nextNodeSerialIdRef = useRef(1);
   const radialMenuRef = useRef<RadialMenuSession | null>(null);
   const radialPressRef = useRef<RadialPressState | null>(null);
@@ -4095,6 +4146,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   const connectionPanPointerRef = useRef<{ x: number; y: number } | null>(null);
   const [connectionPanModeActive, setConnectionPanModeActive] = useState(false);
   const [modelHelpOpen, setModelHelpOpen] = useState(false);
+  const [modelHelpTab, setModelHelpTab] = useState<ModelUsageHelpTabId>('budget-house');
   const [radialSettingsOpen, setRadialSettingsOpen] = useState(false);
   const altDragCloneRef = useRef<{
     placeholderIds: Map<string, string>; // origId -> placeholderId
@@ -5861,6 +5913,67 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     return document;
   }, []);
 
+  useEffect(() => {
+    const subscribe = window.t8pc?.agentControl?.onCanvasMutation;
+    if (!subscribe) return undefined;
+    let disposed = false;
+    let queue = Promise.resolve();
+    const unsubscribe = subscribe((event) => {
+      if (!event
+        || event.schema !== 't8-agent-control-canvas-mutation-v1'
+        || event.projectId !== activeProjectId
+        || event.canvasId !== activeId) return;
+      queue = queue.then(async () => {
+        if (disposed
+          || useCanvasStore.getState().activeId !== event.canvasId
+          || loadedCanvasIdRef.current !== event.canvasId) return;
+        const knownRevision = canvasRevisionsRef.current.get(event.canvasId) || 0;
+        if (knownRevision >= event.revision) return;
+        const baseline = lastSavedByCanvasRef.current.get(event.canvasId)
+          || currentPersistableCanvas().snapshot;
+        try {
+          const document = await fetchAuthoritativeCanvasPatchDocument(event.canvasId);
+          if (disposed
+            || useCanvasStore.getState().activeId !== event.canvasId
+            || loadedCanvasIdRef.current !== event.canvasId) return;
+          const committed = commitAuthoritativeCanvasPatchDocument(event.canvasId, document, {
+            expectedLocalSnapshot: baseline,
+            patchId: event.patchId,
+          });
+          if (committed.conflicts.length > 0) {
+            logBus.warn(
+              `Agent 修改已同步到 r${document.revision}；${committed.conflicts.length} 处本地并发编辑已保留，需确认后再保存。`,
+              'Agent Control',
+            );
+          } else {
+            logBus.success(
+              `${event.action === 'patch.revert' ? 'Agent 撤销' : 'Agent 修改'}已同步到画布 r${document.revision}`,
+              'Agent Control',
+            );
+          }
+          if (event.warningCodes.length > 0) {
+            logBus.warn('权威画布已提交，但兼容镜像需要在下次读取时修复。', 'Agent Control');
+          }
+        } catch (error) {
+          logBus.error(
+            `Agent 已提交画布 r${event.revision}，但当前界面同步失败：${error instanceof Error ? error.message : '请重新打开画布'}`,
+            'Agent Control',
+          );
+        }
+      }).catch(() => {});
+    });
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
+  }, [
+    activeId,
+    activeProjectId,
+    commitAuthoritativeCanvasPatchDocument,
+    currentPersistableCanvas,
+    fetchAuthoritativeCanvasPatchDocument,
+  ]);
+
   const refreshCleanCanvasPatchBaseline = useCallback(async (
     canvasId: string,
     expectedSnapshot: string,
@@ -5889,21 +6002,32 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     return { document, state: committed.state, mutationEpoch: graphMutationEpochRef.current };
   }, [commitAuthoritativeCanvasPatchDocument, currentPersistableCanvas, fetchAuthoritativeCanvasPatchDocument, loaded, loadedCanvasId]);
 
-  const handlePreviewCanvasPatch = useCallback(async (draft: CanvasPatchDraft) => {
+  const handlePreviewCanvasPatch = useCallback(async (draft: CanvasPatchDraft | CanvasPatch) => {
     const canvasId = activeId;
     const projectId = activeProjectId;
     if (!canvasId || !projectId) throw new Error('当前画布缺少项目身份');
     return enqueueCanvasMutation(canvasId, async () => {
       let baseline = await ensureCanvasPatchBaseline(canvasId);
-      let patch = materializeCanvasPatchDraft(draft, {
-        projectId,
-        canvasId,
-        baseRevision: baseline.revision,
-      });
+      const isPreparedPatch = 'schema' in draft && draft.schema === 't8-canvas-patch-v1';
+      let patch: CanvasPatch = isPreparedPatch
+        ? draft as CanvasPatch
+        : materializeCanvasPatchDraft(draft as CanvasPatchDraft, {
+          projectId,
+          canvasId,
+          baseRevision: baseline.revision,
+        });
+      if (isPreparedPatch && patch.baseRevision !== baseline.revision) {
+        const stale = new Error(
+          `创作计划基于画布 r${patch.baseRevision}，当前已是 r${baseline.revision}，请让 Agent 重新规划`,
+        ) as Error & { code: string };
+        stale.code = 'CREATIVE_CANVAS_STALE';
+        throw stale;
+      }
       let preview: CanvasPatchPreview;
       try {
         preview = await api.previewCanvasPatch(canvasId, patch);
       } catch (error) {
+        if (isPreparedPatch) throw error;
         if (!(error instanceof api.ApiRequestError) || error.status !== 409) throw error;
         const refreshed = await refreshCleanCanvasPatchBaseline(canvasId, baseline.snapshot, baseline.mutationEpoch);
         baseline = {
@@ -5912,7 +6036,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
           payload: baseline.payload,
           mutationEpoch: refreshed.mutationEpoch,
         };
-        patch = materializeCanvasPatchDraft(draft, {
+        patch = materializeCanvasPatchDraft(draft as CanvasPatchDraft, {
           projectId: refreshed.document.projectId,
           canvasId,
           baseRevision: refreshed.document.revision,
@@ -5944,7 +6068,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   const handleApplyCanvasPatch = useCallback(async (patch: CanvasPatch, preview: CanvasPatchPreview) => {
     const canvasId = activeId;
     if (!canvasId || patch.id !== preview.patchId) throw new Error('CanvasPatch 预览身份不一致');
-    await enqueueCanvasMutation(canvasId, async () => {
+    return enqueueCanvasMutation(canvasId, async () => {
       const previewKey = `${canvasId}\u001f${patch.id}\u001f${preview.previewDigest}`;
       const baseline = patchPreviewBaselinesRef.current.get(previewKey);
       const current = currentPersistableCanvas();
@@ -5968,13 +6092,14 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         if (key.startsWith(`${canvasId}\u001f`)) patchPreviewBaselinesRef.current.delete(key);
       }
       logBus.success(`${result.duplicate ? '已确认' : '已应用'}修复：${patch.summary}`, '工作流医生');
+      return result;
     });
   }, [activeId, commitAuthoritativeCanvasPatchDocument, currentPersistableCanvas, enqueueCanvasMutation, fetchAuthoritativeCanvasPatchDocument]);
 
   const handleRevertCanvasPatch = useCallback(async (patchId: string, _baseRevision: number) => {
     const canvasId = activeId;
     if (!canvasId) throw new Error('当前没有可撤回 Patch 的画布');
-    await enqueueCanvasMutation(canvasId, async () => {
+    return enqueueCanvasMutation(canvasId, async () => {
       let baseline = await ensureCanvasPatchBaseline(canvasId);
       let result: Awaited<ReturnType<typeof api.revertCanvasPatch>>;
       try {
@@ -6004,6 +6129,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         if (key.startsWith(`${canvasId}\u001f`)) patchPreviewBaselinesRef.current.delete(key);
       }
       logBus.success(`已撤回我的 Patch：${patchId}`, '工作流医生');
+      return result;
     });
   }, [activeId, commitAuthoritativeCanvasPatchDocument, enqueueCanvasMutation, ensureCanvasPatchBaseline, fetchAuthoritativeCanvasPatchDocument, refreshCleanCanvasPatchBaseline]);
 
@@ -8956,12 +9082,19 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       let runId: string | null = null;
       let failedCount = 0;
       let executionStarted = false;
-      const proposedRunId = runIntentLease
-        ? `run-${typeof globalThis.crypto?.randomUUID === 'function'
-          ? globalThis.crypto.randomUUID()
-          : `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
-        : null;
+      const proposedRunId = `run-${typeof globalThis.crypto?.randomUUID === 'function'
+        ? globalThis.crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
       const recoverOrReleaseRunIntentClaim = async () => {
+        if (!runIntentLease) {
+          try {
+            return await api.getProjectRun(proposedRunId);
+          } catch {
+            // The Run create outcome is unknown. Do not start any provider work
+            // unless this exact pre-generated Run can be proven durable.
+            return null;
+          }
+        }
         if (!runIntentLease || !proposedRunId) return null;
         const readIntent = async () => api.getCollaborationRunIntent(
           runIntentLease!.intent.id,
@@ -9017,7 +9150,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
           let run: Awaited<ReturnType<typeof api.createProjectRun>>;
           try {
             run = await api.createProjectRun({
-              ...(proposedRunId ? { id: proposedRunId } : {}),
+              id: proposedRunId,
               canvasId: persistenceSnapshot.canvasId,
               canvasRevision: persistenceSnapshot.revision,
               status: 'queued',
@@ -12567,6 +12700,34 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     pulseNearestNode(target.id);
   }, [activeId, getViewport, loaded, loadedCanvasId, setCenter]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const handoffId = String(params.get('zcanvasHandoff') || '').trim();
+    const action = String(params.get('zcanvasAction') || '').trim();
+    const canvasId = String(params.get('zcanvasCanvasId') || '').trim();
+    const nodeId = String(params.get('zcanvasNodeId') || '').trim();
+    if (!handoffId || handledBrowserHandoffsRef.current.has(handoffId) || action !== 'highlight') return;
+    if (!loaded || loadedCanvasId !== activeId || canvasId !== activeId || !nodeId) return;
+    const target = nodesRef.current.find((node) => node.id === nodeId);
+    if (!target) {
+      logBus.warn('Agent 请求高亮的节点已不存在，未修改画布', 'Canvas Agent');
+      return;
+    }
+    handledBrowserHandoffsRef.current.add(handoffId);
+    setNodes((current) => current.map((node) => ({ ...node, selected: node.id === nodeId })));
+    const rect = rectOf(target);
+    const currentZoom = getViewport().zoom || 1;
+    const zoom = Math.min(Math.max(currentZoom, 0.55), 1.15);
+    setCenter(rect.x + rect.w / 2, rect.y + rect.h / 2, { zoom, duration: 450 });
+    pulseNearestNode(nodeId);
+    params.delete('zcanvasHandoff');
+    params.delete('zcanvasAction');
+    params.delete('zcanvasCanvasId');
+    params.delete('zcanvasNodeId');
+    const query = params.toString();
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`);
+  }, [activeId, getViewport, loaded, loadedCanvasId, setCenter]);
+
   // ===== 全局快捷键 =====
   useEffect(() => {
     const clipboardHandledEvents = new WeakSet<KeyboardEvent>();
@@ -12933,6 +13094,10 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     <>
       <div className="t8-control-rail nodrag nopan" data-canvas-floating-ui="control-rail">
         <div className="t8-control-stack">
+          <div
+            className="t8-control-rail-creator-slot"
+            data-canvas-floating-ui="creator-agent-launcher-slot"
+          />
           <button
             type="button"
             className={`t8-control-rail-help t8-control-rail-doctor t8-mini-icon-button${workflowDoctorEnabled ? ' is-active' : ''}`}
@@ -12949,6 +13114,28 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
             }}
           >
             <LucideIcons.Stethoscope size={16} />
+          </button>
+          <button
+            type="button"
+            className={`t8-control-rail-help t8-mini-icon-button${modelHelpOpen ? ' is-active' : ''}`}
+            data-canvas-floating-ui="model-help-toggle"
+            aria-label="模型注意事项"
+            title="模型注意事项"
+            aria-expanded={modelHelpOpen}
+            onClick={(event) => {
+              event.stopPropagation();
+              setModelHelpOpen((value) => {
+                const next = !value;
+                if (next) {
+                  setRadialSettingsOpen(false);
+                  setCreativeDeskEditing(false);
+                  setFarmCanvasEditing(false);
+                }
+                return next;
+              });
+            }}
+          >
+            <LucideIcons.CircleHelp size={16} />
           </button>
           <button
             type="button"
@@ -13008,28 +13195,6 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
             }}
           >
             <LucideIcons.Settings2 size={16} />
-          </button>
-          <button
-            type="button"
-            className={`t8-control-rail-help t8-mini-icon-button${modelHelpOpen ? ' is-active' : ''}`}
-            data-canvas-floating-ui="model-help-toggle"
-            aria-label="模型注意事项"
-            title="模型注意事项"
-            aria-expanded={modelHelpOpen}
-            onClick={(event) => {
-              event.stopPropagation();
-              setModelHelpOpen((value) => {
-                const next = !value;
-                if (next) {
-                  setRadialSettingsOpen(false);
-                  setCreativeDeskEditing(false);
-                  setFarmCanvasEditing(false);
-                }
-                return next;
-              });
-            }}
-          >
-            <LucideIcons.CircleHelp size={16} />
           </button>
           <ThemeMusicToggle template={currentTemplate} />
           <Controls
@@ -13091,9 +13256,53 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
               <LucideIcons.X size={16} />
             </button>
           </div>
+          <div className="t8-model-help-panel__tabs" role="tablist" aria-label="模型平台">
+            {MODEL_USAGE_HELP_TABS.map((tab, tabIndex) => {
+              const active = tab.id === modelHelpTab;
+              return (
+                <button
+                  key={tab.id}
+                  id={`model-help-tab-${tab.id}`}
+                  type="button"
+                  className={`t8-model-help-panel__tab${active ? ' is-active' : ''}`}
+                  role="tab"
+                  aria-selected={active}
+                  aria-controls={`model-help-panel-${tab.id}`}
+                  tabIndex={active ? 0 : -1}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setModelHelpTab(tab.id);
+                  }}
+                  onKeyDown={(event) => {
+                    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const nextIndex = event.key === 'Home'
+                      ? 0
+                      : event.key === 'End'
+                        ? MODEL_USAGE_HELP_TABS.length - 1
+                        : (tabIndex + (event.key === 'ArrowRight' ? 1 : -1) + MODEL_USAGE_HELP_TABS.length)
+                          % MODEL_USAGE_HELP_TABS.length;
+                    const nextTab = MODEL_USAGE_HELP_TABS[nextIndex];
+                    setModelHelpTab(nextTab.id);
+                    window.requestAnimationFrame(() => {
+                      document.getElementById(`model-help-tab-${nextTab.id}`)?.focus();
+                    });
+                  }}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
           <div className="t8-model-help-panel__body">
-            <div className="t8-model-help-panel__text">
-              {MODEL_USAGE_HELP_SECTIONS.map((section) => (
+            <div
+              id={`model-help-panel-${modelHelpTab}`}
+              className="t8-model-help-panel__text"
+              role="tabpanel"
+              aria-labelledby={`model-help-tab-${modelHelpTab}`}
+            >
+              {MODEL_USAGE_HELP_TABS.find((tab) => tab.id === modelHelpTab)?.sections.map((section) => (
                 <section className="t8-model-help-panel__section" key={section.title}>
                   <h3>{section.title}：</h3>
                   {section.paragraphs?.map((paragraph) => (
@@ -13114,6 +13323,16 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       )}
     </>
   );
+
+  const creatorCanvasContext = useMemo(() => buildCreatorCanvasContext(
+    nodes,
+    edges,
+    getViewport(),
+    {
+      width: typeof window === 'undefined' ? 1440 : window.innerWidth,
+      height: typeof window === 'undefined' ? 900 : window.innerHeight,
+    },
+  ), [edges, getViewport, nodes, viewportMoving]);
 
   return (
     <div
@@ -13255,8 +13474,12 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         onInsertAsset={handleInsertProjectAsset}
         onFocusNode={focusGenerationHistoryNode}
         onPreviewPatch={handlePreviewCanvasPatch}
-        onApplyPatch={handleApplyCanvasPatch}
-        onRevertPatch={handleRevertCanvasPatch}
+        onApplyPatch={async (patch, preview) => {
+          await handleApplyCanvasPatch(patch, preview);
+        }}
+        onRevertPatch={async (patchId, revision) => {
+          await handleRevertCanvasPatch(patchId, revision);
+        }}
         onResolvePatchConflict={handleResolveCanvasPatchConflict}
         onAcceptRunIntent={handleAcceptRunIntent}
         onRetryRun={handleRetryProjectRun}
@@ -13264,6 +13487,35 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         onRetryRunAttempt={handleRetryProjectRunAttempt}
         onDoctorHighlightsChange={handleDoctorHighlightsChange}
       />
+      {loaded && loadedCanvasId === activeId && activeId && activeProjectId && (
+        <CreatorAgentPanel
+          projectId={activeProjectId}
+          canvasId={activeId}
+          canvasRevision={activeCanvasRevision}
+          canvasTitle={canvases.find((canvas) => canvas.id === activeId)?.name || '当前画布'}
+          nodeCount={nodes.length}
+          edgeCount={edges.length}
+          nodeTypeCounts={nodes.reduce<Record<string, number>>((counts, node) => {
+            const type = String(node.type || 'unknown');
+            counts[type] = (counts[type] || 0) + 1;
+            return counts;
+          }, {})}
+          selectedNodeIds={nodes.filter((node) => node.selected).map((node) => node.id)}
+          selectedNodeTypes={nodes
+            .filter((node) => node.selected)
+            .map((node) => String(node.type || 'unknown'))}
+          viewport={getViewport()}
+          canvasObjects={creatorCanvasContext.objects}
+          offscreenSummary={creatorCanvasContext.offscreenSummary}
+          visualStyle={visualStyle}
+          themeMode={theme}
+          themeTokens={themeTokens}
+          onPreviewPatch={handlePreviewCanvasPatch}
+          onApplyPatch={handleApplyCanvasPatch}
+          onRevertPatch={handleRevertCanvasPatch}
+          onFocusNode={focusGenerationHistoryNode}
+        />
+      )}
       <FarmStoryPanel
         visualStyle={visualStyle}
         themeMode={theme}
@@ -13675,9 +13927,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         )}
         {/* 选中可执行节点时的浮动操作栏 (执行 / 中止 / 关闭) */}
         <NodeActionBar
-          onRunNode={async (nodeId) => {
-            await handleRunGroup([nodeId]);
-          }}
+          onRunNode={(nodeId) => { void handleRunGroup([nodeId]); }}
           onStopRun={handleCancelRun}
         />
         </ReactFlow>

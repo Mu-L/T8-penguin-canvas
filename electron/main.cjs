@@ -38,6 +38,7 @@ let backendPort = 18766;
 let backendInstanceId = '';
 let backendStartPromise = null;
 let backendShutdownPromise = null;
+let agentControlMutationUnsubscribe = null;
 let electronQuitRequested = false;
 let electronQuitReady = false;
 let electronQuitFinalizationPromise = null;
@@ -140,6 +141,30 @@ function parseHttpUrl(url) {
     return parsed;
   } catch (_) {
     return null;
+  }
+}
+
+function developmentFrontendUrl() {
+  if (isPackaged()) return '';
+  const raw = String(process.env.T8PC_DEV_SERVER_URL || '').trim();
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw);
+    const hostname = String(parsed.hostname || '').toLowerCase();
+    if (parsed.protocol !== 'http:'
+      || !['127.0.0.1', 'localhost', '[::1]', '::1'].includes(hostname)
+      || parsed.username
+      || parsed.password) {
+      dbgLog('[main] ignored unsafe T8PC_DEV_SERVER_URL; only unauthenticated loopback HTTP is allowed');
+      return '';
+    }
+    parsed.pathname = '/';
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString();
+  } catch (_) {
+    dbgLog('[main] ignored invalid T8PC_DEV_SERVER_URL');
+    return '';
   }
 }
 
@@ -1107,6 +1132,13 @@ function getUserDataDir() {
   if (isPackaged()) {
     return app.getPath('userData');
   }
+  const developmentOverride = String(process.env.T8PC_DEV_DATA_ROOT || '').trim();
+  if (developmentOverride) {
+    if (!path.isAbsolute(developmentOverride)) {
+      throw new Error('T8PC_DEV_DATA_ROOT 必须是绝对路径');
+    }
+    return path.resolve(developmentOverride);
+  }
   return path.resolve(__dirname, '..');
 }
 
@@ -1421,6 +1453,25 @@ async function pickMediaFiles(options = {}) {
     }
   }
   return { success: true, files, truncated: pickedPaths.length >= 5000 };
+}
+
+async function pickDirectory(options = {}) {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: typeof options.title === 'string'
+      ? options.title.slice(0, 120)
+      : '选择交付位置',
+    buttonLabel: typeof options.buttonLabel === 'string'
+      ? options.buttonLabel.slice(0, 40)
+      : '选择此文件夹',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (result.canceled || !result.filePaths?.[0]) {
+    return { success: true, cancelled: true };
+  }
+  return {
+    success: true,
+    path: path.resolve(result.filePaths[0]),
+  };
 }
 
 function resolveMountedDragOutFile(pathname) {
@@ -1763,10 +1814,19 @@ async function findFreePort(preferred, maxTries = 20) {
   return preferred + Math.floor(Math.random() * 900) + 100;
 }
 
+function developmentBackendPortPreference() {
+  if (isPackaged()) return 18766;
+  const candidate = Number.parseInt(String(process.env.T8PC_DEV_BACKEND_PORT || ''), 10);
+  if (!Number.isInteger(candidate) || candidate < 1024 || candidate > 65535) {
+    return 18766;
+  }
+  return candidate;
+}
+
 // ---------- 启动后端 ----------
 async function startBackend() {
   delete process.env.T8_COLLAB_MANAGEMENT_TOKEN;
-  backendPort = await findFreePort(18766);
+  backendPort = await findFreePort(developmentBackendPortPreference());
   backendInstanceId = crypto.randomBytes(32).toString('base64url');
   dbgLog(`[backend] picked port=${backendPort}`);
   collaborationManagementToken = ensureCollaborationManagementAuthority();
@@ -1779,6 +1839,7 @@ async function startBackend() {
   process.env.T8PC_APP_VERSION = APP_VERSION;
   process.env.T8PC_BACKEND_INSTANCE_ID = backendInstanceId;
   process.env.T8PC_RES = isPackaged() ? process.resourcesPath : path.resolve(__dirname, '..');
+  process.env.T8PC_FRONTEND_URL = developmentFrontendUrl() || `http://127.0.0.1:${backendPort}`;
   // 生产模式让 Express 同时托管前端 dist/
   process.env.T8PC_FRONTEND_DIST = isPackaged()
     ? path.join(process.resourcesPath, 'frontend')
@@ -1809,6 +1870,13 @@ async function startBackend() {
       await backendModule?.gracefulShutdown?.('LISTEN_ERROR');
       const error = start?.error || new Error('后端未返回可验证的监听状态');
       throw error;
+    }
+    if (typeof backendModule?.agentControlApprovalService?.subscribeMutations === 'function') {
+      agentControlMutationUnsubscribe?.();
+      agentControlMutationUnsubscribe = backendModule.agentControlApprovalService.subscribeMutations((event) => {
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        mainWindow.webContents.send('t8pc:agent-control:canvas-mutated', event);
+      });
     }
     dbgLog(`[backend] started in-process on http://127.0.0.1:${backendPort}`);
   } catch (e) {
@@ -1869,6 +1937,8 @@ function shutdownBackendForElectron(reason = 'ELECTRON_QUIT') {
         await backendModule?.waitForRuntimeStorageCloseLifecycle?.();
         return outcome || null;
       } finally {
+        try { agentControlMutationUnsubscribe?.(); } catch (_) {}
+        agentControlMutationUnsubscribe = null;
         stopLegacyBackendProcess();
       }
     })();
@@ -1906,7 +1976,8 @@ function createMainWindow() {
   mainWindow.removeMenu();
   installMainWindowManagementAuthority(mainWindow);
 
-  const url = `http://127.0.0.1:${backendPort}/`;
+  const backendUrl = `http://127.0.0.1:${backendPort}/`;
+  const url = developmentFrontendUrl() || backendUrl;
   dbgLog(`[main] loading ${url}`);
   mainWindow.loadURL(url);
 
@@ -1933,7 +2004,7 @@ function createMainWindow() {
   });
 
   mainWindow.webContents.on('will-navigate', (event, targetUrl) => {
-    if (String(targetUrl || '').startsWith(url)) return;
+    if (String(targetUrl || '').startsWith(url) || String(targetUrl || '').startsWith(backendUrl)) return;
     if (!isSafeExternalUrl(targetUrl)) return;
     if (isVibeXRhLoginUrl(targetUrl)) {
       event.preventDefault();
@@ -1999,6 +2070,49 @@ function createLogWindow() {
 }
 
 // ---------- IPC ----------
+function assertTrustedMainRenderer(event) {
+  if (!mainWindow
+    || mainWindow.isDestroyed()
+    || !event?.sender
+    || event.sender.id !== mainWindow.webContents.id) {
+    const error = new Error('只允许当前贞贞无限画布窗口处理 Agent 授权');
+    error.code = 'AGENT_CONTROL_RENDERER_FORBIDDEN';
+    throw error;
+  }
+}
+
+function requireAgentControlAuthService() {
+  const service = backendModule?.agentControlAuthService;
+  if (!service) {
+    const error = new Error('Agent Control 服务尚未就绪，请稍后重试');
+    error.code = 'AGENT_CONTROL_NOT_READY';
+    throw error;
+  }
+  return service;
+}
+
+function requireAgentControlApprovalService() {
+  const service = backendModule?.agentControlApprovalService;
+  if (!service) {
+    const error = new Error('Agent 操作确认服务尚未就绪，请稍后重试');
+    error.code = 'AGENT_CONTROL_NOT_READY';
+    throw error;
+  }
+  return service;
+}
+
+function agentControlIpcResult(action) {
+  try {
+    return { success: true, data: action() };
+  } catch (error) {
+    return {
+      success: false,
+      code: String(error?.code || 'AGENT_CONTROL_IPC_FAILED'),
+      message: normalizeError(error),
+    };
+  }
+}
+
 ipcMain.handle('t8pc:get-info', () => ({
   packaged: isPackaged(),
   backendPort,
@@ -2010,12 +2124,46 @@ ipcMain.handle('t8pc:get-info', () => ({
 ipcMain.handle('t8pc:open-external', async (_event, url) => openExternalUrl(url));
 ipcMain.handle('t8pc:open-path', async (_event, targetPath) => openLocalPath(targetPath));
 ipcMain.handle('t8pc:pick-media-files', async (_event, options) => pickMediaFiles(options));
+ipcMain.handle('t8pc:pick-directory', async (_event, options) => pickDirectory(options));
 ipcMain.handle('t8pc:parse-auth:login', async (_event, profileId) => openParseAuthWindow(profileId));
 ipcMain.handle('t8pc:parse-auth:get-cookie', async (_event, profileId) => getParseAuthCookie(profileId));
 ipcMain.handle('t8pc:parse-auth:list-saved', async (_event, profileId) => listSavedParseAuth(profileId));
 ipcMain.handle('t8pc:parse-auth:save', async (_event, profileId, cookieText, meta) => saveParseAuthRecord(profileId, cookieText, meta));
 ipcMain.handle('t8pc:parse-auth:load', async (_event, profileId) => loadParseAuthRecord(profileId));
 ipcMain.handle('t8pc:parse-auth:clear', async (_event, profileId) => clearParseAuthCookie(profileId));
+ipcMain.handle('t8pc:agent-control:connection-summary', (event) => agentControlIpcResult(() => {
+  assertTrustedMainRenderer(event);
+  return requireAgentControlAuthService().connectionSummary();
+}));
+ipcMain.handle('t8pc:agent-control:list-pending', (event) => agentControlIpcResult(() => {
+  assertTrustedMainRenderer(event);
+  return requireAgentControlAuthService().listPendingPairings();
+}));
+ipcMain.handle('t8pc:agent-control:approve', (event, input) => agentControlIpcResult(() => {
+  assertTrustedMainRenderer(event);
+  return requireAgentControlAuthService().approvePairing({
+    pairingId: String(input?.pairingId || ''),
+    userCode: String(input?.userCode || ''),
+    approvedScopes: Array.isArray(input?.approvedScopes) ? input.approvedScopes : [],
+    approvedBy: 'desktop-owner',
+  });
+}));
+ipcMain.handle('t8pc:agent-control:deny', (event, pairingId) => agentControlIpcResult(() => {
+  assertTrustedMainRenderer(event);
+  return requireAgentControlAuthService().denyPairing(String(pairingId || ''));
+}));
+ipcMain.handle('t8pc:agent-control:list-approvals', (event) => agentControlIpcResult(() => {
+  assertTrustedMainRenderer(event);
+  return requireAgentControlApprovalService().listPending();
+}));
+ipcMain.handle('t8pc:agent-control:approve-operation', (event, approvalRequestId) => agentControlIpcResult(() => {
+  assertTrustedMainRenderer(event);
+  return requireAgentControlApprovalService().approve(String(approvalRequestId || ''));
+}));
+ipcMain.handle('t8pc:agent-control:deny-operation', (event, approvalRequestId) => agentControlIpcResult(() => {
+  assertTrustedMainRenderer(event);
+  return requireAgentControlApprovalService().deny(String(approvalRequestId || ''));
+}));
 ipcMain.handle('t8pc:updater:status', () => emitUpdaterStatus());
 ipcMain.handle('t8pc:updater:check', async () => checkForUpdatesByUser());
 ipcMain.handle('t8pc:updater:download', async () => downloadAvailableUpdate());

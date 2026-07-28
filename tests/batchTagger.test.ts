@@ -201,6 +201,7 @@ test('batch tagger node is registered as an image/video toolbox node with UI and
   const server = read('backend/src/server.js');
   const postBuild = read('electron/_post_build.cjs');
   const node = read('src/components/nodes/BatchTaggerNode.tsx');
+  const batchRoute = read('backend/src/routes/batchTags.js');
   const features = read('features.json');
   const preload = read('electron/preload.cjs');
   const electronMain = read('electron/main.cjs');
@@ -296,6 +297,12 @@ test('batch tagger node is registered as an image/video toolbox node with UI and
   assert.doesNotMatch(node, /自定义 PROMPT/);
   assert.doesNotMatch(node, /customPrompt:\s*effectivePrompt/);
   assert.doesNotMatch(node, /batchTagMode:\s*event\.target\.value\.trim\(\)\s*\?/);
+  assert.match(node, /submissionKey = baseKey[\s\S]*`\$\{baseKey\}:batch-tag:\$\{entry\.index\}`/);
+  assert.match(node, /'X-T8-Provider-Submission': submissionKey/);
+  assert.match(node, /await reporter\?\.providerRequest/);
+  assert.match(node, /await reporter\?\.providerResponse/);
+  assert.match(node, /await runBatch\(retryOnly, reporter\)/);
+  assert.match(batchRoute, /router\.use\(providerSubmissionContextMiddleware\)/);
 });
 
 test('batch tagger plain file upload does not open a second browser directory picker', () => {

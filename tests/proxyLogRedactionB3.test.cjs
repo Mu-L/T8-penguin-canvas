@@ -8,6 +8,7 @@ const { PassThrough } = require('node:stream');
 const express = require('express');
 const sharp = require('sharp');
 const { resolvePublicAddress } = require('../backend/src/utils/safeRemoteMediaFetch');
+const { providerSubmissionContextMiddleware } = require('../backend/src/services/providerSubmissionContext');
 
 const config = require('../backend/src/config');
 const originalProxyMediaMaxBytes = process.env.T8_PROXY_MEDIA_REFERENCE_MAX_BYTES;
@@ -32,6 +33,18 @@ async function listen(handler) {
 async function closeServer(server) {
   if (!server) return;
   await new Promise((resolve) => server.close(() => resolve()));
+}
+
+function runWithProviderSubmission(key, callback) {
+  return new Promise((resolve, reject) => {
+    providerSubmissionContextMiddleware({
+      get(name) {
+        return String(name).toLowerCase() === 'x-t8-provider-submission' ? key : '';
+      },
+    }, {}, () => {
+      Promise.resolve().then(callback).then(resolve, reject);
+    });
+  });
 }
 
 async function startProxyApp() {
@@ -263,9 +276,10 @@ test('B3 Provider fetch deadline covers DNS, connect, TLS, and response headers'
   }
 });
 
-test('B3 Provider GET refreshes stale TUN connections once while POST is never replayed', async () => {
+test('B3 Provider requests use fresh TUN connections and replay writes only with one stable idempotency key', async () => {
   const originalFetch = global.fetch;
   let calls = 0;
+  proxyRouter._test.setProxySafeRemoteTestOptions({ providerRetryDelayMs: 1 });
   try {
     global.fetch = async () => {
       calls += 1;
@@ -285,6 +299,34 @@ test('B3 Provider GET refreshes stale TUN connections once while POST is never r
     assert.equal(calls, 2, 'read-only Provider queries may retry once after refreshing the connection pool');
 
     calls = 0;
+    const writeKeys = [];
+    global.fetch = async (_url, init) => {
+      calls += 1;
+      writeKeys.push(new Headers(init?.headers).get('Idempotency-Key'));
+      if (calls === 1) {
+        throw Object.assign(new TypeError('fetch failed'), {
+          cause: Object.assign(new Error('network unreachable after TUN switch'), { code: 'ENETUNREACH' }),
+        });
+      }
+      return new Response('accepted', { status: 202 });
+    };
+    const recoveredWrite = await runWithProviderSubmission(
+      'attempt-image-tun-0001',
+      () => proxyRouter._test.fetchProviderResponse(
+        'https://provider.example/generate',
+        { method: 'POST', body: '{"prompt":"safe"}' },
+        'Provider submit',
+      ),
+    );
+    assert.equal(recoveredWrite.status, 202);
+    assert.equal(calls, 2, 'a generation POST with a stable submission identity retries once on a fresh connection');
+    assert.deepEqual(
+      writeKeys,
+      ['attempt-image-tun-0001', 'attempt-image-tun-0001'],
+      'the recovery attempt must carry exactly the same upstream idempotency key',
+    );
+
+    calls = 0;
     global.fetch = async () => {
       calls += 1;
       throw Object.assign(new TypeError('fetch failed'), {
@@ -293,19 +335,21 @@ test('B3 Provider GET refreshes stale TUN connections once while POST is never r
     };
     await assert.rejects(
       proxyRouter._test.fetchProviderResponse(
-        'https://provider.example/generate',
+        'https://provider.example/legacy-generate',
         { method: 'POST', body: '{"prompt":"safe"}' },
-        'Provider submit',
+        'Legacy Provider submit',
       ),
       (error) => {
         assert.equal(error?.code, 'provider_network_unavailable');
         assert.equal(error?.status, 503);
         assert.equal(error?.recoverable, true);
+        assert.equal(error?.retryAfterMs, 3_000);
+        assert.equal(error?.retryAttempted, false);
         assert.doesNotMatch(String(error?.message || ''), /关闭.*(?:代理|TUN|VPN)/);
         return true;
       },
     );
-    assert.equal(calls, 1, 'generation POST must not be replayed because that could duplicate work or charges');
+    assert.equal(calls, 1, 'legacy writes without a stable submission key must not be replayed');
 
     calls = 0;
     global.fetch = async () => {
@@ -327,8 +371,21 @@ test('B3 Provider GET refreshes stale TUN connections once while POST is never r
     assert.equal(calls, 2, 'explicitly marked read-only POST queries may retry without resubmitting generation');
   } finally {
     global.fetch = originalFetch;
+    proxyRouter._test.setProxySafeRemoteTestOptions(null);
     await proxyRouter._test.resetProviderDispatcherForTests();
   }
+});
+
+test('B3 pinned media requests disable the global Agent so TUN/VPN route changes cannot reuse an old socket', () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, '../backend/src/utils/safeRemoteMediaFetch.js'),
+    'utf8',
+  );
+  assert.match(
+    source,
+    /transport\.request\(target,\s*\{[\s\S]*?agent:\s*false,[\s\S]*?lookup\(/,
+    'each DNS-pinned media request must open a fresh socket before applying its pinned lookup',
+  );
 });
 
 test('B3 refToBuffer, refToGrokImage, and uploadRefToZhenzhen routes reject collaborator private media before connect', async () => {
@@ -1149,8 +1206,11 @@ test('B3 RunningHub materializes mixed image, video, and audio outputs despite s
         assert.equal(response.data?.data?.urls?.length, 3);
         const outputExtensions = response.data.data.urls.map((url) => path.extname(url)).sort();
         assert.deepEqual(outputExtensions, ['.mov', '.mp3', '.png']);
+        const outputFiles = fs.readdirSync(outputDir, { withFileTypes: true })
+          .filter((entry) => entry.isFile())
+          .map((entry) => entry.name);
         assert.deepEqual(
-          fs.readdirSync(outputDir).map((name) => path.extname(name)).sort(),
+          outputFiles.map((name) => path.extname(name)).sort(),
           ['.mov', '.mp3', '.png'],
         );
       } finally {
@@ -1372,7 +1432,7 @@ test('B3 Suno completed media is localized without returning Provider signed URL
           query.text,
           /media\.test|audio-secret|audio-signature|cover-secret|cover-signature|X-Amz/i,
         );
-        assert.equal(fs.readdirSync(outputDir).length, 2);
+        assert.equal(fs.readdirSync(outputDir, { withFileTypes: true }).filter((entry) => entry.isFile()).length, 2);
       } finally {
         global.fetch = originalFetch;
       }
@@ -1717,7 +1777,7 @@ test('B3 completed image tasks retry transient downloads and expose actionable s
       assert.equal(recovered.data?.data?.status, 'completed');
       assert.match(recovered.data?.data?.urls?.[0] || '', /^\/files\/output\/img_task_/);
       assert.equal(outputRequests, 3, 'transient output download must retry before failing the completed task');
-      assert.equal(fs.readdirSync(outputDir).filter((name) => name.startsWith('img_task_')).length, 1);
+      assert.equal(fs.readdirSync(outputDir).filter((name) => name.startsWith('img_task_') && !name.endsWith('.complete.json')).length, 1);
 
       global.fetch = async () => new Response(JSON.stringify({
         status: 'completed',
@@ -1896,7 +1956,7 @@ test('B3 video, audio, and RunningHub completed tasks survive TUN Fake-IP and re
         assert.equal(rhRecovered.data?.data?.status, 'SUCCESS');
         assert.match(rhRecovered.data?.data?.urls?.[0] || '', /^\/files\/output\/rh_task_/);
         assert.equal(providerQueries, 6, 'recovery must query the same tasks without submitting replacements');
-        assert.equal(fs.readdirSync(outputDir).length, 3);
+        assert.equal(fs.readdirSync(outputDir, { withFileTypes: true }).filter((entry) => entry.isFile()).length, 3);
       } finally {
         global.fetch = originalFetch;
       }
@@ -2043,9 +2103,9 @@ test('B3 task-scoped video materialization coalesces concurrent polls and reuses
       )));
 
       assert.equal(new Set(urls).size, 1);
-      assert.match(urls[0], /^\/files\/output\/vid_task_[0-9a-f]{24}\.mp4$/);
+      assert.match(urls[0], /^\/files\/output\/vid_task_[0-9a-f]{24}_[0-9a-f]{16}\.mp4$/);
       assert.equal(assetHits, 1, 'concurrent completed polls must share one remote download');
-      assert.equal(fs.readdirSync(outputDir).length, 1);
+      assert.equal(fs.readdirSync(outputDir).length, 2);
 
       // 模拟后端重启后内存缓存丢失、Provider 又返回了不同签名 URL：任务键仍应落到同一个文件。
       proxyRouter._test.resetVideoMaterializationCacheForTests();
@@ -2056,7 +2116,7 @@ test('B3 task-scoped video materialization coalesces concurrent polls and reuses
       );
       assert.equal(recovered, urls[0]);
       assert.equal(assetHits, 2);
-      assert.equal(fs.readdirSync(outputDir).length, 1);
+      assert.equal(fs.readdirSync(outputDir).length, 2);
     });
   } finally {
     await closeServer(assetServer);

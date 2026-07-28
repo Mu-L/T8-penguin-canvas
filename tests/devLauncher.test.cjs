@@ -14,8 +14,10 @@ test('development launcher waits for backend before frontend and browser', () =>
   const newlineCount = (launcher.match(/\n/g) || []).length;
   const windowsNewlineCount = (launcher.match(/\r\n/g) || []).length;
   const backendWait = launcher.indexOf('18766/api/status');
-  const backendStart = launcher.indexOf('cd backend && npm run dev');
-  const frontendStart = launcher.indexOf('npm run dev:vite');
+  const backendCommand = 'start "T8 Backend" cmd /d /k "chcp 65001 >nul && npm run dev:backend"';
+  const frontendCommand = 'start "T8 Frontend" cmd /d /k "chcp 65001 >nul && npm run dev:vite"';
+  const backendStart = launcher.indexOf(backendCommand);
+  const frontendStart = launcher.indexOf(frontendCommand);
   const frontendWait = launcher.indexOf('127.0.0.1:11422/');
   const browserOpen = launcher.lastIndexOf('start "" "http://127.0.0.1:11422"');
 
@@ -25,6 +27,10 @@ test('development launcher waits for backend before frontend and browser', () =>
   assert.ok(backendWait < frontendStart);
   assert.ok(frontendStart < frontendWait);
   assert.ok(frontendWait < browserOpen);
+  assert.doesNotMatch(launcher, /cd backend && npm run dev/);
+  assert.equal((launcher.match(/cmd \/d \/k "chcp 65001 >nul && npm run dev:/g) || []).length, 2);
+  assert.match(backendCommand, /chcp 65001 >nul && npm run dev:backend/);
+  assert.match(frontendCommand, /chcp 65001 >nul && npm run dev:vite/);
   assert.doesNotMatch(launcher, /timeout \/t [23] >nul/);
   assert.equal(
     windowsNewlineCount,
@@ -33,11 +39,27 @@ test('development launcher waits for backend before frontend and browser', () =>
   );
 });
 
-test('development backend watches source dependencies so backend fixes do not stay stale', () => {
+test('development backend uses the Electron ABI owner and watches source dependencies', () => {
+  const rootPackage = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
   const backendPackage = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'backend', 'package.json'), 'utf8'));
-  assert.match(backendPackage.scripts?.dev || '', /node --watch\b/);
-  assert.match(backendPackage.scripts?.dev || '', /--watch-path=src\b/);
-  assert.match(backendPackage.scripts?.dev || '', /src\/server\.js\b/);
+  const rootStart = rootPackage.scripts?.['start:backend'] || '';
+  const rootDev = rootPackage.scripts?.['dev:backend'] || '';
+
+  assert.match(rootStart, /ELECTRON_RUN_AS_NODE=1/);
+  assert.match(rootStart, /\belectron\b/);
+  assert.match(rootStart, /backend\/src\/server\.js\b/);
+  assert.doesNotMatch(rootStart, /\bnode\s+backend\/src\/server\.js\b/);
+
+  assert.match(rootDev, /ELECTRON_RUN_AS_NODE=1/);
+  assert.match(rootDev, /\belectron\b/);
+  assert.match(rootDev, /--watch\b/);
+  assert.match(rootDev, /--watch-path=backend\/src\b/);
+  assert.match(rootDev, /--watch-preserve-output\b/);
+  assert.match(rootDev, /backend\/src\/server\.js\b/);
+  assert.doesNotMatch(rootDev, /\bnode\s+--watch\b/);
+
+  assert.equal(backendPackage.scripts?.start, 'npm --prefix .. run start:backend');
+  assert.equal(backendPackage.scripts?.dev, 'npm --prefix .. run dev:backend');
 });
 
 test('local service waiter tolerates startup refusal/status errors until service is ready', async (t) => {

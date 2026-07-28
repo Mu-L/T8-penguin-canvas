@@ -46,6 +46,7 @@ import {
   summarizeBatchProgress,
 } from '../../utils/batchProcessor';
 import { formatMediaSize } from '../../utils/mediaCollection';
+import type { RunNodeLifecycleReporter } from '../../types/project';
 import { useUpstreamMaterials } from './useUpstreamMaterials';
 import { useUpdateNodeData } from './useUpdateNodeData';
 
@@ -612,11 +613,18 @@ function BatchTaggerNode({ id, data, selected }: NodeProps) {
     return mirrored;
   };
 
-  const tagOne = async (entry: WorkEntry, signal: AbortSignal): Promise<BatchTagItem> => {
+  const tagOne = async (
+    entry: WorkEntry,
+    signal: AbortSignal,
+    submissionKey = '',
+  ): Promise<BatchTagItem> => {
     const response = await fetch('/api/batch-tags/tag', {
       method: 'POST',
       signal,
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(submissionKey ? { 'X-T8-Provider-Submission': submissionKey } : {}),
+      },
       body: JSON.stringify({
         providerSource: isExternal ? providerSelection.providerSource : 'zhenzhen',
         providerId: isExternal ? providerSelection.providerId : '',
@@ -650,7 +658,7 @@ function BatchTaggerNode({ id, data, selected }: NodeProps) {
     };
   };
 
-  const runBatch = async (retryOnly = false) => {
+  const runBatch = async (retryOnly = false, reporter?: RunNodeLifecycleReporter) => {
     const deduped = dedupeItems(allItems);
     if (!deduped.length) {
       const msg = '请先上传图片/视频、导入文件夹或连接上游素材';
@@ -691,6 +699,12 @@ function BatchTaggerNode({ id, data, selected }: NodeProps) {
       batchTagProgress: summarizeBatchProgress(baseItems as any),
       batchTagNotice: `${retryOnly ? '重试失败项' : '批量打标'}：${workEntries.length} 项 · 并发 ${concurrency} · 重试 ${retryCount}`,
     });
+    await reporter?.providerRequest({
+      provider: 'batch-tagger',
+      model: activeModel,
+      itemCount: workEntries.length,
+      mode,
+    });
 
     let nextItems = [...baseItems];
     const patchAt = (index: number, patch: Partial<BatchTagItem>) => {
@@ -716,7 +730,13 @@ function BatchTaggerNode({ id, data, selected }: NodeProps) {
           patchAt(masterIndex, { status: 'running', error: `准备重试：${event.error || '请求失败'}` });
         }
       },
-      worker: (entry) => tagOne(entry, controller.signal),
+      worker: (entry) => {
+        const baseKey = String(reporter?.providerSubmissionKey || '').trim();
+        const submissionKey = baseKey
+          ? `${baseKey}:batch-tag:${entry.index}`
+          : '';
+        return tagOne(entry, controller.signal, submissionKey);
+      },
     });
 
     for (const result of results) {
@@ -728,6 +748,15 @@ function BatchTaggerNode({ id, data, selected }: NodeProps) {
         patchAt(result.item.index, { status: 'error', error: result.error || '打标失败' });
       }
     }
+    await reporter?.providerResponse({
+      provider: 'batch-tagger',
+      model: activeModel,
+      status: controller.signal.aborted || cancelRef.current ? 'cancelled' : 'succeeded',
+      itemCount: workEntries.length,
+      succeeded: results.filter((result) => result.status === 'success').length,
+      failed: results.filter((result) => result.status === 'error').length,
+      cancelled: results.filter((result) => result.status === 'cancelled').length,
+    });
     update({
       status: controller.signal.aborted || cancelRef.current ? 'idle' : 'success',
       batchTagNotice: controller.signal.aborted || cancelRef.current ? '批量打标已停止' : summarizeBatchTagSidecarDestination(nextItems),
@@ -759,7 +788,7 @@ function BatchTaggerNode({ id, data, selected }: NodeProps) {
       && reporter.runContext?.requestId === liveData?.batchTagRunRequestId
       && liveData?.batchTagRunMode === 'retry-failed';
     try {
-      await runBatch(retryOnly);
+      await runBatch(retryOnly, reporter);
     } finally {
       update({ batchTagRunMode: 'all', batchTagRunRequestId: '' });
     }

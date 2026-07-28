@@ -5,8 +5,8 @@
   "main": "src/server.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "node --watch --watch-path=src --watch-preserve-output src/server.js"
+    "start": "npm --prefix .. run start:backend",
+    "dev": "npm --prefix .. run dev:backend"
   },
   "dependencies": {
     "cors": "^2.8.5",

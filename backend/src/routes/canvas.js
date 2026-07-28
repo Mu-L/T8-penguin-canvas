@@ -1379,6 +1379,7 @@ router.post('/:id/patches', (req, res) => {
       sessionId: context.sessionId,
       projectId: context.projectId,
       authority: localCanvasPatchAuthority(patch),
+      allowExactDuplicateAcrossActors: true,
     });
     return sendAuthoritativePatchResult(res, req.params.id, result, database);
   } catch (error) {
@@ -1631,3 +1632,5 @@ router.patch('/:id/name', (req, res) => {
 });
 
 module.exports = router;
+router.writeAuthoritativeCanvasCompatibilityMirrors = writeAuthoritativeCanvasCompatibilityMirrors;
+router.PATCH_MIRROR_WARNING_MESSAGES = PATCH_MIRROR_WARNING_MESSAGES;

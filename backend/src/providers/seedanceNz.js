@@ -13,6 +13,7 @@ const {
 } = require('./mediaResolver');
 const { providerTrace } = require('./providerTrace');
 const { safeRemoteMediaFetch } = require('../utils/safeRemoteMediaFetch');
+const { providerIdempotencyHeaders } = require('../services/providerSubmissionContext');
 
 const PROVIDER_ID = 'seedance-nz';
 const BASE_URL = config.ZHENZHEN_SD2_BASE_URL;
@@ -33,27 +34,48 @@ const ZHENZHEN_IMAGE_G2_MODELS = new Set([
 const ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL = 'zhenzhen-image-g-v2-lowprice';
 const ZHENZHEN_IMAGE_GK_V15_MODEL = 'zhenzhen-image-gk-v15';
 const ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL = 'zhenzhen-image-gk-v15-edit';
+const ZHENZHEN_IMAGE_NB_2_LITE_MODEL = 'zhenzhen-image-nb-2-lite';
+const ZHENZHEN_IMAGE_NB_2_MODEL = 'zhenzhen-image-nb-2';
+const ZHENZHEN_IMAGE_NB_PRO_MODEL = 'zhenzhen-image-nb-pro';
+const ZHENZHEN_IMAGE_NB_MODELS = new Set([
+  ZHENZHEN_IMAGE_NB_2_LITE_MODEL,
+  ZHENZHEN_IMAGE_NB_2_MODEL,
+  ZHENZHEN_IMAGE_NB_PRO_MODEL,
+]);
 const ZHENZHEN_APIMART_IMAGE_MODELS = new Set([
   ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
   ZHENZHEN_IMAGE_GK_V15_MODEL,
   ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL,
+  ...ZHENZHEN_IMAGE_NB_MODELS,
 ]);
 const ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL = 'zhenzhen-video-g-omni-flash';
 const ZHENZHEN_VIDEO_GK_V15_MODEL = 'zhenzhen-video-gk-v15';
 const ZHENZHEN_VIDEO_V31_FAST_MODEL = 'zhenzhen-video-v31-fast';
 const ZHENZHEN_VIDEO_V31_QUALITY_MODEL = 'zhenzhen-video-v31-quality';
+const ZHENZHEN_VIDEO_V31_LITE_MODEL = 'zhenzhen-video-v31-lite';
 const ZHENZHEN_APIMART_VIDEO_MODELS = new Set([
   ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL,
   ZHENZHEN_VIDEO_GK_V15_MODEL,
   ZHENZHEN_VIDEO_V31_FAST_MODEL,
   ZHENZHEN_VIDEO_V31_QUALITY_MODEL,
+  ZHENZHEN_VIDEO_V31_LITE_MODEL,
 ]);
 const ZHENZHEN_APIMART_GK_RATIOS = new Set(['1:1', '16:9', '9:16', '3:2', '2:3']);
+const ZHENZHEN_IMAGE_NB_STANDARD_RATIOS = new Set([
+  '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9',
+]);
+const ZHENZHEN_IMAGE_NB_EXTREME_RATIOS = new Set([
+  '1:1', '1:4', '1:8', '2:3', '3:2', '3:4', '4:1',
+  '4:3', '4:5', '5:4', '8:1', '9:16', '16:9', '21:9',
+]);
 const ZHENZHEN_APIMART_VEO_RATIOS = new Set(['16:9', '9:16']);
 const ZHENZHEN_APIMART_VEO_RESOLUTIONS = new Set(['720p', '1080p', '4k']);
 const WHISPER_MODEL = 'whisper-1';
 const WHISPER_RESPONSE_FORMATS = new Set(['json', 'verbose_json', 'srt', 'text', 'vtt']);
 const WHISPER_FILE_EXTENSIONS = new Set(['.mp3', '.wav', '.flac', '.m4a', '.mp4', '.ogg', '.opus', '.aac', '.aiff', '.aif']);
+const WHISPER_MAX_SEGMENTS = 2000;
+const WHISPER_MAX_SEGMENT_TEXT_LENGTH = 4000;
+const WHISPER_MAX_SEGMENT_TEXT_TOTAL = 1_000_000;
 const ZHENZHEN_IMAGE_G2_RATIOS = new Set(RATIOS);
 const IMAGE_MODELS = new Set([
   ...Object.values(IMAGE_MODEL_PAIRS).flat(),
@@ -453,6 +475,9 @@ To9TUwat3wUA6cwXh1EfpS/3fJ0aGah5hdpRyoCLDlsSn8tkrjMfFFX0viC+GxHc
 sI1ANRYvqSFC2X1VRZfDg+wD6E21BccmifG4yWc=
 -----END CERTIFICATE-----`;
 const seedanceDispatcher = new Agent({
+  // Never carry an API socket across TUN/VPN route changes.
+  pipelining: 0,
+  connectTimeout: 3_000,
   connect: {
     ca: [...tls.rootCertificates, LETS_ENCRYPT_ROOT_YR],
     rejectUnauthorized: true,
@@ -464,7 +489,12 @@ const uploadQueues = new Map();
 const responseBoundaries = new WeakMap();
 
 function secureFetch(url, init = {}) {
-  return undiciFetch(url, { ...init, dispatcher: seedanceDispatcher });
+  const method = String(init?.method || 'GET').toUpperCase();
+  return undiciFetch(url, {
+    ...init,
+    headers: providerIdempotencyHeaders(init?.headers, method),
+    dispatcher: seedanceDispatcher,
+  });
 }
 
 function getFetchImpl(options = {}) {
@@ -1885,6 +1915,34 @@ async function buildApimartImagePayload(request, apiKey, options = {}) {
   }
 
   const size = String(request.size || request.ratio || '1:1').trim().toLowerCase();
+  if (ZHENZHEN_IMAGE_NB_MODELS.has(model)) {
+    if (refs.length > 14) throw new Error(`${model} 最多支持 14 张参考图`);
+    const resolution = String(request.resolution || '1k').trim().toLowerCase();
+    const allowedResolutions = model === ZHENZHEN_IMAGE_NB_2_MODEL
+      ? new Set(['0.5k', '1k', '2k', '4k'])
+      : model === ZHENZHEN_IMAGE_NB_2_LITE_MODEL
+        ? new Set(['1k'])
+        : new Set(['1k', '2k', '4k']);
+    if (!allowedResolutions.has(resolution)) {
+      throw new Error(`${model} 不支持分辨率 ${resolution || '(空)'}`);
+    }
+    const allowedRatios = model === ZHENZHEN_IMAGE_NB_PRO_MODEL
+      ? ZHENZHEN_IMAGE_NB_STANDARD_RATIOS
+      : ZHENZHEN_IMAGE_NB_EXTREME_RATIOS;
+    if (!allowedRatios.has(size)) {
+      throw new Error(`${model} 不支持比例 ${size || '(空)'}`);
+    }
+    if (model === ZHENZHEN_IMAGE_NB_2_LITE_MODEL) {
+      if (n < 1 || n > 4) throw new Error(`${model} 图片数量 n 只支持 1-4`);
+    } else if (n !== 1) {
+      throw new Error(`${model} 图片数量 n 固定为 1`);
+    }
+    payload.size = size;
+    payload.metadata = { resolution };
+    if (refs.length) payload.images = await uploadApimartImages(refs, apiKey, options);
+    return { payload, model, taskType: refs.length ? 'i2i' : 't2i' };
+  }
+
   if (!ZHENZHEN_APIMART_GK_RATIOS.has(size)) {
     throw new Error(`${model} size 只支持 1:1、16:9、9:16、3:2 或 2:3`);
   }
@@ -1952,6 +2010,14 @@ async function buildApimartVideoPayload(request, apiKey, options = {}) {
   const resolution = String(request.resolution || '720p').trim().toLowerCase();
   if (!ZHENZHEN_APIMART_VEO_RESOLUTIONS.has(resolution)) {
     throw new Error(`${model} 分辨率只支持 720p、1080p 或 4k`);
+  }
+  if (model === ZHENZHEN_VIDEO_V31_LITE_MODEL) {
+    if (refs.length || videoSources.length) {
+      throw new Error(`${model} 仅支持文生视频，不接受参考图或参考视频`);
+    }
+    payload.seconds = '8';
+    payload.metadata = { resolution, ratio };
+    return { payload, model, taskType: 't2v' };
   }
   const maxRefs = model === ZHENZHEN_VIDEO_V31_FAST_MODEL ? 3 : 2;
   if (refs.length > maxRefs) {
@@ -2449,7 +2515,7 @@ async function buildHappyHorsePayload(request, apiKey, options = {}) {
 }
 
 async function submitHappyHorseTask(request, apiKey, options = {}) {
-  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”');
+  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
   const fetchImpl = getFetchImpl(options);
   const baseUrl = cleanBaseUrl(options.baseUrl);
   const built = await buildHappyHorsePayload(request, apiKey, options);
@@ -2468,7 +2534,7 @@ async function submitHappyHorseTask(request, apiKey, options = {}) {
 }
 
 async function submitHailuoTask(request, apiKey, options = {}) {
-  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”');
+  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
   const fetchImpl = getFetchImpl(options);
   const baseUrl = cleanBaseUrl(options.baseUrl);
   const built = await buildHailuoPayload(request, apiKey, options);
@@ -2487,7 +2553,7 @@ async function submitHailuoTask(request, apiKey, options = {}) {
 }
 
 async function submitKlingTask(request, apiKey, options = {}) {
-  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”');
+  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
   const fetchImpl = getFetchImpl(options);
   const baseUrl = cleanBaseUrl(options.baseUrl);
   const built = await buildKlingPayload(request, apiKey, options);
@@ -2506,7 +2572,7 @@ async function submitKlingTask(request, apiKey, options = {}) {
 }
 
 async function submitUpscalerTask(request, apiKey, options = {}) {
-  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”');
+  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
   const fetchImpl = getFetchImpl(options);
   const baseUrl = cleanBaseUrl(options.baseUrl);
   const built = await buildUpscalerPayload(request, apiKey, options);
@@ -2525,7 +2591,7 @@ async function submitUpscalerTask(request, apiKey, options = {}) {
 }
 
 async function submitViduTask(request, apiKey, options = {}) {
-  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”');
+  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
   const fetchImpl = getFetchImpl(options);
   const baseUrl = cleanBaseUrl(options.baseUrl);
   const built = await buildViduPayload(request, apiKey, options);
@@ -2544,7 +2610,7 @@ async function submitViduTask(request, apiKey, options = {}) {
 }
 
 async function submitWanTask(request, apiKey, options = {}) {
-  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”');
+  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
   const fetchImpl = getFetchImpl(options);
   const baseUrl = cleanBaseUrl(options.baseUrl);
   const built = await buildWanPayload(request, apiKey, options);
@@ -2914,6 +2980,39 @@ function whisperExtension(file = {}) {
   return mimeExtensions[mime] || '';
 }
 
+function normalizeWhisperSegments(payload) {
+  if (!payload || typeof payload !== 'object') return [];
+  const candidates = [
+    payload.segments,
+    payload.data?.segments,
+    payload.result?.segments,
+    payload.data?.result?.segments,
+  ];
+  const source = candidates.find((candidate) => Array.isArray(candidate));
+  if (!source) return [];
+
+  const normalized = [];
+  let totalTextLength = 0;
+  for (const raw of source.slice(0, WHISPER_MAX_SEGMENTS)) {
+    if (!raw || typeof raw !== 'object') continue;
+    const start = Number(raw.start);
+    const end = Number(raw.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start) continue;
+    const text = String(raw.text || '').replace(/\s+/g, ' ').trim();
+    if (!text) continue;
+    const remaining = WHISPER_MAX_SEGMENT_TEXT_TOTAL - totalTextLength;
+    if (remaining <= 0) break;
+    const boundedText = text.slice(0, Math.min(WHISPER_MAX_SEGMENT_TEXT_LENGTH, remaining));
+    normalized.push({
+      start: Math.round(start * 1000) / 1000,
+      end: Math.round(end * 1000) / 1000,
+      text: boundedText,
+    });
+    totalTextLength += boundedText.length;
+  }
+  return normalized;
+}
+
 async function transcribeAudio(request, apiKey, options = {}) {
   if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
   const source = String(request.audioUrl || request.audio || request.source || '').trim();
@@ -2955,10 +3054,12 @@ async function transcribeAudio(request, apiKey, options = {}) {
     ? data
     : String(data?.text || data?.data?.text || data?.result?.text || '').trim();
   if (!text) throw new Error('Whisper 转写完成但未返回文本');
+  const segments = responseFormat === 'verbose_json' ? normalizeWhisperSegments(data) : [];
   return {
     text,
     model: WHISPER_MODEL,
     responseFormat,
+    segments,
     ...safeProviderTrace(response, typeof data === 'object' ? data : {}),
   };
 }
@@ -2994,6 +3095,38 @@ function normalizeImageTaskStatus(value) {
   return 'pending';
 }
 
+function imageTaskResultUrls(record, nested) {
+  const urls = [];
+  const add = (value) => {
+    if (typeof value === 'string') {
+      const normalized = value.trim();
+      if (normalized) urls.push(normalized);
+      return;
+    }
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      for (const item of value) add(item);
+      return;
+    }
+    for (const key of ['url', 'image_url', 'imageUrl', 'result_url', 'resultUrl']) {
+      add(value[key]);
+    }
+  };
+  for (const value of [
+    record?.result_urls,
+    record?.resultUrls,
+    record?.images,
+    nested?.content?.image_urls,
+    nested?.content?.imageUrls,
+    nested?.content?.images,
+    record?.result_url,
+    record?.resultUrl,
+    nested?.content?.image_url,
+    nested?.content?.imageUrl,
+  ]) add(value);
+  return [...new Set(urls)];
+}
+
 async function queryImageTask(taskId, apiKey, options = {}) {
   if (!String(apiKey || '').trim()) throw new Error('缺少贞贞的平价AI小屋 API Key');
   const fetchImpl = getFetchImpl(options);
@@ -3006,13 +3139,12 @@ async function queryImageTask(taskId, apiKey, options = {}) {
   const record = data?.data && typeof data.data === 'object' ? data.data : data;
   const status = normalizeImageTaskStatus(record?.status || data?.status);
   const nested = record?.data && typeof record.data === 'object' ? record.data : {};
-  const imageUrl = status === 'succeeded'
-    ? String(record?.result_url || record?.resultUrl || nested?.content?.image_url || nested?.content?.imageUrl || '').trim()
-    : '';
+  const imageUrls = status === 'succeeded' ? imageTaskResultUrls(record, nested) : [];
   return {
     status,
     progress: safeProgress(record?.progress ?? data?.progress),
-    imageUrl: imageUrl || null,
+    imageUrl: imageUrls[0] || null,
+    imageUrls,
     failReason: status === 'failed' ? '图像任务失败' : null,
     ...safeProviderTrace(response, data),
   };
@@ -3119,9 +3251,14 @@ module.exports = {
   ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
   ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL,
   ZHENZHEN_IMAGE_GK_V15_MODEL,
+  ZHENZHEN_IMAGE_NB_2_LITE_MODEL,
+  ZHENZHEN_IMAGE_NB_2_MODEL,
+  ZHENZHEN_IMAGE_NB_PRO_MODEL,
+  ZHENZHEN_IMAGE_NB_MODELS,
   ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL,
   ZHENZHEN_VIDEO_GK_V15_MODEL,
   ZHENZHEN_VIDEO_V31_FAST_MODEL,
+  ZHENZHEN_VIDEO_V31_LITE_MODEL,
   ZHENZHEN_VIDEO_V31_QUALITY_MODEL,
   ZHENZHEN_UPSCALER_MODEL,
   ZHENZHEN_UPSCALER_RESOLUTIONS,

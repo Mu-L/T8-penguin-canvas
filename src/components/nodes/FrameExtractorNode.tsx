@@ -33,8 +33,25 @@ const FrameExtractorNode = (p: NodeProps) => {
     const upstreamIds = edges.filter((e) => e.target === p.id).map((e) => e.source);
     for (const uid of upstreamIds) {
       const n = nodes.find((x) => x.id === uid);
-      const u = (n?.data as any)?.imageUrl;
-      if (u && /\.(mp4|webm|mov|m4v)(\?|$)/i.test(u)) return u as string;
+      const data = (n?.data as any) || {};
+      const direct = [
+        data.videoUrl,
+        ...(Array.isArray(data.videoUrls) ? data.videoUrls : []),
+        ...(Array.isArray(data.generatedVideos) ? data.generatedVideos : []),
+        ...(Array.isArray(data.videos) ? data.videos : []),
+      ];
+      for (const value of direct) {
+        const url = typeof value === 'string'
+          ? value
+          : typeof value?.url === 'string'
+            ? value.url
+            : typeof value?.videoUrl === 'string'
+              ? value.videoUrl
+              : '';
+        if (url) return url;
+      }
+      const legacy = data.imageUrl;
+      if (legacy && /\.(mp4|webm|mov|m4v|mkv)(\?|$)/i.test(legacy)) return legacy as string;
     }
     return '';
   }, [getEdges, getNodes, p.id, p.data]);

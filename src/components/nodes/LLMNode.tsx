@@ -478,6 +478,7 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
           {
             onDelta: (chunk) => setStreamingText((s) => s + chunk),
             signal: ctrl.signal,
+            submissionKey: reporter?.providerSubmissionKey,
           }
         );
         abortRef.current = null;
@@ -532,7 +533,7 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
               max_tokens: maxTokens,
               ...llmVideoOptions,
               providerParams: d?.providerParams || {},
-            })
+            }, { submissionKey: reporter?.providerSubmissionKey })
           : await generateLlm({
               source: isSeedanceNzSelected ? 'seedance-nz' : 'zhenzhen',
               model: activeModel,
@@ -540,7 +541,7 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
               temperature,
               max_tokens: maxTokens,
               ...llmVideoOptions,
-            });
+            }, { submissionKey: reporter?.providerSubmissionKey });
         const replyText = res.content || '';
         if (res.usage) await reporter?.providerUsage({
           provider: traceProvider,
@@ -917,7 +918,7 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
                       ))}
                     </select>
                     <div className="mt-1 text-[9px] leading-snug text-white/40">
-                      使用“贞贞的平价AI工坊（国内） API Key”，接口为 api.seedance.nz。
+                      使用“贞贞的平价AI小屋 API Key”，接口为 api.seedance.nz。
                     </div>
                   </div>
                 )}

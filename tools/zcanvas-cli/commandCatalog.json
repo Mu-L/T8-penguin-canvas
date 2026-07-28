@@ -1,0 +1,281 @@
+{
+  "schema": "t8-zcanvas-command-catalog-v1",
+  "commands": [
+    {
+      "name": "help",
+      "summary": "查看命令和 Agent 调用约定",
+      "available": true,
+      "subcommands": []
+    },
+    {
+      "name": "version",
+      "summary": "查看 Skill/CLI/Desktop/协议兼容版本",
+      "available": true,
+      "subcommands": []
+    },
+    {
+      "name": "capabilities",
+      "summary": "查询 CLI 已实现能力与当前运行时可执行能力",
+      "available": true,
+      "subcommands": []
+    },
+    {
+      "name": "status",
+      "summary": "检查 CLI 与本机画布连接状态",
+      "available": true,
+      "subcommands": []
+    },
+    {
+      "name": "skill",
+      "summary": "校验版本包并原子安装、更新、回滚、校验或卸载 Skill/CLI",
+      "available": true,
+      "subcommands": [
+        "install",
+        "update",
+        "rollback",
+        "verify",
+        "uninstall"
+      ]
+    },
+    {
+      "name": "app",
+      "summary": "发现并列出本机无限画布实例",
+      "available": true,
+      "subcommands": [
+        "list",
+        "discover"
+      ]
+    },
+    {
+      "name": "auth",
+      "summary": "本机 Agent 配对与撤销",
+      "available": true,
+      "subcommands": [
+        "pair",
+        "complete",
+        "status",
+        "revoke"
+      ]
+    },
+    {
+      "name": "workspace",
+      "summary": "绑定项目、画布和分组上下文",
+      "available": true,
+      "subcommands": [
+        "list",
+        "use",
+        "current"
+      ]
+    },
+    {
+      "name": "doctor",
+      "summary": "读取、验证或只读模拟当前画布的实际执行结构",
+      "available": true,
+      "subcommands": [
+        "inspect",
+        "validate",
+        "schema",
+        "simulate"
+      ]
+    },
+    {
+      "name": "patch",
+      "summary": "预览、应用和撤销 CanvasPatch",
+      "available": true,
+      "subcommands": [
+        "preview",
+        "apply",
+        "history",
+        "revert"
+      ]
+    },
+    {
+      "name": "graph",
+      "summary": "新增、连接、断开、分组或批量预览画布结构，仍走同一批准合同",
+      "available": true,
+      "subcommands": [
+        "connect",
+        "disconnect",
+        "group",
+        "batch",
+        "add"
+      ]
+    },
+    {
+      "name": "asset",
+      "summary": "搜索、检查、追溯和确认后导入/导出/放置素材",
+      "available": true,
+      "subcommands": [
+        "search",
+        "inspect",
+        "version",
+        "lineage",
+        "place-apply",
+        "upload",
+        "download",
+        "apply",
+        "place",
+        "import"
+      ]
+    },
+    {
+      "name": "delivery",
+      "summary": "收集、确认后打包并复核图片/视频/音频/文本交付物",
+      "available": true,
+      "subcommands": [
+        "collect",
+        "download",
+        "apply",
+        "verify",
+        "package"
+      ]
+    },
+    {
+      "name": "model",
+      "summary": "查询当前桌面、画布和已配置平台能证明存在的模型",
+      "available": true,
+      "subcommands": [
+        "list",
+        "search",
+        "schema"
+      ]
+    },
+    {
+      "name": "media",
+      "summary": "为已有图片或视频建立可编辑的本地抽帧、纯色背景移除和等比重采样工作流",
+      "available": true,
+      "subcommands": [
+        "extract-frames",
+        "remove-solid-background",
+        "resample-upscale"
+      ]
+    },
+    {
+      "name": "run",
+      "summary": "计划、批准后启动、观察、恢复、取消和只重试失败范围",
+      "available": true,
+      "subcommands": [
+        "plan",
+        "watch",
+        "resume",
+        "cancel",
+        "retry",
+        "start"
+      ]
+    },
+    {
+      "name": "ask",
+      "summary": "用一句自然语言或已导入素材建立持久创作会话和可编辑计划",
+      "available": true,
+      "subcommands": []
+    },
+    {
+      "name": "continue",
+      "summary": "从同一创作会话继续规划或发起画布确认",
+      "available": true,
+      "subcommands": []
+    },
+    {
+      "name": "sessions",
+      "summary": "列出本机创作会话检查点（不显示完整创作内容）",
+      "available": true,
+      "subcommands": []
+    },
+    {
+      "name": "recipe",
+      "summary": "保存、签名、导入、固定和回滚项目级创作配方",
+      "available": true,
+      "subcommands": [
+        "list",
+        "show",
+        "save",
+        "export",
+        "import",
+        "pin",
+        "rollback",
+        "verify"
+      ]
+    },
+    {
+      "name": "create",
+      "summary": "用创作者计划卡编排图片、视频、音频、剧本和 Story",
+      "available": true,
+      "subcommands": [
+        "plan-card",
+        "image",
+        "video",
+        "audio",
+        "script",
+        "story"
+      ]
+    },
+    {
+      "name": "edit",
+      "summary": "基于已持久化素材建立不覆盖原结果的图片或视频编辑分支",
+      "available": true,
+      "subcommands": [
+        "image",
+        "video"
+      ]
+    },
+    {
+      "name": "iterate",
+      "summary": "基于实际媒体评审候选、锁定连续性、分支、采用和恢复",
+      "available": true,
+      "subcommands": [
+        "compare",
+        "review",
+        "accept",
+        "lock",
+        "unlock",
+        "branch",
+        "rollback"
+      ]
+    },
+    {
+      "name": "story",
+      "summary": "自动分析、检查、导入、绑定、编译和预览 Story 制片对象",
+      "available": true,
+      "subcommands": [
+        "inspect",
+        "analyze",
+        "import",
+        "bind-asset",
+        "compile",
+        "plan-previews",
+        "adopt-preview"
+      ]
+    },
+    {
+      "name": "director",
+      "summary": "从 Story 物化并检查导演分镜",
+      "available": true,
+      "subcommands": [
+        "inspect",
+        "materialize"
+      ]
+    },
+    {
+      "name": "video-edit",
+      "summary": "把已完成镜头送入剪辑台并验证交付",
+      "available": true,
+      "subcommands": [
+        "deliver",
+        "compose"
+      ]
+    },
+    {
+      "name": "browser",
+      "summary": "为 Codex/Chrome 创建当前画布的可见、安全 handoff",
+      "available": true,
+      "subcommands": [
+        "status",
+        "focus",
+        "highlight",
+        "screenshot",
+        "inspect-visible-error",
+        "open"
+      ]
+    }
+  ]
+}

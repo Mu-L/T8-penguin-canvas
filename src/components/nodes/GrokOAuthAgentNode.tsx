@@ -1900,10 +1900,11 @@ const GrokOAuthAgentNode = ({ id, data, selected }: NodeProps) => {
         },
         {
           signal: controller.signal,
+          submissionKey: reporter?.providerSubmissionKey,
           onDelta: (delta) => {
             finalReply += delta;
           },
-          onEvent: (event) => {
+          onEvent: async (event) => {
             if (event.type === 'tool.progress' || event.event === 'tool.progress') {
               const progress = Number(event.progress || 0);
               const eventResult = event.result || {};
@@ -1921,11 +1922,11 @@ const GrokOAuthAgentNode = ({ id, data, selected }: NodeProps) => {
                 message: event.message || 'Grok OAuth 简易生成中...',
               };
               if (payload.requestId && !providerSubmittedRecorded) {
+                await reporter?.providerSubmitted(payload);
                 providerSubmittedRecorded = true;
-                void reporter?.providerSubmitted(payload);
               }
-              if (inferredMode === 'video') void reporter?.polling(payload);
-              else void reporter?.progress(payload);
+              if (inferredMode === 'video') await reporter?.polling(payload);
+              else await reporter?.progress(payload);
               update({
                 status: inferredMode === 'video' ? 'polling' : 'running',
                 progress,

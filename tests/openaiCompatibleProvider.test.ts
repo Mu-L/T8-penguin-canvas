@@ -4,6 +4,19 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const openaiCompatible = require('../backend/src/providers/openaiCompatible.js');
+const { providerSubmissionContextMiddleware } = require('../backend/src/services/providerSubmissionContext.js');
+
+function runWithSubmission<T>(key: string, callback: () => Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    providerSubmissionContextMiddleware({
+      get(name: string) {
+        return String(name).toLowerCase() === 'x-t8-provider-submission' ? key : '';
+      },
+    }, {}, () => {
+      Promise.resolve().then(callback).then(resolve, reject);
+    });
+  });
+}
 
 function jsonResponse(body: any, status = 200) {
   return {
@@ -50,6 +63,37 @@ test('OpenAI compatible chat posts to chat/completions and normalizes assistant 
   assert.equal(calls[0].body.model, 'gpt-4o-mini');
   assert.deepEqual(calls[0].body.messages, [{ role: 'user', content: 'hello' }]);
   assert.equal(calls[0].body.temperature, 0.25);
+});
+
+test('OpenAI compatible writes inherit the lifecycle submission key without changing auth headers', async () => {
+  const calls: any[] = [];
+  const provider = {
+    id: 'custom-openai',
+    protocol: 'openai-compatible',
+    baseUrl: 'https://api.example.com/v1/',
+    apiKey: 'sk-secret',
+    chatModels: ['gpt-4o-mini'],
+  };
+
+  const result = await runWithSubmission('attempt-openai-0001', () => (
+    openaiCompatible.generateChat(provider, {
+      prompt: 'stable request',
+    }, {
+      fetchImpl: async (url: string, init: any) => {
+        calls.push({ url, init });
+        return jsonResponse({
+          choices: [
+            { message: { content: 'stable response' } },
+          ],
+        });
+      },
+    })
+  ));
+
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer sk-secret');
+  assert.equal(calls[0].init.headers['Idempotency-Key'], 'attempt-openai-0001');
 });
 
 test('OpenAI compatible chat preserves remote video_url multimodal parts', async () => {

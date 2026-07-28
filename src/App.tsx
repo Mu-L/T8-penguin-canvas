@@ -9,6 +9,8 @@ import { useShortcutStore } from './stores/shortcuts';
 import Sidebar from './components/Sidebar';
 import type { AddNodeFn, InsertWorkflowFn } from './components/Canvas';
 import AppUpdaterButton from './components/AppUpdaterButton';
+import AgentControlPairingModal from './components/AgentControlPairingModal';
+import AgentControlApprovalModal from './components/AgentControlApprovalModal';
 import MaterialContextMenu from './components/MaterialContextMenu';
 import ErrorBoundary from './components/ErrorBoundary';
 import AchievementButton from './components/AchievementButton';
@@ -224,6 +226,11 @@ const CANVAS_TUTORIALS = [
     title: '教程第十六弹（支持贞贞的平价AI小屋，全国内站模型比海外站便宜5-7.5折，支持宽审核，每日更新模型，RH API分离设置）',
     bilibili: 'https://www.bilibili.com/video/BV11zNM6jEQR/',
     youtube: 'https://www.youtube.com/watch?v=_G9xLFd0DN0',
+  },
+  {
+    title: '教程第十七弹（支持贞贞的平价AI小屋的全套LLM模型，图像模型(gpt-image-2低价版,grok image,midjourney 8.2)，视频模型(veo-omni(支持视频编辑),grok-video 1.5)，音频转译whisper-1,音乐模型suno5.5等，新增工作流医生，新增生成节点复用开关，图像节点新增提示词不输出模式，新增story全自动制片，新增3D表情节点，循环器重新增自定义并发模式，RH工具箱新增视频抠像功能，视频节点新增抠像TAB，视频节点新增获取当前帧，新增海螺视频，vidu视频，happyhorse视频，Wan视频，可灵视频支持，修复已知Bug）',
+    bilibili: 'https://www.bilibili.com/video/BV1ob3g6pESq/',
+    youtube: 'https://www.youtube.com/watch?v=B-2ICzUtcNU',
   },
 ];
 
@@ -2176,6 +2183,8 @@ function App() {
       <AchievementDrawer />
       <AchievementCeremonyLayer />
       <AchievementToast />
+      <AgentControlPairingModal />
+      <AgentControlApprovalModal />
     </div>
     </RHToolsProvider>
   );

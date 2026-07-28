@@ -1,0 +1,4 @@
+interface:
+  display_name: "贞贞无限画布创作 Agent"
+  short_description: "一句话开工，规划、制作、迭代并交付图片、视频、音频和完整故事"
+  default_prompt: "Use $zhenzhen-canvas as the mandatory one-sentence creator entry: infer my intent and visible defaults, turn it into editable image, video, audio, script, or Story work, preserve accepted results, and deliver verified artifacts safely in 贞贞无限画布."

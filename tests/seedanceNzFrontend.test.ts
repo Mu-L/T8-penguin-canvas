@@ -7,6 +7,7 @@ import {
   SEEDANCE_NZ_NATIVE_RESOLUTION_OPTIONS,
 } from '../src/config/seedance.ts';
 import { SUNO_NZ_ACTIONS } from '../src/providers/models.ts';
+import { buildWhisperTranscriptEvidence } from '../src/services/generation.ts';
 import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 const read = (relative: string) => readFileSync(new URL(relative, import.meta.url), 'utf8');
@@ -32,8 +33,8 @@ test('SD2 node exposes built-in provider choices and preserves provider during p
   const node = read('../src/components/nodes/SeedanceNode.tsx');
   const generation = read('../src/services/generation.ts');
 
-  assert.match(node, /主力 API（自动：优先国内平价工坊）/);
-  assert.match(node, /贞贞的平价AI工坊（国内） · api\.seedance\.nz/);
+  assert.match(node, /主力 API（自动：优先平价AI小屋）/);
+  assert.match(node, /贞贞的平价AI小屋 · api\.seedance\.nz/);
   assert.match(node, /贞贞的AI工坊（海外） · ai\.t8star\.org/);
   assert.match(node, /taskProvider: builtinSource/);
   assert.match(node, /querySeedance\(tid, taskProvider\)/);
@@ -335,8 +336,8 @@ test('audio node exposes Seed Audio without replacing Suno and supports image/au
   assertProductionNodeSchema('audio', {
     label: '音频',
     category: 'core',
-    inputs: ['text', 'image', 'audio'],
-    outputs: ['audio', 'text'],
+    inputs: ['text', 'image', 'audio', 'video'],
+    outputs: ['audio', 'text', 'video'],
     executable: true,
   });
   assert.match(apiSettings, /Happy Horse、Hailuo、Kling、Vidu、Upscaler、Seedream、Zhenzhen Image G-2 与 Seed Audio/);
@@ -354,8 +355,12 @@ test('APIMart image, video and Whisper models are wired to the budget provider w
     'zhenzhen-image-g-v2-lowprice',
     'zhenzhen-image-gk-v15',
     'zhenzhen-image-gk-v15-edit',
+    'zhenzhen-image-nb-pro',
+    'zhenzhen-image-nb-2-lite',
+    'zhenzhen-image-nb-2',
     'zhenzhen-video-g-omni-flash',
     'zhenzhen-video-gk-v15',
+    'zhenzhen-video-v31-lite',
     'zhenzhen-video-v31-fast',
     'zhenzhen-video-v31-quality',
   ]) {
@@ -368,8 +373,53 @@ test('APIMart image, video and Whisper models are wired to the budget provider w
   assert.match(audioNode, /whisper-1 · 贞贞的平价AI小屋/);
   assert.match(audioNode, /开始转写/);
   assert.match(audioNode, /官方接口不支持 webm/);
+  assert.match(audioNode, /visibleUpstreamVideos/);
+  assert.match(audioNode, /isWhisper \? \['video', 'audio'\]/);
+  assert.match(audioNode, /orderedVideos\[0\]\?\.url/);
+  assert.match(audioNode, /videos=\{orderedVideos\}/);
   assert.match(generation, /\/api\/proxy\/audio\/whisper\/transcribe/);
+  assert.match(audioNode, /transcriptSegments: evidence\.segments/);
+  assert.match(audioNode, /transcriptAttribution: evidence\.attribution/);
   assert.match(proxy, /seedanceNz\.transcribeAudio/);
+  assert.match(proxy, /segments: Array\.isArray\(result\.segments\) \? result\.segments : \[\]/);
+});
+
+test('Whisper transcript evidence uses real provider segment windows and degrades to untimed text', () => {
+  const segmented = buildWhisperTranscriptEvidence({
+    text: 'raw transcript',
+    model: 'whisper-1',
+    responseFormat: 'verbose_json',
+    segments: [
+      { start: 1.2, end: 3.456, text: ' 第一段 ' },
+      { start: 5, end: 4, text: 'invalid' },
+      { start: 3661.007, end: 3663, text: 'second\nsegment' },
+    ],
+  });
+  assert.equal(segmented.attribution, 'provider-segments');
+  assert.deepEqual(segmented.segments, [
+    { start: 1.2, end: 3.456, text: '第一段' },
+    { start: 3661.007, end: 3663, text: 'second segment' },
+  ]);
+  assert.equal(
+    segmented.text,
+    [
+      '以下为 Whisper 返回的语音分段时间窗（非逐词时间戳）：',
+      '[00:00:01.200 - 00:00:03.456] 第一段',
+      '[01:01:01.007 - 01:01:03.000] second segment',
+    ].join('\n'),
+  );
+
+  const untimed = buildWhisperTranscriptEvidence({
+    text: 'plain transcript',
+    model: 'whisper-1',
+    responseFormat: 'verbose_json',
+    segments: [],
+  });
+  assert.deepEqual(untimed, {
+    text: 'plain transcript',
+    segments: [],
+    attribution: 'untimed',
+  });
 });
 
 test('proxy keeps Happy Horse and Seed Audio on the domestic key and stores outputs locally', () => {

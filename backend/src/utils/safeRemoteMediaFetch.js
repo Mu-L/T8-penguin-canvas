@@ -633,6 +633,18 @@ function issuePinnedRequest(target, pinned, headers, state, requestOptions = {})
       settled = true;
       cleanup();
       if (pendingResponse) pendingResponse.destroy();
+      if (
+        requestOptions.requireBodyCompletion
+        && !bodyCompleted
+        && String(error?.code || '').toUpperCase() === 'ECONNRESET'
+      ) {
+        reject(remoteMediaError(
+          'upload_incomplete',
+          '远程上传连接在请求体发送完毕前关闭，已拒绝将其视为成功。',
+          { cause: error },
+        ));
+        return;
+      }
       reject(error);
     };
     const responseAborted = () => fail(remoteMediaError('remote_response_aborted', '远程服务响应提前中断。'));
@@ -646,6 +658,10 @@ function issuePinnedRequest(target, pinned, headers, state, requestOptions = {})
     try {
       const remaining = remainingDeadlineMs(state);
       request = transport.request(target, {
+        // The DNS result is deliberately pinned for this exact request. Reusing
+        // a global Agent socket could silently keep the route that existed
+        // before a TUN/VPN switch and would bypass the fresh lookup/fallback.
+        agent: false,
         method: requestOptions.method || 'GET',
         headers,
         lookup(_hostname, lookupOptions, callback) {

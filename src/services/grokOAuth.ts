@@ -195,7 +195,7 @@ export async function streamGrokOAuthChat(
   options: {
     signal?: AbortSignal;
     onDelta?: (delta: string, event?: any) => void;
-    onEvent?: (event: any) => void;
+    onEvent?: (event: any) => void | Promise<void>;
   } = {},
 ): Promise<string> {
   const res = await fetch(`${BASE}/chat/stream`, {
@@ -221,10 +221,10 @@ export async function streamGrokOAuthChat(
   let buffer = '';
   let reply = '';
 
-  const consumeEvent = (raw: string) => {
+  const consumeEvent = async (raw: string) => {
     const event = parseSseEvent(raw);
     if (!event) return false;
-    options.onEvent?.(event);
+    await options.onEvent?.(event);
     const parsed = extractGrokStreamDeltaForTests(event);
     if (parsed.error) throw new Error(parsed.error);
     if (parsed.delta) {
@@ -242,11 +242,11 @@ export async function streamGrokOAuthChat(
     while (splitAt >= 0) {
       const chunk = buffer.slice(0, splitAt);
       buffer = buffer.slice(splitAt + 2);
-      if (consumeEvent(chunk)) return reply;
+      if (await consumeEvent(chunk)) return reply;
       splitAt = buffer.indexOf('\n\n');
     }
   }
-  if (buffer.trim()) consumeEvent(buffer);
+  if (buffer.trim()) await consumeEvent(buffer);
   return reply;
 }
 
@@ -384,20 +384,20 @@ async function runLegacyGrokOAuthAgentFallback(
   options: {
     signal?: AbortSignal;
     onDelta?: (delta: string, event?: GrokOAuthStreamEvent) => void;
-    onEvent?: (event: GrokOAuthStreamEvent) => void;
+    onEvent?: (event: GrokOAuthStreamEvent) => void | Promise<void>;
   } = {},
 ): Promise<GrokOAuthMediaResult> {
   const mode = String(payload.mode || 'chat').toLowerCase();
-  const emit = (event: GrokOAuthStreamEvent) => options.onEvent?.(event);
+  const emit = async (event: GrokOAuthStreamEvent) => options.onEvent?.(event);
   const meta = agentEventMeta(payload, mode);
-  emit({
+  await emit({
     type: 'turn.started',
     event: 'turn.started',
     ...meta,
     progress: 1,
     message: `已开始 Grok OAuth ${mode} 任务`,
   });
-  emit({
+  await emit({
     type: 'tool.started',
     event: 'tool.started',
     ...meta,
@@ -409,40 +409,40 @@ async function runLegacyGrokOAuthAgentFallback(
     const reply = await streamGrokOAuthChat(payload, {
       signal: options.signal,
       onDelta: (delta, event) => options.onDelta?.(delta, { ...(event || {}), mode }),
-      onEvent: (event) => options.onEvent?.({ ...(event || {}), mode }),
+      onEvent: async (event) => options.onEvent?.({ ...(event || {}), mode }),
     });
     const result: GrokOAuthMediaResult = { text: reply, reply, status: 'completed', progress: 100 };
-    emit({ type: 'message.completed', event: 'message.completed', ...meta, text: reply, result, progress: 100 });
-    emit({ type: 'turn.completed', event: 'turn.completed', ...meta, result, progress: 100, message: 'Grok OAuth Agent 任务完成' });
-    emit({ type: 'done', event: 'done', ...meta, done: true, result });
+    await emit({ type: 'message.completed', event: 'message.completed', ...meta, text: reply, result, progress: 100 });
+    await emit({ type: 'turn.completed', event: 'turn.completed', ...meta, result, progress: 100, message: 'Grok OAuth Agent 任务完成' });
+    await emit({ type: 'done', event: 'done', ...meta, done: true, result });
     return result;
   }
 
   if (mode === 'image') {
     const result = await generateGrokOAuthImage(payload);
     const artifact = withAgentArtifactMeta(fallbackArtifact('image', result), meta);
-    emit({ type: 'artifact.completed', event: 'artifact.completed', ...meta, artifact, result, progress: 100 });
-    emit({ type: 'turn.completed', event: 'turn.completed', ...meta, result, progress: 100, message: 'Grok OAuth Agent 任务完成' });
-    emit({ type: 'done', event: 'done', ...meta, done: true, result });
+    await emit({ type: 'artifact.completed', event: 'artifact.completed', ...meta, artifact, result, progress: 100 });
+    await emit({ type: 'turn.completed', event: 'turn.completed', ...meta, result, progress: 100, message: 'Grok OAuth Agent 任务完成' });
+    await emit({ type: 'done', event: 'done', ...meta, done: true, result });
     return result;
   }
 
   if (mode === 'tts') {
     const result = await generateGrokOAuthTts(payload);
     const artifact = withAgentArtifactMeta(fallbackArtifact('audio', result), meta);
-    emit({ type: 'artifact.completed', event: 'artifact.completed', ...meta, artifact, result, progress: 100 });
-    emit({ type: 'turn.completed', event: 'turn.completed', ...meta, result, progress: 100, message: 'Grok OAuth Agent 任务完成' });
-    emit({ type: 'done', event: 'done', ...meta, done: true, result });
+    await emit({ type: 'artifact.completed', event: 'artifact.completed', ...meta, artifact, result, progress: 100 });
+    await emit({ type: 'turn.completed', event: 'turn.completed', ...meta, result, progress: 100, message: 'Grok OAuth Agent 任务完成' });
+    await emit({ type: 'done', event: 'done', ...meta, done: true, result });
     return result;
   }
 
   if (mode === 'stt') {
     const result = await transcribeGrokOAuthAudio(payload);
     const artifact = withAgentArtifactMeta(fallbackArtifact('transcript', result), meta);
-    emit({ type: 'message.completed', event: 'message.completed', ...meta, text: artifact?.text || result.text || '', result, progress: 100 });
-    emit({ type: 'artifact.completed', event: 'artifact.completed', ...meta, artifact, result, progress: 100 });
-    emit({ type: 'turn.completed', event: 'turn.completed', ...meta, result, progress: 100, message: 'Grok OAuth Agent 任务完成' });
-    emit({ type: 'done', event: 'done', ...meta, done: true, result });
+    await emit({ type: 'message.completed', event: 'message.completed', ...meta, text: artifact?.text || result.text || '', result, progress: 100 });
+    await emit({ type: 'artifact.completed', event: 'artifact.completed', ...meta, artifact, result, progress: 100 });
+    await emit({ type: 'turn.completed', event: 'turn.completed', ...meta, result, progress: 100, message: 'Grok OAuth Agent 任务完成' });
+    await emit({ type: 'done', event: 'done', ...meta, done: true, result });
     return result;
   }
 
@@ -451,15 +451,15 @@ async function runLegacyGrokOAuthAgentFallback(
     const requestId = first.requestId || first.id || first.taskId || first.generationId;
     if (hasVideoOutput(first)) {
       const artifact = withAgentArtifactMeta(fallbackArtifact('video', first), meta);
-      emit({ type: 'artifact.completed', event: 'artifact.completed', ...meta, artifact, result: first, progress: 100 });
-      emit({ type: 'turn.completed', event: 'turn.completed', ...meta, result: first, progress: typeof first.progress === 'number' ? first.progress : 100, message: 'Grok OAuth Agent 任务完成' });
-      emit({ type: 'done', event: 'done', ...meta, done: true, result: first });
+      await emit({ type: 'artifact.completed', event: 'artifact.completed', ...meta, artifact, result: first, progress: 100 });
+      await emit({ type: 'turn.completed', event: 'turn.completed', ...meta, result: first, progress: typeof first.progress === 'number' ? first.progress : 100, message: 'Grok OAuth Agent 任务完成' });
+      await emit({ type: 'done', event: 'done', ...meta, done: true, result: first });
       return first;
     }
     if (!requestId) {
       throw new Error('Grok OAuth 视频任务已提交但没有返回 requestId，无法轮询结果。');
     }
-    emit({
+    await emit({
       type: 'tool.progress',
       event: 'tool.progress',
       ...meta,
@@ -474,7 +474,7 @@ async function runLegacyGrokOAuthAgentFallback(
       await fallbackDelay(GROK_VIDEO_AGENT_POLL_INTERVAL_MS, options.signal);
       const result = await queryGrokOAuthVideoStatus({ ...payload, requestId });
       lastPoll = result;
-      emit({
+      await emit({
         type: 'tool.progress',
         event: 'tool.progress',
         ...meta,
@@ -490,9 +490,9 @@ async function runLegacyGrokOAuthAgentFallback(
       if (isCompletedVideoStatus(result.status) && !hasVideoOutput(result)) throw completedVideoWithoutOutputError();
       if (hasVideoOutput(result) || isCompletedVideoStatus(result.status)) {
         const artifact = withAgentArtifactMeta(fallbackArtifact('video', result), meta);
-        emit({ type: 'artifact.completed', event: 'artifact.completed', ...meta, artifact, result, progress: 100 });
-        emit({ type: 'turn.completed', event: 'turn.completed', ...meta, result, progress: 100, message: 'Grok OAuth Agent 任务完成' });
-        emit({ type: 'done', event: 'done', ...meta, done: true, result });
+        await emit({ type: 'artifact.completed', event: 'artifact.completed', ...meta, artifact, result, progress: 100 });
+        await emit({ type: 'turn.completed', event: 'turn.completed', ...meta, result, progress: 100, message: 'Grok OAuth Agent 任务完成' });
+        await emit({ type: 'done', event: 'done', ...meta, done: true, result });
         return result;
       }
     }
@@ -508,13 +508,19 @@ export async function streamGrokOAuthAgent(
   payload: GrokOAuthMaterialPayload,
   options: {
     signal?: AbortSignal;
+    submissionKey?: string | null;
     onDelta?: (delta: string, event?: GrokOAuthStreamEvent) => void;
-    onEvent?: (event: GrokOAuthStreamEvent) => void;
+    onEvent?: (event: GrokOAuthStreamEvent) => void | Promise<void>;
   } = {},
 ): Promise<GrokOAuthMediaResult> {
   const res = await fetch(`${BASE}/agent/stream`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,255}$/.test(String(options.submissionKey || '').trim())
+        ? { 'X-T8-Provider-Submission': String(options.submissionKey).trim() }
+        : {}),
+    },
     body: JSON.stringify(payload),
     signal: options.signal,
   });
@@ -547,10 +553,10 @@ export async function streamGrokOAuthAgent(
   let reply = '';
   const result: GrokOAuthMediaResult = {};
 
-  const consumeEvent = (raw: string) => {
+  const consumeEvent = async (raw: string) => {
     const event = parseSseEvent(raw) as GrokOAuthStreamEvent | null;
     if (!event) return false;
-    options.onEvent?.(event);
+    await options.onEvent?.(event);
     if (event.error || event.type === 'error' || event.event === 'error' || event.type === 'artifact.failed') {
       throw new Error(String(event.error || event.message || 'Grok OAuth Agent 流式任务失败'));
     }
@@ -584,11 +590,11 @@ export async function streamGrokOAuthAgent(
     while (splitAt >= 0) {
       const chunk = buffer.slice(0, splitAt);
       buffer = buffer.slice(splitAt + 2);
-      if (consumeEvent(chunk)) return result;
+      if (await consumeEvent(chunk)) return result;
       splitAt = buffer.indexOf('\n\n');
     }
   }
-  if (buffer.trim()) consumeEvent(buffer);
+  if (buffer.trim()) await consumeEvent(buffer);
   if (reply && !result.text) {
     result.text = reply;
     result.reply = reply;

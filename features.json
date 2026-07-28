@@ -1,7 +1,7 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.6.8",
-  "lastUpdated": "2026-07-25-v2.6.8-released",
+  "lastUpdated": "2026-07-29-development-seedance-nz-nano-banana-v31-lite",
   "release": {
     "status": "released",
     "version": "2.6.8",
@@ -31,6 +31,69 @@
       "GitHub Release 已正式发布、非草稿、非预发布并标记为 Latest；Tag v2.6.8 精确指向封存源码提交。",
       "三项自动更新资产的 GitHub size / SHA-256 元数据与本地 sealed recovery 清单完全一致。",
       "用户明确授权先发布、后补真实证据；受当前 GitHub 回下载链路约 80KB/s 影响，1.2GB 安装器的完整远端回下载哈希证据仍待发布后补齐，未标记为通过。"
+    ]
+  },
+  "seedanceNzNanoBananaAndV31Lite": {
+    "status": "development-complete-unreleased",
+    "date": "2026-07-29",
+    "releaseIncluded": false,
+    "highlights": [
+      "图像节点“香蕉Pro”在贞贞的平价AI小屋来源新增 zhenzhen-image-nb-pro；“香蕉2”新增 zhenzhen-image-nb-2 与 zhenzhen-image-nb-2-lite，并把完整 zhenzhen-image-nb-2 设为默认模型。",
+      "香蕉2完整模型支持 0.5K/1K/2K/4K、n=1、极端比例与最多 14 张参考图；Lite 固定 1K、n=1..4；香蕉Pro支持 1K/2K/4K、n=1、最多 14 张参考图。",
+      "视频节点 Veo TAB 新增 zhenzhen-video-v31-lite：仅文生视频、固定 8 秒、16:9/9:16、720p/1080p/4K，界面和后端均拒绝参考素材。",
+      "四个模型均使用 seedance-nz 独立 Provider，工作流保存/恢复、运行目录、能力清单和本地结果转存保持一致；原贞贞AI工坊模型与路由不变。"
+    ],
+    "verification": [
+      "逐项核对官方 https://api.seedance.nz/docs/llms.txt 与 F:\\AI-T8-video-onekey\\ComfyUI\\custom_nodes\\ComfyUI_Seedance 的已通过实现，没有用猜测补字段。",
+      "模型映射、请求合同、Provider、轮询、本地转存、工作流来源恢复与能力清单定向回归通过；feature-sync、TypeScript type-check 和前端 build 通过。",
+      "四个真实最小任务均已由官方接口接受并返回任务 ID；当前仍为上游排队状态且没有错误，本记录不把提交成功或排队状态冒充为最终生成成功。",
+      "未执行 Electron 打包、Git 提交、推送、tag 或发布。"
+    ]
+  },
+  "videoBuiltinProviderSeparation": {
+    "status": "development-complete-unreleased",
+    "date": "2026-07-29",
+    "releaseIncluded": false,
+    "highlights": [
+      "视频节点高级来源新增独立“贞贞的平价AI小屋”；“贞贞的AI工坊”和平价小屋不再共用一份混合模型列表。",
+      "工坊只显示 Grok、Veo、Sora2 及其工坊/FAL 子模型；平价小屋只显示 api.seedance.nz 的 Grok、Veo、Wan、Happy Horse、Hailuo、Vidu、Kling、Upscaler 及对应子模型。",
+      "旧画布没有 videoBuiltinSource 时会按已保存真实模型自动恢复来源；来源切换优先保留同一模型家族，不可用时选择该来源第一个有效模型。",
+      "平价小屋任务继续使用 seedance-nz 提交、轮询和运行证据，扩展 Provider 与原有工坊路由保持不变。"
+    ],
+    "verification": [
+      "TypeScript type-check 通过；视频来源目录、旧数据推断和界面接线定向测试连同 Seedance 前端回归共 21/21 通过。",
+      "本地真实开发页核对：平价小屋显示 8 个模型家族，切回工坊只显示 Grok、Veo、Sora2；测试后已恢复原来源。",
+      "未运行生成、build、Electron 打包、提交、推送、tag 或发布。"
+    ]
+  },
+  "seedanceNzPublicName": {
+    "status": "development-complete-unreleased",
+    "date": "2026-07-29",
+    "releaseIncluded": false,
+    "highlights": [
+      "api.seedance.nz 的用户可见平台名称统一为“贞贞的平价AI小屋”，不再显示“贞贞的平价AI工坊（国内）”或“国内平价工坊”。",
+      "API 设置、SD2.0、视频、图像、导演分镜、运行前体检、前端请求错误和后端缺 Key 提示使用同一名称。",
+      "只修改用户可见文案；zhenzhenSd2ApiKey、seedance-nz、固定域名、提交与轮询路由以及旧画布兼容字段保持不变。"
+    ],
+    "verification": [
+      "实际开发页面确认 API 设置与 SD2.0 均显示新名称，页面不再出现旧称；名称定向回归 5/5、TypeScript type-check、JSON 与 diff-check 通过。",
+      "未运行生成、build、Electron 打包、提交、推送、tag 或发布。"
+    ]
+  },
+  "developmentBackendElectronAbiFix": {
+    "status": "development-complete-unreleased",
+    "date": "2026-07-29",
+    "releaseIncluded": false,
+    "highlights": [
+      "修复 start-dev.bat 从 backend 子目录调用普通系统 Node v22，导致按 Electron 33 ABI 构建的 better-sqlite3 抛出 ERR_DLOPEN_FAILED、后端无法启动的问题。",
+      "根目录 start:backend 与 dev:backend 统一使用 ELECTRON_RUN_AS_NODE=1 的 Electron 运行时；开发模式保留 backend/src 热重载，backend 子包入口只代理到根目录权威脚本。",
+      "启动器继续等待后端健康后才启动前端，批处理保持完整 CRLF；没有重编 better-sqlite3，也没有修改用户项目数据库。",
+      "后端与前端新 cmd 窗口均在自身命令内执行 chcp 65001，并使用 cmd /d 禁止 AutoRun 再次覆盖代码页，修复 UTF-8 中文日志被 GBK 解码产生的乱码。"
+    ],
+    "verification": [
+      "启动器、Electron ABI、开发数据库隔离聚焦回归 7/7 通过。",
+      "使用随机端口、系统临时数据目录和 acceptance-small-v1 策略，按 npm run dev:backend 实际启动成功并返回 /api/status 200。",
+      "未 build、打包、提交、推送、tag 或发布。"
     ]
   },
   "seedanceNzMidjourneyActions": {
@@ -138,6 +201,23 @@
     "verification": [
       "Story 资产清空与卡片交互专项断言、Story 生产流程回归和 TypeScript type-check 通过。",
       "未为该交互改动额外调用真实 Provider；已随 v2.6.6 正式源码、Electron 安装包和自动更新 Release 发布。"
+    ]
+  },
+  "providerTunVpnFreshConnectionRecovery": {
+    "status": "verified-local-unreleased",
+    "date": "2026-07-29",
+    "releaseIncluded": false,
+    "highlights": [
+      "根因修复：Provider 请求和远程素材下载不再复用代理、TUN 或 VPN 切换前的旧连接；Provider dispatcher 禁用 keep-alive，并使用 3 秒连接阈值建立全新 socket。",
+      "生成类 POST/PUT/PATCH 只有在当前 Run / Attempt 已具备稳定 submission key、且请求体可安全重放时，才会在 3 秒后以同一个上游 Idempotency-Key 和相同提交身份恢复一次；无稳定键的旧调用继续禁止自动重发，避免重复生成或重复扣费。",
+      "图像、视频、音频、RunningHub 与其他共用安全远程素材层全部显式禁用 Node 全局 Agent，每次下载或上传都使用当前网络状态的新连接；域名解析到 TUN Fake-IP 时优先保留 Fake-IP，失败后继续通过独立公共 DNS / DoH 回源真实公网地址。",
+      "无响应连接、下载停滞和可恢复重试间隔统一为 3 秒；25 秒仅保留为仍在持续传输的大素材单轮总预算，不会为了缩短重试而截断正常的大图、视频或音频下载。",
+      "安全边界没有放宽：字面量内网/Fake-IP、普通私网、跨重定向敏感头、内容类型、文件魔数、大小与写盘验证继续失败关闭。"
+    ],
+    "verification": [
+      "Provider submission、幂等键复用、无键写请求不重放、TUN Fake-IP、公共 DNS 回源、图片/视频/音频/RH 落盘与上传边界定向回归 46/46 通过。",
+      "贞贞的平价AI小屋 Provider 适配器回归 46/46 通过，TypeScript type-check 通过。",
+      "未调用真实付费 Provider，未在当前开发机冒充覆盖所有外部 VPN/运营商环境；本轮未 build、Electron 打包、提交、推送、tag 或 Release。"
     ]
   },
   "tunFakeIpDownloadRootFix": {
@@ -355,7 +435,7 @@
     "version": "2.6.1",
     "status": "verified-local-b1-f2-f7-b2-schema32-f9-f10-v2.6.2-released-external-evidence-deferred",
     "date": "2026-07-18",
-  "lastUpdated": "2026-07-20-canonical-core-direct-development-restored",
+    "lastUpdated": "2026-07-20-canonical-core-direct-development-restored",
     "completedRounds": 27,
     "plannedRounds": 32,
     "completedRoundIds": [
@@ -446,9 +526,9 @@
         "2026-07-21 充值平台双选专项 4/4：锁定指定 seedance.nz 推广 URL、Electron 外链成功不重复开窗、Electron 异常时 noopener/noreferrer 浏览器兜底、两个平台文案/原 RechargeModal/外部点击/Escape 契约；私有扩展入口 esbuild 完整模块解析与 npm run type-check 通过。实现和测试仅在 ignored local-private/**，未执行生产 build/package/release。",
         "2026-07-21 图像节点仅图片输出专项与相邻回归 26/26：覆盖旧画布缺字段、新节点默认开启、显式关闭恢复图文、edit 共享语义、非图像节点隔离、ImageNode UI、OutputNode 即时签名、普通下游素材收集、Canvas 自动输出、Relay/RandomRoute/GroupBox、Loop 快照、跨画布发送、素材集合并与共享 Schema 默认；npm run type-check、public-check、development 工作树门、JSON 与 diff-check 通过。未执行生产 build/package/release。",
         "2026-07-20 schema32 生产切换与故障矩阵：18 个串行文件 113/113 通过，冻结 schema32 checksum/extension、精确 source→target lineage、freshness receipt、physical admission、7+1 hard-exit，以及 cold PRAGMA、WAL 长读者、TEMP SQLITE_FULL、backup fsync/rename、main/WAL/journal/SHM 故障边界；新增覆盖 v31→v32 末段真实 SQLITE_FULL 的精确回滚/重试、SQLite 内部页单比特损坏与当前 schema 外键孤儿的冷开和恢复候选拒绝，且受保护证据不被改写。该结果只属于临时数据库自动化，不代表真实 Windows 磁盘和安装升级验收。",
-      "2026-07-20 writer audit：455 个方法，read 198 / write 182 / maintenance 43 / migration 32 / test-only 0；policy 408 compliant / 11 noncompliant / 4 unresolved / 32 not-applicable，classification gate=true、policyCompliant=false、external raw=0，audit --compact --check exit 0。",
-      "2026-07-20 F6/F7 最终聚焦回归：Electron F6 CJS 19/19、Node TS 9/9；F7 replay/preflight 35/35。覆盖决策重绑权限、单读快照导出、冻结历史 revision、runtime/可见节点分流、三类 replay 前缀 ID 避让和迟到 runtime 隔离。legacy patch 身份复用相邻 Patch/迁移组 46/46，冻结 patch_applied identity 在任何画布/快照写入前失败关闭。",
-      "2026-07-20 最终全量基线：Electron-as-Node CJS 184 文件 1358/1358（180 个常规文件六组 276/210/283/215/177/173，共 1334；4 个隔离服务边界文件 24/24）；TS 194 文件 1505/1505（纯 Node 190 文件 1448/1448，Electron-native 4 文件 57/57），合计 378 文件 2863/2863。最终审计发现并修复 legacy review status 生命周期绕过后，又以 8 个 F6/Common Review CJS 文件 31/31 和 3 个 F6 TS 文件 12/12 做受影响复核；type-check、writer/lifecycle policy、public/rh-toolbox、JSON、语法、worktree 与 diff 门均通过。该口径不包含 build/package，也不替代外部环境验收。",
+        "2026-07-20 writer audit：455 个方法，read 198 / write 182 / maintenance 43 / migration 32 / test-only 0；policy 408 compliant / 11 noncompliant / 4 unresolved / 32 not-applicable，classification gate=true、policyCompliant=false、external raw=0，audit --compact --check exit 0。",
+        "2026-07-20 F6/F7 最终聚焦回归：Electron F6 CJS 19/19、Node TS 9/9；F7 replay/preflight 35/35。覆盖决策重绑权限、单读快照导出、冻结历史 revision、runtime/可见节点分流、三类 replay 前缀 ID 避让和迟到 runtime 隔离。legacy patch 身份复用相邻 Patch/迁移组 46/46，冻结 patch_applied identity 在任何画布/快照写入前失败关闭。",
+        "2026-07-20 最终全量基线：Electron-as-Node CJS 184 文件 1358/1358（180 个常规文件六组 276/210/283/215/177/173，共 1334；4 个隔离服务边界文件 24/24）；TS 194 文件 1505/1505（纯 Node 190 文件 1448/1448，Electron-native 4 文件 57/57），合计 378 文件 2863/2863。最终审计发现并修复 legacy review status 生命周期绕过后，又以 8 个 F6/Common Review CJS 文件 31/31 和 3 个 F6 TS 文件 12/12 做受影响复核；type-check、writer/lifecycle policy、public/rh-toolbox、JSON、语法、worktree 与 diff 门均通过。该口径不包含 build/package，也不替代外部环境验收。",
         "2026-07-20 全节点 RunEvent 聚焦回归：canvasNodeRunRequest 契约 6/6；与 runLifecycle、runLifecycleBackend、runPersistenceGate、runPreflightExecution、secondaryProviderAction 的六文件合并组 32/32。权威 executable 集合为 51/51，覆盖每个 renderer 唯一 listener、主/次输出入口持久链、mode/target/requestId 摘要与精确分发、完整事件词汇、持久化前置门和终态失败关闭。",
         "2026-07-20 B2 新故障证据两文件 11/11，并已纳入 schema32 串行 18 文件 113/113：覆盖 v31→v32 末段真实 SQLITE_FULL、SQLite 页单比特损坏、当前 schema 外键孤儿、freshness fence、WAL 长读者、TEMP FULL、backup fsync/rename 与 main/WAL/journal/SHM 恢复边界。B3/F1 管理与安全 CJS Electron 组 83/83，独立 Node TS UI/参与者会话组 14/14；新增路由/中间件权限 manifest 专项 4/4、相邻安全组 37/37，各组存在重叠且不得相加。",
         "2026-07-20 F9/F10 本地安全机制已通过聚焦测试：覆盖 http/https /collab Base URL、HTTP 公网降级、HTTPS 可信代理/直连判定、五项自检、DNS pin/SSRF、总 deadline、配置持久化与 fail-closed、分级限流、稳定 429/1013，以及只由正式发布证据门强制的真实 HTTPS DNS /collab；准确测试总数以最终主代理回归日志为准，不在此把重叠分组相加。F8-F10 evidence v2 验证器 3/3，安全 attestation 采集器 4/4；仍不代表真实双机、公网、红队或负载已经执行。",
@@ -469,8 +549,8 @@
         "npm run type-check -- --pretty false、npm run public:check、npm run rh-toolbox:check、当前 120 个变更 JS/CJS 的 node --check、features/package JSON 解析和 git diff --check 全部通过；服务型边界测试隔离运行且未接受 EPIPE。",
         "B3 安全窗口覆盖 Provider 响应头/总时限/空闲/大小、JSON/SSE 复杂度、精确密钥脱敏、签名 URL/原始响应隔离、远端产物本地化、FAL 重启恢复、SSRF 逐跳复核、Origin、路径穿越、junction/符号链接、MIME 欺骗、超限/截断与 exclusive 写入失败清理。",
         "F7 故障窗口覆盖策略从自动批准漂移为人工确认后精确退回 pending、并发 2→1 最终拒绝、跨午夜每日额度、租约泄漏扫描、固定 Run ID 未知响应、广播失败后已提交 Run 仍返回 201、取消传播和权威冻结输入。",
-	        "2026-07-20 用户明确授权后已完成两个独立本地冻结点：release/F2 工作区 e0c6679b5a22539dd5b4983165ecc3f9d5c790e1，core 工作区 4e3061094014b5dc2720d52ed178a62e8469a9d3；随后在第三工作树 codex/integration-f2-core-20260720 进行三方语义合并。127 个冲突文件、1486 个冲突块已按 F2/F3 → B1 → B2/B3 → F4/F5 → F6 → F7 → Provider/媒体 → F9/F10/配置顺序逐项解决，未使用整树 ours/theirs 覆盖。",
-	        "第三工作树提交前验证覆盖 193 个 TS 与 186 个 CJS 测试文件：共 2872 项，最终 2865 通过、7 跳过；一次整组高并发恢复文件身份时序失败已单项复测通过。npm run type-check、public:check、rh-toolbox:check、writer audit、lifecycle policy、278 个变更 JS/CJS/MJS 语法检查、JSON 解析、worktree:check 与 git diff --check 均通过。测试数据库只使用临时目录；本轮仍未执行生产 build、Electron/NSIS 打包、版本升级、推送、tag 或 GitHub Release，因此不是安装包、双设备或公网生产验收。"
+        "2026-07-20 用户明确授权后已完成两个独立本地冻结点：release/F2 工作区 e0c6679b5a22539dd5b4983165ecc3f9d5c790e1，core 工作区 4e3061094014b5dc2720d52ed178a62e8469a9d3；随后在第三工作树 codex/integration-f2-core-20260720 进行三方语义合并。127 个冲突文件、1486 个冲突块已按 F2/F3 → B1 → B2/B3 → F4/F5 → F6 → F7 → Provider/媒体 → F9/F10/配置顺序逐项解决，未使用整树 ours/theirs 覆盖。",
+        "第三工作树提交前验证覆盖 193 个 TS 与 186 个 CJS 测试文件：共 2872 项，最终 2865 通过、7 跳过；一次整组高并发恢复文件身份时序失败已单项复测通过。npm run type-check、public:check、rh-toolbox:check、writer audit、lifecycle policy、278 个变更 JS/CJS/MJS 语法检查、JSON 解析、worktree:check 与 git diff --check 均通过。测试数据库只使用临时目录；本轮仍未执行生产 build、Electron/NSIS 打包、版本升级、推送、tag 或 GitHub Release，因此不是安装包、双设备或公网生产验收。"
       ]
     },
     "nextRequiredWork": [
@@ -478,9 +558,9 @@
       "继续共同底座 B2/B3：v1–21、v24–28 和非精确兼容端点在找到真实历史源码/数据库前继续标为 legacy bridge/fallback，不得伪造。B3 会话/权限/网关/执行策略/本地红队的源码清单已经闭合；下一步只收集真实 Provider、公网 TLS/SNI、安装版端口与权限、以及资源负载证据。本轮 schema32/F9/F10 本地机制不能替代这些证据。",
       "F8-F10 发布证据 v2 的本地失败关闭契约已完成；下一步必须由至少三个独立客户端、两台真实 Windows 设备生成各自 attestation/evidence，并实际验证同时编辑、断网 60 秒、主机重启、备份恢复和 Electron 安装版。没有这些实物证据不得勾选 F8。",
       "F9 的 Base URL、自检、安全降级、持久化与 Nginx/Caddy 示例已完成本地自动化；仍必须在真实域名、证书和 HTTPS 反向代理下验证 health、invite、WebSocket、upload、Range 及 TLS/SNI。F10 的分级限速与发布证据门已完成本地自动化；仍必须完成真实公网红队、连接/吞吐/100MB+ 上传/10 万素材和存储增长压测。",
-	      "release/core 独立 checkpoint、第三工作树语义合并与 canonical core 采用已经完成，没有复制、checkout 覆盖或丢弃 core 本地文件。用户已明确将 E:\\PenguinPravite\\T8-penguin-canvas 恢复为唯一默认开发目录，后续功能直接在当前 core 分支修改、测试并按范围提交；历史 integration 工作树只作参考，不再要求二次推进。正式发布仍须先补真实 Windows/双设备/公网/负载证据并重新执行发布门，Electron/NSIS 正式包仍只允许构建一次。"
+      "release/core 独立 checkpoint、第三工作树语义合并与 canonical core 采用已经完成，没有复制、checkout 覆盖或丢弃 core 本地文件。用户已明确将 E:\\PenguinPravite\\T8-penguin-canvas 恢复为唯一默认开发目录，后续功能直接在当前 core 分支修改、测试并按范围提交；历史 integration 工作树只作参考，不再要求二次推进。正式发布仍须先补真实 Windows/双设备/公网/负载证据并重新执行发布门，Electron/NSIS 正式包仍只允许构建一次。"
     ],
-	    "releaseBoundary": "严格本地自动化进度仍为 27/32：共同底座 1/3、多人协作 7/10、智能素材中心 5/5。schema32、全节点 RunEvent、B3 原始代码侧清单、F9 本地自检/安全持久化、F10 本地分级限流/发布证据门和 AssetCenter 响应式 P2 已落地；但 B2/B3 的真实历史/Windows/安装/Provider/公网/负载证据、F8 双设备/Electron、F9 真实公网 HTTPS/TLS/SNI 与 F10 真实红队/负载仍未闭环，不能增加 completedRounds。v2.6.1 按用户再次明确授权，只允许对完全缺失的证据清单采用精确版本和固定 40 位 target 的一次性延期；该延期不产生 passed 检查，不能称为已完成生产级多人协作验收。"
+    "releaseBoundary": "严格本地自动化进度仍为 27/32：共同底座 1/3、多人协作 7/10、智能素材中心 5/5。schema32、全节点 RunEvent、B3 原始代码侧清单、F9 本地自检/安全持久化、F10 本地分级限流/发布证据门和 AssetCenter 响应式 P2 已落地；但 B2/B3 的真实历史/Windows/安装/Provider/公网/负载证据、F8 双设备/Electron、F9 真实公网 HTTPS/TLS/SNI 与 F10 真实红队/负载仍未闭环，不能增加 completedRounds。v2.6.1 按用户再次明确授权，只允许对完全缺失的证据清单采用精确版本和固定 40 位 target 的一次性延期；该延期不产生 passed 检查，不能称为已完成生产级多人协作验收。"
   },
   "generationResultReuse": {
     "version": "2.6.0-postrelease-dev",
@@ -516,7 +596,7 @@
     "version": "2.5.5",
     "status": "released",
     "date": "2026-07-14",
-    "description": "视频节点新增 Wan TAB 与 wan-2.7-spicy-i2v；图像节点 Seedream 的贞贞平价AI工坊来源新增 Dola Seedream 5.0 Pro 海外模型选择，并保留原国内模型和旧画布默认行为。",
+    "description": "视频节点新增 Wan TAB 与 wan-2.7-spicy-i2v；图像节点 Seedream 的贞贞平价AI小屋来源新增 Dola Seedream 5.0 Pro 海外模型选择，并保留原国内模型和旧画布默认行为。",
     "models": [
       "wan-2.7-spicy-i2v",
       "dola-seedream-5.0-pro-t2i",
@@ -526,7 +606,7 @@
       "Wan 使用独立 POST /v1/videos 与 GET /v1/videos/{task_id}：必须提供一张首帧图，提示词可选，时长 2-15 秒，分辨率 720p/1080p，并支持负面提示词、公开音频 URL、提示词扩写开关和随机/固定种子。",
       "前端使用 /api/proxy/video/wan/submit 与 /api/proxy/video/wan/status/{task_id} 隔离 Wan 提交和轮询；成功 MP4 立即转存 T8 output，画布保存本地 URL。",
       "图像节点 Seedream 的 api.seedance.nz 来源提供国内 Seedream v5 Pro 与海外 Dola Seedream 5.0 Pro 下拉选择；旧画布缺省继续使用国内模型，界面明确标注海外模型。",
-      "Dola 根据参考图数量自动选择 dola-seedream-5.0-pro-t2i 或 dola-seedream-5.0-pro-i2i，继续使用 POST /v1/image/generations、GET /v1/image/generations/{task_id} 和同一平价AI工坊 Key。",
+      "Dola 根据参考图数量自动选择 dola-seedream-5.0-pro-t2i 或 dola-seedream-5.0-pro-i2i，继续使用 POST /v1/image/generations、GET /v1/image/generations/{task_id} 和同一平价AI小屋 Key。",
       "本地参考图先经 /v1/files/upload 取得临时公网 URL；Seedream 最多 10 张且单张不超过 10MB，Wan 只取第一张首帧图。"
     ],
     "verification": [
@@ -543,7 +623,7 @@
     "version": "2.6.0-postrelease-dev",
     "status": "implemented-live-verified-unreleased",
     "date": "2026-07-21",
-    "description": "图像节点 GPT2 TAB 新增 Zhenzhen Image G-2 文生图与图生图，使用贞贞的平价AI工坊（国内）独立异步图片协议和 zhenzhenSd2ApiKey。",
+    "description": "图像节点 GPT2 TAB 新增 Zhenzhen Image G-2 文生图与图生图，使用贞贞的平价AI小屋独立异步图片协议和 zhenzhenSd2ApiKey。",
     "models": [
       "zhenzhen-image-g2-t2i",
       "zhenzhen-image-g2-i2i"
@@ -553,7 +633,7 @@
       "严格按官方 llms.txt 与本机 ComfyUI_Seedance 0.2.7 参考实现约束：Prompt 必填且最长 20000 字符，resolution 仅 1k，ratio 只允许 adaptive/16:9/4:3/1:1/3:4/9:16/21:9，adaptive 不发送 metadata.ratio。",
       "zhenzhen-image-g2-t2i 只发送 Prompt 并忽略画布参考图；zhenzhen-image-g2-i2i 必须提供 1-10 张 JPG/PNG/WebP 参考图，单张最多 10MB，先通过 /v1/files/upload 再提交 images。",
       "G-2 请求禁止混入 Seedream 专属 output_format、width、height 或自定义 size；完成图片继续由本地代理安全下载并转存 T8 output，不向前端暴露签名 URL。",
-      "API 设置页明确把 Zhenzhen Image G-2 归入贞贞的平价AI工坊（国内） Key；测试 Key 仅存在于一次性进程环境，未写入源码、设置、日志、文档或 Git。"
+      "API 设置页明确把 Zhenzhen Image G-2 归入贞贞的平价AI小屋 Key；测试 Key 仅存在于一次性进程环境，未写入源码、设置、日志、文档或 Git。"
     ],
     "verification": [
       "模型映射、前端接线、Provider 契约、路由与既有 Seedream/Seedance 相邻回归 44/44 通过；npm run type-check、Provider/Proxy node -c 通过。",
@@ -1087,7 +1167,7 @@
     "version": "2.5.4",
     "status": "released",
     "date": "2026-07-13",
-    "description": "视频节点新增 Happy Horse，音频节点新增 Seed Audio；四个模型固定使用贞贞的平价AI工坊（国内）API Key，并与原视频模型、Seedance、Seedream 和 Suno 链路隔离。",
+    "description": "视频节点新增 Happy Horse，音频节点新增 Seed Audio；四个模型固定使用贞贞的平价AI小屋 API Key，并与原视频模型、Seedance、Seedream 和 Suno 链路隔离。",
     "models": [
       "happyhorse-1.1-t2v",
       "happyhorse-1.1-i2v",
@@ -5140,7 +5220,7 @@
   "canvasTutorialTopbarPanel": {
     "status": "implemented",
     "date": "2026-06-14",
-    "description": "顶部栏在“最新应用”左侧新增“画布教程”入口，按第一弹到第十六弹整理 T8 画布教程 Bilibili / Youtube 链接；“最新应用 · RunningHub”弹窗移除“获取 RH ApiKey”快捷入口，只保留 RunningHub 国内/海外站和邀请码提示。",
+    "description": "顶部栏在“最新应用”左侧新增“画布教程”入口，按第一弹到第十七弹整理 T8 画布教程 Bilibili / Youtube 链接；“最新应用 · RunningHub”弹窗移除“获取 RH ApiKey”快捷入口，只保留 RunningHub 国内/海外站和邀请码提示。",
     "paths": [
       "src/App.tsx",
       "tests/updateMdRegressions.test.ts",
@@ -5227,12 +5307,43 @@
         "title": "教程第十六弹（支持贞贞的平价AI小屋，全国内站模型比海外站便宜5-7.5折，支持宽审核，每日更新模型，RH API分离设置）",
         "bilibili": "https://www.bilibili.com/video/BV11zNM6jEQR/",
         "youtube": "https://www.youtube.com/watch?v=_G9xLFd0DN0"
+      },
+      {
+        "title": "教程第十七弹（支持贞贞的平价AI小屋的全套LLM模型，图像模型(gpt-image-2低价版,grok image,midjourney 8.2)，视频模型(veo-omni(支持视频编辑),grok-video 1.5)，音频转译whisper-1,音乐模型suno5.5等，新增工作流医生，新增生成节点复用开关，图像节点新增提示词不输出模式，新增story全自动制片，新增3D表情节点，循环器重新增自定义并发模式，RH工具箱新增视频抠像功能，视频节点新增抠像TAB，视频节点新增获取当前帧，新增海螺视频，vidu视频，happyhorse视频，Wan视频，可灵视频支持，修复已知Bug）",
+        "bilibili": "https://www.bilibili.com/video/BV1ob3g6pESq/",
+        "youtube": "https://www.youtube.com/watch?v=B-2ICzUtcNU"
       }
     ],
     "verification": [
       "node --test tests\\updateMdRegressions.test.ts",
       "npm run type-check",
       "npm run build"
+    ]
+  },
+  "modelUsageHelpProviderTabs": {
+    "status": "development-verified",
+    "date": "2026-07-29",
+    "releaseIncluded": false,
+    "description": "左侧控制轨中的“模型注意事项”入口调整到“放置栏”入口之前；弹窗拆分为“贞贞的平价AI小屋”和“贞贞的AI工坊”两个平台 TAB，默认显示平价AI小屋，原工坊的图像、视频、音频及 LLM 说明完整保留。",
+    "defaultTab": "贞贞的平价AI小屋",
+    "paths": [
+      "src/components/Canvas.tsx",
+      "src/styles/index.css",
+      "tests/modelUsageHelp.test.ts",
+      "features.json",
+      "SKILL.md"
+    ],
+    "highlights": [
+      "平价AI小屋说明明确其与贞贞的AI工坊使用不同渠道，以国内模型和部分海外核心模型为主，部分模型价格更优惠。",
+      "补充合规宽审核开通说明，以及 Seedance 2.0 官方特价版、zhenzhen-image-g-v2-lowprice、zhenzhen-video-gk-v15、zhenzhen-image-nb-2、zhenzhen-image-nb-pro、zhenzhen-video-g-omni-flash、Midjourney V8.2、Dola Seedream 5.0 Pro I2I 和 zhenzhen-image-gk-v15-edit 的用途与价格提示。",
+      "左侧控制轨顺序固定为“工作流医生 → 模型注意事项 → 放置栏”，模型注意事项紧邻并位于放置栏之前，按钮原有开关与面板互斥行为不变。",
+      "双 TAB 使用主题 Token，支持键盘焦点、ARIA tablist/tabpanel 和窄屏单列布局，不改变左下角问号入口及其他主题控制条。",
+      "真实开发页面确认默认打开“贞贞的平价AI小屋”，可切换回原“贞贞的AI工坊”，两组说明均正常显示且浏览器控制台无错误。"
+    ],
+    "verification": [
+      "npm run test:electron:ts -- tests/modelUsageHelp.test.ts",
+      "npm run type-check",
+      "git diff --check -- src/components/Canvas.tsx src/styles/index.css tests/modelUsageHelp.test.ts features.json SKILL.md"
     ]
   },
   "figmaBridgeImportHotfix": {
@@ -10080,5 +10191,1766 @@
       "latestYmlSha256": "029B1E7E6AC2D19064E1F2B0B5B2664C0E8E2CF2DD4F1F73F1B0B1D0CDDC5639",
       "installerSha512": "ytCpTvyJtoi75C29Lh8uY6NzuibcBjzaBanqnvjbHO1OClGqpCiEsbraooYH6KTadE3tpTYIQ1fQps2SkY7hnQ=="
     }
+  },
+  "runningHubOutputMimeDriftFix": {
+    "status": "development-verified",
+    "date": "2026-07-25",
+    "releaseIncluded": false,
+    "highlights": [
+      "修复 RunningHub 任务已完成却因 CDN Content-Type 与文件真实子类型不完全相同而无法保存的问题；RH 图像、视频、音频输出统一以文件魔数识别的真实媒体类型和扩展名落盘。",
+      "仅对已完成的 Provider/RH 生成结果允许同一安全媒体大类内的子类型漂移，例如 video/mp4 实际为 QuickTime、image/jpeg 实际为 PNG、audio/wav 实际为 MP3；跨图像/视频/音频类型、HTML/JSON、归档容器、未知魔数、超限和私网 SSRF 继续拒绝。",
+      "RH 上传输入与通用远程输入仍保持精确 Content-Type/魔数子类型检查，避免把输出 CDN 的兼容策略扩大到不可信输入。",
+      "RH 工具箱节点、上传/输出素材上的 RH 能力层会继续持久化魔数校正后的本地 .mov/.mp4/.png/.jpg/.mp3 等 URL，并按真实图片、视频、音频类型创建输出素材节点。"
+    ],
+    "verification": [
+      "两个用户失败的真实已完成 RH 任务均确认 CDN 声明 video/mp4、文件魔数为 QuickTime；修复后其中一个 3,732,279-byte 真实结果完整下载、识别为 video/quicktime 并选择 .mov，未重新提交任务或产生生成费用。",
+      "安全代理与媒体落盘回归 40/40 通过；新增混合 RH 图片/视频/音频端到端用例确认 PNG、QuickTime、MP3 即使 CDN 同类子类型标错也全部保存，跨类型伪装仍拒绝。",
+      "RH 工具箱、视频抠像能力层、文字绑定与国内/海外站点路由回归 36/36 通过；未生产构建、未打包、未提交、未推送或发布。"
+    ]
+  },
+  "canvasAgentZcanvasLocalAcceptance": {
+    "status": "development-acceptance",
+    "date": "2026-07-26",
+    "releaseIncluded": false,
+    "highlights": [
+      "一句自然语言 ask 与同一 Creator Session continue 已在真实开发版桌面配对会话中通过，计划阶段画布写入和 Provider 调用均为 0。",
+      "Canvas Creator Agent 的助手回复已使用同一追加式会话事件流输出 started/delta/completed；每段有稳定 responseId 和顺序索引，SSE 按 cursor 恢复，客户端合并成一个对话气泡，重叠发送失败关闭且不会重复 Provider 提交。",
+      "已验证关联的真实 Run 进度使用每个 Run 独立持久 cursor 同步进 Creator Session；高频后台轮询被降噪为有意义状态和 10% 进度，SSE 断线后从数据库事件继续，UI 每个 Run/NodeRun 只保留最新进度卡。",
+      "隔离画布经用户批准写入 3 节点/2 连线；应用重启并重新配对后，仍能依据原 Patch 的项目、画布和 actor 归属完成用户批准的精确回滚，最终为 0 节点/0 连线。",
+      "主画布 Doctor validate/simulate 已在真实运行时通过：24 节点/12 连线、0 error、0 warning、3 批次、13 个可执行节点、0 uncertainty，模拟不写画布且不调用 Provider。",
+      "CLI browser handoff 保持 executed:false 的事实边界，随后由宿主 Chrome 实际打开画布并高亮精确 image 节点；页面显示 24 个节点、无 dialog、console error 为 0并取得可见截图。",
+      "Windows DPAPI 增加瞬时错误有界重试且永久失败继续 fail-closed；工作区项目 Skill 优先于全局安装副本，避免陈旧 Skill 遮蔽当前源码。"
+    ],
+    "verification": [
+      "27 个 Agent Control、Canvas Agent Tools 与 zcanvas 相关测试文件以单并发运行，190/190 通过。",
+      "Creator Agent 流式回复与真实 Run cursor 聚焦回归 45/45、后端 Node 语法、2GB Node 堆上限 TypeScript 检查和相关文件 diff-check 通过。",
+      "TypeScript 类型检查通过；Node 原生 better-sqlite3 已恢复到 Node ABI 127 并完成 SQLite 内存冒烟。",
+      "验收没有调用真实 Provider、FFmpeg、Electron Builder、NSIS、GitHub push、tag 或 Release。"
+    ],
+    "boundaries": [
+      "该记录只证明核心开发目录的本机开发版闭环，不把它冒充 v2.6.5 已发布安装包能力。",
+      "真实 Provider 作品质量、下载与解码、fresh Codex E1-E7、跨设备和公开不可变安装仍需独立证据。"
+    ]
+  },
+  "creatorAgentObjectContext": {
+    "status": "development-verified",
+    "date": "2026-07-26",
+    "releaseIncluded": false,
+    "highlights": [
+      "Creator Agent 会从真实 Canvas 状态构建最多 24 个关键对象摘要，覆盖当前选中、视口内外、运行状态、结果类型与数量、采用/锁定及上下游关系。",
+      "面板新增轻量上下文回执；建议优先级为真实失败恢复、当前选中对象、通用创作阶段，始终提供恰好 3 个可继续动作。",
+      "后端只接受有界对象、离屏计数和固定近期动作标签；Prompt、远程或签名 URL、本机路径及原始事件 payload 不进入 Creator Session。",
+      "交互对齐 LibTV 的一句话开工与 TapNow 的 Agent/画布协作，但继续复用 T8 的 Creator Session、能力清单、CanvasPatch、批准和证据链。"
+    ],
+    "verification": [
+      "Creator Agent 对象上下文、会话、路由与 UI 聚焦回归 48/48 通过。",
+      "backend/src/services/creatorAgentSessions.js Node 语法检查通过。",
+      "NODE_OPTIONS=--max-old-space-size=2048 的 npm run type-check -- --pretty false 通过。",
+      "验证期间 Provider、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "真实浏览器的选区切换、离屏异常定位、多主题和读屏仍需补可视证据。",
+      "节点图上下游摘要已完成；数据库级资产 lineage 与局部 filmstrip 由 creatorAgentPersistentLineageFilmstrip 记录，不以源码测试冒充浏览器验收。"
+    ]
+  },
+  "creatorAgentPersistentLineageFilmstrip": {
+    "status": "development-verified",
+    "date": "2026-07-26",
+    "releaseIncluded": false,
+    "highlights": [
+      "当前选中节点的最近真实 Run 产物会按需解析为最多 6 个持久项目资产，每项最多读取 12 条 AssetLineageRecord，不扫描整库。",
+      "Creator Session 只保存有界资产来源摘要；Prompt、远程或签名 URL、本机路径、原始 metadata 和未知字段全部丢弃。",
+      "Creator Agent 面板新增局部素材条，使用持久资产缩略图、首帧或波形并支持定位真实源节点；预览 URL 仅用于本地 UI。",
+      "选区建议明确复用已核对来源；单项读取失败不会阻断对话、写画布或触发 Provider。"
+    ],
+    "verification": [
+      "Creator Agent 对象上下文、会话、路由与 UI 聚焦回归 48/48 通过。",
+      "NODE_OPTIONS=--max-old-space-size=2048 的 npm run type-check 通过。",
+      "验证期间 Provider、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "真实浏览器中的素材预览、滚动、定位、主题、键盘和读屏仍需补可视证据。",
+      "该能力只读取当前选区真实产物，不把它扩张为后台资产库扫描或生成授权。"
+    ]
+  },
+  "creatorAgentSingleCapabilitySourceGate": {
+    "status": "development-verified",
+    "date": "2026-07-26",
+    "releaseIncluded": false,
+    "sources": [
+      "backend/src/shared/canvasNodeSchema.json",
+      "tools/zcanvas-cli/creativeCapabilityManifest.json",
+      "runtime model catalog sources",
+      "backend/src/services/agentControlCapabilityHandlers.js"
+    ],
+    "highlights": [
+      "Canvas Node Schema、运行时模型目录、Provider/handler 实现和 Creative Capability Policy 各自只维护自己负责的事实；构建器把它们聚合为统一 t8-creative-capability-graph-v1，而不是把所有事实硬塞进第二套产品表。",
+      "统一图覆盖 70 类节点、193 个运行时模型/动作、26 项高层能力、26 个真实 handler 和 123 个独立 operation 风险合同；未知节点、重复能力、缺失 handler、缺失风险或静态误报 executable 全部失败关闭。",
+      "桌面能力 API 为每个运行时条目计算 installed、credentialReady、regionReady、available、executable 和白话 blockers；known 只表示目录存在，不再等同当前可执行。",
+      "Creator Agent、Agent Control /models、zcanvas capabilities/model、Codex Skill 和前端模型选择器消费同一 aggregate digest；已知但未就绪的模型仍可见但不可选。",
+      "生产 build 的 prebuild 自动执行 feature-sync:check；Electron 同时携带原始领域权威源、generated/creative-capabilities.json 和 generated/creative-capability-graph.json。"
+    ],
+    "verification": [
+      "能力图生成器已产出 backend、CLI 与 Skill 覆盖报告三份一致工件；当前 aggregate digest 为 5b3813d73c43f27d29590e63223fd6ccba9e2eae0c5b429521c32e741a725079，未知节点引用 0、operation 风险缺口 0。",
+      "逐操作风险分布为 L0 75、L1 31、L2 17、L3 0；后端与 CLI 对只读风险漂移、静态兼容误标 executable 均有失败关闭测试。",
+      "Creative Capability、Agent Control discovery/models、Creator Agent routes/UI 与 zcanvas CLI 单并发聚焦回归 72/72 通过，虚拟凭据未出现在任何响应。",
+      "相关 Node 语法、npm run feature-sync:check 与 2GB Node 堆上限 TypeScript type-check 通过；验证期间 Provider、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "当前 11/70 节点被高层能力直接引用；其余节点已进入覆盖报告但不冒充具备完整规划、创建、运行和验证链。",
+      "executable 只证明当前组件、凭据和地区/线路前置条件就绪，不证明 Provider 最终成功、费用、配额、延迟或作品质量；这些仍需真实 Run/Attempt/Asset 证据。",
+      "P1 的只读 ModelDecisionReceipt、智能/固定模型选择和禁止静默跨 Provider/费用/隐私边界降级已在核心开发目录实现；真实桌面与 fresh Codex 配对验收、可验证费用/时延数据仍按 creatorAgentModelDecisionReceipt 边界补录。",
+      "本轮不运行正式 build 或 Electron 打包；真实安装包资源、桌面交互和 fresh Codex Skill digest 留到明确授权的低资源发布验收。"
+    ]
+  },
+  "creatorAgentModelDecisionReceipt": {
+    "status": "development-verified",
+    "date": "2026-07-26",
+    "releaseIncluded": false,
+    "schema": "t8-model-decision-receipt-v1",
+    "highlights": [
+      "Canvas Agent 与 Agent Control / zcanvas 共用同一模型偏好映射、运行目录装饰和只读决策函数；计划回执固定记录 catalog/request/receipt digest、零 Provider 调用和零 Canvas 写入。",
+      "智能模式只按当前输入兼容性与 installed、credentialReady、regionReady、executable 证据选择，并显示选择理由、最多 3 个替代项、限制与白话阻断。",
+      "用户固定的语言、图像、视频或音频平台/模型始终优先；目录未知或运行未就绪时失败关闭并保留原选择，不静默更换 Provider、费用等级或隐私边界。",
+      "没有统一可验证计价或实时队列数据时，费用和时延保持 unknown；Agent Control 的运行、创作和交付错误详情现能真实透传给 zcanvas。",
+      "每轮恰好 3 个建议携带真实 operation contract、executable、blockers 与 unblockActions；不可执行建议仍可见但不会伪装成可点击动作。"
+    ],
+    "verification": [
+      "Creator Agent 模型回执、Canvas UI/路由和 Agent Control 路由聚焦回归 23/23 通过。",
+      "Agent Control Creative、Creator Session、zcanvas CLI/会话和能力清单一致性回归 57/57 通过。",
+      "相关 Node 语法、npm run feature-sync:check 与 2GB Node 堆上限 TypeScript type-check 通过；统一能力图仍为 26 actions、193 runtime entries、11/70 referenced nodes，aggregate digest 5b3813d73c43f27d29590e63223fd6ccba9e2eae0c5b429521c32e741a725079。",
+      "验证期间 Provider、Canvas 写入、文件写入、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "费用、时延、配额、历史成功率和作品质量只有在存在真实 Provider/Run 证据时才能进入决策；当前无法验证的维度明确为 unknown，不伪造评分。",
+      "真实 Electron + paired/fresh Codex 的同会话回执、明暗/自定义主题、窄屏、键盘、读屏、IME 与流式恢复仍需浏览器和桌面证据。",
+      "跨 Provider、费用等级或隐私边界的未来改选必须生成新回执并重新批准；本检查点只读规划不会替用户自动执行降级或产生付费任务。"
+    ]
+  },
+  "creatorAgentAuthoritativeCanvasLifecycle": {
+    "status": "development-verified",
+    "date": "2026-07-26",
+    "releaseIncluded": false,
+    "highlights": [
+      "Creator Agent 应用与撤回画布变更时使用 Canvas Patch 服务返回的真实 revision 和 duplicate，不再按 baseRevision + 1 推算成功。",
+      "plan.applied 与 plan.reverted 事件会独立回查持久 Patch 台账，逐项核对项目、画布、local-owner、plan digest、patch ID、状态和精确 revision。",
+      "同一 apply 或 revert 重试按 plan、patch 与 revision 幂等；已经撤回的计划不会再参与后续真实 Run 关联。",
+      "计划卡只在画布已应用但尚未关联真实 Run 时提供精确撤回，并通过正式 CanvasPatch revert 恢复。"
+    ],
+    "verification": [
+      "Creator Agent sessions、routes 与 UI 定向合同回归 47/47 通过，覆盖无台账拒绝、伪造 revision 拒绝、权威应用、重复应用、精确撤回、重复撤回和撤回后 Run 不关联。",
+      "backend Creator Agent 路由与会话服务 Node 语法检查通过。",
+      "NODE_OPTIONS=--max-old-space-size=2048 的 npm run type-check 通过。",
+      "npm run feature-sync:check 通过，26 项能力与 digest 639198459abe995a3577e5e02484b60982ba4ea808571b5dbe18b63711b58987 无漂移。"
+    ],
+    "boundaries": [
+      "本轮没有调用 Provider、FFmpeg、Electron Builder，也没有提交、推送、打 tag 或发布 Release。",
+      "真实浏览器 apply → 刷新 → revert、断线恢复、多主题、键盘与读屏验收仍待补录，源码与合同测试不冒充人工可视证据。"
+    ]
+  },
+  "creatorAgentCodexConnectionReceipt": {
+    "status": "development-verified",
+    "date": "2026-07-26",
+    "releaseIncluded": false,
+    "highlights": [
+      "Creator Agent 顶部新增 Codex / 本地 Agent 入口，提供一句话安装、连接和直接规划提示；默认只给可编辑方案，不自动生成。",
+      "可信 Electron 主渲染器 IPC 只返回 Codex 会话数、待确认数量、已批准 scope 与过期时间，不暴露 token、pairing secret/code、session ID、客户端身份、本机路径或私有画布内容。",
+      "连接状态只在 Creator Agent 与 Codex 区域同时打开时每 5 秒刷新；复制失败安全回填输入框且不覆盖用户草稿。",
+      "体验参考 LibTV 的一句话 Agent 入口与 TapNow 的意图优先、透明画布和脚本到成片流程；实际权限仍由验证码与逐项 scope 显式批准。"
+    ],
+    "verification": [
+      "Agent Control Auth 与 Creator Agent UI 专项回归 25/25 通过。",
+      "backend/src/services/agentControlAuth.js、electron/main.cjs 与 electron/preload.cjs Node 语法检查通过。",
+      "NODE_OPTIONS=--max-old-space-size=2048 的 npm run type-check -- --pretty false 通过。",
+      "验证期间 Provider、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "该记录只证明核心开发目录中的源码、安全合同和静态 UI 接线，不把它冒充 v2.6.8 已发布安装包能力。",
+      "真实 Electron + fresh Codex 的安装、升级、配对、验证码、scope、拒绝/撤销、断线、过期、多会话、主题、键盘和读屏证据仍需补录。"
+    ]
+  },
+  "creatorAgentProductionDirectorState": {
+    "status": "development-verified",
+    "date": "2026-07-26",
+    "releaseIncluded": false,
+    "highlights": [
+      "Creator Session 持久化创意、剧本、资产、分镜、生成和成片的当前阶段、已访问、已完成、已失效、阻断、检查点与有界迁移历史。",
+      "前端 context.phase 不能越权跳阶段；只有 ready 计划或经过核验的交付生命周期推进，信息不足时停留原阶段并显示白话原因。",
+      "返修上游会使目标和下游完成标记失效，但保留上传、采用、锁定、Run、Asset 和物理交付证据。",
+      "Story 的恰好 3 个建议按资产、分镜和候选阶段路由，并继续由统一 CreativeCapabilityManifest 校验。"
+    ],
+    "verification": [
+      "Creator Agent、Agent Control 与 zcanvas 会话单并发集成回归 70/70 通过，覆盖越权跳阶段、未就绪禁止推进、返修失效、刷新恢复、素材发送与交付分离及阶段化建议。",
+      "backend/src/services/creatorAgentSessions.js Node 语法检查通过。",
+      "NODE_OPTIONS=--max-old-space-size=2048 的 npm run type-check 通过。",
+      "验证期间 Provider、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "该记录只证明核心开发目录中的源码、持久状态与静态 UI 合同，不把它冒充已发布安装包或完整作品质量证据。",
+      "真实浏览器刷新/返修/阻断解除、多主题、窄屏、键盘、读屏，以及 Story 到成片的真实 Provider E2E 仍需补录。"
+    ]
+  },
+  "creatorAgentCanonicalProductionEvidence": {
+    "status": "development-verified",
+    "date": "2026-07-26",
+    "releaseIncluded": false,
+    "highlights": [
+      "Creator Agent 的规划、预览和聊天上下文不再直接完成作品阶段；阶段只由权威 Canvas Patch 台账、持久 Story 文档、候选验收状态、真实 Run/NodeRun 与本地产物核验推动。",
+      "共享生产证据服务从持久画布提取有界状态：Story 剧本与镜头、资产完成数、提示词完成数、视频完成数、最终成片，以及受影响候选的视觉评审和采用状态；不保存剧本正文、Prompt、媒体 URL、Provider payload 或本机路径。",
+      "画布内 Creator Agent 与 zcanvas/Agent Control 共用同一证据规范；缺 Patch 台账、伪造 revision、错误 actor 或跨计划 Patch 均失败关闭，不能从外部事件接口伪造完成。",
+      "撤回和上游返修按撤回后的持久画布重新计算已完成阶段，只失效真实受影响的当前及下游阶段；既有上传、采用、锁定、Run、Asset 和交付证据不被物理删除。"
+    ],
+    "verification": [
+      "Creator Agent、Agent Control 与 zcanvas 单并发回归 82/82 通过，覆盖规划不冒充完成、Story 持久证据推进、Run 产物完成候选、Patch 台账缺失防伪与原有交互合同。",
+      "creatorAgentProductionEvidence、creatorAgentSessions、agentControlCreative、creatorAgent 路由和 agentControl 路由 Node 语法检查通过。",
+      "NODE_OPTIONS=--max-old-space-size=2048 的 npm run type-check 通过。",
+      "npm run feature-sync:check 通过，创作能力单一来源无漂移。"
+    ],
+    "boundaries": [
+      "该检查点只证明核心开发目录中的权威证据、持久状态与合同测试；不把它冒充真实 Provider 作品质量、浏览器人工视觉验收或已发布安装包能力。",
+      "本轮没有调用 Provider、FFmpeg、Electron Builder，也没有提交、推送、打 tag 或发布 Release。"
+    ]
+  },
+  "creatorAgentSuggestionFreshnessReceipt": {
+    "status": "development-verified",
+    "date": "2026-07-26",
+    "releaseIncluded": false,
+    "schema": "t8-creator-suggestion-binding-v1",
+    "highlights": [
+      "每个持久 SuggestionSet 绑定数据库权威 canvasRevision、有界 contextDigest、结果与 lineage 的 assetVersion 以及当前 planDigest，并生成稳定 setDigest。",
+      "Canvas 会话建议只提交建议 ID 与同一版本摘要；旧会话缺回执时按钮失败关闭，空白态三个想法继续作为一句话新请求。",
+      "后端在模型决策、计划生成和事件追加前重新读取当前画布 revision 并重算绑定；画布、选区、素材或计划变化返回白话 CREATOR_SUGGESTION_STALE 409。",
+      "有效建议持久化最小 user.suggestion 审计事件；过期建议不新增事件、不调用 Provider、不写 Canvas 或文件。",
+      "CanvasPatch apply/revert 与 Agent Control approval 继续复用既有 expected revision、digest、idempotency 和持久台账，不新增第二套批准状态。"
+    ],
+    "verification": [
+      "Creator Agent sessions、routes 与 UI 聚焦回归 59/59 通过，覆盖有效回执、旧会话禁用、revision/选区/素材变化和零副作用失败关闭。",
+      "Creator Agent、Agent Control 批准/Patch、统一能力图与 zcanvas 跨入口单并发回归 135/135 通过。",
+      "backend Creator Agent 路由与会话服务 Node 语法及 NODE_OPTIONS=--max-old-space-size=2048 的 TypeScript type-check 通过。",
+      "验证期间 Provider、Canvas 写入、文件写入、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "本记录只证明核心开发目录中的建议 freshness 合同，不把它冒充完整 P2、真实 Provider、浏览器人工视觉验收或已发布安装包能力。",
+      "跨 Provider/费用/隐私边界改选后的旧批准失效、UI/Codex 并发与断线重放仍需按 G19.32 金路径补真实证据。"
+    ]
+  },
+  "creatorAgentApprovalFreshnessReceipt": {
+    "status": "development-verified",
+    "date": "2026-07-26",
+    "releaseIncluded": false,
+    "schema": "t8-agent-control-approval-binding-v1",
+    "highlights": [
+      "计划型确认绑定当前 Agent session、项目、画布、动作、逻辑 subject、planDigest、可用时的模型决策摘要和 Provider/模型边界摘要。",
+      "同一 subject 的新创作或运行计划会在返回前淘汰旧确认；旧 approval ID 即使拥有正确 poll secret 也返回白话 APPROVAL_STALE 409。",
+      "Run subject 按 start/retry、规范化 requested node scope 和 retry 来源区分；同范围改选需重新确认，不同范围仍可并发。",
+      "费用等级与隐私驻留缺少统一可验证元数据时明确记录 unknown，不猜数字，也不把未知边界冒充已批准。",
+      "失效检查位于 CanvasPatch、RunIntent、Provider 和文件副作用之前；有效执行继续复用 operationId、revision 与持久 exactly-once 台账。"
+    ],
+    "verification": [
+      "审批服务与 Creator Creative 路由聚焦回归 3/3 通过。",
+      "审批 UI、Patch、Run、Creator Session、Creative 与 zcanvas 跨入口回归 39/39 通过。",
+      "相关后端服务、路由和测试 Node 语法、feature-sync 及 NODE_OPTIONS=--max-old-space-size=2048 的 TypeScript type-check 通过。",
+      "验证期间 Provider、Canvas 写入、文件写入、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "本记录只证明核心开发目录中的审批 freshness 合同，不把它冒充真实 Provider 费用、隐私驻留、浏览器人工视觉验收或已发布安装包能力。",
+      "真实浏览器刷新/断线/多主题/窄屏/键盘/读屏/IME 与 Electron 金路径仍需补录。"
+    ]
+  },
+  "creatorAgentApprovalBoundaryUiReceipt": {
+    "status": "development-verified",
+    "date": "2026-07-26",
+    "releaseIncluded": false,
+    "schema": "t8-agent-control-approval-binding-v1",
+    "highlights": [
+      "桌面审批弹窗显示绑定的计划版本、模型选择版本、Provider/模型范围及稳定回执摘要，创作者不再盲点确认。",
+      "费用等级和隐私驻留缺少可信元数据时明确显示 unknown 原因，不猜费用，也不把未知边界冒充已批准。",
+      "确认文案明确包含版本边界；计划、平台、模型或边界变化后旧确认自动失效，必须核对最新回执。",
+      "公开 UI 类型只消费有界摘要，不显示 Agent session、poll secret、凭据、本机路径或 Provider payload。",
+      "旧 Patch、素材和交付审批在没有 binding 时继续按既有预览兼容显示。"
+    ],
+    "verification": [
+      "审批 UI、审批服务与 Creator Creative 路由聚焦回归 4/4 通过。",
+      "审批、Patch、Run、Creator Session、Creative 与 zcanvas 跨入口回归 39/39 通过。",
+      "NODE_OPTIONS=--max-old-space-size=2048 的 TypeScript type-check 通过。",
+      "验证期间 Provider、Canvas 写入、文件写入、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "本记录证明核心开发目录中的静态审批边界可见合同，不把它冒充真实 Provider 计价/隐私驻留、浏览器人工视觉验收或已发布安装包能力。",
+      "真实浏览器多主题、窄屏、键盘、读屏、IME、刷新/断线和 Electron 金路径仍需补录。"
+    ]
+  },
+  "creatorAgentApprovalIdempotentRetryReceipt": {
+    "status": "development-verified",
+    "date": "2026-07-26",
+    "releaseIncluded": false,
+    "schema": "t8-agent-control-approval-idempotency-v1",
+    "highlights": [
+      "同一 Agent session、审批动作和 operationId 形成一个逻辑确认槽；精确相同请求重发复用同一 approvalRequestId、pollSecret、过期时间和当前状态。",
+      "请求摘要绑定 actor、项目、画布、Patch、业务 payload、预览、expected revision 与 approval binding；同一 operationId 对应不同内容时返回白话 APPROVAL_IDEMPOTENCY_CONFLICT 409。",
+      "精确重试先于待确认数量门执行，因此网络响应丢失、刷新或并发重发不会额外占用审批槽；旧 binding 已被替换时仍返回 APPROVAL_STALE。",
+      "poll secret 只保存在审批服务的私有内存映射与发起端受保护存储中；桌面待确认列表、公开回执和日志不包含 secret。",
+      "批准后的 CanvasPatch 与 Run 仍由既有 revision、patchId、operationId 和持久 exactly-once 台账提交；本层不调用 Provider，也不建立第二套执行状态。"
+    ],
+    "verification": [
+      "审批服务与 Creative 路由聚焦回归 4/4 通过，覆盖并发重发、刷新后复用、摘要冲突失败关闭和单次画布提交。",
+      "审批 UI、Patch、Run、Creator Session、Creative 与 zcanvas 跨入口回归 40/40 通过。",
+      "验证期间 Provider、额外 Canvas 写入、文件业务写入、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "本记录证明核心开发目录中的待确认创建/恢复幂等，不把它冒充真实浏览器断网、Electron 重启、进程重启后的持久审批或已发布安装包能力。",
+      "进程重启会按既有安全策略使内存审批失效；Agent 必须重新生成受当前 revision 和 binding 约束的确认，不能复活旧 secret。"
+    ]
+  },
+  "creatorAgentCrossEntryExactOnceRecovery": {
+    "status": "development-verified",
+    "date": "2026-07-26",
+    "releaseIncluded": false,
+    "schema": "t8-creator-cross-entry-exact-once-v1",
+    "highlights": [
+      "Creator Session 持久保存经服务端验证的精确 CanvasPatch；刷新后可从同一 session 恢复 patchId、请求摘要和预览摘要，不依赖易失 UI 状态。",
+      "Canvas UI 与 Codex 对同一 patchId、requestDigest 和 previewDigest 的精确重试收敛到同一权威修订；不同 Patch、预览、范围或凭据权限继续失败关闭。",
+      "跨 actor 精确恢复只由 Creator creative.apply 和 Canvas 本地确认入口以内部固定选项启用；普通 Agent patch.apply 不接受请求方自行放宽。",
+      "原提交 actor 保留 Patch 所有权与精确 revert 权限；恢复方只取得同一已提交结果，不接管历史、审计或撤销权限。",
+      "生产证据只在持久 Session Patch 的 requestDigest 与内部 Patch 台账精确一致时接受跨 actor 记录，并保存真实提交 actor。"
+    ],
+    "verification": [
+      "两个真实 SQLite 连接同时以 UI actor 与 Codex actor 提交同一 Creator Patch：双方均返回权威 revision 2，其中一次 duplicate=false、一次 duplicate=true。",
+      "竞争结束后数据库恰好存在 1 条 CanvasPatch、1 条 operation、1 次画布修订和 1 条审计，没有 SQLITE_BUSY 泄漏或重复副作用。",
+      "Creator Agent、Agent Control、审批、Session、CanvasPatch 与 zcanvas 跨入口回归 110/110 通过，相关 Node 语法检查通过。",
+      "验证期间 Provider、生产画布、业务文件、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "本记录证明核心开发目录中的本地服务与真实 SQLite 并发合同，不把它冒充真实双进程 Electron、浏览器人工断网或已发布安装包证据。",
+      "跨入口恢复只接受字节语义一致的已验证 Patch；计划、预览、revision、权限或凭据边界变化必须重新预览和确认。"
+    ]
+  },
+  "creatorAgentAssetPlaceToCanvas": {
+    "status": "development-verified",
+    "date": "2026-07-26",
+    "releaseIncluded": false,
+    "schema": "t8-creator-artifact-canvas-evidence-v1",
+    "highlights": [
+      "Creator Agent 素材带仅对当前项目中已持久、已校验且带稳定 assetId/contentHash 的图片、视频和音频提供发送到画布；远程 URL、签名 URL、内存预览和跨项目素材失败关闭。",
+      "发送操作先向后端请求确定性 asset.place 计划，展示目标节点、位置、可选端口、连线与来源，再复用统一 CanvasPatch 预览和显式确认；确认前 Provider、画布写入与文件传输均为 0。",
+      "asset.place 是 L1 可逆画布写入，与 asset.import/transfer 的 L2 外部读取或传输边界分离；重复提交依赖稳定 Patch、operationId、revision 与既有 exactly-once 台账。",
+      "artifact.sent-to-canvas 事件必须匹配同一 Creator Session 的最新 asset.place 计划、已应用 Patch 台账和权威 revision；证据仅保存有界 assetId、contentHash、nodeId、patchId 和 revision。",
+      "素材带同时保留定位真实来源节点的只读入口；部分缩略图或 lineage 读取失败不触发生成、Provider、画布写入或素材丢失。"
+    ],
+    "verification": [
+      "Creator Agent UI、路由与 Session 聚焦回归 61/61 通过，覆盖预览优先、确认前零写入、未应用 Patch 拒绝成功证据和应用后的有界证据归一化。",
+      "asset.place、项目资产服务与 Creative Capability Manifest 聚焦回归通过；相关后端文件 Node 语法检查通过。",
+      "NODE_OPTIONS=--max-old-space-size=2048 的 TypeScript type-check、feature-sync:check 和 features.json 解析通过；当前 aggregate digest 为 040ee9626fb4c21c5c3f1fdc8d283fa4d6f481f228d24537044bfc9dfa9a61e4。",
+      "验证期间 Provider、生产画布、业务文件、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "本记录证明核心开发目录中的路由、Session、UI 契约和确定性 Patch，不把源码合同冒充真实浏览器、双 Electron 进程、跨设备或已发布安装包证据。",
+      "真实主题/日夜、键盘/读屏、刷新/断线，以及 UI/Codex 并发重复节点为 0 的可视 E2E 仍按 P2-P4 发布门补录。"
+    ]
+  },
+  "creatorAgentGenericNodeAdd": {
+    "status": "development-verified",
+    "date": "2026-07-26",
+    "releaseIncluded": false,
+    "schema": "t8-creative-capability-graph-v1",
+    "highlights": [
+      "新增 canvas.node-add、graph.node-add 与 zcanvas graph add，以权威 Canvas Node Schema 覆盖全部 58 个非隐藏节点；未知或隐藏类型失败关闭。",
+      "通用新增先返回零副作用计划与 L1 CanvasPatch 预览；桌面批准后才应用同一请求，重复命令续跑审批，不创建第二个节点，也不调用 Provider。",
+      "生成型节点初始 data 严格限制到 generation.allowedDataFields、类型和枚举；非生成型节点只创建空节点，由用户在节点 UI 配置。",
+      "能力覆盖明确区分 create 与 run/verify：58/70 节点已引用，但完整可运行仍为 11，不把创建能力冒充所有节点均可端到端执行。",
+      "能力图更新为 28 项能力、28 个 handler、132 个逐操作风险合同、193 个运行时条目，未知节点引用为 0。"
+    ],
+    "verification": [
+      "创作服务、HTTP 路由、CLI、能力图、Creator UI、Creator 路由与 Patch 数据库跨入口回归 135/135 通过。",
+      "Node 语法、feature-sync 生成与 JSON 校验通过；aggregate digest 为 d65e9cdd7871bdfb5525aeb14a80a4d80f856a81d6aced98aed0dcb93a069c32。",
+      "验证期间 Provider、生产画布、业务文件、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "本记录只证明核心开发目录中的通用节点创建、审批和可逆 Patch 合同，不把源码测试冒充真实浏览器、Electron 或已发布安装包证据。",
+      "其余创建型节点的 Provider 运行/验证能力仍按各自真实 handler 与 P3/P4 金路径补齐，不能由 canvas.node-add 推断。"
+    ]
+  },
+  "creatorAgentVersionedProductionDocuments": {
+    "status": "development-verified",
+    "date": "2026-07-26",
+    "releaseIncluded": false,
+    "schema": "t8-creator-production-document-v1",
+    "highlights": [
+      "一句话 Story 或剧本计划同步生成制作需求、剧本文档、世界与连续性设定三份可编辑前期文档；普通创作计划至少生成制作需求。",
+      "前期文档具有稳定文档 ID、内容摘要、版本 ID、revision、草稿/确认状态和可编辑字段；同内容保留版本，内容变化递增 revision 并保留旧 assistant.plan 事件。",
+      "剧本文档保留创作者原始输入，未分析的人物、场景和镜头结构为空；世界设定以空骨架表达未知，不把 Agent 猜测写成事实。",
+      "Creator Agent 计划卡默认折叠显示文档摘要，可直接在下方用一句话修改；修改产生新版本，不覆盖上一版，也不自动调用 Provider 或写入画布。",
+      "上一版内容必须与其 SHA-256 语义摘要一致；摘要缺失或内容被替换时返回 CREATOR_PRODUCTION_DOCUMENT_INVALID 409。"
+    ],
+    "verification": [
+      "Creator Agent Creative、Routes 与 UI 聚焦回归 71/71 通过，覆盖文档生成、轻量折叠 UI、自然语言续改、版本递增、旧版保留和篡改拒绝。",
+      "创作服务、HTTP 路由、CLI、能力图、Creator UI、Creator 路由与 Patch 数据库跨入口回归 137/137 通过。",
+      "相关 Node 语法、2GB Node 堆上限 TypeScript type-check、feature-sync:check、JSON 与 diff-check 通过；能力图仍为 28 actions、193 runtime entries、58/70 nodes referenced，digest d65e9cdd7871bdfb5525aeb14a80a4d80f856a81d6aced98aed0dcb93a069c32。"
+    ],
+    "boundaries": [
+      "本记录完成 P3-A 前期文档骨架、版本与轻量 UI，不把空结构冒充已完成的剧本分析、分镜、资产、真实 Provider 作品质量或发布安装包能力。",
+      "文档级显式确认、字段级差异审阅、角色/场景抽取、浏览器人工多主题/键盘/读屏证据和 Story 到成片 Provider E2E 仍按 P3/P4 后续切片验收。",
+      "验证期间 Provider、生产画布、业务文件写入、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ]
+  },
+  "creatorAgentProductionDocumentConfirmations": {
+    "status": "development-verified",
+    "date": "2026-07-26",
+    "releaseIncluded": false,
+    "schema": "t8-creator-production-document-confirmation-v1",
+    "highlights": [
+      "Creator Agent 可逐份或批量确认当前 ProductionBrief、ScriptDoc 与 WorldBible 的精确版本；确认绑定文档 ID、version ID、内容摘要、来源 plan ID 与 plan digest。",
+      "重复确认同一精确版本幂等，不追加第二条确认；旧 plan、旧 version、旧内容摘要或被替换内容全部返回 409 并要求刷新。",
+      "确认记录与计划文档分离保存，不修改原 plan digest；后续自然语言修改继续生成新 draft，只有内容完全未变的新计划才继承已确认回执。",
+      "文档内容变化时生成 t8-creator-production-document-diff-v1 字段级差异，轻量折叠展示变更字段及前后值，不要求用户学习独立审阅流程。",
+      "确认事件明确记录 providerCalls=0 与 canvasWrites=0；文档确认只表示创作者接受该版文字，不授权生成、运行、文件或画布副作用。"
+    ],
+    "verification": [
+      "Creator Agent Creative、Sessions、Routes 与 UI 聚焦回归 91/91 通过，覆盖字段差异、逐份/批量确认、精确幂等、刷新持久化、旧版本拒绝和修改后恢复草稿。",
+      "Creator Agent、Agent Control、zcanvas CLI、统一能力图与 CanvasPatch 跨入口回归 157/157 通过。",
+      "backend/src/services/creatorAgentSessions.js、backend/src/routes/creatorAgent.js Node 语法检查通过；验证期间 Provider、生产画布、业务文件写入、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "本记录只证明 P3-B 的源码、持久化和静态 UI 合同，不把文档确认冒充真实剧本分析、素材生成、分镜、视频、交付或发布安装包证据。",
+      "真实浏览器多主题/窄屏/键盘/读屏、刷新断线并发、Electron 与 Provider 金路径仍按 P3/P4 后续切片验收。"
+    ]
+  },
+  "creatorAgentSourceBackedScriptAnalysis": {
+    "status": "development-verified",
+    "date": "2026-07-26",
+    "releaseIncluded": false,
+    "schema": "t8-creator-script-analysis-v1",
+    "highlights": [
+      "ScriptDoc 对中英文 Scene/场景、Shot/镜头标题和明确 Characters/人物/角色标签建立确定性原文结构映射；未出现的内容继续保持未知。",
+      "每个场景与镜头具有稳定 ID、原文行号范围和最多 6000 字的原文片段；镜头大段文本超限时明确标记截断，不伪装为完整内容。",
+      "分析回执固定 method=deterministic-source-map、sourceBacked=true、providerCalls=0、inferredFacts=0，并绑定规范化原文摘要。",
+      "Creator Agent 计划卡轻量显示场景、镜头和明示人物数量，折叠后可查看最多 12 个镜头标题与行号；不增加阻断弹窗或独立工作台。",
+      "源文结构进入现有 ScriptDoc 内容摘要、版本、确认和字段差异合同；原文变化生成新 draft，旧版本继续保留。"
+    ],
+    "verification": [
+      "Creator Agent Creative、Routes 与 UI 聚焦回归 73/73 通过，覆盖 NFKC 后中英文标题、明示人物、稳定行号、源文片段、零推断和轻量 UI。",
+      "Creator Agent、Agent Control、zcanvas CLI、统一能力图与 CanvasPatch 跨入口回归 159/159 通过。",
+      "backend/src/services/agentControlCreative.js Node 语法与 2GB Node 堆上限 TypeScript type-check 通过；验证期间 Provider、生产画布、业务文件写入、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "这是可验证的原文结构映射，不是 LLM 剧本理解、人物关系推断、戏剧质量改写或镜头内容补写；没有明确标题时仍显示待补结构。",
+      "Provider 辅助分析、人物/场景资产提案、分镜到成片六条真实金路径和浏览器/Electron 证据继续按 P3/P4 后续切片验收。"
+    ]
+  },
+  "creatorAgentSourceBackedAssetProposals": {
+    "status": "development-verified",
+    "date": "2026-07-26",
+    "releaseIncluded": false,
+    "schema": "t8-creator-source-derivation-v1",
+    "highlights": [
+      "Story/剧本计划生成可版本化 CharacterBible 角色设定草案与 AssetNeed 资产缺口草案，并沿用现有文档稳定 ID、revision、版本、字段差异和精确确认合同。",
+      "角色只来自明确 Characters/人物/角色 标签，地点资产只来自明确 Scene/场景 标题；每项绑定源文行号、证据片段及精确 ScriptDoc 版本、内容摘要和 source digest。",
+      "未明示的外貌、服装、性格、人物关系和地点事实保持空白；派生回执固定 providerCalls=0、inferredFacts=0，资产默认 missing、未采用、未锁定且 generationScope=none。",
+      "派生文档确认前必须先确认其精确来源 ScriptDoc，或在同一个显式批次确认当前 ScriptDoc 与派生文档；来源 ID、版本、摘要或 source digest 不匹配时失败关闭。",
+      "Creator Agent 计划卡以折叠列表轻量显示最多 10 个源证据角色/资产项和行号，不新增阻断弹窗；来源未确认时禁用单份派生确认。"
+    ],
+    "verification": [
+      "Creator Agent Creative、Routes 与 UI 聚焦回归 73/73 通过，覆盖源证据角色、地点资产缺口、版本稳定、零推断、依赖确认、刷新持久化和轻量 UI。",
+      "Creator Agent、Agent Control、zcanvas CLI、统一能力图与 CanvasPatch 跨入口回归 159/159 通过。",
+      "backend/src/services/agentControlCreative.js 与 backend/src/services/creatorAgentSessions.js Node 语法、2GB Node 堆上限 TypeScript type-check 和 git diff-check 通过；验证期间 Provider、生产画布、业务文件写入、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "本记录只证明从原文明示结构派生角色/地点资产缺口及其精确确认依赖，不把草案冒充人物视觉定稿、已上传素材、已生成资产、已锁定连续性或完成分镜。",
+      "LLM 深层抽取、人物视觉设定补写、素材上传/采用/锁定、真实图像生成、分镜与成片金路径以及浏览器/Electron 证据继续按 P3/P4 后续切片验收。"
+    ]
+  },
+  "creatorAgentSourceBackedShotList": {
+    "status": "development-verified",
+    "date": "2026-07-26",
+    "releaseIncluded": false,
+    "schema": "t8-creator-source-derivation-v1",
+    "highlights": [
+      "Story/剧本计划新增可版本化 ShotList 镜头表草案，并沿用前期文档的稳定 ID、revision、版本、字段差异和精确确认合同。",
+      "镜头只来自 ScriptDoc 中明确 Shot/镜头 标题；每项保留稳定镜头表 ID、源镜头 ID、序号、标题、所属场景、原文行号、证据片段和原文描述。",
+      "未明示的时长、景别、运镜、对白/旁白、声音设计和关联资产保持空值并列入 unresolved；generationScope=none，不自动生成任何候选或媒体。",
+      "镜头表绑定精确来源 ScriptDoc 的文档 ID、version、内容摘要和 source digest，固定 providerCalls=0、inferredFacts=0；来源不一致时确认失败关闭。",
+      "Creator Agent 计划卡以折叠列表展示最多 10 个镜头的场景、标题和行号；来源未确认时禁用单份镜头表确认，同批可确认完整当前依赖链。"
+    ],
+    "verification": [
+      "Creator Agent Creative、Routes 与 UI 聚焦回归 73/73 通过，覆盖空结构、源镜头映射、稳定来源、未解析字段、依赖确认、版本变更和轻量 UI。",
+      "Creator Agent、Agent Control、zcanvas CLI、统一能力图与 CanvasPatch 跨入口回归 159/159 通过。",
+      "backend/src/services/agentControlCreative.js 与 backend/src/services/creatorAgentSessions.js Node 语法、2GB Node 堆上限 TypeScript type-check 和 git diff-check 通过；验证期间 Provider、生产画布、业务文件写入、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "本记录只证明可版本化源证据镜头表和精确确认依赖，不把它冒充导演分镜补写、镜头节奏定稿、资产绑定、候选图、生成视频或质量验收。",
+      "创作者补写与 Provider 辅助、逐镜资产绑定、候选生成、视频运行、质量检查及浏览器/Electron 金路径继续按 P3/P4 后续切片验收。"
+    ]
+  },
+  "creatorAgentSourceBackedStoryboard": {
+    "status": "development-verified",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-production-document-v1",
+    "highlights": [
+      "Story/剧本计划在当前 ShotList 后新增可版本化 Storyboard 分镜板草案，并沿用前期文档的稳定 ID、revision、版本、字段差异和精确确认合同。",
+      "每个分镜格只映射一个已验证镜头表项，保留镜头表项 ID、源镜头 ID、序号、标题、所属场景与原文行号/证据；未明示内容保持 unresolved。",
+      "分镜初始固定 missing，候选为空、未选择、未绑定资产、未采用、未锁定，Prompt/构图/连续性备注为空；adoptionPolicy=explicit-only 且 generationScope=none。",
+      "分镜板确认依赖精确来源 ShotList；确认链核对来源文档 ID、version、内容摘要和继承的 ScriptDoc source digest，同一显式批次可确认完整当前依赖链。",
+      "计划卡轻量显示分镜格总数、已采用/缺失数量及最多 10 项折叠来源证据，并明确结构确认不等于候选采用或锁定。"
+    ],
+    "verification": [
+      "Creator Agent Creative、Routes 与 UI 聚焦回归 73/73 通过，覆盖空分镜、源镜头映射、版本变化、确认依赖、显式采用边界和轻量 UI。",
+      "Creator Agent、Agent Control、zcanvas CLI、统一能力图与 CanvasPatch 跨入口回归 159/159 通过。",
+      "backend/src/services/agentControlCreative.js 与 backend/src/services/creatorAgentSessions.js Node 语法、2GB Node 堆上限 TypeScript type-check 和 git diff-check 通过；验证期间 Provider、生产画布、业务文件写入、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "本记录只证明源证据空分镜格、版本与精确确认依赖，不把结构确认冒充候选生成、视觉评审、显式采用、资产锁定、视频运行或成片质量。",
+      "导演补写、PromptPack、真实候选生成与评审、候选采用接口、视频金路径和浏览器/Electron 证据继续按 P3/P4 后续切片验收。"
+    ]
+  },
+  "creatorAgentSourceBackedPromptPack": {
+    "status": "development-verified",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-production-document-v1",
+    "highlights": [
+      "Story/剧本计划在当前 Storyboard 后新增可版本化 PromptPack 草案，并沿用前期文档的稳定 ID、revision、版本、字段差异和精确确认合同。",
+      "每条 Prompt 只映射一个当前分镜格，保留分镜格 ID、镜头表项 ID、源镜头 ID、序号、标题、场景和原文证据；正向提示词只逐字复用该格来源证据。",
+      "负向、运镜/动作、声音、参考资产及图像/视频/音频模型保持空值并列为 unresolved；creatorReviewed=false、locked=false、reviewPolicy=explicit-confirmation、generationScope=none。",
+      "PromptPack 确认依赖精确来源 Storyboard；确认链核对来源文档 ID、version、内容摘要和继承的 ScriptDoc source digest，同一显式批次可确认完整当前依赖链。",
+      "计划卡轻量显示 Prompt 总数、待审阅/已确认数量及最多 10 条折叠来源证据，多级草案统一使用来源版本文案。"
+    ],
+    "verification": [
+      "Creator Agent Creative、Routes 与 UI 聚焦回归 73/73 通过，覆盖空 PromptPack、源分镜映射、逐字证据 Prompt、空模型选择、版本变化、逐级确认依赖和轻量 UI。",
+      "Creator Agent、Agent Control、zcanvas CLI、统一能力图与 CanvasPatch 跨入口回归 159/159 通过。",
+      "backend/src/services/agentControlCreative.js 与 backend/src/services/creatorAgentSessions.js Node 语法、2GB Node 堆上限 TypeScript type-check 和 git diff-check 通过；验证期间 Provider、生产画布、业务文件写入、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "本记录只证明可审阅的源证据 PromptPack、版本与精确确认依赖，不把原文 Prompt 起点冒充导演润色、Provider 推理、真实生成、候选评审、采用或锁定。",
+      "创作者逐镜补写、Provider 辅助、模型决策、真实候选生成与评审、候选采用接口、视频金路径和浏览器/Electron 证据继续按 P3/P4 后续切片验收。"
+    ]
+  },
+  "creatorAgentVerifiedCandidateReviewChain": {
+    "status": "development-verified",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-evidence-derivation-v1",
+    "highlights": [
+      "Story/剧本计划在当前 PromptPack 后新增只读 CandidateReview 候选审阅证据文档，只汇总精确绑定当前 PromptPack 文档 ID、version、content digest 和 Prompt 项的画布节点。",
+      "Story 预览节点把 PromptPack 精确版本与唯一匹配的镜头原文摘要写入 t8-creator-production-binding-v1；旧版本、摘要漂移、模糊匹配和按序号猜测失败关闭。",
+      "只有真实文本结果或通过安全本地引用校验的图片、视频、音频结果进入候选证据；空预览槽、缩略图、Prompt、Provider 名和模型名不会被计为已生成。",
+      "显式采用产生 t8-creative-adoption-receipt-v1 并绑定 node/candidate、当前 evidence digest 与 review digest；仅有旧 accepted=true 而无当前有效回执的 Story 候选拒绝采用。",
+      "CandidateReview 确认依赖当前精确 PromptPack 并校验持久候选证据派生摘要；确认仅冻结证据版本，不采用、不锁定、不运行、不生成或写画布。"
+    ],
+    "verification": [
+      "Creator Agent Creative、Routes 与 UI 聚焦回归 74/74 通过，覆盖 PromptPack 精确绑定、真实结果过滤、审阅证据、显式采用回执、旧 accepted 状态拒绝与只读轻量 UI。",
+      "Creator Agent、Agent Control、zcanvas CLI、统一能力图与 CanvasPatch 跨入口单并发回归 160/160 通过。",
+      "backend/src/services/agentControlCreative.js、backend/src/services/agentControlStoryCreative.js 与 backend/src/services/creatorAgentSessions.js Node 语法、2GB Node 堆上限 TypeScript type-check、能力同步和 JSON 校验通过；验证期间 Provider、生产画布、业务文件写入、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "本记录证明当前 PromptPack 到真实候选、实际结果审阅和显式采用回执的源码证据链，不把结构确认、空预览槽或旧 accepted 布尔值冒充已采用作品。",
+      "真实浏览器多主题/键盘/读屏、Electron、Provider 生成与作品质量证据继续按 P4 验收；本功能尚未包含于已发布版本。"
+    ]
+  },
+  "creatorAgentDevelopmentBrowserAcceptance": {
+    "status": "development-acceptance",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-p4-ui-acceptance-v1",
+    "highlights": [
+      "真实开发后端、Vite 与 Chrome 的隔离验收从右侧地图上方启动按钮通过键盘 Enter 打开 Creator Agent，并以一句话完成同一持久会话的首轮交互和恰好 3 个下一步建议。",
+      "刷新页面后恢复相同 sessionId，持久会话数量保持 1；没有重复会话或画布副作用，隔离画布 revision 在验收前后保持 1。",
+      "面板支持方向键调整尺寸、Escape 关闭并把焦点返回启动按钮；启动按钮 aria-controls 关联具名面板，低动效偏好下光环、动画和过渡全部关闭。",
+      "tech-default 深色、pixel-candy 浅色、1280×720 与 2560×1440 均通过真实 DOM 边界验收；启动按钮位于 minimap 上方，面板打开后不遮挡 minimap。"
+    ],
+    "verification": [
+      "scripts/verify-creator-agent-p4-ui.cjs 真实 Chrome 验收通过，browserErrors 为 0，并产出 report.json 与 one-sentence、tech-dark、pixel-light 三张截图。",
+      "Creator Agent UI 聚焦回归 27/27、验收脚本 Node 语法与 NODE_OPTIONS=--max-old-space-size=2048 的 TypeScript type-check 通过。",
+      "验收使用隔离项目和画布；真实 Provider、生产画布、业务文件、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "本记录只证明核心开发目录的真实开发浏览器一句话入口、会话恢复、主题布局、键盘与低动效合同，不把它冒充 Electron 或已发布安装包。",
+      "真实 Provider 生成与作品质量、人工读屏器/IME、网络中断恢复和 Electron 桌面金路径继续按 P4 后续切片验收。"
+    ]
+  },
+  "creatorAgentDevelopmentElectronAcceptance": {
+    "status": "development-acceptance",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-p4-electron-acceptance-v1",
+    "highlights": [
+      "项目锁定的 Electron 33.4.11、真实主进程、可信 preload、同进程开发后端与 Vite 主窗口完成隔离验收；renderer 保持 contextIsolation 且未暴露 Node require/process。",
+      "一句话需求在同一持久 Creator Session 中得到恰好 3 个下一步建议；再次导航后恢复相同 sessionId，会话数量保持 1。",
+      "Enter 打开、方向键调整面板、Escape 关闭和焦点返回启动按钮全部通过；Agent Control IPC 摘要不含 token，开发态更新器保持 disabled。",
+      "隔离画布 revision 验收前后均为 1，图结构未变化，Electron renderer error 为 0。"
+    ],
+    "verification": [
+      "scripts/verify-creator-agent-p4-electron.cjs 使用真实 Electron 33.4.11 通过，产出 report.json 与 creator-agent-electron-one-sentence.png。",
+      "Electron 开发态隔离目录回归 3/3、Creator Agent/Agent Control/zcanvas/CanvasPatch 跨入口单并发回归 172/172 与相关 Node 语法通过；T8PC_DEV_DATA_ROOT 只在开发态接受绝对路径，默认开发目录不变，打包模式忽略该覆盖。",
+      "验收使用隔离项目、画布、数据库与素材目录；真实 Provider、生产画布、业务文件写入、FFmpeg、Electron Builder、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "本记录只证明核心开发目录的真实 Electron 开发客户端入口、可信桥接、会话恢复、键盘交互和无画布副作用，不把它冒充打包安装包或已发布版本。",
+      "真实 Provider 生成与作品质量、人工读屏器/IME、网络中断恢复和已发布安装包继续按 P4 后续切片验收。"
+    ]
+  },
+  "creatorAgentNetworkResponseRecoveryAcceptance": {
+    "status": "development-acceptance",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-p4-network-acceptance-v1",
+    "highlights": [
+      "Creator 消息使用稳定 clientRequestId 与规范化 requestDigest；相同 ID 的精确重试复用原 user message、assistant response 和计划，相同 ID 改变内容以 409 失败关闭。",
+      "POST 已受理但响应丢失时，客户端先查询同一请求的持久 in-progress/completed/failed 回执，再恢复原 response/event cursor；不会创建第二份计划或 Provider 提交。",
+      "sessionStorage 只保存当前会话待恢复请求；fetch 失败、刷新、EventSource 重连和浏览器 offline/online 都沿用同一请求 ID。SSE 终态先到而 POST response 后丢失时，终态台账阻止成功请求恢复成重复发送草稿。",
+      "真实 Chrome 验收在服务端完成后拦截 POST response，再切换浏览器离线与恢复；user/start/complete 各 1、建议 3、Provider 调用 0、画布写入 0、revision 1→1。"
+    ],
+    "verification": [
+      "scripts/verify-creator-agent-p4-network.cjs 真实 Chrome 验收通过，产出 report.json、creator-agent-response-lost.png 与 creator-agent-network-recovered.png；非预期 browser error 为 0。",
+      "Creator Agent Sessions、Routes 与 UI 聚焦回归 68/68 通过，覆盖请求恢复、digest 冲突、精确复用、终态竞态、offline/online 状态和 SSE cursor；Creator Agent、Agent Control、CanvasPatch 与 zcanvas 跨入口单并发回归 250/250 通过。",
+      "Node 语法、NODE_OPTIONS=--max-old-space-size=2048 的 TypeScript type-check、能力同步、JSON 与 git diff-check 通过。",
+      "验收未调用真实 Provider、生产画布、业务文件、FFmpeg、Electron Builder、GitHub push、tag 或 Release。"
+    ],
+    "boundaries": [
+      "本记录只证明开发浏览器中服务端已受理但客户端响应丢失的 exactly-once 恢复，不把它冒充真实付费 Provider 提交或作品质量证据。",
+      "人工弱网丢包整形、读屏器/IME、打包安装包和已发布版本仍按 P4 后续切片验收。"
+    ]
+  },
+  "creatorAgentBackendRestartRecoveryAcceptance": {
+    "status": "development-acceptance",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-p4-network-acceptance-v1",
+    "highlights": [
+      "服务端已完成且 POST response 丢失后，验收强制结束旧开发后端、确认端口释放，再用同一隔离数据目录启动全新进程；不复用旧进程内存。",
+      "新进程的单请求恢复端点返回原 t8-creator-message-request-v1 completed 回执与相同 responseId；浏览器强制刷新后仍恢复原 sessionId、消息和恰好 3 个建议。",
+      "重启前后 user message、assistant response started/completed 各 1，Provider 调用 0、画布写入 0、revision 1→1，重复计划为 0。",
+      "受控停止窗口的 Vite ECONNRESET/ECONNREFUSED 代理 500 只进入 expectedRestartProxyErrors；窗口外 browserErrors 必须为空。"
+    ],
+    "verification": [
+      "scripts/verify-creator-agent-p4-network.cjs 真实后端进程重启与 Chrome 刷新验收通过，报告包含 backendProcessRestarted=true 与 requestReceiptRecoveredAfterRestart=true。",
+      "证据新增 creator-agent-backend-restarted.png；报告同时保留响应丢失、离线恢复、exactly-once 和画布 revision 不变断言。",
+      "验收未调用真实 Provider、生产画布、业务文件、FFmpeg、Electron Builder、GitHub push、tag 或 Release。"
+    ],
+    "boundaries": [
+      "本记录证明 Provider-free Creator 消息完成后的跨进程持久恢复，不把它冒充 Provider 运行中杀进程或下载中重启。",
+      "孤儿远程任务重新挂接、真实费用/作品质量、人工读屏器/IME、打包安装包和已发布版本仍待后续验收。"
+    ]
+  },
+  "creatorAgentFreshCodexSkillLifecycleAcceptance": {
+    "status": "development-acceptance",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-zcanvas-p4-fresh-codex-acceptance-v1",
+    "highlights": [
+      "完全隔离的 USERPROFILE、CODEX_HOME 与 LOCALAPPDATA 完成 fresh 安装；真实用户全局 Skill、配对凭据和生产画布均未修改。",
+      "~/.agents 与 $CODEX_HOME 两个受管发现副本在 PATH/ZCANVAS_CLI 为空时都通过 ownership marker 启动主 CLI，旧 PATH 命令不能静默遮蔽受管 Skill。",
+      "从 Codex 发现副本完成 1.0.0→2.0.0 原子升级和精确回滚；主安装及两个发现副本的 Skill tree digest 始终一致。",
+      "错误整包 SHA-256、篡改/不可信 Ed25519 签名、未受管同名 Skill 和发现副本激活故障均失败关闭；当前版本、last-known-good 与 creator-owned 文件保持不变。",
+      "卸载只删除受管主安装、last-known-good 与两个受管发现副本，隔离 creator-owned credentials 保留。"
+    ],
+    "verification": [
+      "scripts/verify-zcanvas-p4-fresh-codex.cjs 通过，产出 artifacts/creator-agent-p4-fresh-codex/report.json。",
+      "报告确认 immutableBundleDigestVerified=true、externalTrustPolicyVerified=true、ed25519BundleSignatureVerified=true、tamperedSignatureFailedClosed=true、managedDiscoveryWrappersExecuted=2、unownedGlobalSkillPreserved=true 与 uninstallOwnedRootsOnly=true。",
+      "zcanvasInstaller/zcanvasCli 定向回归 33/33；installer、CLI、发现包装脚本和验收脚本 Node 语法通过。",
+      "验收 Provider 调用、画布写入、Electron build、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "本记录证明隔离用户目录中的真实 CLI/Skill 发现、摘要校验、升级、降级、回滚和卸载，不把它冒充真实 Codex 对话触发召回。",
+      "生产发布私钥、公网不可变下载 URL、SBOM、跨设备安装、真实 Provider 作品质量及正式 Electron/NSIS 发布仍待后续验收；本地 Ed25519 验证合同不冒充正式签名 Release。"
+    ]
+  },
+  "creatorAgentElectronPairingLifecycleAcceptance": {
+    "status": "development-acceptance",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-p4-pairing-acceptance-v1",
+    "highlights": [
+      "项目锁定的真实 Electron、主进程、可信 preload、同进程开发后端和桌面授权弹窗，与完全隔离的 USERPROFILE、CODEX_HOME、LOCALAPPDATA、凭据库及实例发现目录完成配对生命周期验收。",
+      "终端与桌面验证码逐字一致；请求 canvas:read + run:read 后，桌面取消 run:read 并批准，CLI、安全存储和无密钥连接摘要最终只持有 canvas:read。",
+      "撤销同时终止服务端会话并删除本地凭据，后续查询以 PAIRING_REQUIRED 失败关闭；拒绝返回 PAIRING_DENIED 且不签发会话。",
+      "过期返回 PAIRING_EXPIRED，过期 pending/session 不再显示为已配置，只有全新配对请求能够恢复。",
+      "固定 acceptance-small-v1 数据库容量档位只允许开发验收显式启用；未知档位失败关闭，打包环境强制忽略，正式磁盘安全预算不变。"
+    ],
+    "verification": [
+      "scripts/verify-creator-agent-p4-pairing.cjs 真实 Electron 验收通过，报告位于 artifacts/creator-agent-p4-pairing/report.json，并保存验证码匹配桌面弹窗截图。",
+      "报告确认 terminalAndDialogCodeMatched=true、explicitScopeReduction、serverSessionRevoked=true、localCredentialDeleted=true、desktopDenied=true、cliReceivedPairingExpired=true 与 repairedByFreshPairing=true。",
+      "Agent Control Auth、zcanvas secure store/installer 和开发容量档位专项回归 14/14；相关 Node 语法、TypeScript type-check、能力同步及 git diff-check 通过。",
+      "验收 Provider 调用、画布写入、FFmpeg、Electron build、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "本记录证明真实开发 Electron 与隔离受管 Skill/CLI 的批准、scope 缩减、撤销、拒绝、过期和重新配对，不把它冒充真实 Codex 对话召回。",
+      "断线中的 Provider 任务恢复、多人或跨设备会话、人工读屏器/IME、正式安装包和公开 Release 仍待后续验收。"
+    ]
+  },
+  "creatorAgentElectronMultiSessionAcceptance": {
+    "status": "development-acceptance",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-p4-pairing-acceptance-v1",
+    "highlights": [
+      "同一真实 Electron 中使用两套独立本地凭据库，同时建立 canvas:read 与 run:read 两个 Codex 会话。",
+      "连接摘要只显示 2 个活跃会话和 scope 并集；真实授权仍逐 access token 与该会话自身 scope 判定，不会把并集借给任一 Agent。",
+      "撤销第一套凭据后第二套继续有效，摘要只剩 run:read；撤销最后一套后才显示 0 会话和未连接。",
+      "所有多会话摘要继续排除 token、poll secret、验证码、pairing/session ID 与 clientName。"
+    ],
+    "verification": [
+      "scripts/verify-creator-agent-p4-pairing.cjs 真实 Electron 验收报告新增 multipleSessions：independentCredentialStores=2、simultaneousCodexSessions=2、revokingOnePreservedOther=true、finalRevokeDisconnected=true。",
+      "Agent Control 单元回归新增两个 pending、scope 聚合、独立撤销和剩余 token 继续鉴权断言。",
+      "P4-F/P4-G 授权、secure store/installer 与开发容量档位集中回归 15/15；Node 语法、TypeScript、能力同步和 git diff-check 通过。",
+      "验收 Provider 调用、画布写入、FFmpeg、Electron build、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "本记录证明同一开发桌面中的多个本地 Agent 会话与 scope 隔离，不把它冒充两个真实 Codex 对话并发写画布。",
+      "并发 CanvasPatch 冲突仲裁、跨设备/多人协作、正式安装包和公开 Release 仍需独立证据。"
+    ]
+  },
+  "creatorAgentPairingKeyboardAccessibilityAcceptance": {
+    "status": "development-acceptance",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-p4-pairing-acceptance-v1",
+    "highlights": [
+      "可信 Electron 配对弹窗在首个请求出现时取得焦点，Tab 与 Shift+Tab 双向循环，Escape 明确拒绝且不签发会话，最后一个请求关闭后恢复此前焦点。",
+      "键盘导航不会自动勾选确认项、批准 scope 或绕过验证码；批准仍要求创作者显式核对并确认。",
+      "开发 Electron 与 Vite 使用不同的动态本地端口，并以实例注册的精确后端 origin 为准，避免验收串入已安装版 18766。",
+      "开发、预览、构建和 P4-H 验收显式使用 canonical vite.config.ts，防止旧生成 vite.config.js 静默覆盖动态代理。"
+    ],
+    "verification": [
+      "真实 Electron 报告确认 keyboardEscapeDenied=true、focusTrappedForward=true、focusTrappedBackward=true、previousFocusRestored=true。",
+      "配对前直连与 Vite 代理的 Creator Agent capability、collaboration 管理接口均返回 200；最终 browserErrors=[]、failedResponses=[]。",
+      "完整生命周期继续通过 scope 缩减、撤销、拒绝、过期、新配对恢复、两套独立 Codex 凭据并存和逐个撤销。",
+      "验收 Provider 调用、画布写入、FFmpeg、Electron build、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "本记录只证明真实开发 Electron 的配对键盘交互与隔离代理，不替代人工读屏器/IME 验收。",
+      "真实 Provider 作品质量、两个真实 Codex 对话并发写画布、正式安装包和公开 Release 仍需独立证据。"
+    ]
+  },
+  "creatorAgentComposerImeScreenReaderAcceptance": {
+    "status": "development-acceptance",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-p4-ui-acceptance-v1",
+    "highlights": [
+      "Creator Agent 只在持久 Creator Session 与统一能力合同均就绪后把初始焦点放入一句话输入框，初始化临时禁用不再吞掉焦点。",
+      "Enter 在 IME composition、原生 keyCode 229 和 compositionend 后 140ms 提交保护窗内均不发送；Shift+Enter 和保护窗外正常 Enter 保持原语义。",
+      "流式回复继续可视，但消息日志使用 aria-live=off 与 aria-busy；只有持久 completed/failed 事件进入独立 atomic status。",
+      "P4 UI 验收使用项目锁定 Electron Node 运行时、隔离开发数据根、动态前后端端口和 canonical vite.config.ts，不串入已安装版 18766。"
+    ],
+    "verification": [
+      "真实 Chrome 报告确认 composerFocusedOnOpen=true、imeCompositionEnterSuppressed=true、imePostCompositionEnterSuppressed=true。",
+      "完成播报为“贞贞创作 Agent 回复完成。下面有 3 个可直接继续的建议。”，完成后 log aria-busy=false 且 streamingLogLive=off。",
+      "一句话只创建 1 个持久 Session，刷新后恢复；3 个建议、tech-dark/pixel-light、1280/2560、reduced-motion 和地图避让均通过。",
+      "browserErrors=[]，画布 revision 1→1；Creator Agent/UI 与开发代理聚焦合同 34/34、Node 语法、TypeScript 和 diff-check 通过。",
+      "验收 Provider 调用、画布写入、FFmpeg、Electron build、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "自动 CompositionEvent/CDP Enter 与 ARIA DOM 证据不替代 Windows/macOS 真实输入法人工操作或 NVDA/VoiceOver 人工听读。",
+      "真实 Provider 作品质量、两个真实 Codex 对话并发写画布、正式安装包和公开 Release 仍需独立证据。"
+    ]
+  },
+  "creatorAgentReplyStopRemoteTaskIsolation": {
+    "status": "development-acceptance",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-p4-ui-acceptance-v1",
+    "highlights": [
+      "流式回复期间显示轻量“停止回复”操作和白话说明，明确只停止本轮文字输出，不取消画布中已提交的图像、视频或音频远端任务。",
+      "后端按精确 responseId 写入唯一 assistant.response.stopped 终态，保留已持久 delta；重复停止、停止/完成竞态与断线恢复幂等。",
+      "停止后恢复原始创作要求供继续编辑，未完成计划不进入 latestPlan；已有计划、画布 revision 与远端任务不受影响。",
+      "停止状态只通过独立 atomic status 播报一次；消息卡的视觉停止提示对辅助技术隐藏，避免重复朗读。"
+    ],
+    "verification": [
+      "真实 Chrome 第二轮回复停止确认 terminalEventCount=1、partialTextPreserved=true、原始 draft 恢复、planUnchanged=true。",
+      "持久 stopped 回执确认 providerCalls=0、remoteTasksAffected=0，且同 responseId 不存在 completed 终态。",
+      "完成与停止播报、IME 门禁、tech-dark/pixel-light、1280/2560、reduced-motion 和地图避让均通过。",
+      "browserErrors=[]，画布 revision 1→1；Creator Agent Sessions/Routes/UI 聚焦回归 72/72，脚本语法和 TypeScript 检查通过。",
+      "验收 Provider 调用、生产画布写入、FFmpeg、Electron build、GitHub push、tag 与 Release 操作为 0。"
+    ],
+    "boundaries": [
+      "本记录只证明本地回复流的停止、恢复与零远端副作用，不代表真实 Provider 远端取消能力。",
+      "人工 NVDA/VoiceOver、Windows/macOS 真实 IME、正式安装包和公开 Release 仍需独立证据。"
+    ]
+  },
+  "creatorAgentSourceBackedAudioPlan": {
+    "status": "development",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-production-document-v1",
+    "highlights": [
+      "Story/剧本规划新增第 10 份版本化前期文档 AudioPlan，位于 ShotList 与 Storyboard 之间，并精确绑定来源 ShotList ID、版本、内容摘要和继承的 ScriptDoc 来源摘要。",
+      "只从明确的对白/台词、旁白/解说、音乐/配乐/BGM、环境声/氛围声、音效/SFX 标签提取声音条目；普通叙述不推断，每条保留镜头与精确一基来源行号。",
+      "五类分轨和 per-shot layered mix 保持 source-draft/not-requested；时间、响度、音色、Provider、模型、素材、结果和生成均不擅自填写。",
+      "确认只接受当前文本与分轨结构，必须先确认精确 ShotList 或一次确认完整依赖链，且不触发任何生成副作用。"
+    ],
+    "verification": [
+      "agentControlCreative、creatorAgentSessions、creatorAgentRoutes 与 CreatorAgentPanel 聚焦回归 103/103 通过。",
+      "显式标签样例精确得到 ambience、music、dialogue、voiceover、sfx 五条和来源行号 4/5/8/9/10；未标注的警笛叙述被排除。",
+      "Node 语法检查与 npm run type-check 通过。",
+      "本切片 Provider 调用、音频生成/上传、任务提交、画布写入、FFmpeg、Electron build、GitHub 与发布操作均为 0。"
+    ],
+    "boundaries": [
+      "当前证据是确定性来源映射和代码级回归，不代表真实浏览器/Electron 人工交互、真实音频 Provider 或听感质量验收。",
+      "正式 build、打包安装包、GitHub push、tag 和公开 Release 仍需独立授权与证据。"
+    ]
+  },
+  "creatorAgentEvidenceBackedEditDecisionList": {
+    "status": "development",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-edl-v1",
+    "highlights": [
+      "Story/剧本规划新增第 11 份版本化生产文档 EDL，精确依赖当前 CandidateReview ID、版本、内容摘要与 Canvas revision。",
+      "只纳入实际视频结果、真实评审已验证、全部硬门通过且当前显式采用回执有效的候选；旧 accepted、图片、Prompt、完成标记和模糊匹配失败关闭。",
+      "每段绑定 CandidateReview evidence、PromptPack、Storyboard、ShotList、source shot、candidate 与 node，并按 PromptPack 镜头顺序排列；EDL 不复制签名/远程 URL。",
+      "只有持久结果元数据中的实际时长可以生成时间码；请求 duration/durationSec 仅作提示，首个缺口之后的时间线保持未知。",
+      "初始剪辑是完整源片段加默认硬切的审阅草案，音频/字幕未分配；确认不会创建剪辑节点、修改时间线、调用 Provider、渲染或写画布。"
+    ],
+    "verification": [
+      "agentControlCreative、creatorAgentSessions、creatorAgentRoutes 与 CreatorAgentPanel 聚焦回归 82/82 通过。",
+      "两镜头证据验证第一段持久 output.duration=6 覆盖请求 duration=8，第二段只有请求 duration=9 时 source/timeline 时间码均保持 null。",
+      "确认链验证 CandidateReview 精确来源、稳定 sequence evidence digest、零 Provider 调用与零画布写入；EDL resultEvidence 不包含 URL。",
+      "Node 语法检查与 npm run type-check 通过。",
+      "本切片未运行正式 build、Electron Builder、FFmpeg、GitHub push、tag 或 Release。"
+    ],
+    "boundaries": [
+      "当前证据是代码级真实候选/采用/时长合同，不代表真实浏览器/Electron EDL 人工交互、真实媒体探测或 VideoEdit 时间线落地。",
+      "剪辑播放、转场/字幕/音频设计、渲染质量、打包安装包和公开 Release 仍需后续独立证据与授权。"
+    ]
+  },
+  "creatorAgentEvidenceBackedQcReport": {
+    "status": "development",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-qc-report-v1",
+    "highlights": [
+      "Story/剧本规划新增第 12 份版本化生产文档 QCReport，精确依赖当前 EDL ID、版本、内容摘要、Canvas revision 与稳定 QC evidence digest。",
+      "QC 规划只消费 Creator Session 已持久化且精确匹配的 t8-creator-artifact-verification-v1 回执；规划和确认均不扫描文件、不下载、不解码、不调用 Provider、不写画布。",
+      "每个 EDL 片段固定检查创作资格、结果身份、真实源时长、托管文件、SHA-256、魔数/MIME、媒体类型、解码索引、分辨率、索引时长一致性与 Run/node/asset 关联。",
+      "证据缺失或字段不全保持 unknown，矛盾证据为 fail，只有精确持久回执才为 pass；请求时长、完成状态、缩略图、URL 和普通节点元数据不能冒充物理证据。",
+      "报告仅保留有界 asset ID、content hash、verification digest、Run ID、尺寸、时长和时间戳，不复制签名/远程 URL、本机路径、凭据或 Provider payload。"
+    ],
+    "verification": [
+      "agentControlCreative、creatorAgentSessions、creatorAgentRoutes 与 CreatorAgentPanel 聚焦回归 82/82 通过。",
+      "两段 EDL 证据验证无回执时 22 项检查全部保持 unknown；精确回执可使证据齐全片段通过，而缺真实源时长片段仍保持 unknown。",
+      "魔数核验失败回执使报告和对应片段进入 fail；报告内容不包含 /files/ 或 http(s) URL。",
+      "四个相关后端文件 Node 语法检查与 npm run type-check 通过。",
+      "本切片 Provider 调用、文件扫描、下载、画布写入、FFmpeg、Electron build、GitHub 与发布操作均为 0。"
+    ],
+    "boundaries": [
+      "当前证据是代码级持久回执消费与确定性 QC 合同，不代表真实浏览器/Electron 人工交互、真实文件核验或损坏媒体样本验收。",
+      "DeliveryManifest、真实交付、正式 build、打包安装包、GitHub push、tag 和公开 Release 仍需后续独立证据与授权。"
+    ]
+  },
+  "creatorAgentEvidenceBackedDeliveryManifest": {
+    "status": "development",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-delivery-manifest-v1",
+    "highlights": [
+      "Story/剧本规划新增第 13 份版本化生产文档 DeliveryManifest，精确依赖当前 QCReport ID、版本、内容摘要、Canvas revision 与稳定 delivery evidence digest。",
+      "规划只消费 Creator Session 已持久化且完成的 t8-creator-delivery-evidence-v1 回执；规划和确认均不打包、不扫描文件夹、不下载、不调用 Provider、不渲染、不交付、不写画布。",
+      "所有 QC 检查通过、asset ID 与 64 位 SHA-256 有效，且同 revision 回执的 package/selection digest、item/file/byte 计数和唯一文件对自洽并精确覆盖条目后，才进入 included-and-verified。",
+      "文档区分 awaiting-qc-report、blocked-by-qc、awaiting-current-delivery、delivered-needs-license-review 与 delivered-and-verified；许可证未知不会冒充 release ready。",
+      "清单仅保留有界包名、摘要、作用域、revision、计数、字节、许可证汇总、asset ID/hash，不复制本机路径、远程/签名 URL、凭据或 Provider payload。"
+    ],
+    "verification": [
+      "agentControlCreative、creatorAgentSessions、creatorAgentRoutes 与 CreatorAgentPanel 聚焦回归 82/82 通过。",
+      "回归覆盖 QC unknown/fail 阻断、QC 全通过但无当前交付回执、精确回执许可证未知、精确回执许可证齐全以及 hash 篡改失配。",
+      "匹配包验证 package/selection digest、同 Canvas revision、item/file/byte 数量、唯一 asset/hash 文件对与全部 QC 条目覆盖；清单内容不包含本机路径或 http(s) URL。",
+      "相关后端文件 Node 语法检查与 npm run type-check 通过。",
+      "本切片 Provider 调用、打包、文件扫描、下载、交付文件写入、画布写入、FFmpeg、Electron build、GitHub 与发布操作均为 0。"
+    ],
+    "boundaries": [
+      "当前证据是代码级持久交付回执消费与确定性清单合同，不代表真实浏览器/Electron 人工交互、真实交付目录、损坏包或许可证法律审查。",
+      "真实交付、正式 build、打包安装包、GitHub push、tag 和公开 Release 仍需后续独立证据与授权。"
+    ]
+  },
+  "creatorAgentAuthoritativeNodeAccountingAndLocalUtilities": {
+    "status": "development",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creative-capability-graph-v1",
+    "highlights": [
+      "统一能力图对权威 Canvas Node Schema 的 70 个节点逐一记录 direct-capability、internal-compat、semantic-superseded 或 unexplained；新增未解释节点和过期归类均失败关闭。",
+      "当前 70/70 节点已解释：61 个直接能力节点、1 个内部兼容节点、8 个语义替代节点、0 个公共能力缺口、0 个未知节点引用和 0 个未解释节点。",
+      "新增 video.extract-frames、image.remove-solid-background 与 image.resample-upscale 三项专用能力，建立源节点到隐藏本地处理节点再到输出节点的可编辑工作流。",
+      "抽帧识别标准视频结果字段；背景移除只承诺边缘连通纯色背景，不宣称通用 AI 分割；Lanczos3 只承诺等比重采样，不宣称 AI 超分或细节修复。",
+      "通用 graph.node-add 仍拒绝隐藏节点；专用动作校验上游素材类型，CanvasPatch 应用和本地运行分别确认。"
+    ],
+    "verification": [
+      "生成能力图为 31 项能力、31 个 handler、150 个逐操作风险合同、193 个运行时条目和 14 个完整 plan/preview/apply/run/verify 节点。",
+      "三项本地运行的操作策略均为 L1、boundary=local-compute、approvalRequired=true。",
+      "创作服务回归 33/33、能力图联合回归 39/39 通过。",
+      "npm run feature-sync:check、npm run type-check、Node 语法和 git diff --check 通过。",
+      "计划阶段 Canvas 写入和 Provider 调用均为 0；本切片未运行真实 Provider、Electron、正式 build、打包、GitHub 或发布。"
+    ],
+    "boundaries": [
+      "当前证据验证源码、计划、路由绑定和生成能力图合同，不代表真实浏览器媒体处理或物理结果验收。",
+      "纯色背景移除不是复杂背景、人像发丝或任意主体的 AI 抠图；Lanczos 重采样不产生新的真实细节。",
+      "正式 build、Electron、打包安装包、GitHub push、tag 和公开 Release 仍需后续独立证据与授权。"
+    ]
+  },
+  "creatorAgentLocalMediaCliEntrypoints": {
+    "status": "development",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-agent-control-response-v1",
+    "highlights": [
+      "新增 zcanvas media extract-frames、media remove-solid-background 与 media resample-upscale 三个真实 CLI 入口，精确映射已有高层本地媒体能力。",
+      "抽帧 count 仅允许 1..20，重采样 scale 仅允许 1.5、2、3、4；三项命令都要求明确上游 node/source，非法输入在网络请求前失败关闭。",
+      "命令复用现有创作计划、审批恢复与完成链；计划未就绪时返回冲突，不会错误发起审批，CanvasPatch 应用和本地运行仍分别确认。",
+      "commandCatalog 补回已实现但此前漏记的 asset place/place-apply，帮助、能力报告和 Skill 能发现完整素材放置闭环。",
+      "项目 Skill 在 500 行限制内给出可复制命令，不再要求 Agent 只凭内部 capability ID 猜调用方式。"
+    ],
+    "verification": [
+      "zcanvas --help 实测返回 media 三个子命令、三条示例以及 asset place/place-apply。",
+      "离线 zcanvas capabilities 实测 media.extract-frames、media.remove-solid-background、media.resample-upscale 均为 implemented=true、verified=true，证据为 local contract test。",
+      "zcanvasCli、creativeCapabilityManifest 与 agentControlCreative 聚焦回归 64/64 通过。",
+      "node --check tools/zcanvas-cli/src/cli.cjs、npm run feature-sync:check 与 npm run type-check 通过。",
+      "本切片未运行真实 Provider、Desktop 媒体处理、Electron build、打包、GitHub 或发布。"
+    ],
+    "boundaries": [
+      "当前证据证明 CLI 参数、能力发现以及计划/审批合同，不代表真实浏览器媒体输出或物理结果验收。",
+      "纯色背景移除仍不是通用 AI 抠图，Lanczos 重采样仍不是 AI 超分。",
+      "正式 build、Electron、安装包、GitHub push、tag 和公开 Release 需要后续独立证据与明确授权。"
+    ]
+  },
+  "creatorAgentAttachmentFailedItemRetry": {
+    "status": "development",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-attachment-retry-v1",
+    "highlights": [
+      "图片、视频、音频和文档附件上传失败后，失败项同时提供就地重试与移除，不要求用户重新选择原文件。",
+      "重试只提交被点中的失败文件，继续复用最多 3 路并发、真实上传进度、单项取消、项目素材持久化与会话 Asset 引用。",
+      "原始 File 只保留在当前面板内存 Map；上传成功、取消或移除、切换画布和组件卸载时都会释放。",
+      "上传批次进行中禁用并拒绝重试；文件引用已失效时白话提示重新选择，不产生空上传。",
+      "失败态操作区兼容常规和窄屏布局，重试与移除均有独立无障碍名称。"
+    ],
+    "verification": [
+      "creatorAgentUi 聚焦回归 30/30 通过。",
+      "npm run type-check 通过。",
+      "源码测试覆盖 File 引用保留、retryUpload 单项重投、内存引用失效提示以及 Base64 禁止规则。",
+      "本切片未运行真实 Provider、真实浏览器网络故障、Electron build、打包、GitHub 或发布。"
+    ],
+    "boundaries": [
+      "当前证据是源码与 UI 合同，不代表真实浏览器弱网、超大附件、磁盘文件被移动或人工读屏验收。",
+      "失败文件引用不跨刷新恢复；刷新后应重新选择本地文件，不能把原始 File 持久化到会话。",
+      "正式 build、Electron、安装包、GitHub push、tag 和公开 Release 需要后续独立证据与明确授权。"
+    ]
+  },
+  "creatorAgentAttachmentOnlyStart": {
+    "status": "development",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-attachment-only-start-v1",
+    "highlights": [
+      "图片、视频、音频、文本和普通文件持久上传后，即使没有输入文字也可通过按钮或 Enter 直接发起素材分析。",
+      "默认分析要求由后端会话服务统一生成，Canvas UI、HTTP API 与本地 Agent 共用同一规则，不在客户端各自猜测。",
+      "默认要求只包含附件类型和数量，不含文件名、URL、素材 ID、本地路径或其他附件标识。",
+      "Agent 会先说明可直接使用内容与缺失信息，再给出 3 个可执行下一步，并明确不自动生成或修改画布。",
+      "已有附件时输入框和发送按钮提供明确的轻量提示；原文字发送、建议、IME 防误触和断线幂等恢复不变。",
+      "会话事件以 attachments-only 输入模式区分系统默认分析要求，新会话使用简短素材类型标题；停止回复不会把系统默认要求误填成用户草稿。"
+    ],
+    "verification": [
+      "creatorAgentSessions、creatorAgentRoutes 与 creatorAgentUi 聚焦回归 75/75 通过。",
+      "appendTurn 与 beginStreamingTurn 均覆盖空文字附件请求，真实 HTTP 路由返回 201 并保留项目 Asset 绑定。",
+      "回归确认默认请求不泄露文件名、URL、附件 ID 或素材 ID。",
+      "计划阶段 Canvas 写入 0 次、Provider 调用 0 次；附件 Base64 正文仍被拒绝。",
+      "Node 语法、TypeScript type-check 与 feature-sync:check 通过；本切片未运行真实 Provider、Electron build、打包、GitHub 或发布。"
+    ],
+    "boundaries": [
+      "当前证据包含会话服务、真实本地 HTTP 路由和源码 UI 合同，不代表真实浏览器拖放、粘贴或读屏人工验收。",
+      "附件必须先持久上传；失败或仍在上传的文件不能作为可发送附件，刷新后本地 File 仍需重新选择。",
+      "正式 build、Electron、安装包、GitHub push、tag 和公开 Release 需要后续独立证据与明确授权。"
+    ]
+  },
+  "creatorAgentImportedAssetSessionStart": {
+    "status": "development",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-imported-asset-start-v1",
+    "highlights": [
+      "zcanvas 可用一个或多个已导入项目素材直接建立持久 Creator Session，无需额外文字；无文字且无素材仍失败关闭。",
+      "Agent Control 在当前项目作用域内检查素材，并把项目 asset ID 解析为安全媒体引用和规范附件类型。",
+      "本机路径、source locator、私有文件名和原始 Provider URL 不写入 Creator Session、CreativePlan 或公开回执。",
+      "Canvas UI、HTTP API 和 zcanvas 共用附件单独开工提示、短标题、输入模式、类型推断和 recipe 推断。",
+      "图片、视频和音频附件分别进入与 Canvas 对话一致的编辑图片、编辑视频和音频规划路径；规划阶段保持画布写入 0 次、Provider 调用 0 次。"
+    ],
+    "verification": [
+      "agentControlCreativeRoute、agentControlCreatorSessions 与 zcanvasCli 聚焦回归 27/27 通过。",
+      "Creator Agent Sessions、Routes、UI、Agent Control 与 zcanvas CLI 扩展回归 102/102 通过。",
+      "真实本地 HTTP Creator Session 路由保留 asset ID 和安全 /api/project-assets/<id>/media 引用，并记录 attachments-only 输入模式。",
+      "图片素材无文字计划返回 edit-image；私有本机路径和测试文件名均未出现在响应、会话或公开回执。",
+      "Node 语法、npm run type-check 与 npm run feature-sync:check 通过。",
+      "本切片未运行真实 Provider、Desktop 配对、Electron build、打包、GitHub 或发布。"
+    ],
+    "boundaries": [
+      "当前证据包含真实本地 HTTP 路由、会话持久化和 CLI 参数合同，不代表真实浏览器拖放或 Desktop 配对人工验收。",
+      "素材必须已经持久化到当前项目；本地路径不是 Creator Session 输入，无法解析或跨项目的素材会失败关闭。",
+      "正式 build、Electron、安装包、GitHub push、tag 和公开 Release 需要后续独立证据与明确授权。"
+    ]
+  },
+  "creatorAgentExplicitNodeReferences": {
+    "status": "development",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-explicit-node-references-v1",
+    "highlights": [
+      "Creator Agent 输入栏新增轻量“@ 引用选区”，一次固定最多 8 个当前节点；之后改变画布临时选区不会改写本轮引用。",
+      "引用节点以可移除芯片显示名称和持久素材数量；移除只改变本轮对话上下文，不删除节点、素材、运行记录或采用状态。",
+      "显式引用优先于临时选区进入下一步建议；引用 ID 与类型写入有界会话上下文和建议绑定摘要，引用变化会让旧建议失败关闭。",
+      "被引用节点的可用持久 Run 输出自动合并进消息附件，只使用安全 /api/project-assets/<id>/media 引用，不复制本机路径、签名 URL、source locator 或 Base64。",
+      "引用素材与手动附件按 asset ID 或引用去重并共用 16 项上限；跨项目、缺失、损坏或未核验素材不会被附加。",
+      "没有持久输出的节点仍保留为语义引用，但界面不会冒充已经附加媒体。",
+      "成功完成回复后清空显式引用；停止、失败或断线恢复时保留，避免用户重新选择。"
+    ],
+    "verification": [
+      "Creator Agent Sessions 与 UI 聚焦回归 56/56 通过。",
+      "语义测试覆盖显式引用覆盖临时选区、8 项上限、去重、建议 digest 变化和旧建议失败关闭。",
+      "源码 UI 合同覆盖轻量按钮、可移除芯片、安全项目媒体引用、附件合并、完成清理与主题样式。",
+      "backend Creator Agent Session 服务 Node 语法检查与 npm run type-check 通过。",
+      "本切片未调用 Provider、执行 Canvas Patch、运行节点、Electron build、打包、GitHub 或发布。"
+    ],
+    "boundaries": [
+      "当前证据是会话语义和源码 UI 合同，不代表真实浏览器鼠标、键盘、触控或读屏人工验收。",
+      "只有最近可解析且状态为 available 的持久 Run 输出会随行；无持久结果时只提供节点语义。",
+      "正式 build、Electron、安装包、GitHub push、tag 和公开 Release 需要后续独立证据与明确授权。"
+    ]
+  },
+  "creatorAgentCliNodeReferences": {
+    "status": "development",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-cli-node-references-v1",
+    "highlights": [
+      "zcanvas ask 支持通过 --node 引用最多 8 个当前画布节点，并与 Canvas Agent 的 @ 引用选区共用 referencedNodeIds/referencedNodeTypes 协议。",
+      "CLI 自动去重并限制节点数量；节点引用随同一句话计划保存到本地检查点和同一个持久 Creator Session。",
+      "Agent Control 在 CreativePlan 创建和 Creator Session 同步两个入口都验证节点属于当前项目与画布。",
+      "不存在、已删除或跨画布的引用在计划阶段立即白话失败关闭，不会留下无效计划。",
+      "权威节点类型由后端画布文档推导并覆盖客户端值；节点 data、Prompt、媒体正文、本机路径和 Provider 字段不会写入会话。",
+      "引用只提供语义上下文，不运行、删除、修改或采用节点；计划阶段 Canvas 写入 0 次、Provider 调用 0 次。"
+    ],
+    "verification": [
+      "zcanvasCli、agentControlCreativeRoute 与 agentControlCreatorSessions 三入口定向回归 27/27 通过。",
+      "真实本地 HTTP CreativePlan 路由覆盖有效引用和已删除引用的立即失败关闭。",
+      "真实本地 HTTP Creator Session 路由覆盖权威类型推导、伪造类型覆盖、Canvas revision 绑定与幂等同步。",
+      "隐私回归确认节点私有 Prompt 不出现在计划、会话或公开响应。",
+      "CLI 与 Agent Control 路由 Node 语法检查通过；本切片未调用 Provider、CanvasPatch 或运行节点。"
+    ],
+    "boundaries": [
+      "当前证据包含 CLI 参数、真实本地 HTTP 路由和会话持久化，不代表运行中 Desktop/Codex 人工配对验收。",
+      "节点引用本身不自动附加媒体；Canvas UI 的持久媒体随行仍只接受已验证项目 Asset。",
+      "正式 build、Electron、安装包、GitHub push、tag 和公开 Release 需要后续独立证据与明确授权。"
+    ]
+  },
+  "creatorAgentCliContinueNodeReferences": {
+    "status": "development",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-cli-continue-node-references-v1",
+    "highlights": [
+      "zcanvas continue 支持在原 Creator Session 的本轮修改中通过 --node 固定最多 8 个画布参考节点。",
+      "未应用的计划在未重新指定节点时保留原引用；已应用生产的新一轮修改默认清空旧引用，避免陈旧上下文污染。",
+      "已应用生产仍只修改原权威 Story 或生产节点；参考节点作为增量计划的有界支持上下文，不会被批量写入。",
+      "普通 create 与 production.continue 等 action CreativePlan 共用节点归属验证，缺失或跨画布节点在规划前失败关闭。",
+      "Creator Session 同步再次验证节点并由后端推导类型，不复制节点 data、Prompt、媒体正文、本机路径或 Provider 字段。",
+      "引用更新不触发 CanvasPatch、运行、采用、删除或 Provider 外发。"
+    ],
+    "verification": [
+      "zcanvasCli、agentControlCreativeRoute 与 agentControlCreatorSessions 定向回归 27/27 通过。",
+      "纯函数回归覆盖未应用计划保留原引用、已应用生产清空陈旧引用和本轮明确引用覆盖。",
+      "action CreativePlan 的缺失节点引用在真实本地 HTTP 路由返回 CREATOR_REFERENCE_NODE_NOT_FOUND。",
+      "CLI 与 Agent Control 路由 Node 语法检查通过。",
+      "本切片未调用 Provider、执行 CanvasPatch、运行节点、Electron build、打包、GitHub 或发布。"
+    ],
+    "boundaries": [
+      "当前证据不代表运行中 Desktop/Codex 人工配对、真实 approval/apply 或浏览器交互验收。",
+      "引用节点是支持上下文，不自动变为增量 Patch 目标；原权威生产节点保持唯一写入目标。",
+      "正式 build、Electron、安装包、GitHub push、tag 和公开 Release 需要后续独立证据与明确授权。"
+    ]
+  },
+  "creatorAgentRotatingStarterIdeas": {
+    "status": "development",
+    "date": "2026-07-27",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-starter-ideas-v1",
+    "highlights": [
+      "Creator Agent 空白会话从 4 组共 12 条高质量创作入口中稳定显示 3 条，覆盖剧本、角色、分镜、图像、视频、声音、广告、MV、连续性和现有素材续作。",
+      "初始分组只由会话种子和有界画布结构摘要决定；同一会话、同一上下文及刷新后保持一致，不产生每次渲染随机跳动。",
+      "用户可点轻量“换一批”在 4 组间循环；当前轮次按会话与上下文本地持久化，按钮不调用模型、不提交任务、不写画布。",
+      "画布 revision、节点/连线计数、选中/显式引用节点类型及失败计数变化时自动形成新的上下文键；Prompt、路径、URL、凭据和媒体正文不进入该键。",
+      "空白想法是普通自然语言新请求，不携带 SuggestionSet 回执；第一轮之后继续使用后端权威 3 条建议、能力门禁与过期回执失败关闭。"
+    ],
+    "verification": [
+      "稳定哈希、类型归一、4 组轮换、12 条无重复与上下文变化纯函数回归通过。",
+      "Creator Agent 纯函数/UI 聚焦回归 35/35 通过。",
+      "Creator Session、真实 HTTP Routes、Creator UI、Agent Control 与 zcanvas CLI 扩展回归 107/107 通过。",
+      "npm run type-check 通过；本切片未调用 Provider、写画布、运行节点、Electron build、打包、GitHub 或发布。"
+    ],
+    "boundaries": [
+      "当前目录是本地策展入口，不是模型生成、推荐排序或用户行为画像。",
+      "空白入口只负责降低首次开工成本；正式计划、运行、采用、交付和画布变更仍遵循原有预览与确认边界。",
+      "尚未进行真实浏览器触控、读屏和多主题人工验收；正式发布仍需独立授权与证据。"
+    ]
+  },
+  "creatorAgentReferenceVideoBreakdown": {
+    "status": "development",
+    "date": "2026-07-28",
+    "releaseIncluded": false,
+    "schema": "t8-reference-video-breakdown-v2",
+    "highlights": [
+      "用户上传或引用一个当前项目视频并说“帮我拉片”后，shot-breakdown 不再创建普通 Story，而是形成专用 ReferenceBreakdown 计划。",
+      "计划只绑定一个真实视频的 asset ID、content revision、SHA-256、文件名、MIME、字节数和安全项目媒体 URL，不复制本机 managed path。",
+      "确认后始终预览 upload/video、text、llm、output 的视觉分析主链；当运行目录确认 seedance-nz/whisper-1 已安装、Key 就绪且可执行时，再加入 audio/Whisper 可选证据节点和 upload→audio→llm 文本支路。两条路径都不自动运行。",
+      "拉片 LLM 固定使用 frames 模式，最多抽取 48 个均匀采样帧、长边 720；每帧输入前带近似 HH:MM:SS.mmm 时间码，镜头边界不得伪装成逐帧精确证据。",
+      "Audio 节点的真实输入合同新增 video，Whisper 可直接消费上游 MP4；普通 Suno、Seed Audio 和既有音频输入行为保持不变。",
+      "Whisper 拉片支路请求官方允许的 verbose_json；Provider、代理路由和前端只保留实际响应中的有效 start/end/text 分段，并把有界时间窗格式化为 [HH:MM:SS.mmm - HH:MM:SS.mmm] 证据文本。",
+      "有有效 Provider 分段时标记 transcriptAttribution=provider-segments，只可对与近似镜头区间重叠的语音作保守引用；没有分段、分段无效或只有普通文本时自动保持 transcriptAttribution=untimed，不伪造时间戳或逐镜头归属。",
+      "Whisper 只证明可转写语音，不是音乐、环境声或 SFX 分类器；这些声音维度在没有独立可验证证据时继续标为未知，不能从画面或转写猜测。",
+      "模型选择只强制要求一个 vision=true 的语言模型；Whisper 是非阻断可选证据，缺 Key、未安装或不可执行时记录 blocked 回执并诚实退回 frames-only，不静默换平台或模型。",
+      "CanvasPatch 精确映射 LLM 节点运行字段：平价AI小屋使用 seedance-nz/zhenzhen/providerModel，高级来源和默认 AI 工坊保持各自合同。",
+      "每轮恰好 3 个拉片专属建议；点击后保留同一视频版本、SHA-256、recipe 和视觉兼容约束。",
+      "运行后的拉片结果只从来源 asset ID、content revision 与 SHA-256 完全一致的 LLM 节点回收；结果 JSON 必须再次声明同一 sourceAsset，合法时间码镜头才进入版本化 ReferenceBreakdown。",
+      "结果回收白名单保存 summary、shots、limitations 与有界 evidence receipt；未知 Provider 字段、原始 payload、本机路径和串片结果不会进入作品文档。",
+      "已有匹配拉片节点时不再创建重复工作流；结果就绪进入 review，运行中、失败或结构无效进入 recover。无 CanvasPatch 的状态不会显示“发送到画布”按钮。",
+      "结果证据会从当前项目/画布最近 100 个 Run 中寻找同节点 NodeRun，并要求可重放输入快照再次绑定完全一致的视频版本、分析模式与输出 schema；节点有 requestId 时还必须与 Attempt 完全一致。",
+      "节点级 NodeRun 与 Attempt 已成功时即标记 verified，不错误等待整组 Run 的其他节点结束；执行中标记 pending，失败或停止标记 failed，身份、快照或 requestId 不一致标记 invalid-run-evidence。",
+      "拉片结果未达到 analysis-result-ready、当前文档摘要漂移或 Run/NodeRun/Attempt 尚未精确 verified 时，“核对拉片结果后继续规划关键帧和视频”保持禁用并显示白话原因；节奏和镜头语言建议仍可继续分析。",
+      "继续生产会把已核验的 1–240 镜时间码、镜头语法、动作、声音证据、未知项和版权安全改编要求转换为原创 storyboard Story 计划，保留来源素材 lineage，不重复创建 shot-breakdown，也不立即生成图像或视频。",
+      "无 CanvasPatch 的 review.reference-breakdown 与 recover.reference-breakdown 可作为原 Creator Session 的只读计划保存，不再错误进入补丁必填校验。"
+    ],
+    "verification": [
+      "G19.79 Creator Agent/Session/Route/UI 完整回归 123/123、拉片继续生产定向 3/3、npm run type-check、后端 Node 语法与 feature-sync:check 全部通过。",
+      "G19.79 端到端回归确认：未核验结果禁用继续项；精确核验后只创建一个原创 Story 与 2 镜 shot-list，recipe 为 storyboard，保留来源 asset ID，未创建第二套拉片链，Canvas 写入与 Provider 调用均为 0。",
+      "G19.78 Creator Creative/UI 完整回归 75/75、参考视频定向 8/8、Creator Agent 结果展示定向 1/1、npm run type-check、后端 Node 语法与 feature-sync:check 全部通过。",
+      "G19.78 回归覆盖整组 Run 仍运行但目标 NodeRun/Attempt 已成功的 verified 状态、目标执行仍运行的 pending 状态，以及 requestId 串用时失败关闭且不暴露错误 Run ID。",
+      "G19.77 Creator Creative/UI 完整回归 72/72、参考视频定向 5/5、Creator Agent 结果展示定向 1/1、npm run type-check 与后端 Node 语法通过。",
+      "G19.77 回归覆盖合法同源结果回收、服务端重算镜头时长、未知字段剥离、来源版本不一致拒绝、无关节点忽略、已有工作流不重复创建和无补丁计划防误点。",
+      "G19.76 聚焦回归 108/108 通过：Seedance NZ 前端/Provider 62/62、Agent Control 创作合同 36/36、Creator 模型决策 10/10。",
+      "Provider 测试验证 verbose_json multipart 请求、有效分段的毫秒级归一化、倒序无效分段过滤、普通 json/无分段自动降级；前端纯函数验证 1 小时以上时间码和 untimed 回退。",
+      "Creator Agent HTTP 路由 22/22 通过；zcanvas feature-sync 生成与检查均通过：7 项产物、31 项能力、193 项运行目录、70/70 节点，聚合摘要 d10c96a50e56156b0d583644acc823a204ba33a17e55f9047bbcd8b540194124。",
+      "Creator Agent、Agent Control、zcanvas 与能力图扩展回归 223/223 通过；可选 Whisper、CanvasPatch 和模型决策聚焦回归 46/46 通过。",
+      "Seedance NZ 前端、Provider、LLM 与 Creator 空白建议 TypeScript 回归 71/71 通过，包含真实 MP4 multipart Whisper 合同、Audio 视频端口和旧音频模式兼容。",
+      "Creator Agent HTTP 路由回归 22/22 通过，覆盖首次上传视频和不带附件点击建议两轮。",
+      "回归确认建议续聊仍绑定 asset-reference-video、questions=0；未配置 Whisper 时计划保持 upload/text/llm/output，回执保留 required=false 的 audio blocked 证据。",
+      "已就绪 Whisper 路径生成 upload/text/audio/llm/output 五节点与五条边，audio 文本端口明确连入 LLM；计划阶段 Provider 调用仍为 0。",
+      "固定文本模型以 CREATOR_MODEL_PREFERENCE_UNAVAILABLE 失败关闭，智能选择只返回 vision=true LLM；已保存的 Suno/音乐偏好不会被误用作视频转写。",
+      "后端 Node 语法、npm run type-check、70/70 节点与 193 项运行目录能力同步、JSON 和 git diff --check 通过。",
+      "本切片 Provider 调用、CanvasPatch 写入、生产节点运行、Electron build、打包、GitHub 和发布操作均为 0。"
+    ],
+    "boundaries": [
+      "继续生产不是拉片完成状态的猜测：必须同时核对当前作品文档、稳定内容摘要、来源素材版本与精确 Run/NodeRun/Attempt 账本；任一条件缺失都失败关闭。",
+      "已核验拉片只能作为原创 Story 的镜头语法参考；不得复制受保护角色、品牌、对白、独特内容或把参考来源冒充用户原创，也不会自动提交 Provider 或生成媒体。",
+      "只有同项目/画布、同节点身份、同来源输入快照且 requestId 一致的 Run/NodeRun/Attempt 才能标记 verified；没有账本、仍在运行、执行失败或证据不匹配会分别保留 awaiting、pending、failed 或 invalid 状态。",
+      "当前 verified 证明节点执行账本与回收文本的身份关联，不等于文本型拉片结果已经形成可物理下载的媒体产物；结构化结果仍以有界 outputDigest、来源素材哈希与作品文档版本为准。",
+      "结构错误、非法或倒序时间码、来源素材版本或 SHA-256 不一致均失败关闭；原始节点文字仍保留供创作者排查，但不会写入作品文档。",
+      "当前证据证明计划、素材身份、模型兼容、Whisper MP4/verbose_json 请求合同、可选分段保留、建议连续性和节点运行合同，不代表真实 Provider 已完成视频内容分析或语音转写。",
+      "官方文档证明 response_format 可取 verbose_json，但没有承诺返回结构一定含 segments；实现只消费响应中实际存在且通过校验的 start/end/text，缺失时保持 untimed。",
+      "采样帧时间标签与 Whisper 分段都不是逐帧或逐词证据；即使语音窗口与近似镜头重叠，也不得声称说话人身份、精确剪辑点或逐词同步。",
+      "音乐、环境声和 SFX 仍需独立可验证声音分析；当前实现保持未知而不是从语音转写或画面猜测。",
+      "真实 Provider 视觉理解、超长视频覆盖和多主题人工交互仍需显式运行与浏览器/Electron 验收。",
+      "正式 build、Electron、安装包、GitHub push、tag 和公开 Release 需要后续独立授权与证据。"
+    ]
+  },
+  "creatorAgentStructuredCanvasPatchPreview": {
+    "status": "development",
+    "date": "2026-07-28",
+    "releaseIncluded": false,
+    "schema": "t8-canvas-patch-v1",
+    "highlights": [
+      "Creator Agent 在确认写入画布前列出精确 CanvasPatch 的全部节点、连线与视口变更，不再只显示变更数量。",
+      "节点新增或恢复显示节点类型、ID 与 x/y 位置；移动显示目标位置；字段修改只显示字段名；删除显示关联连线数量。",
+      "连线新增或恢复显示源节点、源端口、目标节点、目标端口与连线 ID；删除显示连线 ID 和关联节点。",
+      "持久素材放置额外显示文件名、Asset ID、content revision、SHA-256 前缀、目标/来源端口与放置位置，便于确认 lineage。",
+      "预览采用结构字段白名单，不显示 raw before/after、字段值、Prompt、URL、metadata 或 Provider payload。",
+      "详细清单使用 Creator 主题 Token、有界滚动，并在窄屏下切换单列布局。"
+    ],
+    "verification": [
+      "Creator Agent UI 完整回归 33/33 通过，覆盖节点、连线、端口、位置、lineage、隐私白名单与主题/响应式样式合同。",
+      "Creator Agent Session、HTTP Route、Agent Control Creative 与 UI 联合回归 123/123 通过。",
+      "npm run type-check -- --pretty false 通过。",
+      "预览仍由服务端返回的 previewDigest 与精确 CanvasPatch 驱动；本切片未调用 Provider、应用 CanvasPatch 或运行节点。"
+    ],
+    "boundaries": [
+      "节点 patch 只显示字段路径，不显示字段内容；详细业务值仍在相应创作审阅界面中核对。",
+      "结构化预览不会扩大授权范围；写入仍需显式确认并应用同一 previewDigest 的精确补丁。",
+      "当前证据为源码、纯函数与合同回归；真实浏览器多主题、触控和读屏人工验收仍待后续进行。",
+      "正式 build、Electron、安装包、GitHub push、tag 和公开 Release 需要后续独立授权与证据。"
+    ]
+  },
+  "creatorAgentContextPriority": {
+    "status": "development",
+    "date": "2026-07-28",
+    "releaseIncluded": false,
+    "schema": "t8-creator-context-priority-v1",
+    "highlights": [
+      "Creator Agent 一句话开工和后续三建议统一按显式 @引用、当前选区、当前视口、CreatorSession 阶段、项目摘要的固定顺序选择焦点。",
+      "显式引用或选区存在时，不再被无关的全局失败任务、Story 阶段或项目摘要抢走。",
+      "没有引用和选区时，当前视口中的优先对象先于会话阶段和全项目摘要，面板同步显示当前视口回执。",
+      "只有没有对象焦点时才回退到失败恢复、拉片专属建议、Story 阶段或项目级建议。",
+      "SuggestionSet 的标签、ID、intent 与 operation contract 共享同一焦点分组，不会发生对象文案与全局恢复合同错配。",
+      "上下文仍只保存有界结构摘要；Prompt、媒体正文、URL、本机路径、凭据与 Provider payload 不进入焦点选择或回执。"
+    ],
+    "verification": [
+      "Creator Agent Session 与 UI 定向回归 60/60 通过。",
+      "Creator Agent Session、HTTP Route、Agent Control Creative 与 UI 联合回归 124/124 通过。",
+      "回归覆盖显式引用压过选区/失败/Story 阶段、选区压过失败/阶段、视口压过阶段，以及会话和项目摘要依次回退。",
+      "回归同时锁定显式引用、选区和视口焦点使用 selection suggestion ID，CreatorSession 阶段使用对应 Story suggestion ID。",
+      "backend/src/services/creatorAgentSessions.js Node 语法与 npm run type-check -- --pretty false 通过。"
+    ],
+    "boundaries": [
+      "视口焦点来自有界 24 对象结构摘要，不是整张画布截图或媒体内容上传。",
+      "全局失败仍会在没有引用、选区或视口焦点时优先触发保守恢复建议，不会被静默忽略。",
+      "固定优先级只决定本轮理解和建议焦点，不扩大写入、Provider、运行或浏览器授权。",
+      "正式 build、Electron、安装包、GitHub push、tag 和公开 Release 需要后续独立授权与证据。"
+    ]
+  },
+  "creatorAgentProductionScopeReceipt": {
+    "status": "development",
+    "date": "2026-07-28",
+    "releaseIncluded": false,
+    "schema": "t8-creator-production-scope-receipt-v1",
+    "highlights": [
+      "Creator Agent 阶段条下新增已完成、待完成、影响范围三项轻量回执。",
+      "已完成只读取 production.completedPhases；待完成由六阶段扣除真实完成项，不把计划或未来阶段冒充已完成。",
+      "影响范围只读取 production.invalidatedPhases；没有失效证据时明确显示当前没有已记录的阶段失效。",
+      "回执使用主题 Token、紧凑双列布局与长文本换行，不改变任何生产状态或授权。"
+    ],
+    "verification": [
+      "Creator Agent UI 回归 34/34 通过，覆盖三项回执字段、语义标签和主题样式。",
+      "Creator Agent Session、HTTP Route、Agent Control Creative 与 UI 联合回归 125/125 通过。",
+      "npm run type-check -- --pretty false 通过。"
+    ],
+    "boundaries": [
+      "本功能只展示持久 CreatorSession 生产状态，不推断素材完成、物理文件完成或 Provider 任务完成。",
+      "待完成表示尚无完成证据，不等于返修失效；只有 invalidatedPhases 才显示为受影响。",
+      "正式 build、Electron、安装包、GitHub push、tag 和公开 Release 需要后续独立授权与证据。"
+    ]
+  },
+  "creatorAgentLauncherStates": {
+    "status": "development",
+    "date": "2026-07-28",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-launcher-state-v1",
+    "states": [
+      "idle",
+      "replying",
+      "approval",
+      "running",
+      "completed",
+      "warning"
+    ],
+    "highlights": [
+      "Creator Agent 轻量启动器显示待命、回复中、待确认、运行中、已完成、需处理六种可读状态。",
+      "状态只从持久会话、流式回复、待确认 Patch/交付、真实活动 Run 与错误证据派生，不引入新的生产状态。",
+      "状态文本、状态点和主题 Token 同时表达；动态光环继续遵守 prefers-reduced-motion。"
+    ],
+    "verification": [
+      "Creator Agent UI 回归 35/35 通过，覆盖六种文案、data-status、ARIA 状态与主题样式。",
+      "Creator Agent Session、HTTP Route、Agent Control Creative 与 UI 联合回归 126/126 通过。",
+      "npm run type-check 通过。"
+    ],
+    "boundaries": [
+      "启动器状态是只读导航回执，不自动运行、不代替审批、不推进生产阶段。",
+      "回复完成只表示本轮持久回复完成，不代表素材、Run、作品或交付完成。",
+      "正式 build、Electron、安装包、GitHub push、tag 和公开 Release 需要后续独立授权与证据。"
+    ]
+  },
+  "creatorAgentLauncherMotionLifecycle": {
+    "status": "development",
+    "date": "2026-07-28",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-launcher-motion-lifecycle-v1",
+    "highlights": [
+      "Creator Agent 启动器的装饰光环只在页面可见且面板关闭时运行。",
+      "页面进入后台或面板打开时暂停动画，同时保留可读状态文本、状态点和低强度静态光环。",
+      "重新回到可见页面并关闭面板后恢复动画；prefers-reduced-motion 仍拥有更高的系统级降动效约束。"
+    ],
+    "verification": [
+      "Creator Agent UI 回归 36/36 通过，覆盖 visibilitychange 监听、卸载清理、data-motion-active 与暂停样式。",
+      "Creator Agent Session、HTTP Route、Agent Control Creative 与 UI 联合回归 127/127 通过。",
+      "npm run type-check 通过。"
+    ],
+    "boundaries": [
+      "暂停的只有装饰性光环，不暂停回复、Run、审批或持久化任务。",
+      "本切片不声称完成全部低资源模式、浮动安全区或正式多主题视觉验收。",
+      "正式 build、Electron、安装包、GitHub push、tag 和公开 Release 需要后续独立授权与证据。"
+    ]
+  },
+  "creatorAgentMiniMapAdaptiveAnchor": {
+    "status": "development",
+    "date": "2026-07-28",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-minimap-anchor-v1",
+    "highlights": [
+      "Creator Agent 启动入口根据当前可见 MiniMap 的实际矩形自适应定位，不再依赖固定主题高度猜测。",
+      "入口与 MiniMap 保持同一右边界和 12px 上方安全间距，响应主题、窗口与系统缩放变化。",
+      "MiniMap 临时隐藏时保留最后一个有效锚点；不存在可用 MiniMap 时使用原响应式保底位置。"
+    ],
+    "verification": [
+      "Creator Agent UI 回归 37/37 通过，覆盖 MiniMap 查询、可见性边界、ResizeObserver、窗口 resize、清理和 CSS 变量保底。",
+      "Creator Agent Session、HTTP Route、Agent Control Creative 与 UI 联合回归 128/128 通过。",
+      "npm run type-check 通过。"
+    ],
+    "boundaries": [
+      "定位只读取屏幕几何，不读取或修改节点、连线、Prompt、媒体或 Provider 数据。",
+      "本切片没有宣称完成 MiniMap 永久关闭或所有右侧抽屉占用时的最终重排规则。",
+      "正式 build、Electron、安装包、GitHub push、tag 和公开 Release 需要后续独立授权与证据。"
+    ]
+  },
+  "creatorAgentRightPanelSafeArea": {
+    "status": "development",
+    "date": "2026-07-28",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-right-panel-safe-area-v1",
+    "highlights": [
+      "Creator Agent 启动入口检测资源库与生成历史面板的真实矩形，只对与入口垂直相交的右侧占用进行避让。",
+      "空间足够时入口平滑移动到面板左侧；窄屏没有安全宽度时隐藏并移出键盘焦点顺序。",
+      "面板挂载、卸载和尺寸变化会自动重测；关闭占用面板后恢复 MiniMap 锚点。"
+    ],
+    "verification": [
+      "Creator Agent UI 回归 38/38 通过，覆盖两类右侧面板、相交检测、MutationObserver、ResizeObserver、窄屏失败关闭和焦点释放。",
+      "Creator Agent Session、HTTP Route、Agent Control Creative 与 UI 联合回归 129/129 通过。",
+      "npm run type-check 通过。"
+    ],
+    "boundaries": [
+      "避让只读取元素几何与可见性，不读取或修改画布创作内容。",
+      "全屏模态继续由自身遮罩和焦点合同管理，不作为普通右侧抽屉强行位移入口。",
+      "正式 build、Electron、安装包、GitHub push、tag 和公开 Release 需要后续独立授权与证据。"
+    ]
+  },
+  "creatorAgentEffectsControl": {
+    "status": "development",
+    "date": "2026-07-28",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-effects-control-v1",
+    "highlights": [
+      "Creator Agent 面板右上角提供装饰特效开关，默认开启，并在本机持久保存创作者选择。",
+      "关闭后停止入口光环旋转/模糊和面板装饰动画，保留状态文字、审批/Run 证据与安全定位。",
+      "日间与夜间使用独立语义变量控制透明度、模糊和速度，系统 reduced-motion 继续优先。"
+    ],
+    "verification": [
+      "Creator Agent UI 回归 39/39 通过，覆盖本地持久化、ARIA 按压状态、日夜变量、关闭动画和低资源样式。",
+      "Creator Agent Session、HTTP Route、Agent Control Creative 与 UI 串行联合回归 131/131 通过。",
+      "npm run type-check 通过。"
+    ],
+    "boundaries": [
+      "开关只控制 Creator Agent 装饰表现，不改变会话、审批、Run、CanvasPatch 或生产阶段状态。",
+      "关闭特效不隐藏可读状态，也不关闭 MiniMap 自适应锚点和右侧抽屉避让。",
+      "正式 build、Electron、安装包、GitHub push、tag 和公开 Release 需要后续独立授权与证据。"
+    ]
+  },
+  "creatorAgentSuggestionReceipts": {
+    "status": "development",
+    "date": "2026-07-28",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-suggestion-receipts-v1",
+    "highlights": [
+      "Creator Agent 每轮三条建议直接显示预期效果、模型调用次数证据和精确风险边界。",
+      "当前 L0 计划建议显示“模型调用 0 次”和“L0 · 本步只读”，后续写画布或生成仍单独确认。",
+      "桌面三列和窄屏单列均保持轻量可读，完整回执同时进入 title 与 aria-label。"
+    ],
+    "verification": [
+      "Creator Agent UI 回归 40/40 通过；Creator Session、HTTP Route、Agent Control Creative 与 UI 串行联合回归 132/132 通过。",
+      "npm run type-check 通过。"
+    ],
+    "boundaries": [
+      "0 次 Provider 调用不等于永久免费，界面不推断未声明的平台费用、队列时延或后续生成成本。",
+      "只有建议自身全部 operation contract 为 L0 且无需批准时才显示本步只读；缺失或旧回执保持待核验/禁用。",
+      "建议点击只进入当前只读规划，任何 CanvasPatch、Provider 生成、外部传输或交付继续使用各自风险与批准合同。",
+      "正式 build、Electron、安装包、GitHub push、tag 和公开 Release 需要后续独立授权与证据。"
+    ]
+  },
+  "creatorAgentSameSessionReopen": {
+    "status": "development",
+    "date": "2026-07-28",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-same-session-reopen-v1",
+    "highlights": [
+      "关闭 Creator Agent 面板只释放前台事件连接和轮询，不停止回复、不取消远端生成或 Run。",
+      "重新打开面板会先读取同一 Creator Session 的权威快照，再从最后确认的事件 cursor 补播遗漏增量。",
+      "Run 链接与任务状态在重开时恢复核对；事件尾轮换时使用 cursor.reset 回查权威会话。"
+    ],
+    "verification": [
+      "Creator Agent UI 回归 41/41 通过；Creator Session、HTTP Route、Agent Control Creative 与 UI 串行联合回归 133/133 通过。",
+      "关闭处理器测试确认不调用 stopCreatorAgentResponse、cancel 或 runBus。"
+    ],
+    "boundaries": [
+      "关闭面板不等于停止回复，也不等于取消远端任务；真正停止或取消仍使用各自明确操作。",
+      "面板关闭时不保留无意义的 EventSource 和前台轮询；任务持续性来自后端持久会话、Run 与事件证据。",
+      "本切片未调用 Provider、应用 CanvasPatch、运行生产节点，也未 build、打包、提交、推送或发布。"
+    ]
+  },
+  "creatorAgentVisibleBrowserHandoff": {
+    "status": "development",
+    "date": "2026-07-28",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-visible-browser-handoff-v1",
+    "highlights": [
+      "Browser/Chrome 只为用户明确要求的当前本机画布创建可见 handoff；status 保持纯只读。",
+      "交互型 handoff 固定为 exactly one allowed local Canvas origin，不接受调用方指定的任意网页地址。",
+      "Cookie、Profile、请求头、凭据、Storage 和其他标签页权限不能进入 handoff，CLI 也不把交接回执冒充浏览器已执行。"
+    ],
+    "verification": [
+      "Browser 服务与 Canvas 可见高亮回归 6/6 通过；任意 URL、Cookie、Profile、Storage 与缺少明确用户发起标记均失败关闭。",
+      "能力清单和 7 份生成产物已同步；能力清单回归 6/6、feature-sync:check 与 npm run type-check 通过。"
+    ],
+    "boundaries": [
+      "本地 Canvas handoff 不能复用于跨域导航、表单提交、下载或登录；这些动作需要显示精确域名并单独进行 L2 确认。",
+      "后端只创建两分钟 handoff 合同并返回 executed:false；只有宿主 Chrome 能力返回可见证据后才能报告已打开、高亮、截图或检查。",
+      "禁止用 DOM 自动化旁路执行 T8 画布业务；项目、画布、节点、素材和 Run 继续只走 Agent Control/CLI 权威接口。",
+      "本切片未调用 Provider、应用 CanvasPatch、运行生产节点，也未 build、打包、提交、推送或发布。"
+    ]
+  },
+  "creatorAgentCrossEntrySessionAuthority": {
+    "status": "development",
+    "date": "2026-07-28",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-cross-entry-session-authority-v1",
+    "highlights": [
+      "Canvas Creator UI、Agent Control、Codex、zcanvas 与其他已配对本地 Agent 以同一个后端 Creator Session 为唯一事实源。",
+      "zcanvas 本机 JSON 仅保存有界会话定位与恢复缓存；continue 在判断计划、批准/应用、运行、核验或交付前必须先刷新精确后端会话。",
+      "当前计划、持久批准决定证据、生产阶段/checkpoint、素材 lineage、Run、artifact verification 与 delivery evidence 跨入口保持一致。"
+    ],
+    "verification": [
+      "zcanvas Creator Session 与 Agent Control 双 Route 专项回归 5/5，Creator Agent/zcanvas 相关扩展回归 120/120 通过。",
+      "覆盖陈旧本机副本纠正、session/project/canvas 跨范围拒绝、production checkpoint fallback、先读后端再判断 applied 状态，以及 Canvas/Agent Control 同一事实源。",
+      "两项 CLI 语法检查、npm run type-check、npm run feature-sync:check、features.json 解析与 git diff --check 通过；能力聚合摘要 57e43d510e9fa898d09052665ec167051c8c401507dd166ab86952be8a85be94。"
+    ],
+    "boundaries": [
+      "持久批准决定证据可以跨入口核对，但 access token、poll secret、配对凭据和批准权限仍绑定当前调用方，不随会话转移。",
+      "后端会话缺失或范围不匹配时失败关闭，不从陈旧本机副本重建第二个计划、Story、Provider 提交或生产链。",
+      "本切片未调用 Provider、应用 CanvasPatch、运行生产节点，也未 build、打包、提交、推送或发布。"
+    ]
+  },
+  "creatorAgentSignedSkillLifecycleIntegrity": {
+    "status": "development",
+    "date": "2026-07-28",
+    "releaseIncluded": false,
+    "schema": "t8-zcanvas-signed-skill-lifecycle-integrity-v1",
+    "highlights": [
+      "外部不可变 Skill + CLI 版本包强制整包 SHA-256，并使用当前安装已有信任锚或版本包外的独立可信策略验证 Ed25519 签名。",
+      "签名绑定 Skill 名称、Skill/CLI 版本和整包 digest；版本包不能自带可信策略把自己的签名者标成可信。",
+      "版本标签、协议与 manifest 在 staging 路径构造前校验，安装后拒绝未入清单文件和摘要漂移。",
+      "核心项目目录中的匹配 Skill + CLI 优先于旧受管用户/全局副本，项目外仍由 ownership marker 先于 PATH 定位主安装。",
+      "失败回执明确失败环节、现有工作安全状态和恢复动作；当前安装、last-known-good、配对凭据、未受管目录与画布均按合同保留。"
+    ],
+    "verification": [
+      "安装器、CLI、凭据与配对定向回归 42/42 通过，覆盖缺少/错误 digest、正确/篡改签名、未知信任、路径穿越版本、未入清单文件、故障注入回滚、项目优先级、短码批准、scope 隔离、撤销与过期恢复。",
+      "scripts/verify-zcanvas-p4-fresh-codex.cjs 隔离验收通过，报告确认 externalTrustPolicyVerified、ed25519BundleSignatureVerified、tamperedSignatureFailedClosed、原子升级/降级和受管目录卸载。",
+      "installer、CLI、Skill 包装器与 P4-E 验收脚本 Node 语法检查通过；配对权限和凭据协议未放宽。"
+    ],
+    "boundaries": [
+      "本切片实现本地安装器的签名验证合同，但未生成或托管生产发布私钥，不把开发验收冒充正式签名 Release。",
+      "公网不可变下载 URL、SBOM、正式 Electron/NSIS 与真实新机器安装仍需发布流水线独立证据。",
+      "本切片未调用 Provider、应用 CanvasPatch、运行生产节点，也未 build、打包、提交、推送或发布。"
+    ]
+  },
+  "creatorAgentUnifiedCapabilitySurfaceGeneration": {
+    "status": "development",
+    "date": "2026-07-28",
+    "releaseIncluded": false,
+    "schema": "t8-creative-capability-surfaces-v1",
+    "highlights": [
+      "31 项高层创作能力从同一 creativeCapabilityManifest 生成 31 个 Agent 工具、31 个 CLI 操作、31 个 Canvas UI 动作及 Skill 机器参考。",
+      "commandCatalogSource 只维护非创作控制面；创作子命令、scope、verified 状态和 UI 操作合同由生成工件统一提供，不再手写多份映射。",
+      "后端、CLI、Skill 与 UI 的四份 capability surface 工件字节一致，并与能力图 aggregate digest 和真实 handler binding 绑定。"
+    ],
+    "verification": [
+      "能力清单、zcanvas CLI 与 Skill 打包合同联合回归 34/34，Creator Agent Route/UI 联合回归 63/63，总计 97/97 通过；覆盖 CLI/UI surface 唯一性、四份生成物一致性、真实 handler、命令目录、运行时 scope 与 UI 漂移失败关闭。",
+      "npm run feature-sync:check 与 npm run type-check 通过；12 份生成物覆盖 70/70 节点、193 项运行目录和 150 项逐操作风险合同。",
+      "当前统一能力图摘要为 1bf401034046b9113e754a187194e30b970f2882ae596fb3ff4efaaadb74a679。"
+    ],
+    "boundaries": [
+      "生成 surface 是机器兼容合同，不覆盖 Skill 中的人类安全、批准、证据和作品质量规则。",
+      "本切片没有调用真实 Provider、应用 CanvasPatch、运行生产节点，也没有 Electron build、打包、提交、推送或发布。"
+    ]
+  },
+  "creatorAgentVersionedHighLevelCapabilityGateway": {
+    "status": "development",
+    "date": "2026-07-28",
+    "releaseIncluded": false,
+    "schema": "t8-versioned-creative-tool-v1",
+    "highlights": [
+      "31 项公开创作工具统一使用版本化请求/结果 schema；目录只公开高层工具、operation、scope 与风险合同，不暴露内部 handler/service/method binding。",
+      "调用严格核对版本、manifest、工具、operation、项目、画布、逐操作 scope 和递归字段白名单；低层路由、Provider payload、DOM/store/source/database/shell/CanvasPatch/nodes/edges 失败关闭。",
+      "只有生成清单声明的 L0 高层 plan/read/inspect/preview/verify 可直接分派；L1/L2/L3 继续使用既有预览、批准与执行生命周期。",
+      "资产导入/放置、交付打包与浏览器交接保持只读预览或本机可见交接，不借公共工具产生隐式 Provider、画布或文件写入。"
+    ],
+    "verification": [
+      "Creator Agent、Agent Control、资产、交付、浏览器、Run、zcanvas CLI、Skill 与打包合同联合回归 129/129 通过。",
+      "npm run feature-sync:check、npm run type-check、JSON 解析、四份 capability surface 字节一致性和 git diff --check 通过。",
+      "真实 Agent Control 路由回归确认 L0 create.image 计划的 Provider、CanvasPatch、文件写入与批准绑定写入均为 0；能力图摘要为 ba035512319f06ed9b66729f11caccb8f2cfb98e77efaf5bdda115d199d52866。"
+    ],
+    "boundaries": [
+      "公共高层工具目录不构成 L1/L2/L3 授权；任何写画布、Provider 生成、外部传输、交付或浏览器提交仍需原有风险合同和显式批准。",
+      "本切片没有调用真实 Provider、应用 CanvasPatch、运行生产节点，也没有 Electron build、打包、提交、推送或发布。"
+    ]
+  },
+  "creatorAgentSuggestionInvariantReceipt": {
+    "status": "development-verified",
+    "date": "2026-07-28",
+    "releaseIncluded": false,
+    "schema": "t8-creator-suggestion-invariant-receipt-v1",
+    "highlights": [
+      "空白态固定为恰好 3 个稳定灵感；每个持久完成回复固定为一个含 3 项的 SuggestionSet。",
+      "回执绑定 response、SuggestionSet digest、能力图摘要和有序建议 ID，并在响应、事件、嵌套 SuggestionSet 与 UI 之间保持一致。",
+      "能力 ID、operation/risk/approval/boundary/scope、唯一 ID/intent 和启用/禁用状态均在服务端与前端重复核验。",
+      "跨进程并发精确完成只收敛到一个 terminal event；篡改、重复完成或能力合同漂移失败关闭。"
+    ],
+    "verification": [
+      "真实 Headless Chrome 验收通过：空白态 3 项，完成态 1 个 terminal event / 1 个 SuggestionSet / 3 项，未知能力、重复意图、启用假按钮和无解释禁用项均为 0。",
+      "三建议聚焦回归 102/102；非 CanvasPatch 跨入口回归 274/274；Electron ABI + E 盘隔离库 CanvasPatch 回归 35/35，合计 309/309。",
+      "npm run type-check -- --pretty false、npm run feature-sync:check 与相关 Node 语法检查通过。"
+    ],
+    "boundaries": [
+      "建议只表达下一步意图，不构成 CanvasPatch、Provider、Run、外部传输或交付批准。",
+      "开发浏览器和隔离数据库证据不等于真实 Provider、生产 CanvasPatch apply、正式 Electron、安装包或 Release。",
+      "本切片未 build、打包、提交、推送、tag 或发布。"
+    ]
+  },
+  "creatorAgentDynamicCapabilityCoverageReceipt": {
+    "status": "development-verified",
+    "date": "2026-07-28",
+    "releaseIncluded": false,
+    "schema": "t8-creative-capability-coverage-receipt-v1",
+    "inventory": {
+      "nodes": {
+        "total": 70,
+        "executable": 52,
+        "generatable": 7
+      },
+      "runtime": {
+        "llm": 29,
+        "image": 25,
+        "video": 84,
+        "audio": 8,
+        "actions": 47
+      },
+      "capabilities": 31,
+      "handlers": 31,
+      "operations": 152
+    },
+    "gaps": {
+      "unknownNodeReferences": 0,
+      "missingHandlers": 0,
+      "missingOperationRisk": 0,
+      "missingVerification": 0,
+      "missingCompatibilityEdges": 0
+    },
+    "digests": {
+      "coverageReceipt": "34bfa080ff2ac79fd509c90e4a10b1c101919a27153ad6d27873b2b1a77a36e8",
+      "capabilityGraph": "8e305861a7d0d217863d6f8c637e40ed604e57942e2413ee2a26696408436904"
+    },
+    "highlights": [
+      "节点、模型、动作、能力、handler 与逐操作合同均从各自源文件动态统计，并以五个源摘要绑定为一份覆盖回执。",
+      "后端和 zcanvas CLI 使用同一校验器重算回执，并核对能力图内重复计数和 gap 副本，生成 JSON 不能独立冒充覆盖证据。",
+      "未知节点、缺 handler、缺风险、缺验证和缺兼容边五类问题全部失败关闭。"
+    ],
+    "verification": [
+      "覆盖回执聚焦回归 9/9，后端/CLI/安装与打包消费者回归 59/59，Creator Agent + Agent Control + zcanvas 串行交叉回归 275/275。",
+      "npm run feature-sync:check、npm run type-check -- --pretty false 与相关 Node 语法检查通过。"
+    ],
+    "boundaries": [
+      "验证合同存在不等于已经调用真实 Provider 或完成作品质量验收。",
+      "本切片未应用 CanvasPatch、运行生产节点、build、打包、提交、推送、tag 或发布。"
+    ]
+  },
+  "creatorAgentLocalReadinessReceipt": {
+    "status": "development-verified",
+    "date": "2026-07-28",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-local-readiness-receipt-v1",
+    "targets": {
+      "shellMs": 300,
+      "localPlanP95Ms": 2000
+    },
+    "measured": {
+      "shellElapsedMs": 67.9,
+      "shellCommitMs": 6.6,
+      "shellPaintReadyMs": 64.6,
+      "firstEditablePlanElapsedMs": 1302.6,
+      "sampleCount": 20,
+      "httpP95Ms": 36.203,
+      "serverPlannerP95Ms": 7.219
+    },
+    "sideEffects": {
+      "providerCalls": 0,
+      "canvasWrites": 0,
+      "productionFileWrites": 0,
+      "canvasRevisionBefore": 1,
+      "canvasRevisionAfter": 1
+    },
+    "highlights": [
+      "启动器激活到面板壳下一可绘制帧使用浏览器单调时间测量，和等待持久会话/能力合同后才聚焦的 composer readiness 分离。",
+      "本地计划使用服务端单调时钟生成持久 readiness receipt；非流式响应和 assistant plan/started/completed 事件均带同一回执。",
+      "20 次独立本地计划使用 nearest-rank p95；超出 2000ms 会显式 withinTarget=false，不隐藏超标。",
+      "零文件副作用仅指生产/业务输出；append-only Creator Session 权威账本仍作为刷新与断线恢复证据持久化。"
+    ],
+    "verification": [
+      "隔离 Vite、后端与 Headless Chrome 的 t8-creator-agent-p4-ui-acceptance-v1 通过，报告位于 artifacts/creator-agent-p4-ui/report.json。",
+      "面板壳 67.9ms，首个可编辑计划端到端 1302.6ms；20 次 HTTP p95 36.203ms，服务端规划 p95 7.219ms。",
+      "Creator Agent Readiness、Route、Session 与 UI 聚焦回归 94/94；Creator Agent、Agent Control、资产、交付、浏览器、Run、zcanvas 与能力清单串行交叉回归 210/210；Node 语法、type-check 与 feature-sync:check 通过。"
+    ],
+    "boundaries": [
+      "该证据是开发浏览器本地规划验收，不代表真实 Provider 时延、媒体生成质量、Electron、安装包或 Release。",
+      "本切片没有调用 Provider、应用 CanvasPatch、运行生产节点，也没有 build、打包、提交、推送或发布。"
+    ]
+  },
+  "creatorAgentAuditableModelDecision": {
+    "status": "development-verified",
+    "date": "2026-07-28",
+    "releaseIncluded": false,
+    "schema": "t8-model-decision-receipt-v1",
+    "selection": {
+      "smartRequiresVerifiedCompatibility": true,
+      "fixedAllowsVisibleUnverifiedEvidence": true,
+      "silentProviderFallback": false,
+      "compatibleAlternativesLimit": 3
+    },
+    "evidence": {
+      "attachmentVersionDigest": true,
+      "authoritativePersistedAssetMetadata": true,
+      "visibleReasons": true,
+      "inputCompatibility": true,
+      "costEstimateStatus": "unknown-with-explanation",
+      "latencyEstimateStatus": "unknown-with-explanation"
+    },
+    "approvalInvalidation": {
+      "providerOrModelChange": true,
+      "costTierChange": true,
+      "privacyBoundaryChange": true,
+      "catalogDigestChange": true,
+      "requiredRuntimeReadinessChange": true,
+      "sideEffectsBeforeRevalidation": 0
+    },
+    "highlights": [
+      "模型、理由、备选、输入兼容、限制、阻断和诚实未知的费用/时延证据统一进入可校验回执，并在 Canvas 面板中可展开核对。",
+      "费用或隐私的已知边界只接受带来源摘要与时间的 verified 证据；伪造 known、残缺证据、重复范围和额外字段失败关闭或被规范化剥离。",
+      "同一创作主体的新绑定立即废止旧批准，真正应用画布前再次核对计划、模型目录和必需模型运行状态。"
+    ],
+    "verification": [
+      "模型决策、审批绑定、Creative Route 与 UI 聚焦回归 63/63 通过。",
+      "Creator Agent、Agent Control、资产、交付、浏览器、Run、zcanvas 与能力清单串行交叉回归 225/225 通过。",
+      "相关 Node 语法、npm run type-check -- --pretty false 与 git diff --check 通过。"
+    ],
+    "boundaries": [
+      "运行就绪来自后端运行目录、凭据配置和可注入线路状态；没有冒充真实 Provider 网络、费用或实时队列探测。",
+      "本切片没有调用真实 Provider、应用 CanvasPatch、运行生产节点、build、打包、提交、推送、tag 或发布。"
+    ]
+  },
+  "creatorAgentCanvasPlacementExactlyOnce": {
+    "status": "development-verified",
+    "date": "2026-07-28",
+    "releaseIncluded": false,
+    "schema": "t8-creator-agent-canvas-placement-exactly-once-v1",
+    "identity": {
+      "stableAcrossEntrypoints": true,
+      "stableAcrossRevisionAdvance": true,
+      "exactLedgerLookup": true,
+      "duplicateCanvasWrites": 0
+    },
+    "highlights": [
+      "Canvas UI 与 Codex/Agent Control 对同一素材落点使用相同稳定 Patch 身份；断线重发和并发重试不会创建第二个节点。",
+      "精确台账查询恢复原 base revision、request/preview digest、应用 revision、受影响节点/连线和撤回状态，不依赖有界历史列表。",
+      "服务端已提交但客户端丢失响应时返回 alreadyApplied 权威凭据；UI 只补齐幂等会话事件，不再发起第二次画布写入。",
+      "Agent Control 重建原始确认预览后复用 canonical CanvasPatch apply；重复完成返回 duplicate receipt，不转移 Patch 所有权。",
+      "运行前撤回复用 provenance guard；已关联 Run 或已撤回状态不会被静默当成可再次放置。"
+    ],
+    "verification": [
+      "Agent Control asset.place 2/2、Creator Route 1/1、Creator UI 1/1 定向回归通过。",
+      "Electron ABI + SQLite 跨入口精确重试与同时竞争 2/2 通过；同时竞争实测 committedWrites=1、recoveredEntrypoints=2、revision 1→2、duplicateReceipts=1。",
+      "独立 scripts/verify-creator-agent-canvas-placement-race.cjs 通过，并证明仅测试工作线程旁路不能在生产主线程启用。",
+      "相关后端 Node 语法与 TypeScript type-check 通过。"
+    ],
+    "boundaries": [
+      "该证据只在隔离临时 SQLite 中实际应用 CanvasPatch，不代表真实 Provider、生产画布、生产 Run、作品质量或正式 Electron 安装包验收。",
+      "本切片没有 build、打包、提交、推送、tag 或发布。"
+    ]
+  },
+  "providerSubmissionRecovery": {
+    "status": "development-verified",
+    "date": "2026-07-28",
+    "releaseIncluded": false,
+    "schema": "t8-provider-submission-recovery-v1",
+    "identity": {
+      "source": "attempt-entity-uid",
+      "persistedBeforeProviderCall": true,
+      "stableAcrossRefresh": true,
+      "parallelContextIsolation": true,
+      "pollingReadsCarryIdempotencyKey": false
+    },
+    "terminalEvidence": {
+      "providerSubmissionVerified": true,
+      "physicalOutputRefsRequired": true,
+      "partialFilesReusable": false,
+      "atomicMaterializationManifest": true
+    },
+    "highlights": [
+      "Run、NodeRun、Attempt 在 Provider 调用前持久化，并由不可变 Attempt entity UID 生成稳定提交身份；初始证据失败时昂贵回调执行次数为 0。",
+      "Proxy、Fal、RH、Grok OAuth 和批量打标统一传递提交身份；批量条目按 Attempt 与条目序号派生唯一子键。",
+      "提交响应不明确时进入 ambiguous 并停止自动二次提交；成功终态必须同时具备已验证 Provider 证据和物理输出引用。",
+      "协作运行在网络传输前持久化 operation identity；响应丢失、刷新与快速重复点击恢复同一操作。",
+      "远端素材使用同目录临时文件、哈希/类型校验、fsync、原子 rename 与完成 manifest，非零残片不会被复用。"
+    ],
+    "verification": [
+      "Provider/平台请求回归 34/34、批量打标与运行生命周期 22/22、协作身份与 RunIntent 25/25、物理落盘与终态事务 4/4、Fal/RH/Grok/上下文 43/43 通过。",
+      "相关后端文件 Node 语法与 npm run type-check 通过。"
+    ],
+    "boundaries": [
+      "上游 exactly-once 以 Provider 是否实际兑现 Idempotency-Key 或提供 task 对账能力为边界；不支持时歧义态要求人工核对，不能自动二次提交。",
+      "没有调用真实付费 Provider、执行真实断电/进程强杀、Electron build、打包、提交、推送、tag 或发布。"
+    ]
+  },
+  "creatorAgentControlRailLauncher": {
+    "status": "development-verified",
+    "date": "2026-07-29",
+    "releaseIncluded": false,
+    "placement": {
+      "surface": "left-control-rail",
+      "order": "first",
+      "before": "workflow-doctor-toggle",
+      "sizePx": 32,
+      "usesPortalSlot": true,
+      "usesMiniMapAnchor": false
+    },
+    "highlights": [
+      "AI 入口从右侧 MiniMap / 地图区域移到左下角主快捷条，与听诊器等控制按钮处在同一个 control stack。",
+      "入口固定复用控制条 32px 主题尺寸和主题 Token，只保留 AI、轻量图标及状态点；Creator Agent 对话面板、持久会话、审批和 Run 状态保持不变。",
+      "移除 MiniMap 伪元素几何测量、右侧抽屉避让和遮挡隐藏逻辑，避免主题装饰、地图尺寸或抽屉开关再次改变入口位置。"
+    ],
+    "verification": [
+      "真实开发页 garden-defense 主题核对：入口与听诊器均为 32×32，入口父级为专用 slot，slot 为 control stack 第一个元素。",
+      "Creator Agent UI 42/42 与 npm run type-check 通过，git diff --check 无本轮空白错误。"
+    ],
+    "boundaries": [
+      "真实开发页核对覆盖当前 garden-defense 主题；源码合同同时锁定所有主题共用的控制条 Token，但不冒充已逐主题人工截图验收。",
+      "未执行 build、Electron 打包、提交、推送、tag 或发布。"
+    ]
+  },
+  "creatorAgentChatFirstInterface": {
+    "status": "development-verified",
+    "date": "2026-07-29",
+    "releaseIncluded": false,
+    "defaultSurface": {
+      "mode": "chat-first",
+      "messageFontPx": 14.5,
+      "composerFontPx": 14,
+      "detailsExpandedByDefault": false,
+      "visibleSuggestionReceipts": false,
+      "explicitNewConversation": true
+    },
+    "highlights": [
+      "默认界面只保留清晰对话、三条简洁建议、输入区及明确可见的新对话入口，不再把审计回执堆在主聊天中。",
+      "阶段、上下文、真实 Run/NodeRun/Attempt、素材、候选证据和完整计划统一收进独立任务与详情视图；计划在聊天中只显示一行摘要。",
+      "建议仍保留后端能力、风险、批准和费用合同，但前台不显示本步只读、模型调用次数或费用/风险徽标。"
+    ],
+    "verification": [
+      "Creator Agent UI 43/43 与 npm run type-check 通过。",
+      "真实开发页确认默认详情不挂载、新对话可见、消息字号 14.5px、输入框字号 14px、三建议文字无裁切，详情可独立展开并显示阶段、计划和真实任务。",
+      "真实开发页浏览器控制台 error 日志为 0。"
+    ],
+    "boundaries": [
+      "内部能力、风险、批准、Run 与证据合同没有删除，只改变默认可见层级。",
+      "未执行 build、Electron 打包、提交、推送、tag 或发布。"
+    ]
   }
 }

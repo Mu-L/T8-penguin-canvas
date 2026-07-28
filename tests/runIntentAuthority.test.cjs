@@ -825,6 +825,10 @@ test('remote run intent idempotency only replays the same server-normalized requ
       const revisedCanvas = database.saveCanvasSnapshot('canvas-a', canvasA, {
         expectedRevision: canvasA.revision,
       });
+      const staleExactReplay = await submit(cookie);
+      assert.equal(staleExactReplay.response.status, 202, JSON.stringify(staleExactReplay.payload));
+      assert.equal(staleExactReplay.payload.data.id, first.payload.data.id);
+
       const revisionCollision = await submit(cookie, { canvasRevision: revisedCanvas.revision });
       assert.equal(revisionCollision.response.status, 409);
       assert.equal(revisionCollision.payload.code, 'intent_idempotency_conflict');
@@ -848,6 +852,23 @@ test('runtime authority normalizes stale raw model fields instead of trusting ap
     nodeIds: ['image-node'],
   }]);
 
+  const budgetImageAuthority = deriveRunIntentAuthority({
+    nodes: [node('budget-image-node', 'image', {
+      model: 'nano-banana-2',
+      apiModel: 'zhenzhen-image-nb-2-lite',
+      imageBuiltinSource: 'seedance-nz',
+      aspectRatio: '1:8',
+      sizeLevel: '1K',
+      apimartImageCount: 4,
+    })],
+    edges: [],
+  }, ['budget-image-node']);
+  assert.deepEqual(budgetImageAuthority.declarations, [{
+    provider: 'seedance-nz',
+    model: 'zhenzhen-image-nb-2-lite',
+    nodeIds: ['budget-image-node'],
+  }]);
+
   const videoAuthority = deriveRunIntentAuthority({
     nodes: [node('video-node', 'video', {
       mainId: 'wan-2.7-spicy',
@@ -860,6 +881,23 @@ test('runtime authority normalizes stale raw model fields instead of trusting ap
     provider: 'seedance-nz',
     model: 'wan-2.7-spicy-i2v',
     nodeIds: ['video-node'],
+  }]);
+
+  const budgetVideoAuthority = deriveRunIntentAuthority({
+    nodes: [node('budget-video-node', 'video', {
+      mainId: 'veo3.1',
+      model: 'zhenzhen-video-v31-lite',
+      videoBuiltinSource: 'seedance-nz',
+      duration: '8',
+      ratio: '16:9',
+      resolution: '720p',
+    })],
+    edges: [],
+  }, ['budget-video-node']);
+  assert.deepEqual(budgetVideoAuthority.declarations, [{
+    provider: 'seedance-nz',
+    model: 'zhenzhen-video-v31-lite',
+    nodeIds: ['budget-video-node'],
   }]);
 
   const seedanceAuthority = deriveRunIntentAuthority({

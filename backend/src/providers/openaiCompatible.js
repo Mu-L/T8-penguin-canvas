@@ -1,6 +1,7 @@
 const { resolveMediaRef } = require('./mediaResolver');
 const { normalizeLlmMessageMedia } = require('./llmMedia');
 const { providerTrace } = require('./providerTrace');
+const { providerIdempotencyHeadersLike } = require('../services/providerSubmissionContext');
 
 const DEFAULT_TIMEOUT_MS = 8000;
 const IMAGE_EDIT_REMOTE_MAX_BYTES = 20 * 1024 * 1024;
@@ -19,7 +20,11 @@ async function fetchWithTimeout(url, options = {}) {
   const fetchImpl = options.fetchImpl || fetch;
   const { timeoutMs, fetchImpl: _fetchImpl, ...fetchOptions } = options;
   try {
-    return await fetchImpl(url, { ...fetchOptions, signal: controller.signal });
+    return await fetchImpl(url, {
+      ...fetchOptions,
+      headers: providerIdempotencyHeadersLike(fetchOptions.headers, fetchOptions.method),
+      signal: controller.signal,
+    });
   } finally {
     clearTimeout(timeout);
   }

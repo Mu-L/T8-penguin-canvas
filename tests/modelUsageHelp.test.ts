@@ -3,8 +3,53 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const canvasSource = readFileSync(new URL('../src/components/Canvas.tsx', import.meta.url), 'utf8');
+const styleSource = readFileSync(new URL('../src/styles/index.css', import.meta.url), 'utf8');
 
-test('model usage help text includes current image, video, audio and LLM notes', () => {
+test('model usage help defaults to budget house and keeps the original workshop in a second tab', () => {
+  assert.match(canvasSource, /type ModelUsageHelpTabId = 'budget-house' \| 'workshop'/);
+  assert.match(canvasSource, /useState<ModelUsageHelpTabId>\('budget-house'\)/);
+  assert.match(canvasSource, /label: '贞贞的平价AI小屋'/);
+  assert.match(canvasSource, /label: '贞贞的AI工坊'/);
+  assert.match(canvasSource, /role="tablist" aria-label="模型平台"/);
+  assert.match(canvasSource, /role="tabpanel"/);
+  assert.match(canvasSource, /\['ArrowLeft', 'ArrowRight', 'Home', 'End'\]/);
+  assert.match(styleSource, /\.t8-model-help-panel__tabs/);
+  assert.match(styleSource, /\.t8-model-help-panel__tab\.is-active/);
+});
+
+test('model usage help control appears immediately before the placement shelf control', () => {
+  const controlStackIndex = canvasSource.indexOf('className="t8-control-stack"');
+  const modelHelpIndex = canvasSource.indexOf('data-canvas-floating-ui="model-help-toggle"', controlStackIndex);
+  const placementShelfIndex = canvasSource.indexOf('data-canvas-floating-ui="placement-shelf-toggle"', controlStackIndex);
+  assert.ok(controlStackIndex >= 0);
+  assert.ok(modelHelpIndex > controlStackIndex);
+  assert.ok(placementShelfIndex > modelHelpIndex);
+  const betweenModelHelpAndPlacementShelf = canvasSource.slice(
+    modelHelpIndex + 'data-canvas-floating-ui="model-help-toggle"'.length,
+    placementShelfIndex,
+  );
+  assert.doesNotMatch(
+    betweenModelHelpAndPlacementShelf,
+    /data-canvas-floating-ui="[^"]+-toggle"/,
+  );
+});
+
+test('budget house model usage help includes its channel, review, pricing and recommended models', () => {
+  assert.match(canvasSource, /与贞贞的AI工坊不同，模型以国内模型以及一些海外核心模型为主/);
+  assert.match(canvasSource, /支持宽审核开通；请合规使用/);
+  assert.match(canvasSource, /Seedance 2\.0 官方特价版/);
+  assert.match(canvasSource, /720P 约 1 元\/秒，480P Mini 不到 0\.25 元\/秒/);
+  assert.match(canvasSource, /zhenzhen-image-g-v2-lowprice/);
+  assert.match(canvasSource, /zhenzhen-video-gk-v15/);
+  assert.match(canvasSource, /zhenzhen-image-nb-2/);
+  assert.match(canvasSource, /zhenzhen-image-nb-pro/);
+  assert.match(canvasSource, /zhenzhen-video-g-omni-flash/);
+  assert.match(canvasSource, /midjourney-imagine/);
+  assert.match(canvasSource, /dola-seedream-5\.0-pro-i2i/);
+  assert.match(canvasSource, /zhenzhen-image-gk-v15-edit/);
+});
+
+test('workshop model usage help preserves the current image, video, audio and LLM notes', () => {
   assert.match(canvasSource, /如果不小心网页崩溃等，但是实际任务没失败，需要去网站异步任务看下/);
   assert.match(canvasSource, /图像模型注意事项（2K，4K只有FAL长期稳定，其他都不保证稳定）/);
   assert.match(canvasSource, /2026\.06\.25谷歌香蕉模型从preview模型升级为正式版，模型名字需要修改/);

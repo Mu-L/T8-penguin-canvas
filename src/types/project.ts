@@ -561,6 +561,12 @@ export interface RunNodeLifecycleReporter {
   /** Durable execution identity created before an executor callback starts. */
   readonly nodeRunId: string | null;
   readonly attemptId: string | null;
+  /**
+   * Stable per-Attempt Provider submission key. Submit transports must forward
+   * this value as an idempotency key; polling/download requests may reuse it
+   * for correlation but must never mint a replacement key.
+   */
+  readonly providerSubmissionKey: string | null;
   progress(payload?: Record<string, unknown>): Promise<void>;
   polling(payload?: Record<string, unknown>): Promise<void>;
   output(payload?: Record<string, unknown>): Promise<void>;

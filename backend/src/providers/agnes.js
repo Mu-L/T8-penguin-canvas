@@ -1,6 +1,7 @@
 const { resolveMediaRef } = require('./mediaResolver');
 const openaiCompatible = require('./openaiCompatible');
 const { mergeProviderTrace, providerTrace } = require('./providerTrace');
+const { providerIdempotencyHeadersLike } = require('../services/providerSubmissionContext');
 
 const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
 const DEFAULT_CHAT_TIMEOUT_MS = 30 * 60 * 1000;
@@ -53,7 +54,11 @@ async function fetchWithTimeout(url, options = {}) {
   const fetchImpl = options.fetchImpl || fetch;
   const { timeoutMs, fetchImpl: _fetchImpl, ...fetchOptions } = options;
   try {
-    return await fetchImpl(url, { ...fetchOptions, signal: controller.signal });
+    return await fetchImpl(url, {
+      ...fetchOptions,
+      headers: providerIdempotencyHeadersLike(fetchOptions.headers, fetchOptions.method),
+      signal: controller.signal,
+    });
   } finally {
     clearTimeout(timeout);
   }

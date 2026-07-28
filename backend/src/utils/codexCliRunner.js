@@ -821,20 +821,21 @@ function defaultSkillRoots(workspaceDir, env = process.env) {
   const roots = [];
   const home = String(env.USERPROFILE || env.HOME || os.homedir()).trim() || os.homedir();
   const envHome = String(env.CODEX_HOME || path.join(home, '.codex')).trim();
+  if (workspaceDir) uniquePush(roots, path.join(workspaceDir, '.agents', 'skills'));
   uniquePush(roots, path.join(envHome, 'skills'));
   uniquePush(roots, path.join(envHome, 'skills', '.system'));
   for (const root of collectPluginSkillRoots(envHome)) uniquePush(roots, root);
   uniquePush(roots, path.join(home, '.agents', 'skills'));
   uniquePush(roots, path.join(config.BASE_DIR, '.agents', 'skills'));
-  if (workspaceDir) uniquePush(roots, path.join(workspaceDir, '.agents', 'skills'));
   return roots;
 }
 
 function listCodexSkills(options = {}) {
   const workspaceDir = options.workspaceDir || '';
   const env = options.env || process.env;
+  const workspaceSkillRoot = workspaceDir ? path.join(workspaceDir, '.agents', 'skills') : '';
   const roots = Array.isArray(options.roots) && options.roots.length > 0
-    ? [...options.roots, ...(workspaceDir ? [path.join(workspaceDir, '.agents', 'skills')] : [])]
+    ? [...(workspaceSkillRoot ? [workspaceSkillRoot] : []), ...options.roots]
     : defaultSkillRoots(workspaceDir, env);
   const out = [];
   const seen = new Set();

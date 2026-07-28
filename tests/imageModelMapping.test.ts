@@ -6,6 +6,8 @@ import {
   IMAGE_MODELS,
   ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS,
   ZHENZHEN_BUDGET_GROK_MODEL_OPTIONS,
+  ZHENZHEN_BUDGET_BANANA_2_MODEL_OPTIONS,
+  ZHENZHEN_BUDGET_BANANA_PRO_MODEL_OPTIONS,
   ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
   ZHENZHEN_IMAGE_G2_I2I_MODEL,
   ZHENZHEN_IMAGE_G2_MODEL_OPTIONS,
@@ -13,6 +15,11 @@ import {
   ZHENZHEN_IMAGE_G2_T2I_MODEL,
   ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL,
   ZHENZHEN_IMAGE_GK_V15_MODEL,
+  ZHENZHEN_IMAGE_NB_2_LITE_MODEL,
+  ZHENZHEN_IMAGE_NB_2_MODEL,
+  ZHENZHEN_IMAGE_NB_PRO_MODEL,
+  ZHENZHEN_IMAGE_NB_EXTREME_RATIOS,
+  ZHENZHEN_IMAGE_NB_STANDARD_RATIOS,
   gptImage2ZhenzhenVariantSize,
   isFalModel,
   isZhenzhenImageG2Model,
@@ -124,7 +131,7 @@ test('Zhenzhen Image G-2 models live under the separate budget platform and keep
   assert.doesNotMatch(proxySource, /raw === 'zhenzhen-image-g2-t2i'\) return 'gpt-image-2'/);
 });
 
-test('new APIMart images are isolated in the budget GPT2 and Grok tabs', () => {
+test('APIMart images are isolated in their matching budget-house tabs', () => {
   assert.deepEqual(
     ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS.map((option) => option.value),
     [
@@ -137,7 +144,34 @@ test('new APIMart images are isolated in the budget GPT2 and Grok tabs', () => {
     ZHENZHEN_BUDGET_GROK_MODEL_OPTIONS.map((option) => option.value),
     [ZHENZHEN_IMAGE_GK_V15_MODEL, ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL],
   );
-  assert.match(imageNodeSource, /modelDef\.id === 'grok-image' \? ZHENZHEN_BUDGET_GROK_MODEL_OPTIONS/);
+  assert.deepEqual(
+    ZHENZHEN_BUDGET_BANANA_2_MODEL_OPTIONS.map((option) => option.value),
+    [ZHENZHEN_IMAGE_NB_2_MODEL, ZHENZHEN_IMAGE_NB_2_LITE_MODEL],
+  );
+  assert.deepEqual(
+    ZHENZHEN_BUDGET_BANANA_PRO_MODEL_OPTIONS.map((option) => option.value),
+    [ZHENZHEN_IMAGE_NB_PRO_MODEL],
+  );
+  assert.equal(IMAGE_MODELS.find((item) => item.id === 'nano-banana-2')?.apiModelOptions.some(
+    (option) => option.value === ZHENZHEN_IMAGE_NB_2_MODEL,
+  ), false);
+  assert.equal(IMAGE_MODELS.find((item) => item.id === 'nano-banana-pro')?.apiModelOptions.some(
+    (option) => option.value === ZHENZHEN_IMAGE_NB_PRO_MODEL,
+  ), false);
+  assert.deepEqual(ZHENZHEN_IMAGE_NB_STANDARD_RATIOS, [
+    '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9',
+  ]);
+  assert.ok(ZHENZHEN_IMAGE_NB_EXTREME_RATIOS.includes('1:8'));
+  assert.ok(ZHENZHEN_IMAGE_NB_EXTREME_RATIOS.includes('8:1'));
+  assert.match(imageNodeSource, /modelDef\.id === 'nano-banana-2'/);
+  assert.match(imageNodeSource, /modelDef\.id === 'nano-banana-2'\s*\?\s*ZHENZHEN_IMAGE_NB_2_MODEL/);
+  assert.match(
+    imageNodeSource,
+    /const nextApiModel[\s\S]{0,400}newDef\.id === 'nano-banana-2'\s*\?\s*ZHENZHEN_IMAGE_NB_2_MODEL/,
+  );
+  assert.match(imageNodeSource, /ZHENZHEN_BUDGET_BANANA_2_MODEL_OPTIONS/);
+  assert.match(imageNodeSource, /ZHENZHEN_BUDGET_BANANA_PRO_MODEL_OPTIONS/);
+  assert.match(imageNodeSource, /apimartImageCount/);
   assert.match(imageNodeSource, /isZhenzhenGrokImageEdit/);
   assert.match(imageNodeSource, /必须提供 1 张参考图/);
 });
@@ -168,7 +202,7 @@ test('Seedream V5 Pro is isolated behind its own image protocol and supports up 
 test('Seedream tab keeps legacy source by default and exposes isolated seedance.nz image routing', () => {
   assert.match(imageNodeSource, /d\?\.seedreamApiSource === 'seedance-nz' \? 'seedance-nz' : 'zhenzhen'/);
   assert.match(imageNodeSource, /贞贞的AI工坊（海外） · 原 Seedream/);
-  assert.match(imageNodeSource, /贞贞的平价AI工坊（国内） · api\.seedance\.nz/);
+  assert.match(imageNodeSource, /贞贞的平价AI小屋 · api\.seedance\.nz/);
   assert.match(imageNodeSource, /seedream-v5-pro-i2i/);
   assert.match(imageNodeSource, /seedream-v5-pro-t2i/);
   assert.match(imageNodeSource, /submitSeedreamNz/);

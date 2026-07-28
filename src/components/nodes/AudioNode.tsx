@@ -9,6 +9,7 @@ import {
   submitSeedAudio,
   querySeedAudio,
   transcribeWhisper,
+  buildWhisperTranscriptEvidence,
   uploadAudioForSuno,
   uploadFile as uploadLocalFile,
   type AudioMode,
@@ -161,17 +162,22 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     () => filterExcludedMaterials(upstream.images, excludedMaterialIds),
     [upstream.images, excludedMaterialIds],
   );
+  const visibleUpstreamVideos = useMemo(
+    () => filterExcludedMaterials(upstream.videos, excludedMaterialIds),
+    [upstream.videos, excludedMaterialIds],
+  );
   const visibleUpstreamAudios = useMemo(
     () => filterExcludedMaterials(upstream.audios, excludedMaterialIds),
     [upstream.audios, excludedMaterialIds],
   );
   const excludedUpstreamCount = useMemo(
-    () => countExcludedMaterials(excludedMaterialIds, [...upstream.texts, ...upstream.images, ...upstream.audios]),
-    [excludedMaterialIds, upstream.texts, upstream.images, upstream.audios],
+    () => countExcludedMaterials(excludedMaterialIds, [...upstream.texts, ...upstream.images, ...upstream.videos, ...upstream.audios]),
+    [excludedMaterialIds, upstream.texts, upstream.images, upstream.videos, upstream.audios],
   );
   const materialOrder: string[] = Array.isArray(d?.materialOrder) ? d.materialOrder : [];
   const orderedTexts = useOrderedMaterials(visibleUpstreamTexts, materialOrder);
   const orderedImages = useOrderedMaterials(visibleUpstreamImages, materialOrder);
+  const orderedVideos = useOrderedMaterials(visibleUpstreamVideos, materialOrder);
   const orderedAudios = useOrderedMaterials(visibleUpstreamAudios, materialOrder);
   const setMaterialOrder = (newOrder: string[]) => update({ materialOrder: newOrder });
   const handleExcludeUpstreamMaterial = (m: Material) => {
@@ -211,14 +217,14 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
   const previewGroups = useMemo<ReadonlyArray<'text' | 'image' | 'video' | 'audio'>>(
     () => isSeedAudio
       ? ['text', 'image', 'audio']
-      : isWhisper ? ['audio'] : isSunoNz ? ['text', 'audio'] : (mode === 'generate' ? ['text'] : ['text', 'audio']),
+      : isWhisper ? ['video', 'audio'] : isSunoNz ? ['text', 'audio'] : (mode === 'generate' ? ['text'] : ['text', 'audio']),
     [isSeedAudio, isWhisper, isSunoNz, mode],
   );
   
-  // 收集上游: prompt + audioUrl(cover/extend 兼底, 取 ordered 首个, 后补本地拖入)
+  // Whisper 可直接转写 MP4；其余音频能力仍只消费音频素材。
   const collectUpstream = (): { prompt: string; audioUrl: string; imageUrls: string[]; audioUrls: string[] } => {
     const prompt = orderedTexts.map((t) => t.url).filter((s) => !!s).join('\n').trim();
-    const audioUrl = orderedAudios[0]?.url || localRefAudio || '';
+    const audioUrl = orderedAudios[0]?.url || (isWhisper ? orderedVideos[0]?.url : '') || localRefAudio || '';
     const imageUrls = [...orderedImages.map((item) => item.url), localRefImage].filter(Boolean).slice(0, 1);
     const maxAudios = isSunoNz ? 4 : 3;
     const audioUrls = [...orderedAudios.map((item) => item.url), localRefAudio].filter((value, index, values) => !!value && values.indexOf(value) === index).slice(0, maxAudios);
@@ -630,6 +636,11 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
       sunoVideoUrls: [],
       sunoFileUrls: [],
       ...(isWhisper || isSunoNz ? { transcript: '', sunoResultText: '', text: '', texts: [] } : {}),
+      ...(isWhisper ? {
+        transcriptEvidenceText: '',
+        transcriptSegments: [],
+        transcriptAttribution: 'untimed',
+      } : {}),
     });
     try {
       if (isWhisper) {
@@ -641,7 +652,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           audioUrl: upstream.audioUrl,
           model: 'whisper-1',
           responseFormat: whisperResponseFormat,
-        });
+        }, { submissionKey: reporter?.providerSubmissionKey });
         await reporter?.providerResponse({
           provider: traceProvider,
           model: traceModel,
@@ -652,12 +663,16 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           status: 'succeeded',
           httpStatusSource: 'local-backend',
         });
+        const evidence = buildWhisperTranscriptEvidence(result);
         update({
           status: 'success',
           progress: '100%',
           transcript: result.text,
-          text: result.text,
-          texts: [result.text],
+          transcriptEvidenceText: evidence.text,
+          transcriptSegments: evidence.segments,
+          transcriptAttribution: evidence.attribution,
+          text: evidence.text,
+          texts: [evidence.text],
           lastPrompt: '',
           provider: traceProvider,
           apiModel: traceModel,
@@ -692,7 +707,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           pitchRate: seedAudioPitchRate,
           images: upstream.imageUrls.length ? upstream.imageUrls : undefined,
           audioUrls: upstream.audioUrls.length ? upstream.audioUrls : undefined,
-        });
+        }, { submissionKey: reporter?.providerSubmissionKey });
         await reporter?.providerSubmitted({
           provider: traceProvider,
           model: traceModel,
@@ -759,7 +774,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
             : undefined,
           speed: sunoNzOperation === 'suno-adjust-speed' ? sunoSpeed : undefined,
           name: sunoNzOperation === 'suno-persona' ? sunoPersonaName.trim() : undefined,
-        });
+        }, { submissionKey: reporter?.providerSubmissionKey });
         const normalizedStatus = String(result.status || '').trim().toLowerCase();
         if (result.taskId) {
           await reporter?.providerSubmitted({
@@ -811,7 +826,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
         continue_clip_id: mode === 'extend' ? clipIdForRef : undefined,
         continue_at: mode === 'extend' ? continueAt : undefined,
         providerParams,
-      });
+      }, { submissionKey: reporter?.providerSubmissionKey });
       await reporter?.providerSubmitted({
         provider: traceProvider,
         model: traceModel,
@@ -882,6 +897,9 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     if (payload.kind === 'audio' && payload.url) {
       update({ localRefAudio: payload.url, uploadedClipId: '', uploadedFilename: '' });
       logBus.info('已接受拖入参考音频, 生成时将自动上传', src);
+    } else if (isWhisper && payload.kind === 'video' && payload.url) {
+      update({ localRefAudio: payload.url, uploadedClipId: '', uploadedFilename: '' });
+      logBus.info('已接受拖入 MP4 视频，Whisper 将直接转写其中的语音', src);
     } else if (isSeedAudio && payload.kind === 'image' && payload.url) {
       update({ localRefImage: payload.url });
       logBus.info('已接受 Seed Audio 参考图', src);
@@ -891,7 +909,11 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
   };
   const { dropProps, isAccepting } = useMaterialDropTarget({
     id,
-    accepts: isSeedAudio ? ['image', 'audio', 'text'] : ['audio', 'text'],
+    accepts: isSeedAudio
+      ? ['image', 'audio', 'text']
+      : isWhisper
+        ? ['video', 'audio', 'text']
+        : ['audio', 'text'],
     onDrop: handleDrop,
   });
 
@@ -1295,6 +1317,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
         <MaterialPreviewSection
           texts={orderedTexts}
           images={orderedImages}
+          videos={orderedVideos}
           audios={orderedAudios}
           order={materialOrder}
           onReorder={setMaterialOrder}

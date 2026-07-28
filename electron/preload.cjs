@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('t8pc', {
   openExternal: (url) => ipcRenderer.invoke('t8pc:open-external', url),
   openPath: (targetPath) => ipcRenderer.invoke('t8pc:open-path', targetPath),
   pickMediaFiles: (options) => ipcRenderer.invoke('t8pc:pick-media-files', options || {}),
+  pickDirectory: (options) => ipcRenderer.invoke('t8pc:pick-directory', options || {}),
   getPathForFile: (file) => {
     try {
       return webUtils?.getPathForFile?.(file) || '';
@@ -33,6 +34,36 @@ contextBridge.exposeInMainWorld('t8pc', {
     save: (profileId, cookieText, meta) => ipcRenderer.invoke('t8pc:parse-auth:save', profileId, cookieText, meta),
     load: (profileId) => ipcRenderer.invoke('t8pc:parse-auth:load', profileId),
     clear: (profileId) => ipcRenderer.invoke('t8pc:parse-auth:clear', profileId),
+  },
+  agentControl: {
+    getConnectionSummary: () => ipcRenderer.invoke('t8pc:agent-control:connection-summary'),
+    listPendingPairings: () => ipcRenderer.invoke('t8pc:agent-control:list-pending'),
+    approvePairing: (input) => ipcRenderer.invoke('t8pc:agent-control:approve', {
+      pairingId: typeof input?.pairingId === 'string' ? input.pairingId : '',
+      userCode: typeof input?.userCode === 'string' ? input.userCode : '',
+      approvedScopes: Array.isArray(input?.approvedScopes)
+        ? input.approvedScopes.filter((scope) => typeof scope === 'string').slice(0, 16)
+        : [],
+    }),
+    denyPairing: (pairingId) => ipcRenderer.invoke(
+      't8pc:agent-control:deny',
+      typeof pairingId === 'string' ? pairingId : '',
+    ),
+    listPendingApprovals: () => ipcRenderer.invoke('t8pc:agent-control:list-approvals'),
+    approveOperation: (approvalRequestId) => ipcRenderer.invoke(
+      't8pc:agent-control:approve-operation',
+      typeof approvalRequestId === 'string' ? approvalRequestId : '',
+    ),
+    denyOperation: (approvalRequestId) => ipcRenderer.invoke(
+      't8pc:agent-control:deny-operation',
+      typeof approvalRequestId === 'string' ? approvalRequestId : '',
+    ),
+    onCanvasMutation: (callback) => {
+      if (typeof callback !== 'function') return () => {};
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on('t8pc:agent-control:canvas-mutated', listener);
+      return () => ipcRenderer.removeListener('t8pc:agent-control:canvas-mutated', listener);
+    },
   },
   updater: {
     getStatus: () => ipcRenderer.invoke('t8pc:updater:status'),
