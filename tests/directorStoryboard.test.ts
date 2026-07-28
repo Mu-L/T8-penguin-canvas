@@ -726,7 +726,7 @@ test('director storyboard bridge generation is per-pair and refresh can recover 
   assert.match(node, /filter\(\(\[, result\]\) => result\?\.taskId && !result\.videoUrl\)/);
   assert.match(node, /patchBridge\(bridgeIdFromJob, \{[\s\S]*status: 'success',[\s\S]*videoUrl: query\.videoUrl/);
   assert.match(node, /reporter\?\.providerRequest\(baseTrace\)[\s\S]*reporter\?\.providerPolling\([\s\S]*reporter\?\.providerResponse/);
-  assert.match(node, /submitSeedance\(job\.payload\)[\s\S]*reporter\?\.providerSubmitted\([\s\S]*reporter\?\.providerPolling\(pollingTrace\)/);
+  assert.match(node, /submitSeedance\(job\.payload,\s*\{[\s\S]*submissionKey:\s*reporter\?\.providerSubmissionKey[\s\S]*\}\)[\s\S]*reporter\?\.providerSubmitted\([\s\S]*reporter\?\.providerPolling\(pollingTrace\)/);
   assert.match(node, /catch \(error: any\) \{[\s\S]*reporter\?\.providerResponse\(\{[\s\S]*status: signal\?\.aborted \? 'cancelled' : 'failed'/);
   assert.match(node, /runDirectorStoryboardJobs\(plan, \(job, signal\) => pollJob\(job, signal, reporter\)/);
   assert.match(node, /throw new Error\(message\)/);

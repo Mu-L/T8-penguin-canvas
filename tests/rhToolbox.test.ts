@@ -1,12 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 
 const loadRhToolboxUtils = async () => import('../src/utils/rhToolbox.ts');
 const loadRhToolboxCapabilities = async () => import('../src/utils/rhToolboxCapabilities.ts');
 const loadRhToolboxDeveloper = async () => import('../src/utils/rhToolboxDeveloper.ts');
 const loadRhToolboxManifest = async () => import('../src/data/rhToolboxManifest.ts');
+const rhToolboxMakerNodeUrl = new URL('../src/components/nodes/RHToolboxMakerNode.tsx', import.meta.url);
+const rhToolboxDeveloperUrl = new URL('../src/utils/rhToolboxDeveloper.ts', import.meta.url);
+const hasRhToolboxMakerSource = existsSync(rhToolboxMakerNodeUrl);
+const hasRhToolboxDeveloperSource = existsSync(rhToolboxDeveloperUrl);
 
 test('RH toolbox node is registered as a visible executable RH node', () => {
   const types = readFileSync(new URL('../src/types/canvas.ts', import.meta.url), 'utf8');
@@ -489,8 +493,6 @@ test('RH toolbox image cutout is exposed as a reusable node capability', async (
   const rail = readFileSync(new URL('../src/components/RhImageCapabilityRail.tsx', import.meta.url), 'utf8');
   const uploadNode = readFileSync(new URL('../src/components/nodes/UploadNode.tsx', import.meta.url), 'utf8');
   const outputNode = readFileSync(new URL('../src/components/nodes/OutputNode.tsx', import.meta.url), 'utf8');
-  const roadmap = readFileSync(new URL('../roadmap.md', import.meta.url), 'utf8');
-  const skill = readFileSync(new URL('../skill.md', import.meta.url), 'utf8');
 
   const tool = resolveRhToolboxCapability(RH_TOOLBOX_MANIFEST, {
     surface: 'image',
@@ -631,19 +633,6 @@ test('RH toolbox image cutout is exposed as a reusable node capability', async (
   assert.match(outputNode, /已创建 \$\{newNodes\.length\} 个输出素材节点/);
   assert.match(uploadNode, /onComplete=\{\(result\) => handleProduce\(result\.imageUrls, \{ type: 'rh-capability', label: result\.tool\.title \}\)\}/);
   assert.match(outputNode, /onComplete=\{\(result\) => handleProduce\(result\.imageUrls, \{ type: 'rh-capability', label: result\.tool\.title \}\)\}/);
-  assert.match(roadmap, /RH 工具箱能力调度层/);
-  assert.match(roadmap, /image\.cutout/);
-  assert.match(roadmap, /多图串行队列/);
-  assert.match(roadmap, /运行中再次点击可取消/);
-  assert.match(roadmap, /部分成功/);
-  assert.match(roadmap, /重试/);
-  assert.match(skill, /RH 图像能力复用规范/);
-  assert.match(skill, /image\.upscale/);
-  assert.match(skill, /image-upscale-4k/);
-  assert.match(skill, /image\.expand/);
-  assert.match(skill, /RhImageCapabilityButton[\s\S]*preset/);
-  assert.match(skill, /RhImageCapabilityRail/);
-  assert.match(skill, /runRhImageCapabilityBatch/);
 });
 
 test('RH toolbox builds nodeInfoList from configured mappings without per-tool code', async () => {
@@ -925,8 +914,8 @@ test('RH toolbox maker is dev-only and guarded from packaged builds', () => {
   assert.match(features, /RH工具箱制作器/);
 });
 
-test('RH toolbox maker rebuilds mappings from the current WebApp snapshot', () => {
-  const maker = readFileSync(new URL('../src/components/nodes/RHToolboxMakerNode.tsx', import.meta.url), 'utf8');
+test('RH toolbox maker rebuilds mappings from the current WebApp snapshot', { skip: !hasRhToolboxMakerSource }, () => {
+  const maker = readFileSync(rhToolboxMakerNodeUrl, 'utf8');
 
   assert.match(maker, /renderSelect\('RunningHub 站点',[\s\S]*\['cn', 'intl'\][\s\S]*\}, \{ intl: 'ai' \}\)/);
   assert.match(maker, /rhToolboxMakerRhSite:\s*value === 'intl' \? 'intl' : 'cn'/);
@@ -943,8 +932,8 @@ test('RH toolbox maker rebuilds mappings from the current WebApp snapshot', () =
   assert.match(maker, /const mappingsChanged = Boolean\(autoMappings\.addedInputs \|\| autoMappings\.addedParams\)[\s\S]*autoMappings\.inputs\.length !== inputs\.length[\s\S]*autoMappings\.params\.length !== params\.length/);
 });
 
-test('RH toolbox maker keeps each draft tool category independent', () => {
-  const maker = readFileSync(new URL('../src/components/nodes/RHToolboxMakerNode.tsx', import.meta.url), 'utf8');
+test('RH toolbox maker keeps each draft tool category independent', { skip: !hasRhToolboxMakerSource }, () => {
+  const maker = readFileSync(rhToolboxMakerNodeUrl, 'utf8');
 
   assert.match(maker, /function buildUniqueCategoryId/);
   assert.match(maker, /compactTextHash\(`\$\{majorId\}:\$\{name\}`\)/);
@@ -958,8 +947,8 @@ test('RH toolbox maker keeps each draft tool category independent', () => {
   assert.match(maker, /保存名称/);
 });
 
-test('RH toolbox maker saves a per-tool default instance type', () => {
-  const maker = readFileSync(new URL('../src/components/nodes/RHToolboxMakerNode.tsx', import.meta.url), 'utf8');
+test('RH toolbox maker saves a per-tool default instance type', { skip: !hasRhToolboxMakerSource }, () => {
+  const maker = readFileSync(rhToolboxMakerNodeUrl, 'utf8');
   const runtime = readFileSync(new URL('../src/components/nodes/RHToolboxNode.tsx', import.meta.url), 'utf8');
   const service = readFileSync(new URL('../src/services/rhToolbox.ts', import.meta.url), 'utf8');
 
@@ -977,12 +966,14 @@ test('RH toolbox maker saves a per-tool default instance type', () => {
   assert.match(service, /instanceType:\s*options\.instanceType \|\| tool\.runtime\?\.instanceType \|\| undefined/);
 });
 
-test('RH toolbox developer save persists the selected custom category with each tool', () => {
-  const developer = readFileSync(new URL('../src/utils/rhToolboxDeveloper.ts', import.meta.url), 'utf8');
+test('RH toolbox developer save persists the selected custom category with each tool', {
+  skip: !hasRhToolboxMakerSource || !hasRhToolboxDeveloperSource,
+}, () => {
+  const developer = readFileSync(rhToolboxDeveloperUrl, 'utf8');
   const settings = readFileSync(new URL('../backend/src/routes/settings.js', import.meta.url), 'utf8');
   const config = readFileSync(new URL('../backend/src/config.js', import.meta.url), 'utf8');
   const api = readFileSync(new URL('../src/services/api.ts', import.meta.url), 'utf8');
-  const maker = readFileSync(new URL('../src/components/nodes/RHToolboxMakerNode.tsx', import.meta.url), 'utf8');
+  const maker = readFileSync(rhToolboxMakerNodeUrl, 'utf8');
 
   assert.match(developer, /isRhToolboxBuiltinCategoryId/);
   assert.match(developer, /for \(const category of incoming\.categories\)/);
@@ -1002,7 +993,9 @@ test('RH toolbox developer save persists the selected custom category with each 
   assert.match(api, /saveRhToolboxPersistentManifest/);
 });
 
-test('RH toolbox developer drafts replace the edited released tool instead of duplicating by title', async () => {
+test('RH toolbox developer drafts replace the edited released tool instead of duplicating by title', {
+  skip: !hasRhToolboxDeveloperSource,
+}, async () => {
   const { RH_TOOLBOX_MANIFEST } = await loadRhToolboxManifest();
   const { normalizeRhToolboxManifest } = await loadRhToolboxUtils();
   const { mergeRhToolboxManifestWithDeveloperDrafts } = await loadRhToolboxDeveloper();
@@ -1089,7 +1082,9 @@ test('RH toolbox keeps domestic and overseas apps separate even when their WebAp
   assert.deepEqual(merged.tools.map((tool) => tool.rhSite).sort(), ['cn', 'intl']);
 });
 
-test('RH toolbox developer manifest normalizes old duplicate drafts before display', async () => {
+test('RH toolbox developer manifest normalizes old duplicate drafts before display', {
+  skip: !hasRhToolboxDeveloperSource,
+}, async () => {
   const { RH_TOOLBOX_MANIFEST } = await loadRhToolboxManifest();
   const { normalizeRhToolboxManifest } = await loadRhToolboxUtils();
   const { mergeRhToolboxManifestWithDeveloperDrafts } = await loadRhToolboxDeveloper();
@@ -1146,8 +1141,10 @@ test('RH toolbox developer manifest normalizes old duplicate drafts before displ
   assert.equal(upscaleTools[0].runtime?.instanceType, 'plus');
 });
 
-test('RH toolbox maker defaults use a 60 minute RH polling budget while theme copy stays decorative', () => {
-  const maker = readFileSync(new URL('../src/components/nodes/RHToolboxMakerNode.tsx', import.meta.url), 'utf8');
+test('RH toolbox maker defaults use a 60 minute RH polling budget while theme copy stays decorative', {
+  skip: !hasRhToolboxMakerSource,
+}, () => {
+  const maker = readFileSync(rhToolboxMakerNodeUrl, 'utf8');
   const canvas = readFileSync(new URL('../src/components/Canvas.tsx', import.meta.url), 'utf8');
   const service = readFileSync(new URL('../src/services/rhToolbox.ts', import.meta.url), 'utf8');
   const utils = readFileSync(new URL('../src/utils/rhToolbox.ts', import.meta.url), 'utf8');

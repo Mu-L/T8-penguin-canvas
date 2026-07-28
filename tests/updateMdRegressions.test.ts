@@ -225,7 +225,7 @@ test('LLM node defaults to the second built-in model', () => {
 
   assert.match(models, /export const DEFAULT_LLM_MODEL = 'gemini-3\.5-flash'/);
   assert.match(canvas, /llm:\s*\{[\s\S]*model:\s*'gemini-3\.5-flash'/);
-  assert.match(llm, /gemini-3\.5-flash\(默认\)/);
+  assert.match(llm, /<select[\s\S]*value=\{modelSelection\.presetValue\}[\s\S]*LLM_MODELS\.map/);
   assert.match(features, /gemini-3\.5-flash 默认/);
 });
 

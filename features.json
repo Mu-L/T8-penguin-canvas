@@ -1,42 +1,39 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.6.8",
-  "lastUpdated": "2026-07-29-development-seedance-nz-nano-banana-v31-lite",
+  "version": "2.6.9",
+  "lastUpdated": "2026-07-29-v2.6.9-release-candidate",
   "release": {
-    "status": "released",
-    "version": "2.6.8",
-    "date": "2026-07-25",
-    "tag": "v2.6.8",
-    "sourceTarget": "41097025671baddfce7d171bfc41c64bb2d0af87",
-    "releaseUrl": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.6.8",
-    "latest": true,
-    "autoUpdateAssets": {
-      "installer": {
-        "name": "T8-PenguinCanvas-Setup-2.6.8.exe",
-        "size": 1303124391,
-        "sha256": "4baabc603f62e1dea43bac2f8be10147686b5abc84aac6704e0797c4b2a96cae"
-      },
-      "blockmap": {
-        "name": "T8-PenguinCanvas-Setup-2.6.8.exe.blockmap",
-        "size": 1357957,
-        "sha256": "42f3caf452fe2169a662935771781a79e9ca6c11fd72c44917b7f7cb71056cc8"
-      },
-      "latestYml": {
-        "name": "latest.yml",
-        "size": 362,
-        "sha256": "d3e2f0b242822253d014d50217fec077ae043668c7228f3ea1f9e4de46b999cf"
-      }
-    },
+    "status": "release-candidate-authorized-evidence-deferred",
+    "version": "2.6.9",
+    "date": "2026-07-29",
+    "tag": "v2.6.9",
+    "latest": false,
     "verification": [
-      "GitHub Release 已正式发布、非草稿、非预发布并标记为 Latest；Tag v2.6.8 精确指向封存源码提交。",
-      "三项自动更新资产的 GitHub size / SHA-256 元数据与本地 sealed recovery 清单完全一致。",
-      "用户明确授权先发布、后补真实证据；受当前 GitHub 回下载链路约 80KB/s 影响，1.2GB 安装器的完整远端回下载哈希证据仍待发布后补齐，未标记为通过。"
+      "用户已明确授权 v2.6.9 先发布、后补真实证据；延期只允许精确版本 owner-approved-post-release-v2.6.9，不把缺失证据标记为通过。",
+      "Electron/NSIS 正式打包限制为一次，并使用受限 CPU 资源；最终 GitHub Release、Latest、三项自动更新资产大小与 SHA-256 在发布后回填。"
+    ]
+  },
+  "releaseV269CreatorAgentAndProviderStability": {
+    "status": "release-candidate",
+    "date": "2026-07-29",
+    "releaseIncluded": true,
+    "highlights": [
+      "正式加入一句话开工的 Creator Agent：支持文字、图像、视频和音频附件，流式对话，每轮恰好三项可点击建议，新建对话、历史恢复、停止回复、对象引用和素材发送到画布。",
+      "Creator Agent、Agent Control、zcanvas CLI 与内置 Codex Skill 由同一能力图、模型目录和权限合同生成；画布写入、运行与交付使用可审计审批、幂等回执、revision 新鲜度及本地产物证据。",
+      "贞贞的AI工坊与贞贞的平价AI小屋在图像、视频、LLM 与 Story 中按真实来源分流；平价AI小屋补齐 zhenzhen-image-nb-pro、zhenzhen-image-nb-2、zhenzhen-image-nb-2-lite 和 zhenzhen-video-v31-lite，香蕉2默认使用完整 zhenzhen-image-nb-2。",
+      "所有生成链路继续使用安全远程素材转存，并加强代理/TUN/VPN 切换后的新连接、DNS 与下载恢复；不会因下载重试而重复提交生成任务。",
+      "开发启动统一使用 Electron Node ABI 并修复 Windows 中文日志乱码；模型注意事项移动到放置栏前，工作流医生保持默认关闭。"
+    ],
+    "verification": [
+      "公开文件边界检查通过；本地 SKILL.md、roadmap.md、用户数据、缓存、测试凭据和受保护 FFmpeg/运行时文件均不进入公开提交。",
+      "Creator Agent、Agent Control、zcanvas、模型映射、Provider 来源、下载恢复、启动器与 UI 合同由随源码测试覆盖；正式构建和自动更新资产验证在本次发布流程中执行。",
+      "用户明确授权先发布、后补真实 Provider、协作多端、安装升级和完整远端回下载证据；延期不产生伪造 passed 结果。"
     ]
   },
   "seedanceNzNanoBananaAndV31Lite": {
-    "status": "development-complete-unreleased",
+    "status": "release-candidate",
     "date": "2026-07-29",
-    "releaseIncluded": false,
+    "releaseIncluded": true,
     "highlights": [
       "图像节点“香蕉Pro”在贞贞的平价AI小屋来源新增 zhenzhen-image-nb-pro；“香蕉2”新增 zhenzhen-image-nb-2 与 zhenzhen-image-nb-2-lite，并把完整 zhenzhen-image-nb-2 设为默认模型。",
       "香蕉2完整模型支持 0.5K/1K/2K/4K、n=1、极端比例与最多 14 张参考图；Lite 固定 1K、n=1..4；香蕉Pro支持 1K/2K/4K、n=1、最多 14 张参考图。",
@@ -51,9 +48,9 @@
     ]
   },
   "videoBuiltinProviderSeparation": {
-    "status": "development-complete-unreleased",
+    "status": "release-candidate",
     "date": "2026-07-29",
-    "releaseIncluded": false,
+    "releaseIncluded": true,
     "highlights": [
       "视频节点高级来源新增独立“贞贞的平价AI小屋”；“贞贞的AI工坊”和平价小屋不再共用一份混合模型列表。",
       "工坊只显示 Grok、Veo、Sora2 及其工坊/FAL 子模型；平价小屋只显示 api.seedance.nz 的 Grok、Veo、Wan、Happy Horse、Hailuo、Vidu、Kling、Upscaler 及对应子模型。",
@@ -67,9 +64,9 @@
     ]
   },
   "seedanceNzPublicName": {
-    "status": "development-complete-unreleased",
+    "status": "release-candidate",
     "date": "2026-07-29",
-    "releaseIncluded": false,
+    "releaseIncluded": true,
     "highlights": [
       "api.seedance.nz 的用户可见平台名称统一为“贞贞的平价AI小屋”，不再显示“贞贞的平价AI工坊（国内）”或“国内平价工坊”。",
       "API 设置、SD2.0、视频、图像、导演分镜、运行前体检、前端请求错误和后端缺 Key 提示使用同一名称。",
@@ -81,9 +78,9 @@
     ]
   },
   "developmentBackendElectronAbiFix": {
-    "status": "development-complete-unreleased",
+    "status": "release-candidate",
     "date": "2026-07-29",
-    "releaseIncluded": false,
+    "releaseIncluded": true,
     "highlights": [
       "修复 start-dev.bat 从 backend 子目录调用普通系统 Node v22，导致按 Electron 33 ABI 构建的 better-sqlite3 抛出 ERR_DLOPEN_FAILED、后端无法启动的问题。",
       "根目录 start:backend 与 dev:backend 统一使用 ELECTRON_RUN_AS_NODE=1 的 Electron 运行时；开发模式保留 backend/src 热重载，backend 子包入口只代理到根目录权威脚本。",
