@@ -1,20 +1,41 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.6.9",
-  "lastUpdated": "2026-07-29-v2.6.9-release-candidate",
+  "lastUpdated": "2026-07-29-v2.6.9-released",
   "release": {
-    "status": "release-candidate-authorized-evidence-deferred",
+    "status": "released",
     "version": "2.6.9",
     "date": "2026-07-29",
     "tag": "v2.6.9",
-    "latest": false,
+    "sourceTarget": "838dc0bf87e290bbf618075e5800b8c541e5f80a",
+    "releaseUrl": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.6.9",
+    "latest": true,
+    "autoUpdateAssets": {
+      "installer": {
+        "name": "T8-PenguinCanvas-Setup-2.6.9.exe",
+        "size": 1304390936,
+        "sha256": "3b96cd9cde1d1488e4fb2b88d9a5105fcfe2128dc51f4f36db20dbb962ee951c"
+      },
+      "blockmap": {
+        "name": "T8-PenguinCanvas-Setup-2.6.9.exe.blockmap",
+        "size": 1359621,
+        "sha256": "45cae6d5171576fc5a3620b9689918ed1a5799f86e452da25f2a9244337c5d20"
+      },
+      "latestYml": {
+        "name": "latest.yml",
+        "size": 362,
+        "sha256": "36b152c0f9da3e0bd02ebc5cdc32d4a6f18624d6ad0ef33cf4bb0f62f7718ba7"
+      }
+    },
     "verification": [
-      "用户已明确授权 v2.6.9 先发布、后补真实证据；延期只允许精确版本 owner-approved-post-release-v2.6.9，不把缺失证据标记为通过。",
-      "Electron/NSIS 正式打包限制为一次，并使用受限 CPU 资源；最终 GitHub Release、Latest、三项自动更新资产大小与 SHA-256 在发布后回填。"
+      "GitHub Release 已正式发布、非草稿、非预发布并标记为 Latest；Tag v2.6.9 精确指向源码提交 838dc0bf87e290bbf618075e5800b8c541e5f80a。",
+      "Electron/NSIS 只完成一次正式安装包构建，并使用 BelowNormal 优先级与 4 个逻辑核心；未运行 FFmpeg 转码或额外 Electron 冷启动压力测试。",
+      "安装包、blockmap 与 latest.yml 的本地 SHA-256、sealed recovery 清单、GitHub digest/size 元数据及发布前完整远端回下载字节核验一致。",
+      "用户明确授权先发布、后补真实 Provider、协作多端与安装升级证据；延期不将尚未执行的证据标记为通过。"
     ]
   },
   "releaseV269CreatorAgentAndProviderStability": {
-    "status": "release-candidate",
+    "status": "released-v2.6.9",
     "date": "2026-07-29",
     "releaseIncluded": true,
     "highlights": [
@@ -31,7 +52,7 @@
     ]
   },
   "seedanceNzNanoBananaAndV31Lite": {
-    "status": "release-candidate",
+    "status": "released-v2.6.9",
     "date": "2026-07-29",
     "releaseIncluded": true,
     "highlights": [
@@ -44,11 +65,11 @@
       "逐项核对官方 https://api.seedance.nz/docs/llms.txt 与 F:\\AI-T8-video-onekey\\ComfyUI\\custom_nodes\\ComfyUI_Seedance 的已通过实现，没有用猜测补字段。",
       "模型映射、请求合同、Provider、轮询、本地转存、工作流来源恢复与能力清单定向回归通过；feature-sync、TypeScript type-check 和前端 build 通过。",
       "四个真实最小任务均已由官方接口接受并返回任务 ID；当前仍为上游排队状态且没有错误，本记录不把提交成功或排队状态冒充为最终生成成功。",
-      "未执行 Electron 打包、Git 提交、推送、tag 或发布。"
+      "本功能已随 v2.6.9 完成 Electron/NSIS 打包、GitHub Tag、Latest Release 与自动更新资产发布。"
     ]
   },
   "videoBuiltinProviderSeparation": {
-    "status": "release-candidate",
+    "status": "released-v2.6.9",
     "date": "2026-07-29",
     "releaseIncluded": true,
     "highlights": [
@@ -60,11 +81,11 @@
     "verification": [
       "TypeScript type-check 通过；视频来源目录、旧数据推断和界面接线定向测试连同 Seedance 前端回归共 21/21 通过。",
       "本地真实开发页核对：平价小屋显示 8 个模型家族，切回工坊只显示 Grok、Veo、Sora2；测试后已恢复原来源。",
-      "未运行生成、build、Electron 打包、提交、推送、tag 或发布。"
+      "本功能已随 v2.6.9 完成构建、Electron/NSIS 打包、GitHub Tag、Latest Release 与自动更新资产发布。"
     ]
   },
   "seedanceNzPublicName": {
-    "status": "release-candidate",
+    "status": "released-v2.6.9",
     "date": "2026-07-29",
     "releaseIncluded": true,
     "highlights": [
@@ -74,11 +95,11 @@
     ],
     "verification": [
       "实际开发页面确认 API 设置与 SD2.0 均显示新名称，页面不再出现旧称；名称定向回归 5/5、TypeScript type-check、JSON 与 diff-check 通过。",
-      "未运行生成、build、Electron 打包、提交、推送、tag 或发布。"
+      "本功能已随 v2.6.9 完成构建、Electron/NSIS 打包、GitHub Tag、Latest Release 与自动更新资产发布。"
     ]
   },
   "developmentBackendElectronAbiFix": {
-    "status": "release-candidate",
+    "status": "released-v2.6.9",
     "date": "2026-07-29",
     "releaseIncluded": true,
     "highlights": [
@@ -90,7 +111,7 @@
     "verification": [
       "启动器、Electron ABI、开发数据库隔离聚焦回归 7/7 通过。",
       "使用随机端口、系统临时数据目录和 acceptance-small-v1 策略，按 npm run dev:backend 实际启动成功并返回 /api/status 200。",
-      "未 build、打包、提交、推送、tag 或发布。"
+      "本修复已随 v2.6.9 完成构建、Electron/NSIS 打包、GitHub Tag、Latest Release 与自动更新资产发布。"
     ]
   },
   "seedanceNzMidjourneyActions": {
