@@ -7,6 +7,7 @@
 const express = require('express');
 const crypto = require('node:crypto');
 const fs = require('fs');
+const net = require('node:net');
 const path = require('path');
 const multer = require('multer');
 const { Agent: UndiciAgent } = require('undici');
@@ -31,6 +32,7 @@ const { redactLocalPaths } = require('../services/assetPublicView');
 const { detectBinaryKind } = require('../collaboration/gatewaySecurity');
 const {
   assertJsonComplexity,
+  resolveTunPublicDns,
   safeRemoteJsonFetch,
   safeRemoteMediaFetch,
   safeRemoteUpload,
@@ -140,6 +142,7 @@ const FAL_POLL_MAX_JSON_NODES = 50_000;
 let proxySafeRemoteTestOptions = null;
 const providerResponseTimings = new WeakMap();
 let providerDispatcher = null;
+let providerPublicDnsDispatcher = null;
 
 const PROVIDER_NETWORK_ERROR_CODES = new Set([
   'ENOTFOUND',
@@ -155,31 +158,86 @@ const PROVIDER_NETWORK_ERROR_CODES = new Set([
   'UND_ERR_SOCKET',
 ]);
 
-function createProviderDispatcher() {
+function providerPublicDnsLookup(
+  hostname,
+  options,
+  callback,
+  resolvePublicDns = resolveTunPublicDns,
+) {
+  const literalFamily = net.isIP(String(hostname || ''));
+  if (literalFamily) {
+    if (options?.all === true) {
+      callback(null, [{ address: String(hostname), family: literalFamily }]);
+    } else {
+      callback(null, String(hostname), literalFamily);
+    }
+    return;
+  }
+  resolvePublicDns(hostname)
+    .then((records) => {
+      const candidates = [...records].sort((left, right) => {
+        if (Number(left?.family) === Number(right?.family)) return 0;
+        return Number(left?.family) === 4 ? -1 : 1;
+      });
+      if (!candidates.length) {
+        callback(Object.assign(new Error('公共 DNS 未返回可用地址'), {
+          code: 'TUN_DNS_FALLBACK_FAILED',
+        }));
+        return;
+      }
+      if (options?.all === true) {
+        callback(null, candidates);
+        return;
+      }
+      callback(null, candidates[0].address, candidates[0].family);
+    })
+    .catch((error) => callback(error));
+}
+
+function createProviderDispatcher(options = {}) {
+  const usePublicDns = options.publicDns === true;
   return new UndiciAgent({
     // A socket opened before a TUN/VPN route switch must never be reused for
     // the next Provider call. Undici documents pipelining=0 as disabling
     // keep-alive, so every request resolves and connects against current state.
     pipelining: 0,
     connectTimeout: Math.min(PROXY_REMOTE_DEADLINE_MS, PROVIDER_CONNECT_TIMEOUT_MS),
+    // Let Undici race usable IPv4/IPv6 addresses instead of getting stuck on
+    // an enabled-but-unroutable IPv6 interface after a TUN/VPN switch.
+    autoSelectFamily: true,
+    autoSelectFamilyAttemptTimeout: 250,
+    ...(usePublicDns ? {
+      // The first attempt always honors the active system/TUN resolver. Only
+      // after that path fails do read-only task queries use independent public
+      // DNS, which recovers from stale Fake-IP and broken IPv6 resolver state.
+      connect: { lookup: providerPublicDnsLookup },
+    } : {}),
   });
 }
 
-function currentProviderDispatcher() {
+function currentProviderDispatcher(publicDns = false) {
+  if (publicDns) {
+    if (!providerPublicDnsDispatcher) {
+      providerPublicDnsDispatcher = createProviderDispatcher({ publicDns: true });
+    }
+    return providerPublicDnsDispatcher;
+  }
   if (!providerDispatcher) providerDispatcher = createProviderDispatcher();
   return providerDispatcher;
 }
 
 function rotateProviderDispatcher() {
-  const previous = providerDispatcher;
-  providerDispatcher = createProviderDispatcher();
-  if (previous) void previous.close().catch(() => {});
+  const previous = [providerDispatcher, providerPublicDnsDispatcher].filter(Boolean);
+  providerDispatcher = null;
+  providerPublicDnsDispatcher = null;
+  for (const dispatcher of previous) void dispatcher.close().catch(() => {});
 }
 
 async function resetProviderDispatcherForTests() {
-  const previous = providerDispatcher;
+  const previous = [providerDispatcher, providerPublicDnsDispatcher].filter(Boolean);
   providerDispatcher = null;
-  if (previous) await previous.close().catch(() => {});
+  providerPublicDnsDispatcher = null;
+  await Promise.all(previous.map((dispatcher) => dispatcher.close().catch(() => {})));
 }
 
 function providerNetworkCause(error) {
@@ -308,7 +366,7 @@ async function fetchProviderResponse(url, init = {}, label = 'Provider', options
         fetch(url, {
           ...init,
           headers: requestHeaders,
-          dispatcher: init?.dispatcher || currentProviderDispatcher(),
+          dispatcher: init?.dispatcher || currentProviderDispatcher(attempt > 0),
           signal: controller.signal,
         }),
         timeoutPromise,
@@ -352,6 +410,48 @@ function proxyRouteError(label, error, exactSecrets = []) {
 function proxyPublicError(error, fallback = '请求失败', exactSecrets = []) {
   const safe = safeDiagnosticText(error?.message || '', 300, exactSecrets);
   return safe || fallback;
+}
+
+function isRecoverableTaskResultQueryError(error) {
+  const code = String(error?.code || '').trim().toUpperCase();
+  return error?.recoverable === true
+    || code === 'PROVIDER_NETWORK_UNAVAILABLE'
+    || code === 'SEEDANCE_UPSTREAM_UNAVAILABLE'
+    || code === 'SEEDANCE_UPSTREAM_TIMEOUT'
+    || code === 'SEEDANCE_REQUEST_ABORTED'
+    || code === 'CONNECT_TIMEOUT'
+    || code === 'FETCH_TIMEOUT'
+    || code === 'TUN_DNS_FALLBACK_FAILED'
+    || code === 'TUN_DNS_FALLBACK_DOH_TIMEOUT'
+    || code === 'REMOTE_CONNECT_FAILED'
+    || isProviderNetworkError(error);
+}
+
+function sendTaskResultQueryRecovery(res, error, options = {}) {
+  if (!isRecoverableTaskResultQueryError(error)) return false;
+  const taskId = String(options.taskId || '').trim();
+  const retryAfterMs = Math.max(
+    500,
+    Number(error?.retryAfterMs) || PROVIDER_NETWORK_RETRY_DELAY_MS,
+  );
+  const status = String(options.status || 'MATERIALIZING');
+  const message = '后台任务和生成结果仍然保留；当前仅结果查询或下载连接中断。正在使用原任务 ID 自动重新获取，不会重新生成，也不会重复扣费。';
+  res.status(202).json({
+    success: true,
+    code: 'task_result_query_recovering',
+    message,
+    data: {
+      ...(options.data && typeof options.data === 'object' ? options.data : {}),
+      ...(taskId ? { taskId } : {}),
+      status,
+      progress: '100% · 正在重新获取结果',
+      recoverable: true,
+      retryAfterMs,
+      code: 'task_result_query_recovering',
+      error: message,
+    },
+  });
+  return true;
 }
 
 function normalizedContentType(value) {
@@ -2861,6 +2961,10 @@ router.get('/image/seedance-nz/status/:tid', async (req, res) => {
   } catch (error) {
     const status = Number(error?.status || 500);
     proxyRouteError('proxy/image/seedance-nz/status 错误', error, [apiKey]);
+    if (sendTaskResultQueryRecovery(res, error, {
+      taskId: req.params.tid,
+      status: 'materializing',
+    })) return;
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
       error: proxyPublicError(error, 'seedance.nz 图像查询失败', [apiKey]),
@@ -3096,6 +3200,10 @@ router.get('/image/seedance-nz/midjourney/status/:tid', async (req, res) => {
   } catch (error) {
     const status = Number(error?.status || 500);
     proxyRouteError('proxy/image/seedance-nz/midjourney/status 错误', error, [apiKey]);
+    if (sendTaskResultQueryRecovery(res, error, {
+      taskId: req.params.tid,
+      status: 'materializing',
+    })) return;
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
       error: proxyPublicError(error, '平价AI小屋 Midjourney 查询失败', [apiKey]),
@@ -3175,6 +3283,7 @@ router.get('/video/happyhorse/status/:tid', async (req, res) => {
   } catch (error) {
     const status = Number(error?.status || 500);
     proxyRouteError('proxy/video/happyhorse/status 错误', error, [apiKey]);
+    if (sendTaskResultQueryRecovery(res, error, { taskId: req.params.tid })) return;
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
       error: proxyPublicError(error, 'Happy Horse 查询失败', [apiKey]),
@@ -3254,6 +3363,7 @@ router.get('/video/hailuo/status/:tid', async (req, res) => {
   } catch (error) {
     const status = Number(error?.status || 500);
     proxyRouteError('proxy/video/hailuo/status 错误', error, [apiKey]);
+    if (sendTaskResultQueryRecovery(res, error, { taskId: req.params.tid })) return;
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
       error: proxyPublicError(error, 'Hailuo 2.3 查询失败', [apiKey]),
@@ -3333,6 +3443,7 @@ router.get('/video/kling/status/:tid', async (req, res) => {
   } catch (error) {
     const status = Number(error?.status || 500);
     proxyRouteError('proxy/video/kling/status 错误', error, [apiKey]);
+    if (sendTaskResultQueryRecovery(res, error, { taskId: req.params.tid })) return;
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
       error: proxyPublicError(error, 'Kling 查询失败', [apiKey]),
@@ -3412,6 +3523,7 @@ router.get('/video/upscaler/status/:tid', async (req, res) => {
   } catch (error) {
     const status = Number(error?.status || 500);
     proxyRouteError('proxy/video/upscaler/status 错误', error, [apiKey]);
+    if (sendTaskResultQueryRecovery(res, error, { taskId: req.params.tid })) return;
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
       error: proxyPublicError(error, 'Zhenzhen Upscaler 查询失败', [apiKey]),
@@ -3491,6 +3603,7 @@ router.get('/video/vidu/status/:tid', async (req, res) => {
   } catch (error) {
     const status = Number(error?.status || 500);
     proxyRouteError('proxy/video/vidu/status 错误', error, [apiKey]);
+    if (sendTaskResultQueryRecovery(res, error, { taskId: req.params.tid })) return;
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
       error: proxyPublicError(error, 'Vidu Q3 查询失败', [apiKey]),
@@ -3570,6 +3683,7 @@ router.get('/video/wan/status/:tid', async (req, res) => {
   } catch (error) {
     const status = Number(error?.status || 500);
     proxyRouteError('proxy/video/wan/status 错误', error, [apiKey]);
+    if (sendTaskResultQueryRecovery(res, error, { taskId: req.params.tid })) return;
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
       error: proxyPublicError(error, 'Wan 2.7 Spicy 查询失败', [apiKey]),
@@ -3669,6 +3783,10 @@ router.get('/audio/suno-nz/status/:tid', async (req, res) => {
   } catch (error) {
     const status = Number(error?.status || 500);
     proxyRouteError('proxy/audio/suno-nz/status 错误', error, [apiKey]);
+    if (sendTaskResultQueryRecovery(res, error, {
+      taskId: req.params.tid,
+      data: { tracks: [] },
+    })) return;
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
       error: proxyPublicError(error, 'Suno 查询失败', [apiKey]),
@@ -3737,6 +3855,7 @@ router.get('/audio/seed-audio/status/:tid', async (req, res) => {
   } catch (error) {
     const status = Number(error?.status || 500);
     proxyRouteError('proxy/audio/seed-audio/status 错误', error, [apiKey]);
+    if (sendTaskResultQueryRecovery(res, error, { taskId: req.params.tid })) return;
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
       error: proxyPublicError(error, 'Seed Audio 查询失败', [apiKey]),
@@ -3981,6 +4100,10 @@ router.get('/image/status/:tid', async (req, res) => {
     res.json({ success: true, data: { status: status || 'pending', progress } });
   } catch (e) {
     proxyRouteError('proxy/image/status 错误', e, [apiKey]);
+    if (sendTaskResultQueryRecovery(res, e, {
+      taskId: tid,
+      status: 'materializing',
+    })) return;
     res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e, '查询失败', [apiKey]) });
   }
 });
@@ -4392,6 +4515,10 @@ router.post('/image/fal/query', async (req, res) => {
     return res.json({ success: true, data: { status: 'pending', falStatus: st || 'IN_QUEUE' } });
   } catch (e) {
     proxyRouteError('proxy/image/fal/query 错误', e);
+    if (sendTaskResultQueryRecovery(res, e, {
+      taskId: requestId,
+      status: 'materializing',
+    })) return;
     return res.status(Number(e?.status) || 400).json({ success: false, error: proxyPublicError(e, '查询失败') });
   }
 });
@@ -4557,6 +4684,10 @@ router.get('/mj/task/:id', async (req, res) => {
     });
   } catch (e) {
     proxyRouteError('proxy/mj/task 错误', e, [settings.zhenzhenApiKey]);
+    if (sendTaskResultQueryRecovery(res, e, {
+      taskId,
+      status: 'materializing',
+    })) return;
     return res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e, '查询失败', [settings.zhenzhenApiKey]) });
   }
 });
@@ -5539,6 +5670,10 @@ router.post('/video/fal/query', async (req, res) => {
     return res.json({ success: true, data: { status: 'pending', falStatus: st || 'IN_QUEUE' } });
   } catch (e) {
     proxyRouteError('proxy/video/fal/query 错误', e);
+    if (sendTaskResultQueryRecovery(res, e, {
+      taskId: requestId,
+      status: 'MATERIALIZING',
+    })) return;
     return res.status(Number(e?.status) || 400).json({ success: false, error: proxyPublicError(e, '查询失败') });
   }
 });
@@ -6112,6 +6247,10 @@ router.post('/fal-toolbox/query', async (req, res) => {
     return res.json({ success: true, data: { status: 'pending', falStatus: resultStatus || falToolboxStatusValue(statusData) || 'IN_PROGRESS', requestId } });
   } catch (e) {
     proxyRouteError('proxy/fal-toolbox/query 错误', e);
+    if (sendTaskResultQueryRecovery(res, e, {
+      taskId: requestId,
+      status: 'MATERIALIZING',
+    })) return;
     return res.status(proxyErrorStatus(e)).json({ success: false, data: { status: 'failed', error: proxyPublicError(e, '查询失败') } });
   }
 });
@@ -6372,6 +6511,10 @@ router.get('/video/query', async (req, res) => {
     });
   } catch (e) {
     proxyRouteError('proxy/video/query 错误', e, [apiKey]);
+    if (sendTaskResultQueryRecovery(res, e, {
+      taskId,
+      status: 'MATERIALIZING',
+    })) return;
     res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e, '请求失败', [apiKey]) });
   }
 });
@@ -6607,6 +6750,11 @@ router.get('/seedance/query', async (req, res) => {
       });
     } catch (e) {
       proxyRouteError('proxy/seedance/query seedance.nz 错误', e, [apiKey]);
+      if (sendTaskResultQueryRecovery(res, e, {
+        taskId,
+        status: 'MATERIALIZING',
+        data: { taskProvider: seedanceNz.PROVIDER_ID },
+      })) return;
       const status = Number(e?.status);
       return res.status(status >= 400 && status < 600 ? status : 500).json({
         success: false,
@@ -6710,6 +6858,11 @@ router.get('/seedance/query', async (req, res) => {
     });
   } catch (e) {
     proxyRouteError('proxy/seedance/query 错误', e, [apiKey]);
+    if (sendTaskResultQueryRecovery(res, e, {
+      taskId,
+      status: 'MATERIALIZING',
+      data: { taskProvider: 'zhenzhen-legacy' },
+    })) return;
     res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e, '查询失败', [apiKey]) });
   }
 });
@@ -6930,6 +7083,11 @@ router.get('/audio/query', async (req, res) => {
     });
   } catch (e) {
     proxyRouteError('proxy/audio/query 错误', e, [apiKey]);
+    if (sendTaskResultQueryRecovery(res, e, {
+      taskId: ids,
+      status: 'MATERIALIZING',
+      data: { tracks: [], total: 0, completed: 0 },
+    })) return;
     res.status(proxyErrorStatus(e)).json({ success: false, error: proxyPublicError(e, '请求失败', [apiKey]) });
   }
 });
@@ -7322,6 +7480,11 @@ router.get('/runninghub/query', async (req, res) => {
     });
   } catch (e) {
     proxyRouteError('proxy/rh/query 错误', e);
+    if (sendTaskResultQueryRecovery(res, e, {
+      taskId,
+      status: 'MATERIALIZING',
+      data: { urls: [], site: requestedSite },
+    })) return;
     res.status(502).json({ success: false, error: 'RunningHub 查询请求失败' });
   }
 });
@@ -7498,12 +7661,14 @@ module.exports = router;
 module.exports._test = Object.freeze({
   diagnosticDigest,
   FAL_TOOLBOX_AUTHORITY,
+  currentProviderDispatcher,
   fetchProxyRemoteMedia,
   fetchFalPollJson,
   storeMaterializedOutputBuffer,
   fetchProviderResponse,
   opaqueDiagnosticSummary,
   parseJsonResponse,
+  providerPublicDnsLookup,
   resetFalTaskRegistryMemoryForTests,
   resetProviderDispatcherForTests,
   resetVideoMaterializationCacheForTests,

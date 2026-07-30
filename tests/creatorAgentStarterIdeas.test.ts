@@ -4,6 +4,7 @@ import {
   CREATOR_AGENT_STARTER_IDEA_BATCH_COUNT,
   creatorAgentStarterIdeaBatch,
   creatorAgentStarterIdeaContextKey,
+  creatorAgentStarterMode,
 } from '../src/utils/creatorAgentStarterIdeas.ts';
 
 test('creator Agent starter ideas stay stable for the same session and canvas context', () => {
@@ -87,4 +88,59 @@ test('creator Agent starter context key is canonical and accepts only bounded st
   });
   assert.equal(first, reordered);
   assert.notEqual(first, changed);
+});
+test('blank creator Agent starters never invent continuation context', () => {
+  const context = {
+    canvasRevision: 42,
+    nodeCount: 18,
+    edgeCount: 10,
+    failedRunCount: 3,
+    offscreenFailedCount: 2,
+  };
+  const contextKey = creatorAgentStarterIdeaContextKey(context);
+  const mode = creatorAgentStarterMode(context);
+  assert.equal(mode, 'blank-new');
+  const forbidden = /当前|现有|这组|这个|这些|它|继续|接着|沿用|完善|补齐|只重做|恢复|检查当前/;
+  for (let rotation = 0; rotation < CREATOR_AGENT_STARTER_IDEA_BATCH_COUNT; rotation += 1) {
+    const batch = creatorAgentStarterIdeaBatch({
+      sessionSeed: 'session-blank-1',
+      contextKey,
+      mode,
+      rotation,
+    });
+    assert.equal(batch.length, 3);
+    assert.equal(new Set(batch.map((item) => item.taskFamily)).size, 3);
+    batch.forEach((item) => {
+      assert.doesNotMatch(item.label, forbidden);
+      assert.equal(item.requiredCapabilityIds.length > 0, true);
+      assert.notEqual(item.starterPrompt.trim(), '');
+      assert.notEqual(item.expectedFirstArtifact.trim(), '');
+    });
+  }
+});
+
+test('creator Agent starter mode requires explicit evidence before contextual suggestions', () => {
+  assert.equal(creatorAgentStarterMode({
+    nodeCount: 12,
+    failedRunCount: 2,
+  }), 'blank-new');
+  assert.equal(creatorAgentStarterMode({
+    attachmentKinds: ['image'],
+    nodeCount: 12,
+  }), 'attachment-ready');
+  assert.equal(creatorAgentStarterMode({
+    selectedNodeTypes: ['video'],
+  }), 'selection-ready');
+  assert.equal(creatorAgentStarterMode({
+    nodeCount: 12,
+    allowCanvasContext: true,
+  }), 'canvas-explicit');
+  assert.equal(creatorAgentStarterMode({
+    failedRunCount: 2,
+    allowFailureContext: true,
+  }), 'recoverable-failure');
+  assert.equal(creatorAgentStarterMode({
+    resumedSession: true,
+    selectedNodeTypes: ['video'],
+  }), 'resumed-session');
 });

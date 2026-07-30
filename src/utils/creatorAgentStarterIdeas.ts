@@ -1,6 +1,24 @@
+import starterCatalogJson from '../../backend/src/shared/creatorAgentStarterCatalog.json' with { type: 'json' };
+
+export type CreatorAgentStarterMode =
+  | 'blank-new'
+  | 'attachment-ready'
+  | 'selection-ready'
+  | 'canvas-explicit'
+  | 'recoverable-failure'
+  | 'resumed-session';
+
 export interface CreatorAgentStarterIdea {
   id: string;
+  batch: number;
   label: string;
+  description: string;
+  starterPrompt: string;
+  intent: string;
+  taskFamily: string;
+  creatorKind: string;
+  expectedFirstArtifact: string;
+  requiredCapabilityIds: string[];
 }
 
 export interface CreatorAgentStarterIdeaContext {
@@ -9,34 +27,30 @@ export interface CreatorAgentStarterIdeaContext {
   edgeCount?: number;
   selectedNodeTypes?: readonly string[];
   referencedNodeTypes?: readonly string[];
+  attachmentKinds?: readonly string[];
   failedRunCount?: number;
   offscreenFailedCount?: number;
+  allowCanvasContext?: boolean;
+  allowFailureContext?: boolean;
+  resumedSession?: boolean;
 }
 
-const STARTER_IDEA_BATCHES: readonly (readonly CreatorAgentStarterIdea[])[] = [
-  [
-    { id: 'idea-story-system', label: '把一个模糊创意整理成可编辑的剧本、角色与镜头计划' },
-    { id: 'idea-canvas-priority', label: '结合当前画布，找出最值得继续完善的三处内容' },
-    { id: 'idea-vertical-ad', label: '从一句产品卖点开始，规划一支 30 秒竖屏广告' },
-  ],
-  [
-    { id: 'idea-character-system', label: '帮我设计一个角色，并统一脸、服装、场景和镜头风格' },
-    { id: 'idea-image-to-video', label: '把现有图片发展成一段有起承转合的短视频' },
-    { id: 'idea-material-production', label: '为这组素材补全分镜、运镜、声音和成片节奏' },
-  ],
-  [
-    { id: 'idea-script-breakdown', label: '把一段剧本拆成角色资产、场景资产和可拍分镜' },
-    { id: 'idea-visual-directions', label: '为一个画面设计三种不同情绪的光影与构图方向' },
-    { id: 'idea-music-video', label: '策划一支音乐短片，从视觉概念推进到镜头和剪辑' },
-  ],
-  [
-    { id: 'idea-continuity-review', label: '检查当前作品的连续性，并给出不覆盖已确认内容的改进计划' },
-    { id: 'idea-coherent-video', label: '用现有素材做一套角色一致、场景连贯的视频方案' },
-    { id: 'idea-campaign-hook', label: '从受众和传播目标出发，完善脚本、视觉钩子与结尾行动' },
-  ],
-] as const;
+interface CreatorAgentStarterCatalog {
+  schema: string;
+  rotationCount: number;
+  modes: Record<CreatorAgentStarterMode, CreatorAgentStarterIdea[]>;
+}
 
-export const CREATOR_AGENT_STARTER_IDEA_BATCH_COUNT = STARTER_IDEA_BATCHES.length;
+const starterCatalog = starterCatalogJson as CreatorAgentStarterCatalog;
+
+if (starterCatalog.schema !== 't8-creator-agent-starter-catalog-v2') {
+  throw new Error('Creator Agent starter catalog schema mismatch');
+}
+
+export const CREATOR_AGENT_STARTER_IDEA_BATCH_COUNT = Math.max(
+  1,
+  Number(starterCatalog.rotationCount) || 1,
+);
 
 function stableHash(value: string) {
   let hash = 0x811c9dc5;
@@ -62,11 +76,35 @@ function normalizedTypes(value: readonly string[] | undefined) {
     .slice(0, 16);
 }
 
+export function creatorAgentStarterMode(
+  input: CreatorAgentStarterIdeaContext,
+): CreatorAgentStarterMode {
+  if (input.resumedSession) return 'resumed-session';
+  if (normalizedTypes(input.referencedNodeTypes).length > 0) return 'selection-ready';
+  if (normalizedTypes(input.attachmentKinds).length > 0) return 'attachment-ready';
+  if (normalizedTypes(input.selectedNodeTypes).length > 0) return 'selection-ready';
+  if (
+    input.allowFailureContext
+    && (
+      boundedCount(input.failedRunCount) > 0
+      || boundedCount(input.offscreenFailedCount) > 0
+    )
+  ) {
+    return 'recoverable-failure';
+  }
+  if (input.allowCanvasContext && boundedCount(input.nodeCount) > 0) {
+    return 'canvas-explicit';
+  }
+  return 'blank-new';
+}
+
 export function creatorAgentStarterIdeaContextKey(
   input: CreatorAgentStarterIdeaContext,
 ) {
+  const mode = creatorAgentStarterMode(input);
   const safeSummary = {
-    schema: 't8-creator-starter-context-v1',
+    schema: 't8-creator-starter-context-v2',
+    mode,
     canvasRevision: input.canvasRevision == null
       ? null
       : boundedCount(input.canvasRevision),
@@ -74,30 +112,46 @@ export function creatorAgentStarterIdeaContextKey(
     edgeCount: boundedCount(input.edgeCount),
     selectedNodeTypes: normalizedTypes(input.selectedNodeTypes),
     referencedNodeTypes: normalizedTypes(input.referencedNodeTypes),
+    attachmentKinds: normalizedTypes(input.attachmentKinds),
     failedRunCount: boundedCount(input.failedRunCount),
     offscreenFailedCount: boundedCount(input.offscreenFailedCount),
+    allowCanvasContext: Boolean(input.allowCanvasContext),
+    allowFailureContext: Boolean(input.allowFailureContext),
+    resumedSession: Boolean(input.resumedSession),
   };
   return stableHash(JSON.stringify(safeSummary));
+}
+
+function catalogIdeasForMode(mode: CreatorAgentStarterMode) {
+  return (starterCatalog.modes[mode] || []).map((item) => ({
+    ...item,
+    requiredCapabilityIds: [...item.requiredCapabilityIds],
+  }));
 }
 
 export function creatorAgentStarterIdeaBatch(input: {
   sessionSeed: string;
   contextKey: string;
+  mode?: CreatorAgentStarterMode;
   rotation?: number;
 }) {
+  const mode = input.mode || 'blank-new';
+  if (mode === 'resumed-session') return [];
+  const eligible = catalogIdeasForMode(mode);
+  if (eligible.length === 0) return [];
+
+  const batches = [...new Set(eligible.map((item) => boundedCount(item.batch)))].sort(
+    (left, right) => left - right,
+  );
   const sessionSeed = String(input.sessionSeed || 'new-session').slice(0, 160);
   const contextKey = String(input.contextKey || '00000000').slice(0, 64);
-  const hash = stableHash(`t8-creator-starter-v1\0${sessionSeed}\0${contextKey}`);
-  const baseIndex = Number.parseInt(hash, 16) % CREATOR_AGENT_STARTER_IDEA_BATCH_COUNT;
+  const hash = stableHash(`t8-creator-starter-v2\0${mode}\0${sessionSeed}\0${contextKey}`);
+  const baseIndex = Number.parseInt(hash, 16) % batches.length;
   const rotation = Number.isFinite(input.rotation)
     ? Math.trunc(Number(input.rotation))
     : 0;
-  const normalizedRotation = (
-    (rotation % CREATOR_AGENT_STARTER_IDEA_BATCH_COUNT)
-    + CREATOR_AGENT_STARTER_IDEA_BATCH_COUNT
-  ) % CREATOR_AGENT_STARTER_IDEA_BATCH_COUNT;
-  const batch = STARTER_IDEA_BATCHES[
-    (baseIndex + normalizedRotation) % CREATOR_AGENT_STARTER_IDEA_BATCH_COUNT
-  ];
-  return batch.map((item) => ({ ...item }));
+  const normalizedRotation = ((rotation % batches.length) + batches.length) % batches.length;
+  const selectedBatch = batches[(baseIndex + normalizedRotation) % batches.length];
+  const selected = eligible.filter((item) => boundedCount(item.batch) === selectedBatch);
+  return selected.slice(0, 3);
 }

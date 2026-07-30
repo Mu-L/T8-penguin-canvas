@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const fs = require('fs');
+const net = require('node:net');
 const path = require('path');
 const sharp = require('sharp');
 const tls = require('tls');
@@ -12,7 +13,10 @@ const {
   resolveMediaRef,
 } = require('./mediaResolver');
 const { providerTrace } = require('./providerTrace');
-const { safeRemoteMediaFetch } = require('../utils/safeRemoteMediaFetch');
+const {
+  resolveTunPublicDns,
+  safeRemoteMediaFetch,
+} = require('../utils/safeRemoteMediaFetch');
 const { providerIdempotencyHeaders } = require('../services/providerSubmissionContext');
 
 const PROVIDER_ID = 'seedance-nz';
@@ -478,9 +482,57 @@ const seedanceDispatcher = new Agent({
   // Never carry an API socket across TUN/VPN route changes.
   pipelining: 0,
   connectTimeout: 3_000,
+  autoSelectFamily: true,
+  autoSelectFamilyAttemptTimeout: 250,
   connect: {
     ca: [...tls.rootCertificates, LETS_ENCRYPT_ROOT_YR],
     rejectUnauthorized: true,
+  },
+});
+function seedancePublicDnsLookup(
+  hostname,
+  options,
+  callback,
+  resolvePublicDns = resolveTunPublicDns,
+) {
+  const literalFamily = net.isIP(String(hostname || ''));
+  if (literalFamily) {
+    if (options?.all === true) {
+      callback(null, [{ address: String(hostname), family: literalFamily }]);
+    } else {
+      callback(null, String(hostname), literalFamily);
+    }
+    return;
+  }
+  resolvePublicDns(hostname)
+    .then((records) => {
+      const candidates = [...records].sort((left, right) => {
+        if (Number(left?.family) === Number(right?.family)) return 0;
+        return Number(left?.family) === 4 ? -1 : 1;
+      });
+      if (!candidates.length) {
+        callback(Object.assign(new Error('公共 DNS 未返回可用地址'), {
+          code: 'TUN_DNS_FALLBACK_FAILED',
+        }));
+        return;
+      }
+      if (options?.all === true) {
+        callback(null, candidates);
+        return;
+      }
+      callback(null, candidates[0].address, candidates[0].family);
+    })
+    .catch((error) => callback(error));
+}
+const seedancePublicDnsDispatcher = new Agent({
+  pipelining: 0,
+  connectTimeout: 3_000,
+  autoSelectFamily: true,
+  autoSelectFamilyAttemptTimeout: 250,
+  connect: {
+    ca: [...tls.rootCertificates, LETS_ENCRYPT_ROOT_YR],
+    rejectUnauthorized: true,
+    lookup: seedancePublicDnsLookup,
   },
 });
 
@@ -488,13 +540,27 @@ const uploadCache = new Map();
 const uploadQueues = new Map();
 const responseBoundaries = new WeakMap();
 
-function secureFetch(url, init = {}) {
+async function secureFetch(url, init = {}) {
   const method = String(init?.method || 'GET').toUpperCase();
-  return undiciFetch(url, {
+  const request = {
     ...init,
     headers: providerIdempotencyHeaders(init?.headers, method),
-    dispatcher: seedanceDispatcher,
-  });
+  };
+  try {
+    return await undiciFetch(url, {
+      ...request,
+      dispatcher: seedanceDispatcher,
+    });
+  } catch (error) {
+    if (!['GET', 'HEAD'].includes(method) || init?.signal?.aborted) throw error;
+    // The task already exists. Re-query the same id through independent public
+    // DNS when the active TUN resolver left a stale Fake-IP or unusable IPv6
+    // route. This never resubmits a generation request.
+    return undiciFetch(url, {
+      ...request,
+      dispatcher: seedancePublicDnsDispatcher,
+    });
+  }
 }
 
 function getFetchImpl(options = {}) {
@@ -3299,6 +3365,7 @@ module.exports = {
   queryTask,
   resetCachesForTests,
   resolveModel,
+  seedancePublicDnsLookup,
   submitAudioTask,
   submitSunoMusicTask,
   submitHailuoTask,

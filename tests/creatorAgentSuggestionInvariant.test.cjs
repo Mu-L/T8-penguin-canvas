@@ -76,7 +76,6 @@ test('every Creator suggestion family closes with one valid three-item invariant
   ];
   for (const [context, plan] of cases) assertValidInvariant(creatorSuggestionSet(context, plan));
 });
-
 test('reference-breakdown keeps its blocked continuation explained without creating a fake button', () => {
   const set = creatorSuggestionSet({}, {
     kind: 'story',
@@ -131,4 +130,3 @@ test('suggestion invariant rejects duplicate identity, invalid capability, fake 
     );
   }
 });
-

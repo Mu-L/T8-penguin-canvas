@@ -17,6 +17,9 @@ const {
 const {
   canvasPatchRequestDigest,
 } = require('../backend/src/services/canvasPatch.js');
+const creativeCapabilitySurfaces = require(
+  '../backend/src/shared/creativeCapabilitySurfaces.json',
+);
 
 const VALID_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
@@ -139,6 +142,14 @@ async function startFixture(t, initialNodes = [], overrides = {}) {
     },
     ...(overrides.credentialSettingsProvider ? { credentialSettingsProvider: overrides.credentialSettingsProvider } : {}),
     ...(overrides.runtimeStatusProvider ? { runtimeStatusProvider: overrides.runtimeStatusProvider } : {}),
+    ...(overrides.creatorLlmSettingsProvider ? {
+      creatorLlmSettingsProvider: overrides.creatorLlmSettingsProvider,
+    } : {}),
+    ...(overrides.creatorLlmGenerateChat ? {
+      creatorLlmGenerateChat: overrides.creatorLlmGenerateChat,
+    } : {}),
+    ...(overrides.creatorLlmFetchImpl ? { creatorLlmFetchImpl: overrides.creatorLlmFetchImpl } : {}),
+    ...(overrides.creatorLlmTimeoutMs ? { creatorLlmTimeoutMs: overrides.creatorLlmTimeoutMs } : {}),
     ...(overrides.deliveryService ? { deliveryService: overrides.deliveryService } : {}),
     ...(overrides.assetService ? { assetService: overrides.assetService } : {}),
     ...(overrides.approvals ? { approvals: overrides.approvals } : {}),
@@ -287,6 +298,55 @@ test('empty session and suggestions are provider-free and persist exactly three 
   assert.equal(fixture.providerCalls, 0);
 });
 
+test('new conversation is idempotent and cannot inherit prior conversation phase or actions', async (t) => {
+  const fixture = await startFixture(t);
+  const sessionId = '11111111-2222-4333-8444-555555555555';
+  const body = {
+    sessionId,
+    projectId: 'project-local',
+    canvasId: 'canvas-a',
+    context: {
+      nodeCount: 3,
+      edgeCount: 2,
+      canvasTitle: '保留画布上下文',
+      phase: 'candidates',
+      recentActions: [{
+        eventType: 'assistant.response.completed',
+        label: '旧对话动作',
+        createdAt: '2026-07-30T00:00:00.000Z',
+      }],
+    },
+  };
+  const created = await fixture.request('/sessions', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  assert.equal(created.response.status, 201);
+  assert.equal(created.body.data.id, sessionId);
+  assert.equal(created.body.data.phase, 'idea');
+  assert.equal(created.body.data.context.phase, 'idea');
+  assert.deepEqual(created.body.data.context.recentActions, []);
+  assert.equal(created.body.data.context.nodeCount, 3);
+  assert.equal(created.body.data.events.length, 1);
+
+  const retried = await fixture.request('/sessions', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  assert.equal(retried.response.status, 201);
+  assert.equal(retried.body.data.id, sessionId);
+  assert.equal(retried.body.data.createdAt, created.body.data.createdAt);
+  assert.equal(retried.body.data.events.length, 1);
+
+  const listed = await fixture.request(
+    '/sessions?projectId=project-local&canvasId=canvas-a&limit=20',
+  );
+  assert.equal(listed.response.status, 200);
+  assert.equal(listed.body.data.sessions.filter((item) => item.id === sessionId).length, 1);
+  assert.equal(fixture.writes, 0);
+  assert.equal(fixture.providerCalls, 0);
+});
+
 test('suggestion clicks require the current receipt and stale canvas revisions fail before planning', async (t) => {
   const fixture = await startFixture(t);
   const created = await fixture.request('/sessions', {
@@ -318,6 +378,10 @@ test('suggestion clicks require the current receipt and stale canvas revisions f
   assert.equal(
     valid.body.data.userEvent.payload.suggestion.setDigest,
     session.suggestionSet.setDigest,
+  );
+  assert.equal(
+    valid.body.data.session.latestPlan.brief.goal.replaceAll(',', '，'),
+    suggestion.arguments.creatorPrompt,
   );
   assert.equal(fixture.writes, 0);
   assert.equal(fixture.providerCalls, 0);
@@ -458,9 +522,19 @@ test('one sentence creates a previewable Story plan but performs zero writes and
   assert.equal(confirmed.response.status, 201);
   assert.equal(confirmed.body.data.confirmations.length, 13);
   assert.equal(confirmed.body.data.session.productionDocumentConfirmations.length, 13);
-  assert.equal(confirmed.body.data.session.events.at(-1).type, 'production-documents.confirmed');
-  assert.equal(confirmed.body.data.session.events.at(-1).payload.providerCalls, 0);
-  assert.equal(confirmed.body.data.session.events.at(-1).payload.canvasWrites, 0);
+  assert.equal(confirmed.body.data.session.events.at(-1).type, 'canvas-retention.preview-prepared');
+  const confirmationEvent = confirmed.body.data.session.events.find(
+    (event) => event.type === 'production-documents.confirmed',
+  );
+  assert.ok(confirmationEvent);
+  assert.equal(confirmationEvent.payload.providerCalls, 0);
+  assert.equal(confirmationEvent.payload.canvasWrites, 0);
+  assert.equal(
+    confirmed.body.data.session.events.some(
+      (event) => event.type === 'production-stage.advanced',
+    ),
+    true,
+  );
   const confirmationSequence = confirmed.body.data.session.lastSequence;
   const duplicateConfirmation = await fixture.request(`/sessions/${sessionId}/production-documents/confirm`, {
     method: 'POST',
@@ -516,7 +590,10 @@ test('one sentence creates a previewable Story plan but performs zero writes and
   assert.equal(staleConfirmation.response.status, 409);
   assert.equal(staleConfirmation.body.code, 'CREATOR_PRODUCTION_DOCUMENT_STALE');
   assert.match(staleConfirmation.body.message, /已有新版本|新版本/);
-  const planEvents = revised.body.data.session.events.filter((event) => event.type === 'assistant.plan');
+  const planEvents = revised.body.data.session.events.filter((event) => (
+    ['assistant.plan', 'assistant.response.completed'].includes(event.type)
+      && event.payload?.plan
+  ));
   assert.equal(planEvents.length, 2);
   assert.equal(
     planEvents[0].payload.plan.productionDocuments.find((item) => item.kind === 'script-doc').revision,
@@ -732,10 +809,12 @@ test('fixed model stays exact when ready and fails closed without silent fallbac
   });
   assert.equal(fixedReady.response.status, 201);
   const readyReceipt = fixedReady.body.data.session.latestPlan.modelDecisionReceipt;
-  assert.equal(readyReceipt.mode, 'fixed');
+  assert.equal(readyReceipt.mode, 'mixed');
   assert.equal(readyReceipt.ready, true);
-  assert.equal(readyReceipt.decisions[0].selected.provider, readyImage.provider);
-  assert.equal(readyReceipt.decisions[0].selected.model, readyImage.model);
+  const readyImageDecision = readyReceipt.decisions.find((decision) => decision.kind === 'image');
+  assert.equal(readyImageDecision.mode, 'fixed');
+  assert.equal(readyImageDecision.selected.provider, readyImage.provider);
+  assert.equal(readyImageDecision.selected.model, readyImage.model);
   assert.equal(JSON.stringify(fixedReady.body).includes(privateValue), false);
 
   const blockedSession = await fixture.request('/sessions', {
@@ -765,6 +844,530 @@ test('fixed model stays exact when ready and fails closed without silent fallbac
   assert.equal(fixture.providerCalls, settingsReadsAfterCatalog);
 });
 
+test('ready LLM produces substantive V0 with durable honest response evidence', async (t) => {
+  const privateValue = 'test-only-secret-never-return';
+  const modelText = [
+    '## 电商首屏文案 V0',
+    '',
+    '**核心承诺**：把真实产品利益点放在首屏，先用“通勤也能快速完成清爽护理”作为可修改方向，不虚构功效、认证或实验数据。',
+    '',
+    '### 页面结构',
+    '1. 封面：产品主体、使用对象和一句核心利益点。',
+    '2. 卖点：用三个可验证事实解释适用场景、使用方式和真实规格。',
+    '3. 场景：早晨通勤、办公补充、夜间收束，各自只表达一个信息。',
+    '4. 细节：材质、包装、用量和操作步骤；未知参数保留占位符。',
+    '',
+    '### 第一轮执行',
+    '先确认已有产品图与不可改的品牌元素，再做封面、卖点、场景三张方向稿；采用一个方向后才扩展尺寸和详情页。',
+  ].join('\n');
+  let llmCalls = 0;
+  let observedProvider = null;
+  let observedRequest = null;
+  const fixture = await startFixture(t, [], {
+    credentialSettingsProvider: () => ({ llmApiKey: 'configured' }),
+    creatorLlmSettingsProvider: () => ({
+      llmApiKey: privateValue,
+      llmBaseUrl: 'https://mock-provider.invalid',
+    }),
+    creatorLlmGenerateChat: async (provider, request) => {
+      llmCalls += 1;
+      observedProvider = provider;
+      observedRequest = request;
+      return {
+        ok: true,
+        text: modelText,
+        model: request.model,
+        finishReason: 'stop',
+        requestId: 'mock-request-1',
+      };
+    },
+  });
+  const created = await fixture.request('/sessions', {
+    method: 'POST',
+    body: JSON.stringify({
+      projectId: 'project-local',
+      canvasId: 'canvas-a',
+      context: { nodeCount: 0, edgeCount: 0 },
+    }),
+  });
+  const planned = await fixture.request(`/sessions/${created.body.data.id}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({
+      projectId: 'project-local',
+      canvasId: 'canvas-a',
+      kind: 'script',
+      text: '为一款通勤护肤新品写一套可以继续修改的电商首屏和详情页内容',
+      clientRequestId: 'creator-online-0001',
+    }),
+  });
+
+  assert.equal(planned.response.status, 201);
+  assert.equal(llmCalls, 1);
+  assert.equal(observedProvider.id, 'zhenzhen');
+  assert.equal(observedProvider.apiKey, privateValue);
+  assert.equal(observedRequest.stream, false);
+  assert.equal(planned.body.data.assistantEvent.payload.text, modelText);
+  assert.equal(planned.body.data.assistantEvent.payload.providerCalls, 1);
+  assert.deepEqual(planned.body.data.assistantEvent.payload.responseEvidence, {
+    schema: 't8-creator-agent-response-evidence-v1',
+    mode: 'online-model',
+    status: 'completed',
+    providerCalls: 1,
+    provider: 'zhenzhen',
+    model: observedRequest.model,
+    finishReason: 'stop',
+    requestId: 'mock-request-1',
+    errorCode: null,
+    qualityCode: 'accepted',
+    modelDecisionDigest: planned.body.data.session.latestPlan.modelDecisionReceipt.receiptDigest,
+    evidenceDigest: planned.body.data.assistantEvent.payload.responseEvidence.evidenceDigest,
+  });
+  assert.match(planned.body.data.assistantEvent.payload.responseEvidence.evidenceDigest, /^[a-f0-9]{64}$/);
+  assert.equal(JSON.stringify(planned.body).includes(privateValue), false);
+  assert.equal(fixture.writes, 0);
+});
+
+test('ready LLM may propose one versioned high-level tool without executing it', async (t) => {
+  const modelText = [
+    '## 商品主视觉 V0',
+    '',
+    '先保留产品真实包装与品牌标识，画面采用正面三分构图，背景用克制的暖灰渐变。',
+    '第一版只完成主体层级、光影方向和卖点留白，不虚构功效、规格、价格或认证。',
+    '',
+    '### 可执行结构',
+    '1. 产品主体占画面中心偏左，保留包装文字可读性。',
+    '2. 右侧留出标题和三条真实卖点位置。',
+    '3. 确认这版结构后，再由用户决定是否写入画布并启动生成。',
+  ].join('\n');
+  const fixture = await startFixture(t, [], {
+    credentialSettingsProvider: () => ({ llmApiKey: 'configured' }),
+    creatorLlmSettingsProvider: () => ({
+      llmApiKey: 'test-only-tool-proposal-secret',
+      llmBaseUrl: 'https://mock-provider.invalid',
+    }),
+    creatorLlmGenerateChat: async (_provider, request) => ({
+      ok: true,
+      text: modelText,
+      model: request.model,
+      finishReason: 'stop',
+      requestId: 'mock-tool-proposal-1',
+      toolProposals: [{
+        schema: 't8-creator-model-tool-proposal-v1',
+        proposalId: 'ctp_route_valid_123456',
+        request: {
+          schema: 't8-versioned-creative-tool-request-v1',
+          tool: 'zcanvas_create_image',
+          version: creativeCapabilitySurfaces.capabilityManifestVersion,
+          operation: 'apply',
+          projectId: 'project-local',
+          canvasId: 'canvas-a',
+          clientRequestId: 'creator-route-tool-request-1',
+          input: {
+            prompt: '保留真实包装的商品主视觉',
+            ratio: '16:9',
+          },
+        },
+      }],
+    }),
+  });
+  const created = await fixture.request('/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ projectId: 'project-local', canvasId: 'canvas-a' }),
+  });
+  const result = await fixture.request(`/sessions/${created.body.data.id}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({
+      projectId: 'project-local',
+      canvasId: 'canvas-a',
+      kind: 'image',
+      text: '为这款商品先做一版可编辑的主视觉结构',
+      clientRequestId: 'creator-route-tool-message-1',
+    }),
+  });
+  assert.equal(result.response.status, 201);
+  assert.equal(result.body.data.assistantEvent.payload.text, modelText);
+  assert.equal(result.body.data.toolProposals.length, 1);
+  assert.equal(result.body.data.toolProposalReceipts[0].status, 'accepted');
+  assert.equal(result.body.data.toolProposals[0].gate.riskLevel, 'L1');
+  assert.equal(result.body.data.toolProposals[0].gate.approvalRequired, true);
+  assert.equal(result.body.data.toolProposals[0].gate.dispatchAllowed, false);
+  assert.deepEqual(result.body.data.toolProposals[0].execution, {
+    status: 'not-started',
+    canvasWrites: 0,
+    providerCalls: 0,
+    fileWrites: 0,
+  });
+  assert.equal(result.body.data.session.toolProposals.length, 1);
+  assert.equal(
+    result.body.data.session.events.some(
+      (event) => event.type === 'assistant.tool-proposal.validated',
+    ),
+    true,
+  );
+  assert.equal(fixture.writes, 0);
+});
+
+test('invalid model tool proposal is rejected without erasing the useful creative reply', async (t) => {
+  const modelText = [
+    '## 商品海报 V0',
+    '',
+    '**核心承诺**：保留产品真实包装与品牌标识，未知功效、规格、价格和认证全部使用明确占位符。',
+    '',
+    '### 画面结构',
+    '1. 封面主图：产品主体放在中心偏左，右侧保留标题与三条真实卖点的安全空间。',
+    '2. 卖点图：每张只表达一个可验证事实，使用统一的暖灰背景和主光方向。',
+    '3. 场景图：补充真实使用环境，但不改变产品外观、包装文字或品牌色。',
+    '4. 细节图：展示材质、接口、尺寸或操作步骤，未知参数继续保留占位。',
+    '',
+    '### 第一轮执行',
+    '先确认已有产品图、不可修改元素和投放尺寸，再做封面、卖点、场景三张方向稿；用户选择后才写入画布并启动生成。',
+  ].join('\n');
+  const fixture = await startFixture(t, [], {
+    credentialSettingsProvider: () => ({ llmApiKey: 'configured' }),
+    creatorLlmSettingsProvider: () => ({
+      llmApiKey: 'test-only-invalid-tool-secret',
+      llmBaseUrl: 'https://mock-provider.invalid',
+    }),
+    creatorLlmGenerateChat: async (_provider, request) => ({
+      ok: true,
+      text: modelText,
+      model: request.model,
+      finishReason: 'stop',
+      requestId: 'mock-tool-proposal-invalid-1',
+      toolProposals: [{
+        schema: 't8-creator-model-tool-proposal-v1',
+        request: {
+          schema: 't8-versioned-creative-tool-request-v1',
+          tool: 'zcanvas_create_image',
+          version: creativeCapabilitySurfaces.capabilityManifestVersion,
+          operation: 'plan',
+          projectId: 'project-local',
+          canvasId: 'canvas-a',
+          input: {
+            prompt: '商品海报',
+            url: 'https://example.invalid/private-provider-endpoint',
+            headers: { Authorization: 'Bearer secret' },
+          },
+        },
+      }],
+    }),
+  });
+  const created = await fixture.request('/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ projectId: 'project-local', canvasId: 'canvas-a' }),
+  });
+  const result = await fixture.request(`/sessions/${created.body.data.id}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({
+      projectId: 'project-local',
+      canvasId: 'canvas-a',
+      kind: 'image',
+      text: '先整理一版可以修改的商品海报',
+      clientRequestId: 'creator-route-tool-message-2',
+    }),
+  });
+  assert.equal(result.response.status, 201);
+  assert.equal(result.body.data.assistantEvent.payload.text, modelText);
+  assert.equal(result.body.data.assistantEvent.type, 'assistant.response.completed');
+  assert.deepEqual(result.body.data.toolProposals, []);
+  assert.equal(result.body.data.toolProposalReceipts.length, 1);
+  assert.equal(result.body.data.toolProposalReceipts[0].status, 'rejected');
+  assert.equal(
+    result.body.data.toolProposalReceipts[0].code,
+    'CAPABILITY_TOOL_LOW_LEVEL_FIELD_FORBIDDEN',
+  );
+  assert.deepEqual(result.body.data.toolProposalReceipts[0].sideEffects, {
+    canvasWrites: 0,
+    providerCalls: 0,
+    fileWrites: 0,
+  });
+  assert.equal(result.body.data.session.toolProposals.length, 0);
+  assert.equal(JSON.stringify(result.body).includes('example.invalid'), false);
+  assert.equal(JSON.stringify(result.body).includes('Bearer secret'), false);
+  assert.equal(fixture.writes, 0);
+});
+test('ready online LLM streams provider deltas into the durable session before completion', async (t) => {
+  const privateValue = 'test-only-stream-secret-never-return';
+  const deltas = [
+    '## 短视频脚本 V0\n\n开场用一个真实通勤场景直接展示问题，',
+    '中段用三个可验证卖点推进：先展示产品在真实环境中的使用动作，再用材质、规格和操作步骤建立信任，最后回到明确行动。镜头一负责提出问题，镜头二展示产品与人物关系，镜头三拆解卖点，镜头四用前后状态收束。品牌名称、具体规格、功效、认证和价格未知时全部保留明确占位符，不编造事实。第一轮只形成可编辑脚本、素材清单和三个画面方向，确认已有产品图、不可修改元素与目标平台后，才进入画布生成和尺寸扩展。',
+  ];
+  const modelText = deltas.join('');
+  let releaseModel;
+  let signalFirstDelta;
+  const firstDeltaWritten = new Promise((resolve) => { signalFirstDelta = resolve; });
+  const modelGate = new Promise((resolve) => { releaseModel = resolve; });
+  let llmCalls = 0;
+  let observedRequest = null;
+  const fixture = await startFixture(t, [], {
+    credentialSettingsProvider: () => ({ llmApiKey: 'configured' }),
+    creatorLlmSettingsProvider: () => ({
+      llmApiKey: privateValue,
+      llmBaseUrl: 'https://mock-provider.invalid',
+    }),
+    creatorLlmGenerateChat: async (_provider, request, options) => {
+      llmCalls += 1;
+      observedRequest = request;
+      await options.onDelta(deltas[0], { eventIndex: 0 });
+      signalFirstDelta();
+      await modelGate;
+      await options.onDelta(deltas[1], { eventIndex: 1 });
+      return {
+        ok: true,
+        text: modelText,
+        model: request.model,
+        finishReason: 'stop',
+        requestId: 'mock-upstream-stream-1',
+        toolProposals: [{
+          schema: 't8-creator-model-tool-proposal-v1',
+          proposalId: 'ctp_stream_valid_123456',
+          request: {
+            schema: 't8-versioned-creative-tool-request-v1',
+            tool: 'zcanvas_create_script',
+            version: creativeCapabilitySurfaces.capabilityManifestVersion,
+            operation: 'plan',
+            projectId: 'project-local',
+            canvasId: 'canvas-a',
+            clientRequestId: 'creator-upstream-stream-tool-1',
+            input: { brief: '通勤新品可编辑短视频脚本' },
+          },
+        }],
+      };
+    },
+  });
+  const created = await fixture.request('/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ projectId: 'project-local', canvasId: 'canvas-a' }),
+  });
+  const sessionId = created.body.data.id;
+  const clientRequestId = 'creator-upstream-stream-0001';
+  const messageBody = {
+    projectId: 'project-local',
+    canvasId: 'canvas-a',
+    kind: 'script',
+    text: '为通勤新品写一版可编辑短视频脚本',
+    clientRequestId,
+    stream: true,
+  };
+  const firstPromise = fixture.request('/sessions/' + sessionId + '/messages', {
+    method: 'POST',
+    body: JSON.stringify(messageBody),
+  });
+  await firstDeltaWritten;
+
+  const inFlight = await fixture.request(
+    '/sessions/' + sessionId + '?projectId=project-local&canvasId=canvas-a',
+  );
+  const responseEvents = inFlight.body.data.events.filter((event) => (
+    event.payload?.clientRequestId === clientRequestId
+      || event.payload?.responseId
+  ));
+  const started = responseEvents.find((event) => event.type === 'assistant.response.started');
+  assert.ok(started);
+  assert.equal(started.payload.transport, 'upstream-sse');
+  assert.equal(responseEvents.filter((event) => event.type === 'assistant.response.delta').length, 1);
+  assert.equal(responseEvents.some((event) => event.type === 'assistant.response.completed'), false);
+  assert.equal(
+    responseEvents.find((event) => event.type === 'assistant.response.delta').payload.delta,
+    deltas[0],
+  );
+
+  const exactRetry = await fixture.request('/sessions/' + sessionId + '/messages', {
+    method: 'POST',
+    body: JSON.stringify(messageBody),
+  });
+  assert.equal(exactRetry.response.status, 202);
+  assert.equal(exactRetry.body.data.request.status, 'in-progress');
+  assert.equal(exactRetry.body.data.request.duplicate, true);
+  assert.equal(llmCalls, 1);
+
+  releaseModel();
+  const completed = await firstPromise;
+  assert.equal(completed.response.status, 201);
+  assert.equal(observedRequest.stream, true);
+  assert.equal(completed.body.data.stream.transport, 'upstream-sse');
+  assert.equal(completed.body.data.stream.chunkCount, 2);
+  assert.equal(completed.body.data.assistantEvent.payload.text, modelText);
+  assert.equal(completed.body.data.assistantEvent.payload.providerCalls, 1);
+  assert.equal(completed.body.data.toolProposals.length, 1);
+  assert.equal(completed.body.data.toolProposalReceipts[0].status, 'accepted');
+  assert.equal(completed.body.data.toolProposals[0].tool.creatorLabel, '完善剧本');
+  assert.equal(completed.body.data.toolProposals[0].gate.dispatchAllowed, false);
+  assert.equal(completed.body.data.toolProposals[0].execution.status, 'not-started');
+  assert.equal(completed.body.data.session.toolProposals.length, 1);
+  const completedEvents = completed.body.data.session.events
+    .filter((event) => event.payload?.responseId === completed.body.data.stream.responseId);
+  assert.deepEqual(
+    completedEvents.filter((event) => event.type === 'assistant.response.delta')
+      .map((event) => event.payload.delta),
+    deltas,
+  );
+  assert.equal(
+    completedEvents.filter((event) => event.type === 'assistant.response.completed').length,
+    1,
+  );
+  assert.equal(completed.body.data.session.events.at(-1).type, 'assistant.tool-proposal.validated');
+  assert.equal(JSON.stringify(completed.body).includes(privateValue), false);
+  assert.equal(llmCalls, 1);
+  assert.equal(fixture.writes, 0);
+});
+test('stopping an online upstream reply preserves the durable partial text without completing its plan', async (t) => {
+  let releaseModel;
+  let signalFirstDelta;
+  const firstDeltaWritten = new Promise((resolve) => { signalFirstDelta = resolve; });
+  const modelGate = new Promise((resolve) => { releaseModel = resolve; });
+  const firstDelta = '## 局部脚本 V0\n\n开场先展示真实问题，';
+  let llmCalls = 0;
+  const fixture = await startFixture(t, [], {
+    credentialSettingsProvider: () => ({ llmApiKey: 'configured' }),
+    creatorLlmSettingsProvider: () => ({
+      llmApiKey: 'test-only-online-stop-secret',
+      llmBaseUrl: 'https://mock-provider.invalid',
+    }),
+    creatorLlmGenerateChat: async (_provider, request, options) => {
+      llmCalls += 1;
+      await options.onDelta(firstDelta, { eventIndex: 0 });
+      signalFirstDelta();
+      await modelGate;
+      if (await options.shouldStop()) {
+        return {
+          ok: false,
+          code: 'stopped',
+          text: firstDelta,
+          model: request.model,
+          requestId: 'mock-upstream-stop-1',
+        };
+      }
+      throw new Error('the mock provider must observe the stop signal');
+    },
+  });
+  const created = await fixture.request('/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ projectId: 'project-local', canvasId: 'canvas-a' }),
+  });
+  const sessionId = created.body.data.id;
+  const clientRequestId = 'creator-upstream-stop-0001';
+  const firstPromise = fixture.request('/sessions/' + sessionId + '/messages', {
+    method: 'POST',
+    body: JSON.stringify({
+      projectId: 'project-local',
+      canvasId: 'canvas-a',
+      clientRequestId,
+      kind: 'script',
+      text: '写一版可修改的产品短视频脚本',
+      stream: true,
+    }),
+  });
+  await firstDeltaWritten;
+  const inProgress = await fixture.request(
+    '/sessions/' + sessionId + '/messages/' + clientRequestId
+      + '?projectId=project-local&canvasId=canvas-a',
+  );
+  assert.equal(inProgress.body.data.status, 'in-progress');
+  const responseId = inProgress.body.data.responseId;
+  assert.ok(responseId);
+
+  const stopped = await fixture.request(
+    '/sessions/' + sessionId + '/responses/' + responseId + '/stop',
+    {
+      method: 'POST',
+      body: JSON.stringify({ projectId: 'project-local', canvasId: 'canvas-a' }),
+    },
+  );
+  assert.equal(stopped.response.status, 200);
+  assert.equal(stopped.body.data.status, 'stopped');
+  assert.equal(stopped.body.data.remoteTasksAffected, 0);
+  releaseModel();
+
+  const original = await firstPromise;
+  assert.equal(original.response.status, 200);
+  assert.equal(original.body.data.request.status, 'stopped');
+  assert.equal(original.body.data.stream.transport, 'upstream-sse');
+  assert.equal(original.body.data.stream.stopped, true);
+  assert.equal(original.body.data.stream.remoteTasksAffected, 0);
+  assert.equal(original.body.data.assistantEvent.payload.text, firstDelta);
+  assert.equal(original.body.data.assistantEvent.payload.providerCalls, 1);
+  assert.equal(original.body.data.session.latestPlan, null);
+  const responseEvents = original.body.data.session.events
+    .filter((event) => event.payload?.responseId === responseId);
+  assert.equal(responseEvents.filter((event) => event.type === 'assistant.response.delta').length, 1);
+  assert.equal(responseEvents.filter((event) => event.type === 'assistant.response.stopped').length, 1);
+  assert.equal(responseEvents.some((event) => event.type === 'assistant.response.completed'), false);
+  assert.equal(responseEvents.some((event) => event.type === 'assistant.response.failed'), false);
+  assert.equal(llmCalls, 1);
+  assert.equal(fixture.writes, 0);
+});
+test('planning reservation prevents duplicate paid LLM calls before a durable response exists', async (t) => {
+  let releaseModel;
+  let signalStarted;
+  const modelStarted = new Promise((resolve) => { signalStarted = resolve; });
+  const modelGate = new Promise((resolve) => { releaseModel = resolve; });
+  let llmCalls = 0;
+  const fixture = await startFixture(t, [], {
+    credentialSettingsProvider: () => ({ llmApiKey: 'configured' }),
+    creatorLlmSettingsProvider: () => ({
+      llmApiKey: 'test-only-concurrency-secret',
+      llmBaseUrl: 'https://mock-provider.invalid',
+    }),
+    creatorLlmGenerateChat: async (_provider, request) => {
+      llmCalls += 1;
+      signalStarted();
+      await modelGate;
+      return {
+        ok: true,
+        model: request.model,
+        finishReason: 'stop',
+        requestId: 'mock-concurrency-1',
+        text: '## 可编辑脚本 V0\n\n开场直接展示产品解决的真实场景，中段用三个可验证卖点逐步建立信任，结尾回收到明确行动。每段都保留品牌事实占位符，不编造规格、功效或认证；先确认已有素材与不可修改元素，再进入画布生成。',
+      };
+    },
+  });
+  const created = await fixture.request('/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ projectId: 'project-local', canvasId: 'canvas-a' }),
+  });
+  const sessionId = created.body.data.id;
+  const firstBody = {
+    projectId: 'project-local',
+    canvasId: 'canvas-a',
+    kind: 'script',
+    text: '为新品写一版可继续修改的短视频脚本',
+    clientRequestId: 'creator-concurrent-0001',
+  };
+  const firstPromise = fixture.request(`/sessions/${sessionId}/messages`, {
+    method: 'POST',
+    body: JSON.stringify(firstBody),
+  });
+  await modelStarted;
+
+  const exactRetry = await fixture.request(`/sessions/${sessionId}/messages`, {
+    method: 'POST',
+    body: JSON.stringify(firstBody),
+  });
+  assert.equal(exactRetry.response.status, 202);
+  assert.equal(exactRetry.body.data.request.duplicate, true);
+  assert.equal(exactRetry.body.data.request.status, 'in-progress');
+  assert.match(exactRetry.body.message, /不会重复调用模型/);
+
+  const overlapping = await fixture.request(`/sessions/${sessionId}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({
+      ...firstBody,
+      text: '再写一版完全不同的脚本',
+      clientRequestId: 'creator-concurrent-0002',
+    }),
+  });
+  assert.equal(overlapping.response.status, 409);
+  assert.equal(overlapping.body.code, 'CREATOR_RESPONSE_IN_PROGRESS');
+  assert.equal(llmCalls, 1);
+
+  releaseModel();
+  const first = await firstPromise;
+  assert.equal(first.response.status, 201);
+  assert.equal(first.body.data.assistantEvent.payload.providerCalls, 1);
+  assert.equal(llmCalls, 1);
+  assert.equal(fixture.writes, 0);
+});
 test('one sentence streams a durable assistant reply and rejects overlapping submissions', async (t) => {
   const fixture = await startFixture(t, [], { responseDeltaDelayMs: 35 });
   const created = await fixture.request('/sessions', {
@@ -1371,6 +1974,26 @@ test('run-link reconciliation validates applied plan nodes and authoritative Run
     },
   });
 
+  const laterPlan = await fixture.request(`/sessions/${sessionId}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({
+      projectId: 'project-local',
+      canvasId: 'canvas-a',
+      text: '再规划一张白天街景图，但不要修改刚才已应用的计划',
+      kind: 'image',
+      context: { nodeCount: 1, edgeCount: 0 },
+    }),
+  });
+  assert.equal(laterPlan.response.status, 201);
+  assert.notEqual(laterPlan.body.data.session.latestPlan.planId, plan.planId);
+  assert.equal(
+    laterPlan.body.data.session.events.some((event) => (
+      event.type === 'assistant.response.completed'
+        && event.payload?.plan?.planId === plan.planId
+    )),
+    true,
+  );
+
   const first = await fixture.request(`/sessions/${sessionId}/run-links/reconcile`, {
     method: 'POST',
     body: JSON.stringify({
@@ -1934,7 +2557,39 @@ test('a durable attachment can start analysis without typed text or leaking atta
 });
 
 test('reference video breakdown keeps its verified video and recipe across suggestion follow-ups', async (t) => {
-  const fixture = await startFixture(t);
+  const modelText = [
+    '## 素材观察',
+    '',
+    '- 画面主体沿走廊由远及近移动，人物始终位于画面中轴，背景为连续的冷色顶灯。',
+    '- 镜头采用低机位缓慢推进，切点落在人物抬头与环境声增强之后，节奏由静转紧。',
+    '',
+    '## 参考视频逐镜拆解 V0',
+    '',
+    '### 镜头 1｜00:00–00:03',
+    '全景建立走廊空间；固定机位，冷色环境光；只保留脚步与空调底噪。',
+    '',
+    '### 镜头 2｜00:03–00:07',
+    '中景跟随人物向前；轻微推进，在人物抬头时切入近景；脚步声逐渐靠近。',
+    '',
+    '### 镜头 3｜00:07–00:10',
+    '近景停在人物表情，环境声短暂收窄后硬切；可复用的节奏是“建立三秒—推进四秒—反应三秒”。',
+    '',
+    '下一轮可直接沿用这套时间码结构，替换主体动作与场景，不虚构素材中看不到的台词或品牌信息。',
+  ].join('\n');
+  const fixture = await startFixture(t, [], {
+    credentialSettingsProvider: () => ({ llmApiKey: 'configured' }),
+    creatorLlmSettingsProvider: () => ({
+      llmApiKey: 'test-only-reference-video-secret',
+      llmBaseUrl: 'https://mock-provider.invalid',
+    }),
+    creatorLlmGenerateChat: async (_provider, request) => ({
+      ok: true,
+      text: modelText,
+      model: request.model,
+      finishReason: 'stop',
+      requestId: 'mock-reference-video-1',
+    }),
+  });
   fixture.registerAsset({
     id: 'asset-reference-video',
     projectId: 'project-local',

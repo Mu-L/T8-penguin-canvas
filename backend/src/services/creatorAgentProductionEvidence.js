@@ -28,12 +28,21 @@ function unique(values, limit = 128) {
     .filter(Boolean))].slice(0, limit);
 }
 
+function creatorAssistantEventPlan(event) {
+  return [
+    'assistant.plan',
+    'assistant.response.completed',
+  ].includes(event?.type) && event?.payload?.plan
+    ? event.payload.plan
+    : null;
+}
+
 function creatorSessionPlanById(session, rawPlanId) {
   const planId = text(rawPlanId, 160);
   if (!planId) return null;
   if (text(session?.latestPlan?.planId, 160) === planId) return session.latestPlan;
   for (const event of [...(Array.isArray(session?.events) ? session.events : [])].reverse()) {
-    const plan = event?.type === 'assistant.plan' ? event.payload?.plan : null;
+    const plan = creatorAssistantEventPlan(event);
     if (text(plan?.planId, 160) === planId) return plan;
   }
   return null;
@@ -399,6 +408,7 @@ function canonicalCreatorCanvasLifecycle(database, session, scope, type, rawPayl
 module.exports = {
   buildCreatorProductionEvidence,
   canonicalCreatorCanvasLifecycle,
+  creatorAssistantEventPlan,
   creatorPlanAffectedNodeIds,
   creatorSessionPlanById,
   replayCreatorCanvasPlanStates,

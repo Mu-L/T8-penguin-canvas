@@ -11,6 +11,7 @@ const { resolvePublicAddress } = require('../backend/src/utils/safeRemoteMediaFe
 const { providerSubmissionContextMiddleware } = require('../backend/src/services/providerSubmissionContext');
 
 const config = require('../backend/src/config');
+const seedanceNzProvider = require('../backend/src/providers/seedanceNz');
 const originalProxyMediaMaxBytes = process.env.T8_PROXY_MEDIA_REFERENCE_MAX_BYTES;
 const originalProxyImageMaxBytes = process.env.T8_PROXY_IMAGE_REFERENCE_MAX_BYTES;
 process.env.T8_PROXY_MEDIA_REFERENCE_MAX_BYTES = String(1024 * 1024);
@@ -279,10 +280,12 @@ test('B3 Provider fetch deadline covers DNS, connect, TLS, and response headers'
 test('B3 Provider requests use fresh TUN connections and replay writes only with one stable idempotency key', async () => {
   const originalFetch = global.fetch;
   let calls = 0;
+  const readDispatchers = [];
   proxyRouter._test.setProxySafeRemoteTestOptions({ providerRetryDelayMs: 1 });
   try {
-    global.fetch = async () => {
+    global.fetch = async (_url, init) => {
       calls += 1;
+      readDispatchers.push(init?.dispatcher);
       if (calls === 1) {
         throw Object.assign(new TypeError('fetch failed'), {
           cause: Object.assign(new Error('socket reset after TUN switch'), { code: 'ECONNRESET' }),
@@ -297,6 +300,12 @@ test('B3 Provider requests use fresh TUN connections and replay writes only with
     );
     assert.equal(recovered.status, 200);
     assert.equal(calls, 2, 'read-only Provider queries may retry once after refreshing the connection pool');
+    assert.notEqual(readDispatchers[0], readDispatchers[1]);
+    assert.equal(
+      readDispatchers[1],
+      proxyRouter._test.currentProviderDispatcher(true),
+      'the recovery query must use the independent public-DNS dispatcher',
+    );
 
     calls = 0;
     const writeKeys = [];
@@ -386,6 +395,145 @@ test('B3 pinned media requests disable the global Agent so TUN/VPN route changes
     /transport\.request\(target,\s*\{[\s\S]*?agent:\s*false,[\s\S]*?lookup\(/,
     'each DNS-pinned media request must open a fresh socket before applying its pinned lookup',
   );
+});
+
+test('B3 Provider fallback lookup prefers usable IPv4 while retaining IPv6-only support', async () => {
+  const records = await new Promise((resolve, reject) => {
+    proxyRouter._test.providerPublicDnsLookup(
+      'provider.example',
+      { all: true },
+      (error, addresses) => error ? reject(error) : resolve(addresses),
+      async () => [
+        { address: '2001:4860:4860::8888', family: 6 },
+        { address: '93.184.216.34', family: 4 },
+      ],
+    );
+  });
+  assert.deepEqual(records, [
+    { address: '93.184.216.34', family: 4 },
+    { address: '2001:4860:4860::8888', family: 6 },
+  ]);
+
+  const ipv6Only = await new Promise((resolve, reject) => {
+    proxyRouter._test.providerPublicDnsLookup(
+      'ipv6-provider.example',
+      { all: true },
+      (error, addresses) => error ? reject(error) : resolve(addresses),
+      async () => [{ address: '2001:4860:4860::8844', family: 6 }],
+    );
+  });
+  assert.deepEqual(ipv6Only, [{ address: '2001:4860:4860::8844', family: 6 }]);
+
+  const seedanceRecords = await new Promise((resolve, reject) => {
+    seedanceNzProvider.seedancePublicDnsLookup(
+      'api.seedance.nz',
+      { all: true },
+      (error, addresses) => error ? reject(error) : resolve(addresses),
+      async () => [
+        { address: '2606:4700::6810:85e5', family: 6 },
+        { address: '104.16.133.229', family: 4 },
+      ],
+    );
+  });
+  assert.deepEqual(seedanceRecords, [
+    { address: '104.16.133.229', family: 4 },
+    { address: '2606:4700::6810:85e5', family: 6 },
+  ]);
+
+  const literalIpv6 = await new Promise((resolve, reject) => {
+    proxyRouter._test.providerPublicDnsLookup(
+      '2606:4700::6810:85e5',
+      { all: true },
+      (error, addresses) => error ? reject(error) : resolve(addresses),
+    );
+  });
+  assert.deepEqual(literalIpv6, [{ address: '2606:4700::6810:85e5', family: 6 }]);
+});
+
+test('B3 completed task query interruptions retain the original task and never submit a replacement', async () => {
+  await withProxyFixture(async ({ appServer }) => {
+    const originalFetch = global.fetch;
+    const providerCalls = [];
+    proxyRouter._test.setProxySafeRemoteTestOptions({ providerRetryDelayMs: 1 });
+    try {
+      global.fetch = async (url, init = {}) => {
+        providerCalls.push({
+          url: String(url),
+          method: String(init?.method || 'GET').toUpperCase(),
+          body: String(init?.body || ''),
+        });
+        throw Object.assign(new TypeError('fetch failed'), {
+          cause: Object.assign(new Error('route changed after IPv6/TUN/VPN switch'), {
+            code: 'ENETUNREACH',
+          }),
+        });
+      };
+
+      const cases = [
+        {
+          path: '/api/proxy/image/status/existing-image-task?model=gpt-image-2',
+          taskId: 'existing-image-task',
+        },
+        {
+          path: '/api/proxy/mj/task/existing-midjourney-task',
+          taskId: 'existing-midjourney-task',
+        },
+        {
+          path: '/api/proxy/video/query?taskId=existing-video-task&model=veo-3.1',
+          taskId: 'existing-video-task',
+        },
+        {
+          path: '/api/proxy/audio/query?clipIds=existing-audio-task&saveLocal=false',
+          taskId: 'existing-audio-task',
+        },
+        {
+          path: '/api/proxy/runninghub/query?taskId=existing-rh-task&site=cn',
+          taskId: 'existing-rh-task',
+        },
+      ];
+
+      for (const fixture of cases) {
+        const response = await requestGet(appServer, fixture.path);
+        assert.equal(response.status, 202, response.text);
+        assert.equal(response.data?.success, true);
+        assert.equal(response.data?.code, 'task_result_query_recovering');
+        assert.equal(response.data?.data?.taskId, fixture.taskId);
+        assert.equal(response.data?.data?.recoverable, true);
+        assert.equal(response.data?.data?.retryAfterMs, 3_000);
+        assert.match(response.data?.message || '', /原任务 ID/);
+        assert.match(response.data?.message || '', /不会重新生成/);
+        assert.match(response.data?.message || '', /不会重复扣费/);
+      }
+
+      assert.equal(
+        providerCalls.length,
+        cases.length * 2,
+        'each read-only result query may retry once on a fresh connection',
+      );
+      assert.equal(
+        providerCalls.filter((call) => call.method === 'POST').length,
+        2,
+        'only the RunningHub read-only query may use POST, including its one recovery attempt',
+      );
+      assert.ok(
+        providerCalls
+          .filter((call) => call.method === 'POST')
+          .every((call) => call.url.includes('/task/openapi/outputs') && call.body.includes('existing-rh-task')),
+        'read-only POST recovery must keep the original RunningHub task id',
+      );
+      assert.ok(
+        providerCalls.every((call) => (
+          call.method !== 'POST'
+          || !/\/(?:generate|generations|submit)(?:\/|$|\?)/i.test(call.url)
+        )),
+        `a query/download recovery must never call a generation submission endpoint: ${JSON.stringify(providerCalls)}`,
+      );
+    } finally {
+      global.fetch = originalFetch;
+      proxyRouter._test.setProxySafeRemoteTestOptions(null);
+      await proxyRouter._test.resetProviderDispatcherForTests();
+    }
+  });
 });
 
 test('B3 refToBuffer, refToGrokImage, and uploadRefToZhenzhen routes reject collaborator private media before connect', async () => {

@@ -47,17 +47,35 @@ const {
 } = require('../services/creatorAgentModelDecision');
 const {
   canonicalCreatorCanvasLifecycle,
+  creatorAssistantEventPlan,
   replayCreatorCanvasPlanStates,
 } = require('../services/creatorAgentProductionEvidence');
 const {
   monotonicNowMs,
   createCreatorAgentLocalReadinessReceipt,
 } = require('../services/creatorAgentReadiness');
+const {
+  createCreatorAgentLlmRuntime,
+} = require('../services/creatorAgentLlmRuntime');
+const {
+  CREATOR_TOOL_PROPOSAL_RECEIPT_SCHEMA,
+  CreatorAgentToolProposalError,
+  compileCreatorToolProposal,
+  rejectionReceipt,
+} = require('../services/creatorAgentToolProposals');
 
 const CREATOR_AGENT_HTTP_SCHEMA = 't8-creator-agent-http-v1';
 const CREATOR_AGENT_REQUEST_LIMIT = 1024 * 1024;
 const CREATOR_DELIVERY_DRAFT_TTL_MS = 10 * 60 * 1000;
 const CREATOR_REFERENCE_PRODUCTION_MAX_SHOTS = 240;
+const CREATOR_PRODUCTION_PHASE_LABELS = Object.freeze({
+  idea: '创意简报',
+  script: '完整剧本',
+  assets: '资产设定',
+  shots: '镜头与分镜',
+  candidates: '候选与采用',
+  delivery: '成片交付',
+});
 
 function creatorDigest(value) {
   return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -465,6 +483,20 @@ function createCreatorAgentRouter(options = {}) {
     : 75;
   const waitForResponseDelta = () => responseDeltaDelayMs > 0
     ? new Promise((resolve) => setTimeout(resolve, responseDeltaDelayMs)) : Promise.resolve();
+  let lazyCreatorLlmRuntime = options.llmRuntime || null;
+  const creatorLlm = () => {
+    if (!lazyCreatorLlmRuntime) {
+      lazyCreatorLlmRuntime = createCreatorAgentLlmRuntime({
+        config: runtimeConfig,
+        settingsFile: runtimeConfig.SETTINGS_FILE,
+        settingsProvider: options.creatorLlmSettingsProvider,
+        generateChat: options.creatorLlmGenerateChat,
+        fetchImpl: options.creatorLlmFetchImpl,
+        timeoutMs: options.creatorLlmTimeoutMs,
+      });
+    }
+    return lazyCreatorLlmRuntime;
+  };
   const cleanupDeliveryState = () => {
     const now = Date.now();
     for (const [id, draft] of deliveryDrafts) {
@@ -479,6 +511,47 @@ function createCreatorAgentRouter(options = {}) {
   const sessions = options.sessions || createCreatorAgentSessionStore({
     rootDir: path.join(runtimeConfig.DATA_DIR, 'creator-agent'),
   });
+  const persistCreatorToolProposals = (sessionId, assistantEvent, rawProposals) => {
+    const proposals = Array.isArray(rawProposals) ? rawProposals.slice(0, 12) : [];
+    const accepted = [];
+    const receipts = [];
+    proposals.forEach((rawProposal, index) => {
+      try {
+        const compiled = compileCreatorToolProposal({
+          proposal: rawProposal,
+          session: sessions.read(sessionId),
+          assistantEvent,
+        });
+        const stored = sessions.recordToolProposal(sessionId, { proposal: compiled });
+        accepted.push(stored.proposal);
+        receipts.push({
+          schema: CREATOR_TOOL_PROPOSAL_RECEIPT_SCHEMA,
+          status: 'accepted',
+          index,
+          proposalId: stored.proposal.proposalId,
+          proposalDigest: stored.proposal.proposalDigest,
+          duplicate: stored.duplicate,
+          gate: stored.proposal.gate,
+          sideEffects: {
+            canvasWrites: 0,
+            providerCalls: 0,
+            fileWrites: 0,
+          },
+        });
+      } catch (error) {
+        const proposalFailure = error instanceof CreatorAgentToolProposalError
+          || String(error?.code || '').startsWith('CAPABILITY_TOOL_')
+          || String(error?.code || '').startsWith('CREATOR_TOOL_PROPOSAL_');
+        if (!proposalFailure) throw error;
+        receipts.push(rejectionReceipt(error, index));
+      }
+    });
+    return {
+      session: sessions.read(sessionId),
+      proposals: accepted,
+      receipts,
+    };
+  };
   const syncCreatorRunEvents = (sessionId) => {
     let snapshot = sessions.read(sessionId);
     const db = database();
@@ -679,6 +752,7 @@ function createCreatorAgentRouter(options = {}) {
         );
       }
       const session = sessions.create({
+        sessionId: req.body?.sessionId,
         projectId,
         canvasId,
         title: req.body?.title,
@@ -706,18 +780,72 @@ function createCreatorAgentRouter(options = {}) {
   router.post('/sessions/:sessionId/production-documents/confirm', (req, res, next) => {
     try {
       const session = sessions.read(req.params.sessionId);
-      ensureSessionScope(session, req.body || {});
+      const scope = ensureSessionScope(session, req.body || {});
       const result = sessions.confirmProductionDocuments(session.id, {
         planId: req.body?.planId,
         planDigest: req.body?.planDigest,
         documents: req.body?.documents,
         actor: 'canvas-ui',
       });
+      let canvasRetention = null;
+      if (result.phaseTransition) {
+        const document = database().getCanvas(scope.canvasId);
+        if (!document || String(document.projectId || '') !== scope.projectId) {
+          throw new CreatorAgentSessionError(
+            'CREATOR_SCOPE_NOT_FOUND',
+            '当前画布不存在，无法准备阶段成果留存预览',
+            404,
+          );
+        }
+        const phase = String(result.phaseTransition.completedPhase || 'idea');
+        const label = CREATOR_PRODUCTION_PHASE_LABELS[phase] || '阶段成果';
+        const nodes = Array.isArray(document.nodes) ? document.nodes : [];
+        const rightEdge = nodes.reduce((maximum, node) => (
+          Math.max(maximum, Number(node?.position?.x) || 0)
+        ), 0);
+        const phaseIndex = Math.max(0, Object.keys(CREATOR_PRODUCTION_PHASE_LABELS).indexOf(phase));
+        const prompt = [
+          `# 已确认 · ${label}`,
+          '',
+          String(result.stageResponse?.text || '').trim(),
+        ].join('\n').slice(0, 12_000);
+        const retentionPlan = creative().actionPlan('graph.node-add', {
+          type: 'text',
+          prompt,
+          x: rightEdge + 420,
+          y: 80 + phaseIndex * 240,
+        }, scope);
+        const retentionPatch = creative().requirePlan(retentionPlan.planId, scope).patch;
+        const retentionTurn = sessions.appendActionPlan(session.id, {
+          action: 'graph.node-add',
+          label: `将已确认${label}留存在画布`,
+          context: creatorContextForDocument(req.body?.context, document),
+          plan: retentionPlan,
+          patch: retentionPatch,
+          source: 'creator-stage-retention',
+          silent: true,
+          preserveSuggestions: true,
+        });
+        result.session = retentionTurn.session;
+        canvasRetention = {
+          schema: 't8-creator-canvas-retention-preview-v1',
+          phase,
+          label,
+          plan: retentionPlan,
+          patch: retentionPatch,
+          requiresExplicitApply: true,
+        };
+      }
       return res.status(result.duplicate ? 200 : 201).json(response({
         message: result.duplicate
           ? '这些前期文档版本已经确认，无需重复操作'
-          : '已确认当前文档版本；后续修改会生成新草稿，不会覆盖这次确认',
-        data: result,
+          : canvasRetention
+            ? `已确认${canvasRetention.label}并进入下一阶段；已准备画布留存预览，确认后才会写入`
+            : '已确认当前文档版本；后续修改会生成新草稿，不会覆盖这次确认',
+        data: {
+          ...result,
+          canvasRetention,
+        },
       }));
     } catch (error) {
       return next(error);
@@ -948,13 +1076,44 @@ function createCreatorAgentRouter(options = {}) {
           },
         }));
       }
-      if (activeMessageStreams.has(session.id)) {
+      const activeMessage = activeMessageStreams.get(session.id);
+      if (activeMessage) {
+        if (activeMessage.clientRequestId === clientRequestId) {
+          return res.status(202).json(response({
+            message: '同一条创作要求仍在生成中，不会重复调用模型或重复扣费',
+            data: {
+              session: sessions.read(session.id),
+              request: {
+                schema: 't8-creator-message-request-v1',
+                clientRequestId,
+                status: 'in-progress',
+                duplicate: true,
+              },
+              ...(activeMessage.responseId ? {
+                stream: {
+                  responseId: activeMessage.responseId,
+                  durable: true,
+                  recovering: true,
+                },
+              } : {}),
+            },
+          }));
+        }
         throw new CreatorAgentSessionError(
           'CREATOR_RESPONSE_IN_PROGRESS',
           '当前创作会话正在回复，请等待完成后再发送下一条',
           409,
         );
       }
+      streamingSessionId = session.id;
+      streamingControl = {
+        sessionId: session.id,
+        responseId: '',
+        clientRequestId,
+        stopRequested: false,
+        phase: 'planning',
+      };
+      activeMessageStreams.set(session.id, streamingControl);
       const selectedSuggestion = requestedSuggestion
         ? resolveCreatorSuggestionSelection(session, {
             suggestionId: requestedSuggestion.id,
@@ -962,12 +1121,15 @@ function createCreatorAgentRouter(options = {}) {
             context: currentContext,
           })
         : null;
-      const prompt = selectedSuggestion?.label
+      const visiblePrompt = selectedSuggestion?.label
         || String(req.body?.text || '').trim()
         || creatorAttachmentOnlyPrompt(attachments);
-      if (!prompt) throw new CreatorAgentSessionError(
+      if (!visiblePrompt) throw new CreatorAgentSessionError(
         'CREATOR_MESSAGE_EMPTY', '请先输入创作要求，或添加一个已上传附件',
       );
+      const suggestionPrompt = String(
+        selectedSuggestion?.arguments?.creatorPrompt || '',
+      ).trim();
       const refiningShotBreakdown = Boolean(
         ['reference-breakdown.rhythm', 'reference-breakdown.camera-language']
           .includes(selectedSuggestion?.intent)
@@ -982,7 +1144,7 @@ function createCreatorAgentRouter(options = {}) {
       const referenceProduction = continuingReferenceProduction
         ? referenceBreakdownProductionSource(session.latestPlan)
         : null;
-      const planningPrompt = referenceProduction?.prompt || prompt;
+      const planningPrompt = referenceProduction?.prompt || suggestionPrompt || visiblePrompt;
       const assetIds = [...new Set([
         ...(Array.isArray(req.body?.assetIds) ? req.body.assetIds : []),
         ...attachments.map((attachment) => attachment.assetId).filter(Boolean),
@@ -1005,16 +1167,32 @@ function createCreatorAgentRouter(options = {}) {
               : null;
           }).filter(Boolean)
         : attachments;
+      const suggestionKind = String(
+        selectedSuggestion?.arguments?.creatorKind || '',
+      ).trim().toLowerCase();
+      const allowedSuggestionKinds = new Set([
+        'story',
+        'script',
+        'image',
+        'edit-image',
+        'video',
+        'edit-video',
+        'audio',
+        'delivery',
+      ]);
       const kind = refiningShotBreakdown || continuingReferenceProduction
         ? 'story'
-        : String(req.body?.kind || '').trim().toLowerCase() || inferCreatorKind(prompt, attachments);
+        : allowedSuggestionKinds.has(suggestionKind)
+          ? suggestionKind
+          : String(req.body?.kind || '').trim().toLowerCase()
+            || inferCreatorKind(planningPrompt, attachments);
       const recipe = refiningShotBreakdown
         ? 'shot-breakdown'
         : continuingReferenceProduction
           ? 'storyboard'
         : Object.prototype.hasOwnProperty.call(req.body || {}, 'recipe')
         ? String(req.body?.recipe || 'general').trim().toLowerCase()
-        : inferCreatorRecipe(prompt, kind, attachments);
+        : inferCreatorRecipe(planningPrompt, kind, attachments);
       const requestedModelPreferences = req.body?.modelPreferences && typeof req.body.modelPreferences === 'object'
         ? req.body.modelPreferences
         : {};
@@ -1054,7 +1232,7 @@ function createCreatorAgentRouter(options = {}) {
       }
       const modelFields = modelDecision.modelFields;
       const plan = kind === 'delivery'
-        ? createDeliveryIntentPlan(session, document, prompt)
+        ? createDeliveryIntentPlan(session, document, planningPrompt)
         : creative().createPlan({
             kind,
             prompt: planningPrompt,
@@ -1077,12 +1255,25 @@ function createCreatorAgentRouter(options = {}) {
         startedAtMs: localPlanningStartedAtMs,
         readyAtMs: readinessNow(),
       });
+      const requestHost = String(req.get('host') || '').replace(/[^A-Za-z0-9.:[\]-]/g, '');
+      const responseInput = {
+        prompt: planningPrompt,
+        kind,
+        recipe,
+        attachments,
+        session,
+        plan,
+        modelDecisionReceipt: modelDecision.receipt,
+        requestBaseUrl: requestHost ? `${req.protocol}://${requestHost}` : undefined,
+      };
+      const llmRuntime = creatorLlm();
+      const wantsStream = req.body?.stream === true;
       const controlledPatch = plan.ready
         && kind !== 'delivery'
         && Number(plan?.impact?.patchOperationCount || 0) > 0
         ? creative().requirePlan(plan.planId, scope).patch
         : null;
-      const turnInput = {
+      const baseTurnInput = {
         text: selectedSuggestion?.label || String(req.body?.text || '').trim(),
         attachments,
         context: currentContext,
@@ -1099,15 +1290,135 @@ function createCreatorAgentRouter(options = {}) {
         requestDigest,
         readinessReceipt,
       };
-      const wantsStream = req.body?.stream === true;
+      const preparedResponse = wantsStream && typeof llmRuntime.prepareResponse === 'function'
+        ? llmRuntime.prepareResponse(responseInput)
+        : null;
+      if (preparedResponse?.mode === 'online-model') {
+        const begun = sessions.beginStreamingTurn(session.id, {
+          ...baseTurnInput,
+          live: true,
+          responseEvidence: preparedResponse.startedEvidence,
+        });
+        streamingResponseId = begun.responseId;
+        streamingControl.responseId = begun.responseId;
+        streamingControl.phase = 'streaming';
+        let durableDeltaCount = 0;
+        const appendDurableDelta = async (incomingDelta) => {
+          const delta = String(incomingDelta == null ? '' : incomingDelta);
+          for (let offset = 0; offset < delta.length; offset += 2_000) {
+            if (streamingControl.stopRequested) return;
+            const part = delta.slice(offset, offset + 2_000);
+            if (!part) continue;
+            sessions.appendResponseDelta(session.id, {
+              responseId: begun.responseId,
+              index: durableDeltaCount,
+              delta: part,
+            });
+            durableDeltaCount += 1;
+          }
+        };
+        const creativeResponse = await llmRuntime.createResponse(responseInput, {
+          prepared: preparedResponse,
+          onDelta: appendDurableDelta,
+          shouldStop: () => Boolean(streamingControl.stopRequested),
+        });
+        const responseMessage = creativeResponse.evidence?.mode === 'online-model'
+          ? '已生成本轮可编辑创作 V0；当前没有修改画布或启动素材生成'
+          : creativeResponse.evidence?.mode === 'offline-fallback'
+            ? '在线模型没有返回可用正文，已保留要求并给出离线结构 V0；当前没有修改画布'
+            : '当前 LLM 未就绪，已明确给出离线结构 V0；当前没有修改画布或启动生成';
+        if (streamingControl.stopRequested || creativeResponse.stopped) {
+          const stopped = sessions.stopStreamingTurn(session.id, {
+            responseId: begun.responseId,
+          });
+          return res.status(200).json(response({
+            message: '已停止本轮文字回复；画布里的远端生成任务没有被取消',
+            data: {
+              session: stopped.session,
+              userEvent: begun.userEvent,
+              assistantEvent: stopped.assistantEvent,
+              request: {
+                schema: 't8-creator-message-request-v1',
+                clientRequestId,
+                status: stopped.status,
+                duplicate: stopped.duplicate,
+              },
+              stream: {
+                responseId: begun.responseId,
+                chunkCount: durableDeltaCount,
+                durable: true,
+                transport: 'upstream-sse',
+                stopped: true,
+                remoteTasksAffected: 0,
+              },
+            },
+          }));
+        }
+        const completed = sessions.completeStreamingTurn(session.id, {
+          ...baseTurnInput,
+          responseId: begun.responseId,
+          assistantText: creativeResponse.text,
+          responseEvidence: creativeResponse.evidence,
+          artifactProposal: creativeResponse.artifactProposal,
+        });
+        const toolProposalResult = persistCreatorToolProposals(
+          session.id,
+          completed.assistantEvent,
+          creativeResponse.toolProposals,
+        );
+        return res.status(201).json(response({
+          message: responseMessage,
+          data: {
+            session: toolProposalResult.session,
+            userEvent: begun.userEvent,
+            assistantEvent: completed.assistantEvent,
+            toolProposals: toolProposalResult.proposals,
+            toolProposalReceipts: toolProposalResult.receipts,
+            readinessReceipt,
+            request: {
+              schema: 't8-creator-message-request-v1',
+              clientRequestId,
+              status: 'completed',
+              duplicate: false,
+            },
+            stream: {
+              responseId: begun.responseId,
+              chunkCount: durableDeltaCount,
+              durable: true,
+              transport: 'upstream-sse',
+            },
+          },
+        }));
+      }
+      const creativeResponse = await llmRuntime.createResponse(
+        responseInput,
+        preparedResponse ? { prepared: preparedResponse } : {},
+      );
+      const responseMessage = creativeResponse.evidence?.mode === 'online-model'
+        ? '已生成本轮可编辑创作 V0；当前没有修改画布或启动素材生成'
+        : creativeResponse.evidence?.mode === 'offline-fallback'
+          ? '在线模型没有返回可用正文，已保留要求并给出离线结构 V0；当前没有修改画布'
+          : '当前 LLM 未就绪，已明确给出离线结构 V0；当前没有修改画布或启动生成';
+      const turnInput = {
+        ...baseTurnInput,
+        assistantText: creativeResponse.text,
+        responseEvidence: creativeResponse.evidence,
+        artifactProposal: creativeResponse.artifactProposal,
+      };
       if (!wantsStream) {
         const turn = sessions.appendTurn(session.id, turnInput);
+        const toolProposalResult = persistCreatorToolProposals(
+          session.id,
+          turn.assistantEvent,
+          creativeResponse.toolProposals,
+        );
         return res.status(201).json(response({
-          message: plan.ready
-            ? '已形成可编辑计划；当前没有修改画布，也没有调用 Provider'
-            : '已保存需求，但计划还需要少量关键信息',
+          message: responseMessage,
           data: {
             ...turn,
+            session: toolProposalResult.session,
+            toolProposals: toolProposalResult.proposals,
+            toolProposalReceipts: toolProposalResult.receipts,
             readinessReceipt,
             request: {
               schema: 't8-creator-message-request-v1',
@@ -1118,16 +1429,10 @@ function createCreatorAgentRouter(options = {}) {
           },
         }));
       }
-      streamingSessionId = session.id;
       const begun = sessions.beginStreamingTurn(session.id, turnInput);
       streamingResponseId = begun.responseId;
-      streamingControl = {
-        sessionId: session.id,
-        responseId: begun.responseId,
-        clientRequestId,
-        stopRequested: false,
-      };
-      activeMessageStreams.set(session.id, streamingControl);
+      streamingControl.responseId = begun.responseId;
+      streamingControl.phase = 'streaming';
       for (let index = 0; index < begun.chunks.length; index += 1) {
         await waitForResponseDelta();
         if (streamingControl.stopRequested) break;
@@ -1167,14 +1472,19 @@ function createCreatorAgentRouter(options = {}) {
         ...turnInput,
         responseId: begun.responseId,
       });
+      const toolProposalResult = persistCreatorToolProposals(
+        session.id,
+        completed.assistantEvent,
+        creativeResponse.toolProposals,
+      );
       return res.status(201).json(response({
-        message: plan.ready
-          ? '已形成可编辑计划；当前没有修改画布，也没有调用 Provider'
-          : '已保存需求，但计划还需要少量关键信息',
+        message: responseMessage,
         data: {
-          session: completed.session,
+          session: toolProposalResult.session,
           userEvent: begun.userEvent,
           assistantEvent: completed.assistantEvent,
+          toolProposals: toolProposalResult.proposals,
+          toolProposalReceipts: toolProposalResult.receipts,
           readinessReceipt,
           request: {
             schema: 't8-creator-message-request-v1',
@@ -1692,8 +2002,9 @@ function createCreatorAgentRouter(options = {}) {
         .filter(([, state]) => state.status === 'applied')
         .map(([planId, state]) => [planId, state.payload]));
       const plansById = new Map((session.events || [])
-        .filter((event) => event?.type === 'assistant.plan' && event.payload?.plan?.planId)
-        .map((event) => [String(event.payload.plan.planId), event.payload.plan]));
+        .map((event) => creatorAssistantEventPlan(event))
+        .filter((plan) => plan?.planId)
+        .map((plan) => [String(plan.planId), plan]));
       if (session.latestPlan?.planId) {
         plansById.set(String(session.latestPlan.planId), session.latestPlan);
       }

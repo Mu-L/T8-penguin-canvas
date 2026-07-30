@@ -37,11 +37,28 @@ function model(overrides = {}) {
   };
 }
 
+function llmModel(overrides = {}) {
+  return model({
+    id: 'llm:zhenzhen:gemini-3.5-flash',
+    kind: 'llm',
+    model: 'gemini-3.5-flash',
+    label: 'Gemini 3.5 Flash',
+    family: 'gemini',
+    parameters: { vision: true },
+    ...overrides,
+  });
+}
+
+function decisionFor(result, kind) {
+  return result.receipt.decisions.find((decision) => decision.kind === kind);
+}
+
 test('smart selection chooses a compatible executable model before a blocked default', () => {
   const result = createCreatorModelDecision({
     kind: 'image',
     ratio: '16:9',
     models: [
+      llmModel(),
       model({
         readiness: {
           known: true,
@@ -72,12 +89,16 @@ test('smart selection chooses a compatible executable model before a blocked def
   assert.equal(result.receipt.ready, true);
   assert.equal(result.receipt.providerCalls, 0);
   assert.equal(result.receipt.canvasWrites, 0);
-  assert.equal(result.receipt.decisions[0].inputCompatibility.status, 'compatible');
-  assert.match(result.receipt.decisions[0].inputCompatibility.reasons.join(' '), /16:9/);
-  assert.equal(result.receipt.decisions[0].alternatives.length, 1);
-  assert.equal(result.receipt.decisions[0].alternatives[0].model, 'gpt-image-2');
-  assert.equal(result.receipt.decisions[0].alternatives[0].compatibility.status, 'compatible');
-  assert.deepEqual(result.receipt.approvalBoundary.providerSelections.map((item) => item.provider), ['seedance-nz']);
+  const imageDecision = decisionFor(result, 'image');
+  assert.equal(imageDecision.inputCompatibility.status, 'compatible');
+  assert.match(imageDecision.inputCompatibility.reasons.join(' '), /16:9/);
+  assert.equal(imageDecision.alternatives.length, 1);
+  assert.equal(imageDecision.alternatives[0].model, 'gpt-image-2');
+  assert.equal(imageDecision.alternatives[0].compatibility.status, 'compatible');
+  assert.deepEqual(
+    result.receipt.approvalBoundary.providerSelections.map((item) => item.provider),
+    ['seedance-nz', 'zhenzhen'],
+  );
 });
 
 test('fixed selection wins exactly and records that the creator chose it', () => {
@@ -87,6 +108,7 @@ test('fixed selection wins exactly and records that the creator chose it', () =>
       image: { provider: 'seedance-nz', model: 'zhenzhen-image-g2-t2i' },
     },
     models: [
+      llmModel(),
       model(),
       model({
         id: 'image:seedance-nz:zhenzhen-image-g2-t2i',
@@ -99,9 +121,10 @@ test('fixed selection wins exactly and records that the creator chose it', () =>
 
   assert.deepEqual(result.errors, []);
   assert.equal(result.modelFields.imageProvider, 'seedance-nz');
-  assert.equal(result.receipt.mode, 'fixed');
-  assert.equal(result.receipt.decisions[0].mode, 'fixed');
-  assert.match(result.receipt.decisions[0].reasons.join(' '), /明确固定/);
+  assert.equal(result.receipt.mode, 'mixed');
+  assert.equal(decisionFor(result, 'llm').mode, 'smart');
+  assert.equal(decisionFor(result, 'image').mode, 'fixed');
+  assert.match(decisionFor(result, 'image').reasons.join(' '), /明确固定/);
 });
 
 test('fixed but blocked selection never silently falls back', () => {
@@ -111,6 +134,7 @@ test('fixed but blocked selection never silently falls back', () => {
       image: { provider: 'zhenzhen', model: 'gpt-image-2' },
     },
     models: [
+      llmModel(),
       model({
         readiness: {
           known: true,
@@ -133,13 +157,17 @@ test('fixed but blocked selection never silently falls back', () => {
   assert.equal(result.errors.length, 1);
   assert.equal(result.errors[0].code, 'CREATOR_MODEL_RUNTIME_NOT_READY');
   assert.match(result.errors[0].message, /没有自动切换平台或模型/);
-  assert.deepEqual(result.modelFields, {});
+  assert.deepEqual(result.modelFields, {
+    llmProvider: 'zhenzhen',
+    llmModel: 'gemini-3.5-flash',
+  });
+  assert.equal(result.modelFields.imageModel, undefined);
 });
 
 test('receipt keeps unknown estimates honest, excludes secrets and has a stable evidence digest', () => {
   const input = {
     kind: 'image',
-    models: [model()],
+    models: [llmModel(), model()],
     catalogDigest: 'a'.repeat(64),
   };
   const first = createCreatorModelDecision({ ...input, now: 1_700_000_000_000 });
@@ -147,10 +175,11 @@ test('receipt keeps unknown estimates honest, excludes secrets and has a stable 
   const serialized = JSON.stringify(first.receipt);
 
   assert.equal(first.receipt.receiptDigest, second.receipt.receiptDigest);
-  assert.equal(first.receipt.decisions[0].estimates.cost.status, 'unknown');
-  assert.equal(first.receipt.decisions[0].estimates.latency.status, 'unknown');
-  assert.match(first.receipt.decisions[0].estimates.cost.message, /不得猜测费用/);
-  assert.match(first.receipt.decisions[0].estimates.latency.message, /不得猜测耗时/);
+  const imageDecision = decisionFor(first, 'image');
+  assert.equal(imageDecision.estimates.cost.status, 'unknown');
+  assert.equal(imageDecision.estimates.latency.status, 'unknown');
+  assert.match(imageDecision.estimates.cost.message, /不得猜测费用/);
+  assert.match(imageDecision.estimates.latency.message, /不得猜测耗时/);
   assert.equal(first.receipt.approvalBoundary.costTier.status, 'unknown');
   assert.equal(first.receipt.approvalBoundary.privacyBoundary.status, 'unknown');
   assert.equal(first.receipt.fallbackPolicy.silentProviderFallback, false);
@@ -160,7 +189,7 @@ test('receipt keeps unknown estimates honest, excludes secrets and has a stable 
 });
 
 test('receipt validation fails closed when provider, cost or privacy evidence drifts', () => {
-  const original = createCreatorModelDecision({ kind: 'image', models: [model()] }).receipt;
+  const original = createCreatorModelDecision({ kind: 'image', models: [llmModel(), model()] }).receipt;
   for (const mutate of [
     (receipt) => { receipt.approvalBoundary.providerSelections[0].provider = 'other'; },
     (receipt) => { receipt.approvalBoundary.costTier.status = 'known'; },
@@ -242,6 +271,7 @@ test('direct video selection respects declared duration and ratio compatibility'
     ratio: '16:9',
     duration: 10,
     models: [
+      llmModel(),
       model({
         id: 'video:zhenzhen:short-only',
         kind: 'video',
@@ -260,7 +290,7 @@ test('direct video selection respects declared duration and ratio compatibility'
 
   assert.deepEqual(result.errors, []);
   assert.equal(result.modelFields.videoModel, 'ten-second');
-  assert.match(result.receipt.decisions[0].reasons.join(' '), /10 秒/);
+  assert.match(decisionFor(result, 'video').reasons.join(' '), /10 秒/);
 });
 
 test('reference video breakdown requires a vision LLM and may add ready MP4 transcription evidence', () => {
@@ -407,7 +437,7 @@ test('attachment content evidence changes both request and receipt digests witho
       width: 1024,
       height: 1024,
     }],
-    models: [model()],
+    models: [llmModel(), model()],
   };
   const first = createCreatorModelDecision(input).receipt;
   const second = createCreatorModelDecision({
@@ -435,6 +465,7 @@ test('smart selection excludes a model whose reference-image capability is not d
     kind: 'image',
     attachments: [{ kind: 'image', assetId: 'asset-reference-image' }],
     models: [
+      llmModel(),
       model({
         id: 'image:zhenzhen:unknown-reference',
         model: 'unknown-reference',
@@ -451,9 +482,9 @@ test('smart selection excludes a model whose reference-image capability is not d
 
   assert.deepEqual(result.errors, []);
   assert.equal(result.modelFields.imageModel, 'verified-reference');
-  assert.equal(result.receipt.decisions[0].inputCompatibility.status, 'compatible');
+  assert.equal(decisionFor(result, 'image').inputCompatibility.status, 'compatible');
   assert.equal(
-    result.receipt.decisions[0].alternatives.some((item) => item.model === 'unknown-reference'),
+    decisionFor(result, 'image').alternatives.some((item) => item.model === 'unknown-reference'),
     false,
   );
 });
@@ -464,6 +495,7 @@ test('smart video selection excludes models with unknown ratio or duration evide
     ratio: '16:9',
     duration: 10,
     models: [
+      llmModel(),
       model({
         id: 'video:zhenzhen:unknown-constraints',
         kind: 'video',
@@ -482,6 +514,91 @@ test('smart video selection excludes models with unknown ratio or duration evide
 
   assert.deepEqual(result.errors, []);
   assert.equal(result.modelFields.videoModel, 'verified-constraints');
-  assert.equal(result.receipt.decisions[0].inputCompatibility.status, 'compatible');
-  assert.match(result.receipt.decisions[0].reasons.join(' '), /16:9.*10 秒/);
+  assert.equal(decisionFor(result, 'video').inputCompatibility.status, 'compatible');
+  assert.match(decisionFor(result, 'video').reasons.join(' '), /16:9.*10 秒/);
+});
+
+test('general creative requests with image attachments only select a verified vision LLM', () => {
+  const result = createCreatorModelDecision({
+    kind: 'story',
+    recipe: 'general',
+    attachments: [{ kind: 'image', assetId: 'asset-duck-reference' }],
+    models: [
+      llmModel({
+        id: 'llm:zhenzhen:text-only',
+        model: 'text-only',
+        parameters: { vision: false },
+      }),
+      llmModel({
+        id: 'llm:zhenzhen:vision-ready',
+        model: 'vision-ready',
+        parameters: { vision: true },
+      }),
+    ],
+  });
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.modelFields.llmModel, 'vision-ready');
+  const llmDecision = decisionFor(result, 'llm');
+  assert.equal(llmDecision.inputCompatibility.status, 'compatible');
+  assert.match(llmDecision.inputCompatibility.reasons.join(' '), /视觉输入/);
+  assert.equal(
+    llmDecision.alternatives.some((item) => item.model === 'text-only'),
+    false,
+  );
+});
+
+test('fixed LLM without declared vision support fails closed for an ordinary image reference', () => {
+  const result = createCreatorModelDecision({
+    kind: 'story',
+    recipe: 'general',
+    attachments: [{ kind: 'image', assetId: 'asset-duck-reference' }],
+    preferences: {
+      llm: { provider: 'zhenzhen', model: 'catalog-unknown' },
+    },
+    models: [
+      llmModel({
+        id: 'llm:zhenzhen:catalog-unknown',
+        model: 'catalog-unknown',
+        parameters: {},
+      }),
+      llmModel({
+        id: 'llm:zhenzhen:vision-ready',
+        model: 'vision-ready',
+        parameters: { vision: true },
+      }),
+    ],
+  });
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.modelFields.llmModel, 'catalog-unknown');
+  const llmDecision = decisionFor(result, 'llm');
+  assert.equal(llmDecision.mode, 'fixed');
+  assert.equal(llmDecision.inputCompatibility.status, 'unverified');
+  assert.match(llmDecision.inputCompatibility.limitations.join(' '), /视觉输入/);
+});
+
+test('audio attachment cannot be routed to an LLM without verified audio input support', () => {
+  const result = createCreatorModelDecision({
+    kind: 'audio',
+    recipe: 'general',
+    attachments: [{ kind: 'audio', assetId: 'asset-voice-reference' }],
+    models: [
+      llmModel({
+        id: 'llm:zhenzhen:vision-only',
+        model: 'vision-only',
+        parameters: { vision: true },
+      }),
+      model({
+        id: 'audio:seedance-nz:whisper-1',
+        kind: 'audio',
+        provider: 'seedance-nz',
+        model: 'whisper-1',
+        label: 'Whisper 1',
+        parameters: { capabilities: ['stt'] },
+      }),
+    ],
+  });
+  const llmDecision = decisionFor(result, 'llm');
+  assert.equal(llmDecision.status, 'blocked');
+  assert.equal(llmDecision.inputCompatibility.status, 'unverified');
+  assert.match(JSON.stringify(llmDecision.blockers), /兼容|音频/);
 });

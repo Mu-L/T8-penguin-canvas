@@ -71,10 +71,11 @@ function requiredModelKinds(kind, recipe = '') {
   if (normalized === 'story' && normalizedRecipe === 'shot-breakdown') return ['llm'];
   if (normalized === 'story') return [...MODEL_KINDS];
   if (normalized === 'script') return ['llm'];
-  if (['image', 'edit-image'].includes(normalized)) return ['image'];
-  if (['video', 'edit-video'].includes(normalized)) return ['video'];
-  if (normalized === 'audio') return ['audio'];
-  return [];
+  if (['image', 'edit-image'].includes(normalized)) return ['llm', 'image'];
+  if (['video', 'edit-video'].includes(normalized)) return ['llm', 'video'];
+  if (normalized === 'audio') return ['llm', 'audio'];
+  if (normalized === 'delivery') return [];
+  return ['llm'];
 }
 
 function optionalModelKinds(kind, recipe = '') {
@@ -216,16 +217,27 @@ function compatibilityFor(item, request) {
   };
 
   if (item.kind === 'llm'
-    && request.kind === 'story'
-    && request.recipe === 'shot-breakdown'
-    && attachmentKinds.has('video')) {
+    && (attachmentKinds.has('image') || attachmentKinds.has('video'))) {
     if (parameters.vision === true) {
       confidence += 5;
-      reasons.push('目录明确声明支持视觉输入，可分析受控参考视频采样帧');
+      reasons.push(
+        request.kind === 'story' && request.recipe === 'shot-breakdown'
+          ? '目录明确声明支持视觉输入，可分析受控参考视频采样帧'
+          : '目录明确声明支持视觉输入，可核验当前图片或视频参考素材',
+      );
     } else if (parameters.vision === false) {
-      markIncompatible('模型明确不支持视觉输入，不能分析参考视频采样帧');
+      markIncompatible('模型明确不支持视觉输入，不能读取当前图片或视频参考素材');
     } else {
-      markUnverified('目录没有明确声明视觉输入能力，不能据此自动选择');
+      markUnverified('目录没有明确声明视觉输入能力，不能据此自动选择或声称已读取素材');
+    }
+  }
+
+  if (item.kind === 'llm' && attachmentKinds.has('audio')) {
+    if (parameters.audioInput === true) {
+      confidence += 4;
+      reasons.push('目录明确声明支持音频输入');
+    } else {
+      markIncompatible('当前创作对话输入链路没有该模型的可核验音频理解能力');
     }
   }
 

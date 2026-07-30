@@ -166,7 +166,7 @@ test('creator Agent exposes versioned pre-production documents without expanding
   assert.match(panel, /确认此版/);
   assert.match(panel, /确认全部当前版本/);
   assert.match(panel, /较 v\{changeSummary\.baseRevision\} 改了/);
-  assert.match(panel, /session\?\.latestPlan\?\.planId === plan\.planId/);
+  assert.match(panel, /session\?\.latestPlan\?\.planId === currentStagePlan\.planId/);
   assert.match(panel, /confirmation\.contentDigest === document\.contentDigest/);
   assert.match(css, /\.t8-creator-agent-production-documents/);
   assert.match(css, /\.t8-creator-agent-production-document-diff/);
@@ -324,12 +324,29 @@ test('creator Agent preview uses the Canvas baseline callback and never directly
 test('creator Agent empty state presents exactly three stable rotatable local ideas', () => {
   const panel = source('src/components/CreatorAgentPanel.tsx');
   const ideas = source('src/utils/creatorAgentStarterIdeas.ts');
-  const catalogEntries = ideas.match(/\{ id: 'idea-[^']+', label: '[^']+' \}/g) || [];
-  assert.equal(catalogEntries.length, 12);
+  const catalog = JSON.parse(source('backend/src/shared/creatorAgentStarterCatalog.json'));
+  assert.equal(catalog.schema, 't8-creator-agent-starter-catalog-v2');
+  assert.equal(catalog.modes['blank-new'].length, 12);
+  assert.equal(catalog.modes['attachment-ready'].length, 3);
+  assert.equal(catalog.modes['selection-ready'].length, 3);
+  assert.equal(catalog.modes['resumed-session'].length, 0);
+  assert.equal(
+    catalog.modes['blank-new'].some((item) => (
+      /当前|现有|这组|这个|这些|它|继续|接着|沿用|完善|补齐|只重做|恢复|检查当前/.test(item.label)
+    )),
+    false,
+  );
   assert.match(ideas, /CREATOR_AGENT_STARTER_IDEA_BATCH_COUNT/);
+  assert.match(ideas, /creatorAgentStarterMode/);
+  assert.match(ideas, /allowCanvasContext/);
+  assert.match(ideas, /allowFailureContext/);
   assert.match(ideas, /creatorAgentStarterIdeaContextKey/);
   assert.match(ideas, /creatorAgentStarterIdeaBatch/);
   assert.match(panel, /isPristineSession = allVisibleEvents\.length === 0/);
+  assert.match(panel, /attachmentKinds: messageAttachments\.map/);
+  assert.match(panel, /mode: starterIdeaMode/);
+  assert.match(panel, /creatorPrompt: idea\.starterPrompt/);
+  assert.match(panel, /requiredCapabilityIds: \[\.\.\.idea\.requiredCapabilityIds\]/);
   assert.match(panel, /starterIdeaRotationStorageKey/);
   assert.match(panel, /localStorage\.setItem\(starterIdeaRotationStorageKey/);
   assert.match(panel, /aria-label="换一批创作想法"/);
@@ -362,13 +379,18 @@ test('creator Agent keeps suggestion contracts but hides technical receipts from
   assert.doesNotMatch(panel, /data-kind="cost"/);
   assert.doesNotMatch(panel, /data-kind="risk"/);
   assert.match(panel, /aria-label=\{accessibleLabel\}/);
+  assert.match(panel, /suggestion\.description/);
+  assert.match(panel, /✎ 我有其他想法/);
+  assert.match(panel, /setCustomIdeaDraft/);
+  assert.match(panel, /void submit\(value\)/);
   assert.match(service, /providerCalls: 0/);
   assert.match(service, /riskLevel: 'L0'/);
   assert.match(service, /approvalRequired: false/);
 });
 
-test('creator Agent defaults to a readable chat with explicit new conversation and separate task details', () => {
+test('creator Agent keeps new conversation explicit without a persistent task-details footer', () => {
   const panel = source('src/components/CreatorAgentPanel.tsx');
+  const service = source('src/services/creatorAgent.ts');
   const css = source('src/styles/index.css');
 
   assert.match(panel, /const \[detailsOpen, setDetailsOpen\] = useState\(false\)/);
@@ -376,19 +398,73 @@ test('creator Agent defaults to a readable chat with explicit new conversation a
   assert.match(panel, /aria-label="新对话"/);
   assert.match(panel, /startNewConversation/);
   assert.match(panel, /ensureSession\(true\)/);
-  assert.match(panel, /className="t8-creator-agent-details-entry"/);
-  assert.match(panel, /aria-controls="t8-creator-agent-details-content"/);
-  assert.match(panel, /\{detailsOpen && \(\s*<section[\s\S]*?className="t8-creator-agent-details"/);
-  assert.match(panel, /plan && !detailsOpen[\s\S]*?t8-creator-agent-plan-summary/);
-  assert.match(panel, /plan && detailsOpen[\s\S]*?<PlanCard/);
-  assert.match(panel, /!isUser && !plan && detailsOpen && <LifecycleActivity/);
+  assert.match(panel, /phase:\s*'idea'/);
+  assert.match(panel, /recentActions:\s*\[\]/);
+  assert.match(service, /sessionId:\s*input\.sessionId\s*\|\|\s*crypto\.randomUUID\(\)/);
+  assert.match(service, /status\s*<\s*500/);
+  assert.match(service, /setTimeout\(resolve,\s*220\)/);
+  assert.match(service, /getCreatorAgentSession\(/);
+  assert.doesNotMatch(panel, /className="t8-creator-agent-details-entry"/);
+  assert.doesNotMatch(panel, />任务与详情</);
+  assert.doesNotMatch(panel, /aria-controls="t8-creator-agent-details-content"/);
+  assert.match(panel, /\{false && detailsOpen && \(\s*<section[\s\S]*?className="t8-creator-agent-details"/);
+  assert.doesNotMatch(panel, /className="t8-creator-agent-plan-summary"/);
+  assert.doesNotMatch(panel, /<PlanCard[\s\S]*?plan=\{plan\}/);
+  assert.doesNotMatch(panel, /<LifecycleActivity event=\{event\}/);
   assert.doesNotMatch(panel, /<span>Standard<\/span>/);
   assert.doesNotMatch(panel, /<span>手动确认<\/span>/);
   assert.match(css, /\.t8-creator-agent-message__body > p\s*\{[\s\S]*?font-size:\s*14\.5px/);
   assert.match(css, /\.t8-creator-agent-composer textarea\s*\{[\s\S]*?font-size:\s*14px/);
-  assert.match(css, /\.t8-creator-agent-suggestions button\s*\{[\s\S]*?min-height:\s*62px/);
+  assert.match(css, /\.t8-creator-agent-suggestions button\s*\{[\s\S]*?min-height:\s*76px/);
+  assert.match(css, /\.t8-creator-agent-suggestions__content > small/);
+  assert.match(css, /\.t8-creator-agent-custom-idea/);
 });
 
+test('creator Agent confirms a completed stage, retains it on Canvas, then continues automatically', () => {
+  const panel = source('src/components/CreatorAgentPanel.tsx');
+  assert.match(panel, /interface PendingStageContinuation/);
+  assert.match(panel, /const \[pendingStageContinuation, setPendingStageContinuation\]/);
+  assert.match(panel, /session\?\.latestPlan\?\.planId === currentStagePlan\.planId/);
+  assert.match(panel, /'confirmCurrentStage' in suggestion\.arguments/);
+  assert.match(panel, /continueFromStageSuggestion/);
+  assert.match(panel, /result\.phaseTransition\.nextPhase !== targetPhase/);
+  assert.match(panel, /readyAfterApply: !result\.canvasRetention/);
+  assert.match(panel, /setPendingStageContinuation\(\(current\) => \(\s*current \? \{ \.\.\.current, readyAfterApply: true \}/);
+  assert.match(panel, /void submit\(prompt\)/);
+  assert.match(panel, /Agent 会自动进入/);
+  assert.match(panel, /确认添加到画布/);
+  assert.match(panel, /正在构思并整理本阶段方案/);
+  assert.match(panel, /\{'（已 '\}\{thinkingSeconds\} 秒）/);
+});
+
+test('creator Agent keeps model tool proposals out of chat and visibly unexecuted in task details', () => {
+  const panel = source('src/components/CreatorAgentPanel.tsx');
+  const service = source('src/services/creatorAgent.ts');
+  const css = source('src/styles/index.css');
+  const proposalSection = panel.match(
+    /<section className="t8-creator-agent-tool-proposals"[\s\S]*?<\/section>/,
+  );
+
+  assert.match(service, /export interface CreatorAgentToolProposal/);
+  assert.match(service, /dispatchAllowed: false/);
+  assert.match(service, /status: 'not-started'/);
+  assert.match(service, /toolProposals\?: CreatorAgentToolProposal\[\]/);
+  assert.match(service, /toolProposalReceipts\?: CreatorAgentToolProposalReceipt\[\]/);
+  assert.match(panel, /latestCompletedResponseId/);
+  assert.match(panel, /proposal\.binding\.responseId === latestCompletedResponseId/);
+  assert.ok(proposalSection, 'tool proposals must have one bounded details-only section');
+  assert.match(proposalSection[0], /待确认操作/);
+  assert.match(proposalSection[0], /尚未执行/);
+  assert.match(proposalSection[0], /不会自动生成内容、改动画布或写入文件/);
+  assert.doesNotMatch(proposalSection[0], /onClick=|dispatch|invoke|apply|run/);
+  assert.ok(
+    panel.indexOf('t8-creator-agent-tool-proposals')
+      > panel.indexOf('id="t8-creator-agent-details-content"'),
+    'tool proposals must remain inside the separate details surface',
+  );
+  assert.match(css, /\.t8-creator-agent-tool-proposals\s*\{/);
+  assert.match(css, /\.t8-creator-agent-tool-proposals strong\s*\{[\s\S]*?font-size:\s*12px/);
+});
 test('creator Agent fails closed until the shared capability contract is verified', () => {
   const panel = source('src/components/CreatorAgentPanel.tsx');
   const service = source('src/services/creatorAgent.ts');
@@ -782,7 +858,7 @@ test('creator Agent starts an applied plan through the existing Canvas preflight
   assert.match(panel, /createCanvasNodeRunRequestId\(nodeId,\s*'creator-agent'\)/);
   assert.match(panel, /开始运行（进入体检）/);
   assert.match(panel, /已关联真实任务，请在下方查看/);
-  assert.match(panel, /runLinkedPlanIds\.has\(plan\.planId\)/);
+  assert.match(panel, /const runLinkedPlanIds = new Set\(\(session\?\.runLinks \|\| \[\]\)/);
   assert.match(request, /CANVAS_NODE_RUN_REQUEST_EVENT/);
   assert.match(request, /onSettled/);
   assert.match(canvas, /CANVAS_NODE_RUN_REQUEST_EVENT/);
@@ -906,4 +982,27 @@ test('creator Agent recovers one pending message across fetch loss and SSE recon
   assert.match(service, /'stopped'\s*:\s*'reconnecting'/);
   assert.match(css, /\.t8-creator-agent-connection/);
   assert.match(panel, /已保存的回复和任务不会丢失，也不会重复提交/);
+});
+
+test('creator Agent keeps versioned creative artifacts out of the main conversation clutter', () => {
+  const panel = source('src/components/CreatorAgentPanel.tsx');
+  const client = source('src/services/creatorAgent.ts');
+  const css = source('src/styles/index.css');
+  const sessions = source('backend/src/services/creatorAgentSessions.js');
+
+  assert.match(client, /t8-creator-artifact-version-v1/);
+  assert.match(client, /creativeArtifactVersions\?: CreatorAgentCreativeArtifactVersion\[\]/);
+  assert.match(client, /creativeArtifacts\?: CreatorAgentCreativeArtifactSummary\[\]/);
+  assert.match(panel, /eventArtifactVersion\(event\)/);
+  assert.match(panel, /creativeArtifactVersions/);
+  assert.match(panel, /className="t8-creator-agent-artifact-chip"/);
+  assert.match(panel, /可编辑产物/);
+  assert.match(panel, /每轮正文保存为独立版本；后续修改不会覆盖上一版/);
+  assert.match(panel, /artifact\.status === 'model-draft' \? '模型草案' : '离线结构草案'/);
+  assert.match(panel, /artifact\.revision === 1 \? '首版' : `\$\{changeCount\} 项版本差异`/);
+  assert.match(css, /\.t8-creator-agent-artifact-chip/);
+  assert.match(css, /\.t8-creator-agent-artifacts/);
+  assert.match(sessions, /creativeArtifactVersions/);
+  assert.match(sessions, /creativeArtifacts/);
+  assert.doesNotMatch(panel, /artifactVersion\.content\.bodyMarkdown/);
 });

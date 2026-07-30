@@ -17,13 +17,13 @@
     "creativeCapabilityManifest": "862cf87d748e9be79d2859bdb3d31845274b8912eb8169995be6071f98473796",
     "canvasNodeSchema": "c594306f7a1efc8124a25d83c3294ea7fe87c0718e4305a282a3f10f8896e0e7",
     "canvasNodeSchemaFile": "21806d0f5bee2ebe845f943dc6718293f6f57ff5cfcb57a341d285c21a7707a5",
-    "runtimeCatalogSources": "8a3c35041eff1488d83c27909593b136c391134d61e858634d70b118dbf22520",
-    "runtimeCatalogArtifact": "2da7c2d6ba697c622e684b84ef962ff31576d5b2c1f956ca44a460d9ee93d3cc",
+    "runtimeCatalogSources": "8d07f381b1c1d4ed2c759dddc79bbe8c65e5f2f047c052ac0adc3b77d16233fa",
+    "runtimeCatalogArtifact": "b9e3c05fed55928194cf51830109840d1f5904b4c2a37dda4ad443bdf0ca4265",
     "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
     "capabilityGraphCompiler": "05a050818efca904418de7dbd02ac151480295ce1dd98956f740874c615bbede",
     "coverageReceiptCompiler": "b562109fae3df266c20198b0c079b61330b2f663be78319be9104ef2c3457961"
   },
-  "aggregateDigest": "d683d4d7333264b7f38461e456a7deb899021968a013cad08eb7b97e360dca91",
+  "aggregateDigest": "700d67055fca7b461929ceb74407abcbeb9989ad5c1c65fc85685cac3e51894d",
   "principles": {
     "oneSentenceStart": true,
     "directCanvasMutation": false,
@@ -6016,7 +6016,7 @@
   ],
   "runtime": {
     "schema": "t8-creative-runtime-catalog-v1",
-    "sourceDigest": "8a3c35041eff1488d83c27909593b136c391134d61e858634d70b118dbf22520",
+    "sourceDigest": "8d07f381b1c1d4ed2c759dddc79bbe8c65e5f2f047c052ac0adc3b77d16233fa",
     "platforms": [
       {
         "id": "zhenzhen",
@@ -10435,7 +10435,7 @@
     "sourceDigests": {
       "capabilityManifest": "862cf87d748e9be79d2859bdb3d31845274b8912eb8169995be6071f98473796",
       "nodeSchema": "c594306f7a1efc8124a25d83c3294ea7fe87c0718e4305a282a3f10f8896e0e7",
-      "runtimeCatalog": "8a3c35041eff1488d83c27909593b136c391134d61e858634d70b118dbf22520",
+      "runtimeCatalog": "8d07f381b1c1d4ed2c759dddc79bbe8c65e5f2f047c052ac0adc3b77d16233fa",
       "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
       "receiptCompiler": "b562109fae3df266c20198b0c079b61330b2f663be78319be9104ef2c3457961"
     },
@@ -10464,6 +10464,6 @@
       "missingCompatibilityEdges": []
     },
     "complete": true,
-    "digest": "2f75a97e04f80fbef3d9645fd3b2b048611f41d1bd31e1574d9ede506f268cdc"
+    "digest": "8f986fd3617053c1a7d7cc9713ff1f6c0a509b4941f74553053e6124aefef425"
   }
 }

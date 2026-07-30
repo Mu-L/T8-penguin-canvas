@@ -89,7 +89,6 @@ test('creative capability manifest is one validated source for backend and zcanv
   });
   assert.equal(cli.creativeCapabilities.every((item) => item.operations.length === item.supports.length), true);
 });
-
 test('creative capability manifest covers the one-sentence production spine', () => {
   const payload = publicCreativeCapabilities();
   const ids = new Set(payload.capabilities.map((capability) => capability.id));
@@ -640,4 +639,3 @@ test('Agent tools, CLI schema, Skill reference and UI actions are generated from
   assert.equal(scopeBlock.includes('CREATIVE_CLI_SCOPE_REQUIREMENTS'), false);
   assert.equal(verifiedBlock.includes('...CREATIVE_CLI_OPERATIONS'), true);
 });
-

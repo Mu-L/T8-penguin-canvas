@@ -1,37 +1,34 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.6.9",
-  "lastUpdated": "2026-07-29-v2.6.9-released",
+  "version": "2.6.10",
+  "lastUpdated": "2026-07-30-v2.6.10-release-candidate",
   "release": {
-    "status": "released",
-    "version": "2.6.9",
-    "date": "2026-07-29",
-    "tag": "v2.6.9",
-    "sourceTarget": "838dc0bf87e290bbf618075e5800b8c541e5f80a",
-    "releaseUrl": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.6.9",
-    "latest": true,
-    "autoUpdateAssets": {
-      "installer": {
-        "name": "T8-PenguinCanvas-Setup-2.6.9.exe",
-        "size": 1304390936,
-        "sha256": "3b96cd9cde1d1488e4fb2b88d9a5105fcfe2128dc51f4f36db20dbb962ee951c"
-      },
-      "blockmap": {
-        "name": "T8-PenguinCanvas-Setup-2.6.9.exe.blockmap",
-        "size": 1359621,
-        "sha256": "45cae6d5171576fc5a3620b9689918ed1a5799f86e452da25f2a9244337c5d20"
-      },
-      "latestYml": {
-        "name": "latest.yml",
-        "size": 362,
-        "sha256": "36b152c0f9da3e0bd02ebc5cdc32d4a6f18624d6ad0ef33cf4bb0f62f7718ba7"
-      }
-    },
+    "status": "release-candidate-authorized-evidence-deferred",
+    "version": "2.6.10",
+    "date": "2026-07-30",
+    "tag": "v2.6.10",
+    "latest": false,
     "verification": [
-      "GitHub Release 已正式发布、非草稿、非预发布并标记为 Latest；Tag v2.6.9 精确指向源码提交 838dc0bf87e290bbf618075e5800b8c541e5f80a。",
-      "Electron/NSIS 只完成一次正式安装包构建，并使用 BelowNormal 优先级与 4 个逻辑核心；未运行 FFmpeg 转码或额外 Electron 冷启动压力测试。",
-      "安装包、blockmap 与 latest.yml 的本地 SHA-256、sealed recovery 清单、GitHub digest/size 元数据及发布前完整远端回下载字节核验一致。",
-      "用户明确授权先发布、后补真实 Provider、协作多端与安装升级证据；延期不将尚未执行的证据标记为通过。"
+      "用户已明确授权发布 v2.6.10，并授权先发布、后补真实 Provider、协作多端与安装升级证据；延期不将尚未执行的证据标记为通过。",
+      "Electron/NSIS 正式安装包只允许构建一次，使用 BelowNormal 优先级和受限逻辑核心；正式资产、Tag、Latest 与哈希在发布后回填。"
+    ]
+  },
+  "releaseV2610CreatorAgentGroundingAndProviderRecovery": {
+    "status": "release-candidate-v2.6.10",
+    "date": "2026-07-30",
+    "releaseIncluded": true,
+    "highlights": [
+      "Creator Agent 接入真实在线语言模型流式运行时，不再用问卷或泛化模板冒充创作结果；每轮先交付可编辑的剧本、TVC、电商、图像、视频或音频工作稿，再给出与该工作稿一致的三个下一步。",
+      "图像、视频和音频附件会持久化为创作证据并参与模型决策；未完成视觉或音频理解时不会声称已经看懂素材，新对话保持幂等且不会继承旧会话阶段和动作。",
+      "新增版本化 Creator Agent 工件与高层工具提案，只允许通过公开能力目录、预览和审批进入画布；内部路由、凭据、原始 CanvasPatch、数据库和 DOM 操作继续拒绝外部调用。",
+      "主对话隐藏任务回执、循环标签和技术收据，保留大字号流式创作内容、可编辑方案、精确建议、停止与断线恢复；Agent、zcanvas CLI 和 Codex Skill 继续由同一能力图与模型目录生成。",
+      "修复 Provider 在代理、TUN、VPN 或 IPv6 网络变化后的连接复用根因：完成任务只重新查询和转存原任务结果，不重复提交扣费；IPv6 首选失败会回退 IPv4，TUN Fake-IP 和公网 DNS/DoH 回源共用有界下载与持久化链路。",
+      "图像、视频、音频、3D 与 RunningHub 的同任务结果转存会合并并发轮询，下载失败返回真实且安全的原因；只有持久化到本地并关联原 Run/NodeRun 后才报告完成。"
+    ],
+    "verification": [
+      "Creator Agent 在线模型、附件落地、建议不变量、工具提案、会话恢复与 UI 合同由源码测试覆盖；Provider、TUN Fake-IP、IPv6 回退、完成任务恢复和安全转存由定向回归覆盖。",
+      "公开文件边界保持不变：本地 SKILL.md、roadmap.md、用户数据、缓存、测试凭据和受保护 FFmpeg/运行时文件不会进入公开提交。",
+      "用户明确授权先发布、后补真实 Provider、协作多端与安装升级证据；正式 Electron 构建、自动更新资产和 GitHub Release 结果将在单次发布流程完成后回填。"
     ]
   },
   "releaseV269CreatorAgentAndProviderStability": {

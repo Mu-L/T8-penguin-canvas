@@ -272,6 +272,7 @@ export interface CreatorAgentContext {
 export interface CreatorAgentSuggestion {
   id: string;
   label: string;
+  description?: string;
   intent: string;
   arguments: Record<string, unknown>;
   expectedEffect: string;
@@ -402,11 +403,100 @@ export interface CreatorAgentSuggestionSet {
     contextDigest: string;
     assetVersion: string;
     planDigest: string | null;
+    responseDigest?: string;
+    artifactDigest?: string;
+    artifactId?: string;
+    artifactVersionId?: string;
+  };
+  source?: {
+    schema?: string;
+    taskFamily?: string;
+    responseDigest?: string;
+    artifactDigest?: string;
+    artifactId?: string;
+    artifactVersionId?: string;
+    artifactRevision?: number;
+    artifactKind?: string;
+    evidenceMode?: string;
+    primaryFocus?: string;
+    headings?: string[];
+    documentCount?: number;
   };
   items: CreatorAgentSuggestion[];
   invariantReceipt?: CreatorAgentSuggestionInvariantReceipt;
 }
 
+export interface CreatorAgentCreativeArtifactSection {
+  id: string;
+  title: string;
+  level: number;
+  bodyMarkdown: string;
+}
+
+export interface CreatorAgentCreativeArtifactContent {
+  schema: 't8-creator-artifact-content-v1';
+  bodyMarkdown: string;
+  sections: CreatorAgentCreativeArtifactSection[];
+  contentDigest: string;
+}
+
+export interface CreatorAgentCreativeArtifactDiffOperation {
+  op: 'add' | 'replace' | 'remove';
+  path: string;
+  beforeDigest?: string;
+  afterDigest?: string;
+}
+
+export interface CreatorAgentCreativeArtifactDiff {
+  schema: 't8-creator-artifact-diff-v1';
+  baseRevision: number;
+  baseVersionId: string | null;
+  operations: CreatorAgentCreativeArtifactDiffOperation[];
+}
+
+export interface CreatorAgentCreativeArtifactVersion {
+  schema: 't8-creator-artifact-version-v1';
+  artifactId: string;
+  versionId: string;
+  revision: number;
+  taskFamily: 'commerce' | 'image' | 'video' | 'story' | 'audio' | 'mixed';
+  kind: string;
+  title: string;
+  status: 'model-draft' | 'offline-draft';
+  content: CreatorAgentCreativeArtifactContent;
+  source: {
+    responseId: string;
+    responseDigest: string;
+    responseBodyDigest: string;
+    responseEvidenceDigest?: string;
+    planDigest: string | null;
+    proposalDigest: string;
+  };
+  diff: CreatorAgentCreativeArtifactDiff;
+  createdAt: string;
+  versionDigest: string;
+}
+
+export interface CreatorAgentCreativeArtifactSummary {
+  artifactId: string;
+  versionId: string;
+  revision: number;
+  taskFamily: CreatorAgentCreativeArtifactVersion['taskFamily'];
+  kind: string;
+  title: string;
+  status: CreatorAgentCreativeArtifactVersion['status'];
+  contentDigest: string;
+  updatedAt: string;
+}
+
+export interface CreatorAgentArtifactCompilation {
+  schema: 't8-creator-artifact-compilation-v1';
+  status: 'created' | 'reused' | 'failed';
+  code: string;
+  message: string;
+  proposalDigest?: string;
+  artifactVersion: CreatorAgentCreativeArtifactVersion | null;
+}
 export interface CreatorAgentQuestion {
   id: string;
   question: string;
@@ -1162,6 +1252,88 @@ export interface CreatorAgentCandidateComparison {
   guidance: string[];
 }
 
+export interface CreatorAgentToolProposal {
+  schema: 't8-creator-tool-proposal-v1';
+  proposalId: string;
+  proposalDigest: string;
+  binding: {
+    sessionId: string;
+    projectId: string;
+    canvasId: string;
+    responseId: string;
+    responseDigest: string;
+    planId: string | null;
+    planDigest: string | null;
+    artifactId: string | null;
+    artifactVersionId: string | null;
+    artifactDigest: string | null;
+    canvasRevision: number | null;
+  };
+  tool: {
+    protocol: 't8-versioned-creative-tool-v1';
+    requestSchema: string;
+    name: string;
+    version: string;
+    capabilityId: string;
+    creatorLabel?: string;
+    operation: string;
+    requestAction: string;
+    capabilityManifestDigest: string;
+    capabilityGraphDigest: string;
+  };
+  request: {
+    schema: string;
+    tool: string;
+    version: string;
+    operation: string;
+    projectId: string;
+    canvasId: string;
+    clientRequestId: string | null;
+    input: Record<string, unknown>;
+  };
+  gate: {
+    riskLevel: string;
+    approvalRequired: boolean;
+    requiredScopes: string[];
+    directOperation: boolean;
+    previewRequired: boolean;
+    dispatchAllowed: false;
+    status: 'proposed';
+  };
+  execution: {
+    status: 'not-started';
+    canvasWrites: 0;
+    providerCalls: 0;
+    fileWrites: 0;
+  };
+  createdAt: string;
+}
+
+export type CreatorAgentToolProposalReceipt = {
+  schema: 't8-creator-tool-proposal-receipt-v1';
+  status: 'accepted';
+  index: number;
+  proposalId: string;
+  proposalDigest: string;
+  duplicate: boolean;
+  gate: CreatorAgentToolProposal['gate'];
+  sideEffects: {
+    canvasWrites: 0;
+    providerCalls: 0;
+    fileWrites: 0;
+  };
+} | {
+  schema: 't8-creator-tool-proposal-receipt-v1';
+  status: 'rejected';
+  index: number;
+  code: string;
+  message: string;
+  sideEffects: {
+    canvasWrites: 0;
+    providerCalls: 0;
+    fileWrites: 0;
+  };
+};
 export interface CreatorAgentEvent {
   schema: 't8-creator-agent-event-v1';
   eventId: string;
@@ -1305,6 +1477,30 @@ export interface CreatorAgentProductionState {
   }>;
 }
 
+export interface CreatorAgentProductionPhaseTransition {
+  advanced: boolean;
+  completedPhase: CreatorAgentProductionPhase;
+  nextPhase: CreatorAgentProductionPhase;
+  productionRevision: number;
+}
+
+export interface CreatorAgentProductionStageResponse {
+  eventId: string;
+  responseId: string | null;
+  responseDigest: string | null;
+  productionPhase: CreatorAgentProductionPhase;
+  text: string;
+}
+
+export interface CreatorAgentCanvasRetentionPreview {
+  schema: 't8-creator-canvas-retention-preview-v1';
+  phase: CreatorAgentProductionPhase;
+  label: string;
+  plan: CreatorAgentPlan;
+  patch: CanvasPatch;
+  requiresExplicitApply: true;
+}
+
 export interface CreatorAgentSession {
   schema: 't8-creator-agent-session-v1';
   id: string;
@@ -1321,8 +1517,11 @@ export interface CreatorAgentSession {
   runLinks: CreatorAgentRunLink[];
   runEventCursors?: Record<string, number>;
   artifactVerifications: CreatorAgentArtifactVerification[];
+  creativeArtifactVersions?: CreatorAgentCreativeArtifactVersion[];
+  creativeArtifacts?: CreatorAgentCreativeArtifactSummary[];
   deliveryEvidence?: CreatorAgentDeliveryEvidence[];
   productionDocumentConfirmations?: CreatorAgentProductionDocumentConfirmation[];
+  toolProposals?: CreatorAgentToolProposal[];
   lastSequence: number;
   latestPlan: CreatorAgentPlan | null;
   createdAt: string;
@@ -1393,16 +1592,50 @@ export function getCreatorAgentRuntimeCatalog(projectId: string, canvasId: strin
   return creatorRequest<CreatorAgentRuntimeCatalog>(`/catalog?${query}`);
 }
 
-export function createCreatorAgentSession(input: {
+export async function createCreatorAgentSession(input: {
+  sessionId?: string;
   projectId: string;
   canvasId: string;
   title?: string;
   context: CreatorAgentContext;
 }) {
-  return creatorRequest<CreatorAgentSession>('/sessions', {
+  const payload = {
+    ...input,
+    sessionId: input.sessionId || crypto.randomUUID(),
+  };
+  const request = () => creatorRequest<CreatorAgentSession>('/sessions', {
     method: 'POST',
-    body: JSON.stringify(input),
+    body: JSON.stringify(payload),
   });
+  try {
+    return await request();
+  } catch (error) {
+    const status = Number((error as { status?: unknown })?.status);
+    if (Number.isFinite(status) && status < 500) throw error;
+    try {
+      return await getCreatorAgentSession(
+        payload.sessionId,
+        payload.projectId,
+        payload.canvasId,
+      );
+    } catch {
+      // The create request may have committed before the transport failed.
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 220));
+    try {
+      return await request();
+    } catch (retryError) {
+      try {
+        return await getCreatorAgentSession(
+          payload.sessionId,
+          payload.projectId,
+          payload.canvasId,
+        );
+      } catch {
+        throw retryError;
+      }
+    }
+  }
 }
 
 export function listCreatorAgentSessions(projectId: string, canvasId: string, limit = 20) {
@@ -1444,6 +1677,9 @@ export function confirmCreatorAgentProductionDocuments(
     session: CreatorAgentSession;
     confirmations: CreatorAgentProductionDocumentConfirmation[];
     duplicate: boolean;
+    phaseTransition: CreatorAgentProductionPhaseTransition | null;
+    stageResponse: CreatorAgentProductionStageResponse | null;
+    canvasRetention: CreatorAgentCanvasRetentionPreview | null;
   }>(`/sessions/${encodeURIComponent(sessionId)}/production-documents/confirm`, {
     method: 'POST',
     body: JSON.stringify(input),
@@ -1474,6 +1710,8 @@ export function sendCreatorAgentMessage(sessionId: string, input: {
     userEvent: CreatorAgentEvent;
     assistantEvent: CreatorAgentEvent;
     readinessReceipt?: CreatorAgentLocalReadinessReceipt;
+    toolProposals?: CreatorAgentToolProposal[];
+    toolProposalReceipts?: CreatorAgentToolProposalReceipt[];
     request?: {
       schema: 't8-creator-message-request-v1';
       clientRequestId: string;

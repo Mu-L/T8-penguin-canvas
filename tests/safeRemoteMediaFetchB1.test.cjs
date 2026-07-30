@@ -141,6 +141,28 @@ test('DNS resolution fails closed when any answer is invalid or non-public', asy
   assert.deepEqual(pinned, { address: '93.184.216.34', family: 4, tunFake: false });
 });
 
+test('IPv6-first DNS and a failed address fall through to the usable IPv4 result', async (t) => {
+  const server = await listen((_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/plain' });
+    res.end('dual-stack-ok');
+  });
+  t.after(() => closeServer(server));
+  const result = await safeRemoteMediaFetch(
+    `http://dual-stack.test:${server.address().port}/asset`,
+    {
+      allowPrivateForTests: (hostname) => hostname === 'dual-stack.test',
+      connectTimeoutMs: 200,
+      lookupImpl: async () => [
+        { address: '::1', family: 6 },
+        { address: '127.0.0.2', family: 4 },
+        { address: '127.0.0.1', family: 4 },
+      ],
+    },
+  );
+  assert.equal(result.buffer.toString('utf8'), 'dual-stack-ok');
+  assert.equal(result.status, 200);
+});
+
 test('hostname-bound TUN Fake-IP stays on the TUN path and explicit fallback uses public DNS', async () => {
   let publicLookups = 0;
   const resolved = await resolvePublicAddress(

@@ -1,0 +1,76 @@
+.t8-creator-agent-message__body > .t8-creator-agent-rich-text {
+  display: grid;
+  gap: 10px;
+  padding: 13px 15px 14px;
+  color: var(--creator-text);
+  font-size: 14.5px;
+  line-height: 1.72;
+  overflow-wrap: anywhere;
+  background: var(--creator-bg-muted);
+  border: 1px solid var(--creator-border);
+  border-radius: 4px 14px 14px 14px;
+}
+
+.t8-creator-agent-rich-text > :first-child {
+  margin-top: 0;
+}
+
+.t8-creator-agent-rich-text > :last-child {
+  margin-bottom: 0;
+}
+
+.t8-creator-agent-rich-text h3,
+.t8-creator-agent-rich-text h4 {
+  margin: 5px 0 0;
+  color: var(--creator-text-strong, var(--creator-text));
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+
+.t8-creator-agent-rich-text h3 {
+  font-size: 16px;
+}
+
+.t8-creator-agent-rich-text h4 {
+  font-size: 14px;
+}
+
+.t8-creator-agent-rich-text p,
+.t8-creator-agent-rich-text blockquote {
+  margin: 0;
+}
+
+.t8-creator-agent-rich-text ul,
+.t8-creator-agent-rich-text ol {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 1.35em;
+}
+
+.t8-creator-agent-rich-text li::marker {
+  color: var(--creator-accent);
+  font-weight: 700;
+}
+
+.t8-creator-agent-rich-text blockquote {
+  padding: 8px 10px;
+  color: var(--creator-muted);
+  background: color-mix(in srgb, var(--creator-bg-elevated) 72%, transparent);
+  border-left: 3px solid var(--creator-accent);
+  border-radius: 0 8px 8px 0;
+}
+
+.t8-creator-agent-rich-text strong {
+  color: var(--creator-text-strong, var(--creator-text));
+  font-weight: 750;
+}
+
+.t8-creator-agent-rich-text code {
+  padding: 1px 5px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.9em;
+  background: color-mix(in srgb, var(--creator-accent) 11%, transparent);
+  border: 1px solid color-mix(in srgb, var(--creator-accent) 22%, transparent);
+  border-radius: 5px;
+}

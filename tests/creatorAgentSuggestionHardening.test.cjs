@@ -82,7 +82,6 @@ test('SuggestionSet contracts match authoritative operations field for field', (
     assertInvariantFailure(resign(set));
   }
 });
-
 test('versioned suggestion evidence is revalidated when reading snapshot and event history', (t) => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 't8-creator-suggestion-corrupt-'));
   t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));
@@ -158,4 +157,3 @@ test('two local processes completing the same response persist one terminal Sugg
   assert.equal(new Set(sequences).size, sequences.length);
   assert.deepEqual(sequences, sequences.slice().sort((left, right) => left - right));
 });
-

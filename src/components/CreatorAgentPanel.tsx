@@ -6,6 +6,7 @@ import {
   Clock3,
   FileAudio,
   FileImage,
+  FileText,
   FileVideo,
   FolderOpen,
   History,
@@ -29,6 +30,7 @@ import {
   type DragEvent,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -38,6 +40,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import './CreatorAgentModels.css';
+import './CreatorAgentRichText.css';
 import * as api from '../services/api';
 import {
   appendCreatorAgentEvent,
@@ -67,10 +70,12 @@ import {
   type CreatorAgentCandidate,
   type CreatorAgentCandidateComparison,
   type CreatorAgentContext,
+  type CreatorAgentCreativeArtifactVersion,
   type CreatorAgentEvent,
   type CreatorAgentPlan,
   type CreatorAgentProductionDocument,
   type CreatorAgentProductionDocumentConfirmation,
+  type CreatorAgentProductionPhase,
   type CreatorAgentSuggestion,
   type CreatorAgentSuggestionSet,
   type CreatorAgentSession,
@@ -100,6 +105,7 @@ import {
   CREATOR_AGENT_STARTER_IDEA_BATCH_COUNT,
   creatorAgentStarterIdeaBatch,
   creatorAgentStarterIdeaContextKey,
+  creatorAgentStarterMode,
 } from '../utils/creatorAgentStarterIdeas';
 import type { ThemeTokens } from '../theme/types';
 
@@ -131,6 +137,12 @@ interface PatchPreviewState {
   preview: CanvasPatchPreview;
 }
 
+interface PendingStageContinuation {
+  prompt: string;
+  targetPhase: CreatorAgentProductionPhase;
+  readyAfterApply: boolean;
+}
+
 interface CreatorAgentUploadTask {
   id: string;
   name: string;
@@ -157,6 +169,27 @@ const CREATIVE_PHASES = [
   { id: 'candidates', label: '生成' },
   { id: 'delivery', label: '成片' },
 ] as const;
+
+const CREATOR_STAGE_DOCUMENT_KINDS: Record<
+  CreatorAgentProductionPhase,
+  CreatorAgentProductionDocument['kind'][]
+> = {
+  idea: ['production-brief'],
+  script: ['script-doc', 'world-bible'],
+  assets: ['character-bible', 'asset-needs'],
+  shots: ['shot-list', 'audio-plan', 'storyboard', 'prompt-pack'],
+  candidates: ['candidate-review', 'edit-decision-list', 'qc-report'],
+  delivery: ['delivery-manifest'],
+};
+
+const CREATOR_STAGE_CONFIRM_LABELS: Record<CreatorAgentProductionPhase, string> = {
+  idea: '确认创意，进入剧本',
+  script: '确认剧本，准备资产',
+  assets: '确认资产，开始分镜',
+  shots: '确认分镜，准备生成',
+  candidates: '确认采用，准备成片',
+  delivery: '确认最终交付',
+};
 
 const CREATOR_MODEL_KINDS = ['llm', 'image', 'video', 'audio'] as const;
 const CREATOR_MODEL_KIND_LABELS: Record<CreatorAgentModelKind, string> = {
@@ -427,6 +460,105 @@ function attachmentKind(file: File): CreatorAgentAttachmentKind {
   return 'file';
 }
 
+function creatorInlineText(text: string): ReactNode[] {
+  return String(text || '')
+    .split(/(\*\*[^*]+\*\*|\`[^\`]+\`)/g)
+    .filter(Boolean)
+    .map((part, index) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return <strong key={`strong-${index}`}>{part.slice(2, -2)}</strong>;
+      }
+      if (part.startsWith('`') && part.endsWith('`')) {
+        return <code key={`code-${index}`}>{part.slice(1, -1)}</code>;
+      }
+      return part;
+    });
+}
+
+function CreatorAgentMessageText(props: { text: string; isUser: boolean }) {
+  const text = String(props.text || '').trim();
+  if (!text) return null;
+  if (props.isUser) return <p>{text}</p>;
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  const nodes: ReactNode[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    const raw = lines[index];
+    const line = raw.trim();
+    if (!line) {
+      index += 1;
+      continue;
+    }
+    const heading = /^(#{1,4})\s+(.+)$/.exec(line);
+    if (heading) {
+      const level = Math.min(4, Math.max(2, heading[1].length + 1));
+      const content = creatorInlineText(heading[2]);
+      nodes.push(level <= 2
+        ? <h3 key={`heading-${index}`}>{content}</h3>
+        : <h4 key={`heading-${index}`}>{content}</h4>);
+      index += 1;
+      continue;
+    }
+    if (/^[-*]\s+/.test(line)) {
+      const items: ReactNode[] = [];
+      while (index < lines.length && /^[-*]\s+/.test(lines[index].trim())) {
+        items.push(
+          <li key={`bullet-${index}`}>
+            {creatorInlineText(lines[index].trim().replace(/^[-*]\s+/, ''))}
+          </li>,
+        );
+        index += 1;
+      }
+      nodes.push(<ul key={`list-${index}`}>{items}</ul>);
+      continue;
+    }
+    if (/^\d+[.)、]\s*/.test(line)) {
+      const items: ReactNode[] = [];
+      while (index < lines.length && /^\d+[.)、]\s*/.test(lines[index].trim())) {
+        items.push(
+          <li key={`ordered-${index}`}>
+            {creatorInlineText(lines[index].trim().replace(/^\d+[.)、]\s*/, ''))}
+          </li>,
+        );
+        index += 1;
+      }
+      nodes.push(<ol key={`ordered-list-${index}`}>{items}</ol>);
+      continue;
+    }
+    if (/^>\s?/.test(line)) {
+      const quote: string[] = [];
+      while (index < lines.length && /^>\s?/.test(lines[index].trim())) {
+        quote.push(lines[index].trim().replace(/^>\s?/, ''));
+        index += 1;
+      }
+      nodes.push(
+        <blockquote key={`quote-${index}`}>
+          {creatorInlineText(quote.join(' '))}
+        </blockquote>,
+      );
+      continue;
+    }
+    const paragraph = [line];
+    index += 1;
+    while (index < lines.length) {
+      const next = lines[index].trim();
+      if (!next
+        || /^(#{1,4})\s+/.test(next)
+        || /^[-*]\s+/.test(next)
+        || /^\d+[.)、]\s*/.test(next)
+        || /^>\s?/.test(next)) break;
+      paragraph.push(next);
+      index += 1;
+    }
+    nodes.push(
+      <p key={`paragraph-${index}`}>
+        {creatorInlineText(paragraph.join(' '))}
+      </p>,
+    );
+  }
+  return <div className="t8-creator-agent-rich-text">{nodes}</div>;
+}
+
 function eventReadinessReceipt(event: CreatorAgentEvent) {
   const value = event.payload.readinessReceipt as CreatorAgentLocalReadinessReceipt | undefined;
   return value?.schema === 't8-creator-agent-local-readiness-receipt-v1'
@@ -440,6 +572,26 @@ function eventPlan(event: CreatorAgentEvent) {
     : null;
 }
 
+function creatorEventArtifactVersion(value: unknown): CreatorAgentCreativeArtifactVersion | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as CreatorAgentCreativeArtifactVersion;
+  if (candidate.schema !== 't8-creator-artifact-version-v1'
+    || !candidate.artifactId
+    || !candidate.versionId
+    || !candidate.title
+    || !Number.isInteger(candidate.revision)
+    || candidate.revision < 1
+    || candidate.content?.schema !== 't8-creator-artifact-content-v1'
+    || !candidate.content.contentDigest
+    || candidate.diff?.schema !== 't8-creator-artifact-diff-v1'
+    || !Array.isArray(candidate.diff.operations)) return null;
+  return candidate;
+}
+
+function eventArtifactVersion(event: CreatorAgentEvent) {
+  return creatorEventArtifactVersion(event.payload.artifactVersion);
+}
+
 function mergeCreatorAgentSessionEvent(
   session: CreatorAgentSession,
   event: CreatorAgentEvent,
@@ -449,14 +601,40 @@ function mergeCreatorAgentSessionEvent(
   const events = [...session.events, event]
     .sort((left, right) => Number(left.sequence) - Number(right.sequence))
     .slice(-1_000);
+  const artifactVersion = eventArtifactVersion(event);
+  const creativeArtifactVersions = artifactVersion
+    ? [...(session.creativeArtifactVersions || []).filter(
+        (current) => current.versionId !== artifactVersion.versionId,
+      ), artifactVersion].slice(-120)
+    : session.creativeArtifactVersions;
+  const creativeArtifacts = artifactVersion && creativeArtifactVersions
+    ? [...creativeArtifactVersions.reduce((latest, current) => {
+        const known = latest.get(current.artifactId);
+        if (!known || current.revision > known.revision) latest.set(current.artifactId, current);
+        return latest;
+      }, new Map<string, CreatorAgentCreativeArtifactVersion>()).values()]
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map((current) => ({
+        artifactId: current.artifactId,
+        versionId: current.versionId,
+        revision: current.revision,
+        taskFamily: current.taskFamily,
+        kind: current.kind,
+        title: current.title,
+        status: current.status,
+        contentDigest: current.content.contentDigest,
+        updatedAt: current.createdAt,
+      }))
+    : session.creativeArtifacts;
   return {
     ...session,
     events,
+    ...(creativeArtifactVersions ? { creativeArtifactVersions } : {}),
+    ...(creativeArtifacts ? { creativeArtifacts } : {}),
     lastSequence: Math.max(Number(session.lastSequence) || 0, Number(event.sequence) || 0),
     updatedAt: String(event.createdAt || session.updatedAt),
   };
 }
-
 function creatorDisplayEvents(events: CreatorAgentEvent[]) {
   const output: CreatorAgentEvent[] = [];
   const responseIndexes = new Map<string, number>();
@@ -2152,6 +2330,7 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
   const [open, setOpen] = useState(false);
   const [session, setSession] = useState<CreatorAgentSession | null>(null);
   const [draft, setDraft] = useState('');
+  const [customIdeaDraft, setCustomIdeaDraft] = useState('');
   const [attachments, setAttachments] = useState<CreatorAgentAttachment[]>([]);
   const [referencedNodes, setReferencedNodes] = useState<CreatorAgentNodeReference[]>([]);
   const [uploadTasks, setUploadTasks] = useState<CreatorAgentUploadTask[]>([]);
@@ -2193,6 +2372,9 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
   const [candidateActionBusy, setCandidateActionBusy] = useState('');
   const [deliveryBusyPlanId, setDeliveryBusyPlanId] = useState('');
   const [confirmingDocumentKey, setConfirmingDocumentKey] = useState('');
+  const [pendingStageContinuation, setPendingStageContinuation] =
+    useState<PendingStageContinuation | null>(null);
+  const [thinkingSeconds, setThinkingSeconds] = useState(0);
   const [starterIdeaRotation, setStarterIdeaRotation] = useState(0);
   const [screenReaderAnnouncement, setScreenReaderAnnouncement] = useState<{
     eventId: string;
@@ -2357,13 +2539,14 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
     session?.phase,
   ]);
 
-  const starterIdeaContextKey = useMemo(
-    () => creatorAgentStarterIdeaContextKey({
+  const starterIdeaContext = useMemo(
+    () => ({
       canvasRevision: context.canvasRevision,
       nodeCount: context.nodeCount,
       edgeCount: context.edgeCount,
       selectedNodeTypes: context.selectedNodeTypes,
       referencedNodeTypes: context.referencedNodeTypes,
+      attachmentKinds: messageAttachments.map((attachment) => attachment.kind),
       failedRunCount: context.failedRunCount,
       offscreenFailedCount: context.offscreenSummary?.failedCount,
     }),
@@ -2375,18 +2558,34 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
       context.offscreenSummary?.failedCount,
       context.referencedNodeTypes,
       context.selectedNodeTypes,
+      messageAttachments,
     ],
+  );
+  const starterIdeaMode = useMemo(
+    () => creatorAgentStarterMode(starterIdeaContext),
+    [starterIdeaContext],
+  );
+  const starterIdeaContextKey = useMemo(
+    () => creatorAgentStarterIdeaContextKey(starterIdeaContext),
+    [starterIdeaContext],
   );
   const starterIdeaSessionSeed = session?.id || storageKey(props.projectId, props.canvasId);
   const starterIdeaRotationStorageKey = useMemo(
     () => [
-      't8.creator-agent.starter-ideas.v1',
+      't8.creator-agent.starter-ideas.v2',
       props.projectId,
       props.canvasId,
       starterIdeaSessionSeed,
+      starterIdeaMode,
       starterIdeaContextKey,
     ].join(':'),
-    [props.canvasId, props.projectId, starterIdeaContextKey, starterIdeaSessionSeed],
+    [
+      props.canvasId,
+      props.projectId,
+      starterIdeaContextKey,
+      starterIdeaMode,
+      starterIdeaSessionSeed,
+    ],
   );
   useEffect(() => {
     let nextRotation = 0;
@@ -2414,8 +2613,14 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
   const starterIdeas = useMemo(() => creatorAgentStarterIdeaBatch({
     sessionSeed: starterIdeaSessionSeed,
     contextKey: starterIdeaContextKey,
+    mode: starterIdeaMode,
     rotation: starterIdeaRotation,
-  }), [starterIdeaContextKey, starterIdeaRotation, starterIdeaSessionSeed]);
+  }), [
+    starterIdeaContextKey,
+    starterIdeaMode,
+    starterIdeaRotation,
+    starterIdeaSessionSeed,
+  ]);
 
   const contextReceipt = useMemo(() => {
     const objects = context.canvasObjects || [];
@@ -2693,10 +2898,15 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
       const key = storageKey(props.projectId, props.canvasId);
       const existingId = forceNew ? '' : String(localStorage.getItem(key) || '').trim();
       let next: CreatorAgentSession;
+      const freshSessionContext: CreatorAgentContext = {
+        ...context,
+        phase: 'idea',
+        recentActions: [],
+      };
       const createFresh = () => createCreatorAgentSession({
         projectId: props.projectId,
         canvasId: props.canvasId,
-        context,
+        context: freshSessionContext,
       });
       if (forceNew) {
         next = await createFresh();
@@ -2715,6 +2925,7 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
       localStorage.setItem(key, next.id);
       setSession(next);
       setPatchPreview(null);
+      setPendingStageContinuation(null);
       setHistoryPage(0);
       setSessionHistory((current) => [
         next,
@@ -2731,17 +2942,23 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
   }, [context, props.canvasId, props.projectId]);
 
   const startNewConversation = useCallback(async () => {
+    const next = await ensureSession(true);
+    if (!next) return;
+    const pending = readPendingCreatorMessage(pendingMessageKey);
+    if (pending?.requestId) {
+      clearPendingCreatorMessage(pendingMessageKey, pending.requestId);
+    }
+    terminalMessageRequestsRef.current.clear();
     setDraft('');
+    setCustomIdeaDraft('');
     setAttachments([]);
     setReferencedNodes([]);
     setDetailsOpen(false);
     setHistoryOpen(false);
     setCodexOpen(false);
-    const next = await ensureSession(true);
-    if (!next) return;
     composerFocusPendingRef.current = true;
     window.requestAnimationFrame(() => composerRef.current?.focus());
-  }, [ensureSession]);
+  }, [ensureSession, pendingMessageKey]);
 
   useEffect(() => {
     if (!open || session || busy) return;
@@ -2978,6 +3195,7 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
     localStorage.setItem(storageKey(props.projectId, props.canvasId), next.id);
     setSession(next);
     setPatchPreview(null);
+    setPendingStageContinuation(null);
     setAttachments([]);
     setReferencedNodes([]);
     setError('');
@@ -3109,7 +3327,9 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
     setUploading(false);
     setSession(null);
     setPatchPreview(null);
+    setPendingStageContinuation(null);
     setAttachments([]);
+    setCustomIdeaDraft('');
     setReferencedNodes([]);
     setError('');
     setRunDetails([]);
@@ -3287,11 +3507,6 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
     documents: CreatorAgentProductionDocument[],
   ) => {
     if (!session || busy || confirmingDocumentKey || documents.length === 0) return;
-    if (session.latestPlan?.planId !== plan.planId
-      || session.latestPlan?.planDigest !== plan.planDigest) {
-      setError('这份前期文档已有新版本，请使用最新计划中的文档确认。');
-      return;
-    }
     setConfirmingDocumentKey(documents.length > 1 ? 'all' : documents[0].versionId);
     setError('');
     try {
@@ -3307,8 +3522,18 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
         })),
       });
       setSession(result.session);
+      if (result.canvasRetention) {
+        const previewResult = await props.onPreviewPatch(result.canvasRetention.patch);
+        setPatchPreview({
+          plan: result.canvasRetention.plan,
+          patch: previewResult.patch,
+          preview: previewResult.preview,
+        });
+      }
+      return result;
     } catch (confirmationError) {
       setError(compactError(confirmationError));
+      return null;
     } finally {
       setConfirmingDocumentKey('');
     }
@@ -3316,6 +3541,7 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
     busy,
     confirmingDocumentKey,
     props.canvasId,
+    props.onPreviewPatch,
     props.projectId,
     session,
   ]);
@@ -3706,6 +3932,9 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
       }
       setSession(updated);
       setPatchPreview(null);
+      setPendingStageContinuation((current) => (
+        current ? { ...current, readyAfterApply: true } : current
+      ));
       if (evidenceError) {
         setError(`素材已发送到画布，但会话证据同步失败；刷新后可继续：${evidenceError}`);
       }
@@ -4043,6 +4272,15 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
     || event.type === 'assistant.response'
     || CREATOR_ACTIVITY_EVENT_TYPES.has(event.type)
   ));
+  const creativeArtifactVersions = session?.creativeArtifactVersions || [];
+  const creativeArtifacts = session?.creativeArtifacts || [];
+  const latestCompletedResponseId = String([...((session?.events) || [])]
+    .reverse()
+    .find((event) => event.type === 'assistant.response.completed')?.payload.responseId || '');
+  const currentToolProposals = (session?.toolProposals || [])
+    .filter((proposal) => proposal.binding.responseId === latestCompletedResponseId)
+    .slice(-3)
+    .reverse();
   const isPristineSession = allVisibleEvents.length === 0;
   const historyWindowEnd = Math.max(
     0,
@@ -4056,10 +4294,53 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
     event.type === 'assistant.response' && event.payload.streamStatus === 'streaming'
   ));
   const hasStreamingResponse = Boolean(activeStreamingResponse);
+  const thinkingActive = busy || hasStreamingResponse || Boolean(confirmingDocumentKey);
+  useEffect(() => {
+    if (!thinkingActive) {
+      setThinkingSeconds(0);
+      return undefined;
+    }
+    const startedAt = Date.now();
+    setThinkingSeconds(0);
+    const timer = window.setInterval(() => {
+      setThinkingSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1_000)));
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [thinkingActive]);
   const activeStreamingResponseId = String(activeStreamingResponse?.payload.responseId || '');
   const activeStreamingClientRequestId = String(
     activeStreamingResponse?.payload.clientRequestId || '',
   );
+  const starterIdeaSuggestions: CreatorAgentSuggestion[] = starterIdeas.map((idea) => ({
+    id: idea.id,
+    label: idea.label,
+    description: idea.description,
+    intent: idea.intent,
+    arguments: {
+      planOnly: true,
+      preserveAccepted: true,
+      creatorPrompt: idea.starterPrompt,
+      creatorKind: idea.creatorKind,
+      taskFamily: idea.taskFamily,
+      starterRequestId: idea.id,
+      starterMode: starterIdeaMode,
+    },
+    expectedEffect: `${idea.expectedFirstArtifact}；先产出可编辑内容，不自动写画布或启动媒体生成`,
+    riskLevel: 'L0-intent',
+    requiredCapabilityIds: [...idea.requiredCapabilityIds],
+    disabledReason: '',
+    executable: true,
+    operationContracts: idea.requiredCapabilityIds.map((capabilityId) => ({
+      capabilityId,
+      operation: 'plan',
+      riskLevel: 'L0' as const,
+      approvalRequired: false as const,
+      boundary: 'local-read',
+      requiredScopes: ['canvas:read'],
+    })),
+    blockers: [],
+    unblockActions: [],
+  }));
   const localPlanSuggestionContract = [{
     capabilityId: 'create.story',
     operation: 'plan',
@@ -4068,26 +4349,18 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
     boundary: 'local-read',
     requiredScopes: ['canvas:read'],
   }];
-  const starterIdeaSuggestions: CreatorAgentSuggestion[] = starterIdeas.map(({ id, label }) => ({
-    id,
-    label,
-    intent: id,
-    arguments: { planOnly: true, preserveAccepted: true },
-    expectedEffect: '先形成可编辑计划，不自动写画布或调用模型',
-    riskLevel: 'L0-intent',
-    requiredCapabilityIds: ['create.story'],
-    disabledReason: '',
-    executable: true,
-    operationContracts: localPlanSuggestionContract,
-    blockers: [],
-    unblockActions: [],
-  }));
   const legacySuggestions = session?.suggestions?.length === 3
     ? session.suggestions.map((label, index) => ({
         id: `legacy-${index + 1}`,
         label,
+        description: '选择后只推进一个关键决定；也可以在下方直接写自己的方向。',
         intent: `legacy-${index + 1}`,
-        arguments: { planOnly: true, preserveAccepted: true },
+        arguments: {
+          planOnly: true,
+          preserveAccepted: true,
+          creatorPrompt: label,
+          creatorKind: 'story',
+        },
         expectedEffect: '先形成可编辑计划，不自动写画布或调用模型',
         riskLevel: 'L0-intent' as const,
         requiredCapabilityIds: ['create.story'],
@@ -4140,11 +4413,100 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
       })
     : [];
   const suggestionContractBroken = capabilityReady && suggestions.length !== 3;
-  const activePhase = session?.production?.currentPhase || session?.phase || 'idea';
+  const activePhaseCandidate = session?.production?.currentPhase || session?.phase;
+  const activePhase = CREATIVE_PHASES[
+    creativePhaseIndex(activePhaseCandidate || 'idea')
+  ].id;
   const activePhaseIndex = creativePhaseIndex(activePhase);
   const completedPhaseIds = new Set(session?.production?.completedPhases
     || CREATIVE_PHASES.slice(0, activePhaseIndex).map((phase) => phase.id));
   const invalidatedPhaseIds = new Set(session?.production?.invalidatedPhases || []);
+  const currentStageResponseEvent = [...allVisibleEvents].reverse().find((event) => {
+    if (event.type !== 'assistant.response'
+      || event.payload.streamStatus !== 'completed'
+      || String(event.payload.productionPhase || '') !== activePhase) return false;
+    const plan = eventPlan(event);
+    return Boolean(plan && Array.isArray(plan.productionDocuments) && plan.productionDocuments.length > 0);
+  });
+  const currentStagePlan = currentStageResponseEvent
+    ? eventPlan(currentStageResponseEvent)
+    : null;
+  const currentStageRequiredKinds = CREATOR_STAGE_DOCUMENT_KINDS[activePhase];
+  const currentStageDocuments = (currentStagePlan?.productionDocuments || []).filter(
+    (document) => currentStageRequiredKinds.includes(document.kind),
+  );
+  const currentStageDocumentKinds = new Set(currentStageDocuments.map((document) => document.kind));
+  const currentStageComplete = Boolean(
+    currentStagePlan
+    && session?.latestPlan?.planId === currentStagePlan.planId
+    && currentStageRequiredKinds.every((kind) => currentStageDocumentKinds.has(kind)),
+  );
+  const confirmedProductionVersionIds = new Set(
+    (session?.productionDocumentConfirmations || []).map((item) => item.versionId),
+  );
+  const currentStageUnconfirmedDocuments = currentStageDocuments.filter(
+    (document) => !confirmedProductionVersionIds.has(document.versionId),
+  );
+  const continueFromStageSuggestion = useCallback(async (
+    suggestion: CreatorAgentSuggestion,
+  ) => {
+    if (!currentStagePlan
+      || !currentStageComplete
+      || currentStageUnconfirmedDocuments.length === 0) {
+      setError('当前阶段还没有完整可确认稿；请先完成本阶段内容，再确认并继续。');
+      return;
+    }
+    const prompt = String(suggestion.arguments?.creatorPrompt || '').trim();
+    const targetPhase = String(suggestion.arguments?.continueToPhase || '') as
+      CreatorAgentProductionPhase;
+    if (!prompt || !CREATIVE_PHASES.some((phase) => phase.id === targetPhase)) {
+      setError('这条继续操作缺少下一阶段信息，请刷新会话后重试。');
+      return;
+    }
+    const result = await confirmProductionDocuments(
+      currentStagePlan,
+      currentStageUnconfirmedDocuments,
+    );
+    if (!result?.phaseTransition?.advanced
+      || result.phaseTransition.nextPhase !== targetPhase) {
+      if (result) setError('当前阶段版本已保存，但没有进入预期的下一阶段；请刷新会话后重试。');
+      return;
+    }
+    setPendingStageContinuation({
+      prompt,
+      targetPhase,
+      readyAfterApply: !result.canvasRetention,
+    });
+  }, [
+    confirmProductionDocuments,
+    currentStageComplete,
+    currentStagePlan,
+    currentStageUnconfirmedDocuments,
+  ]);
+  const stageContinuationSuggestion = suggestions.find((suggestion) => (
+    suggestion.arguments
+    && 'confirmCurrentStage' in suggestion.arguments
+    && suggestion.arguments.confirmCurrentStage === true
+  )) || null;
+
+  useEffect(() => {
+    if (!pendingStageContinuation?.readyAfterApply
+      || patchPreview
+      || busy
+      || uploading) return;
+    const prompt = pendingStageContinuation.prompt;
+    setPendingStageContinuation(null);
+    stickToBottomRef.current = true;
+    setHistoryPage(0);
+    void submit(prompt);
+  }, [
+    busy,
+    patchPreview,
+    pendingStageContinuation,
+    submit,
+    uploading,
+  ]);
+
   const completedPhaseLabels = CREATIVE_PHASES
     .filter((phase) => completedPhaseIds.has(phase.id))
     .map((phase) => phase.label);
@@ -4321,6 +4683,20 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
             <div className="t8-creator-agent-header__actions">
               <button
                 type="button"
+                title="Codex / 本地 Agent"
+                aria-label="连接 Codex 或本地 Agent"
+                className={codexOpen ? 'is-active' : ''}
+                onClick={() => {
+                  setCodexOpen((current) => !current);
+                  setHistoryOpen(false);
+                  setDetailsOpen(false);
+                  setCodexCopied(false);
+                }}
+              >
+                <Link2 size={17} />
+              </button>
+              <button
+                type="button"
                 title="历史对话"
                 aria-label="查看历史对话"
                 className={historyOpen ? 'is-active' : ''}
@@ -4348,6 +4724,27 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
               </button>
             </div>
           </header>
+
+          {!isPristineSession && (
+            <nav className="t8-creator-agent-phases is-compact" aria-label="创作阶段">
+              {CREATIVE_PHASES.map((phase, index) => (
+                <span
+                  key={phase.id}
+                  className={[
+                    completedPhaseIds.has(phase.id) ? 'is-done' : '',
+                    index === activePhaseIndex ? 'is-current' : '',
+                    invalidatedPhaseIds.has(phase.id) ? 'is-revising' : '',
+                  ].filter(Boolean).join(' ')}
+                  aria-current={index === activePhaseIndex ? 'step' : undefined}
+                >
+                  <i aria-hidden="true">
+                    {completedPhaseIds.has(phase.id) ? <Check size={10} /> : index + 1}
+                  </i>
+                  {phase.label}
+                </span>
+              ))}
+            </nav>
+          )}
 
           <div
             className="sr-only"
@@ -4471,16 +4868,16 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
             </section>
           )}
 
-          {detailsOpen && (
+          {false && detailsOpen && (
             <section
               id="t8-creator-agent-details-content"
               className="t8-creator-agent-details"
-              aria-label="任务与详情"
+              aria-label="创作计划"
             >
               <header className="t8-creator-agent-details__header">
                 <span>
-                  <strong>任务与详情</strong>
-                  <small>阶段、计划、素材和运行记录</small>
+                  <strong>创作计划</strong>
+                  <small>按需查看方案与执行状态</small>
                 </span>
                 <div>
                   <button
@@ -4508,7 +4905,7 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
                   </button>
                   <button
                     type="button"
-                    aria-label="关闭任务与详情"
+                    aria-label="关闭创作计划"
                     onClick={() => {
                       setDetailsOpen(false);
                       setCodexOpen(false);
@@ -4569,6 +4966,69 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
               <small>{contextReceipt.detail}</small>
             </span>
           </section>
+          {currentToolProposals.length > 0 && (
+            <section className="t8-creator-agent-tool-proposals" aria-label="待确认操作">
+              <header>
+                <WandSparkles size={14} aria-hidden="true" />
+                <span>
+                  <strong>待确认操作</strong>
+                  <small>{currentToolProposals.length} 项建议已准备，尚未执行</small>
+                </span>
+              </header>
+              <div>
+                {currentToolProposals.map((proposal) => (
+                  <article key={proposal.proposalId}>
+                    <span>
+                      <strong>{proposal.tool.creatorLabel || proposal.tool.capabilityId}</strong>
+                      <small>
+                        {proposal.gate.previewRequired ? '需先预览并确认' : '仅保存为操作建议'}
+                      </small>
+                    </span>
+                    <em>{proposal.gate.approvalRequired ? '需确认' : '只读'} · 未执行</em>
+                  </article>
+                ))}
+              </div>
+              <p>Agent 不会自动生成内容、改动画布或写入文件。</p>
+            </section>
+          )}
+          {creativeArtifacts.length > 0 && (
+            <section className="t8-creator-agent-artifacts" aria-label="可编辑创作产物">
+              <header>
+                <FileText size={14} aria-hidden="true" />
+                <span>
+                  <strong>可编辑产物</strong>
+                  <small>每轮正文保存为独立版本；后续修改不会覆盖上一版</small>
+                </span>
+              </header>
+              <div>
+                {creativeArtifacts.map((artifact) => {
+                  const version = creativeArtifactVersions.find(
+                    (current) => current.versionId === artifact.versionId,
+                  );
+                  const sectionLabels = (version?.content.sections || [])
+                    .map((section) => section.title)
+                    .filter(Boolean)
+                    .slice(0, 3);
+                  const changeCount = version?.diff.operations.length || 0;
+                  return (
+                    <article key={artifact.artifactId}>
+                      <span>
+                        <strong>{artifact.title}</strong>
+                        <small>
+                          v{artifact.revision}
+                          {' · '}
+                          {artifact.status === 'model-draft' ? '模型草案' : '离线结构草案'}
+                          {' · '}
+                          {artifact.revision === 1 ? '首版' : `${changeCount} 项版本差异`}
+                        </small>
+                      </span>
+                      {sectionLabels.length > 0 && <em>{sectionLabels.join(' · ')}</em>}
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          )}
           {(selectedOutputAssets.length > 0 || lineageReadError) && (
             <section className="t8-creator-agent-filmstrip" aria-label="当前选区真实素材">
               <header>
@@ -4691,7 +5151,7 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
                 </div>
               ) : candidateComparison ? (
                 <CandidateComparison
-                  comparison={candidateComparison}
+                  comparison={candidateComparison!}
                   selectedNodeIds={props.selectedNodeIds}
                   busyAction={candidateActionBusy}
                   availableCapabilityIds={new Set(
@@ -4778,9 +5238,12 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
             )}
 
             {visibleEvents.map((event) => {
-              const isUser = event.type === 'user.message' || event.type === 'user.action';
+              const isUser = event.type === 'user.message'
+                || event.type === 'user.suggestion'
+                || event.type === 'user.action';
               const plan = eventPlan(event);
               const readinessReceipt = eventReadinessReceipt(event);
+              const artifactVersion = eventArtifactVersion(event);
               return (
                 <div
                   key={event.eventId}
@@ -4788,7 +5251,9 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
                 >
                   {!isUser && <span className="t8-creator-agent-avatar"><Sparkles size={14} /></span>}
                   <div className="t8-creator-agent-message__body">
-                    {event.payload.text && <p>{String(event.payload.text)}</p>}
+                    {event.payload.text && (
+                      <CreatorAgentMessageText text={String(event.payload.text)} isUser={isUser} />
+                    )}
                     {event.type === 'assistant.response' && event.payload.streamStatus === 'streaming' && (
                       <span className="t8-creator-agent-stream-status" aria-hidden="true">
                         {event.payload.text ? '继续整理中' : '正在理解并组织为可编辑步骤'}
@@ -4814,69 +5279,75 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
                         ))}
                       </div>
                     )}
-                    {plan && !detailsOpen && (
-                      <button
-                        type="button"
-                        className="t8-creator-agent-plan-summary"
-                        onClick={() => {
-                          setHistoryOpen(false);
-                          setDetailsOpen(true);
-                        }}
-                      >
+                    {artifactVersion && (
+                      <div className="t8-creator-agent-artifact-chip">
                         <span>
-                          <strong>{planKindLabel(plan.kind)}</strong>
-                          <small>{plan.brief?.goal || plan.brief?.summary || '已整理为可编辑计划'}</small>
+                          <strong>可编辑产物</strong>
+                          <small>
+                            v{artifactVersion.revision}
+                            {' · '}
+                            {artifactVersion.status === 'model-draft' ? '模型草案' : '离线结构草案'}
+                          </small>
                         </span>
-                        <span>查看计划 <ChevronRight size={14} /></span>
-                      </button>
+                        <em>
+                          {artifactVersion.revision === 1
+                            ? '首版'
+                            : `${artifactVersion.diff.operations.length} 项版本差异`}
+                        </em>
+                      </div>
                     )}
-                    {plan && detailsOpen && (
-                      <PlanCard
-                        plan={plan}
-                        readinessReceipt={readinessReceipt}
-                        busy={busy || Boolean(previewingPlanId)}
-                        previewing={previewingPlanId === plan.planId}
-                        applied={appliedPlanIds.has(plan.planId)}
-                        reverted={revertedPlanIds.has(plan.planId)}
-                        runLinked={runLinkedPlanIds.has(plan.planId)}
-                        running={runningPlanId === plan.planId}
-                        reverting={revertingPlanId === plan.planId}
-                        isLatestPlan={session?.latestPlan?.planId === plan.planId}
-                        confirmingDocumentKey={confirmingDocumentKey}
-                        documentConfirmations={session?.productionDocumentConfirmations || []}
-                        onConfirmDocuments={(value, documents) => {
-                          void confirmProductionDocuments(value, documents);
-                        }}
-                        onPreview={(value) => void previewPlan(value)}
-                        onRun={runAppliedPlan}
-                        onRevert={(value) => void revertAppliedPlan(value)}
-                        deliveryStatus={plan.kind === 'delivery'
-                          ? completedDeliveryPlanIds.has(plan.planId)
-                            ? 'completed'
-                            : deliveryApproval?.planId === plan.planId
-                              ? 'pending'
-                              : plan.delivery?.status === 'ready'
-                                ? 'ready'
-                                : 'needs-target'
-                          : 'needs-target'}
-                        onPrepareDelivery={(value) => void prepareDelivery(value)}
-                        onRequestDelivery={(value) => void requestDelivery(value)}
-                      />
-                    )}
-                    {!isUser && !plan && detailsOpen && <LifecycleActivity event={event} />}
                   </div>
                 </div>
               );
             })}
 
-            {busy && !hasStreamingResponse && (
+            {thinkingActive && (
               <div className="t8-creator-agent-thinking">
                 <LoaderCircle size={15} className="animate-spin" />
-                {patchPreview
-                  ? '正在把你已确认的变更写入画布…'
-                  : '正在同步创作会话并整理为可编辑步骤…'}
+                <span>
+                  {confirmingDocumentKey
+                    ? '正在确认当前版本并准备画布留存'
+                    : patchPreview && busy
+                    ? '正在把你确认的内容写入画布'
+                    : hasStreamingResponse
+                      ? '正在构思并整理本阶段方案'
+                      : '正在准备本阶段内容'}
+                  {'（已 '}{thinkingSeconds} 秒）
+                </span>
               </div>
             )}
+
+            {!thinkingActive
+              && !patchPreview
+              && currentStagePlan
+              && currentStageComplete
+              && currentStageUnconfirmedDocuments.length > 0 && (
+                <section className="t8-creator-agent-stage-confirm" aria-label="确认当前创作阶段">
+                  <span>
+                    <strong>{creativePhaseLabel(activePhase)}方案已整理好</strong>
+                    <small>可继续修改；确认后进入下一阶段，并准备一份画布留存预览。</small>
+                  </span>
+                  <button
+                    type="button"
+                    disabled={busy || Boolean(confirmingDocumentKey)}
+                    onClick={() => {
+                      if (stageContinuationSuggestion) {
+                        void continueFromStageSuggestion(stageContinuationSuggestion);
+                        return;
+                      }
+                      void confirmProductionDocuments(
+                        currentStagePlan,
+                        currentStageUnconfirmedDocuments,
+                      );
+                    }}
+                  >
+                    {confirmingDocumentKey
+                      ? <LoaderCircle size={14} className="animate-spin" />
+                      : <Check size={14} />}
+                    {CREATOR_STAGE_CONFIRM_LABELS[activePhase]}
+                  </button>
+                </section>
+              )}
 
             {patchPreview && (
               <section className="t8-creator-agent-confirm">
@@ -4888,7 +5359,13 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
                     {' · '}基于 r{patchPreview.preview.baseRevision}
                   </strong>
                 </div>
-                <p>只会添加或调整预览中列出的内容；生成任务仍需在画布中单独运行。</p>
+                <p>
+                  {pendingStageContinuation
+                    ? `只会留存已确认内容；写入后 Agent 会自动进入「${creativePhaseLabel(
+                        pendingStageContinuation.targetPhase,
+                      )}」并继续交付下一版可编辑稿。`
+                    : '只会添加或调整预览中列出的内容；生成任务仍需在画布中单独运行。'}
+                </p>
                 <ol className="t8-creator-agent-confirm__changes" aria-label="将写入画布的节点和连线">
                   {patchPreviewItems.map((item) => (
                     <li key={item.key} data-kind={item.kind}>
@@ -4924,7 +5401,15 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
                   <small key={warning}>{warning}</small>
                 ))}
                 <div>
-                  <button type="button" onClick={() => setPatchPreview(null)}>返回修改</button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPatchPreview(null);
+                      setPendingStageContinuation(null);
+                    }}
+                  >
+                    返回修改
+                  </button>
                   <button type="button" disabled={busy} onClick={() => void applyPreview()}>
                     {busy ? <LoaderCircle size={15} className="animate-spin" /> : <Check size={15} />}
                     确认添加到画布
@@ -4940,42 +5425,84 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
             )}
 
             {!patchPreview && suggestions.length === 3 && (
-              <div className="t8-creator-agent-suggestions" aria-label="接下来可以做">
-                {suggestions.map((suggestion) => {
-                  const blockedReason = suggestion.disabledReason
-                    || suggestion.blockers?.[0]?.message
-                    || suggestion.unblockActions?.[0]
-                    || '';
-                  const accessibleLabel = [
-                    suggestion.label,
-                    blockedReason,
-                  ].filter(Boolean).join('。');
-                  return (
+              <>
+                <div className="t8-creator-agent-suggestions" aria-label="选择一个方向继续">
+                  {suggestions.map((suggestion) => {
+                    const blockedReason = suggestion.disabledReason
+                      || suggestion.blockers?.[0]?.message
+                      || suggestion.unblockActions?.[0]
+                      || '';
+                    const accessibleLabel = [
+                      suggestion.label,
+                      suggestion.description,
+                      blockedReason,
+                    ].filter(Boolean).join('。');
+                    return (
+                      <button
+                        type="button"
+                        key={suggestion.id}
+                        title={blockedReason || suggestion.label}
+                        aria-label={accessibleLabel}
+                        data-suggestion-id={suggestion.id}
+                        data-suggestion-intent={suggestion.intent}
+                        data-suggestion-executable={suggestion.executable ? 'true' : 'false'}
+                        data-required-capabilities={suggestion.requiredCapabilityIds.join(',')}
+                        disabled={busy || uploading || !capabilityReady || !suggestion.executable || Boolean(blockedReason)}
+                        onClick={() => {
+                          if (suggestion.arguments
+                            && 'confirmCurrentStage' in suggestion.arguments
+                            && suggestion.arguments.confirmCurrentStage === true) {
+                            void continueFromStageSuggestion(suggestion);
+                            return;
+                          }
+                          void submit(
+                            isPristineSession
+                              ? String(suggestion.arguments?.creatorPrompt || suggestion.label)
+                              : suggestion.label,
+                            !isPristineSession && session?.suggestionSet?.setDigest
+                              ? { id: suggestion.id, setDigest: session.suggestionSet.setDigest }
+                              : undefined,
+                          );
+                        }}
+                      >
+                        <span className="t8-creator-agent-suggestions__content">
+                          <strong>{suggestion.label}</strong>
+                          {suggestion.description && <small>{suggestion.description}</small>}
+                        </span>
+                        <ChevronRight size={16} aria-hidden="true" />
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="t8-creator-agent-custom-idea">
+                  <label htmlFor="t8-creator-agent-custom-idea">✎ 我有其他想法</label>
+                  <div>
+                    <textarea
+                      id="t8-creator-agent-custom-idea"
+                      rows={2}
+                      maxLength={200_000}
+                      value={customIdeaDraft}
+                      placeholder="直接写你的方向，或修改上面任一方案…"
+                      disabled={busy || uploading}
+                      onChange={(event) => setCustomIdeaDraft(event.target.value)}
+                    />
                     <button
                       type="button"
-                      key={suggestion.id}
-                      title={blockedReason || suggestion.label}
-                      aria-label={accessibleLabel}
-                      data-suggestion-id={suggestion.id}
-                      data-suggestion-intent={suggestion.intent}
-                      data-suggestion-executable={suggestion.executable ? 'true' : 'false'}
-                      data-required-capabilities={suggestion.requiredCapabilityIds.join(',')}
-                      disabled={busy || uploading || !capabilityReady || !suggestion.executable || Boolean(blockedReason)}
-                      onClick={() => void submit(
-                        suggestion.label,
-                        !isPristineSession && session?.suggestionSet?.setDigest
-                          ? { id: suggestion.id, setDigest: session.suggestionSet.setDigest }
-                          : undefined,
-                      )}
+                      title="按我的想法继续"
+                      aria-label="按我的想法继续"
+                      disabled={busy || uploading || !customIdeaDraft.trim()}
+                      onClick={() => {
+                        const value = customIdeaDraft.trim();
+                        if (!value) return;
+                        setCustomIdeaDraft('');
+                        void submit(value);
+                      }}
                     >
-                      <span className="t8-creator-agent-suggestions__content">
-                        <strong>{suggestion.label}</strong>
-                      </span>
-                      <ChevronRight size={14} aria-hidden="true" />
+                      <Send size={16} />
                     </button>
-                  );
-                })}
-              </div>
+                  </div>
+                </div>
+              </>
             )}
           </div>
 
@@ -5065,28 +5592,6 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
               ))}
             </div>
           )}
-
-          <div className="t8-creator-agent-details-entry">
-            <button
-              type="button"
-              aria-expanded={detailsOpen}
-              aria-controls="t8-creator-agent-details-content"
-              onClick={() => {
-                setHistoryOpen(false);
-                setDetailsOpen((current) => {
-                  if (current) setCodexOpen(false);
-                  return !current;
-                });
-              }}
-            >
-              <FolderOpen size={15} aria-hidden="true" />
-              <span>
-                <strong>任务与详情</strong>
-                <small>{detailsOpen ? '收起详细信息' : '查看阶段、计划和运行记录'}</small>
-              </span>
-              <ChevronRight size={15} aria-hidden="true" />
-            </button>
-          </div>
 
           {modelSettingsOpen && (
             <section className="t8-creator-agent-models" aria-label="创作模型与平台">

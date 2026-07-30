@@ -76,4 +76,3 @@ test('one logical assistant completion persists exactly one three-item Suggestio
   assert.equal(set.invariantReceipt.fakeEnabledActionCount, 0);
   assert.equal(set.invariantReceipt.unexplainedDisabledActionCount, 0);
 });
-

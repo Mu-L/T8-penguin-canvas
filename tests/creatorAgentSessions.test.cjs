@@ -9,6 +9,7 @@ const path = require('node:path');
 
 const {
   CreatorAgentSessionError,
+  assistantMessageForPlan,
   createCreatorAgentSessionStore,
   creatorAttachmentOnlyPrompt,
   creatorSuggestions,
@@ -22,6 +23,9 @@ const {
   phaseForPlan,
   resolveCreatorSuggestionSelection,
 } = require('../backend/src/services/creatorAgentSessions.js');
+const {
+  createCreatorArtifactProposal,
+} = require('../backend/src/services/creatorAgentArtifacts.js');
 
 function stableTestString(value) {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -210,8 +214,9 @@ test('explicit Creator references outrank the live selection and invalidate stal
   assert.equal(normalized.referencedNodeTypes.length, 1);
 
   const suggestionSet = creatorSuggestionSet(context, { kind: 'image' });
-  assert.match(suggestionSet.items[0].label, /固定引用的主视觉/);
-  assert.doesNotMatch(suggestionSet.items[0].label, /临时选中的视频/);
+  assert.match(suggestionSet.items[0].label, /构图与视觉重点/);
+  assert.match(suggestionSet.items[0].arguments.creatorPrompt, /当前图像/);
+  assert.doesNotMatch(suggestionSet.items[0].label, /固定引用|临时选中/);
 
   const changed = {
     ...context,
@@ -271,9 +276,13 @@ test('creator context focus is explicit reference, selection, viewport, session,
     canvasObjects: objects,
   };
 
-  const explicit = creatorSuggestionSet(shared, plan);
-  assert.match(explicit.items[0].label, /固定引用的主视觉/);
-  assert.doesNotMatch(explicit.items[0].label, /失败发生/);
+  const explicit = creatorSuggestionSet(shared, {
+    ...plan,
+    kind: 'edit-image',
+    brief: { ...plan.brief, goal: '修改这张图的构图和光影' },
+  });
+  assert.match(explicit.items[0].label, /构图与视觉重点/);
+  assert.doesNotMatch(explicit.items[0].label, /固定引用|失败发生/);
   assert.deepEqual(
     explicit.items.map((item) => item.id),
     ['selection-refine', 'selection-review', 'selection-missing'],
@@ -283,9 +292,13 @@ test('creator context focus is explicit reference, selection, viewport, session,
     ...shared,
     referencedNodeIds: [],
     referencedNodeTypes: [],
-  }, plan);
-  assert.match(selection.items[0].label, /临时选中的视频/);
-  assert.doesNotMatch(selection.items[0].label, /失败发生/);
+  }, {
+    ...plan,
+    kind: 'edit-video',
+    brief: { ...plan.brief, goal: '优化这段视频的动作与节奏' },
+  });
+  assert.match(selection.items[0].label, /表演和动作/);
+  assert.doesNotMatch(selection.items[0].label, /临时选中|失败发生/);
   assert.deepEqual(
     selection.items.map((item) => item.id),
     ['selection-refine', 'selection-review', 'selection-missing'],
@@ -304,11 +317,11 @@ test('creator context focus is explicit reference, selection, viewport, session,
       inViewport: item.nodeId === 'node-visible',
     })),
   }, plan);
-  assert.match(viewport.items[0].label, /视口里的旁白/);
-  assert.doesNotMatch(viewport.items[0].label, /核对角色、场景/);
+  assert.match(viewport.items[0].label, /核对现有角色与场景/);
+  assert.doesNotMatch(viewport.items[0].label, /视口里的旁白|对白.*自然/);
   assert.deepEqual(
     viewport.items.map((item) => item.id),
-    ['selection-refine', 'selection-review', 'selection-missing'],
+    ['story-assets-review', 'story-assets-missing', 'story-assets-to-shots'],
   );
 
   const session = creatorSuggestionSet({
@@ -316,14 +329,127 @@ test('creator context focus is explicit reference, selection, viewport, session,
     nodeCount: 3,
     canvasObjects: objects.map((item) => ({ ...item, selected: false, inViewport: false })),
   }, plan);
-  assert.match(session.items[0].label, /核对角色、场景/);
+  assert.match(session.items[0].label, /核对现有角色与场景/);
   assert.deepEqual(
     session.items.map((item) => item.id),
     ['story-assets-review', 'story-assets-missing', 'story-assets-to-shots'],
   );
 
   const project = creatorSuggestionSet({ nodeCount: 3 }, null);
-  assert.match(project.items[0].label, /看懂当前画布/);
+  assert.match(project.items[0].label, /现有素材串成一个故事/);
+});
+
+test('creator choices hide internal loop labels and advance one concrete creative decision per turn', () => {
+  const loopContext = {
+    nodeCount: 1,
+    selectedNodeIds: ['loop-node'],
+    selectedNodeTypes: ['loop'],
+    canvasObjects: [{
+      nodeId: 'loop-node',
+      nodeType: 'loop',
+      label: '[loop]',
+      selected: true,
+      mediaKinds: [],
+    }],
+  };
+  const loop = creatorSuggestionSet(loopContext, {
+    kind: 'story',
+    ready: true,
+    brief: { goal: '批量生成一组画面' },
+  });
+  assert.deepEqual(loop.items.map((item) => item.label), [
+    '逐条对应：每条内容各生成一次',
+    '统一参考：所有内容共用同一素材',
+    '先试 3 条，确认后再跑全部',
+  ]);
+  assert.equal(loop.items.every((item) => item.description.length > 0), true);
+  assert.equal(loop.items.every((item) => item.arguments.creatorPrompt.length > 0), true);
+  assert.doesNotMatch(
+    loop.items.map((item) => `${item.label} ${item.description}`).join(' '),
+    /\[loop\]|继续完善|检查.*上下游|只补.*仍缺失/u,
+  );
+
+  const entry = creatorSuggestionSet({}, {
+    kind: 'story',
+    ready: true,
+    brief: { goal: '我有一个创意想法' },
+  });
+  assert.deepEqual(entry.items.map((item) => item.label), [
+    '我有一个故事设定',
+    '我脑中有一个画面',
+    '我有角色或关系',
+  ]);
+
+  const relationship = creatorSuggestionSet({}, {
+    kind: 'story',
+    ready: true,
+    brief: { goal: entry.items[2].arguments.creatorPrompt },
+  });
+  assert.deepEqual(relationship.items.map((item) => item.label), [
+    '亲密关系：爱着，却无法站在同一边',
+    '家庭关系：最亲的人，最不了解彼此',
+    '搭档 / 对手：必须并肩，却不能信任',
+  ]);
+
+  const conflict = creatorSuggestionSet({}, {
+    kind: 'story',
+    ready: true,
+    brief: { goal: relationship.items[0].arguments.creatorPrompt },
+  });
+  assert.deepEqual(conflict.items.map((item) => item.label), [
+    '共同秘密被揭开',
+    '现实目标突然对立',
+    '一方必须做出背叛',
+  ]);
+
+  const escalation = creatorSuggestionSet({}, {
+    kind: 'story',
+    ready: true,
+    brief: { goal: conflict.items[0].arguments.creatorPrompt },
+  });
+  assert.deepEqual(escalation.items.map((item) => item.label), [
+    '当众决裂',
+    '私下交易',
+    '被迫再次合作',
+  ]);
+
+  const ending = creatorSuggestionSet({}, {
+    kind: 'story',
+    ready: true,
+    brief: { goal: escalation.items[0].arguments.creatorPrompt },
+  });
+  assert.deepEqual(ending.items.map((item) => item.label), [
+    '付出无法挽回的代价',
+    '带着裂痕继续同行',
+    '反转：真正的背叛者另有其人',
+  ]);
+
+  const productionStep = creatorSuggestionSet({}, {
+    kind: 'story',
+    ready: true,
+    brief: { goal: ending.items[0].arguments.creatorPrompt },
+  });
+  assert.deepEqual(productionStep.items.map((item) => item.label), [
+    '整理成完整短片提纲',
+    '先细化两位角色',
+    '直接拆成可编辑分镜',
+  ]);
+
+  const userDirectedStory = {
+    kind: 'story',
+    ready: true,
+    brief: { goal: '我想做一个雨夜重逢的短片，先帮我确定两个人的关系。' },
+  };
+  const storyDespiteSelectedLoop = creatorSuggestionSet(loopContext, userDirectedStory);
+  assert.deepEqual(storyDespiteSelectedLoop.items.map((item) => item.label), [
+    '亲密关系：爱着，却无法站在同一边',
+    '家庭关系：最亲的人，最不了解彼此',
+    '搭档 / 对手：必须并肩，却不能信任',
+  ]);
+  assert.doesNotMatch(
+    assistantMessageForPlan(userDirectedStory, loopContext),
+    /批量|逐条|素材.*配对/u,
+  );
 });
 
 test('story suggestions follow the persisted production phase and stay capability-backed', () => {
@@ -350,8 +476,47 @@ test('story suggestions follow the persisted production phase and stay capabilit
       ready: true,
       analysis: { stage: 'assets' },
     }).items[1].label,
-    /不覆盖现有素材/,
+    /只补缺失资产/,
   );
+});
+
+test('staged Story suggestions distinguish drafting from exact confirm-and-continue actions', () => {
+  const phases = [
+    ['idea', 'script', 'story-idea-draft', 'story-idea-continue'],
+    ['script', 'assets', 'story-script-draft', 'story-script-continue'],
+    ['assets', 'shots', 'story-assets-draft', 'story-assets-continue'],
+    ['shots', 'candidates', 'story-shots-draft', 'story-shots-continue'],
+    ['candidates', 'delivery', 'story-candidates-draft', 'story-candidates-continue'],
+  ];
+  for (const [phase, nextPhase, draftId, continueId] of phases) {
+    const production = { currentPhase: phase };
+    const plan = {
+      kind: 'story',
+      ready: true,
+      productionDocuments: [{
+        id: `document-${phase}`,
+        kind: 'production-brief',
+        versionId: `document-${phase}-v1`,
+        contentDigest: 'a'.repeat(64),
+      }],
+    };
+    const drafting = creatorSuggestionSet({}, plan, {
+      production,
+      stageReadyForConfirmation: false,
+    });
+    assert.equal(drafting.items[0].id, draftId);
+    assert.equal(drafting.items[0].arguments.confirmCurrentStage, undefined);
+
+    const ready = creatorSuggestionSet({}, plan, {
+      production,
+      stageReadyForConfirmation: true,
+    });
+    assert.equal(ready.items[0].id, continueId);
+    assert.equal(ready.items[0].arguments.confirmCurrentStage, true);
+    assert.equal(ready.items[0].arguments.continueToPhase, nextPhase);
+    assert.equal(ready.items[0].arguments.requiresCanvasRetentionApply, true);
+    assert.equal(ready.items.length, 3);
+  }
 });
 
 test('creator suggestions hide unavailable capabilities and deterministically backfill three safe actions', () => {
@@ -376,7 +541,7 @@ test('creator suggestions hide unavailable capabilities and deterministically ba
   );
 });
 
-test('creator context keeps a bounded production summary and prioritizes failed Run recovery', () => {
+test('creator context keeps a bounded production summary and only prioritizes failed Run recovery when requested', () => {
   const context = normalizeContext({
     nodeCount: 12,
     edgeCount: 11,
@@ -404,7 +569,19 @@ test('creator context keeps a bounded production summary and prioritizes failed 
     outputAssetCount: 2,
   }]);
 
-  const suggestions = creatorSuggestionSet(context, { kind: 'image' });
+  const creativeSuggestions = creatorSuggestionSet(context, {
+    kind: 'story',
+    brief: { goal: '我想做一个雨夜重逢的短片，先帮我确定两个人的关系。' },
+  });
+  assert.deepEqual(
+    creativeSuggestions.items.map((item) => item.id),
+    ['story-style', 'story-shots', 'story-missing-assets'],
+  );
+
+  const suggestions = creatorSuggestionSet(context, {
+    kind: 'image',
+    brief: { goal: '告诉我这次生成为什么失败了，并保留已经完成的素材。' },
+  });
   assert.deepEqual(
     suggestions.items.map((item) => item.id),
     ['recovery-explain', 'recovery-retry-scope', 'recovery-continue'],
@@ -508,9 +685,9 @@ test('creator context prioritizes selected objects, locks and offscreen failures
     suggestions.items.map((item) => item.id),
     ['selection-refine', 'selection-review', 'selection-missing'],
   );
-  assert.match(suggestions.items[0].label, /主视觉海报/);
-  assert.match(suggestions.items[0].label, /锁定/);
-  assert.match(suggestions.items[0].label, /真实素材来源/);
+  assert.match(suggestions.items[0].label, /构图与视觉重点/);
+  assert.match(suggestions.items[0].arguments.creatorPrompt, /保留主体身份/);
+  assert.match(suggestions.items[0].arguments.creatorPrompt, /已有素材来源/);
 });
 
 test('creator sessions retain more than 500 lightweight message events without unbounded UI rendering', () => {
@@ -842,9 +1019,19 @@ test('production document confirmation is exact, idempotent, persisted, and neve
   assert.equal(confirmed.session.latestPlan.planDigest, plan.planDigest);
   assert.equal(confirmed.session.latestPlan.productionDocuments[0].status, 'draft');
   assert.equal(confirmed.session.productionDocumentConfirmations.length, 1);
-  assert.equal(confirmed.session.events.at(-1).type, 'production-documents.confirmed');
-  assert.equal(confirmed.session.events.at(-1).payload.providerCalls, 0);
-  assert.equal(confirmed.session.events.at(-1).payload.canvasWrites, 0);
+  const confirmationEvent = confirmed.session.events.find(
+    (event) => event.type === 'production-documents.confirmed',
+  );
+  assert.ok(confirmationEvent);
+  assert.equal(confirmationEvent.payload.providerCalls, 0);
+  assert.equal(confirmationEvent.payload.canvasWrites, 0);
+  assert.equal(confirmed.session.events.at(-1).type, 'production-stage.advanced');
+  assert.deepEqual(confirmed.phaseTransition, {
+    advanced: true,
+    completedPhase: 'idea',
+    nextPhase: 'script',
+    productionRevision: 1,
+  });
   assert.equal(fixture.store.productionDocumentsForNextPlan(created.id)[0].status, 'confirmed');
 
   const sequence = confirmed.session.lastSequence;
@@ -1290,6 +1477,7 @@ test('assistant response deltas are durable, ordered, idempotent and resumable b
   });
   assert.equal(begun.startedEvent.type, 'assistant.response.started');
   assert.equal(begun.startedEvent.payload.providerCalls, 0);
+  assert.match(begun.startedEvent.payload.responseDigest, /^[a-f0-9]{64}$/);
   assert.ok(begun.chunks.length > 1);
   assert.ok(begun.chunks.length <= 8);
 
@@ -1310,13 +1498,25 @@ test('assistant response deltas are durable, ordered, idempotent and resumable b
   assert.equal(duplicate.duplicate, true);
   assert.equal(duplicate.event.eventId, firstDelta.eventId);
 
+  // Live canvas context may change while a response is streaming. Completion
+  // must verify the immutable text chosen at response start instead of
+  // recomputing a different reply from the newer canvas focus.
   const completed = fixture.store.completeStreamingTurn(created.id, {
     responseId: begun.responseId,
-    context: { phase: 'story' },
+    context: {
+      phase: 'story',
+      canvasObjects: [{
+        nodeId: 'loop-became-visible-during-stream',
+        nodeType: 'loop',
+        label: '循环器',
+        inViewport: true,
+      }],
+    },
     plan,
   });
   assert.equal(completed.assistantEvent.type, 'assistant.response.completed');
   assert.equal(completed.assistantEvent.payload.providerCalls, 0);
+  assert.equal(completed.assistantEvent.payload.text, begun.chunks.join(''));
   assert.equal(completed.session.latestPlan.planId, 'plan-stream');
   assert.equal(completed.session.status, 'planned');
 
@@ -1331,6 +1531,184 @@ test('assistant response deltas are durable, ordered, idempotent and resumable b
   assert.equal(resumed.events.at(-1).type, 'assistant.response.completed');
 });
 
+test('model response evidence is digest-bound, durable and preserves exact provider call counts', (t) => {
+  const fixture = temporaryStore();
+  t.after(fixture.cleanup);
+  const evidencePayload = {
+    schema: 't8-creator-agent-response-evidence-v1',
+    mode: 'online-model',
+    status: 'completed',
+    providerCalls: 1,
+    provider: 'zhenzhen',
+    model: 'gemini-3.5-flash',
+    finishReason: 'stop',
+    requestId: 'mock-session-evidence',
+    errorCode: null,
+    qualityCode: 'accepted',
+    modelDecisionDigest: 'a'.repeat(64),
+  };
+  const responseEvidence = {
+    ...evidencePayload,
+    evidenceDigest: stableTestDigest(evidencePayload),
+  };
+  const assistantText = '## 可编辑 V0\n\n这是一份真实模型返回的创作正文，包含目标、结构、执行顺序和明确的未知项；会话必须原样保存正文与模型调用证据，不能改写成固定追问。';
+  const plan = {
+    planId: 'plan-model-evidence',
+    kind: 'script',
+    ready: true,
+    candidateCount: 1,
+    questions: [],
+  };
+
+  const appendedSession = fixture.store.create({
+    projectId: 'project-local',
+    canvasId: 'canvas-model-evidence-append',
+  });
+  const appended = fixture.store.appendTurn(appendedSession.id, {
+    text: '写一版脚本',
+    assistantText,
+    responseEvidence,
+    plan,
+  });
+  assert.equal(appended.assistantEvent.type, 'assistant.response.completed');
+  assert.equal(appended.assistantEvent.payload.text, assistantText);
+  assert.equal(appended.assistantEvent.payload.providerCalls, 1);
+  assert.deepEqual(appended.assistantEvent.payload.responseEvidence, responseEvidence);
+
+  const streamingSession = fixture.store.create({
+    projectId: 'project-local',
+    canvasId: 'canvas-model-evidence-stream',
+  });
+  const begun = fixture.store.beginStreamingTurn(streamingSession.id, {
+    text: '写一版流式脚本',
+    assistantText,
+    responseEvidence,
+    plan: { ...plan, planId: 'plan-model-evidence-stream' },
+  });
+  assert.equal(begun.startedEvent.payload.providerCalls, 1);
+  assert.deepEqual(begun.startedEvent.payload.responseEvidence, responseEvidence);
+  begun.chunks.forEach((delta, index) => fixture.store.appendResponseDelta(streamingSession.id, {
+    responseId: begun.responseId,
+    index,
+    delta,
+  }));
+  const completed = fixture.store.completeStreamingTurn(streamingSession.id, {
+    responseId: begun.responseId,
+    plan: { ...plan, planId: 'plan-model-evidence-stream' },
+  });
+  assert.equal(completed.assistantEvent.payload.text, assistantText);
+  assert.equal(completed.assistantEvent.payload.providerCalls, 1);
+  assert.deepEqual(completed.assistantEvent.payload.responseEvidence, responseEvidence);
+
+  const rejectedSession = fixture.store.create({
+    projectId: 'project-local',
+    canvasId: 'canvas-model-evidence-rejected',
+  });
+  assert.throws(() => fixture.store.appendTurn(rejectedSession.id, {
+    text: '这条不能写入',
+    assistantText,
+    plan,
+    responseEvidence: { ...responseEvidence, provider: 'tampered-provider' },
+  }), (error) => error instanceof CreatorAgentSessionError
+    && error.code === 'CREATOR_RESPONSE_EVIDENCE_INVALID');
+  assert.deepEqual(
+    fixture.store.read(rejectedSession.id).events.map((event) => event.type),
+    ['session.created'],
+  );
+});
+test('upstream response deltas stay exact, durable and complete only after the final model text matches', (t) => {
+  const fixture = temporaryStore();
+  t.after(fixture.cleanup);
+  const created = fixture.store.create({
+    projectId: 'project-local',
+    canvasId: 'canvas-upstream-stream',
+    context: { nodeCount: 0, edgeCount: 0 },
+  });
+  const startedPayload = {
+    schema: 't8-creator-agent-response-evidence-v1',
+    mode: 'online-model',
+    status: 'streaming',
+    providerCalls: 1,
+    provider: 'zhenzhen',
+    model: 'gemini-3.5-flash',
+    finishReason: null,
+    requestId: null,
+    errorCode: null,
+    qualityCode: null,
+    modelDecisionDigest: 'b'.repeat(64),
+  };
+  const finalPayload = {
+    ...startedPayload,
+    status: 'completed',
+    finishReason: 'stop',
+    requestId: 'upstream-request-001',
+    qualityCode: 'accepted',
+  };
+  const startedEvidence = {
+    ...startedPayload,
+    evidenceDigest: stableTestDigest(startedPayload),
+  };
+  const finalEvidence = {
+    ...finalPayload,
+    evidenceDigest: stableTestDigest(finalPayload),
+  };
+  const plan = {
+    planId: 'plan-upstream-stream',
+    kind: 'script',
+    ready: true,
+    candidateCount: 1,
+    questions: [],
+  };
+  const begun = fixture.store.beginStreamingTurn(created.id, {
+    text: '把这个电商创意整理成可执行脚本',
+    context: { phase: 'script' },
+    plan,
+    live: true,
+    responseEvidence: startedEvidence,
+  });
+  assert.equal(begun.live, true);
+  assert.deepEqual(begun.chunks, []);
+  assert.equal(begun.startedEvent.payload.transport, 'upstream-sse');
+  assert.equal('chunkCount' in begun.startedEvent.payload, false);
+  assert.equal('responseDigest' in begun.startedEvent.payload, false);
+
+  const deltas = [
+    '## 可编辑方案',
+    '\n\n  保留开头空格，',
+    '并逐字持久化模型输出。',
+  ];
+  deltas.forEach((delta, index) => fixture.store.appendResponseDelta(created.id, {
+    responseId: begun.responseId,
+    index,
+    delta,
+  }));
+  const exactText = deltas.join('');
+  assert.throws(() => fixture.store.completeStreamingTurn(created.id, {
+    responseId: begun.responseId,
+    assistantText: exactText + '被篡改',
+    responseEvidence: finalEvidence,
+    context: { phase: 'script' },
+    plan,
+  }), (error) => error instanceof CreatorAgentSessionError
+    && error.code === 'CREATOR_RESPONSE_INCOMPLETE');
+
+  const completed = fixture.store.completeStreamingTurn(created.id, {
+    responseId: begun.responseId,
+    assistantText: exactText,
+    responseEvidence: finalEvidence,
+    context: { phase: 'script' },
+    plan,
+  });
+  assert.equal(completed.status, 'completed');
+  assert.equal(completed.assistantEvent.payload.text, exactText);
+  assert.equal(
+    completed.assistantEvent.payload.responseDigest,
+    stableTestDigest({ schema: 't8-creator-agent-response-v1', text: exactText }),
+  );
+  assert.deepEqual(completed.assistantEvent.payload.responseEvidence, finalEvidence);
+  assert.equal(completed.assistantEvent.payload.suggestionSet.items.length, 3);
+  assert.equal(completed.session.latestPlan.planId, plan.planId);
+});
 test('stopping a local assistant reply is durable, idempotent and never completes its plan', (t) => {
   const fixture = temporaryStore();
   t.after(fixture.cleanup);
@@ -1549,9 +1927,9 @@ test('reference video breakdown suggestions stay bound to analysis-only follow-u
   });
 
   assert.deepEqual(suggestions.items.map((item) => item.label), [
-    '只学习参考视频的节奏和剪辑密度',
-    '只提取镜头语言、景别和运镜规则',
-    '核对拉片结果后继续规划关键帧和视频，不立即生成',
+    '学习节奏和剪辑密度',
+    '学习景别和运镜语言',
+    '用拉片结果继续做分镜',
   ]);
   assert.deepEqual(suggestions.items.map((item) => item.intent), [
     'reference-breakdown.rhythm',
@@ -1619,4 +1997,488 @@ test('reference video breakdown continue-production unlocks only for a verified 
   assert.equal(pending.items[2].executable, false);
   assert.equal(pending.items[2].blockers[0].code, 'reference-breakdown-run-evidence-required');
   assert.match(pending.items[2].disabledReason, /仍在运行/);
+});
+test('formal next actions are derived from the exact response and artifact instead of generic loop prompts', () => {
+  const context = {
+    canvasRevision: 21,
+    nodeCount: 2,
+    edgeCount: 1,
+    canvasTitle: '夏季饮品首屏',
+  };
+  const plan = {
+    planId: 'plan-response-actions',
+    planDigest: 'd'.repeat(64),
+    kind: 'story',
+    ready: true,
+    goal: '为一款无糖气泡水制作电商详情页',
+    productionDocuments: [{
+      documentId: 'doc-commerce-v0',
+      versionId: 'version-1',
+      kind: 'commerce-outline',
+      revision: 1,
+      contentDigest: 'a'.repeat(64),
+    }],
+  };
+  const responseText = [
+    '## 电商首屏文案 V0',
+    '主标题：气泡够足，糖分归零。',
+    '### 页面结构',
+    '首屏先交代口味与无糖事实，中段展示饮用场景，结尾回到规格与购买理由。',
+    '### 素材缺口',
+    '仍需要真实罐体六面图、配料表和已授权认证。',
+  ].join('\n');
+  const suggestionSet = creatorSuggestionSet(context, plan, {
+    responseText,
+    responseEvidence: { mode: 'online-model' },
+  });
+
+  assert.equal(suggestionSet.source.schema, 't8-creator-suggestion-source-v1');
+  assert.equal(suggestionSet.source.taskFamily, 'commerce');
+  assert.equal(suggestionSet.source.evidenceMode, 'online-model');
+  assert.equal(suggestionSet.source.documentCount, 1);
+  assert.match(suggestionSet.source.responseDigest, /^[a-f0-9]{64}$/);
+  assert.match(suggestionSet.source.artifactDigest, /^[a-f0-9]{64}$/);
+  assert.equal(suggestionSet.items.length, 3);
+  assert.match(suggestionSet.items[0].label, /电商首屏文案|逐屏成稿/);
+  assert.match(suggestionSet.items[0].arguments.creatorPrompt, new RegExp(
+    suggestionSet.source.responseDigest.slice(0, 10),
+  ));
+  const uselessPattern = /\[loop\]|继续完善|接着完善|只补|与上下游对象是否连贯/u;
+  for (const item of suggestionSet.items) {
+    assert.doesNotMatch(`${item.label}\n${item.description}\n${item.arguments.creatorPrompt}`, uselessPattern);
+  }
+
+  const resolved = resolveCreatorSuggestionSelection({
+    context,
+    latestPlan: plan,
+    suggestionSet,
+  }, {
+    context,
+    suggestionId: suggestionSet.items[0].id,
+    suggestionSetDigest: suggestionSet.setDigest,
+  });
+  assert.equal(resolved.arguments.creatorPrompt, suggestionSet.items[0].arguments.creatorPrompt);
+
+  const changedArtifactPlan = structuredClone(plan);
+  changedArtifactPlan.productionDocuments[0].contentDigest = 'b'.repeat(64);
+  assert.throws(() => resolveCreatorSuggestionSelection({
+    context,
+    latestPlan: changedArtifactPlan,
+    suggestionSet,
+  }, {
+    context,
+    suggestionId: suggestionSet.items[0].id,
+    suggestionSetDigest: suggestionSet.setDigest,
+  }), (error) => error instanceof CreatorAgentSessionError
+    && error.code === 'CREATOR_SUGGESTION_STALE'
+    && error.details?.staleFields?.includes('artifactDigest'));
+
+  const imageSuggestionSet = creatorSuggestionSet(context, {
+    ...plan,
+    kind: 'image',
+    goal: '把现有产品图改成雨夜霓虹主视觉',
+    productionDocuments: [],
+  }, {
+    responseText: [
+      '## 雨夜产品主视觉 V0',
+      '保留瓶身轮廓和商标，只替换背景与光影。',
+      '### 构图与光影',
+      '主体居中，左后方霓虹轮廓光，地面保留真实接触阴影。',
+    ].join('\n'),
+  });
+  assert.equal(imageSuggestionSet.source.taskFamily, 'image');
+  assert.notDeepEqual(
+    imageSuggestionSet.items.map((item) => item.label),
+    suggestionSet.items.map((item) => item.label),
+  );
+});
+
+test('stream completion derives suggestions from the exact durable response body', (t) => {
+  const fixture = temporaryStore();
+  t.after(fixture.cleanup);
+  const created = fixture.store.create({
+    projectId: 'project-local',
+    canvasId: 'canvas-response-actions',
+    context: { canvasRevision: 3, nodeCount: 1, edgeCount: 0 },
+  });
+  const plan = {
+    planId: 'plan-stream-response-actions',
+    planDigest: 'e'.repeat(64),
+    kind: 'video',
+    ready: true,
+    goal: '制作 15 秒产品视频',
+  };
+  const assistantText = [
+    '## 15 秒产品视频 V0',
+    '前 3 秒用液体飞溅建立钩子，中段交代瓶身与卖点，结尾回到品牌标识。',
+    '### 镜头节奏',
+    '0–3 秒特写，3–10 秒中近景，10–15 秒定格收尾。',
+  ].join('\n');
+  const begun = fixture.store.beginStreamingTurn(created.id, {
+    text: '把这瓶饮料做成 15 秒产品视频',
+    context: { canvasRevision: 3, nodeCount: 1, edgeCount: 0 },
+    plan,
+    assistantText,
+  });
+  begun.chunks.forEach((delta, index) => fixture.store.appendResponseDelta(created.id, {
+    responseId: begun.responseId,
+    index,
+    delta,
+  }));
+  const completed = fixture.store.completeStreamingTurn(created.id, {
+    responseId: begun.responseId,
+    context: { canvasRevision: 3, nodeCount: 1, edgeCount: 0 },
+    plan,
+  });
+
+  assert.equal(completed.assistantEvent.payload.text, assistantText);
+  assert.equal(completed.session.suggestionSet.source.taskFamily, 'video');
+  assert.match(completed.session.suggestionSet.items[0].label, /逐镜头表/);
+  assert.equal(
+    completed.assistantEvent.payload.suggestionSet.setDigest,
+    completed.session.suggestionSet.setDigest,
+  );
+});
+
+test('model response artifacts persist exact versions, bind three suggestions, and survive refresh', (t) => {
+  const fixture = temporaryStore();
+  t.after(fixture.cleanup);
+  const created = fixture.store.create({
+    projectId: 'project-local',
+    canvasId: 'canvas-artifact-versions',
+  });
+  const evidencePayload = {
+    schema: 't8-creator-agent-response-evidence-v1',
+    mode: 'online-model',
+    status: 'completed',
+    providerCalls: 1,
+    provider: 'zhenzhen',
+    model: 'gemini-3.5-flash',
+    finishReason: 'stop',
+    requestId: 'artifact-response-1',
+    errorCode: null,
+    qualityCode: 'accepted',
+    modelDecisionDigest: 'c'.repeat(64),
+  };
+  const responseEvidence = {
+    ...evidencePayload,
+    evidenceDigest: stableTestDigest(evidencePayload),
+  };
+  const plan = {
+    planId: 'plan-artifact-version',
+    planDigest: 'd'.repeat(64),
+    kind: 'story',
+    ready: true,
+    candidateCount: 1,
+    questions: [],
+  };
+  const firstText = [
+    '## 雨夜重逢短片 V0',
+    '两位旧友在末班车站重逢，表面寒暄，真正冲突是其中一人准备永久离开。',
+    '### 三段结构',
+    '建立距离、旧事失控、在列车到站前做出选择。',
+  ].join('\n');
+  const firstProposal = createCreatorArtifactProposal({
+    taskFamily: 'story',
+    prompt: '写一个雨夜重逢短片',
+    responseText: firstText,
+    mode: 'online-model',
+    responseEvidence,
+  });
+  const first = fixture.store.appendTurn(created.id, {
+    text: '写一个雨夜重逢短片',
+    assistantText: firstText,
+    responseEvidence,
+    artifactProposal: firstProposal,
+    plan,
+  });
+
+  assert.equal(first.assistantEvent.payload.text, firstText);
+  assert.equal(first.assistantEvent.payload.artifactCompilation.status, 'created');
+  assert.equal(first.session.creativeArtifactVersions.length, 1);
+  assert.equal(first.session.creativeArtifacts.length, 1);
+  assert.equal(first.session.creativeArtifacts[0].revision, 1);
+  assert.equal(first.session.creativeArtifactVersions[0].content.bodyMarkdown, firstText);
+  assert.equal(first.session.suggestionSet.binding.artifactId, first.session.creativeArtifacts[0].artifactId);
+  assert.equal(
+    first.session.suggestionSet.binding.artifactVersionId,
+    first.session.creativeArtifacts[0].versionId,
+  );
+  for (const suggestion of first.session.suggestionSet.items) {
+    assert.equal(suggestion.arguments.artifactId, first.session.creativeArtifacts[0].artifactId);
+    assert.equal(suggestion.arguments.artifactVersionId, first.session.creativeArtifacts[0].versionId);
+    assert.equal(
+      suggestion.arguments.expectedDiff.baseVersionId,
+      first.session.creativeArtifacts[0].versionId,
+    );
+  }
+
+  const reopened = createCreatorAgentSessionStore({ rootDir: fixture.rootDir }).read(created.id);
+  assert.deepEqual(reopened.creativeArtifactVersions, first.session.creativeArtifactVersions);
+  assert.deepEqual(reopened.creativeArtifacts, first.session.creativeArtifacts);
+
+  const oldSuggestionSet = structuredClone(first.session.suggestionSet);
+  const secondText = `${firstText}\n\n### 镜头锚点\n雨伞、站牌和驶入站台的车灯贯穿三段。`;
+  const secondProposal = createCreatorArtifactProposal({
+    taskFamily: 'story',
+    prompt: '把视觉锚点也补进方案',
+    responseText: secondText,
+    mode: 'online-model',
+    responseEvidence,
+  });
+  const second = fixture.store.appendTurn(created.id, {
+    text: '把视觉锚点也补进方案',
+    assistantText: secondText,
+    responseEvidence,
+    artifactProposal: secondProposal,
+    plan: { ...plan, planId: 'plan-artifact-version-2' },
+  });
+  assert.equal(second.session.creativeArtifactVersions.length, 2);
+  assert.equal(second.session.creativeArtifacts[0].revision, 2);
+  assert.equal(second.session.creativeArtifactVersions[1].diff.baseVersionId,
+    first.session.creativeArtifacts[0].versionId);
+  assert.throws(() => resolveCreatorSuggestionSelection({
+    ...second.session,
+    suggestionSet: oldSuggestionSet,
+  }, {
+    context: second.session.context,
+    suggestionId: oldSuggestionSet.items[0].id,
+    suggestionSetDigest: oldSuggestionSet.setDigest,
+  }), (error) => error instanceof CreatorAgentSessionError
+    && error.code === 'CREATOR_SUGGESTION_STALE'
+    && error.details?.staleFields?.includes('artifactVersionId'));
+});
+
+test('invalid artifact proposals preserve assistant text without creating a version', (t) => {
+  const fixture = temporaryStore();
+  t.after(fixture.cleanup);
+  const created = fixture.store.create({
+    projectId: 'project-local',
+    canvasId: 'canvas-artifact-invalid',
+  });
+  const assistantText = '## 图像修改 V0\n保留人物身份，只调整背景、接触阴影和综合色温。';
+  const valid = createCreatorArtifactProposal({
+    taskFamily: 'image',
+    prompt: '调整这张人物图',
+    responseText: assistantText,
+    mode: 'offline-structure',
+  });
+  const tampered = structuredClone(valid);
+  tampered.content.bodyMarkdown = '被篡改';
+  const result = fixture.store.appendTurn(created.id, {
+    text: '调整这张人物图',
+    assistantText,
+    artifactProposal: tampered,
+    plan: {
+      planId: 'plan-invalid-artifact',
+      planDigest: 'e'.repeat(64),
+      kind: 'image',
+      ready: true,
+      candidateCount: 1,
+      questions: [],
+    },
+  });
+  assert.equal(result.assistantEvent.payload.text, assistantText);
+  assert.equal(result.assistantEvent.payload.artifactCompilation.status, 'failed');
+  assert.equal(result.assistantEvent.payload.artifactCompilation.artifactVersion, null);
+  assert.deepEqual(result.session.creativeArtifactVersions, []);
+  assert.deepEqual(result.session.creativeArtifacts, []);
+  assert.equal('artifactId' in result.session.suggestionSet.binding, false);
+});
+
+test('stopped live responses never create a creative artifact version', (t) => {
+  const fixture = temporaryStore();
+  t.after(fixture.cleanup);
+  const created = fixture.store.create({
+    projectId: 'project-local',
+    canvasId: 'canvas-artifact-stopped',
+  });
+  const responseEvidence = {
+    schema: 't8-creator-agent-response-evidence-v1',
+    mode: 'online-model',
+    status: 'streaming',
+    providerCalls: 1,
+    provider: 'zhenzhen',
+    model: 'gemini-3.5-flash',
+    finishReason: null,
+    requestId: null,
+    errorCode: null,
+    qualityCode: null,
+    modelDecisionDigest: 'f'.repeat(64),
+  };
+  responseEvidence.evidenceDigest = stableTestDigest(responseEvidence);
+  const begun = fixture.store.beginStreamingTurn(created.id, {
+    text: '做一支产品短片',
+    live: true,
+    responseEvidence,
+  });
+  fixture.store.appendResponseDelta(created.id, {
+    responseId: begun.responseId,
+    index: 0,
+    delta: '## 产品短片 V0\n前两秒建立钩子。',
+  });
+  const stopped = fixture.store.stopStreamingTurn(created.id, {
+    responseId: begun.responseId,
+  });
+  assert.equal(stopped.status, 'stopped');
+  assert.deepEqual(stopped.session.creativeArtifactVersions, []);
+  assert.deepEqual(stopped.session.creativeArtifacts, []);
+  assert.equal('artifactCompilation' in stopped.assistantEvent.payload, false);
+});
+test('creator session creation repairs interrupted snapshot and event commits', (t) => {
+  const fixture = temporaryStore();
+  t.after(() => fixture.cleanup());
+  const sessionId = '22222222-3333-4444-8555-666666666666';
+  const input = {
+    sessionId,
+    projectId: 'project-local',
+    canvasId: 'canvas-create-repair',
+  };
+  const created = fixture.store.create(input);
+  const snapshotPath = path.join(fixture.rootDir, 'sessions', `${sessionId}.json`);
+  const eventPath = path.join(fixture.rootDir, 'events', `${sessionId}.jsonl`);
+
+  const interrupted = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'));
+  interrupted.events = [];
+  interrupted.lastSequence = 0;
+  fs.writeFileSync(snapshotPath, `${JSON.stringify(interrupted, null, 2)}\n`, 'utf8');
+  fs.rmSync(eventPath, { force: true });
+
+  const recovered = fixture.store.create(input);
+  assert.equal(recovered.id, created.id);
+  assert.equal(recovered.lastSequence, 1);
+  assert.deepEqual(recovered.events.map((event) => event.type), ['session.created']);
+  const eventLines = fs.readFileSync(eventPath, 'utf8').trim().split(/\r?\n/);
+  assert.equal(eventLines.length, 1);
+  assert.equal(JSON.parse(eventLines[0]).type, 'session.created');
+});
+
+test('creator session creation repairs a stale snapshot without duplicating its persisted event', (t) => {
+  const fixture = temporaryStore();
+  t.after(() => fixture.cleanup());
+  const sessionId = '33333333-4444-4555-8666-777777777777';
+  const input = {
+    sessionId,
+    projectId: 'project-local',
+    canvasId: 'canvas-create-stale-snapshot',
+  };
+  fixture.store.create(input);
+  const snapshotPath = path.join(fixture.rootDir, 'sessions', `${sessionId}.json`);
+  const eventPath = path.join(fixture.rootDir, 'events', `${sessionId}.jsonl`);
+  const stale = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'));
+  stale.events = [];
+  stale.lastSequence = 0;
+  fs.writeFileSync(snapshotPath, `${JSON.stringify(stale, null, 2)}\n`, 'utf8');
+
+  const recovered = fixture.store.create(input);
+  assert.equal(recovered.lastSequence, 1);
+  assert.deepEqual(recovered.events.map((event) => event.type), ['session.created']);
+  const eventLines = fs.readFileSync(eventPath, 'utf8').trim().split(/\r?\n/);
+  assert.equal(eventLines.length, 1);
+});
+
+test('creator session creation is cross-process idempotent for one stable session id', async (t) => {
+  const fixture = temporaryStore();
+  t.after(() => fixture.cleanup());
+  const sessionId = '44444444-5555-4666-8777-888888888888';
+  const childScript = [
+    "const { createCreatorAgentSessionStore } = require('./backend/src/services/creatorAgentSessions.js');",
+    "const [rootDir, sessionId] = process.argv.slice(1);",
+    "const store = createCreatorAgentSessionStore({ rootDir });",
+    "const session = store.create({ sessionId, projectId: 'project-local', canvasId: 'canvas-cross-process' });",
+    "process.stdout.write(JSON.stringify({ id: session.id, lastSequence: session.lastSequence }));",
+  ].join('');
+  const { spawn } = require('node:child_process');
+  const run = () => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['-e', childScript, fixture.rootDir, sessionId], {
+      cwd: path.join(__dirname, '..'),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.once('error', reject);
+    child.once('exit', (code) => {
+      if (code !== 0) {
+        reject(new Error(`creator session child failed (${code}): ${stderr}`));
+        return;
+      }
+      resolve(JSON.parse(stdout));
+    });
+  });
+
+  const [left, right] = await Promise.all([run(), run()]);
+  assert.deepEqual(left, { id: sessionId, lastSequence: 1 });
+  assert.deepEqual(right, { id: sessionId, lastSequence: 1 });
+  const eventPath = path.join(fixture.rootDir, 'events', `${sessionId}.jsonl`);
+  const eventLines = fs.readFileSync(eventPath, 'utf8').trim().split(/\r?\n/);
+  assert.equal(eventLines.length, 1);
+  assert.equal(JSON.parse(eventLines[0]).type, 'session.created');
+});
+
+test('completed grounded response outranks a selected loop and media failure returns recovery actions', () => {
+  const loopContext = {
+    canvasRevision: 47,
+    nodeCount: 1,
+    edgeCount: 0,
+    selectedNodeIds: ['loop-node'],
+    selectedNodeTypes: ['loop'],
+    canvasObjects: [{
+      nodeId: 'loop-node',
+      nodeType: 'loop',
+      label: '[loop]',
+      selected: true,
+      mediaKinds: [],
+    }],
+  };
+  const plan = {
+    planId: 'plan-duck-story',
+    planDigest: 'f'.repeat(64),
+    kind: 'story',
+    ready: true,
+    goal: '根据鸭子参考图写一个温馨短剧本',
+  };
+  const grounded = creatorSuggestionSet(loopContext, plan, {
+    responseText: [
+      '## 素材观察',
+      '素材 1 是黄色小鸭，浅蓝背景上有白色水纹。',
+      '## 温馨短剧本 V0',
+      '小鸭练习欢迎舞，最后用一个拥抱迎接妈妈。',
+      '## 场景推进',
+      '练习、误会、重新找到节拍、温暖收束。',
+    ].join('\n'),
+    responseEvidence: {
+      mode: 'online-model',
+      mediaGrounding: { status: 'confirmed' },
+    },
+  });
+  assert.equal(grounded.source.mediaGroundingStatus, 'confirmed');
+  assert.equal(grounded.items.length, 3);
+  assert.match(grounded.items[0].label, /素材观察|完整场景|短剧本/);
+  assert.doesNotMatch(
+    grounded.items.map((item) => `${item.label} ${item.description}`).join(' '),
+    /逐条对应|统一参考|先试 3 条|\[loop\]/u,
+  );
+
+  const unavailable = creatorSuggestionSet(loopContext, plan, {
+    responseText: [
+      '## 暂时无法核验参考素材',
+      '你上传的 1 张图片仍然保留，当前模型不能可靠读取画面。',
+      '为了避免假装看过素材，本轮没有生成剧本。',
+    ].join('\n'),
+    responseEvidence: {
+      mode: 'media-unavailable',
+      errorCode: 'media-model-incompatible',
+      mediaGrounding: { status: 'unavailable' },
+    },
+  });
+  assert.equal(unavailable.source.mediaGroundingStatus, 'unavailable');
+  assert.deepEqual(unavailable.items.map((item) => item.label), [
+    '保持附件，换视觉模型重试',
+    '保持附件，重新读取一次',
+    '忽略附件，只按文字创作',
+  ]);
+  assert.equal(unavailable.items.every((item) => item.disabledReason === ''), true);
 });

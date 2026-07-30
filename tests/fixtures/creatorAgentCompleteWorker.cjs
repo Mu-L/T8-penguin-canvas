@@ -25,4 +25,3 @@ process.stdout.write(JSON.stringify({
   duplicate: result.duplicate,
   eventId: result.assistantEvent.eventId,
 }));
-

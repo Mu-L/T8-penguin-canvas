@@ -9,6 +9,7 @@ const path = require('path');
 
 const DEFAULT_MAX_BYTES = 30 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_CONNECT_TIMEOUT_MS = 3_000;
 const DEFAULT_MAX_REDIRECTS = 4;
 const DEFAULT_JSON_MAX_BYTES = 2 * 1024 * 1024;
 const DEFAULT_JSON_MAX_DEPTH = 64;
@@ -372,7 +373,40 @@ async function resolveTunPublicDns(hostname, options = {}) {
   );
 }
 
-async function resolvePublicAddress(
+function normalizedPublicRecords(records, bypass) {
+  const normalizedRecords = (Array.isArray(records) ? records : (records ? [records] : [])).map((record) => {
+    const address = normalizeAddress(record?.address);
+    const detectedFamily = net.isIP(address);
+    const family = Number(record?.family) || detectedFamily;
+    return { address, family, detectedFamily };
+  });
+  if (!normalizedRecords.length || normalizedRecords.some((record) => (
+    !record.detectedFamily || record.family !== record.detectedFamily || (!bypass && isPrivateAddress(record.address))
+  ))) {
+    throw remoteMediaError('private_address', '远程地址不是全球可路由单播地址，已拒绝访问。');
+  }
+  const deduped = [];
+  const seen = new Set();
+  for (const record of normalizedRecords) {
+    const key = `${record.family}:${record.address}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push({
+      address: record.address,
+      family: record.family,
+      tunFake: false,
+    });
+  }
+  // Prefer IPv4 when both families are available. A sizeable group of Windows
+  // users has IPv6 enabled but no usable IPv6 route after TUN/VPN changes.
+  // IPv6-only destinations are still supported and are attempted normally.
+  return deduped.sort((left, right) => {
+    if (left.family === right.family) return 0;
+    return left.family === 4 ? -1 : 1;
+  });
+}
+
+async function resolvePublicAddresses(
   hostname,
   lookupImpl = dns.lookup,
   allowPrivateForTests = false,
@@ -405,31 +439,33 @@ async function resolvePublicAddress(
   // independently resolved public addresses without weakening the SSRF policy.
   const tunFakeRecord = normalizedRecords.find((record) => isTunFakeAddress(record.address));
   if (tunFakeRecord && acceptTunFake) {
-    return {
+    return [{
       address: tunFakeRecord.address,
       family: tunFakeRecord.family,
       tunFake: true,
-    };
+    }];
   }
   if (tunFakeRecord) {
     records = await publicLookupImpl(normalizedHostname);
-    normalizedRecords = records.map((record) => {
-      const address = normalizeAddress(record?.address);
-      const detectedFamily = net.isIP(address);
-      const family = Number(record?.family) || detectedFamily;
-      return { address, family, detectedFamily };
-    });
   }
-  if (!normalizedRecords.length || normalizedRecords.some((record) => (
-    !record.detectedFamily || record.family !== record.detectedFamily || (!bypass && isPrivateAddress(record.address))
-  ))) {
-    throw remoteMediaError('private_address', '远程地址不是全球可路由单播地址，已拒绝访问。');
-  }
-  return {
-    address: normalizedRecords[0].address,
-    family: normalizedRecords[0].family,
-    tunFake: false,
-  };
+  return normalizedPublicRecords(records, bypass);
+}
+
+async function resolvePublicAddress(
+  hostname,
+  lookupImpl = dns.lookup,
+  allowPrivateForTests = false,
+  publicLookupImpl = resolveTunPublicDns,
+  acceptTunFake = true,
+) {
+  const records = await resolvePublicAddresses(
+    hostname,
+    lookupImpl,
+    allowPrivateForTests,
+    publicLookupImpl,
+    acceptTunFake,
+  );
+  return records[0];
 }
 
 function positiveInteger(value, fallback) {
@@ -620,8 +656,19 @@ function issuePinnedRequest(target, pinned, headers, state, requestOptions = {})
     let bodyCompleted = !requestOptions.requireBodyCompletion;
     let settled = false;
     let deadlineTimer;
+    let connectTimer;
+    let requestSocket;
+    let connectedEvent;
+    const clearConnectTimer = () => {
+      if (connectTimer) clearTimeout(connectTimer);
+      connectTimer = null;
+      if (requestSocket && connectedEvent) requestSocket.off(connectedEvent, clearConnectTimer);
+      requestSocket = null;
+      connectedEvent = null;
+    };
     const cleanup = () => {
       if (deadlineTimer) clearTimeout(deadlineTimer);
+      clearConnectTimer();
       if (request) request.setTimeout(0);
       if (pendingResponse) {
         pendingResponse.off('error', fail);
@@ -677,6 +724,7 @@ function issuePinnedRequest(target, pinned, headers, state, requestOptions = {})
           return;
         }
         pendingResponse = response;
+        clearConnectTimer();
         response.once('error', fail);
         response.once('aborted', responseAborted);
         if (requestOptions.requireBodyCompletion && !bodyQueued) {
@@ -690,6 +738,23 @@ function issuePinnedRequest(target, pinned, headers, state, requestOptions = {})
           return;
         }
         maybeResolve();
+      });
+      request.once('socket', (socket) => {
+        requestSocket = socket;
+        if (!socket.connecting) {
+          clearConnectTimer();
+          return;
+        }
+        connectedEvent = target.protocol === 'https:' ? 'secureConnect' : 'connect';
+        socket.once(connectedEvent, clearConnectTimer);
+        const connectTimeoutMs = Math.max(
+          1,
+          Math.min(state.connectTimeoutMs, remainingDeadlineMs(state)),
+        );
+        connectTimer = setTimeout(() => request.destroy(remoteMediaError(
+          'connect_timeout',
+          `连接远程地址 ${pinned.family === 6 ? 'IPv6' : 'IPv4'} 超时，正在尝试其他可用地址。`,
+        )), connectTimeoutMs);
       });
       request.setTimeout(state.idleTimeoutMs, () => request.destroy(fetchTimeoutError('idle')));
       deadlineTimer = setTimeout(() => request.destroy(fetchTimeoutError('deadline')), remaining);
@@ -714,6 +779,19 @@ function issuePinnedRequest(target, pinned, headers, state, requestOptions = {})
   });
 }
 
+async function issuePinnedCandidates(target, candidates, headers, state) {
+  let lastError = null;
+  for (const pinned of candidates) {
+    try {
+      return await issuePinnedRequest(target, pinned, headers, state);
+    } catch (error) {
+      lastError = error;
+      if (remainingDeadlineMs(state) <= 1) break;
+    }
+  }
+  throw lastError || remoteMediaError('remote_connect_failed', '无法连接远程素材地址。');
+}
+
 async function openSafeRemoteResponse(inputUrl, options, state, initialRedirectCount = 0) {
   let currentUrl = inputUrl;
   let previousTarget = null;
@@ -726,8 +804,8 @@ async function openSafeRemoteResponse(inputUrl, options, state, initialRedirectC
     const target = parseRemoteUrl(currentUrl, options);
     if (previousTarget && previousTarget.origin !== target.origin) sensitiveHeadersAllowed = false;
     const privateTestSetting = options.allowPrivateForTests;
-    let pinned = await withinDeadline(
-      resolvePublicAddress(
+    let pinnedCandidates = await withinDeadline(
+      resolvePublicAddresses(
         target.hostname,
         options.lookupImpl || dns.lookup,
         privateTestSetting,
@@ -738,19 +816,19 @@ async function openSafeRemoteResponse(inputUrl, options, state, initialRedirectC
     );
     let response;
     try {
-      response = await issuePinnedRequest(
+      response = await issuePinnedCandidates(
         target,
-        pinned,
+        pinnedCandidates,
         requestHeaders(options, sensitiveHeadersAllowed),
         state,
       );
     } catch (error) {
-      if (!pinned.tunFake) throw error;
+      if (!pinnedCandidates.some((candidate) => candidate.tunFake)) throw error;
       // TUN may have been disabled after the task was submitted or may not own
       // this Fake-IP anymore. Resolve the same hostname independently and retry
       // only this idempotent download; the generation request is never replayed.
-      pinned = await withinDeadline(
-        resolvePublicAddress(
+      pinnedCandidates = await withinDeadline(
+        resolvePublicAddresses(
           target.hostname,
           async (name) => (options.publicLookupImpl || resolveTunPublicDns)(name),
           privateTestSetting,
@@ -759,9 +837,9 @@ async function openSafeRemoteResponse(inputUrl, options, state, initialRedirectC
         ),
         state,
       );
-      response = await issuePinnedRequest(
+      response = await issuePinnedCandidates(
         target,
-        pinned,
+        pinnedCandidates,
         requestHeaders(options, sensitiveHeadersAllowed),
         state,
       );
@@ -900,6 +978,7 @@ function createTransferState(options) {
   const deadlineMs = positiveInteger(options.deadlineMs, timeoutMs);
   return {
     deadlineAt: Date.now() + deadlineMs,
+    connectTimeoutMs: positiveInteger(options.connectTimeoutMs, DEFAULT_CONNECT_TIMEOUT_MS),
     idleTimeoutMs: positiveInteger(options.idleTimeoutMs, timeoutMs),
     maxBytes: positiveInteger(options.maxBytes, DEFAULT_MAX_BYTES),
     maxRedirects: nonNegativeInteger(options.maxRedirects, DEFAULT_MAX_REDIRECTS),

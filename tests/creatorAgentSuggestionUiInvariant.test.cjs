@@ -33,4 +33,3 @@ test('Creator Agent renders suggestion buttons only behind the complete invarian
   assert.match(panel, /data-suggestion-executable=\{suggestion\.executable \? 'true' : 'false'\}/);
   assert.match(panel, /data-required-capabilities=\{suggestion\.requiredCapabilityIds\.join\(','\)\}/);
 });
-
