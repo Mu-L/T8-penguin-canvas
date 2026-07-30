@@ -9,9 +9,9 @@ Turn creative intent into an editable production plan, then use `zcanvas` as the
 
 ## Current release baseline
 
-- The current stable desktop and automatic-update release is `v2.7.1`: <https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.1>.
-- Its immutable release Tag and packaged-source commit are `a3b54c9141060e2e34f744714db6606856c58dcc`. Later metadata-only commits on `main` do not move that Tag.
-- The release contains the Creator Agent single-decision stage flow, completed-response-only SuggestionSets, image/Story default-model corrections, and shared system-network-first recovery for LLM/Vision, image, video, audio, 3D, RunningHub, and the Seedance NZ provider path.
+- The desktop and automatic-update release represented by this source is `v2.7.2`: <https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.2>.
+- Its immutable `v2.7.2` release Tag must be fixed to the packaged-source commit. Later metadata-only commits on `main` must not move that Tag.
+- This release adds terminal handling for RunningHub TXT, Markdown, JSON, and CSV outputs. Pure-text and mixed text/media tasks must download, validate, persist, and return their original task results once, without permanent `MATERIALIZING` polling or a second submission.
 - Provider work is complete only after the original task result is downloaded, validated, persisted, and linked. Real Provider-network, multi-device collaboration, and installed-upgrade evidence remains explicitly deferred by the owner and must never be reported as passed before it exists.
 
 ## Optimize for the creator
