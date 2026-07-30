@@ -1,37 +1,38 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.7.2",
-  "lastUpdated": "2026-07-31-v2.7.2-rh-text-output-terminal-fix-release-candidate",
+  "lastUpdated": "2026-07-31-v2.7.2-rh-text-output-terminal-fix-released",
   "release": {
-    "status": "release-candidate",
+    "status": "released-postrelease-evidence-pending",
     "version": "2.7.2",
     "date": "2026-07-31",
-    "publishedAt": null,
+    "publishedAt": "2026-07-30T20:31:01Z",
     "tag": "v2.7.2",
-    "latest": false,
-    "sourceCommit": null,
+    "latest": true,
+    "sourceCommit": "8ecc882fb6e030b38c7f37b4d16e69267cce537f",
     "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.2",
     "artifacts": {
       "installer": {
         "name": "T8-PenguinCanvas-Setup-2.7.2.exe",
-        "size": null,
-        "sha256": null
+        "size": 1304665337,
+        "sha256": "26847cd07c4dc1bbb491ec3ebd9688e3aa7e47d1bbefd91b43e60c50d0d2cf44"
       },
       "blockmap": {
         "name": "T8-PenguinCanvas-Setup-2.7.2.exe.blockmap",
-        "size": null,
-        "sha256": null
+        "size": 1359962,
+        "sha256": "d60ba173f3de3a748efb9cee36db8f63d6b73c81826f5a66e03cd8e50eebf9ac"
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": null,
-        "sha256": null
+        "size": 362,
+        "sha256": "f2a76e9fb8ae5e52b5e1efae2c0067c67a2ad5c937f3f08fd3d593a663bed818"
       }
     },
     "verification": [
-      "v2.7.2 已获用户明确授权发布；正式 Tag、Release target 与自动更新资产将在唯一一次 Electron/NSIS 正式打包完成后回写。",
+      "v2.7.2 已正式发布为 GitHub Latest Release；Tag 与 Release target 精确固定到安装包对应源码 8ecc882fb6e030b38c7f37b4d16e69267cce537f，后续发布事实提交不得移动该 Tag。",
       "RunningHub 文本输出真实 WebApp 与定向回归已通过；TypeScript、feature-sync、公开面、RH 工具箱、协作延期和 core/development 工作树发布前门均已通过。",
-      "安装包、blockmap 与 latest.yml 的 size、SHA-256、sealed recovery、GitHub 元数据和完整远端回下载证据将在发布完成后回写。",
+      "Electron/Vite/后端加密与运行时归档的正式应用构建只执行一次；在运行时归档恢复后，Electron/NSIS 安装包也只封装一次，post-build 完整通过，没有重复打包。",
+      "安装包、blockmap 与 latest.yml 的 size、SHA-256 已通过 sealed recovery、GitHub digest/size 元数据、发布前完整远端回下载字节核验和最终 Latest 状态校验。",
       "用户已明确授权先发布、后补真实 Provider、协作多端与安装升级证据；延期不将尚未执行的证据标记为通过。"
     ]
   },
@@ -47,7 +48,7 @@
     ]
   },
   "runningHubTextOutputTerminalFix": {
-    "status": "release-candidate-v2.7.2",
+    "status": "released-v2.7.2",
     "date": "2026-07-31",
     "releaseIncluded": true,
     "highlights": [
@@ -58,7 +59,8 @@
     "verification": [
       "使用用户指定 WebApp 2082878851868348418 完成真实调用：实际上游返回 txt + flac，3 秒间隔轮询仅经历 RUNNING → SUCCESS，MATERIALIZING 为 0 次，最终返回 1 个本地 flac、1 段文本和 1 个本地 txt。",
       "对同一真实 taskId 再次查询仍为 SUCCESS，媒体地址和文本内容保持稳定一致，没有重新提交任务。",
-      "RunningHub 文本、站点与 RH 工具箱定向回归 32/32 通过；TypeScript type-check、Node 语法与 diff-check 已通过开发轮验证，修复 checkpoint 与 v2.7.1 发布基线语义合并完成。"
+      "RunningHub 文本、站点与 RH 工具箱定向回归 32/32 通过；TypeScript type-check、Node 语法与 diff-check 已通过开发轮验证，修复 checkpoint 与 v2.7.1 发布基线语义合并完成。",
+      "该修复已进入 v2.7.2 正式 Electron 自动更新版；Release 为非草稿、非预发布并已成为 Latest，三项远端资产通过完整字节回下载核验。"
     ]
   },
   "providerSystemNetworkCompatibilityCorrection": {

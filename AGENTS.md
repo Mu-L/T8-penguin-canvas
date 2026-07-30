@@ -23,7 +23,7 @@
 ## 产品版本号规则
 
 - 本项目使用用户指定的十进制展示序列：每一段只使用 `0-9`。`v2.6.9` 的下一正式版本必须是 `v2.7.0`，禁止创建、打包、推送、打 tag 或发布 `v2.6.10`。
-- 当前正式版本为 `v2.7.1`，已授权的下一发布候选与开发基线为 `v2.7.2`；v2.7.1 Tag 固定指向 `a3b54c9141060e2e34f744714db6606856c58dcc`，不得移动。v2.7.2 只允许从固定源码提交执行一次正式 Electron/NSIS 打包，并在发布后回写 Tag、Release、自动更新资产及哈希事实。改版本前必须同时核对 `package.json`、`package-lock.json`、README、`features.json`、项目 `SKILL.md`、release notes、自动更新元数据与 Git tag，不能只修改单个文件。
+- 当前正式版本为 `v2.7.2`；v2.7.2 Tag 固定指向安装包对应源码 `8ecc882fb6e030b38c7f37b4d16e69267cce537f`，不得移动，发布后的文档或元数据提交不得改写该 Tag。该版本的正式应用构建与最终 Electron/NSIS 安装包均只执行一次，三项自动更新资产已通过 sealed recovery、GitHub digest/size 与完整远端回下载核验。改版本前必须同时核对 `package.json`、`package-lock.json`、README、`features.json`、项目 `SKILL.md`、release notes、自动更新元数据与 Git tag，不能只修改单个文件。
 
 ## 已完成的无损集成
 

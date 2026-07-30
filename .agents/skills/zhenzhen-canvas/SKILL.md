@@ -10,8 +10,9 @@ Turn creative intent into an editable production plan, then use `zcanvas` as the
 ## Current release baseline
 
 - The desktop and automatic-update release represented by this source is `v2.7.2`: <https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.2>.
-- Its immutable `v2.7.2` release Tag must be fixed to the packaged-source commit. Later metadata-only commits on `main` must not move that Tag.
+- Its immutable `v2.7.2` release Tag is fixed to packaged-source commit `8ecc882fb6e030b38c7f37b4d16e69267cce537f`. Later metadata-only commits on `main` must not move that Tag.
 - This release adds terminal handling for RunningHub TXT, Markdown, JSON, and CSV outputs. Pure-text and mixed text/media tasks must download, validate, persist, and return their original task results once, without permanent `MATERIALIZING` polling or a second submission.
+- The v2.7.2 installer, blockmap, and update manifest passed local post-build validation, sealed recovery checks, GitHub digest/size checks, and a complete pre-publication byte download. The public Release is non-draft, non-prerelease, and Latest.
 - Provider work is complete only after the original task result is downloaded, validated, persisted, and linked. Real Provider-network, multi-device collaboration, and installed-upgrade evidence remains explicitly deferred by the owner and must never be reported as passed before it exists.
 
 ## Optimize for the creator
