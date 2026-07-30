@@ -3,6 +3,9 @@
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 const {
+  sha256CanonicalText,
+} = require('./canonicalTextDigest.cjs');
+const {
   COMMAND_CATALOG_PATH,
   CREATIVE_CAPABILITY_GRAPH_PATH,
   CREATIVE_CAPABILITY_SURFACES_PATH,
@@ -151,7 +154,7 @@ function readManifest() {
   const capabilityManifest = JSON.parse(capabilityBuffer.toString('utf8'));
   const capabilityGraph = JSON.parse(capabilityGraphBuffer.toString('utf8'));
   const capabilitySurfaces = JSON.parse(capabilitySurfacesBuffer.toString('utf8'));
-  const capabilityDigest = crypto.createHash('sha256').update(capabilityBuffer).digest('hex');
+  const capabilityDigest = sha256CanonicalText(capabilityBuffer);
   if (parsed?.schema !== 't8-zcanvas-manifest-v1') throw new Error('zcanvas manifest schema invalid');
   if (parsed.commandCatalog !== 'commandCatalog.json'
     || parsed.creativeCapabilityGraph !== 'generated/creative-capability-graph.json'

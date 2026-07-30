@@ -5,6 +5,9 @@ const fs = require('node:fs');
 const Module = require('node:module');
 const path = require('node:path');
 const ts = require('typescript');
+const {
+  canonicalTextBytes,
+} = require('../src/canonicalTextDigest.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..', '..');
 const MODEL_SOURCE = path.join(ROOT, 'src', 'providers', 'models.ts');
@@ -69,7 +72,7 @@ function sourceDigest() {
   for (const filename of SOURCE_PATHS) {
     digest.update(path.relative(ROOT, filename).replace(/\\/g, '/'));
     digest.update('\0');
-    digest.update(fs.readFileSync(filename));
+    digest.update(canonicalTextBytes(fs.readFileSync(filename)));
     digest.update('\0');
   }
   return digest.digest('hex');

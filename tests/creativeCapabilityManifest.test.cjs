@@ -57,9 +57,23 @@ const {
   assertCapabilityCoverageReceipt,
   buildCapabilityCoverageReceipt,
 } = require('../tools/zcanvas-cli/src/capabilityCoverage.cjs');
+const {
+  canonicalTextBytes,
+  sha256CanonicalText,
+} = require('../tools/zcanvas-cli/src/canonicalTextDigest.cjs');
 
 
 const ROOT = path.resolve(__dirname, '..');
+
+test('creative capability text digests are stable across Windows and Unix line endings', () => {
+  const lf = '{"schema":"example"}\nline two\n';
+  const crlf = lf.replace(/\n/g, '\r\n');
+  const cr = lf.replace(/\n/g, '\r');
+  assert.equal(canonicalTextBytes(crlf).toString('utf8'), lf);
+  assert.equal(canonicalTextBytes(cr).toString('utf8'), lf);
+  assert.equal(sha256CanonicalText(lf), sha256CanonicalText(crlf));
+  assert.equal(sha256CanonicalText(lf), sha256CanonicalText(cr));
+});
 
 test('creative capability manifest is one validated source for backend and zcanvas', () => {
   const backend = readCreativeCapabilityManifest({ disableCache: true });

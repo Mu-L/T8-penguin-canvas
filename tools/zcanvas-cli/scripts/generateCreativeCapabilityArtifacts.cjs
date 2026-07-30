@@ -1,8 +1,11 @@
 'use strict';
 
-const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const {
+  canonicalTextBytes,
+  sha256CanonicalText,
+} = require('../src/canonicalTextDigest.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..', '..');
 const SOURCE = path.join(ROOT, 'tools', 'zcanvas-cli', 'creativeCapabilityManifest.json');
@@ -55,7 +58,7 @@ function readManifest() {
   return {
     raw,
     manifest,
-    digest: crypto.createHash('sha256').update(raw).digest('hex'),
+    digest: sha256CanonicalText(raw),
   };
 }
 
@@ -311,7 +314,8 @@ function capabilitySurfacesArtifact(surfaces) {
 
 function sameFile(filename, expected) {
   try {
-    return fs.readFileSync(filename, 'utf8') === expected;
+    return canonicalTextBytes(fs.readFileSync(filename))
+      .equals(canonicalTextBytes(expected));
   } catch (error) {
     if (error?.code === 'ENOENT') return false;
     throw error;

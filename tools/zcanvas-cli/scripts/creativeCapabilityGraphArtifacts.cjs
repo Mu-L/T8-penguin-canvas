@@ -3,12 +3,22 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const {
+  sha256CanonicalText,
+} = require('../src/canonicalTextDigest.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..', '..');
 const NODE_SCHEMA_SOURCE = path.join(ROOT, 'backend', 'src', 'shared', 'canvasNodeSchema.json');
 const BACKEND_TARGET = path.join(ROOT, 'backend', 'src', 'shared', 'creativeCapabilityGraph.json');
 const CLI_TARGET = path.join(ROOT, 'tools', 'zcanvas-cli', 'generated', 'creative-capability-graph.json');
 const COVERAGE_RECEIPT_SOURCE = path.join(ROOT, 'tools', 'zcanvas-cli', 'src', 'capabilityCoverage.cjs');
+const CANONICAL_TEXT_DIGEST_SOURCE = path.join(
+  ROOT,
+  'tools',
+  'zcanvas-cli',
+  'src',
+  'canonicalTextDigest.cjs',
+);
 const MARKDOWN_TARGET = path.join(
   ROOT,
   '.agents',
@@ -179,7 +189,7 @@ function readCanvasNodeSchema(filename = NODE_SCHEMA_SOURCE) {
   return {
     raw,
     schema,
-    digest: sha256(raw),
+    digest: sha256CanonicalText(raw),
     protocolDigest: digestAgentResult(schema),
   };
 }
@@ -404,8 +414,9 @@ function buildCapabilityGraph(options = {}) {
     runtimeCatalogSources: String(runtimeCatalog.sourceDigest || ''),
     runtimeCatalogArtifact: runtimeArtifactDigest,
     handlerBindings: bindingDigest,
-    capabilityGraphCompiler: sha256(fs.readFileSync(__filename)),
-    coverageReceiptCompiler: sha256(fs.readFileSync(COVERAGE_RECEIPT_SOURCE)),
+    capabilityGraphCompiler: sha256CanonicalText(fs.readFileSync(__filename)),
+    coverageReceiptCompiler: sha256CanonicalText(fs.readFileSync(COVERAGE_RECEIPT_SOURCE)),
+    canonicalTextDigestCompiler: sha256CanonicalText(fs.readFileSync(CANONICAL_TEXT_DIGEST_SOURCE)),
   };
   const aggregateDigest = sha256(JSON.stringify(sourceDigests));
 

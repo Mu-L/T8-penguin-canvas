@@ -14,16 +14,17 @@
     "coverageReceiptCompiler": "tools/zcanvas-cli/src/capabilityCoverage.cjs"
   },
   "sourceDigests": {
-    "creativeCapabilityManifest": "862cf87d748e9be79d2859bdb3d31845274b8912eb8169995be6071f98473796",
+    "creativeCapabilityManifest": "36908537be76c1b8bfcecbe1fec079d8a335e6d7d03f470ecd562f823658e0f5",
     "canvasNodeSchema": "c594306f7a1efc8124a25d83c3294ea7fe87c0718e4305a282a3f10f8896e0e7",
-    "canvasNodeSchemaFile": "21806d0f5bee2ebe845f943dc6718293f6f57ff5cfcb57a341d285c21a7707a5",
-    "runtimeCatalogSources": "0bfb3486d4d358d8c430e89adc887bad18b5bc0ac7472fa8e1718d3689ae4605",
-    "runtimeCatalogArtifact": "4286356da647dd83106bbf33701a16352ecfc8c679a1fee79cb2259b32f9ce6f",
+    "canvasNodeSchemaFile": "330bd64abf3de1d183f61dee477670ef72192052a2d516e22805511e6bdc93d1",
+    "runtimeCatalogSources": "0150f7bb46d8299abdae6e4cdd049174eb4f61ce46562c916e03b68427770516",
+    "runtimeCatalogArtifact": "12da452a347171135712ac60faf23b29780b8a646f9391953cf215a7a967a024",
     "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
-    "capabilityGraphCompiler": "05a050818efca904418de7dbd02ac151480295ce1dd98956f740874c615bbede",
-    "coverageReceiptCompiler": "b562109fae3df266c20198b0c079b61330b2f663be78319be9104ef2c3457961"
+    "capabilityGraphCompiler": "1a611d7e91dcf523e0536a92e9adb6ba2d884689a65fa10274bcda3a05ef9840",
+    "coverageReceiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7",
+    "canonicalTextDigestCompiler": "b0afcf28a257fbbd8f391edc117348f8f2ede1b4a039ae91bce25a8d563ac0cf"
   },
-  "aggregateDigest": "b2d7d10efccd54a8725fce866940cd40eeb8caaa2a6eae6730da0b231097d530",
+  "aggregateDigest": "8028c974da2fdcefd34a0755353b7eba94761e05707a24960e61254a8138b05e",
   "principles": {
     "oneSentenceStart": true,
     "directCanvasMutation": false,
@@ -6016,7 +6017,7 @@
   ],
   "runtime": {
     "schema": "t8-creative-runtime-catalog-v1",
-    "sourceDigest": "0bfb3486d4d358d8c430e89adc887bad18b5bc0ac7472fa8e1718d3689ae4605",
+    "sourceDigest": "0150f7bb46d8299abdae6e4cdd049174eb4f61ce46562c916e03b68427770516",
     "platforms": [
       {
         "id": "zhenzhen",
@@ -10433,11 +10434,11 @@
   "coverageReceipt": {
     "schema": "t8-creative-capability-coverage-receipt-v1",
     "sourceDigests": {
-      "capabilityManifest": "862cf87d748e9be79d2859bdb3d31845274b8912eb8169995be6071f98473796",
+      "capabilityManifest": "36908537be76c1b8bfcecbe1fec079d8a335e6d7d03f470ecd562f823658e0f5",
       "nodeSchema": "c594306f7a1efc8124a25d83c3294ea7fe87c0718e4305a282a3f10f8896e0e7",
-      "runtimeCatalog": "0bfb3486d4d358d8c430e89adc887bad18b5bc0ac7472fa8e1718d3689ae4605",
+      "runtimeCatalog": "0150f7bb46d8299abdae6e4cdd049174eb4f61ce46562c916e03b68427770516",
       "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
-      "receiptCompiler": "b562109fae3df266c20198b0c079b61330b2f663be78319be9104ef2c3457961"
+      "receiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7"
     },
     "inventory": {
       "nodes": {
@@ -10464,6 +10465,6 @@
       "missingCompatibilityEdges": []
     },
     "complete": true,
-    "digest": "444cedddd9f8102ab68af700ea8e39a41690b240f42e6c33bb8dbb1602315760"
+    "digest": "84eb3d1197da935e6be299812e5adfb57fe29b157fcedfd24a6a00b9879c4df9"
   }
 }

@@ -6,6 +6,14 @@ const {
 } = require('./agentControlCapabilityHandlers');
 
 const SOURCE_ROOT = path.resolve(__dirname, '..', '..', '..');
+const {
+  sha256CanonicalText,
+} = require(existingFile([
+  String(process.resourcesPath || '').trim()
+    ? path.join(process.resourcesPath, 'tools', 'zcanvas-cli', 'src', 'canonicalTextDigest.cjs')
+    : '',
+  path.join(SOURCE_ROOT, 'tools', 'zcanvas-cli', 'src', 'canonicalTextDigest.cjs'),
+]));
 const CAPABILITY_SCHEMA = 't8-creative-capability-manifest-v1';
 const CAPABILITY_ID_RE = /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$/;
 const CLI_NAME_RE = /^[a-z][a-z0-9-]*$/;
@@ -379,7 +387,7 @@ function readCreativeCapabilityManifest(options = {}) {
   const manifest = validateCreativeCapabilityManifest(JSON.parse(buffer.toString('utf8')));
   const record = Object.freeze({
     manifestPath,
-    digest: crypto.createHash('sha256').update(buffer).digest('hex'),
+    digest: sha256CanonicalText(buffer),
     schema: manifest.schema,
     version: String(manifest.version || ''),
     principles: Object.freeze({ ...manifest.principles }),
