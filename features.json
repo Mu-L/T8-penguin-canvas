@@ -1,34 +1,37 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.7.1",
-  "lastUpdated": "2026-07-31-v2.7.1-release-candidate",
+  "lastUpdated": "2026-07-31-v2.7.1-released",
   "release": {
-    "status": "release-candidate",
+    "status": "released",
     "version": "2.7.1",
     "date": "2026-07-31",
+    "publishedAt": "2026-07-30T17:53:30Z",
     "tag": "v2.7.1",
-    "latest": false,
-    "sourceCommit": "pending-release-commit",
+    "latest": true,
+    "sourceCommit": "a3b54c9141060e2e34f744714db6606856c58dcc",
     "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.1",
     "artifacts": {
       "installer": {
         "name": "T8-PenguinCanvas-Setup-2.7.1.exe",
-        "size": null,
-        "sha256": null
+        "size": 1304642885,
+        "sha256": "b6166fac2929b7140440ee61b438b6f8ddf35115ef575c706c892ed67a2eba7d"
       },
       "blockmap": {
         "name": "T8-PenguinCanvas-Setup-2.7.1.exe.blockmap",
-        "size": null,
-        "sha256": null
+        "size": 1359921,
+        "sha256": "541f6d8184ffbd00fdfc9c97064c2251a120df0774f1e1176bd9e087132c2445"
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": null,
-        "sha256": null
+        "size": 362,
+        "sha256": "7e66486ec34ebc0a2d35df6fc1e017c965ccdfc38ef1aba37e7bf00366522518"
       }
     },
     "verification": [
-      "v2.7.1 发布候选已完成源码与回归准备；精确 source commit、安装包大小与摘要将在唯一一次正式打包和 GitHub Release 完成后回填。",
+      "v2.7.1 已正式发布并标记为 GitHub Latest；Tag 与 Release target 精确指向 a3b54c9141060e2e34f744714db6606856c58dcc。",
+      "Electron/Vite/后端加密与运行时归档的正式应用构建只执行一次；发布门发现 FFmpeg/ffprobe sidecar 后仅对已验证的 win-unpacked 执行一次 NSIS prepackaged 重封装，没有重复构建应用。",
+      "安装包、blockmap 与 latest.yml 已通过 post-build、sealed recovery、GitHub digest/size 元数据和三项完整远端回下载字节核验。",
       "用户已明确授权先发布、后补真实 Provider、协作多端与安装升级证据；延期不将尚未执行的证据标记为通过。"
     ]
   },
@@ -43,7 +46,7 @@
     ]
   },
   "providerSystemNetworkCompatibilityCorrection": {
-    "status": "release-candidate-v2.7.1",
+    "status": "released-v2.7.1",
     "date": "2026-07-31",
     "releaseIncluded": true,
     "highlights": [
@@ -59,7 +62,7 @@
     ]
   },
   "creatorAgentRecommendationPublicationAndStageConfirmation": {
-    "status": "release-candidate-v2.7.1",
+    "status": "released-v2.7.1",
     "date": "2026-07-30",
     "releaseIncluded": true,
     "highlights": [
@@ -74,7 +77,7 @@
     ]
   },
   "imageAndStoryDefaultModelCorrection": {
-    "status": "release-candidate-v2.7.1",
+    "status": "released-v2.7.1",
     "date": "2026-07-30",
     "releaseIncluded": true,
     "highlights": [
@@ -88,7 +91,7 @@
     ]
   },
   "creatorAgentSingleDecisionStages": {
-    "status": "release-candidate-v2.7.1",
+    "status": "released-v2.7.1",
     "date": "2026-07-30",
     "releaseIncluded": true,
     "schema": "t8-creator-decision-document-v1",
