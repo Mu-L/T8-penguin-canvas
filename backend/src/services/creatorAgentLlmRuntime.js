@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const { generateChatWithProvider } = require('../providers/adapters');
 const { normalizeAdvancedProviders } = require('../providers/registry');
 const { createCreatorArtifactProposal } = require('./creatorAgentArtifacts');
+const { creatorDecisionPromptContract } = require('./creatorAgentDecisions');
 
 const CREATOR_RESPONSE_EVIDENCE_SCHEMA = 't8-creator-agent-response-evidence-v1';
 const MAX_HISTORY_MESSAGES = 8;
@@ -134,7 +135,7 @@ function stagedStoryContract(input = {}) {
     idea: [
       '当前唯一阶段是“创意”。只交付可确认的创意简报，不提前写完整剧本、资产表、分镜或生成计划。',
       '必须包含：素材观察（如有）、一句话核心、受众与用途、推荐时长/画幅、主角或主体、具体事件、情绪变化、视觉方向、必须保留和禁止项。',
-      '结尾明确标出“本阶段待确认”，只列真正会改变创意方向的少量内容；合理默认直接写成建议值。',
+      '合理默认直接写成建议值；内部仍未处理的决策不得作为清单输出，本轮结尾只提出系统指定的当前唯一问题。',
     ],
     script: [
       '当前唯一阶段是“剧本”。必须以已经确认的创意简报为上游，交付完整可编辑剧本，不返回创意问卷，也不提前做资产或分镜。',
@@ -360,9 +361,6 @@ function offlineV0(input = {}) {
       '- **情绪路径**：建立日常与亲近感 → 出现一个小变化 → 主体主动回应 → 用具体动作形成温暖或有记忆点的收束。',
       '- **视觉方向**：清晰主体、真实空间、统一光向和克制色彩；参考素材内容尚未核验时不得写入外貌、身份或场景细节。',
       '- **必须保留**：用户原始目标、已确认素材和明确风格；后续不得无确认改变。',
-      '',
-      '### 本阶段待确认',
-      '- 确认这一句核心与推荐时长后，下一阶段才写完整剧本。',
     ] : stage === 'script' ? [
       '### 当前阶段：完整剧本',
       `- **已确认创意目标**：${goal}`,
@@ -395,14 +393,18 @@ function offlineV0(input = {}) {
       '- **验证版本**：每一步都保留来源、版本和采用理由，避免重复生成覆盖已确认内容。',
     ],
   };
+  const currentDecision = input.decisionTurn?.currentDecision || null;
+  const nextDecisionSection = currentDecision ? [
+    '',
+    '### 下一步只确认一件事',
+    `**${currentDecision.topic}**`,
+    currentDecision.question,
+    '也可以不选按钮，直接写你的答案或补充要求。',
+  ] : [];
   return [
     ...headers,
     ...(bodies[family] || bodies.mixed),
-    '',
-    '### 当前建议值与待确认',
-    '- 若没有指定渠道，先按移动端优先、中文交付处理。',
-    '- 若没有指定风格，先采用清晰、可信、不过度装饰的方向。',
-    '- 你可以直接改上面任意一项；确认前不会替你生成素材或修改画布。',
+    ...nextDecisionSection,
   ].join('\n');
 }
 
@@ -608,7 +610,7 @@ function systemPrompt(input = {}) {
   return [
     '你是贞贞无限画布的创作 Agent。你的职责是直接帮助创作者产出可编辑内容，不是把工作退回给用户。',
     '当前任务可能是电商、品牌、海报、修图、角色、故事、分镜、视频、音频或混合创作；必须根据用户真实需求选择最短路径，不得一律套用故事板。',
-    '同一轮先交付有实质内容的 V0，再列少量真正会改变结果的待确认项。可合理默认的条件直接写明建议值并继续。',
+    '同一轮先交付有实质内容的可编辑版本，再只提出系统指定的当前一个决策。其余待处理内容保存在内部版本文档中，不得在回复里倾倒问题清单。',
     '明确区分用户事实、你的建议和未知项。不得编造商品参数、人物身份、品牌规则、素材内容、模型调用结果或已经发生的画布修改。',
     '本轮只回复创作正文；不要声称已经运行节点、生成素材、覆盖内容或写入画布。工具和画布动作由后续受控计划单独处理。',
     '不要在正文末尾生成产品 UI 的“三个下一步按钮”，SuggestionSet 会由系统根据本轮产物另行形成。',
@@ -617,6 +619,7 @@ function systemPrompt(input = {}) {
     mediaGroundingContract(input),
     stagedStoryContract(input),
     taskResponseContract(input),
+    creatorDecisionPromptContract(input.decisionTurn),
     `任务类型：${taskFamily(input)}；计划种类：${boundedText(input.kind, 40) || 'mixed'}；recipe：${boundedText(input.recipe, 80) || 'general'}。`,
   ].join('\n');
 }
@@ -637,7 +640,7 @@ function userMessage(input = {}) {
     `用户要求：${prompt}`,
     `当前生产阶段：${productionPhase(input)}`,
     metadata.length ? `附件元数据：${JSON.stringify(metadata)}` : '附件元数据：无',
-    '请直接给出本轮可编辑 V0。不要只复述要求或只给问题。',
+    '请直接给出本轮可编辑内容。不要只复述要求或只给问题；结尾只能提出当前唯一决策。',
   ].join('\n');
   const media = attachmentParts(attachments);
   return media.length

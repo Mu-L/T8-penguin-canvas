@@ -1,36 +1,108 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.7.0",
-  "lastUpdated": "2026-07-30-v2.7.0-released",
+  "version": "2.7.1",
+  "lastUpdated": "2026-07-31-v2.7.1-release-candidate",
   "release": {
-    "status": "released",
-    "version": "2.7.0",
-    "date": "2026-07-30",
-    "tag": "v2.7.0",
-    "latest": true,
-    "sourceCommit": "227b01903b77db0f23fcb5dd648482acb2df6688",
-    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.0",
+    "status": "release-candidate",
+    "version": "2.7.1",
+    "date": "2026-07-31",
+    "tag": "v2.7.1",
+    "latest": false,
+    "sourceCommit": "pending-release-commit",
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.1",
     "artifacts": {
       "installer": {
-        "name": "T8-PenguinCanvas-Setup-2.7.0.exe",
-        "size": 1304585520,
-        "sha256": "7b989c1f6436e972082ef829357d1650b556c8a8ff08f884e705e6794df2dcf9"
+        "name": "T8-PenguinCanvas-Setup-2.7.1.exe",
+        "size": null,
+        "sha256": null
       },
       "blockmap": {
-        "name": "T8-PenguinCanvas-Setup-2.7.0.exe.blockmap",
-        "size": 1359642,
-        "sha256": "d01262e19a26855cb72a2db74b758fcfae3672cd1283e65cfd6231841c2d7f43"
+        "name": "T8-PenguinCanvas-Setup-2.7.1.exe.blockmap",
+        "size": null,
+        "sha256": null
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": 362,
-        "sha256": "05dd99fb2ac6beae08fa890c9bcddbda71468f47466b0d6a4bf5cedb5ed932b5"
+        "size": null,
+        "sha256": null
       }
     },
     "verification": [
-      "v2.7.0 已正式发布为 GitHub Latest；Tag 与 Release target 精确指向安装包对应的 source commit 227b01903b77db0f23fcb5dd648482acb2df6688，发布后只追加元数据记录提交。",
-      "Electron/NSIS 正式安装包只完成一次完整打包；最终资产通过 post-build、sealed recovery、GitHub digest/size 元数据及发布前完整远端回下载字节核验。",
+      "v2.7.1 发布候选已完成源码与回归准备；精确 source commit、安装包大小与摘要将在唯一一次正式打包和 GitHub Release 完成后回填。",
       "用户已明确授权先发布、后补真实 Provider、协作多端与安装升级证据；延期不将尚未执行的证据标记为通过。"
+    ]
+  },
+  "versionSequencePolicy": {
+    "status": "active",
+    "date": "2026-07-30",
+    "currentVersion": "2.7.1",
+    "rules": [
+      "版本号每一段只使用 0-9；v2.6.9 的下一正式版本固定为 v2.7.0。",
+      "禁止创建、打包、推送、打 tag、发布或写入自动更新元数据为 v2.6.10。",
+      "后续改版本前必须同步核对 package.json、package-lock.json、README、features.json、项目 SKILL.md、Release notes、自动更新元数据和 Git tag。"
+    ]
+  },
+  "providerSystemNetworkCompatibilityCorrection": {
+    "status": "release-candidate-v2.7.1",
+    "date": "2026-07-31",
+    "releaseIncluded": true,
+    "highlights": [
+      "纠正 v2.7.0 Provider 恢复层的共同回归：默认工坊、LLM/Vision、图像、视频、音频、RunningHub 与其他统一代理请求恢复为首选运行时系统网络，不再在第一次请求时强制覆盖为自建 Undici dispatcher。",
+      "首次系统网络失败后才启用禁用连接复用的全新系统 DNS 连接；需要重放的写请求必须携带相同 Idempotency-Key，旧调用没有稳定提交标识时不会自动重发，避免重复生成和扣费。",
+      "贞贞的平价AI小屋独立 Provider 同步采用系统网络优先、官方根证书连接回退；公共 DNS 仅保留为已存在任务的只读最终回退，不用于绕过当前代理/TUN 提交生成。",
+      "已完成任务若在状态 JSON 或结果响应体读取阶段超时，会继续使用原 taskId 查询和转存，不再把 100% 下载、响应体停顿或网络切换误报为生成失败。"
+    ],
+    "verification": [
+      "统一 proxy 安全、LLM、图像、视频、音频、RunningHub、下载与任务恢复完整回归 34/34 通过；Electron Node ABI 下系统网络优先、LLM SSE 与完成任务响应恢复定向回归 3/3 通过。",
+      "平价AI小屋模型、上传、提交、轮询、TLS、响应边界与本地素材回归 53/53 通过；Provider trace 与提交上下文回归 10/10 通过。",
+      "本轮未调用真实付费 Provider，未声称覆盖尚未复现的外部用户网络；未执行 build、Electron 打包、提交、推送、tag 或 Release。"
+    ]
+  },
+  "creatorAgentRecommendationPublicationAndStageConfirmation": {
+    "status": "release-candidate-v2.7.1",
+    "date": "2026-07-30",
+    "releaseIncluded": true,
+    "highlights": [
+      "Creator Agent 的三个推荐项只在最新 assistant.response.completed 所携带的 SuggestionSet 摘要与当前会话版本完全一致后展示；思考、流式回复、请求提交和阶段确认期间不会提前显示上一轮建议。",
+      "阶段确认继续精确绑定当前 SuggestionSet、plan、回复正文、创作工件、决策文档和能力合同；只忽略画布自动保存、选区变化和实时素材摘要对已完成创作稿确认造成的无关漂移。",
+      "普通画布操作建议仍会在 canvas revision、选区或素材变化后严格过期；确认按钮只有在当前完成回复提供 confirmCurrentStage 建议时出现。"
+    ],
+    "verification": [
+      "Creator Agent Session、Route、UI 与建议不变量聚焦回归 116/116 通过；独立 UI 建议合同回归 47/47 通过。",
+      "回归覆盖画布 revision 12→13 后确认创意并进入 script 成功，同时普通旧建议在相同漂移下仍返回 CREATOR_SUGGESTION_STALE。",
+      "npm run type-check、npm run feature-sync:check、npm run worktree:check、Node 语法和 diff-check 通过；未执行 build、Electron 打包、提交、推送、tag 或 Release。"
+    ]
+  },
+  "imageAndStoryDefaultModelCorrection": {
+    "status": "release-candidate-v2.7.1",
+    "date": "2026-07-30",
+    "releaseIncluded": true,
+    "highlights": [
+      "普通图像/编辑节点以及 Story 切换到贞贞 AI 工坊（海外）时，默认模型统一为 gpt-image-2。",
+      "Story 的贞贞的平价AI小屋补齐并默认使用 zhenzhen-image-g-v2-lowprice，模型白名单、平台识别、API Key 提示、2K 单图提交和异步轮询保持同一来源。",
+      "旧画布已保存的 gpt-image-2-all、G-2 和其他有效模型继续原样保留，不强制迁移或改变已存在工作流。"
+    ],
+    "verification": [
+      "模型映射与 Story 定向回归 31/31 通过，TypeScript type-check 通过。",
+      "本轮未调用真实付费 Provider，未执行 build、Electron 打包、提交、推送、tag 或 Release。"
+    ]
+  },
+  "creatorAgentSingleDecisionStages": {
+    "status": "release-candidate-v2.7.1",
+    "date": "2026-07-30",
+    "releaseIncluded": true,
+    "schema": "t8-creator-decision-document-v1",
+    "highlights": [
+      "Creator Agent 每轮只公开一个当前待完善决策，并且只给同一决策的三个选项；用户也可以直接自由补充或改写，不再一次抛出整阶段问题清单。",
+      "当前决策、已确认答案、文档版本、摘要和未来决策保存在版本化决策文档中；未来问题不会提前显示，主回复不再出现“本阶段待确认”。",
+      "每个阶段完成全部细分决策后才出现一次显式阶段确认；确认后按 idea → script → assets → shots → candidates → delivery 逐步推进，故事、电商、图像、视频、音频与混合创作共用同一状态机。",
+      "确认并发送到画布时只采用已持久化、摘要匹配且非空的权威创作工件正文；Text 节点不会再因展示文案、空 prompt 或陈旧版本而生成空白内容。",
+      "候选采用和 QC 已从视频专用链扩展到图像、音频与文本：不同媒体使用各自真实结果类型、时长、分辨率、文件与 Run 关联门槛，不用视频条件阻断其他创作。"
+    ],
+    "verification": [
+      "Creator Agent 决策、语言运行时、会话、路由、UI 与 Agent Control 联合回归 181/181 通过；新增图像真实候选绑定、评审、采用及 9 项持久化 QC 回归。",
+      "npm run type-check、npm run feature-sync:check 与 npm run build 通过；能力目录同步为 31 项公开动作、197 项运行时条目和 70/70 节点覆盖。",
+      "本轮未调用真实付费 Provider、未应用生产画布 CanvasPatch、未运行生产节点，也未执行 Electron 打包、提交、推送、tag 或 Release。"
     ]
   },
   "releaseV270CreatorAgentGroundingAndProviderRecovery": {

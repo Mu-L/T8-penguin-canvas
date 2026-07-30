@@ -284,6 +284,46 @@ export interface CreatorAgentSuggestion {
   blockers: Array<{ code: string; message: string }>;
   unblockActions: string[];
 }
+
+export interface CreatorAgentDecisionOption {
+  id: string;
+  label: string;
+  description: string;
+  value: string;
+  creatorPrompt: string;
+  action: 'answer' | 'confirm-stage' | 'revise-stage';
+}
+
+export interface CreatorAgentDecision {
+  id: string;
+  kind: 'choice' | 'stage-confirmation';
+  topic: string;
+  question: string;
+  whyItMatters: string;
+  options: [CreatorAgentDecisionOption, CreatorAgentDecisionOption, CreatorAgentDecisionOption];
+  status: 'pending' | 'resolved';
+  answer: {
+    source: 'option' | 'custom';
+    optionId: string | null;
+    value: string;
+  } | null;
+}
+
+export interface CreatorAgentDecisionDocument {
+  schema: 't8-creator-decision-document-v1';
+  documentId: string;
+  versionId: string;
+  contentDigest: string;
+  sessionId: string;
+  family: 'story' | 'commerce' | 'image' | 'video' | 'audio' | 'mixed';
+  phase: CreatorAgentProductionPhase;
+  revision: number;
+  status: 'collecting' | 'ready-for-confirmation' | 'confirmed';
+  currentDecisionId: string | null;
+  decisions: CreatorAgentDecision[];
+  revisionNotes: string[];
+}
+
 export interface CreatorAgentSuggestionOperationContract {
   capabilityId: string;
   operation: string;
@@ -407,6 +447,10 @@ export interface CreatorAgentSuggestionSet {
     artifactDigest?: string;
     artifactId?: string;
     artifactVersionId?: string;
+    decisionDocumentId?: string;
+    decisionDocumentVersionId?: string;
+    decisionDocumentDigest?: string;
+    currentDecisionId?: string | null;
   };
   source?: {
     schema?: string;
@@ -1479,6 +1523,7 @@ export interface CreatorAgentProductionState {
 
 export interface CreatorAgentProductionPhaseTransition {
   advanced: boolean;
+  completed?: boolean;
   completedPhase: CreatorAgentProductionPhase;
   nextPhase: CreatorAgentProductionPhase;
   productionRevision: number;
@@ -1490,6 +1535,7 @@ export interface CreatorAgentProductionStageResponse {
   responseDigest: string | null;
   productionPhase: CreatorAgentProductionPhase;
   text: string;
+  artifactVersion: CreatorAgentCreativeArtifactVersion;
 }
 
 export interface CreatorAgentCanvasRetentionPreview {
@@ -1519,6 +1565,8 @@ export interface CreatorAgentSession {
   artifactVerifications: CreatorAgentArtifactVerification[];
   creativeArtifactVersions?: CreatorAgentCreativeArtifactVersion[];
   creativeArtifacts?: CreatorAgentCreativeArtifactSummary[];
+  decisionDocument?: CreatorAgentDecisionDocument | null;
+  decisionDocumentVersions?: CreatorAgentDecisionDocument[];
   deliveryEvidence?: CreatorAgentDeliveryEvidence[];
   productionDocumentConfirmations?: CreatorAgentProductionDocumentConfirmation[];
   toolProposals?: CreatorAgentToolProposal[];
@@ -1671,6 +1719,7 @@ export function confirmCreatorAgentProductionDocuments(
       versionId: string;
       contentDigest: string;
     }>;
+    suggestion: { id: string; setDigest: string };
   },
 ) {
   return creatorRequest<{
@@ -1700,6 +1749,7 @@ export function sendCreatorAgentMessage(sessionId: string, input: {
   candidates?: number;
   stream?: boolean;
   suggestion?: { id: string; setDigest: string };
+  stageContinuation?: boolean;
   modelPreferences?: CreatorAgentModelPreferences;
 }) {
   /*

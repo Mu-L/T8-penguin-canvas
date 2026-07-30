@@ -58,6 +58,9 @@ const {
   createCreatorAgentLlmRuntime,
 } = require('../services/creatorAgentLlmRuntime');
 const {
+  prepareCreatorDecisionTurn,
+} = require('../services/creatorAgentDecisions');
+const {
   CREATOR_TOOL_PROPOSAL_RECEIPT_SCHEMA,
   CreatorAgentToolProposalError,
   compileCreatorToolProposal,
@@ -781,34 +784,92 @@ function createCreatorAgentRouter(options = {}) {
     try {
       const session = sessions.read(req.params.sessionId);
       const scope = ensureSessionScope(session, req.body || {});
+      const currentCanvasDocument = database().getCanvas(scope.canvasId);
+      if (!currentCanvasDocument
+        || String(currentCanvasDocument.projectId || '') !== scope.projectId) {
+        throw new CreatorAgentSessionError(
+          'CREATOR_SCOPE_NOT_FOUND',
+          '当前画布不存在，无法确认阶段成果',
+          404,
+        );
+      }
+      const currentContext = creatorContextForDocument(
+        req.body?.context,
+        currentCanvasDocument,
+      );
+      const requestedSuggestion = req.body?.suggestion
+        && typeof req.body.suggestion === 'object'
+        ? req.body.suggestion
+        : null;
+      const selectedSuggestion = requestedSuggestion
+        ? resolveCreatorSuggestionSelection(session, {
+            suggestionId: requestedSuggestion.id,
+            suggestionSetDigest: requestedSuggestion.setDigest,
+            context: currentContext,
+            bindingScope: 'production-stage-confirmation',
+          })
+        : null;
+      if (!selectedSuggestion?.arguments?.confirmCurrentStage) {
+        throw new CreatorAgentSessionError(
+          'CREATOR_STAGE_CONFIRMATION_SUGGESTION_REQUIRED',
+          '请使用当前回复下方的“确认并进入下一阶段”选项，避免确认过期版本',
+          409,
+        );
+      }
       const result = sessions.confirmProductionDocuments(session.id, {
         planId: req.body?.planId,
         planDigest: req.body?.planDigest,
         documents: req.body?.documents,
         actor: 'canvas-ui',
+        decisionSelection: {
+          decisionDocumentId: selectedSuggestion.arguments.decisionDocumentId,
+          decisionDocumentVersionId:
+            selectedSuggestion.arguments.decisionDocumentVersionId,
+          decisionDocumentDigest:
+            selectedSuggestion.arguments.decisionDocumentDigest,
+          decisionId: selectedSuggestion.arguments.decisionId,
+          decisionOptionId: selectedSuggestion.arguments.decisionOptionId,
+        },
       });
       let canvasRetention = null;
       if (result.phaseTransition) {
-        const document = database().getCanvas(scope.canvasId);
-        if (!document || String(document.projectId || '') !== scope.projectId) {
-          throw new CreatorAgentSessionError(
-            'CREATOR_SCOPE_NOT_FOUND',
-            '当前画布不存在，无法准备阶段成果留存预览',
-            404,
-          );
-        }
+        const document = currentCanvasDocument;
         const phase = String(result.phaseTransition.completedPhase || 'idea');
         const label = CREATOR_PRODUCTION_PHASE_LABELS[phase] || '阶段成果';
+        const artifactVersion = result.stageResponse?.artifactVersion;
+        const authoritativeBody = String(
+          artifactVersion?.content?.bodyMarkdown || '',
+        ).trim();
+        if (!artifactVersion?.versionId
+          || !artifactVersion?.content?.contentDigest
+          || !authoritativeBody) {
+          throw new CreatorAgentSessionError(
+            'CREATOR_STAGE_ARTIFACT_REQUIRED',
+            '当前阶段成果没有可验证的非空版本，已停止发送到画布',
+            409,
+          );
+        }
         const nodes = Array.isArray(document.nodes) ? document.nodes : [];
         const rightEdge = nodes.reduce((maximum, node) => (
           Math.max(maximum, Number(node?.position?.x) || 0)
         ), 0);
         const phaseIndex = Math.max(0, Object.keys(CREATOR_PRODUCTION_PHASE_LABELS).indexOf(phase));
+        const retainedBody = authoritativeBody.length > 1_700
+          ? `${authoritativeBody.slice(0, 1_700).trim()}\n\n[正文较长；完整权威版本：${artifactVersion.versionId}]`
+          : authoritativeBody;
         const prompt = [
           `# 已确认 · ${label}`,
+          `版本：${artifactVersion.versionId}`,
           '',
-          String(result.stageResponse?.text || '').trim(),
-        ].join('\n').slice(0, 12_000);
+          retainedBody,
+        ].join('\n').slice(0, 2_000);
+        if (!prompt.replace(/^# 已确认[^\n]*\n*/u, '').trim()) {
+          throw new CreatorAgentSessionError(
+            'CREATOR_STAGE_CANVAS_TEXT_EMPTY',
+            '当前阶段成果正文为空，未创建画布文本节点',
+            409,
+          );
+        }
         const retentionPlan = creative().actionPlan('graph.node-add', {
           type: 'text',
           prompt,
@@ -819,7 +880,7 @@ function createCreatorAgentRouter(options = {}) {
         const retentionTurn = sessions.appendActionPlan(session.id, {
           action: 'graph.node-add',
           label: `将已确认${label}留存在画布`,
-          context: creatorContextForDocument(req.body?.context, document),
+          context: currentContext,
           plan: retentionPlan,
           patch: retentionPatch,
           source: 'creator-stage-retention',
@@ -1035,6 +1096,7 @@ function createCreatorAgentRouter(options = {}) {
           ? String(req.body?.recipe || 'general').trim().toLowerCase() : '',
         modelPreferences: req.body?.modelPreferences
           && typeof req.body.modelPreferences === 'object' ? req.body.modelPreferences : {},
+        stageContinuation: req.body?.stageContinuation === true,
       });
       const existingRequest = sessions.messageRequest(session.id, {
         clientRequestId,
@@ -1193,6 +1255,42 @@ function createCreatorAgentRouter(options = {}) {
         : Object.prototype.hasOwnProperty.call(req.body || {}, 'recipe')
         ? String(req.body?.recipe || 'general').trim().toLowerCase()
         : inferCreatorRecipe(planningPrompt, kind, attachments);
+      let decisionTurn = null;
+      if (recipe !== 'shot-breakdown') {
+        try {
+          const decisionSelection = selectedSuggestion?.arguments?.decisionOptionId
+            ? {
+                decisionDocumentId: selectedSuggestion.arguments.decisionDocumentId,
+                decisionDocumentVersionId:
+                  selectedSuggestion.arguments.decisionDocumentVersionId,
+                decisionDocumentDigest:
+                  selectedSuggestion.arguments.decisionDocumentDigest,
+                decisionId: selectedSuggestion.arguments.decisionId,
+                decisionOptionId: selectedSuggestion.arguments.decisionOptionId,
+              }
+            : null;
+          decisionTurn = prepareCreatorDecisionTurn({
+            sessionId: session.id,
+            document: session.decisionDocument,
+            family: session.decisionDocument?.family,
+            phase: session.production?.currentPhase,
+            kind,
+            prompt: planningPrompt,
+            selection: decisionSelection,
+            customValue: selectedSuggestion
+              ? ''
+              : String(req.body?.text || '').trim(),
+            skipAnswer: req.body?.stageContinuation === true,
+          });
+        } catch (error) {
+          throw new CreatorAgentSessionError(
+            'CREATOR_DECISION_SELECTION_STALE',
+            '当前选择已经不是本阶段正在完善的内容，请使用最新回复下方的三个选项',
+            409,
+            { cause: String(error?.message || error) },
+          );
+        }
+      }
       const requestedModelPreferences = req.body?.modelPreferences && typeof req.body.modelPreferences === 'object'
         ? req.body.modelPreferences
         : {};
@@ -1247,9 +1345,10 @@ function createCreatorAgentRouter(options = {}) {
             assetIds,
             artifactVerifications: session.artifactVerifications,
             deliveryEvidence: session.deliveryEvidence,
-            modelDecisionReceipt: modelDecision.receipt,
-            previousProductionDocuments: sessions.productionDocumentsForNextPlan(session.id),
-            ...modelFields,
+             modelDecisionReceipt: modelDecision.receipt,
+             previousProductionDocuments: sessions.productionDocumentsForNextPlan(session.id),
+             stagedProduction: recipe !== 'shot-breakdown',
+             ...modelFields,
           }, scope);
       const readinessReceipt = createCreatorAgentLocalReadinessReceipt({
         startedAtMs: localPlanningStartedAtMs,
@@ -1264,6 +1363,7 @@ function createCreatorAgentRouter(options = {}) {
         session,
         plan,
         modelDecisionReceipt: modelDecision.receipt,
+        decisionTurn,
         requestBaseUrl: requestHost ? `${req.protocol}://${requestHost}` : undefined,
       };
       const llmRuntime = creatorLlm();
@@ -1289,6 +1389,7 @@ function createCreatorAgentRouter(options = {}) {
         clientRequestId,
         requestDigest,
         readinessReceipt,
+        decisionTurn,
       };
       const preparedResponse = wantsStream && typeof llmRuntime.prepareResponse === 'function'
         ? llmRuntime.prepareResponse(responseInput)

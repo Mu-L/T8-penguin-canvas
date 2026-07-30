@@ -26,6 +26,11 @@ const {
 const {
   createCreatorArtifactProposal,
 } = require('../backend/src/services/creatorAgentArtifacts.js');
+const {
+  advanceCreatorDecisionDocument,
+  createCreatorDecisionDocument,
+  currentCreatorDecision,
+} = require('../backend/src/services/creatorAgentDecisions.js');
 
 function stableTestString(value) {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -1000,10 +1005,46 @@ test('production document confirmation is exact, idempotent, persisted, and neve
     questions: [],
     productionDocuments: [document],
   };
+  let decisionDocument = createCreatorDecisionDocument({
+    sessionId: created.id,
+    family: 'story',
+    phase: 'idea',
+  });
+  while (currentCreatorDecision(decisionDocument).kind === 'choice') {
+    decisionDocument = advanceCreatorDecisionDocument(decisionDocument, {
+      optionId: currentCreatorDecision(decisionDocument).options[0].id,
+    }).document;
+  }
+  const assistantText = [
+    '# 创意简报',
+    '',
+    '一支围绕雨夜重逢展开的短片，以人物关系变化为核心。',
+    '',
+    '当前版本保留真实可拍动作、统一雨夜氛围和明确的情绪收束。',
+  ].join('\n');
   const planned = fixture.store.appendTurn(created.id, {
     text: '做一支雨夜短片',
     plan,
+    assistantText,
+    artifactProposal: createCreatorArtifactProposal({
+      taskFamily: 'story',
+      prompt: '做一支雨夜短片',
+      responseText: assistantText,
+      mode: 'offline-structure',
+    }),
+    decisionTurn: { document: decisionDocument },
   }).session;
+  const confirmationSuggestion = planned.suggestionSet.items.find(
+    (item) => item.arguments?.confirmCurrentStage === true,
+  );
+  assert.ok(confirmationSuggestion);
+  const decisionSelection = {
+    decisionDocumentId: confirmationSuggestion.arguments.decisionDocumentId,
+    decisionDocumentVersionId: confirmationSuggestion.arguments.decisionDocumentVersionId,
+    decisionDocumentDigest: confirmationSuggestion.arguments.decisionDocumentDigest,
+    decisionId: confirmationSuggestion.arguments.decisionId,
+    decisionOptionId: confirmationSuggestion.arguments.decisionOptionId,
+  };
   const confirmed = fixture.store.confirmProductionDocuments(created.id, {
     planId: plan.planId,
     planDigest: plan.planDigest,
@@ -1013,6 +1054,7 @@ test('production document confirmation is exact, idempotent, persisted, and neve
       contentDigest,
     }],
     actor: 'canvas-ui',
+    decisionSelection,
   });
   assert.equal(confirmed.duplicate, false);
   assert.equal(confirmed.confirmations.length, 1);

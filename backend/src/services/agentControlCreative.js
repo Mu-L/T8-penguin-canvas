@@ -1150,6 +1150,25 @@ function creatorProductionBinding(productionDocuments, project = null) {
   return binding;
 }
 
+function creatorProductionCandidateBinding(productionDocuments) {
+  const documents = Array.isArray(productionDocuments) ? productionDocuments : [];
+  const promptPack = documents.find((item) => item?.kind === 'prompt-pack');
+  const prompts = Array.isArray(promptPack?.content?.prompts) ? promptPack.content.prompts : [];
+  if (prompts.length !== 1) return null;
+  const binding = creatorProductionBinding(documents);
+  const prompt = prompts[0];
+  if (!binding || !text(prompt?.id, 160)) return null;
+  return {
+    ...binding,
+    promptPackItemId: text(prompt.id, 160),
+    storyboardFrameId: text(prompt.storyboardFrameId, 160),
+    shotListItemId: text(prompt.shotListItemId, 160),
+    sourceShotId: text(prompt.sourceShotId, 160),
+    ordinal: integer(prompt.ordinal, 1, 1, 20_000),
+    matchMethod: 'single-prompt-pack-item',
+  };
+}
+
 function candidateResultForProduction(node) {
   const data = nodeData(node);
   const resultKind = data.imageUrl || (Array.isArray(data.imageUrls) && data.imageUrls.length)
@@ -1310,6 +1329,14 @@ function productionCandidateDuration(node) {
   };
 }
 
+function productionExpectedResultKind(brief) {
+  const kind = text(brief?.kind, 40).toLowerCase();
+  if (kind === 'image' || kind === 'edit-image') return 'image';
+  if (kind === 'audio') return 'audio';
+  if (kind === 'script') return 'text';
+  return 'video';
+}
+
 function productionEditDecisionList(document, candidateReviewDocument, brief) {
   const candidates = Array.isArray(candidateReviewDocument?.content?.candidates)
     ? candidateReviewDocument.content.candidates
@@ -1321,16 +1348,27 @@ function productionEditDecisionList(document, candidateReviewDocument, brief) {
     text(item?.promptPackItemId, 160),
     item,
   ]));
-  const adoptedVideos = candidates.filter((candidate) => (
-    candidate?.resultKind === 'video'
+  const expectedResultKind = productionExpectedResultKind(brief);
+  const durationRequired = ['video', 'audio'].includes(expectedResultKind);
+  const mediaLabel = {
+    image: '图像',
+    video: '视频',
+    audio: '音频',
+    text: '文本',
+  }[expectedResultKind] || '作品';
+  const adoptedResults = candidates.filter((candidate) => (
+    candidate?.resultKind === expectedResultKind
     && candidate?.adoption?.status === 'adopted'
   ));
-  const eligible = adoptedVideos.filter((candidate) => (
+  const eligible = adoptedResults.filter((candidate) => (
     candidate?.adoption?.receiptVerified === true
     && candidate?.review?.status === 'verified'
     && candidate?.review?.hardGatesPassed === true
-    && Array.isArray(candidate?.resultUrls)
-    && candidate.resultUrls.length > 0
+    && (
+      expectedResultKind === 'text'
+        ? Boolean(text(candidate?.resultEvidence?.contentHash, 200))
+        : Array.isArray(candidate?.resultUrls) && candidate.resultUrls.length > 0
+    )
   )).map((candidate) => {
     const prompt = promptById.get(text(candidate?.promptPackItemId, 160)) || {};
     const duration = productionCandidateDuration(findNode(document, candidate?.nodeId));
@@ -1348,14 +1386,15 @@ function productionEditDecisionList(document, candidateReviewDocument, brief) {
       title: text(prompt?.title, 240) || text(candidate?.candidateLabel, 240) || '未命名镜头',
       candidateId: text(candidate?.candidateId, 160),
       nodeId: text(candidate?.nodeId, 160),
+      resultKind: expectedResultKind,
       resultEvidence: {
         assetId: text(candidate?.resultEvidence?.assetId, 160) || null,
         contentHash: text(candidate?.resultEvidence?.contentHash, 200) || null,
         referenceAvailable: true,
       },
-      sourceDurationSec: duration.sourceDurationSec,
-      requestedDurationSec: duration.requestedDurationSec,
-      durationEvidence: duration.evidence,
+      sourceDurationSec: durationRequired ? duration.sourceDurationSec : null,
+      requestedDurationSec: durationRequired ? duration.requestedDurationSec : null,
+      durationEvidence: durationRequired ? duration.evidence : 'not-applicable',
     };
   }).sort((left, right) => (
     left.ordinal - right.ordinal
@@ -1366,55 +1405,80 @@ function productionEditDecisionList(document, candidateReviewDocument, brief) {
   let cursor = 0;
   let timelineReady = true;
   const sequence = eligible.map((item) => {
-    const durationReady = Number.isFinite(item.sourceDurationSec) && item.sourceDurationSec > 0;
-    const timelineStartSec = timelineReady && durationReady
+    const durationReady = !durationRequired
+      || (Number.isFinite(item.sourceDurationSec) && item.sourceDurationSec > 0);
+    const timelineStartSec = durationRequired && timelineReady && durationReady
       ? Math.round(cursor * 1_000) / 1_000
       : null;
     const timelineEndSec = timelineStartSec != null
       ? Math.round((timelineStartSec + item.sourceDurationSec) * 1_000) / 1_000
       : null;
     if (timelineEndSec != null) cursor = timelineEndSec;
-    if (!durationReady) timelineReady = false;
+    if (durationRequired && !durationReady) timelineReady = false;
+    const unresolved = durationRequired
+      ? [
+          ...(!durationReady ? ['真实媒体时长'] : []),
+          '入点/出点复核',
+          '转场复核',
+          expectedResultKind === 'video' ? '原声/静音/混音策略' : '响度/淡入淡出/混音策略',
+          expectedResultKind === 'video' ? '字幕与节奏' : '编排与节奏',
+        ]
+      : expectedResultKind === 'image'
+        ? ['最终构图与版式复核', '色彩/文字/品牌细节复核']
+        : ['最终文本与结构复核'];
     return {
       ...item,
-      sourceInSec: durationReady ? 0 : null,
-      sourceOutSec: durationReady ? item.sourceDurationSec : null,
+      sourceInSec: durationRequired && durationReady ? 0 : null,
+      sourceOutSec: durationRequired && durationReady ? item.sourceDurationSec : null,
       timelineStartSec,
       timelineEndSec,
-      placementPolicy: 'source-order-full-clip-draft',
-      transition: {
-        type: 'cut',
-        durationSec: 0,
-        source: 'default-draft',
-      },
+      placementPolicy: durationRequired
+        ? 'source-order-full-clip-draft'
+        : 'prompt-order-selected-result-draft',
+      transition: expectedResultKind === 'video'
+        ? {
+            type: 'cut',
+            durationSec: 0,
+            source: 'default-draft',
+          }
+        : null,
       audioPolicy: null,
       editStatus: durationReady ? 'ready-for-review' : 'duration-missing',
       locked: false,
-      unresolved: [
-        ...(!durationReady ? ['真实媒体时长'] : []),
-        '入点/出点复核',
-        '转场复核',
-        '原声/静音/混音策略',
-        '字幕与节奏',
-      ],
+      unresolved,
     };
   });
-  const promptIdsWithVideo = new Set(sequence.map((item) => item.promptPackItemId));
+  const promptIdsWithResult = new Set(sequence.map((item) => item.promptPackItemId));
   const missingShots = promptBindings.filter((item) => (
-    !promptIdsWithVideo.has(text(item?.promptPackItemId, 160))
+    !promptIdsWithResult.has(text(item?.promptPackItemId, 160))
   )).length;
-  const missingDuration = sequence.filter((item) => item.durationEvidence === 'missing').length;
+  const missingDuration = durationRequired
+    ? sequence.filter((item) => item.durationEvidence === 'missing').length
+    : 0;
   const timingReady = sequence.length > 0 && missingDuration === 0;
   const evidenceDigest = digest(sequence);
+  const isVideo = expectedResultKind === 'video';
+  const isTimedMedia = durationRequired;
   return {
-    title: `${brief.title} · EDL 剪辑计划`,
+    title: `${brief.title} · ${
+      isVideo
+        ? 'EDL 剪辑计划'
+        : expectedResultKind === 'audio'
+          ? '音频编排清单'
+          : expectedResultKind === 'image'
+            ? '图像采用清单'
+            : '文本定稿清单'
+    }`,
     language: brief.language,
     status: sequence.length === 0
-      ? 'awaiting-adopted-video'
-      : timingReady ? 'source-assembled' : 'needs-duration-evidence',
+      ? `awaiting-adopted-${expectedResultKind}`
+      : isTimedMedia && !timingReady ? 'needs-duration-evidence' : 'source-assembled',
+    resultKind: expectedResultKind,
     derivation: {
       schema: 't8-creator-evidence-derivation-v1',
-      method: 'verified-adopted-video-sequence',
+      method: isVideo
+        ? 'verified-adopted-video-sequence'
+        : 'verified-adopted-media-sequence',
       sourceDocumentId: text(candidateReviewDocument?.id, 160),
       sourceVersionId: text(candidateReviewDocument?.versionId, 160),
       sourceContentDigest: text(candidateReviewDocument?.contentDigest, 64),
@@ -1428,27 +1492,41 @@ function productionEditDecisionList(document, candidateReviewDocument, brief) {
       ready: sequence.length - missingDuration,
       missingDuration,
       missingShots,
-      blocked: Math.max(0, adoptedVideos.length - eligible.length),
+      blocked: Math.max(0, adoptedResults.length - eligible.length),
     },
     sequence,
     timeline: {
       schema: 't8-creator-edl-v1',
       sequencePolicy: 'prompt-order',
-      placementPolicy: 'source-order-full-clip-draft',
-      timingStatus: sequence.length === 0 ? 'empty' : timingReady ? 'ready' : 'incomplete',
-      totalDurationSec: timingReady ? Math.round(cursor * 1_000) / 1_000 : null,
-      transitionPolicy: 'default-cut-draft',
-      audioPolicy: 'unassigned',
-      subtitlePolicy: 'unassigned',
+      placementPolicy: isTimedMedia
+        ? 'source-order-full-clip-draft'
+        : 'prompt-order-selected-result-draft',
+      timingStatus: sequence.length === 0
+        ? 'empty'
+        : isTimedMedia ? timingReady ? 'ready' : 'incomplete' : 'not-applicable',
+      totalDurationSec: isTimedMedia && timingReady
+        ? Math.round(cursor * 1_000) / 1_000
+        : null,
+      transitionPolicy: isVideo ? 'default-cut-draft' : 'not-applicable',
+      audioPolicy: expectedResultKind === 'audio' ? 'creator-review-required' : 'unassigned',
+      subtitlePolicy: isVideo ? 'unassigned' : 'not-applicable',
       requiresCreatorReview: true,
     },
-    reviewPolicy: 'verified-adopted-video-only',
+    reviewPolicy: isVideo
+      ? 'verified-adopted-video-only'
+      : `verified-adopted-${expectedResultKind}-only`,
     generationScope: 'none',
     editingGuidance: sequence.length === 0
-      ? '当前候选证据中还没有“实际视频已审、硬门通过且采用回执有效”的镜头；不会拿图片、旧采用记录、Prompt 或生成状态伪造 EDL。'
-      : timingReady
-        ? '已按 PromptPack 镜头顺序排出完整片段草案；时间码只来自持久结果元数据，默认硬切和完整片段仍需创作者确认，确认不会创建剪辑节点或渲染成片。'
-        : `已排出 ${sequence.length} 段采用视频，但 ${missingDuration} 段缺少持久结果时长；请求参数中的时长不会冒充真实媒体时长，缺口补齐前不生成后续时间码。`,
+      ? `当前候选证据中还没有“实际${mediaLabel}已审、硬门通过且采用回执有效”的作品；不会拿其他媒体、旧采用记录、Prompt 或生成状态伪造采用清单。`
+      : isVideo
+        ? timingReady
+          ? '已按 PromptPack 镜头顺序排出完整片段草案；时间码只来自持久结果元数据，默认硬切和完整片段仍需创作者确认，确认不会创建剪辑节点或渲染成片。'
+          : `已排出 ${sequence.length} 段采用视频，但 ${missingDuration} 段缺少持久结果时长；请求参数中的时长不会冒充真实媒体时长，缺口补齐前不生成后续时间码。`
+        : expectedResultKind === 'audio'
+          ? timingReady
+            ? '已按 PromptPack 顺序整理采用音频；时间码只来自持久结果元数据，编排、响度与混音仍需创作者确认。'
+            : `已整理 ${sequence.length} 段采用音频，但 ${missingDuration} 段缺少持久结果时长；缺口补齐前不会伪造时间码。`
+          : `已按 PromptPack 顺序整理 ${sequence.length} 项采用${mediaLabel}；确认只固化当前选择与审阅证据，不会生成、覆盖或写入画布。`,
   };
 }
 
@@ -1479,6 +1557,20 @@ function productionQualityControlReport(editDecisionListDocument, brief, verific
   const items = sequence.map((item) => {
     const assetId = text(item?.resultEvidence?.assetId, 160);
     const nodeId = text(item?.nodeId, 160);
+    const expectedResultKind = ['image', 'video', 'audio', 'text'].includes(
+      text(item?.resultKind || editDecisionListDocument?.content?.resultKind, 40),
+    )
+      ? text(item?.resultKind || editDecisionListDocument?.content?.resultKind, 40)
+      : productionExpectedResultKind(brief);
+    const fileBacked = expectedResultKind !== 'text';
+    const durationRequired = ['video', 'audio'].includes(expectedResultKind);
+    const resolutionRequired = ['video', 'image'].includes(expectedResultKind);
+    const mediaLabel = {
+      image: '图像',
+      video: '视频',
+      audio: '音频',
+      text: '文本',
+    }[expectedResultKind] || '媒体';
     const expectedHash = normalizedQcHash(item?.resultEvidence?.contentHash);
     const matches = verifiedAssets.filter((entry) => (
       assetId && text(entry.asset?.assetId, 160) === assetId
@@ -1519,27 +1611,28 @@ function productionQualityControlReport(editDecisionListDocument, brief, verific
         'creative-eligibility',
         '创意审阅与采用回执',
         'pass',
-        '此片段来自 EDL，已满足实际视频已审、硬门通过和采用回执有效。',
+        `此项来自采用清单，已满足实际${mediaLabel}已审、硬门通过和采用回执有效。`,
       ),
       qcCheck(
         'result-reference',
         '结果身份',
-        item?.resultEvidence?.referenceAvailable === true && Boolean(assetId || expectedHash)
+        item?.resultEvidence?.referenceAvailable === true
+          && Boolean(fileBacked ? assetId || expectedHash : expectedHash)
           ? 'pass'
           : 'fail',
         assetId
           ? `已记录素材 ${assetId}`
           : expectedHash ? '已记录内容摘要，但缺少素材 ID。' : '缺少素材 ID 与内容摘要。',
       ),
-      qcCheck(
+      durationRequired ? qcCheck(
         'source-duration',
         '真实媒体时长',
         durationReady ? 'pass' : 'unknown',
         durationReady
           ? `${persistedDuration}s，来源为持久结果元数据。`
           : '未记录真实媒体时长；请求时长不会代替核验。',
-      ),
-      qcCheck(
+      ) : null,
+      fileBacked ? qcCheck(
         'managed-file',
         '文件存在与受控保存',
         !hasReceipt ? 'unknown' : asset?.stored === true && asset?.blobPresent === true ? 'pass' : 'fail',
@@ -1548,8 +1641,8 @@ function productionQualityControlReport(editDecisionListDocument, brief, verific
           : asset?.stored === true && asset?.blobPresent === true
             ? `${Number(asset?.byteSize) || 0} bytes，文件存在且保存受控。`
             : '回执显示文件缺失、不可读或未受控保存。',
-      ),
-      qcCheck(
+      ) : null,
+      fileBacked ? qcCheck(
         'content-hash',
         '文件摘要',
         !hasReceipt ? 'unknown' : asset?.hashVerified === true && hashMatches ? 'pass' : 'fail',
@@ -1558,8 +1651,13 @@ function productionQualityControlReport(editDecisionListDocument, brief, verific
           : asset?.hashVerified === true && hashMatches
             ? '文件 SHA-256 已复算，并与当前 EDL 身份一致。'
             : '文件摘要复算失败，或与当前 EDL 身份不一致。',
+      ) : qcCheck(
+        'content-hash',
+        '文本内容摘要',
+        expectedHash ? 'pass' : 'fail',
+        expectedHash ? '已记录当前采用文本的内容摘要。' : '缺少当前采用文本的内容摘要。',
       ),
-      qcCheck(
+      fileBacked ? qcCheck(
         'file-magic',
         '文件魔数与 MIME',
         !hasReceipt ? 'unknown' : asset?.magicVerified === true ? 'pass' : 'fail',
@@ -1568,18 +1666,18 @@ function productionQualityControlReport(editDecisionListDocument, brief, verific
           : asset?.magicVerified === true
             ? `${text(asset?.detectedMimeType, 160) || '已识别媒体类型'}`
             : '文件魔数、声明类型或 MIME 不一致。',
-      ),
-      qcCheck(
+      ) : null,
+      fileBacked ? qcCheck(
         'media-kind',
         '媒体类型',
         !hasReceipt || !text(asset?.detectedKind, 40)
           ? 'unknown'
-          : text(asset?.detectedKind, 40) === 'video' ? 'pass' : 'fail',
+          : text(asset?.detectedKind, 40) === expectedResultKind ? 'pass' : 'fail',
         !hasReceipt || !text(asset?.detectedKind, 40)
           ? '没有可用的媒体类型识别证据。'
-          : `实际识别为 ${text(asset?.detectedKind, 40)}。`,
-      ),
-      qcCheck(
+          : `预期 ${expectedResultKind}，实际识别为 ${text(asset?.detectedKind, 40)}。`,
+      ) : null,
+      fileBacked ? qcCheck(
         'decode-evidence',
         '媒体解码索引',
         !hasReceipt || decodeEvidence === 'not-recorded' || decodeEvidence === 'magic-only-legacy'
@@ -1590,16 +1688,16 @@ function productionQualityControlReport(editDecisionListDocument, brief, verific
           : decodeEvidence === 'magic-only-legacy'
             ? '旧素材只有魔数证据，尚无完整媒体索引。'
             : '没有可验证的媒体解码索引。',
-      ),
-      qcCheck(
+      ) : null,
+      resolutionRequired ? qcCheck(
         'resolution',
-        '视频分辨率',
+        `${mediaLabel}分辨率`,
         !hasReceipt || !resolutionReady ? 'unknown' : 'pass',
         resolutionReady
           ? `${Number(asset.width)} × ${Number(asset.height)}`
           : '当前核验回执没有记录真实宽高。',
-      ),
-      qcCheck(
+      ) : null,
+      durationRequired ? qcCheck(
         'indexed-duration',
         '索引时长一致性',
         !hasReceipt || !durationReady || !durationIndexed
@@ -1610,8 +1708,8 @@ function productionQualityControlReport(editDecisionListDocument, brief, verific
           : durationMatches
             ? `索引 ${indexedDuration}s，与 EDL 真实时长一致。`
             : `索引 ${indexedDuration}s，与 EDL ${persistedDuration}s 不一致。`,
-      ),
-      qcCheck(
+      ) : null,
+      fileBacked ? qcCheck(
         'run-association',
         'Run / 节点 / 素材关联',
         !hasReceipt ? 'unknown' : associationPassed ? 'pass' : 'fail',
@@ -1620,8 +1718,8 @@ function productionQualityControlReport(editDecisionListDocument, brief, verific
           : associationPassed
             ? `Run ${text(receipt?.runId, 160)} 的成功节点与当前素材精确关联。`
             : 'Run、节点、输出素材或画布关联无法验证。',
-      ),
-    ];
+      ) : null,
+    ].filter(Boolean);
     const failed = checks.filter((check) => check.status === 'fail').length;
     const unknown = checks.filter((check) => check.status === 'unknown').length;
     return {
@@ -1631,6 +1729,7 @@ function productionQualityControlReport(editDecisionListDocument, brief, verific
       title: text(item?.title, 240) || '未命名镜头',
       candidateId: text(item?.candidateId, 160),
       nodeId,
+      resultKind: expectedResultKind,
       assetId: assetId || null,
       contentHash: text(item?.resultEvidence?.contentHash, 200) || null,
       status: failed > 0 ? 'fail' : unknown > 0 ? 'unknown' : 'pass',
@@ -1655,9 +1754,15 @@ function productionQualityControlReport(editDecisionListDocument, brief, verific
   const failed = items.filter((item) => item.status === 'fail').length;
   const unknown = items.filter((item) => item.status === 'unknown').length;
   const passed = items.filter((item) => item.status === 'pass').length;
+  const reportResultKind = ['image', 'video', 'audio', 'text'].includes(
+    text(editDecisionListDocument?.content?.resultKind, 40),
+  )
+    ? text(editDecisionListDocument.content.resultKind, 40)
+    : productionExpectedResultKind(brief);
   return {
     title: `${brief.title} · QCReport`,
     language: brief.language,
+    resultKind: reportResultKind,
     status: items.length === 0
       ? 'awaiting-edit-decision-list'
       : failed > 0 ? 'failed' : unknown > 0 ? 'needs-verification-evidence' : 'passed',
@@ -1683,11 +1788,11 @@ function productionQualityControlReport(editDecisionListDocument, brief, verific
     verificationPolicy: 'persisted-receipts-only',
     generationScope: 'none',
     editingGuidance: items.length === 0
-      ? '当前 EDL 没有可质检片段；不会凭生成状态或缩略图伪造通过记录。'
+      ? '当前采用清单没有可质检作品；不会凭生成状态或缩略图伪造通过记录。'
       : failed > 0
-        ? `${failed} 段存在真实核验失败；报告不会自动修复、重新下载、重新生成或覆盖素材。`
+        ? `${failed} 项存在真实核验失败；报告不会自动修复、重新下载、重新生成或覆盖素材。`
         : unknown > 0
-          ? `${unknown} 段缺少完整持久化核验回执；未知项保持未知，确认报告不会触发文件扫描或 Provider 调用。`
+          ? `${unknown} 项缺少完整持久化核验回执；未知项保持未知，确认报告不会触发文件扫描或 Provider 调用。`
           : '所有当前必需检查均有持久化证据且通过；确认报告只固化此版证据，不会渲染、下载或交付。',
   };
 }
@@ -2462,13 +2567,23 @@ function productionReferenceBreakdown(document, brief, database) {
   };
 }
 
-function productionDocumentsForPlan(document, planId, brief, previousValue, verificationValue, deliveryValue, database) {
+function productionDocumentsForPlan(
+  document,
+  planId,
+  brief,
+  previousValue,
+  verificationValue,
+  deliveryValue,
+  database,
+  options = {},
+) {
   if (!brief.goal) return [];
   const kinds = ['production-brief'];
   const isReferenceBreakdown = brief.kind === 'story' && brief.recipe === 'shot-breakdown';
+  const stagedProduction = options.stagedProduction === true && !isReferenceBreakdown;
   if (isReferenceBreakdown) {
     kinds.push('reference-breakdown');
-  } else if (['script', 'story'].includes(brief.kind)) {
+  } else if (stagedProduction || ['script', 'story'].includes(brief.kind)) {
     kinds.push('script-doc', 'world-bible');
   }
   const labels = {
@@ -2539,7 +2654,7 @@ function productionDocumentsForPlan(document, planId, brief, previousValue, veri
       : productionDocumentContent(kind, brief);
     return buildDocument(kind, content);
   });
-  if (!isReferenceBreakdown && ['script', 'story'].includes(brief.kind)) {
+  if (stagedProduction || (!isReferenceBreakdown && ['script', 'story'].includes(brief.kind))) {
     const scriptDocument = documents.find((item) => item.kind === 'script-doc');
     for (const kind of ['character-bible', 'asset-needs', 'shot-list']) {
       documents.push(buildDocument(kind, productionDocumentContent(kind, brief, scriptDocument)));
@@ -3194,6 +3309,7 @@ function imagePatch(document, planId, brief, candidateCount, options = {}) {
   const providerSource = brief.imageProviderSource || 'zhenzhen';
   const providerId = brief.imageProviderId || '';
   const model = brief.imageModel || brief.model || 'gpt-image-2';
+  const productionBinding = creatorProductionCandidateBinding(options.productionDocuments);
   const operations = [
     nodeAdd(promptId, 'text', origin.x, origin.y, {
       text: prompt,
@@ -3230,6 +3346,7 @@ function imagePatch(document, planId, brief, candidateCount, options = {}) {
       providerModel: providerId ? model : '',
       imageOnlyOutput: true,
       reuseResult: false,
+      ...(productionBinding ? { creatorProductionBinding: productionBinding } : {}),
       creativeState: defaultCreativeState(effectiveBrief, groupId, candidateId, index + 1, candidateCount),
     }));
     operations.push(edgeAdd(stableId('edge', `${promptId}:${nodeId}`), promptId, nodeId));
@@ -3244,7 +3361,7 @@ function imagePatch(document, planId, brief, candidateCount, options = {}) {
   return patchEnvelope(document, stableId('creative-patch', planId), `创建 ${candidateCount} 个可比较图像候选`, operations);
 }
 
-function videoPatch(document, planId, brief, candidateCount) {
+function videoPatch(document, planId, brief, candidateCount, options = {}) {
   const origin = originFor(document);
   const groupId = stableId('creative-video', planId);
   const promptId = stableId('text', `${planId}:prompt`);
@@ -3257,6 +3374,7 @@ function videoPatch(document, planId, brief, candidateCount) {
   const providerSource = brief.videoProviderSource || 'zhenzhen';
   const providerId = brief.videoProviderId || '';
   const model = brief.videoModel || brief.model || 'doubao-seedance-2-0-fast-260128';
+  const productionBinding = creatorProductionCandidateBinding(options.productionDocuments);
   const operations = [
     nodeAdd(promptId, 'text', origin.x, origin.y, { text: prompt, creativeBrief: brief }),
   ];
@@ -3287,6 +3405,7 @@ function videoPatch(document, planId, brief, candidateCount) {
       creativeDirection: direction,
       candidateLabel: `候选 ${index + 1} · ${direction.split('：')[0]}`,
       reuseResult: false,
+      ...(productionBinding ? { creatorProductionBinding: productionBinding } : {}),
       creativeState: defaultCreativeState(brief, groupId, candidateId, index + 1, candidateCount),
     }));
     operations.push(edgeAdd(stableId('edge', `${promptId}:${nodeId}`), promptId, nodeId));
@@ -3348,7 +3467,7 @@ function editVideoPatch(document, planId, brief, candidateCount, options = {}) {
       '编辑要求：只修改创作者明确描述的部分；保持参考素材中未要求变化的主体、身份、服装、产品外形、场景方向与时间连续性。',
     ].filter(Boolean).join('\n'),
   };
-  const result = videoPatch(document, planId, patchedBrief, candidateCount);
+  const result = videoPatch(document, planId, patchedBrief, candidateCount, options);
   for (const operation of result.operations) {
     if (operation.type !== 'node.add' || operation.payload?.node?.type !== 'seedance') continue;
     operation.payload.node.data.localRefImages = bindings.filter((item) => item.kind === 'image').map((item) => item.url);
@@ -3388,6 +3507,7 @@ function lipSyncPatch(document, planId, brief, candidateCount, options = {}) {
   const audioNodeId = stableId('upload', `${planId}:audio`);
   const outputId = stableId('output', `${planId}:output`);
   const sourceBindings = [image, audio].map(({ url, ...binding }) => binding);
+  const productionBinding = creatorProductionCandidateBinding(options.productionDocuments);
   const operations = [
     nodeAdd(imageNodeId, 'upload', origin.x, origin.y, {
       title: `${brief.title} · 人物图`,
@@ -3449,6 +3569,7 @@ function lipSyncPatch(document, planId, brief, candidateCount, options = {}) {
       videoUrls: [],
       creativeDirection: direction,
       candidateLabel: `候选 ${index + 1} · ${direction.split('：')[0]}`,
+      ...(productionBinding ? { creatorProductionBinding: productionBinding } : {}),
       creativeState: defaultCreativeState(brief, groupId, candidateId, index + 1, candidateCount),
     }));
     operations.push(edgeAdd(stableId('edge', `${imageNodeId}:${nodeId}`), imageNodeId, nodeId));
@@ -3498,6 +3619,7 @@ function audioPatch(document, planId, brief, options = {}) {
     1,
     1,
   );
+  const productionBinding = creatorProductionCandidateBinding(options.productionDocuments);
   if (grokTts || grokStt) {
     const sourceAudio = reference.find((item) => item.kind === 'audio');
     const operations = [];
@@ -3534,6 +3656,7 @@ function audioPatch(document, planId, brief, options = {}) {
       reuseResult: false,
       status: 'idle',
       grokRunRequestId: '',
+      ...(productionBinding ? { creatorProductionBinding: productionBinding } : {}),
       creativeState,
     }));
     operations.push(nodeAdd(outputId, 'output', origin.x + 900, origin.y, {
@@ -3582,6 +3705,7 @@ function audioPatch(document, planId, brief, options = {}) {
       continueAt: 28,
       reuseResult: false,
       status: 'idle',
+      ...(productionBinding ? { creatorProductionBinding: productionBinding } : {}),
       creativeState,
     }),
     nodeAdd(outputId, 'output', origin.x + 900, origin.y, { title: `${brief.title} · 音频输出` }),
@@ -3617,7 +3741,7 @@ function llmNodeProviderData(brief, model) {
   };
 }
 
-function scriptPatch(document, planId, brief) {
+function scriptPatch(document, planId, brief, options = {}) {
   const origin = originFor(document);
   const llmId = stableId('llm', planId);
   const outputId = stableId('output', `${planId}:output`);
@@ -3628,6 +3752,7 @@ function scriptPatch(document, planId, brief) {
   ].join('\n');
   const creativeState = defaultCreativeState(brief, stableId('creative-script', planId), stableId('candidate', planId), 1, 1);
   const model = brief.llmModel || brief.model || 'gemini-3.5-flash';
+  const productionBinding = creatorProductionCandidateBinding(options.productionDocuments);
   return patchEnvelope(document, stableId('creative-patch', planId), '创建可继续编辑的编剧工作流', [
     nodeAdd(llmId, 'llm', origin.x, origin.y, {
       model,
@@ -3644,6 +3769,7 @@ function scriptPatch(document, planId, brief) {
       maxTokens: 16384,
       stream: true,
       history: [],
+      ...(productionBinding ? { creatorProductionBinding: productionBinding } : {}),
       creativeState,
     }),
     nodeAdd(outputId, 'output', origin.x + 520, origin.y, { title: `${brief.title} · 剧本输出` }),
@@ -3978,11 +4104,11 @@ function createPatch(document, planId, kind, brief, candidateCount, options = {}
     if (brief.videoTask === 'lip-sync') {
       return lipSyncPatch(document, planId, brief, candidateCount, options);
     }
-    return videoPatch(document, planId, brief, candidateCount);
+    return videoPatch(document, planId, brief, candidateCount, options);
   }
   if (kind === 'edit-video') return editVideoPatch(document, planId, brief, candidateCount, options);
   if (kind === 'audio') return audioPatch(document, planId, brief, options);
-  if (kind === 'script') return scriptPatch(document, planId, brief);
+  if (kind === 'script') return scriptPatch(document, planId, brief, options);
   if (kind === 'story') {
     if (brief.recipe === 'shot-breakdown') return shotBreakdownPatch(document, planId, brief, options);
     return storyPatch(document, planId, brief, options);
@@ -5130,6 +5256,7 @@ function createAgentControlCreativeService(options = {}) {
       normalizedInput.artifactVerifications,
       normalizedInput.deliveryEvidence,
       database,
+      { stagedProduction: normalizedInput.stagedProduction === true },
     );
     const referenceBreakdownDocument = productionDocuments
       .find((item) => item?.kind === 'reference-breakdown');

@@ -1,7 +1,12 @@
 import type { DirectorStoryboardInputShot } from './directorStoryboard';
 import type { VideoEditClip } from './videoEdit';
 import type { CanvasProviderSource } from '../types/canvas';
-import { IMAGE_MODELS, LLM_MODELS } from '../providers/models.ts';
+import {
+  IMAGE_MODELS,
+  LLM_MODELS,
+  ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS,
+  ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
+} from '../providers/models.ts';
 import { resolveSeedanceNzLlmModel } from '../config/llm.ts';
 import {
   LEGACY_SEEDANCE_MODEL_OPTIONS,
@@ -200,7 +205,10 @@ const ASSET_KINDS = new Set<StoryAssetKind>(['character', 'scene', 'prop', 'cost
 const TASK_STATUSES = new Set<StoryTaskStatus>(['idle', 'pending', 'submitting', 'running', 'polling', 'succeeded', 'failed', 'cancelled', 'stale']);
 const PROVIDER_SOURCES = new Set<CanvasProviderSource>(['zhenzhen', 'openai-compatible', 'modelscope', 'volcengine', 'agnes', 'comfyui', 'jimeng-cli']);
 const STORY_LLM_MODELS = new Set(LLM_MODELS.map((model) => model.id));
-const STORY_IMAGE_MODELS = new Set((IMAGE_MODELS.find((model) => model.id === 'gpt-image-2')?.apiModelOptions || []).map((model) => model.value));
+const STORY_IMAGE_MODELS = new Set([
+  ...(IMAGE_MODELS.find((model) => model.id === 'gpt-image-2')?.apiModelOptions || []).map((model) => model.value),
+  ...ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS.map((model) => model.value),
+]);
 const STORY_LEGACY_VIDEO_MODELS = new Set<string>(LEGACY_SEEDANCE_MODEL_OPTIONS.map((model) => model.value));
 const STORY_NZ_VIDEO_MODELS = new Set<string>(SEEDANCE_NZ_MODEL_OPTIONS.map((model) => model.value));
 const HARD_CONSTRAINT_RE = /(?:不要|不得|禁止|没有|无其他|无其它|只出现|始终|保持|不能|不可|never|without|only|must\s+not)[^。！？\n]*/gi;
@@ -280,7 +288,7 @@ export function defaultStorySettings(): StorySettings {
     llmProviderSource: 'zhenzhen',
     llmProviderId: '',
     llmProviderModel: '',
-    imageModel: 'zhenzhen-image-g2-t2i',
+    imageModel: ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
     imageProviderSource: 'zhenzhen',
     imageProviderId: '',
     imageProviderModel: '',

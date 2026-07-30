@@ -540,6 +540,30 @@ const uploadCache = new Map();
 const uploadQueues = new Map();
 const responseBoundaries = new WeakMap();
 
+function seedanceNetworkCause(error) {
+  let current = error;
+  let depth = 0;
+  while (current?.cause && current.cause !== current && depth < 8) {
+    current = current.cause;
+    depth += 1;
+  }
+  return current || error;
+}
+
+function seedanceRetryIsKnownPreRequestFailure(error) {
+  const cause = seedanceNetworkCause(error);
+  const code = String(cause?.code || error?.code || '').trim().toUpperCase();
+  const message = String(cause?.message || error?.message || '');
+  return [
+    'CERT_HAS_EXPIRED',
+    'DEPTH_ZERO_SELF_SIGNED_CERT',
+    'SELF_SIGNED_CERT_IN_CHAIN',
+    'UNABLE_TO_GET_ISSUER_CERT',
+    'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+    'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  ].includes(code) || /certificate|self signed|unable to verify|issuer cert/i.test(message);
+}
+
 async function secureFetch(url, init = {}) {
   const method = String(init?.method || 'GET').toUpperCase();
   const request = {
@@ -547,19 +571,34 @@ async function secureFetch(url, init = {}) {
     headers: providerIdempotencyHeaders(init?.headers, method),
   };
   try {
-    return await undiciFetch(url, {
-      ...request,
-      dispatcher: seedanceDispatcher,
-    });
+    // Preserve the runtime/system network path first. This is the behavior
+    // users had before Provider-specific dispatchers were introduced and it
+    // keeps transparent TUN/VPN routing, system DNS and working IPv6 intact.
+    return await undiciFetch(url, request);
   } catch (error) {
-    if (!['GET', 'HEAD'].includes(method) || init?.signal?.aborted) throw error;
-    // The task already exists. Re-query the same id through independent public
-    // DNS when the active TUN resolver left a stale Fake-IP or unusable IPv6
-    // route. This never resubmits a generation request.
-    return undiciFetch(url, {
-      ...request,
-      dispatcher: seedancePublicDnsDispatcher,
-    });
+    if (init?.signal?.aborted) throw error;
+    const safeRead = ['GET', 'HEAD'].includes(method);
+    const stableSubmission = Boolean(headerValue(request.headers, 'idempotency-key'));
+    // TLS trust can fail before an HTTP request exists on older Electron CA
+    // bundles. That case is safe to retry with the provider-pinned CA even
+    // when a legacy caller has no submission key.
+    if (!safeRead && !stableSubmission && !seedanceRetryIsKnownPreRequestFailure(error)) {
+      throw error;
+    }
+    try {
+      return await undiciFetch(url, {
+        ...request,
+        dispatcher: seedanceDispatcher,
+      });
+    } catch (recoveryError) {
+      if (!safeRead || init?.signal?.aborted) throw recoveryError;
+      // Public DNS is the final read-only fallback only. Generation writes
+      // never bypass the active system/TUN resolver and are never duplicated.
+      return undiciFetch(url, {
+        ...request,
+        dispatcher: seedancePublicDnsDispatcher,
+      });
+    }
   }
 }
 

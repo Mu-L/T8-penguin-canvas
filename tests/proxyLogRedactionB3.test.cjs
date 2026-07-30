@@ -55,7 +55,7 @@ async function startProxyApp() {
   return listen(app);
 }
 
-async function requestJson(server, pathname, body) {
+async function requestJson(server, pathname, body, extraHeaders = {}) {
   const payload = Buffer.from(JSON.stringify(body ?? {}));
   return new Promise((resolve, reject) => {
     const req = http.request({
@@ -66,6 +66,7 @@ async function requestJson(server, pathname, body) {
       headers: {
         'content-type': 'application/json',
         'content-length': payload.length,
+        ...extraHeaders,
       },
     }, (res) => {
       const chunks = [];
@@ -277,7 +278,7 @@ test('B3 Provider fetch deadline covers DNS, connect, TLS, and response headers'
   }
 });
 
-test('B3 Provider requests use fresh TUN connections and replay writes only with one stable idempotency key', async () => {
+test('B3 Provider requests preserve native system networking first and replay writes only with one stable idempotency key', async () => {
   const originalFetch = global.fetch;
   let calls = 0;
   const readDispatchers = [];
@@ -300,11 +301,16 @@ test('B3 Provider requests use fresh TUN connections and replay writes only with
     );
     assert.equal(recovered.status, 200);
     assert.equal(calls, 2, 'read-only Provider queries may retry once after refreshing the connection pool');
+    assert.equal(
+      readDispatchers[0],
+      undefined,
+      'the primary Provider request must preserve the runtime/system network path used by v2.5.3',
+    );
     assert.notEqual(readDispatchers[0], readDispatchers[1]);
     assert.equal(
       readDispatchers[1],
-      proxyRouter._test.currentProviderDispatcher(true),
-      'the recovery query must use the independent public-DNS dispatcher',
+      proxyRouter._test.currentProviderDispatcher(false),
+      'the recovery query must use a fresh system-DNS connection without bypassing the active proxy/TUN path',
     );
 
     calls = 0;
@@ -1755,6 +1761,41 @@ test('B3 LLM JSON and SSE paths bound Provider bodies and expose only normalized
       assert.equal(Object.hasOwn(completed.data.data, 'raw'), false);
       assert.doesNotMatch(completed.text, /llm-provider-secret-key|usage-secret|provider-raw-secret/);
 
+      proxyRouter._test.setProxySafeRemoteTestOptions({ providerRetryDelayMs: 1 });
+      let recoveryCalls = 0;
+      const recoveryDispatchers = [];
+      const recoveryKeys = [];
+      global.fetch = async (_url, init = {}) => {
+        recoveryCalls += 1;
+        recoveryDispatchers.push(init.dispatcher);
+        recoveryKeys.push(new Headers(init.headers).get('Idempotency-Key'));
+        if (recoveryCalls === 1) {
+          throw Object.assign(new TypeError('fetch failed'), {
+            cause: Object.assign(new Error('stale route'), { code: 'ECONNRESET' }),
+          });
+        }
+        return new Response(JSON.stringify({
+          id: 'llm-recovered-request',
+          choices: [{ message: { content: 'recovered' }, finish_reason: 'stop' }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      };
+      const recovered = await requestJson(
+        appServer,
+        '/api/proxy/llm',
+        requestBody,
+        { 'x-t8-provider-submission': 'llm-node-run-attempt-0001' },
+      );
+      assert.equal(recovered.status, 200, recovered.text);
+      assert.equal(recovered.data.data.requestId, 'llm-recovered-request');
+      assert.equal(recoveryCalls, 2);
+      assert.equal(recoveryDispatchers[0], undefined);
+      assert.ok(recoveryDispatchers[1], 'the retry must use a fresh system-DNS connection');
+      assert.deepEqual(
+        recoveryKeys,
+        ['llm-node-run-attempt-0001', 'llm-node-run-attempt-0001'],
+        'LLM recovery must retain one stable submission identity',
+      );
+
       global.fetch = async () => new Response(
         'data: {"choices":[{"delta":{"content":"stream llm-provider-secret-key"}}],"token":"stream-debug-secret"}\n\n'
           + 'data: {"choices":[{"finish_reason":"stop"}],"provider_debug":"raw-stream-secret"}\n\n'
@@ -1777,6 +1818,43 @@ test('B3 LLM JSON and SSE paths bound Provider bodies and expose only normalized
       const stalled = await requestJson(appServer, '/api/proxy/llm', { ...requestBody, stream: true });
       assert.equal(stalled.status, 504, stalled.text);
       assert.ok(Date.now() - startedAt < 1_000, 'stalled LLM SSE must stop at its idle/deadline budget');
+    } finally {
+      global.fetch = originalFetch;
+      proxyRouter._test.setProxySafeRemoteTestOptions(null);
+    }
+  });
+});
+
+test('B3 completed task response stalls remain recoverable without resubmitting generation', async () => {
+  await withProxyFixture(async ({ appServer }) => {
+    const originalFetch = global.fetch;
+    let calls = 0;
+    proxyRouter._test.setProxySafeRemoteTestOptions({
+      providerDeadlineMs: 120,
+      idleTimeoutMs: 40,
+      providerRetryDelayMs: 1,
+    });
+    global.fetch = async () => {
+      calls += 1;
+      return new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(Buffer.from('{"status":"completed","data":'));
+        },
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+    try {
+      const response = await requestGet(
+        appServer,
+        '/api/proxy/image/status/existing-completed-image-task?model=gpt-image-2',
+      );
+      assert.equal(response.status, 202, response.text);
+      assert.equal(response.data?.code, 'task_result_query_recovering');
+      assert.equal(response.data?.data?.taskId, 'existing-completed-image-task');
+      assert.equal(response.data?.data?.recoverable, true);
+      assert.equal(calls, 1, 'a stalled result body must continue the same query instead of submitting again');
     } finally {
       global.fetch = originalFetch;
       proxyRouter._test.setProxySafeRemoteTestOptions(null);

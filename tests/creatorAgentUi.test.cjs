@@ -364,6 +364,11 @@ test('creator Agent empty state presents exactly three stable rotatable local id
   assert.match(panel, /blockedReason/);
   assert.match(panel, /suggestionContractBroken/);
   assert.match(panel, /无法提供完整的 3 条建议/);
+  assert.match(panel, /const latestCompletedResponseEvent =/);
+  assert.match(panel, /const latestCompletedSuggestionSet = latestCompletedResponseEvent\?\.payload\.suggestionSet as/);
+  assert.match(panel, /const recommendationChoicesReady = !thinkingActive/);
+  assert.match(panel, /latestCompletedSuggestionSetDigest === session\?\.suggestionSet\?\.setDigest/);
+  assert.match(panel, /recommendationChoicesReady && suggestions\.length === 3/);
 });
 
 test('creator Agent keeps suggestion contracts but hides technical receipts from the chat-first choices', () => {
@@ -427,10 +432,13 @@ test('creator Agent confirms a completed stage, retains it on Canvas, then conti
   assert.match(panel, /session\?\.latestPlan\?\.planId === currentStagePlan\.planId/);
   assert.match(panel, /'confirmCurrentStage' in suggestion\.arguments/);
   assert.match(panel, /continueFromStageSuggestion/);
-  assert.match(panel, /result\.phaseTransition\.nextPhase !== targetPhase/);
+  assert.match(panel, /const phaseTransitionReady = Boolean/);
+  assert.match(panel, /result\.phaseTransition\.nextPhase === targetPhase/);
+  assert.match(panel, /result\.phaseTransition\.completed === true/);
   assert.match(panel, /readyAfterApply: !result\.canvasRetention/);
+  assert.match(panel, /if \(productionFinished\) \{\s*setPendingStageContinuation\(null\);\s*return;/);
   assert.match(panel, /setPendingStageContinuation\(\(current\) => \(\s*current \? \{ \.\.\.current, readyAfterApply: true \}/);
-  assert.match(panel, /void submit\(prompt\)/);
+  assert.match(panel, /void submit\(prompt, undefined, \{ stageContinuation: true \}\)/);
   assert.match(panel, /Agent 会自动进入/);
   assert.match(panel, /确认添加到画布/);
   assert.match(panel, /正在构思并整理本阶段方案/);

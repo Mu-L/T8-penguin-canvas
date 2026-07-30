@@ -13,6 +13,7 @@ const {
   compileCreatorArtifactVersion,
   creatorArtifactSummaries,
   latestCreatorArtifactVersions,
+  normalizeCreatorArtifactVersion,
   normalizeCreatorArtifactVersions,
 } = require('./creatorAgentArtifacts');
 const {
@@ -20,6 +21,14 @@ const {
   assertCreatorToolProposalCurrent,
   validateStoredCreatorToolProposal,
 } = require('./creatorAgentToolProposals');
+const {
+  advanceCreatorDecisionDocument,
+  createCreatorDecisionDocument,
+  creatorDecisionSuggestionChoices,
+  currentCreatorDecision,
+  normalizeCreatorDecisionDocument,
+  normalizeCreatorDecisionDocumentVersions,
+} = require('./creatorAgentDecisions');
 
 const CREATOR_AGENT_SESSION_SCHEMA = 't8-creator-agent-session-v1';
 const CREATOR_AGENT_EVENT_SCHEMA = 't8-creator-agent-event-v1';
@@ -68,6 +77,41 @@ function creatorStableString(value) {
 
 function creatorDigest(value) {
   return crypto.createHash('sha256').update(creatorStableString(value)).digest('hex');
+}
+
+function creatorDecisionSummary(value) {
+  const document = normalizeCreatorDecisionDocument(value);
+  if (!document) return null;
+  return {
+    schema: 't8-creator-decision-summary-v1',
+    documentId: document.documentId,
+    versionId: document.versionId,
+    contentDigest: document.contentDigest,
+    family: document.family,
+    phase: document.phase,
+    revision: document.revision,
+    status: document.status,
+    currentDecisionId: document.currentDecisionId,
+  };
+}
+
+function storeCreatorDecisionDocument(session, value) {
+  const document = normalizeCreatorDecisionDocument(value);
+  if (!document || document.sessionId !== session.id) {
+    throw new CreatorAgentSessionError(
+      'CREATOR_DECISION_DOCUMENT_INVALID',
+      '当前创作决策版本无法验证，已停止推进以保护创作记录',
+      409,
+    );
+  }
+  session.decisionDocument = document;
+  session.decisionDocumentVersions = normalizeCreatorDecisionDocumentVersions([
+    ...(Array.isArray(session.decisionDocumentVersions)
+      ? session.decisionDocumentVersions
+      : []),
+    document,
+  ]);
+  return document;
 }
 function normalizeProductionDocumentConfirmations(value) {
   return (Array.isArray(value) ? value : []).slice(-CREATOR_PRODUCTION_DOCUMENT_CONFIRMATION_LIMIT)
@@ -1824,6 +1868,7 @@ function validateCreatorSuggestionPersistence(session, events = session?.events)
 
 function creatorSuggestionBinding(context = {}, plan = null, options = {}) {
   const normalized = normalizeContext(context);
+  const decisionDocument = normalizeCreatorDecisionDocument(options.decisionDocument);
   const canvasObjects = [...normalized.canvasObjects]
     .sort((left, right) => left.nodeId.localeCompare(right.nodeId));
   const assetLineage = [...normalized.assetLineage]
@@ -1891,6 +1936,12 @@ function creatorSuggestionBinding(context = {}, plan = null, options = {}) {
     ...(boundedText(options.artifactVersionId, 80) ? {
       artifactVersionId: boundedText(options.artifactVersionId, 80),
     } : {}),
+    ...(decisionDocument ? {
+      decisionDocumentId: decisionDocument.documentId,
+      decisionDocumentVersionId: decisionDocument.versionId,
+      decisionDocumentDigest: decisionDocument.contentDigest,
+      currentDecisionId: decisionDocument.currentDecisionId,
+    } : {}),
   };
 }
 
@@ -1906,15 +1957,32 @@ function creatorSuggestionSet(context = {}, plan = null, options = {}) {
     options.responseEvidence,
     options.artifactVersion,
   );
-  const choices = creatorSuggestionChoices(context, plan, {
-    responseSource,
-    production: options.production,
-    stageReadyForConfirmation: options.stageReadyForConfirmation === true,
-  });
-  const isStagedStory = ['story', 'script'].includes(String(plan?.kind || ''))
-    && options.production
-    && plan?.brief?.recipe !== 'shot-breakdown';
-  const planPhase = isStagedStory
+  const decisionDocument = normalizeCreatorDecisionDocument(options.decisionDocument);
+  const decisionChoices = decisionDocument
+    ? creatorDecisionSuggestionChoices(decisionDocument)
+    : [];
+  const decisionDriven = decisionChoices.length === 3;
+  const choices = decisionDriven
+    ? decisionChoices
+    : creatorSuggestionChoices(context, plan, {
+        responseSource,
+        production: options.production,
+        stageReadyForConfirmation: options.stageReadyForConfirmation === true,
+      });
+  const isStagedProduction = Boolean(
+    options.production
+    && plan?.brief?.recipe !== 'shot-breakdown'
+    && (
+      ['story', 'script'].includes(String(plan?.kind || ''))
+      || (
+        Array.isArray(plan?.productionDocuments)
+        && plan.productionDocuments.some((document) => (
+          document?.kind === 'delivery-manifest'
+        ))
+      )
+    ),
+  );
+  const planPhase = isStagedProduction
     ? normalizeCreativePhase(options.production?.currentPhase, normalized.phase || 'idea')
     : phaseForPlan(plan, normalized.phase || 'idea');
   const storyGroup = `story-${planPhase}`;
@@ -1932,7 +2000,7 @@ function creatorSuggestionSet(context = {}, plan = null, options = {}) {
           ? responseSource.taskFamily
           : 'canvas'
     : '';
-  const group = (isStagedStory ? storyGroup : responseGroup) || (focus
+  const group = (isStagedProduction ? storyGroup : responseGroup) || (focus
     ? 'selection'
     : recoveryRequested
       && (normalized.failedRunCount > 0 || normalized.offscreenSummary.failedCount > 0)
@@ -2061,19 +2129,44 @@ function creatorSuggestionSet(context = {}, plan = null, options = {}) {
     candidates: ['story-candidates-continue', 'story.confirm-candidates-and-continue', '确认真实采用结果，准备画布留存预览，并在写入确认后继续成片', ['iterate.compare']],
   };
   const preferred = choices.map((choice, index) => {
-    const stageDraftSpec = isStagedStory
+    if (decisionDriven) {
+      const confirmCurrentStage = choice.decision?.decisionAction === 'confirm-stage';
+      return {
+        id: choice.id,
+        label: choice.label,
+        description: choice.description,
+        intent: choice.intent,
+        arguments: {
+          preserveAccepted: true,
+          planOnly: true,
+          creatorPrompt: choice.creatorPrompt,
+          creatorKind: choice.creatorKind || creatorPlanKind(plan),
+          ...choice.decision,
+          ...(confirmCurrentStage ? {
+            confirmCurrentStage: true,
+            continueToPhase: nextCreatorProductionPhase(decisionDocument.phase),
+            requiresCanvasRetentionApply: true,
+          } : {}),
+        },
+        expectedEffect: choice.expectedEffect,
+        riskLevel: 'L0-intent',
+        requiredCapabilityIds: choice.requiredCapabilityIds,
+        disabledReason: '',
+      };
+    }
+    const stageDraftSpec = isStagedProduction
       && index === 0
       && options.stageReadyForConfirmation !== true
       ? stageDraftSpecs[planPhase]
       : null;
-    const stageContinueSpec = isStagedStory
+    const stageContinueSpec = isStagedProduction
       && index === 0
       && options.stageReadyForConfirmation === true
       ? stageContinueSpecs[planPhase]
       : null;
     const [id, intent, expectedEffect, requiredCapabilityIds] =
       stageContinueSpec || stageDraftSpec || specs[group][index];
-    const stageContinuation = isStagedStory
+    const stageContinuation = isStagedProduction
       && index === 0
       && planPhase !== 'delivery'
       && options.stageReadyForConfirmation === true
@@ -2153,7 +2246,7 @@ function creatorSuggestionSet(context = {}, plan = null, options = {}) {
     riskLevel: 'L0-intent',
     disabledReason: '',
   }));
-  const items = [...preferred, ...safeBackfills]
+  const items = (decisionDriven ? preferred : [...preferred, ...safeBackfills])
     .filter((item) => item.requiredCapabilityIds.every((id) => availableCapabilityIds.has(id)))
     .filter((item, index, all) => all.findIndex((candidate) => candidate.id === item.id) === index)
     .slice(0, 3);
@@ -2206,6 +2299,7 @@ function creatorSuggestionSet(context = {}, plan = null, options = {}) {
     artifactDigest: responseSource?.artifactDigest,
     artifactId: responseSource?.artifactId,
     artifactVersionId: responseSource?.artifactVersionId,
+    decisionDocument,
   });
   const suggestionSet = {
     schema: 't8-creator-suggestion-set-v1',
@@ -2240,6 +2334,14 @@ function resolveCreatorSuggestionSelection(session, input = {}) {
       { staleFields: ['suggestionSet'] },
     );
   }
+  const suggestion = storedSet.items.find((item) => item.id === suggestionId);
+  if (!suggestion) {
+    throw new CreatorAgentSessionError(
+      'CREATOR_SUGGESTION_NOT_FOUND',
+      '当前建议中没有这个操作，请使用最新回复下方的建议',
+      409,
+    );
+  }
   const boundArtifactId = boundedText(
     storedSet.binding?.artifactId || storedSet.source?.artifactId,
     80,
@@ -2260,19 +2362,26 @@ function resolveCreatorSuggestionSelection(session, input = {}) {
       artifactId: currentArtifactVersion?.artifactId || boundArtifactId,
       artifactVersionId: currentArtifactVersion?.versionId
         || storedSet.binding?.artifactVersionId,
+      decisionDocument: session.decisionDocument,
     },
   );
-  if (creatorStableString(currentBinding) !== creatorStableString(storedSet.binding)) {
-    const staleFields = [
-      'canvasRevision',
-      'contextDigest',
-      'assetVersion',
-      'planDigest',
-      'responseDigest',
-      'artifactDigest',
-      'artifactId',
-      'artifactVersionId',
-    ].filter((field) => currentBinding?.[field] !== storedSet.binding?.[field]);
+  const productionStageConfirmation = (
+    input.bindingScope === 'production-stage-confirmation'
+    && suggestion.arguments?.confirmCurrentStage === true
+  );
+  const liveCanvasOnlyFields = new Set([
+    'canvasRevision',
+    'contextDigest',
+    'assetVersion',
+  ]);
+  const staleFields = [...new Set([
+    ...Object.keys(currentBinding || {}),
+    ...Object.keys(storedSet.binding || {}),
+  ])].filter((field) => (
+    currentBinding?.[field] !== storedSet.binding?.[field]
+    && !(productionStageConfirmation && liveCanvasOnlyFields.has(field))
+  ));
+  if (staleFields.length > 0) {
     throw new CreatorAgentSessionError(
       'CREATOR_SUGGESTION_STALE',
       '画布、选区或素材已经变化，或者本轮创作正文已更新；这条旧建议已停止执行，请使用刚刷新的 3 条建议',
@@ -2292,14 +2401,6 @@ function resolveCreatorSuggestionSelection(session, input = {}) {
       '这条建议依赖的画布能力已经变化，请刷新后使用新的建议',
       409,
       { staleFields: ['capabilities'], missingCapabilityIds },
-    );
-  }
-  const suggestion = storedSet.items.find((item) => item.id === suggestionId);
-  if (!suggestion) {
-    throw new CreatorAgentSessionError(
-      'CREATOR_SUGGESTION_NOT_FOUND',
-      '当前建议中没有这个操作，请使用最新回复下方的建议',
-      409,
     );
   }
   if (!suggestion.executable || suggestion.blockers.length > 0) {
@@ -2893,6 +2994,31 @@ function createCreatorAgentSessionStore(options = {}) {
       session.creativeArtifactVersions,
     );
     session.creativeArtifacts = creatorArtifactSummaries(session.creativeArtifactVersions);
+    const rawDecisionDocument = session.decisionDocument;
+    session.decisionDocument = rawDecisionDocument == null
+      ? null
+      : normalizeCreatorDecisionDocument(rawDecisionDocument);
+    if (rawDecisionDocument != null && !session.decisionDocument) {
+      throw new CreatorAgentSessionError(
+        'CREATOR_SESSION_DECISION_DOCUMENT_CORRUPT',
+        '创作会话中的决策版本无法验证，已停止继续使用',
+        500,
+      );
+    }
+    const rawDecisionVersions = Array.isArray(session.decisionDocumentVersions)
+      ? session.decisionDocumentVersions
+      : [];
+    const normalizedDecisionVersions = normalizeCreatorDecisionDocumentVersions(
+      rawDecisionVersions,
+    );
+    if (rawDecisionVersions.length !== normalizedDecisionVersions.length) {
+      throw new CreatorAgentSessionError(
+        'CREATOR_SESSION_DECISION_HISTORY_CORRUPT',
+        '创作会话中的决策历史无法完整验证，已停止继续使用',
+        500,
+      );
+    }
+    session.decisionDocumentVersions = normalizedDecisionVersions;
     try {
       session.toolProposals = (Array.isArray(session.toolProposals)
         ? session.toolProposals : [])
@@ -3127,6 +3253,8 @@ function createCreatorAgentSessionStore(options = {}) {
         artifactVerifications: [],
         creativeArtifactVersions: [],
         creativeArtifacts: [],
+        decisionDocument: null,
+        decisionDocumentVersions: [],
         toolProposals: [],
         deliveryEvidence: [],
         lastSequence: 0,
@@ -3178,6 +3306,9 @@ function createCreatorAgentSessionStore(options = {}) {
   }
 
   function applyPlanState(session, input, context) {
+    if (input.decisionTurn?.document) {
+      storeCreatorDecisionDocument(session, input.decisionTurn.document);
+    }
     session.context = context;
     session.status = input.plan?.ready ? 'planned' : 'needs-input';
     const recordedAt = new Date(now()).toISOString();
@@ -3212,6 +3343,7 @@ function createCreatorAgentSessionStore(options = {}) {
       responseText: explicitAssistantText,
       responseEvidence: input.responseEvidence,
       artifactVersion: input.artifactVersion,
+      decisionDocument: session.decisionDocument,
       production: session.production,
       stageReadyForConfirmation: Boolean(
         input.plan?.ready
@@ -3307,6 +3439,9 @@ function createCreatorAgentSessionStore(options = {}) {
       ...(artifactCompilation ? { artifactCompilation } : {}),
       ...(artifactCompilation?.artifactVersion ? {
         artifactVersion: artifactCompilation.artifactVersion,
+      } : {}),
+      ...(creatorDecisionSummary(session.decisionDocument) ? {
+        decision: creatorDecisionSummary(session.decisionDocument),
       } : {}),
       providerCalls: responseEvidence?.providerCalls || 0,
       suggestions: session.suggestions,
@@ -3428,15 +3563,6 @@ function createCreatorAgentSessionStore(options = {}) {
       );
     }
     const currentPhase = normalizeCreativePhase(session.production?.currentPhase, 'idea');
-    const stageResponse = [...(Array.isArray(session.events) ? session.events : [])]
-      .reverse()
-      .find((event) => (
-        ['assistant.response.completed', 'assistant.plan'].includes(event?.type)
-        && event?.payload?.plan?.planId === planId
-        && event?.payload?.plan?.planDigest === planDigest
-        && normalizeCreativePhase(event?.payload?.productionPhase, '__invalid__') === currentPhase
-        && boundedText(event?.payload?.text, 80_000)
-      ));
     const requested = Array.isArray(input.documents) ? input.documents.slice(0, 16) : [];
     if (requested.length === 0) {
       throw new CreatorAgentSessionError(
@@ -3481,7 +3607,7 @@ function createCreatorAgentSessionStore(options = {}) {
     const allSelectedAlreadyConfirmed = selected.every(
       (document) => productionDocumentConfirmationFor(session, document),
     );
-    if (!stageResponse && allSelectedAlreadyConfirmed) {
+    if (allSelectedAlreadyConfirmed) {
       return {
         session: read(session.id),
         confirmations: selected.map(
@@ -3492,10 +3618,92 @@ function createCreatorAgentSessionStore(options = {}) {
         stageResponse: null,
       };
     }
+    const allowedKinds = new Set(creatorProductionDocumentKindsForPhase(currentPhase));
+    if (selected.some((document) => !allowedKinds.has(String(document?.kind || '')))) {
+      throw new CreatorAgentSessionError(
+        'CREATOR_STAGE_DOCUMENT_SCOPE_INVALID',
+        '一次只能确认当前阶段的必需文档；后续阶段仍需逐项完善并明确确认',
+        409,
+      );
+    }
+    const decisionDocument = normalizeCreatorDecisionDocument(session.decisionDocument);
+    const currentDecision = currentCreatorDecision(decisionDocument);
+    const decisionSelection = input.decisionSelection
+      && typeof input.decisionSelection === 'object'
+      ? input.decisionSelection
+      : null;
+    if (!decisionDocument
+      || decisionDocument.phase !== currentPhase
+      || currentDecision?.kind !== 'stage-confirmation'
+      || boundedText(decisionSelection?.decisionDocumentId, 160)
+        !== decisionDocument.documentId
+      || boundedText(decisionSelection?.decisionDocumentVersionId, 80)
+        !== decisionDocument.versionId
+      || boundedText(decisionSelection?.decisionDocumentDigest, 64).toLowerCase()
+        !== decisionDocument.contentDigest
+      || boundedText(decisionSelection?.decisionId, 120)
+        !== decisionDocument.currentDecisionId) {
+      throw new CreatorAgentSessionError(
+        'CREATOR_STAGE_DECISION_REQUIRED',
+        '请先完成本阶段当前的逐项确认，再使用最新的“确认并进入下一阶段”选项',
+        409,
+      );
+    }
+    const decisionOption = currentDecision.options.find((option) => (
+      option.id === boundedText(decisionSelection?.decisionOptionId, 80)
+    ));
+    if (!decisionOption || decisionOption.action !== 'confirm-stage') {
+      throw new CreatorAgentSessionError(
+        'CREATOR_STAGE_CONFIRMATION_REQUIRED',
+        '当前选择不是阶段确认；修改和补充会继续留在本阶段',
+        409,
+      );
+    }
+    let confirmedDecisionDocument;
+    try {
+      confirmedDecisionDocument = advanceCreatorDecisionDocument(decisionDocument, {
+        optionId: decisionOption.id,
+      }).document;
+    } catch (error) {
+      throw new CreatorAgentSessionError(
+        'CREATOR_STAGE_DECISION_STALE',
+        '当前阶段确认版本已经变化，请使用最新回复下方的选项',
+        409,
+        { cause: String(error?.message || error) },
+      );
+    }
+    const stageResponse = [...(Array.isArray(session.events) ? session.events : [])]
+      .reverse()
+      .find((event) => (
+        ['assistant.response.completed', 'assistant.plan'].includes(event?.type)
+        && event?.payload?.plan?.planId === planId
+        && event?.payload?.plan?.planDigest === planDigest
+        && normalizeCreativePhase(event?.payload?.productionPhase, '__invalid__') === currentPhase
+        && boundedText(event?.payload?.text, 80_000)
+      ));
     if (!stageResponse) {
       throw new CreatorAgentSessionError(
         'CREATOR_PRODUCTION_STAGE_RESPONSE_REQUIRED',
         '当前阶段还没有完整创作稿，不能只确认空计划；请先让 Agent 完成本阶段内容',
+        409,
+      );
+    }
+    const stageArtifact = normalizeCreatorArtifactVersion(
+      stageResponse.payload?.artifactVersion,
+    );
+    const persistedStageArtifact = stageArtifact
+      ? session.creativeArtifactVersions.find((version) => (
+          version.versionId === stageArtifact.versionId
+          && version.versionDigest === stageArtifact.versionDigest
+        ))
+      : null;
+    if (!persistedStageArtifact
+      || !boundedResponseText(persistedStageArtifact.content?.bodyMarkdown, 80_000)
+      || boundedResponseText(stageResponse.payload?.text, 80_000)
+        !== boundedResponseText(persistedStageArtifact.content.bodyMarkdown, 80_000)) {
+      throw new CreatorAgentSessionError(
+        'CREATOR_STAGE_ARTIFACT_REQUIRED',
+        '当前阶段没有可验证的非空创作稿版本，已停止确认；请先让 Agent 完成本阶段内容',
         409,
       );
     }
@@ -3560,7 +3768,10 @@ function createCreatorAgentSessionStore(options = {}) {
       const persistedEditDecisionListValid = (
         document.kind === 'edit-decision-list'
         && derivation?.schema === 't8-creator-evidence-derivation-v1'
-        && derivation?.method === 'verified-adopted-video-sequence'
+        && [
+          'verified-adopted-video-sequence',
+          'verified-adopted-media-sequence',
+        ].includes(derivation?.method)
         && Number.isSafeInteger(Number(derivation?.canvasRevision))
         && Number(derivation?.canvasRevision) >= 0
         && Number(derivation?.canvasRevision) === Number(sourceDocument?.content?.derivation?.canvasRevision || 0)
@@ -3622,6 +3833,26 @@ function createCreatorAgentSessionStore(options = {}) {
       }
     }
 
+    const requiredKinds = creatorProductionDocumentKindsForPhase(currentPhase);
+    const requiredDocuments = currentDocuments.filter((document) => (
+      requiredKinds.includes(String(document?.kind || ''))
+    ));
+    const selectedVersionIdsForConfirmation = new Set(
+      selected.map((document) => document.versionId),
+    );
+    const allRequiredSelectedOrConfirmed = requiredDocuments.length > 0
+      && requiredDocuments.every((document) => (
+        productionDocumentConfirmationFor(session, document)
+        || selectedVersionIdsForConfirmation.has(document.versionId)
+      ));
+    if (!allRequiredSelectedOrConfirmed) {
+      throw new CreatorAgentSessionError(
+        'CREATOR_STAGE_DOCUMENTS_INCOMPLETE',
+        '请一次确认本阶段当前版本的全部必需文档；缺少的内容仍会留在本阶段继续完善',
+        409,
+      );
+    }
+    storeCreatorDecisionDocument(session, confirmedDecisionDocument);
     const existing = [];
     const created = [];
     const confirmedAt = new Date(now()).toISOString();
@@ -3670,10 +3901,6 @@ function createCreatorAgentSessionStore(options = {}) {
         canvasWrites: 0,
       });
     }
-    const requiredKinds = creatorProductionDocumentKindsForPhase(currentPhase);
-    const requiredDocuments = currentDocuments.filter((document) => (
-      requiredKinds.includes(String(document?.kind || ''))
-    ));
     const allRequiredConfirmed = requiredDocuments.length > 0
       && requiredDocuments.every((document) => productionDocumentConfirmationFor(session, document));
     let phaseTransition = null;
@@ -3694,10 +3921,23 @@ function createCreatorAgentSessionStore(options = {}) {
       });
       phaseTransition = {
         advanced: currentPhase !== nextPhase,
+        ...(nextPhase === currentPhase
+          && session.production.completedPhases.includes(currentPhase)
+          ? { completed: true }
+          : {}),
         completedPhase: currentPhase,
         nextPhase,
         productionRevision: session.production.revision,
       };
+      if (currentPhase !== nextPhase) {
+        storeCreatorDecisionDocument(session, createCreatorDecisionDocument({
+          sessionId: session.id,
+          family: decisionDocument.family,
+          phase: nextPhase,
+          kind: sourcePlan.kind,
+          prompt: persistedStageArtifact.content.bodyMarkdown,
+        }));
+      }
       session.suggestionSet = creatorSuggestionSet({
         ...session.context,
         phase: session.production.currentPhase,
@@ -3705,6 +3945,7 @@ function createCreatorAgentSessionStore(options = {}) {
         responseText: stageResponse.payload.text,
         responseEvidence: stageResponse.payload.responseEvidence,
         artifactVersion: stageResponse.payload.artifactVersion,
+        decisionDocument: session.decisionDocument,
         production: session.production,
       });
       session.suggestions = session.suggestionSet.items.map((item) => item.label);
@@ -3718,6 +3959,7 @@ function createCreatorAgentSessionStore(options = {}) {
           sourceResponseId: boundedText(stageResponse.payload?.responseId, 160) || null,
           sourceResponseDigest: boundedText(stageResponse.payload?.responseDigest, 64) || null,
           productionRevision: session.production.revision,
+          decision: creatorDecisionSummary(session.decisionDocument),
           providerCalls: 0,
           canvasWrites: 0,
         });
@@ -3734,6 +3976,7 @@ function createCreatorAgentSessionStore(options = {}) {
         responseDigest: boundedText(stageResponse.payload?.responseDigest, 64) || null,
         productionPhase: currentPhase,
         text: boundedResponseText(stageResponse.payload?.text, 80_000),
+        artifactVersion: persistedStageArtifact,
       },
     };
   }
@@ -3995,6 +4238,9 @@ function createCreatorAgentSessionStore(options = {}) {
       ...(artifactCompilation?.artifactVersion ? {
         artifactVersion: artifactCompilation.artifactVersion,
       } : {}),
+      ...(creatorDecisionSummary(session.decisionDocument) ? {
+        decision: creatorDecisionSummary(session.decisionDocument),
+      } : {}),
       providerCalls: responseEvidence?.providerCalls
         ?? Math.max(0, Math.trunc(Number(started.payload?.providerCalls) || 0)),
       ...(started.payload?.clientRequestId ? { clientRequestId: started.payload.clientRequestId } : {}),
@@ -4211,6 +4457,7 @@ function createCreatorAgentSessionStore(options = {}) {
     if (!preserveSuggestions) {
       session.suggestionSet = creatorSuggestionSet(suggestionContext, input.plan, {
         production: session.production,
+        decisionDocument: session.decisionDocument,
       });
       session.suggestions = session.suggestionSet.items.map((item) => item.label);
     }

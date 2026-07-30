@@ -27,6 +27,7 @@ import {
   storyToVideoEditClips,
   storyToVideoEditTimeline,
 } from '../src/utils/storyProduction.ts';
+import { ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL } from '../src/providers/models.ts';
 
 const root = path.resolve(import.meta.dirname, '..');
 const sampleScript = `《唐人街巷战》Director Script V2
@@ -101,6 +102,7 @@ test('legacy Story project data without recovery fields upgrades safely', () => 
 
 test('story provider settings preserve canonical built-ins and configured external selections', () => {
   const base = createEmptyStoryProject({ storyId: 'story-provider-settings' });
+  assert.equal(base.settings.imageModel, ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL);
   const configured = sanitizeStoryProject({
     ...base,
     settings: {
@@ -133,6 +135,19 @@ test('story provider settings preserve canonical built-ins and configured extern
   assert.equal(configured.settings.videoNzModel, 'global-fast');
   assert.equal(configured.settings.videoProviderSource, 'volcengine');
 
+  for (const preservedImageModel of [
+    'gpt-image-2-all',
+    'gpt-image-2',
+    'zhenzhen-image-g2-t2i',
+    ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
+  ]) {
+    const preserved = sanitizeStoryProject({
+      ...base,
+      settings: { ...base.settings, imageModel: preservedImageModel },
+    });
+    assert.equal(preserved.settings.imageModel, preservedImageModel);
+  }
+
   const invalid = sanitizeStoryProject({
     ...base,
     settings: { ...base.settings, llmModel: 'gpt-5.4', llmApiSource: 'made-up-source', llmNzModel: 'made-up-llm', imageModel: 'made-up-image', videoModel: 'made-up-video', videoNzModel: 'made-up-nz' },
@@ -140,7 +155,7 @@ test('story provider settings preserve canonical built-ins and configured extern
   assert.equal(invalid.settings.llmModel, 'gemini-3.5-flash');
   assert.equal(invalid.settings.llmApiSource, 'zhenzhen');
   assert.equal(invalid.settings.llmNzModel, 'bytedance/doubao-seed-2.0-mini');
-  assert.equal(invalid.settings.imageModel, 'zhenzhen-image-g2-t2i');
+  assert.equal(invalid.settings.imageModel, ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL);
   assert.equal(invalid.settings.videoModel, 'doubao-seedance-2-0-fast-260128');
   assert.equal(invalid.settings.videoNzModel, 'fast');
 });
@@ -488,7 +503,12 @@ test('story node is wired into shared schema, Canvas and roadmap', () => {
   assert.match(storyNode, /贞贞AI工坊内置LLM[\s\S]*贞贞的平价AI小屋/);
   assert.match(storyNode, /generateLlm\(\{ source: builtinSource, model,/);
   assert.match(storyNode, /IMAGE_MODELS\.find\(\(item\) => item\.id === 'gpt-image-2'\)/);
-  assert.match(storyNode, /ZHENZHEN_IMAGE_G2_MODEL_OPTIONS/);
+  assert.match(storyNode, /ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS/);
+  assert.match(storyNode, /STORY_LEGACY_IMAGE_OPTIONS[\s\S]*item\.value === 'gpt-image-2'/);
+  assert.match(storyNode, /STORY_BUDGET_IMAGE_OPTIONS[\s\S]*ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL/);
+  assert.match(storyNode, /STORY_BUDGET_IMAGE_MODELS\.has\(model[\s\S]*submitSeedreamNz/);
+  assert.match(storyNode, /resolution: isLowpriceModel \? '2k' : '1k'/);
+  assert.match(storyNode, /size: isLowpriceModel \? imageAspectRatio : undefined/);
   assert.match(storyNode, /<option value="seedance-nz">贞贞的平价AI小屋<\/option>/);
   assert.doesNotMatch(storyNode, /贞贞平价 AI 工坊（国内）/);
   assert.match(storyNode, /LEGACY_SEEDANCE_MODEL_OPTIONS/);

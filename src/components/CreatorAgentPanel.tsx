@@ -3505,6 +3505,7 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
   const confirmProductionDocuments = useCallback(async (
     plan: CreatorAgentPlan,
     documents: CreatorAgentProductionDocument[],
+    suggestion?: CreatorAgentSuggestion,
   ) => {
     if (!session || busy || confirmingDocumentKey || documents.length === 0) return;
     setConfirmingDocumentKey(documents.length > 1 ? 'all' : documents[0].versionId);
@@ -3520,6 +3521,10 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
           versionId: document.versionId,
           contentDigest: document.contentDigest,
         })),
+        suggestion: {
+          id: String(suggestion?.id || ''),
+          setDigest: String(session.suggestionSet?.setDigest || ''),
+        },
       });
       setSession(result.session);
       if (result.canvasRetention) {
@@ -3579,6 +3584,7 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
   const submit = useCallback(async (
     value = draft,
     suggestion?: { id: string; setDigest: string },
+    options: { stageContinuation?: boolean } = {},
   ) => {
     const text = value.trim();
     if ((!text && messageAttachments.length === 0) || busy || uploading) return;
@@ -3600,6 +3606,7 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
       })),
       context,
       modelPreferences,
+      stageContinuation: options.stageContinuation === true,
     });
     const existingPending = readPendingCreatorMessage(pendingMessageKey);
     const pendingRequest = existingPending?.signature === requestSignature
@@ -3621,6 +3628,7 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
         attachments: messageAttachments,
         context,
         modelPreferences,
+        stageContinuation: options.stageContinuation === true,
         ...(suggestion ? { suggestion } : {}),
       });
       setSession(turn.session);
@@ -4274,9 +4282,12 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
   ));
   const creativeArtifactVersions = session?.creativeArtifactVersions || [];
   const creativeArtifacts = session?.creativeArtifacts || [];
-  const latestCompletedResponseId = String([...((session?.events) || [])]
+  const latestCompletedResponseEvent = [...((session?.events) || [])]
     .reverse()
-    .find((event) => event.type === 'assistant.response.completed')?.payload.responseId || '');
+    .find((event) => event.type === 'assistant.response.completed');
+  const latestCompletedResponseId = String(
+    latestCompletedResponseEvent?.payload.responseId || '',
+  );
   const currentToolProposals = (session?.toolProposals || [])
     .filter((proposal) => proposal.binding.responseId === latestCompletedResponseId)
     .slice(-3)
@@ -4376,6 +4387,20 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
     && session.suggestionSet.binding?.schema === 't8-creator-suggestion-binding-v1'
     && creatorSuggestionSetContractReady(session.suggestionSet, capabilities)
   );
+  const latestCompletedSuggestionSet = latestCompletedResponseEvent?.payload.suggestionSet as
+    | { setDigest?: unknown }
+    | undefined;
+  const latestCompletedSuggestionSetDigest = String(
+    latestCompletedSuggestionSet?.setDigest || '',
+  );
+  const recommendationChoicesReady = !thinkingActive && (
+    isPristineSession
+    || Boolean(
+      suggestionReceiptReady
+      && latestCompletedSuggestionSetDigest
+      && latestCompletedSuggestionSetDigest === session?.suggestionSet?.setDigest
+    )
+  );
   const candidateSuggestions = (
     isPristineSession
       ? starterIdeaSuggestions
@@ -4466,10 +4491,24 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
     const result = await confirmProductionDocuments(
       currentStagePlan,
       currentStageUnconfirmedDocuments,
+      suggestion,
     );
-    if (!result?.phaseTransition?.advanced
-      || result.phaseTransition.nextPhase !== targetPhase) {
+    const phaseTransitionReady = Boolean(
+      result?.phaseTransition
+      && result.phaseTransition.nextPhase === targetPhase
+      && (
+        result.phaseTransition.advanced
+        || (targetPhase === 'delivery' && result.phaseTransition.completed === true)
+      ),
+    );
+    if (!result || !phaseTransitionReady) {
       if (result) setError('当前阶段版本已保存，但没有进入预期的下一阶段；请刷新会话后重试。');
+      return;
+    }
+    const productionFinished = targetPhase === 'delivery'
+      && result?.phaseTransition?.completed === true;
+    if (productionFinished) {
+      setPendingStageContinuation(null);
       return;
     }
     setPendingStageContinuation({
@@ -4498,7 +4537,7 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
     setPendingStageContinuation(null);
     stickToBottomRef.current = true;
     setHistoryPage(0);
-    void submit(prompt);
+    void submit(prompt, undefined, { stageContinuation: true });
   }, [
     busy,
     patchPreview,
@@ -5321,7 +5360,8 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
               && !patchPreview
               && currentStagePlan
               && currentStageComplete
-              && currentStageUnconfirmedDocuments.length > 0 && (
+              && currentStageUnconfirmedDocuments.length > 0
+              && stageContinuationSuggestion && (
                 <section className="t8-creator-agent-stage-confirm" aria-label="确认当前创作阶段">
                   <span>
                     <strong>{creativePhaseLabel(activePhase)}方案已整理好</strong>
@@ -5331,14 +5371,7 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
                     type="button"
                     disabled={busy || Boolean(confirmingDocumentKey)}
                     onClick={() => {
-                      if (stageContinuationSuggestion) {
-                        void continueFromStageSuggestion(stageContinuationSuggestion);
-                        return;
-                      }
-                      void confirmProductionDocuments(
-                        currentStagePlan,
-                        currentStageUnconfirmedDocuments,
-                      );
+                      void continueFromStageSuggestion(stageContinuationSuggestion);
                     }}
                   >
                     {confirmingDocumentKey
@@ -5418,13 +5451,13 @@ export default function CreatorAgentPanel(props: CreatorAgentPanelProps) {
               </section>
             )}
 
-            {!patchPreview && suggestionContractBroken && (
+            {!patchPreview && recommendationChoicesReady && suggestionContractBroken && (
               <div className="t8-creator-agent-suggestion-warning" role="status">
                 当前能力清单无法提供完整的 3 条建议，请更新应用或新建会话后重试。
               </div>
             )}
 
-            {!patchPreview && suggestions.length === 3 && (
+            {!patchPreview && recommendationChoicesReady && suggestions.length === 3 && (
               <>
                 <div className="t8-creator-agent-suggestions" aria-label="选择一个方向继续">
                   {suggestions.map((suggestion) => {

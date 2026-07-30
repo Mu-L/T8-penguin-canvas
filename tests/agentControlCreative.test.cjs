@@ -845,6 +845,234 @@ test('EDL uses only verified adopted videos and never treats requested duration 
   assert.equal(state.writes, writesBeforeRefresh);
   assert.equal(state.providerPosts, 0);
 });
+
+test('staged production keeps the full document chain and the correct expected result kind for every creative family', () => {
+  const sourceText = [
+    '【镜头一｜主画面】',
+    '一只黄色小鸭站在暖色窗边，画面安静温馨。',
+  ].join('\n');
+  const expectedKinds = [
+    'production-brief',
+    'script-doc',
+    'world-bible',
+    'character-bible',
+    'asset-needs',
+    'shot-list',
+    'audio-plan',
+    'storyboard',
+    'prompt-pack',
+    'candidate-review',
+    'edit-decision-list',
+    'qc-report',
+    'delivery-manifest',
+  ];
+  for (const [kind, resultKind] of [
+    ['image', 'image'],
+    ['video', 'video'],
+    ['audio', 'audio'],
+    ['script', 'text'],
+  ]) {
+    const state = fixture();
+    const service = createAgentControlCreativeService({ database: state.database });
+    const plan = service.createPlan({
+      kind,
+      prompt: sourceText,
+      stagedProduction: true,
+      candidates: 1,
+    }, scope);
+    assert.deepEqual(plan.productionDocuments.map((item) => item.kind), expectedKinds);
+    const editDecisionList = plan.productionDocuments
+      .find((item) => item.kind === 'edit-decision-list');
+    const qcReport = plan.productionDocuments.find((item) => item.kind === 'qc-report');
+    assert.equal(editDecisionList.content.resultKind, resultKind);
+    assert.equal(editDecisionList.content.status, `awaiting-adopted-${resultKind}`);
+    assert.equal(
+      editDecisionList.content.derivation.method,
+      resultKind === 'video'
+        ? 'verified-adopted-video-sequence'
+        : 'verified-adopted-media-sequence',
+    );
+    assert.equal(
+      editDecisionList.content.reviewPolicy,
+      resultKind === 'video'
+        ? 'verified-adopted-video-only'
+        : `verified-adopted-${resultKind}-only`,
+    );
+    assert.equal(qcReport.content.resultKind, resultKind);
+    assert.equal(qcReport.content.status, 'awaiting-edit-decision-list');
+    assert.equal(state.writes, 0);
+    assert.equal(state.providerPosts, 0);
+  }
+});
+
+test('staged image production binds, reviews, adopts and verifies one real image without video-only gates', () => {
+  const state = fixture();
+  const service = createAgentControlCreativeService({ database: state.database });
+  const sourceText = [
+    '【镜头一｜主画面】',
+    '一只黄色小鸭站在暖色窗边，画面安静温馨。',
+  ].join('\n');
+  const first = service.createPlan({
+    kind: 'image',
+    prompt: sourceText,
+    ratio: '1:1',
+    candidates: 1,
+    stagedProduction: true,
+  }, scope);
+  const promptPack = first.productionDocuments.find((item) => item.kind === 'prompt-pack');
+  assert.equal(promptPack.content.prompts.length, 1);
+  state.applyPatch(service.requirePlan(first.planId, scope).patch);
+  const candidate = state.document.nodes.find((node) => node.type === 'image');
+  assert.ok(candidate);
+  assert.equal(
+    candidate.data.creatorProductionBinding.promptPackDocumentId,
+    promptPack.id,
+  );
+  assert.equal(
+    candidate.data.creatorProductionBinding.promptPackItemId,
+    promptPack.content.prompts[0].id,
+  );
+  assert.equal(candidate.data.creatorProductionBinding.matchMethod, 'single-prompt-pack-item');
+
+  const contentHash = `sha256:${'a'.repeat(64)}`;
+  candidate.data.imageUrl = '/files/output/duck.png';
+  candidate.data.imageUrls = [candidate.data.imageUrl];
+  candidate.data.contentHash = contentHash;
+  candidate.data.outputAssetId = 'asset-duck-image';
+  candidate.data.taskId = 'task-duck-image';
+  candidate.data.status = 'succeeded';
+  const reviewPlan = service.actionPlan('review', {
+    nodeId: candidate.id,
+    review: {
+      schema: 't8-creative-review-v1',
+      source: 'visual-inspection',
+      reviewer: 'creator',
+      evidence: { contentHash },
+      dimensions: {
+        composition: { status: 'pass', summary: '主体与留白清晰' },
+        identity: { status: 'pass', summary: '小鸭主体一致' },
+        productShape: { status: 'pass', summary: '轮廓稳定' },
+        textAccuracy: { status: 'pass', summary: '无错误文字' },
+      },
+    },
+  }, scope);
+  state.applyPatch(service.requirePlan(reviewPlan.planId, scope).patch);
+  const acceptPlan = service.actionPlan('accept', { nodeId: candidate.id }, scope);
+  state.applyPatch(service.requirePlan(acceptPlan.planId, scope).patch);
+
+  const refreshed = service.createPlan({
+    kind: 'image',
+    prompt: sourceText,
+    ratio: '1:1',
+    candidates: 1,
+    stagedProduction: true,
+    previousProductionDocuments: first.productionDocuments,
+  }, scope);
+  const candidateReview = refreshed.productionDocuments
+    .find((item) => item.kind === 'candidate-review');
+  const adoptedImages = refreshed.productionDocuments
+    .find((item) => item.kind === 'edit-decision-list');
+  assert.deepEqual(candidateReview.content.counts, {
+    total: 1,
+    withResult: 1,
+    reviewed: 1,
+    adopted: 1,
+    blocked: 0,
+  });
+  assert.equal(adoptedImages.content.resultKind, 'image');
+  assert.equal(adoptedImages.content.status, 'source-assembled');
+  assert.equal(adoptedImages.content.derivation.method, 'verified-adopted-media-sequence');
+  assert.equal(adoptedImages.content.reviewPolicy, 'verified-adopted-image-only');
+  assert.deepEqual(adoptedImages.content.counts, {
+    total: 1,
+    ready: 1,
+    missingDuration: 0,
+    missingShots: 0,
+    blocked: 0,
+  });
+  assert.equal(adoptedImages.content.sequence[0].resultKind, 'image');
+  assert.equal(adoptedImages.content.sequence[0].durationEvidence, 'not-applicable');
+  assert.equal(adoptedImages.content.timeline.timingStatus, 'not-applicable');
+  assert.equal(adoptedImages.content.timeline.totalDurationSec, null);
+
+  const verification = {
+    schema: 't8-creator-artifact-verification-v1',
+    runId: 'run-duck-image',
+    verified: true,
+    reasons: [],
+    run: {
+      runId: 'run-duck-image',
+      status: 'succeeded',
+      canvasRevision: state.document.revision,
+      createdAt: 1,
+      finishedAt: 2,
+    },
+    nodeRuns: [{
+      nodeRunId: 'node-run-duck-image',
+      nodeId: candidate.id,
+      status: 'succeeded',
+      latestAttemptId: 'attempt-duck-image',
+      latestAttemptStatus: 'succeeded',
+      outputAssetIds: ['asset-duck-image'],
+    }],
+    assets: [{
+      assetId: 'asset-duck-image',
+      nodeRunId: 'node-run-duck-image',
+      kind: 'image',
+      mimeType: 'image/png',
+      contentHash,
+      availability: 'available',
+      stored: true,
+      blobPresent: true,
+      hashVerified: true,
+      magicVerified: true,
+      detectedKind: 'image',
+      detectedMimeType: 'image/png',
+      observedContentHash: 'a'.repeat(64),
+      byteSize: 2048,
+      width: 1024,
+      height: 1024,
+      decodeEvidence: 'indexed-parser-verified',
+      associationVerified: true,
+      expectedNodeId: candidate.id,
+      expectedShotIds: [adoptedImages.content.sequence[0].sourceShotId],
+      observedShotIds: [adoptedImages.content.sequence[0].sourceShotId],
+      expectedCanvasRevision: state.document.revision,
+    }],
+    verifiedAt: '2026-07-30T00:00:00.000Z',
+    verificationDigest: 'b'.repeat(64),
+  };
+  const verified = service.createPlan({
+    kind: 'image',
+    prompt: sourceText,
+    ratio: '1:1',
+    candidates: 1,
+    stagedProduction: true,
+    previousProductionDocuments: refreshed.productionDocuments,
+    artifactVerifications: [verification],
+  }, scope);
+  const qualityControl = verified.productionDocuments.find((item) => item.kind === 'qc-report');
+  assert.equal(qualityControl.content.resultKind, 'image');
+  assert.equal(qualityControl.content.status, 'passed');
+  assert.deepEqual(qualityControl.content.counts, {
+    total: 1,
+    pass: 1,
+    fail: 0,
+    unknown: 0,
+    checks: 9,
+  });
+  assert.equal(qualityControl.content.qcItems[0].resultKind, 'image');
+  assert.equal(
+    qualityControl.content.qcItems[0].checks.some((item) => item.id === 'source-duration'),
+    false,
+  );
+  assert.equal(
+    qualityControl.content.qcItems[0].checks.some((item) => item.id === 'resolution'),
+    true,
+  );
+  assert.equal(state.providerPosts, 0);
+});
+
 test('generic node creation uses the authoritative schema, stays preview-first, and rejects hidden or invented fields', () => {
 
   const state = fixture([{

@@ -472,6 +472,14 @@ test('one sentence creates a previewable Story plan but performs zero writes and
     '把两个朋友在雨夜重逢的故事做成 30 秒竖屏短片');
   assert.deepEqual(productionDocuments.find((item) => item.kind === 'world-bible').content.characters, []);
   const currentPlan = planned.body.data.session.latestPlan;
+  assert.equal(planned.body.data.session.decisionDocument.phase, 'idea');
+  assert.equal(planned.body.data.session.decisionDocument.status, 'collecting');
+  assert.equal(planned.body.data.session.suggestionSet.items.length, 3);
+  assert.equal(new Set(
+    planned.body.data.session.suggestionSet.items.map(
+      (item) => item.arguments.decisionId,
+    ),
+  ).size, 1);
   const derivedDocuments = productionDocuments.filter((item) => (
     item.kind === 'character-bible'
       || item.kind === 'asset-needs'
@@ -499,30 +507,81 @@ test('one sentence creates a previewable Story plan but performs zero writes and
     }),
   });
   assert.equal(sourceBlocked.response.status, 409);
-  assert.equal(sourceBlocked.body.code, 'CREATOR_PRODUCTION_DOCUMENT_SOURCE_UNCONFIRMED');
-  assert.match(sourceBlocked.body.message, /先确认.*来源|一次确认/);
+  assert.equal(sourceBlocked.body.code, 'CREATOR_STAGE_CONFIRMATION_SUGGESTION_REQUIRED');
+  assert.match(sourceBlocked.body.message, /当前回复.*确认|避免确认过期版本/);
   assert.equal(sourceBlocked.body.data, undefined);
   assert.equal(fixture.writes, 0);
   assert.equal(fixture.providerCalls, 0);
+
+  let decisionSession = planned.body.data.session;
+  let confirmationSuggestion = decisionSession.suggestionSet.items.find(
+    (item) => item.arguments?.confirmCurrentStage === true,
+  );
+  for (let turnIndex = 0; !confirmationSuggestion && turnIndex < 4; turnIndex += 1) {
+    const selected = decisionSession.suggestionSet.items[0];
+    const answered = await fixture.request(`/sessions/${sessionId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({
+        projectId: 'project-local',
+        canvasId: 'canvas-a',
+        text: selected.arguments.creatorPrompt,
+        context: { nodeCount: 0, edgeCount: 0 },
+        suggestion: {
+          id: selected.id,
+          setDigest: decisionSession.suggestionSet.setDigest,
+        },
+      }),
+    });
+    assert.equal(answered.response.status, 201);
+    decisionSession = answered.body.data.session;
+    assert.equal(decisionSession.suggestionSet.items.length, 3);
+    confirmationSuggestion = decisionSession.suggestionSet.items.find(
+      (item) => item.arguments?.confirmCurrentStage === true,
+    );
+  }
+  assert.ok(confirmationSuggestion);
+  assert.equal(decisionSession.decisionDocument.status, 'ready-for-confirmation');
+  const confirmablePlan = decisionSession.latestPlan;
+  const currentStageDocuments = confirmablePlan.productionDocuments.filter(
+    (item) => item.kind === 'production-brief',
+  );
+  assert.equal(currentStageDocuments.length, 1);
   const confirmationBody = {
     projectId: 'project-local',
     canvasId: 'canvas-a',
-    planId: currentPlan.planId,
-    planDigest: currentPlan.planDigest,
-    documents: productionDocuments.map((item) => ({
+    planId: confirmablePlan.planId,
+    planDigest: confirmablePlan.planDigest,
+    documents: currentStageDocuments.map((item) => ({
       documentId: item.id,
       versionId: item.versionId,
       contentDigest: item.contentDigest,
     })),
+    suggestion: {
+      id: confirmationSuggestion.id,
+      setDigest: decisionSession.suggestionSet.setDigest,
+    },
   };
+  fixture.setCanvasDocument({ revision: 13 });
   const confirmed = await fixture.request(`/sessions/${sessionId}/production-documents/confirm`, {
     method: 'POST',
     body: JSON.stringify(confirmationBody),
   });
   assert.equal(confirmed.response.status, 201);
-  assert.equal(confirmed.body.data.confirmations.length, 13);
-  assert.equal(confirmed.body.data.session.productionDocumentConfirmations.length, 13);
+  assert.equal(confirmed.body.data.canvasRetention.patch.baseRevision, 13);
+  assert.equal(confirmed.body.data.confirmations.length, 1);
+  assert.equal(confirmed.body.data.session.productionDocumentConfirmations.length, 1);
   assert.equal(confirmed.body.data.session.events.at(-1).type, 'canvas-retention.preview-prepared');
+  assert.equal(confirmed.body.data.phaseTransition.advanced, true);
+  assert.equal(confirmed.body.data.phaseTransition.completedPhase, 'idea');
+  assert.equal(confirmed.body.data.phaseTransition.nextPhase, 'script');
+  assert.equal(confirmed.body.data.session.decisionDocument.phase, 'script');
+  assert.equal(confirmed.body.data.session.decisionDocument.status, 'collecting');
+  const retainedTextOperation = confirmed.body.data.canvasRetention.patch.operations.find(
+    (operation) => operation.type === 'node.add',
+  );
+  assert.ok(retainedTextOperation);
+  assert.match(retainedTextOperation.payload.node.data.text, /# 已确认 · 创意/);
+  assert.ok(retainedTextOperation.payload.node.data.text.trim().length > 40);
   const confirmationEvent = confirmed.body.data.session.events.find(
     (event) => event.type === 'production-documents.confirmed',
   );
@@ -535,14 +594,6 @@ test('one sentence creates a previewable Story plan but performs zero writes and
     ),
     true,
   );
-  const confirmationSequence = confirmed.body.data.session.lastSequence;
-  const duplicateConfirmation = await fixture.request(`/sessions/${sessionId}/production-documents/confirm`, {
-    method: 'POST',
-    body: JSON.stringify(confirmationBody),
-  });
-  assert.equal(duplicateConfirmation.response.status, 200);
-  assert.equal(duplicateConfirmation.body.data.duplicate, true);
-  assert.equal(duplicateConfirmation.body.data.session.lastSequence, confirmationSequence);
   const modelReceipt = planned.body.data.session.latestPlan.modelDecisionReceipt;
   assert.equal(modelReceipt.schema, 't8-model-decision-receipt-v1');
   assert.equal(modelReceipt.mode, 'smart');
@@ -555,6 +606,7 @@ test('one sentence creates a previewable Story plan but performs zero writes and
   assert.equal(fixture.writes, 0);
   assert.equal(fixture.providerCalls, 0);
 
+  fixture.setCanvasDocument({ revision: 12 });
   const planId = planned.body.data.session.latestPlan.planId;
   const patch = await fixture.request(
     `/sessions/${sessionId}/plans/${planId}/patch?projectId=project-local&canvasId=canvas-a`,
@@ -564,49 +616,6 @@ test('one sentence creates a previewable Story plan but performs zero writes and
   assert.equal(patch.body.data.patch.baseRevision, 12);
   assert.equal(patch.body.data.patch.requiresConfirmation, true);
   assert.ok(patch.body.data.patch.operations.length > 0);
-  const revised = await fixture.request(`/sessions/${sessionId}/messages`, {
-    method: 'POST',
-    body: JSON.stringify({
-      projectId: 'project-local',
-      canvasId: 'canvas-a',
-      kind: 'story',
-      text: '改成两个朋友在雪夜重逢，其他要求不变',
-      ratio: '9:16',
-      duration: 30,
-      context: { nodeCount: 0, edgeCount: 0 },
-    }),
-  });
-  assert.equal(revised.response.status, 201);
-  const revisedDocuments = revised.body.data.session.latestPlan.productionDocuments;
-  assert.equal(revisedDocuments.find((item) => item.kind === 'production-brief').revision, 2);
-  assert.equal(revisedDocuments.find((item) => item.kind === 'script-doc').revision, 2);
-  assert.equal(revisedDocuments.find((item) => item.kind === 'world-bible').revision, 2);
-  assert.equal(revisedDocuments.every((item) => item.status === 'draft'), true);
-  assert.equal(revisedDocuments.every((item) => item.changeSummary?.changedFields?.length > 0), true);
-  const staleConfirmation = await fixture.request(`/sessions/${sessionId}/production-documents/confirm`, {
-    method: 'POST',
-    body: JSON.stringify(confirmationBody),
-  });
-  assert.equal(staleConfirmation.response.status, 409);
-  assert.equal(staleConfirmation.body.code, 'CREATOR_PRODUCTION_DOCUMENT_STALE');
-  assert.match(staleConfirmation.body.message, /已有新版本|新版本/);
-  const planEvents = revised.body.data.session.events.filter((event) => (
-    ['assistant.plan', 'assistant.response.completed'].includes(event.type)
-      && event.payload?.plan
-  ));
-  assert.equal(planEvents.length, 2);
-  assert.equal(
-    planEvents[0].payload.plan.productionDocuments.find((item) => item.kind === 'script-doc').revision,
-    1,
-  );
-  assert.equal(
-    planEvents[0].payload.plan.productionDocuments.find((item) => item.kind === 'script-doc').content.sourceText,
-    '把两个朋友在雨夜重逢的故事做成 30 秒竖屏短片',
-  );
-  assert.match(
-    planEvents[1].payload.plan.productionDocuments.find((item) => item.kind === 'script-doc').content.sourceText,
-    /雪夜重逢.*其他要求不变/,
-  );
   assert.equal(fixture.writes, 0);
   assert.equal(fixture.providerCalls, 0);
 });

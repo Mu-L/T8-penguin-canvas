@@ -191,7 +191,8 @@ test('provider failure keeps the request and returns task-matched offline conten
   assert.equal(result.evidence.providerCalls, 1);
   assert.equal(result.evidence.errorCode, 'network_error');
   assert.match(result.text, /创意简报/);
-  assert.match(result.text, /本阶段待确认/);
+  assert.doesNotMatch(result.text, /本阶段待确认/);
+  assert.match(result.text, /可编辑 V0：创意简报/);
 });
 
 test('ready model streams exact provider deltas and exposes truthful started evidence', async () => {

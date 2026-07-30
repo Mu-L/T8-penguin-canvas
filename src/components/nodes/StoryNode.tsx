@@ -57,8 +57,9 @@ import {
 import {
   IMAGE_MODELS,
   LLM_MODELS,
+  ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS,
+  ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
   ZHENZHEN_IMAGE_G2_I2I_MODEL,
-  ZHENZHEN_IMAGE_G2_MODEL_OPTIONS,
   ZHENZHEN_IMAGE_G2_T2I_MODEL,
   gptImage2ZhenzhenVariantSize,
   isFalModel,
@@ -155,6 +156,15 @@ const ACTIVE_TASK_STATUSES = new Set(['submitting', 'running', 'polling']);
 const POLL_TIMEOUT_MS = 60 * 60 * 1000;
 const GPT_IMAGE_2_OPTIONS = IMAGE_MODELS.find((item) => item.id === 'gpt-image-2')?.apiModelOptions || [];
 const LEGACY_GPT_IMAGE_2_MODELS = new Set(['gpt-image-2-all', 'gpt-image-2', 'gpt-image-2-2K', 'gpt-image-2-4K']);
+const STORY_LEGACY_IMAGE_OPTIONS = [
+  ...GPT_IMAGE_2_OPTIONS.filter((item) => item.value === 'gpt-image-2'),
+  ...GPT_IMAGE_2_OPTIONS.filter((item) => item.value !== 'gpt-image-2' && LEGACY_GPT_IMAGE_2_MODELS.has(item.value)),
+];
+const STORY_BUDGET_IMAGE_OPTIONS = [
+  ...ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS.filter((item) => item.value === ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL),
+  ...ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS.filter((item) => item.value !== ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL),
+];
+const STORY_BUDGET_IMAGE_MODELS = new Set(STORY_BUDGET_IMAGE_OPTIONS.map((item) => item.value));
 const STORY_RUN_LABEL: Record<StoryRunMode, string> = {
   all: '一键生产',
   analyze: '分析剧本',
@@ -179,16 +189,16 @@ function providerIdFromChoice(value: string): string {
 }
 
 function builtInImagePlatform(model: string): Exclude<StoryImagePlatformChoice, `advanced:${string}`> {
-  if (model === ZHENZHEN_IMAGE_G2_T2I_MODEL || model === ZHENZHEN_IMAGE_G2_I2I_MODEL) return 'builtin:seedance-nz';
+  if (STORY_BUDGET_IMAGE_MODELS.has(model as typeof STORY_BUDGET_IMAGE_OPTIONS[number]['value'])) return 'builtin:seedance-nz';
   if (isFalModel(model)) return 'builtin:fal';
   return 'builtin:legacy';
 }
 
 function builtInImageOptions(platform: StoryImagePlatformChoice) {
-  if (platform === 'builtin:seedance-nz') return [...ZHENZHEN_IMAGE_G2_MODEL_OPTIONS];
+  if (platform === 'builtin:seedance-nz') return [...STORY_BUDGET_IMAGE_OPTIONS];
+  if (platform === 'builtin:legacy') return [...STORY_LEGACY_IMAGE_OPTIONS];
   return GPT_IMAGE_2_OPTIONS.filter((item) => {
-    if (platform === 'builtin:fal') return isFalModel(item.value);
-    return LEGACY_GPT_IMAGE_2_MODELS.has(item.value);
+    return platform === 'builtin:fal' && isFalModel(item.value);
   });
 }
 
@@ -670,7 +680,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
     if (
       !external
       && asset.kind !== 'audio'
-      && (configuredModelWithReferences === ZHENZHEN_IMAGE_G2_T2I_MODEL || configuredModelWithReferences === ZHENZHEN_IMAGE_G2_I2I_MODEL)
+      && STORY_BUDGET_IMAGE_MODELS.has(configuredModelWithReferences as typeof STORY_BUDGET_IMAGE_OPTIONS[number]['value'])
       && !hasDomesticKey
     ) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
     if (!external && asset.kind !== 'audio' && configuredModelWithReferences === ZHENZHEN_IMAGE_G2_I2I_MODEL && !referenceImages.length) {
@@ -682,7 +692,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
       ? asset.taskProvider
       : asset.kind === 'audio'
         ? 'suno'
-        : external?.providerSource || (model.startsWith('zhenzhen-image-g2') ? 'seedance-nz' : isFalModel(model) ? 'fal' : 'zhenzhen');
+        : external?.providerSource || (STORY_BUDGET_IMAGE_MODELS.has(model as typeof STORY_BUDGET_IMAGE_OPTIONS[number]['value']) ? 'seedance-nz' : isFalModel(model) ? 'fal' : 'zhenzhen');
     updateAsset(assetId, {
       status: resumable ? 'polling' : 'submitting',
       error: '',
@@ -752,16 +762,19 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
       if (!url) throw new Error(`${asset.name} 未返回图片`);
       if (taskId || result.requestId) await reporter.providerSubmitted({ provider: taskProvider, model: taskModel, upstreamTaskId: taskId || undefined, requestId: result.requestId, transportHttpStatus: result.transportHttpStatus, upstreamHttpStatus: result.upstreamHttpStatus, usage: result.usage, jobId: assetId, jobKind: 'story-asset', httpStatusSource: 'local-backend' });
       await reporter.providerResponse({ provider: taskProvider, model: taskModel, upstreamTaskId: taskId || undefined, requestId: result.requestId, transportHttpStatus: result.transportHttpStatus, upstreamHttpStatus: result.upstreamHttpStatus, usage: result.usage, status: 'succeeded', jobId: assetId, jobKind: 'story-asset', httpStatusSource: 'local-backend' });
-    } else if (model === ZHENZHEN_IMAGE_G2_T2I_MODEL || model === ZHENZHEN_IMAGE_G2_I2I_MODEL) {
+    } else if (STORY_BUDGET_IMAGE_MODELS.has(model as typeof STORY_BUDGET_IMAGE_OPTIONS[number]['value'])) {
       if (resumable) {
         await reporter.providerSubmitted({ provider: taskProvider, model, upstreamTaskId: taskId, jobId: assetId, jobKind: 'story-asset', resumed: true, httpStatusSource: 'local-backend' });
       } else {
+        const isLowpriceModel = model === ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL;
         const submitted = await submitSeedreamNz({
           prompt: generationSpec.prompt,
           images: referenceImages,
-          model,
-          resolution: '1k',
-          ratio: imageAspectRatio as any,
+          model: model as typeof STORY_BUDGET_IMAGE_OPTIONS[number]['value'],
+          resolution: isLowpriceModel ? '2k' : '1k',
+          ratio: isLowpriceModel ? undefined : imageAspectRatio as any,
+          size: isLowpriceModel ? imageAspectRatio : undefined,
+          n: isLowpriceModel ? 1 : undefined,
         }, { submissionKey: reporter.providerSubmissionKey });
         taskId = String(submitted.taskId || '');
         taskProvider = 'seedance-nz';
@@ -1825,7 +1838,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
       return;
     }
     const platform = value as StoryImagePlatformChoice;
-    const firstModel = builtInImageOptions(platform)[0]?.value || 'gpt-image-2-all';
+    const firstModel = builtInImageOptions(platform)[0]?.value || 'gpt-image-2';
     updateSettings({ imageProviderSource: 'zhenzhen', imageProviderId: '', imageProviderModel: '', imageModel: firstModel });
   };
 

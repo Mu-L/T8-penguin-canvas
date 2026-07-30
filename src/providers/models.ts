@@ -120,7 +120,7 @@ export function gptImage2ZhenzhenVariantSize(apiModel: string | undefined | null
 export const IMAGE_MODELS: ImageModelDef[] = [
   {
     id: 'gpt-image-2',
-    apiModel: 'gpt-image-2-all', // 主项目 Tab 0 默认选中
+    apiModel: 'gpt-image-2',
     label: 'GPT Image 2',
     tabLabel: 'GPT2',
     provider: 'zhenzhen',

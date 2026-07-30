@@ -26,6 +26,7 @@ import {
 } from '../src/providers/models.ts';
 
 const imageNodeSource = fs.readFileSync(new URL('../src/components/nodes/ImageNode.tsx', import.meta.url), 'utf8');
+const canvasSource = fs.readFileSync(new URL('../src/components/Canvas.tsx', import.meta.url), 'utf8');
 const proxySource = fs.readFileSync(new URL('../backend/src/routes/proxy.js', import.meta.url), 'utf8');
 
 test('Nano Banana 2 maps to the current Gemini Flash image upstream model', () => {
@@ -93,6 +94,9 @@ test('GPT Image 2 2K and 4K variants stay on the Zhenzhen gpt-image-2 route', ()
   const gpt2 = IMAGE_MODELS.find((model) => model.id === 'gpt-image-2');
   const options = gpt2?.apiModelOptions.map((option) => option.value) || [];
 
+  assert.equal(gpt2?.apiModel, 'gpt-image-2');
+  assert.match(canvasSource, /image:\s*\{\s*model:\s*'gpt-image-2',\s*apiModel:\s*'gpt-image-2'/);
+  assert.match(canvasSource, /edit:\s*\{\s*mode:\s*'edit',\s*model:\s*'gpt-image-2',\s*apiModel:\s*'gpt-image-2'/);
   assert.ok(options.includes('gpt-image-2-2K'));
   assert.ok(options.includes('gpt-image-2-4K'));
   assert.equal(gptImage2ZhenzhenVariantSize('gpt-image-2-2K'), '2K');

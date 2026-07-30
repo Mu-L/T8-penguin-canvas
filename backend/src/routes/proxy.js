@@ -197,9 +197,11 @@ function providerPublicDnsLookup(
 function createProviderDispatcher(options = {}) {
   const usePublicDns = options.publicDns === true;
   return new UndiciAgent({
-    // A socket opened before a TUN/VPN route switch must never be reused for
-    // the next Provider call. Undici documents pipelining=0 as disabling
-    // keep-alive, so every request resolves and connects against current state.
+    // This dispatcher is a recovery path only. The first request deliberately
+    // uses the runtime's native fetch path (the same behavior as v2.5.3) so
+    // system proxies, transparent TUN routing and platform DNS keep working.
+    // A recovery socket must never reuse a connection opened before a route
+    // switch, therefore keep-alive is disabled here.
     pipelining: 0,
     connectTimeout: Math.min(PROXY_REMOTE_DEADLINE_MS, PROVIDER_CONNECT_TIMEOUT_MS),
     // Let Undici race usable IPv4/IPv6 addresses instead of getting stuck on
@@ -261,25 +263,26 @@ function isProviderNetworkError(error) {
 function providerNetworkFailure(error, label, options = {}) {
   const cause = providerNetworkCause(error);
   const causeCode = String(cause?.code || error?.code || '').trim().toUpperCase();
+  const diagnosticCode = causeCode || 'NETWORK_ERROR';
   const retryAttempted = options.retryAttempted === true;
   let message;
   if (['ENOTFOUND', 'EAI_AGAIN'].includes(causeCode)) {
     message = retryAttempted
-      ? `${label}：应用已用新连接和相同提交标识自动重试，但本机仍无法解析 API 平台域名。原任务不会重复提交，请在 3 秒后重试。`
-      : `${label}：本机当前无法解析 API 平台域名。应用已刷新网络连接；请在 3 秒后重试原节点。`;
+      ? `${label}：系统网络与全新连接仍无法解析 API 平台域名（${diagnosticCode}）。原任务不会重复提交，请在 3 秒后重试。`
+      : `${label}：系统网络暂时无法解析 API 平台域名（${diagnosticCode}）。应用已刷新连接；请在 3 秒后重试原节点。`;
   } else if (/certificate|cert_|self signed|unable to verify|tls|ssl/i.test(`${causeCode} ${cause?.message || ''}`)) {
     message = `${label}：HTTPS 证书校验失败。请检查系统时间、代理证书或安全软件的 HTTPS 扫描。`;
   } else {
     message = retryAttempted
-      ? `${label}：应用已在代理/TUN/VPN 切换后用新连接和相同提交标识自动恢复，但 API 平台仍不可达。原任务不会重复提交，请在 3 秒后重试。`
-      : `${label}：本机到 API 平台的连接中断。应用已刷新连接；请在 3 秒后重试原节点。`;
+      ? `${label}：系统网络与全新连接均未能访问 API 平台（${diagnosticCode}）。原任务不会重复提交，请在 3 秒后重试。`
+      : `${label}：本机到 API 平台的连接中断（${diagnosticCode}）。应用已刷新连接；请在 3 秒后重试原节点。`;
   }
   return providerResponseError(
     'provider_network_unavailable',
     message,
     {
       status: 503,
-      causeCode: causeCode || 'NETWORK_ERROR',
+      causeCode: diagnosticCode,
       recoverable: true,
       retryAfterMs: PROVIDER_NETWORK_RETRY_DELAY_MS,
       retryAttempted,
@@ -362,13 +365,21 @@ async function fetchProviderResponse(url, init = {}, label = 'Provider', options
     });
     try {
       const requestHeaders = providerIdempotencyHeaders(init?.headers, method);
+      const explicitDispatcher = init?.dispatcher;
+      const recoveryDispatcher = explicitDispatcher
+        || (attempt > 0 ? currentProviderDispatcher(false) : null);
+      const requestInit = {
+        ...init,
+        headers: requestHeaders,
+        signal: controller.signal,
+      };
+      // Do not force a custom Undici dispatcher on the primary request. Native
+      // fetch is the only path that consistently preserves the user's active
+      // system proxy/TUN/VPN behavior across Electron and standalone Node.
+      if (recoveryDispatcher) requestInit.dispatcher = recoveryDispatcher;
+      else delete requestInit.dispatcher;
       const response = await Promise.race([
-        fetch(url, {
-          ...init,
-          headers: requestHeaders,
-          dispatcher: init?.dispatcher || currentProviderDispatcher(attempt > 0),
-          signal: controller.signal,
-        }),
+        fetch(url, requestInit),
         timeoutPromise,
       ]);
       if (response && typeof response === 'object') {
@@ -416,6 +427,7 @@ function isRecoverableTaskResultQueryError(error) {
   const code = String(error?.code || '').trim().toUpperCase();
   return error?.recoverable === true
     || code === 'PROVIDER_NETWORK_UNAVAILABLE'
+    || code === 'PROVIDER_RESPONSE_TIMEOUT'
     || code === 'SEEDANCE_UPSTREAM_UNAVAILABLE'
     || code === 'SEEDANCE_UPSTREAM_TIMEOUT'
     || code === 'SEEDANCE_REQUEST_ABORTED'
