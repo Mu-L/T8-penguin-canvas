@@ -7,6 +7,13 @@ description: Create, change, remove, extend, remake, compare, continue, recover,
 
 Turn creative intent into an editable production plan, then use `zcanvas` as the only business control surface.
 
+## Current release baseline
+
+- The current stable desktop and automatic-update release is `v2.7.1`: <https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.1>.
+- Its immutable release Tag and packaged-source commit are `a3b54c9141060e2e34f744714db6606856c58dcc`. Later metadata-only commits on `main` do not move that Tag.
+- The release contains the Creator Agent single-decision stage flow, completed-response-only SuggestionSets, image/Story default-model corrections, and shared system-network-first recovery for LLM/Vision, image, video, audio, 3D, RunningHub, and the Seedance NZ provider path.
+- Provider work is complete only after the original task result is downloaded, validated, persisted, and linked. Real Provider-network, multi-device collaboration, and installed-upgrade evidence remains explicitly deferred by the owner and must never be reported as passed before it exists.
+
 ## Optimize for the creator
 
 - Treat one natural-language sentence as the mandatory default entry. Start planning immediately; never require the creator to learn a command, node type, provider, model ID, protocol, or UUID first.

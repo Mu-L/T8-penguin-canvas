@@ -23,7 +23,7 @@
 ## 产品版本号规则
 
 - 本项目使用用户指定的十进制展示序列：每一段只使用 `0-9`。`v2.6.9` 的下一正式版本必须是 `v2.7.0`，禁止创建、打包、推送、打 tag 或发布 `v2.6.10`。
-- 当前发布目标与开发基线为 `v2.7.1`；发布完成前最近正式版本仍为 `v2.7.0`。改版本前必须同时核对 `package.json`、`package-lock.json`、README、`features.json`、项目 `SKILL.md`、release notes、自动更新元数据与 Git tag，不能只修改单个文件。
+- 当前正式版本与开发基线为 `v2.7.1`；GitHub Release 与自动更新资产已发布为 Latest，Tag 固定指向 `a3b54c9141060e2e34f744714db6606856c58dcc`。发布后的事实记录提交可以继续推进 `main`，但不得移动已经发布的 Tag。改版本前必须同时核对 `package.json`、`package-lock.json`、README、`features.json`、项目 `SKILL.md`、release notes、自动更新元数据与 Git tag，不能只修改单个文件。
 
 ## 已完成的无损集成
 

@@ -239,7 +239,15 @@ function verifyPackagedRuntimeArchive(requirement, archive, manifestPath) {
     windowsHide: true,
     maxBuffer: 64 * 1024 * 1024,
   };
-  const testResult = spawnSync(path7za, ['t', '-bso0', '-bsp0', '-bb0', '--', archive], commonOptions);
+  // Keep formal-release verification bounded on creator workstations. 7-Zip's
+  // default worker count can contend with Electron/NSIS immediately after a
+  // large build and has produced transient CRC failures even when the copied
+  // archive SHA-256 is byte-for-byte identical to the verified source.
+  const testResult = spawnSync(
+    path7za,
+    ['t', '-mmt=2', '-bso0', '-bsp0', '-bb0', '--', archive],
+    commonOptions,
+  );
   if (testResult.error || testResult.status !== 0) {
     failSecurity(`packaged runtime archive CRC verification failed: ${requirement.id}`, archive);
   }
