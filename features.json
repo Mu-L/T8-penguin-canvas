@@ -1,20 +1,20 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.6.10",
-  "lastUpdated": "2026-07-30-v2.6.10-release-candidate",
+  "version": "2.7.0",
+  "lastUpdated": "2026-07-30-v2.7.0-release-candidate",
   "release": {
     "status": "release-candidate-authorized-evidence-deferred",
-    "version": "2.6.10",
+    "version": "2.7.0",
     "date": "2026-07-30",
-    "tag": "v2.6.10",
+    "tag": "v2.7.0",
     "latest": false,
     "verification": [
-      "用户已明确授权发布 v2.6.10，并授权先发布、后补真实 Provider、协作多端与安装升级证据；延期不将尚未执行的证据标记为通过。",
+      "用户已明确授权发布 v2.7.0，并授权先发布、后补真实 Provider、协作多端与安装升级证据；延期不将尚未执行的证据标记为通过。",
       "Electron/NSIS 正式安装包只允许构建一次，使用 BelowNormal 优先级和受限逻辑核心；正式资产、Tag、Latest 与哈希在发布后回填。"
     ]
   },
-  "releaseV2610CreatorAgentGroundingAndProviderRecovery": {
-    "status": "release-candidate-v2.6.10",
+  "releaseV270CreatorAgentGroundingAndProviderRecovery": {
+    "status": "release-candidate-v2.7.0",
     "date": "2026-07-30",
     "releaseIncluded": true,
     "highlights": [
