@@ -1,20 +1,40 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.7.0",
-  "lastUpdated": "2026-07-30-v2.7.0-release-candidate",
+  "lastUpdated": "2026-07-30-v2.7.0-released",
   "release": {
-    "status": "release-candidate-authorized-evidence-deferred",
+    "status": "released",
     "version": "2.7.0",
     "date": "2026-07-30",
     "tag": "v2.7.0",
-    "latest": false,
+    "latest": true,
+    "sourceCommit": "227b01903b77db0f23fcb5dd648482acb2df6688",
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.0",
+    "artifacts": {
+      "installer": {
+        "name": "T8-PenguinCanvas-Setup-2.7.0.exe",
+        "size": 1304585520,
+        "sha256": "7b989c1f6436e972082ef829357d1650b556c8a8ff08f884e705e6794df2dcf9"
+      },
+      "blockmap": {
+        "name": "T8-PenguinCanvas-Setup-2.7.0.exe.blockmap",
+        "size": 1359642,
+        "sha256": "d01262e19a26855cb72a2db74b758fcfae3672cd1283e65cfd6231841c2d7f43"
+      },
+      "updateManifest": {
+        "name": "latest.yml",
+        "size": 362,
+        "sha256": "05dd99fb2ac6beae08fa890c9bcddbda71468f47466b0d6a4bf5cedb5ed932b5"
+      }
+    },
     "verification": [
-      "用户已明确授权发布 v2.7.0，并授权先发布、后补真实 Provider、协作多端与安装升级证据；延期不将尚未执行的证据标记为通过。",
-      "Electron/NSIS 正式安装包只允许构建一次，使用 BelowNormal 优先级和受限逻辑核心；正式资产、Tag、Latest 与哈希在发布后回填。"
+      "v2.7.0 已正式发布为 GitHub Latest；Tag 与 Release target 精确指向安装包对应的 source commit 227b01903b77db0f23fcb5dd648482acb2df6688，发布后只追加元数据记录提交。",
+      "Electron/NSIS 正式安装包只完成一次完整打包；最终资产通过 post-build、sealed recovery、GitHub digest/size 元数据及发布前完整远端回下载字节核验。",
+      "用户已明确授权先发布、后补真实 Provider、协作多端与安装升级证据；延期不将尚未执行的证据标记为通过。"
     ]
   },
   "releaseV270CreatorAgentGroundingAndProviderRecovery": {
-    "status": "release-candidate-v2.7.0",
+    "status": "released-v2.7.0",
     "date": "2026-07-30",
     "releaseIncluded": true,
     "highlights": [
@@ -28,7 +48,8 @@
     "verification": [
       "Creator Agent 在线模型、附件落地、建议不变量、工具提案、会话恢复与 UI 合同由源码测试覆盖；Provider、TUN Fake-IP、IPv6 回退、完成任务恢复和安全转存由定向回归覆盖。",
       "公开文件边界保持不变：本地 SKILL.md、roadmap.md、用户数据、缓存、测试凭据和受保护 FFmpeg/运行时文件不会进入公开提交。",
-      "用户明确授权先发布、后补真实 Provider、协作多端与安装升级证据；正式 Electron 构建、自动更新资产和 GitHub Release 结果将在单次发布流程完成后回填。"
+      "v2.7.0 已完成 Electron/NSIS、自动更新资产、GitHub Tag 与 Latest Release 发布；安装包、blockmap 和 latest.yml 的本地摘要、远端 digest/size 与完整回下载字节均一致。",
+      "用户明确授权先发布、后补真实 Provider、协作多端与安装升级证据；延期不将尚未执行的证据标记为通过。"
     ]
   },
   "releaseV269CreatorAgentAndProviderStability": {
