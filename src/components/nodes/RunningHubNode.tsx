@@ -567,7 +567,7 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
             pollLimit: MAX,
             status: r.status,
             code: r.code,
-            outputCount: Array.isArray(r.urls) ? r.urls.length : 0,
+            outputCount: (Array.isArray(r.urls) ? r.urls.length : 0) + (Array.isArray(r.texts) ? r.texts.length : 0),
           });
           console.log('[RH/poll] taskId=', tid, 'status=', r.status, 'code=', r.code, 'urls=', r.urls?.length || 0);
           // 轮询进度写入面板：每 30s 一条 debug，避免刷屏
@@ -586,6 +586,10 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
             // 按后缀分流到 imageUrl/videoUrl/audioUrl，避免视频 url 被填到 imageUrl 导致
             // OutputNode 当图片渲染而空白。
             const list: string[] = Array.isArray(r.urls) ? r.urls : [];
+            const textOutputs = (Array.isArray(r.texts) ? r.texts : [])
+              .map((value) => String(value || '').trim())
+              .filter(Boolean);
+            const textValue = textOutputs.join('\n\n');
             const isImg = (u: string) => /\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(u);
             const isVid = (u: string) => /\.(mp4|webm|mov|m4v|mkv)$/i.test(u);
             const isAud = (u: string) => /\.(mp3|wav|ogg|m4a|flac|aac)$/i.test(u);
@@ -603,14 +607,21 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
               upstreamHttpStatus: r.upstreamHttpStatus,
               usage: r.usage,
               pollCount: elapsed,
+              textUrls: Array.isArray(r.textUrls) ? r.textUrls : [],
             };
+            if (textValue) {
+              patch.outputText = textValue;
+              patch.text = textValue;
+              patch.texts = textOutputs;
+              patch.textSegments = textOutputs;
+            }
             if (firstImg) patch.imageUrl = firstImg;
             if (firstVid) patch.videoUrl = firstVid;
             if (firstAud) patch.audioUrl = firstAud;
             // 都不匹配时退回原逻辑（首个当 imageUrl）以保证向后兼容
             if (!firstImg && !firstVid && !firstAud && list[0]) patch.imageUrl = list[0];
-            console.log('[RH/done] taskId=', tid, 'urls=', list);
-            logBus.success(`任务完成 · ${list.length} 个输出 → ${list[0] || ''}`, src);
+            console.log('[RH/done] taskId=', tid, 'media=', list.length, 'texts=', textOutputs.length);
+            logBus.success(`任务完成 · ${list.length + textOutputs.length} 个输出`, src);
             update(patch);
             await reporter?.providerResponse({
               provider: 'runninghub',

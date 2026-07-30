@@ -101,6 +101,12 @@ const PROXY_MEDIA_REFERENCE_MAX_BYTES = boundedProxyInteger(
   1024 * 1024,
   1024 * 1024 * 1024,
 );
+const RUNNINGHUB_TEXT_OUTPUT_MAX_BYTES = boundedProxyInteger(
+  process.env.T8_RUNNINGHUB_TEXT_OUTPUT_MAX_BYTES,
+  2 * 1024 * 1024,
+  16 * 1024,
+  16 * 1024 * 1024,
+);
 const PROXY_PROVIDER_JSON_MAX_BYTES = boundedProxyInteger(
   process.env.T8_PROXY_PROVIDER_JSON_MAX_BYTES,
   2 * 1024 * 1024,
@@ -930,6 +936,10 @@ function mimeTypeForProxyFilename(filename) {
     '.flac': 'audio/flac',
     '.aac': 'audio/aac',
     '.wma': 'audio/x-ms-wma',
+    '.txt': 'text/plain; charset=utf-8',
+    '.md': 'text/markdown; charset=utf-8',
+    '.json': 'application/json; charset=utf-8',
+    '.csv': 'text/csv; charset=utf-8',
   };
   return map[ext] || 'application/octet-stream';
 }
@@ -1163,6 +1173,130 @@ function collectRunningHubOutputItems(value, out = [], seen = new Set()) {
     collectRunningHubOutputItems(child, out, seen);
   }
   return out;
+}
+
+const RUNNINGHUB_TEXT_OUTPUT_TYPES = new Set([
+  'txt',
+  'text',
+  'string',
+  'md',
+  'markdown',
+  'json',
+  'csv',
+  'text/plain',
+  'text/markdown',
+  'text/csv',
+  'application/json',
+]);
+
+function normalizedRunningHubOutputType(item) {
+  return String(
+    item?.fileType
+      || item?.file_type
+      || item?.contentType
+      || item?.content_type
+      || item?.mimeType
+      || item?.mime_type
+      || item?.type
+      || '',
+  )
+    .trim()
+    .toLowerCase()
+    .replace(/^\./, '')
+    .split(';')[0]
+    .trim();
+}
+
+function runningHubOutputUrlExtension(item) {
+  const remote = String(
+    item?.fileUrl
+      || item?.file_url
+      || item?.downloadUrl
+      || item?.download_url
+      || item?.resultUrl
+      || item?.result_url
+      || item?.outputUrl
+      || item?.output_url
+      || item?.url
+      || '',
+  ).trim();
+  try {
+    return path.extname(new URL(remote).pathname).toLowerCase().replace(/^\./, '');
+  } catch (_) {
+    return '';
+  }
+}
+
+function isRunningHubTextOutputItem(item) {
+  const declared = normalizedRunningHubOutputType(item);
+  if (RUNNINGHUB_TEXT_OUTPUT_TYPES.has(declared) || declared.startsWith('text/')) return true;
+  return ['txt', 'md', 'markdown', 'json', 'csv'].includes(runningHubOutputUrlExtension(item));
+}
+
+function runningHubTextOutputExtension(item) {
+  const declared = normalizedRunningHubOutputType(item);
+  const extension = runningHubOutputUrlExtension(item);
+  if (declared === 'json' || declared === 'application/json' || extension === 'json') return 'json';
+  if (declared === 'csv' || declared === 'text/csv' || extension === 'csv') return 'csv';
+  if (declared === 'md' || declared === 'markdown' || declared === 'text/markdown' || ['md', 'markdown'].includes(extension)) {
+    return 'md';
+  }
+  return 'txt';
+}
+
+function decodeRunningHubTextOutput(buffer, contentType = '') {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error('RunningHub 文本输出为空');
+  if (buffer.length > RUNNINGHUB_TEXT_OUTPUT_MAX_BYTES) {
+    throw new Error(`RunningHub 文本输出超过 ${RUNNINGHUB_TEXT_OUTPUT_MAX_BYTES} bytes 限制`);
+  }
+  const declared = normalizedContentType(contentType);
+  if (declared === 'text/html' || declared === 'application/xhtml+xml') {
+    throw new Error('RunningHub 文本输出返回了 HTML 页面');
+  }
+
+  let text = '';
+  if (buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) {
+    text = buffer.subarray(2).toString('utf16le');
+  } else if (buffer.length >= 2 && buffer[0] === 0xfe && buffer[1] === 0xff) {
+    const swapped = Buffer.from(buffer.subarray(2));
+    for (let index = 0; index + 1 < swapped.length; index += 2) {
+      const left = swapped[index];
+      swapped[index] = swapped[index + 1];
+      swapped[index + 1] = left;
+    }
+    text = swapped.toString('utf16le');
+  } else {
+    if (buffer.includes(0)) throw new Error('RunningHub 文本输出包含二进制数据');
+    text = buffer.toString('utf8');
+  }
+
+  const normalized = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').trim();
+  if (!normalized) throw new Error('RunningHub 文本输出为空');
+  if (/^\s*<!doctype\s+html|^\s*<html[\s>]/i.test(normalized)) {
+    throw new Error('RunningHub 文本输出返回了 HTML 页面');
+  }
+  return normalized;
+}
+
+async function fetchRunningHubTextOutput(remote, item, materializationKey) {
+  const downloaded = await safeRemoteMediaFetch(remote, proxySafeRemoteOptions({
+    maxBytes: RUNNINGHUB_TEXT_OUTPUT_MAX_BYTES,
+    deadlineMs: PROXY_REMOTE_DEADLINE_MS,
+    idleTimeoutMs: PROXY_REMOTE_IDLE_TIMEOUT_MS,
+    maxRedirects: 4,
+    accept: 'text/plain,text/markdown,text/csv,application/json,application/octet-stream;q=0.5',
+    userAgent: 'T8-PenguinCanvas-ProviderProxy/1.0',
+  }));
+  const text = decodeRunningHubTextOutput(downloaded.buffer, downloaded.contentType);
+  const extension = runningHubTextOutputExtension(item);
+  const utf8Buffer = Buffer.from(text, 'utf8');
+  const url = storeMaterializedOutputBuffer(
+    utf8Buffer,
+    'rh_text',
+    extension,
+    materializationKey,
+  );
+  return { text, url };
 }
 
 function summarizeRunningHubOutputShape(value, depth = 0, seen = new WeakSet()) {
@@ -7377,6 +7511,8 @@ router.get('/runninghub/query', async (req, res) => {
     const taskCode = String(data.code ?? '');
     let status = 'PENDING';
     let urls = [];
+    let texts = [];
+    let textUrls = [];
     if (taskCode === '0') {
       status = 'SUCCESS';
       const materializationFailures = [];
@@ -7408,6 +7544,16 @@ router.get('/runninghub/query', async (req, res) => {
         const remote = it?.fileUrl || it?.file_url || it?.downloadUrl || it?.download_url || it?.resultUrl || it?.result_url || it?.outputUrl || it?.output_url || it?.signedUrl || it?.signed_url || it?.publicUrl || it?.public_url || it?.previewUrl || it?.preview_url || it?.url;
         if (!remote) continue;
         try {
+          if (isRunningHubTextOutputItem(it)) {
+            const output = await fetchRunningHubTextOutput(
+              remote,
+              it,
+              `runninghub:${selectedCandidate.id}:${taskId}:text:${outputIndex}`,
+            );
+            texts.push(output.text);
+            textUrls.push(output.url);
+            continue;
+          }
           const downloaded = await fetchProxyRemoteMedia(remote, {
             allowedKinds: ['image', 'video', 'audio'],
             maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
@@ -7452,6 +7598,8 @@ router.get('/runninghub/query', async (req, res) => {
         return sendCompletedRemoteOutputFailure(res, failure, {
           taskId,
           urls,
+          texts,
+          textUrls,
           code: Number.isFinite(Number(data.code)) ? Number(data.code) : data.code,
           site: selectedCandidate.id,
           fallbackUsed: selectedCandidate.id !== requestedSite,
@@ -7461,6 +7609,8 @@ router.get('/runninghub/query', async (req, res) => {
           defaultMessage: 'RunningHub 结果无法保存。',
         });
       }
+      texts = [...new Set(texts)];
+      textUrls = [...new Set(textUrls)];
     } else if (taskCode === '804') status = 'RUNNING';
     else if (taskCode === '813') status = 'QUEUED';
     else if (taskCode === '805') status = 'FAILED';
@@ -7478,12 +7628,14 @@ router.get('/runninghub/query', async (req, res) => {
         failReasonStr = String(failReasonRaw);
       }
     }
-    console.log(`[RH/query] site=${selectedCandidate.id} taskId=${taskId} status=${status} code=${data.code} urls=${urls.length}${failReasonStr ? ` ${opaqueDiagnosticSummary('fail', failReasonStr)}` : ''}`);
+    console.log(`[RH/query] site=${selectedCandidate.id} taskId=${taskId} status=${status} code=${data.code} media=${urls.length} texts=${texts.length}${failReasonStr ? ` ${opaqueDiagnosticSummary('fail', failReasonStr)}` : ''}`);
     res.json({
       success: true,
       data: {
         status,
         urls,
+        texts,
+        textUrls,
         failReason: failReasonStr ? 'RunningHub 任务失败' : null,
         code: data.code,
         site: selectedCandidate.id,
@@ -7671,10 +7823,12 @@ router.get('/runninghub/app-info', async (req, res) => {
 
 module.exports = router;
 module.exports._test = Object.freeze({
+  decodeRunningHubTextOutput,
   diagnosticDigest,
   FAL_TOOLBOX_AUTHORITY,
   currentProviderDispatcher,
   fetchProxyRemoteMedia,
+  fetchRunningHubTextOutput,
   fetchFalPollJson,
   storeMaterializedOutputBuffer,
   fetchProviderResponse,
@@ -7690,6 +7844,9 @@ module.exports._test = Object.freeze({
   safeFalRequestId,
   saveRemoteVideo,
   setProxySafeRemoteTestOptions,
+  isRunningHubTextOutputItem,
+  normalizedRunningHubOutputType,
+  runningHubTextOutputExtension,
   summarizeImageRef,
   summarizeRunningHubOutputShape,
   trustedFalPollUrl,

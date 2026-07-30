@@ -1,7 +1,7 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.7.1",
-  "lastUpdated": "2026-07-31-v2.7.1-release-candidate",
+  "lastUpdated": "2026-07-31-v2.7.1-rh-text-output-terminal-fix",
   "release": {
     "status": "release-candidate",
     "version": "2.7.1",
@@ -40,6 +40,21 @@
       "版本号每一段只使用 0-9；v2.6.9 的下一正式版本固定为 v2.7.0。",
       "禁止创建、打包、推送、打 tag、发布或写入自动更新元数据为 v2.6.10。",
       "后续改版本前必须同步核对 package.json、package-lock.json、README、features.json、项目 SKILL.md、Release notes、自动更新元数据和 Git tag。"
+    ]
+  },
+  "runningHubTextOutputTerminalFix": {
+    "status": "release-candidate-v2.7.1",
+    "date": "2026-07-31",
+    "releaseIncluded": true,
+    "highlights": [
+      "修复 RunningHub AI 应用返回 txt 文本产物时被误当作图像/视频/音频做魔数校验、从而永久停留在 MATERIALIZING 并无限轮询的问题。",
+      "RunningHub 查询公共终态现在按 fileType、MIME 与签名 URL 扩展名识别 txt、Markdown、JSON 和 CSV；文本以有界安全下载读取、统一 UTF-8 持久化，并与媒体产物一起在同一次 SUCCESS 响应返回。",
+      "普通 RunningHub 节点、RH AI 应用节点和 RH 工具箱统一接收 texts/textUrls，并写入 outputText、text、texts 与 textSegments，文本可以继续沿画布连线传给下游节点。"
+    ],
+    "verification": [
+      "使用用户指定 WebApp 2082878851868348418 完成真实调用：实际上游返回 txt + flac，3 秒间隔轮询仅经历 RUNNING → SUCCESS，MATERIALIZING 为 0 次，最终返回 1 个本地 flac、1 段文本和 1 个本地 txt。",
+      "对同一真实 taskId 再次查询仍为 SUCCESS，媒体地址和文本内容保持稳定一致，没有重新提交任务。",
+      "RunningHub 文本、站点与 RH 工具箱定向回归 32/32 通过；TypeScript type-check、Node 语法与 diff-check 通过。本轮未执行 Electron build、打包、提交、推送、tag 或 Release。"
     ]
   },
   "providerSystemNetworkCompatibilityCorrection": {

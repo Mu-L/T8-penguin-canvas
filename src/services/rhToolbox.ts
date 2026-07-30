@@ -278,9 +278,13 @@ export async function runRhToolboxTool(options: RunRhToolboxToolOptions): Promis
         if (normalizedStatus === 'SUCCESS') {
           remoteTaskCompleted = true;
           const classified = classifyRhToolboxOutputs(query.urls || []);
+          const textOutputs = Array.from(new Set([
+            ...classified.textOutputs,
+            ...(Array.isArray(query.texts) ? query.texts : []),
+          ].map((value) => String(value || '').trim()).filter(Boolean)));
           await progress?.({
             stage: 'success',
-            message: `完成 · ${classified.urls.length} 个输出`,
+            message: `完成 · ${classified.urls.length + textOutputs.length} 个输出`,
             taskId,
             pollCount,
             requestId: query.requestId,
@@ -290,6 +294,7 @@ export async function runRhToolboxTool(options: RunRhToolboxToolOptions): Promis
           });
           return {
             ...classified,
+            textOutputs,
             tool,
             taskId,
             nodeInfoList,

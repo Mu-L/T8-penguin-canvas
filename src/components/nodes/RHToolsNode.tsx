@@ -612,7 +612,7 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
             pollLimit: MAX,
             status: r.status,
             code: r.code,
-            outputCount: Array.isArray(r.urls) ? r.urls.length : 0,
+            outputCount: (Array.isArray(r.urls) ? r.urls.length : 0) + (Array.isArray(r.texts) ? r.texts.length : 0),
           });
           if (elapsed % 6 === 0) {
             logBus.debug(`[${elapsed * 5}s] status=${r.status} code=${r.code} urls=${r.urls?.length || 0}`, src);
@@ -628,6 +628,10 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
             }
           } else if (normalizedStatus === 'SUCCESS') {
             const list: string[] = Array.isArray(r.urls) ? r.urls : [];
+            const textOutputs = (Array.isArray(r.texts) ? r.texts : [])
+              .map((value) => String(value || '').trim())
+              .filter(Boolean);
+            const textValue = textOutputs.join('\n\n');
             const isImg = (u: string) => /\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(u);
             const isVid = (u: string) => /\.(mp4|webm|mov|m4v|mkv)$/i.test(u);
             const isAud = (u: string) => /\.(mp3|wav|ogg|m4a|flac|aac)$/i.test(u);
@@ -645,12 +649,19 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
               upstreamHttpStatus: r.upstreamHttpStatus,
               usage: r.usage,
               pollCount: elapsed,
+              textUrls: Array.isArray(r.textUrls) ? r.textUrls : [],
             };
+            if (textValue) {
+              patch.outputText = textValue;
+              patch.text = textValue;
+              patch.texts = textOutputs;
+              patch.textSegments = textOutputs;
+            }
             if (firstImg) patch.imageUrl = firstImg;
             if (firstVid) patch.videoUrl = firstVid;
             if (firstAud) patch.audioUrl = firstAud;
             if (!firstImg && !firstVid && !firstAud && list[0]) patch.imageUrl = list[0];
-            logBus.success(`任务完成 · ${list.length} 个输出 → ${list[0] || ''}`, src);
+            logBus.success(`任务完成 · ${list.length + textOutputs.length} 个输出`, src);
             update(patch);
             await reporter?.providerResponse({
               provider: 'runninghub',

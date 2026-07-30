@@ -1745,6 +1745,8 @@ export async function submitRh(req: RhSubmitRequest, transport: ProviderSubmissi
 export interface RhQueryResult extends ProviderTransportTrace {
   status: 'PENDING' | 'SUCCESS' | 'RUNNING' | 'QUEUED' | 'FAILED' | string;
   urls: string[];
+  texts?: string[];
+  textUrls?: string[];
   failReason?: string | null;
   code?: number;
   site?: RhSite;
