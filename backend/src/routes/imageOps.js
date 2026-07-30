@@ -139,6 +139,7 @@ async function fetchImageBuffer(url, remoteFetchOptions = {}) {
 function saveBuffer(buf, ext = 'png') {
   const filename = `op_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
   const filePath = path.join(config.OUTPUT_DIR, filename);
+  fs.mkdirSync(config.OUTPUT_DIR, { recursive: true });
   fs.writeFileSync(filePath, buf);
   return `/files/output/${filename}`;
 }
@@ -147,6 +148,7 @@ function saveBuffer(buf, ext = 'png') {
 async function saveBufferAsync(buf, ext = 'png') {
   const filename = `op_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
   const filePath = path.join(config.OUTPUT_DIR, filename);
+  await fsp.mkdir(config.OUTPUT_DIR, { recursive: true });
   await fsp.writeFile(filePath, buf);
   return `/files/output/${filename}`;
 }
@@ -168,6 +170,32 @@ function chooseEncoder(meta) {
   return {
     ext: 'png',
     encode: (p) => p.png({ compressionLevel: 3, effort: 1 }),
+  };
+}
+
+// 长边限制只改变像素尺寸，不做额外的有损压缩：
+// JPEG 使用最高质量和 4:4:4，WebP 使用 lossless，PNG 本身保持无损。
+function chooseLongEdgeEncoder(meta) {
+  const fmt = (meta && meta.format) || 'png';
+  if (fmt === 'jpeg' || fmt === 'jpg') {
+    return {
+      ext: 'jpg',
+      encode: (pipeline) => pipeline.jpeg({
+        quality: 100,
+        chromaSubsampling: '4:4:4',
+        mozjpeg: false,
+      }),
+    };
+  }
+  if (fmt === 'webp') {
+    return {
+      ext: 'webp',
+      encode: (pipeline) => pipeline.webp({ lossless: true, effort: 2 }),
+    };
+  }
+  return {
+    ext: 'png',
+    encode: (pipeline) => pipeline.png({ compressionLevel: 3, effort: 1 }),
   };
 }
 
@@ -777,6 +805,75 @@ router.post('/resize', async (req, res) => {
   } catch (e) {
     console.error('resize 错误:', e);
     res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ========== POST /api/image/resize-long-edge — 等比限制图片长边 ==========
+// body: { imageUrl, longEdge: 1024 | 2048 }
+// 小于目标尺寸的图片直接复用原 URL，不放大、不重复落盘。
+router.post('/resize-long-edge', async (req, res) => {
+  try {
+    const { imageUrl } = req.body || {};
+    const longEdge = Number(req.body?.longEdge);
+    if (!imageUrl) return res.status(400).json({ success: false, error: 'imageUrl 必填' });
+    if (longEdge !== 1024 && longEdge !== 2048) {
+      return res.status(400).json({ success: false, error: 'longEdge 仅支持 1024 或 2048' });
+    }
+
+    const buf = await fetchImageBuffer(imageUrl);
+    const input = sharp(buf, { sequentialRead: true });
+    const meta = await input.metadata();
+    const rawWidth = Number(meta.width) || 0;
+    const rawHeight = Number(meta.height) || 0;
+    if (!rawWidth || !rawHeight) throw new Error('无法读取图片尺寸');
+    // 手机照片常用 EXIF 5-8 表示转正后宽高互换。resize 前会自动转正，
+    // 因此长边与目标尺寸也必须按转正后的宽高计算，避免图片被拉伸。
+    const orientation = Number(meta.orientation) || 1;
+    const swapsAxes = orientation >= 5 && orientation <= 8;
+    const width = swapsAxes ? rawHeight : rawWidth;
+    const height = swapsAxes ? rawWidth : rawHeight;
+
+    const sourceLongEdge = Math.max(width, height);
+    if (sourceLongEdge <= longEdge) {
+      return res.json({
+        success: true,
+        data: {
+          imageUrl,
+          width,
+          height,
+          longEdge,
+          resized: false,
+        },
+      });
+    }
+
+    const scale = longEdge / sourceLongEdge;
+    const targetWidth = Math.max(1, Math.round(width * scale));
+    const targetHeight = Math.max(1, Math.round(height * scale));
+    const encoder = chooseLongEdgeEncoder(meta);
+    const pipeline = sharp(buf, { sequentialRead: true })
+      .rotate()
+      .resize(targetWidth, targetHeight, {
+        fit: 'fill',
+        kernel: sharp.kernel.lanczos3,
+        withoutEnlargement: true,
+      })
+      .withMetadata();
+    const out = await encoder.encode(pipeline).toBuffer();
+    const url = await saveBufferAsync(out, encoder.ext);
+    return res.json({
+      success: true,
+      data: {
+        imageUrl: url,
+        width: targetWidth,
+        height: targetHeight,
+        longEdge,
+        resized: true,
+      },
+    });
+  } catch (e) {
+    console.error('resize-long-edge 错误:', e);
+    return res.status(500).json({ success: false, error: e.message });
   }
 });
 

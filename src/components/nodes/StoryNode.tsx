@@ -18,6 +18,7 @@ import {
   Clapperboard,
   Copy,
   Download,
+  Eraser,
   Film,
   ImagePlus,
   Library,
@@ -57,6 +58,7 @@ import {
   IMAGE_MODELS,
   LLM_MODELS,
   ZHENZHEN_IMAGE_G2_I2I_MODEL,
+  ZHENZHEN_IMAGE_G2_MODEL_OPTIONS,
   ZHENZHEN_IMAGE_G2_T2I_MODEL,
   gptImage2ZhenzhenVariantSize,
   isFalModel,
@@ -153,6 +155,16 @@ const ACTIVE_TASK_STATUSES = new Set(['submitting', 'running', 'polling']);
 const POLL_TIMEOUT_MS = 60 * 60 * 1000;
 const GPT_IMAGE_2_OPTIONS = IMAGE_MODELS.find((item) => item.id === 'gpt-image-2')?.apiModelOptions || [];
 const LEGACY_GPT_IMAGE_2_MODELS = new Set(['gpt-image-2-all', 'gpt-image-2', 'gpt-image-2-2K', 'gpt-image-2-4K']);
+const STORY_RUN_LABEL: Record<StoryRunMode, string> = {
+  all: '一键生产',
+  analyze: '分析剧本',
+  'asset-one': '生成资产',
+  'assets-missing': '生成缺失资产',
+  compile: '编译提示词',
+  'videos-missing': '生成缺失视频',
+  compose: '合成为片',
+  'retry-failed': '重试失败任务',
+};
 
 type StoryProviderChoice = 'builtin' | `advanced:${string}`;
 type StoryLlmPlatformChoice = 'builtin:zhenzhen' | 'builtin:seedance-nz' | `advanced:${string}`;
@@ -173,11 +185,24 @@ function builtInImagePlatform(model: string): Exclude<StoryImagePlatformChoice, 
 }
 
 function builtInImageOptions(platform: StoryImagePlatformChoice) {
+  if (platform === 'builtin:seedance-nz') return [...ZHENZHEN_IMAGE_G2_MODEL_OPTIONS];
   return GPT_IMAGE_2_OPTIONS.filter((item) => {
-    if (platform === 'builtin:seedance-nz') return item.value === ZHENZHEN_IMAGE_G2_T2I_MODEL || item.value === ZHENZHEN_IMAGE_G2_I2I_MODEL;
     if (platform === 'builtin:fal') return isFalModel(item.value);
     return LEGACY_GPT_IMAGE_2_MODELS.has(item.value);
   });
+}
+
+function storyRunSubmissionError(raw: unknown): string {
+  const detail = String(raw || '').trim();
+  if (/恢复代次|sidecar.*持久化确认|freshness\s*ack/i.test(detail)) {
+    return '后台在上次异常退出后尚未完成画布数据恢复确认。请完全退出并重新启动应用或开发服务后再试；本次没有调用模型，也不会产生费用。';
+  }
+  if (/无法创建持久化\s*Run|无法创建.*运行记录/i.test(detail)) {
+    return `无法创建本次运行记录，已停止调用模型。${detail.replace(/^.*?：/, '').trim() || '请重新启动应用后再试。'}`;
+  }
+  return detail
+    ? `Story 未能启动：${detail}`
+    : 'Story 未能启动，请查看左下角 Logs；本次没有调用模型。';
 }
 
 function falImageSizeFor(ratio: string): string {
@@ -190,6 +215,21 @@ function falImageSizeFor(ratio: string): string {
 
 function storyAssetsReady(project: StoryProject): boolean {
   return project.assets.length > 0 && project.assets.every((asset) => Boolean(asset.url) && asset.status === 'succeeded');
+}
+
+function hasClearableAssetMedia(asset: StoryAsset): boolean {
+  return Boolean(
+    asset.url
+    || asset.taskId
+    || asset.taskProvider
+    || asset.taskModel
+    || asset.taskEndpoint
+    || asset.taskClipIds.length
+    || asset.error
+    || asset.generatedAt
+    || asset.source !== 'missing'
+    || asset.status !== 'pending',
+  );
 }
 
 interface StoryRunTaskBudget {
@@ -301,9 +341,11 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
   const [resourceLoading, setResourceLoading] = useState(false);
   const [resourceMessage, setResourceMessage] = useState('');
   const [localMessage, setLocalMessage] = useState('');
+  const [runRequestPending, setRunRequestPending] = useState(false);
   const [assetRunActive, setAssetRunActive] = useState(false);
   const [generatingAssetIds, setGeneratingAssetIds] = useState<Set<string>>(() => new Set());
   const abortRef = useRef<AbortController | null>(null);
+  const runRequestPendingRef = useRef(false);
   const composeJobIdRef = useRef('');
   const assetRunSessionRef = useRef<StoryAssetRunSessionHandle | null>(null);
   const assetRunRequestPendingRef = useRef(false);
@@ -419,7 +461,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
     .map((assetId) => project.assets.find((asset) => asset.id === assetId)?.name)
     .filter(Boolean)
     .join('、') || '';
-  const busy = Boolean(abortRef.current) || ACTIVE_TASK_STATUSES.has(String((data as any)?.status || ''));
+  const busy = runRequestPending || Boolean(abortRef.current) || ACTIVE_TASK_STATUSES.has(String((data as any)?.status || ''));
 
   const setProjectPatch = useCallback((patch: Partial<StoryProject>) => {
     mutate((current) => ({ ...current, ...patch, storyRevision: current.storyRevision + 1, updatedAt: new Date().toISOString() }));
@@ -439,7 +481,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
   }, [mutate]);
 
   const requestRun = useCallback((mode: StoryRunMode, targetId = '') => {
-    if (busy) return false;
+    if (busy || runRequestPendingRef.current) return false;
     if (mode === 'asset-one' || mode === 'assets-missing') setActiveStage('assets');
     if (mode === 'compile') setActiveStage('prompts');
     if (mode === 'videos-missing') setActiveStage('videos');
@@ -453,6 +495,28 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
     const builtinModel = usesLlm
       ? storySettings.llmApiSource === 'seedance-nz' ? storySettings.llmNzModel : storySettings.llmModel
       : usesImage ? storySettings.imageModel : effectiveVideoModel;
+    const clearPendingRequest = () => {
+      runRequestPendingRef.current = false;
+      setRunRequestPending(false);
+    };
+    const rejectRequest = (reason: unknown) => {
+      const message = storyRunSubmissionError(reason);
+      clearPendingRequest();
+      setLocalMessage(message);
+      mutate((current) => ({
+        ...current,
+        lastError: message,
+        updatedAt: new Date().toISOString(),
+      }), { status: 'error', error: message });
+      updateNode({
+        storyRunRequestId: '',
+        storyRunTargetId: '',
+        storyRunMode: 'all',
+      });
+    };
+    runRequestPendingRef.current = true;
+    setRunRequestPending(true);
+    setLocalMessage(`${STORY_RUN_LABEL[mode]}请求正在提交…`);
     updateNode({
       storyRunMode: mode,
       storyRunTargetId: targetId,
@@ -465,11 +529,20 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
       llmApiSource: usesLlm ? storySettings.llmApiSource : undefined,
     });
     window.requestAnimationFrame(() => {
-      if (requestCanvasNodeRun(id, { requestId })) return;
-      updateNode({ storyRunRequestId: '', status: 'error', error: '无法提交 Story 运行请求，请重试。' });
+      if (requestCanvasNodeRun(id, {
+        requestId,
+        onSettled: (outcome) => {
+          if (outcome.accepted) {
+            clearPendingRequest();
+            return;
+          }
+          rejectRequest(outcome.error);
+        },
+      })) return;
+      rejectRequest('无法派发 Story 运行请求，请重试。');
     });
     return true;
-  }, [busy, effectiveVideoModel, id, imageSelection, llmSelection, updateNode, videoSelection]);
+  }, [busy, effectiveVideoModel, id, imageSelection, llmSelection, mutate, updateNode, videoSelection]);
 
   const enterAssetReview = useCallback(() => {
     if (busy || projectRef.current.shots.length === 0) return;
@@ -523,8 +596,8 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
         temperature,
         max_tokens: 32768,
         messages,
-      })
-      : generateLlm({ source: builtinSource, model, temperature, max_tokens: 32768, messages });
+      }, { submissionKey: reporter.providerSubmissionKey })
+      : generateLlm({ source: builtinSource, model, temperature, max_tokens: 32768, messages }, { submissionKey: reporter.providerSubmissionKey });
     try {
       await reporter.providerRequest({ provider, model, jobKind: 'story-analysis' });
       const result = await runLlm([
@@ -599,7 +672,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
       && asset.kind !== 'audio'
       && (configuredModelWithReferences === ZHENZHEN_IMAGE_G2_T2I_MODEL || configuredModelWithReferences === ZHENZHEN_IMAGE_G2_I2I_MODEL)
       && !hasDomesticKey
-    ) throw new Error('请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”');
+    ) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
     if (!external && asset.kind !== 'audio' && configuredModelWithReferences === ZHENZHEN_IMAGE_G2_I2I_MODEL && !referenceImages.length) {
       throw new Error('G-2 图生图需要参考图；请先生成或绑定角色参考图，或改用 G-2 文生图/其他文生图模型');
     }
@@ -626,7 +699,10 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
       if (resumable) {
         await reporter.providerSubmitted({ provider: taskProvider, model, upstreamTaskId: taskId, jobId: assetId, jobKind: 'story-audio-asset', resumed: true, httpStatusSource: 'local-backend' });
       } else {
-        const submitted = await submitAudio({ mode: 'generate', prompt: generationSpec.prompt, title: asset.name, version: 'v5.5' });
+        const submitted = await submitAudio(
+          { mode: 'generate', prompt: generationSpec.prompt, title: asset.name, version: 'v5.5' },
+          { submissionKey: reporter.providerSubmissionKey },
+        );
         taskId = submitted.taskId;
         taskProvider = 'suno';
         taskClipIds = submitted.clipIds?.length ? submitted.clipIds : taskId ? [taskId] : [];
@@ -668,7 +744,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
         images: referenceImages,
         size: externalImageSizeFor(imageAspectRatio, '2K'),
         n: 1,
-      });
+      }, { submissionKey: reporter.providerSubmissionKey });
       url = String(result.imageUrls?.[0] || '');
       taskId = String(result.taskId || '');
       taskProvider = external.providerSource;
@@ -686,7 +762,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
           model,
           resolution: '1k',
           ratio: imageAspectRatio as any,
-        });
+        }, { submissionKey: reporter.providerSubmissionKey });
         taskId = String(submitted.taskId || '');
         taskProvider = 'seedance-nz';
         if (!taskId) throw new Error(`${asset.name} 未返回图像任务 ID`);
@@ -732,7 +808,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
           mode: referenceImages.length ? 'edit' : 'gen',
           size: falImageSizeFor(imageAspectRatio),
           quality: 'medium',
-        });
+        }, { submissionKey: reporter.providerSubmissionKey });
         url = String(submitted.urls?.[0] || '');
         taskId = String(submitted.requestId || '');
         taskEndpoint = String(submitted.endpoint || '');
@@ -779,7 +855,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
         n: 1,
         aspect_ratio: imageAspectRatio,
         image_size: gptImage2ZhenzhenVariantSize(model) || '2K',
-      });
+      }, { submissionKey: reporter.providerSubmissionKey });
       url = String(result.urls?.[0] || '');
       if (!url) throw new Error(`${asset.name} 未返回图片`);
       await reporter.providerResponse({ provider: 'zhenzhen', model, requestId: result.requestId, transportHttpStatus: result.transportHttpStatus, upstreamHttpStatus: result.upstreamHttpStatus, usage: result.usage, status: 'succeeded', jobId: assetId, jobKind: 'story-asset', httpStatusSource: 'local-backend' });
@@ -1092,7 +1168,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
         videos: job.payload.videos,
         audios: job.payload.audios,
         providerParams: job.payload.providerParams,
-      });
+      }, { submissionKey: reporter.providerSubmissionKey });
       const videoUrl = String(result.videoUrls?.[0] || '');
       if (!videoUrl) throw new Error(`${job.title} 未返回视频`);
       if (result.taskId || result.requestId) await reporter.providerSubmitted({ provider: taskProvider, model: resolvedModel, upstreamTaskId: result.taskId, requestId: result.requestId, transportHttpStatus: result.transportHttpStatus, upstreamHttpStatus: result.upstreamHttpStatus, usage: result.usage, jobId: job.id, jobKind: 'story-shot', httpStatusSource: 'local-backend' });
@@ -1103,7 +1179,10 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
     if (resumable) {
       await reporter.providerSubmitted({ provider: taskProvider, model: resolvedModel, upstreamTaskId: taskId, jobId: job.id, jobKind: 'story-shot', resumed: true, httpStatusSource: 'local-backend' });
     } else {
-      const submitted = await submitSeedance({ ...job.payload, taskProvider: defaultProvider });
+      const submitted = await submitSeedance(
+        { ...job.payload, taskProvider: defaultProvider },
+        { submissionKey: reporter.providerSubmissionKey },
+      );
       taskProvider = submitted.taskProvider || defaultProvider;
       taskId = submitted.taskId;
       resolvedModel = submitted.model || job.payload.model;
@@ -1371,6 +1450,8 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
   }, [analyze, compile, compose, generateAssets, generateVideos, runAssetRegenerationSession]);
 
   useRunTrigger(id, async (reporter) => {
+    runRequestPendingRef.current = false;
+    setRunRequestPending(false);
     const liveData = rf.getNode(id)?.data as Record<string, unknown> | undefined;
     const contextRequestId = String(reporter.runContext?.requestId || '').trim();
     const persistedRequestId = String(liveData?.storyRunRequestId || '').trim();
@@ -1422,6 +1503,8 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
       logBus.error(`Story 失败：${message}`, src);
       throw error;
     } finally {
+      runRequestPendingRef.current = false;
+      setRunRequestPending(false);
       if (abortRef.current === controller) abortRef.current = null;
       composeJobIdRef.current = '';
       if (contextRequestId) {
@@ -1665,6 +1748,16 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
     setLocalMessage(`${asset.name} 已清空，可重新上传或 AI 生成`);
   }, [updateAsset]);
 
+  const confirmClearAssetMedia = useCallback((asset: StoryAsset) => {
+    if (generatingAssetIds.has(asset.id)) {
+      setLocalMessage(`${asset.name} 正在生成，请等待完成或先停止当前流程`);
+      return;
+    }
+    const materialKind = asset.kind === 'audio' ? '音频' : '图片';
+    if (!window.confirm(`确认清空资产「${asset.name}」的当前${materialKind}？资产设定、提示词和镜头关联都会保留。`)) return;
+    clearAssetMedia(asset);
+  }, [clearAssetMedia, generatingAssetIds]);
+
   const toggleAssetShot = useCallback((assetId: string, shotId: string) => {
     mutate((current) => {
       const asset = current.assets.find((item) => item.id === assetId);
@@ -1775,17 +1868,17 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
         <label className={labelClass}>语言模型<select value={selectedLlmModel} onChange={(event) => llmSelection.available ? updateSettings({ llmProviderModel: event.target.value }) : project.settings.llmApiSource === 'seedance-nz' ? updateSettings({ llmNzModel: event.target.value }) : updateSettings({ llmModel: event.target.value })} className={selectClass}>{llmModels.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
       </div>
       <div className="grid grid-cols-2 gap-2">
-        <label className={labelClass}>图像 API 平台<select value={imageChoice} onChange={(event) => selectImagePlatform(event.target.value)} className={selectClass}><option value="builtin:legacy">贞贞 AI 工坊（海外）</option><option value="builtin:seedance-nz">贞贞平价 AI 工坊（国内）</option><option value="builtin:fal">FAL（贞贞线路）</option>{imageProviders.map((provider) => <option key={provider.id} value={advancedChoice(provider.id)}>{provider.label} · {provider.protocol}</option>)}</select></label>
+        <label className={labelClass}>图像 API 平台<select value={imageChoice} onChange={(event) => selectImagePlatform(event.target.value)} className={selectClass}><option value="builtin:legacy">贞贞 AI 工坊（海外）</option><option value="builtin:seedance-nz">贞贞的平价AI小屋</option><option value="builtin:fal">FAL（贞贞线路）</option>{imageProviders.map((provider) => <option key={provider.id} value={advancedChoice(provider.id)}>{provider.label} · {provider.protocol}</option>)}</select></label>
         <label className={labelClass}>图像模型<select value={imageSelection.available ? imageSelection.providerModel : project.settings.imageModel} onChange={(event) => imageSelection.available ? updateSettings({ imageProviderModel: event.target.value }) : updateSettings({ imageModel: event.target.value })} className={selectClass}>{imageModels.map((item) => <option key={item.value} value={item.value} disabled={item.value === ZHENZHEN_IMAGE_G2_I2I_MODEL}>{item.label}{item.value === ZHENZHEN_IMAGE_G2_I2I_MODEL ? '（需参考图）' : ''}</option>)}</select></label>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <label className={labelClass}>视频 API 平台<select value={videoChoice} onChange={(event) => selectVideoPlatform(event.target.value)} className={selectClass}><option value="builtin">Seedance 2.0 内置线路</option>{videoProviders.map((provider) => <option key={provider.id} value={advancedChoice(provider.id)}>{provider.label} · {provider.protocol}</option>)}</select></label>
-        {videoSelection.available ? <label className={labelClass}>视频模型<select value={videoSelection.providerModel} onChange={(event) => updateSettings({ videoProviderModel: event.target.value })} className={selectClass}>{videoModels.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label> : <label className={labelClass}>Seedance API 来源<select value={project.settings.videoApiSource} onChange={(event) => updateSettings({ videoApiSource: event.target.value as SeedanceBuiltinSource })} className={selectClass}><option value="auto">自动（优先国内）</option><option value="seedance-nz">贞贞平价 AI 工坊（国内）</option><option value="zhenzhen-legacy">贞贞 AI 工坊（海外）</option></select></label>}
+        {videoSelection.available ? <label className={labelClass}>视频模型<select value={videoSelection.providerModel} onChange={(event) => updateSettings({ videoProviderModel: event.target.value })} className={selectClass}>{videoModels.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label> : <label className={labelClass}>Seedance API 来源<select value={project.settings.videoApiSource} onChange={(event) => updateSettings({ videoApiSource: event.target.value as SeedanceBuiltinSource })} className={selectClass}><option value="auto">自动（优先平价AI小屋）</option><option value="seedance-nz">贞贞的平价AI小屋</option><option value="zhenzhen-legacy">贞贞 AI 工坊（海外）</option></select></label>}
       </div>
       {!videoSelection.available && <label className={labelClass}>视频模型<select value={effectiveVideoModel} onChange={(event) => effectiveVideoBuiltinSource === 'seedance-nz' ? updateSettings({ videoNzModel: event.target.value }) : updateSettings({ videoModel: event.target.value })} className={selectClass}>{videoModels.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>}
       {!imageSelection.available && project.settings.imageModel === ZHENZHEN_IMAGE_G2_I2I_MODEL && <p className="text-[9px] text-amber-200">G-2 图生图需要参考图，Story 缺失资产不会使用该模型生成。</p>}
       {!llmSelection.available && project.settings.llmApiSource === 'seedance-nz' && !hasDomesticKey && <p className="text-[9px] text-amber-200">尚未配置贞贞的平价AI小屋 API Key。</p>}
-      {!videoSelection.available && effectiveVideoBuiltinSource === 'seedance-nz' && !hasDomesticKey && <p className="text-[9px] text-amber-200">尚未配置贞贞平价 AI 工坊（国内）API Key。</p>}
+      {!videoSelection.available && effectiveVideoBuiltinSource === 'seedance-nz' && !hasDomesticKey && <p className="text-[9px] text-amber-200">尚未配置贞贞的平价AI小屋 API Key。</p>}
     </div>;
   };
 
@@ -1880,6 +1973,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
                   <div className="flex items-center gap-2">
                     <strong className="min-w-0 flex-1 truncate text-xs text-white">{asset.name}</strong>
                     <button onClick={(event) => { event.stopPropagation(); updateAsset(asset.id, { locked: !asset.locked }); }} className="text-white/45" title={asset.locked ? '解除锁定' : '锁定资产'}>{asset.locked ? <Lock size={13} /> : <Unlock size={13} />}</button>
+                    <button disabled={generating || !hasClearableAssetMedia(asset)} onClick={(event) => { event.stopPropagation(); confirmClearAssetMedia(asset); }} className="inline-flex items-center gap-1 rounded border border-white/10 px-1.5 py-0.5 text-[9px] text-white/55 hover:border-cyan-300/30 hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-25" title={`清空「${asset.name}」的${asset.kind === 'audio' ? '音频' : '图片'}，保留资产设定与镜头关联`}><Eraser size={11} />清空</button>
                     <button disabled={generating} onClick={(event) => { event.stopPropagation(); confirmRemoveAsset(asset); }} className="text-rose-300/65 hover:text-rose-200 disabled:opacity-25" title={`删除「${asset.name}」`}><Trash2 size={13} /></button>
                   </div>
                   <p className="line-clamp-2 min-h-9 text-[10px] leading-4 text-white/45">{asset.description || '点击右侧补充资产描述和提示词'}</p>
@@ -1910,7 +2004,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
           <div className={`grid ${selectedAsset.kind === 'audio' ? 'grid-cols-2' : 'grid-cols-3'} gap-2`}>
             <button disabled={assetActionsBlocked || generatingAssetIds.has(selectedAsset.id) || selectedAsset.locked || selectedAsset.kind === 'audio' && Boolean(selectedAsset.url)} onClick={() => requestAssetRun(selectedAsset.id)} className={`rounded-lg border px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-30 ${generatingAssetIds.has(selectedAsset.id) ? 'animate-pulse border-amber-200/50 bg-amber-200/15 text-amber-100' : 'border-amber-300/30 bg-amber-300/10 text-amber-200'}`} title={selectedAsset.url && selectedAsset.kind !== 'audio' ? '重新生成；可与其他资产并发，新图成功前保留当前图片' : 'AI 生成'}>{generatingAssetIds.has(selectedAsset.id) ? <Loader2 size={12} className="mr-1 inline animate-spin" /> : <WandSparkles size={12} className="mr-1 inline" />}{generatingAssetIds.has(selectedAsset.id) ? '生成中' : selectedAsset.url && selectedAsset.kind !== 'audio' ? '重新生成' : 'AI 生成'}</button>
             {selectedAsset.kind !== 'audio' && <button onClick={() => openResourcePicker(selectedAsset)} className="rounded-lg border border-cyan-300/25 bg-cyan-300/[0.06] px-3 py-2 text-xs text-cyan-100"><Library size={12} className="mr-1 inline" />资产库</button>}
-            <button disabled={!selectedAsset.url || generatingAssetIds.has(selectedAsset.id)} onClick={() => clearAssetMedia(selectedAsset)} className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/55 disabled:opacity-30">清空素材</button>
+            <button disabled={!hasClearableAssetMedia(selectedAsset) || generatingAssetIds.has(selectedAsset.id)} onClick={() => confirmClearAssetMedia(selectedAsset)} className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/55 disabled:opacity-30" title="只清空当前素材，保留资产设定、提示词和镜头关联"><Eraser size={12} className="mr-1 inline" />清空素材</button>
           </div>
           {selectedAsset.taskId && <div className="break-all rounded-lg border border-white/10 bg-black/20 p-2 text-[9px] text-white/30">任务 {selectedAsset.taskId} · {selectedAsset.taskProvider || 'unknown'}</div>}
         </div> : <div className="grid h-full place-items-center text-center text-xs text-white/35"><div><PackageOpen className="mx-auto mb-2" /><p>选择一个资产后可编辑</p></div></div>}
@@ -1990,7 +2084,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
       <header className="flex h-16 shrink-0 items-center gap-4 border-b border-white/10 px-5"><div className="grid h-9 w-9 place-items-center rounded-xl border border-amber-300/30 bg-amber-300/10 text-amber-200"><BookOpenText size={18} /></div><div className="min-w-0"><h2 className="truncate text-sm font-semibold">Story 全自动制片 · {project.title}</h2><p className="text-[10px] text-white/45">{compactProgress} · 覆盖 {project.coverage.percent}% · production r{project.productionRevision}</p></div><div className="ml-auto flex items-center gap-2"><button onClick={() => downloadJson(project)} className="rounded-lg border border-white/10 p-2 text-white/55" title="导出 Story JSON"><Download size={15} /></button><button onClick={() => { closeResourcePicker(); setWorkbenchOpen(false); }} className="rounded-lg border border-white/10 p-2 text-white/65"><X size={16} /></button></div></header>
       <nav className="shrink-0 border-b border-white/10 px-5 py-3"><div className="mx-auto flex max-w-6xl items-center">{STAGE_ORDER.map((stage, index) => { const state = project.stages[stage]; const active = activeStage === stage; return <div key={stage} className="flex min-w-0 flex-1 items-center"><button onClick={() => setActiveStage(stage)} className={`flex min-w-0 items-center gap-2 rounded-xl px-3 py-2 text-left ${active ? 'bg-amber-300/10 text-amber-100' : 'text-white/45 hover:bg-white/[0.03]'}`}><span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border text-[10px] ${state.status === 'succeeded' ? 'border-emerald-300/35 bg-emerald-300/10 text-emerald-200' : active ? 'border-amber-300/50 text-amber-200' : 'border-white/10'}`}>{state.status === 'succeeded' ? <Check size={11} /> : index + 1}</span><span className="min-w-0"><span className="block truncate text-xs font-medium">{storyStageLabel(stage)}</span><span className="block truncate text-[9px] opacity-60">{state.message || `${state.completed}/${state.total}`}</span></span></button>{index < STAGE_ORDER.length - 1 && <div className="h-px flex-1 bg-white/10" />}</div>; })}</div></nav>
       <main className="mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col p-4">{activeStage === 'script' ? renderScriptStage() : activeStage === 'shots' ? renderShotsStage() : activeStage === 'assets' ? renderAssetsStage() : activeStage === 'prompts' ? renderPromptsStage() : activeStage === 'videos' ? renderVideosStage() : renderComposeStage()}</main>
-      <footer className="flex shrink-0 items-center gap-3 border-t border-white/10 bg-black/25 px-5 py-3"><div className="min-w-0 flex-1 text-xs text-white/50">{localMessage || project.lastError || '修改会自动保存到当前画布；已完成结果不会重复生成。'}</div>{(progress.assets.failed > 0 || progress.videos.failed > 0) && <button disabled={busy} onClick={() => requestRun('retry-failed')} className="rounded-xl border border-rose-300/25 px-4 py-2.5 text-xs text-rose-200 disabled:opacity-40"><RefreshCw size={13} className="mr-1 inline" />仅重试失败</button>}{busy ? <button onClick={() => void stopRun()} className="rounded-xl border border-rose-300/30 bg-rose-300/10 px-5 py-2.5 text-xs font-semibold text-rose-200"><Pause size={14} className="mr-1 inline" />停止</button> : <><button onClick={() => requestRun('all')} className="rounded-xl border border-white/10 px-4 py-2.5 text-xs text-white/70"><Sparkles size={13} className="mr-1 inline" />一键生产全部</button><button disabled={mainAction.disabled} onClick={() => mainAction.mode === 'review-assets' ? enterAssetReview() : requestRun(mainAction.mode)} className="rounded-xl bg-gradient-to-r from-lime-300 to-emerald-300 px-6 py-2.5 text-xs font-bold text-black shadow-lg shadow-emerald-500/10 disabled:opacity-35"><Play size={13} className="mr-1 inline fill-current" />{mainAction.label}</button></>}</footer>
+      <footer className="flex shrink-0 items-center gap-3 border-t border-white/10 bg-black/25 px-5 py-3"><div className="min-w-0 flex-1 text-xs text-white/50">{localMessage || project.lastError || '修改会自动保存到当前画布；已完成结果不会重复生成。'}</div>{(progress.assets.failed > 0 || progress.videos.failed > 0) && <button disabled={busy} onClick={() => requestRun('retry-failed')} className="rounded-xl border border-rose-300/25 px-4 py-2.5 text-xs text-rose-200 disabled:opacity-40"><RefreshCw size={13} className="mr-1 inline" />仅重试失败</button>}{runRequestPending ? <button type="button" disabled className="rounded-xl border border-amber-300/25 bg-amber-300/10 px-5 py-2.5 text-xs font-semibold text-amber-100"><Loader2 size={14} className="mr-1 inline animate-spin" />正在提交…</button> : busy ? <button onClick={() => void stopRun()} className="rounded-xl border border-rose-300/30 bg-rose-300/10 px-5 py-2.5 text-xs font-semibold text-rose-200"><Pause size={14} className="mr-1 inline" />停止</button> : <><button onClick={() => requestRun('all')} className="rounded-xl border border-white/10 px-4 py-2.5 text-xs text-white/70"><Sparkles size={13} className="mr-1 inline" />一键生产全部</button><button disabled={mainAction.disabled} onClick={() => mainAction.mode === 'review-assets' ? enterAssetReview() : requestRun(mainAction.mode)} className="rounded-xl bg-gradient-to-r from-lime-300 to-emerald-300 px-6 py-2.5 text-xs font-bold text-black shadow-lg shadow-emerald-500/10 disabled:opacity-35"><Play size={13} className="mr-1 inline fill-current" />{mainAction.label}</button></>}</footer>
       {resourcePicker}
     </div>, document.body) : null;
 

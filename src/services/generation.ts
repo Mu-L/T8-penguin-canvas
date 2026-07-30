@@ -3,6 +3,7 @@
  * 所有请求走 /api/proxy/* (后端会注入对应 Key 并转存结果)
  */
 import type { AdvancedProviderConfig } from '../types/canvas';
+import type { SunoNzOperation, SunoNzResultFamily } from '../providers/models';
 import { normalizeProviderErrorMessage } from '../utils/providerErrorMessage.ts';
 
 export interface ProviderTransportTrace {
@@ -14,6 +15,20 @@ export interface ProviderTransportTrace {
   upstreamHttpStatus?: number;
   usage?: Record<string, unknown>;
 }
+export interface ProviderSubmissionTransport {
+  submissionKey?: string | null;
+}
+
+export function providerSubmissionHeaders(transport: ProviderSubmissionTransport = {}): Record<string, string> {
+  const key = String(transport.submissionKey || '').trim();
+  return {
+    'Content-Type': 'application/json',
+    ...(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,255}$/.test(key)
+      ? { 'X-T8-Provider-Submission': key }
+      : {}),
+  };
+}
+
 
 function providerTransportTrace(payload: unknown, response: Response): ProviderTransportTrace {
   const record = payload && typeof payload === 'object' && !Array.isArray(payload)
@@ -110,10 +125,13 @@ export interface GenerateImageResult extends ProviderTransportTrace {
   raw: any;
 }
 
-export async function generateImage(req: GenerateImageRequest): Promise<GenerateImageResult> {
+export async function generateImage(
+  req: GenerateImageRequest,
+  transport: ProviderSubmissionTransport = {},
+): Promise<GenerateImageResult> {
   const r = await fetch('/api/proxy/image', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(req),
   });
   const data = await r.json();
@@ -158,10 +176,13 @@ export interface GenerateExternalImageResult extends ProviderTransportTrace {
   provider?: any;
 }
 
-export async function generateExternalImage(req: GenerateExternalImageRequest): Promise<GenerateExternalImageResult> {
+export async function generateExternalImage(
+  req: GenerateExternalImageRequest,
+  transport: ProviderSubmissionTransport = {},
+): Promise<GenerateExternalImageResult> {
   const r = await fetch('/api/proxy/external/image', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(req),
   });
   const data = await r.json();
@@ -211,10 +232,13 @@ export interface GenerateExternalVideoResult extends ProviderTransportTrace {
   provider?: any;
 }
 
-export async function generateExternalVideo(req: GenerateExternalVideoRequest): Promise<GenerateExternalVideoResult> {
+export async function generateExternalVideo(
+  req: GenerateExternalVideoRequest,
+  transport: ProviderSubmissionTransport = {},
+): Promise<GenerateExternalVideoResult> {
   const r = await fetch('/api/proxy/external/video', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(req),
   });
   const data = await r.json();
@@ -247,10 +271,13 @@ export interface ImageSubmitResult extends ProviderTransportTrace {
   raw?: any;
 }
 
-export async function submitImageAsync(req: GenerateImageRequest): Promise<ImageSubmitResult> {
+export async function submitImageAsync(
+  req: GenerateImageRequest,
+  transport: ProviderSubmissionTransport = {},
+): Promise<ImageSubmitResult> {
   const r = await fetch('/api/proxy/image/submit', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(req),
   });
   const data = await r.json();
@@ -285,33 +312,154 @@ export async function queryImageStatus(taskId: string, apiModel?: string): Promi
 export interface SeedreamNzSubmitRequest {
   prompt: string;
   images?: string[];
-  model?: 'zhenzhen-image-g2-t2i' | 'zhenzhen-image-g2-i2i';
+  model?:
+    | 'zhenzhen-image-g2-t2i'
+    | 'zhenzhen-image-g2-i2i'
+    | 'zhenzhen-image-g-v2-lowprice'
+    | 'zhenzhen-image-gk-v15'
+    | 'zhenzhen-image-gk-v15-edit'
+    | 'zhenzhen-image-nb-2-lite'
+    | 'zhenzhen-image-nb-2'
+    | 'zhenzhen-image-nb-pro';
   modelFamily?: 'domestic' | 'overseas';
-  resolution?: '1k' | '2k';
+  resolution?: '0.5k' | '1k' | '2k' | '4k';
   ratio?: 'adaptive' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16' | '21:9';
   size?: string;
+  n?: number;
   output_format?: 'png' | 'jpeg';
 }
 
-export async function submitSeedreamNz(req: SeedreamNzSubmitRequest): Promise<ImageSubmitResult> {
+export async function submitSeedreamNz(
+  req: SeedreamNzSubmitRequest,
+  transport: ProviderSubmissionTransport = {},
+): Promise<ImageSubmitResult> {
   const r = await fetch('/api/proxy/image/seedance-nz/submit', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(req),
   });
-  const data = await safeJsonResponse(r, '贞贞的平价AI工坊（国内）图像任务提交');
+  const data = await safeJsonResponse(r, '贞贞的平价AI小屋图像任务提交');
   if (!r.ok || !data.success) throw providerResponseError(r, data);
   return withProviderTransportTrace(data.data, r);
 }
 
 export async function querySeedreamNz(taskId: string): Promise<ImageQueryResult> {
   const r = await fetch(`/api/proxy/image/seedance-nz/status/${encodeURIComponent(taskId)}`);
-  const data = await safeJsonResponse(r, '贞贞的平价AI工坊（国内）图像任务查询');
+  const data = await safeJsonResponse(r, '贞贞的平价AI小屋图像任务查询');
   if (!r.ok) throw providerResponseError(r, data);
   return withProviderTransportTrace(
     data.data || { status: data.success ? 'pending' : 'failed', progress: '0%', error: data?.error },
     r,
   );
+}
+
+export type MidjourneyNzOperation =
+  | 'midjourney-blend'
+  | 'midjourney-describe'
+  | 'midjourney-edits'
+  | 'midjourney-high-variation'
+  | 'midjourney-imagine'
+  | 'midjourney-inpaint'
+  | 'midjourney-low-variation'
+  | 'midjourney-modal'
+  | 'midjourney-pan'
+  | 'midjourney-remix-strong'
+  | 'midjourney-remix-subtle'
+  | 'midjourney-reroll'
+  | 'midjourney-upscale'
+  | 'midjourney-variation'
+  | 'midjourney-video'
+  | 'midjourney-zoom';
+
+export interface MidjourneyNzSubmitRequest {
+  operation: MidjourneyNzOperation;
+  prompt?: string;
+  images?: string[];
+  task_id?: string;
+  index?: number;
+  custom_id?: string;
+  speed?: 'relax' | 'fast' | 'turbo';
+  dimensions?: 'SQUARE' | 'PORTRAIT' | 'LANDSCAPE';
+  size?: string;
+  direction?: 'left' | 'right' | 'up' | 'down';
+  zoom_ratio?: number;
+  modal_mode?: 'region' | 'outpaint';
+  mask_url?: string;
+  video_type?:
+    | 'vid_1.1_i2v_480'
+    | 'vid_1.1_i2v_720'
+    | 'vid_1.1_i2v_start_end_480'
+    | 'vid_1.1_i2v_start_end_720';
+  animate_mode?: 'manual' | 'auto';
+  motion?: 'low' | 'high';
+  batch_size?: 1 | 2 | 4;
+  end_url?: string;
+  quality?: '0.25' | '0.5' | '1' | '2';
+  style?: string;
+  version?: '5' | '5.1' | '5.2' | '6' | '6.1' | '7' | '8.1' | '8.2';
+  seed?: number;
+  negative_prompt?: string;
+  stylize?: number;
+  chaos?: number;
+  weird?: number;
+  tile?: boolean;
+  niji?: boolean;
+  iw?: number;
+  cw?: number;
+  sw?: number;
+  cref?: string;
+  sref?: string;
+  dref?: string;
+  dw?: number;
+  repeat?: number;
+  raw?: boolean;
+  draft?: boolean;
+  hd?: boolean;
+  stop?: number;
+  extra?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface MidjourneyNzTaskResult extends ProviderTransportTrace {
+  sync?: boolean;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'modal' | 'materializing' | string;
+  progress?: string;
+  taskId?: string;
+  action?: string;
+  operation?: MidjourneyNzOperation | string;
+  resultFamily?: 'image' | 'video' | 'text' | 'modal' | string;
+  imageUrls?: string[];
+  videoUrls?: string[];
+  text?: string;
+  buttons?: Array<{ customId?: string; label?: string }>;
+  error?: string;
+  code?: string;
+  recoverable?: boolean;
+  retryAfterMs?: number;
+}
+
+export async function submitMidjourneyNz(
+  req: MidjourneyNzSubmitRequest,
+  transport: ProviderSubmissionTransport = {},
+): Promise<MidjourneyNzTaskResult> {
+  const r = await fetch('/api/proxy/image/seedance-nz/midjourney/submit', {
+    method: 'POST',
+    headers: providerSubmissionHeaders(transport),
+    body: JSON.stringify(req),
+  });
+  const data = await safeJsonResponse(r, '贞贞的平价AI小屋 Midjourney 任务提交');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data || {}, r) as MidjourneyNzTaskResult;
+}
+
+export async function queryMidjourneyNz(taskId: string): Promise<MidjourneyNzTaskResult> {
+  const r = await fetch(`/api/proxy/image/seedance-nz/midjourney/status/${encodeURIComponent(taskId)}`);
+  const data = await safeJsonResponse(r, '贞贞的平价AI小屋 Midjourney 任务查询');
+  if (!r.ok) throw providerResponseError(r, data);
+  return withProviderTransportTrace(
+    data.data || { status: data.success ? 'pending' : 'failed', error: data?.error },
+    r,
+  ) as MidjourneyNzTaskResult;
 }
 
 // ========================================================================
@@ -366,10 +514,13 @@ export interface FalSubmitResult extends ProviderTransportTrace {
   endpoint?: string;
 }
 
-export async function submitImageFal(req: FalSubmitRequest): Promise<FalSubmitResult> {
+export async function submitImageFal(
+  req: FalSubmitRequest,
+  transport: ProviderSubmissionTransport = {},
+): Promise<FalSubmitResult> {
   const r = await fetch('/api/proxy/image/fal/submit', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(req),
   });
   const data = await r.json();
@@ -456,10 +607,13 @@ export interface MjImagineResult extends ProviderTransportTrace {
   taskId: string;
 }
 
-export async function submitMjImagine(req: MjImagineRequest): Promise<MjImagineResult> {
+export async function submitMjImagine(
+  req: MjImagineRequest,
+  transport: ProviderSubmissionTransport = {},
+): Promise<MjImagineResult> {
   const r = await fetch('/api/proxy/mj/imagine', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(req),
   });
   const data = await r.json();
@@ -577,10 +731,13 @@ export interface GenerateLlmResult {
   usage?: Record<string, unknown>;
 }
 
-export async function generateLlm(req: GenerateLlmRequest): Promise<GenerateLlmResult> {
+export async function generateLlm(
+  req: GenerateLlmRequest,
+  transport: ProviderSubmissionTransport = {},
+): Promise<GenerateLlmResult> {
   const r = await fetch('/api/proxy/llm', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(transport),
     body: JSON.stringify({ ...req, stream: false }),
   });
   const data = await r.json();
@@ -600,10 +757,13 @@ export interface GenerateExternalLlmRequest extends Omit<GenerateLlmRequest, 'st
   providerParams?: Record<string, any>;
 }
 
-export async function generateExternalLlm(req: GenerateExternalLlmRequest): Promise<GenerateLlmResult> {
+export async function generateExternalLlm(
+  req: GenerateExternalLlmRequest,
+  transport: ProviderSubmissionTransport = {},
+): Promise<GenerateLlmResult> {
   const r = await fetch('/api/proxy/external/llm', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(req),
   });
   const data = await r.json();
@@ -632,11 +792,11 @@ export async function generateExternalLlm(req: GenerateExternalLlmRequest): Prom
  */
 export async function generateLlmStream(
   req: GenerateLlmRequest,
-  opts: { onDelta?: (chunk: string) => void; signal?: AbortSignal } = {}
+  opts: { onDelta?: (chunk: string) => void; signal?: AbortSignal; submissionKey?: string | null } = {}
 ): Promise<{ content: string; finishReason?: string; truncated?: boolean; requestId?: string; transportHttpStatus?: number; usage?: Record<string, unknown> }> {
   const r = await fetch('/api/proxy/llm', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(opts),
     body: JSON.stringify({ ...req, stream: true }),
     signal: opts.signal,
   });
@@ -782,10 +942,13 @@ export interface VideoFalSubmitResult extends ProviderTransportTrace {
   endpoint?: string;
 }
 
-export async function submitVideoFal(req: VideoFalSubmitRequest): Promise<VideoFalSubmitResult> {
+export async function submitVideoFal(
+  req: VideoFalSubmitRequest,
+  transport: ProviderSubmissionTransport = {},
+): Promise<VideoFalSubmitResult> {
   const r = await fetch('/api/proxy/video/fal/submit', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(req),
   });
   const data = await r.json();
@@ -866,10 +1029,13 @@ export interface VideoSubmitResult extends ProviderTransportTrace {
   taskId: string;
 }
 
-export async function submitVideo(req: VideoSubmitRequest): Promise<VideoSubmitResult> {
+export async function submitVideo(
+  req: VideoSubmitRequest,
+  transport: ProviderSubmissionTransport = {},
+): Promise<VideoSubmitResult> {
   const r = await fetch('/api/proxy/video/submit', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(req),
   });
   const data = await r.json();
@@ -913,14 +1079,14 @@ export interface HappyHorseSubmitRequest {
   images?: string[];
 }
 
-export async function submitHappyHorse(req: HappyHorseSubmitRequest): Promise<{
+export async function submitHappyHorse(req: HappyHorseSubmitRequest, transport: ProviderSubmissionTransport = {}): Promise<{
   taskId: string;
   model: string;
   taskType: string;
 } & ProviderTransportTrace> {
   const r = await fetch('/api/proxy/video/happyhorse/submit', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(req),
   });
   const data = await r.json();
@@ -964,14 +1130,14 @@ export interface HailuoSubmitRequest {
   images?: string[];
 }
 
-export async function submitHailuo(req: HailuoSubmitRequest): Promise<{
+export async function submitHailuo(req: HailuoSubmitRequest, transport: ProviderSubmissionTransport = {}): Promise<{
   taskId: string;
   model: string;
   taskType: 't2v' | 'i2v';
 } & ProviderTransportTrace> {
   const r = await fetch('/api/proxy/video/hailuo/submit', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(req),
   });
   const data = await safeJsonResponse(r, 'Hailuo 2.3 提交');
@@ -1019,14 +1185,14 @@ export interface KlingSubmitRequest {
   videos?: string[];
 }
 
-export async function submitKling(req: KlingSubmitRequest): Promise<{
+export async function submitKling(req: KlingSubmitRequest, transport: ProviderSubmissionTransport = {}): Promise<{
   taskId: string;
   model: string;
   taskType: 't2v' | 'i2v' | 'r2v' | 'edit';
 } & ProviderTransportTrace> {
   const r = await fetch('/api/proxy/video/kling/submit', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(req),
   });
   const data = await safeJsonResponse(r, 'Kling 提交');
@@ -1049,14 +1215,14 @@ export interface UpscalerSubmitRequest {
   videos: string[];
 }
 
-export async function submitUpscaler(req: UpscalerSubmitRequest): Promise<{
+export async function submitUpscaler(req: UpscalerSubmitRequest, transport: ProviderSubmissionTransport = {}): Promise<{
   taskId: string;
   model: 'zhenzhen-upscaler';
   taskType: 'upscale';
 } & ProviderTransportTrace> {
   const r = await fetch('/api/proxy/video/upscaler/submit', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(req),
   });
   const data = await safeJsonResponse(r, 'Zhenzhen Upscaler 提交');
@@ -1103,14 +1269,14 @@ export interface ViduSubmitRequest {
   assetDescription?: string;
 }
 
-export async function submitVidu(req: ViduSubmitRequest): Promise<{
+export async function submitVidu(req: ViduSubmitRequest, transport: ProviderSubmissionTransport = {}): Promise<{
   taskId: string;
   model: string;
   taskType: 't2v' | 'i2v' | 'start-end' | 'r2v' | 'short-play';
 } & ProviderTransportTrace> {
   const r = await fetch('/api/proxy/video/vidu/submit', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(req),
   });
   const data = await safeJsonResponse(r, 'Vidu Q3 提交');
@@ -1137,14 +1303,14 @@ export interface WanSubmitRequest {
   seed?: number;
 }
 
-export async function submitWan(req: WanSubmitRequest): Promise<{
+export async function submitWan(req: WanSubmitRequest, transport: ProviderSubmissionTransport = {}): Promise<{
   taskId: string;
   model: string;
   taskType: string;
 } & ProviderTransportTrace> {
   const r = await fetch('/api/proxy/video/wan/submit', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(req),
   });
   const data = await safeJsonResponse(r, 'Wan 2.7 Spicy 提交');
@@ -1208,10 +1374,13 @@ export interface SeedanceSubmitResult extends ProviderTransportTrace {
   taskType?: 't2v' | 'i2v' | 'multi';
 }
 
-export async function submitSeedance(req: SeedanceSubmitRequest): Promise<SeedanceSubmitResult> {
+export async function submitSeedance(
+  req: SeedanceSubmitRequest,
+  transport: ProviderSubmissionTransport = {},
+): Promise<SeedanceSubmitResult> {
   const r = await fetch('/api/proxy/seedance/submit', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(req),
   });
   const data = await r.json();
@@ -1250,7 +1419,98 @@ export async function querySeedance(
 // 完全对齐主项目 gpt-image-2-web 的 runSuno / runSunoCover / runSunoExtend
 // ========================================================================
 export type AudioMode = 'generate' | 'cover' | 'extend';
-export type AudioProviderMode = 'suno' | 'seed-audio';
+export type AudioProviderMode = 'suno' | 'seed-audio' | 'whisper';
+export type SunoPlatform = 'zhenzhen' | 'seedance-nz';
+export type WhisperResponseFormat = 'json' | 'verbose_json' | 'srt' | 'text' | 'vtt';
+
+export interface WhisperTranscribeRequest {
+  audioUrl: string;
+  model?: 'whisper-1';
+  responseFormat?: WhisperResponseFormat;
+}
+
+export interface WhisperTranscriptSegment {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export type WhisperTranscriptAttribution = 'provider-segments' | 'untimed';
+
+export interface WhisperTranscribeResult extends ProviderTransportTrace {
+  text: string;
+  model: 'whisper-1';
+  responseFormat: WhisperResponseFormat;
+  segments?: WhisperTranscriptSegment[];
+}
+
+export interface WhisperTranscriptEvidence {
+  text: string;
+  segments: WhisperTranscriptSegment[];
+  attribution: WhisperTranscriptAttribution;
+}
+
+export function formatWhisperTimecode(seconds: number): string {
+  const totalMilliseconds = Math.max(0, Math.round(Number(seconds) * 1000));
+  const hours = Math.floor(totalMilliseconds / 3_600_000);
+  const minutes = Math.floor((totalMilliseconds % 3_600_000) / 60_000);
+  const secs = Math.floor((totalMilliseconds % 60_000) / 1000);
+  const milliseconds = totalMilliseconds % 1000;
+  return [hours, minutes, secs].map((value) => String(value).padStart(2, '0')).join(':')
+    + `.${String(milliseconds).padStart(3, '0')}`;
+}
+
+export function buildWhisperTranscriptEvidence(result: WhisperTranscribeResult): WhisperTranscriptEvidence {
+  const segments: WhisperTranscriptSegment[] = [];
+  let totalTextLength = 0;
+  for (const segment of (Array.isArray(result.segments) ? result.segments : []).slice(0, 2000)) {
+    const start = Number(segment?.start);
+    const end = Number(segment?.end);
+    const rawText = String(segment?.text || '').replace(/\s+/g, ' ').trim();
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || !rawText) continue;
+    const remaining = 1_000_000 - totalTextLength;
+    if (remaining <= 0) break;
+    const text = rawText.slice(0, Math.min(4000, remaining));
+    segments.push({ start, end, text });
+    totalTextLength += text.length;
+  }
+  if (!segments.length) {
+    return {
+      text: String(result.text || '').trim(),
+      segments: [],
+      attribution: 'untimed',
+    };
+  }
+  return {
+    text: [
+      '以下为 Whisper 返回的语音分段时间窗（非逐词时间戳）：',
+      ...segments.map((segment) => (
+        `[${formatWhisperTimecode(segment.start)} - ${formatWhisperTimecode(segment.end)}] ${segment.text}`
+      )),
+    ].join('\n'),
+    segments,
+    attribution: 'provider-segments',
+  };
+}
+
+export async function transcribeWhisper(
+  req: WhisperTranscribeRequest,
+  transport: ProviderSubmissionTransport = {},
+): Promise<WhisperTranscribeResult> {
+  const r = await fetch('/api/proxy/audio/whisper/transcribe', {
+    method: 'POST',
+    headers: providerSubmissionHeaders(transport),
+    body: JSON.stringify({
+      audioUrl: req.audioUrl,
+      model: req.model || 'whisper-1',
+      response_format: req.responseFormat || 'json',
+    }),
+  });
+  const data = await safeJsonResponse(r, '贞贞的平价AI小屋 Whisper 转写');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r) as WhisperTranscribeResult;
+}
+
 export interface AudioSubmitRequest {
   mode: AudioMode;
   prompt?: string;
@@ -1270,10 +1530,11 @@ export interface AudioSubmitRequest {
 
 export async function submitAudio(
   req: AudioSubmitRequest,
+  transport: ProviderSubmissionTransport = {},
 ): Promise<{ taskId: string; clipIds: string[] } & ProviderTransportTrace> {
   const r = await fetch('/api/proxy/audio/submit', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(req),
   });
   const data = await r.json();
@@ -1315,6 +1576,79 @@ export async function queryAudio(clipIds: string[], saveLocal: boolean = true): 
   return withProviderTransportTrace(data.data, r);
 }
 
+export interface SunoNzSubmitRequest {
+  operation: SunoNzOperation;
+  prompt?: string;
+  version?: string;
+  custom?: boolean;
+  instrumental?: boolean;
+  title?: string;
+  style?: string;
+  vocal_gender?: string;
+  tags?: string;
+  audioFilePath?: string;
+  audio_url?: string;
+  audio_urls?: string[];
+  audioUrls?: string[];
+  task_id?: string;
+  task_id_2?: string;
+  task_ids?: string[];
+  audio_index?: number;
+  continue_at?: number;
+  start_s?: number;
+  end_s?: number;
+  duration_s?: number;
+  speed?: number;
+  name?: string;
+}
+
+export interface SunoNzArtifact {
+  kind: 'audio' | 'video' | 'image' | 'file';
+  url: string;
+}
+
+export interface SunoNzTaskResult extends ProviderTransportTrace {
+  taskId?: string;
+  operation?: SunoNzOperation;
+  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'materializing' | string;
+  progress?: string | number;
+  resultFamily: SunoNzResultFamily;
+  text?: string;
+  tracks: AudioTrack[];
+  audioUrls: string[];
+  videoUrls: string[];
+  imageUrls: string[];
+  fileUrls: string[];
+  artifacts: SunoNzArtifact[];
+  partialFailures?: Array<{ code?: string; message?: string; recoverable?: boolean }>;
+  failReason?: string;
+  error?: string;
+  code?: string;
+  recoverable?: boolean;
+  retryAfterMs?: number;
+}
+
+export async function submitSunoNz(
+  req: SunoNzSubmitRequest,
+  transport: ProviderSubmissionTransport = {},
+): Promise<SunoNzTaskResult> {
+  const r = await fetch('/api/proxy/audio/suno-nz/submit', {
+    method: 'POST',
+    headers: providerSubmissionHeaders(transport),
+    body: JSON.stringify(req),
+  });
+  const data = await safeJsonResponse(r, '贞贞的平价AI小屋 Suno');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r) as SunoNzTaskResult;
+}
+
+export async function querySunoNz(taskId: string): Promise<SunoNzTaskResult> {
+  const r = await fetch(`/api/proxy/audio/suno-nz/status/${encodeURIComponent(taskId)}`);
+  const data = await safeJsonResponse(r, '贞贞的平价AI小屋 Suno');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r) as SunoNzTaskResult;
+}
+
 export interface SeedAudioSubmitRequest {
   model: 'doubao-seed-audio-1.0';
   prompt: string;
@@ -1328,13 +1662,13 @@ export interface SeedAudioSubmitRequest {
   audioUrls?: string[];
 }
 
-export async function submitSeedAudio(req: SeedAudioSubmitRequest): Promise<{
+export async function submitSeedAudio(req: SeedAudioSubmitRequest, transport: ProviderSubmissionTransport = {}): Promise<{
   taskId: string;
   model: string;
 } & ProviderTransportTrace> {
   const r = await fetch('/api/proxy/audio/seed-audio/submit', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(req),
   });
   const data = await r.json();
@@ -1393,14 +1727,14 @@ export interface RhSubmitRequest {
   site?: RhSite;
 }
 
-export async function submitRh(req: RhSubmitRequest): Promise<{
+export async function submitRh(req: RhSubmitRequest, transport: ProviderSubmissionTransport = {}): Promise<{
   taskId: string;
   site: RhSite;
   fallbackUsed?: boolean;
 } & ProviderTransportTrace> {
   const r = await fetch('/api/proxy/runninghub/submit', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(req),
   });
   const data = await r.json();

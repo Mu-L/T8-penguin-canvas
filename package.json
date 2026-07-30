@@ -1,7 +1,7 @@
 {
   "name": "t8-penguin-canvas",
   "private": false,
-  "version": "2.6.5",
+  "version": "2.6.9",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "T8-penguin-canvas — AI 节点画布工作流工具（Web + Electron 桌面端）",
@@ -27,19 +27,24 @@
   ],
   "scripts": {
     "predev": "node scripts/worktree-role.cjs development",
-    "dev": "concurrently \"cross-env ELECTRON_RUN_AS_NODE=1 electron backend/src/server.js\" \"vite\"",
+    "dev": "concurrently \"cross-env ELECTRON_RUN_AS_NODE=1 electron backend/src/server.js\" \"vite --config vite.config.ts\"",
     "predev:vite": "node scripts/worktree-role.cjs development",
-    "dev:vite": "vite",
+    "dev:vite": "vite --config vite.config.ts",
+    "prestart:backend": "node scripts/worktree-role.cjs development",
+    "start:backend": "cross-env ELECTRON_RUN_AS_NODE=1 electron backend/src/server.js",
     "predev:backend": "node scripts/worktree-role.cjs development",
-    "dev:backend": "cross-env ELECTRON_RUN_AS_NODE=1 electron backend/src/server.js",
+    "dev:backend": "cross-env ELECTRON_RUN_AS_NODE=1 electron --watch --watch-path=backend/src --watch-preserve-output backend/src/server.js",
     "figma:bridge": "node tools/figma-bridge/server.cjs",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview",
+    "prebuild": "npm run feature-sync:check",
+    "build": "tsc -b && vite build --config vite.config.ts",
+    "preview": "vite preview --config vite.config.ts",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "type-check": "tsc --noEmit",
     "test:electron:ts": "cross-env ELECTRON_RUN_AS_NODE=1 electron --loader ./scripts/electron-typescript-loader.mjs --test",
     "audit:project-db-writers": "node scripts/audit-project-database-writers.cjs",
     "audit:project-db-writers:check": "node scripts/audit-project-database-writers.cjs --compact --check",
+    "feature-sync:generate": "node tools/zcanvas-cli/scripts/generateCreativeCapabilityArtifacts.cjs",
+    "feature-sync:check": "node tools/zcanvas-cli/scripts/generateCreativeCapabilityArtifacts.cjs --check",
     "collaboration:evidence:attest": "node scripts/collaboration-evidence-attestation.cjs",
     "preelectron:dev": "node scripts/worktree-role.cjs development",
     "electron:dev": "cross-env T8PC_PACKAGED=0 electron electron/main.cjs",
@@ -163,6 +168,26 @@
       "!build/**/*"
     ],
     "extraResources": [
+      {
+        "from": ".agents/skills/zhenzhen-canvas",
+        "to": "agent/skills/zhenzhen-canvas",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "tools/zcanvas-cli",
+        "to": "tools/zcanvas-cli",
+        "filter": [
+          "bin/**/*",
+          "src/**/*",
+          "commandCatalog.json",
+          "creativeCapabilityManifest.json",
+          "generated/**/*",
+          "manifest.json",
+          "package.json"
+        ]
+      },
       {
         "from": "build/backend-enc",
         "to": "backend-enc",

@@ -5628,6 +5628,23 @@ class CollaborationGateway {
             throw new RunIntentAuthorityError('intent_canvas_not_found', '画布不存在或无权访问', {}, 404);
           }
           const revision = Number(req.body?.canvasRevision);
+          const requestedNodeIds = normalizeRequestedRunNodeIds(req.body?.nodeIds);
+          const existing = this.database.getRunIntentByKey(
+            req.collaborationSession.projectId,
+            idempotencyKey,
+          );
+          if (existing) {
+            return {
+              intent: assertEquivalentRunIntentReplay(existing, {
+                projectId: req.collaborationSession.projectId,
+                canvasId: document.canvasId,
+                canvasRevision: revision,
+                nodeIds: requestedNodeIds,
+                requestedBy: req.collaborationSession.memberId,
+              }),
+              created: false,
+            };
+          }
           if (revision !== document.revision) {
             throw new RunIntentAuthorityError(
               'intent_canvas_stale',
@@ -5636,35 +5653,8 @@ class CollaborationGateway {
               409,
             );
           }
-          const existing = this.database.getRunIntentByKey(req.collaborationSession.projectId, idempotencyKey);
-          if (existing) {
-            assertEquivalentRunIntentReplay(existing, {
-              projectId: req.collaborationSession.projectId,
-              canvasId: document.canvasId,
-              canvasRevision: document.revision,
-              nodeIds: normalizeRequestedRunNodeIds(req.body?.nodeIds),
-              requestedBy: req.collaborationSession.memberId,
-            });
-          }
-          const authority = deriveRunIntentAuthority(document, req.body?.nodeIds);
+          const authority = deriveRunIntentAuthority(document, requestedNodeIds);
           const summary = summarizeRunIntentAuthority(authority);
-          if (existing) {
-            return {
-              intent: assertEquivalentRunIntentReplay(existing, {
-                projectId: req.collaborationSession.projectId,
-                canvasId: document.canvasId,
-                canvasRevision: document.revision,
-                nodeIds: authority.requestedNodeIds,
-                requestedBy: req.collaborationSession.memberId,
-                provider: summary.provider,
-                model: summary.model,
-                estimatedCost: summary.estimatedCost,
-                estimatedCostKnown: summary.estimatedCostKnown,
-                executionAuthority: authority,
-              }, { includeAuthority: true }),
-              created: false,
-            };
-          }
           const authorization = this.executionPolicy.authorize({
             projectId: document.projectId,
             canvasId: document.canvasId,

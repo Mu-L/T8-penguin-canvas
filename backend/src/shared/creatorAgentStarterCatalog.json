@@ -1,0 +1,305 @@
+{
+  "schema": "t8-creator-agent-starter-catalog-v2",
+  "rotationCount": 4,
+  "modes": {
+    "blank-new": [
+      {
+        "id": "starter-blank-idea",
+        "batch": 0,
+        "label": "我有一个创意，帮我发展成完整作品",
+        "description": "先给出几个可直接选择的作品方向，再把选定方向做成可编辑 V0。",
+        "starterPrompt": "我有一个创意，帮我把它发展成完整作品。先给我几个明显不同、可以直接继续的作品方向，并说明每个方向会产出什么；不要假定我已经有素材或上一版内容，也不要只向我提问题。",
+        "intent": "start-from-idea",
+        "taskFamily": "mixed",
+        "creatorKind": "story",
+        "expectedFirstArtifact": "互异的作品方向与推荐的可编辑 V0",
+        "requiredCapabilityIds": ["create.story"]
+      },
+      {
+        "id": "starter-blank-commerce",
+        "batch": 0,
+        "label": "帮我做一套电商商品图",
+        "description": "从商品真值、卖点和渠道规格开始，先给套图结构与版式 V0。",
+        "starterPrompt": "帮我做一套电商商品图。先给出适合常用电商和社媒渠道的套图结构、画面层级与文案位置 V0，并明确需要我补充或上传的商品真值；不要编造商品参数，也不要只向我提问题。",
+        "intent": "start-commerce-images",
+        "taskFamily": "commerce",
+        "creatorKind": "image",
+        "expectedFirstArtifact": "商品真值清单、套图结构与版式 V0",
+        "requiredCapabilityIds": ["create.image"]
+      },
+      {
+        "id": "starter-blank-video",
+        "batch": 0,
+        "label": "帮我做一支短视频",
+        "description": "先给出可执行的主题、时间结构和镜头 V0，再按需补素材。",
+        "starterPrompt": "帮我做一支短视频。先给我一个可执行的主题、时长结构和镜头 V0，清楚标出建议值与需要我确认的内容；不要假定已经有脚本、素材或上一版视频，也不要只向我提问题。",
+        "intent": "start-short-video",
+        "taskFamily": "video",
+        "creatorKind": "video",
+        "expectedFirstArtifact": "主题、时间结构与镜头 V0",
+        "requiredCapabilityIds": ["create.video"]
+      },
+      {
+        "id": "starter-blank-poster",
+        "batch": 1,
+        "label": "帮我设计一张宣传海报",
+        "description": "先给出版式、视觉焦点、文案层级和三个可比较方向。",
+        "starterPrompt": "帮我设计一张宣传海报。先给出版式骨架、视觉焦点、文案层级和三个明显不同的视觉方向，并标出需要我提供的主题或品牌信息；不要假定已有海报或素材。",
+        "intent": "start-poster-design",
+        "taskFamily": "design",
+        "creatorKind": "image",
+        "expectedFirstArtifact": "海报版式与视觉方向 V0",
+        "requiredCapabilityIds": ["create.image"]
+      },
+      {
+        "id": "starter-blank-script",
+        "batch": 1,
+        "label": "帮我写一个可拍的短片剧本",
+        "description": "先给核心冲突、人物关系、场景结构和可编辑剧本骨架。",
+        "starterPrompt": "帮我写一个可拍的短片剧本。先给出一个有明确核心冲突、人物动机、场景推进和结尾落点的可编辑 V0；信息不足时使用可见假设继续，不要先抛固定问卷。",
+        "intent": "start-shootable-script",
+        "taskFamily": "story",
+        "creatorKind": "script",
+        "expectedFirstArtifact": "人物、冲突、场景和剧本骨架 V0",
+        "requiredCapabilityIds": ["create.script"]
+      },
+      {
+        "id": "starter-blank-image-edit",
+        "batch": 1,
+        "label": "帮我精修一张图片",
+        "description": "先说明可保护、可修改和需要素材的位置，再给编辑方案。",
+        "starterPrompt": "帮我精修一张图片。先给出保护区、修改区、画面问题检查和三种精修方向的工作方案，并提示我上传图片；不要假定已经收到图片或知道图片内容。",
+        "intent": "start-image-retouch",
+        "taskFamily": "image",
+        "creatorKind": "edit-image",
+        "expectedFirstArtifact": "图像检查与精修方案 V0",
+        "requiredCapabilityIds": ["create.image"]
+      },
+      {
+        "id": "starter-blank-character",
+        "batch": 2,
+        "label": "帮我设计一个可持续使用的角色",
+        "description": "先形成角色核心、外观锚点和跨镜头一致性参考方案。",
+        "starterPrompt": "帮我设计一个可持续使用的角色。先形成角色核心、身份与欲望、外观锚点、服装和三视图一致性方案，并把未确定内容标为可编辑假设；不要假定已有角色。",
+        "intent": "start-character-design",
+        "taskFamily": "character",
+        "creatorKind": "story",
+        "expectedFirstArtifact": "角色设定与一致性参考 V0",
+        "requiredCapabilityIds": ["create.story"]
+      },
+      {
+        "id": "starter-blank-brand",
+        "batch": 2,
+        "label": "帮我建立一套品牌视觉方向",
+        "description": "先给定位、色彩、字体、图形语言和应用示例。",
+        "starterPrompt": "帮我建立一套品牌视觉方向。先给出定位假设、色彩、字体、图形语言、影像风格和三个应用示例 V0，并列出需要确认的品牌真值；不要假定已有品牌手册。",
+        "intent": "start-brand-direction",
+        "taskFamily": "brand",
+        "creatorKind": "image",
+        "expectedFirstArtifact": "品牌视觉方向与应用 V0",
+        "requiredCapabilityIds": ["create.image"]
+      },
+      {
+        "id": "starter-blank-audio",
+        "batch": 2,
+        "label": "帮我制作配音、音乐或音效",
+        "description": "先按目标内容给声音结构、情绪和交付规格建议。",
+        "starterPrompt": "帮我制作配音、音乐或音效。先根据常见创作目标给出可选的声音方向、时间结构和交付规格 V0，并清楚说明需要我提供的文本或视频；不要假定已经收到素材。",
+        "intent": "start-audio-production",
+        "taskFamily": "audio",
+        "creatorKind": "audio",
+        "expectedFirstArtifact": "声音方向、时间结构与交付 V0",
+        "requiredCapabilityIds": ["create.audio"]
+      },
+      {
+        "id": "starter-blank-social",
+        "batch": 3,
+        "label": "帮我规划一组社媒内容",
+        "description": "先给内容支柱、选题矩阵和首批可执行样稿。",
+        "starterPrompt": "帮我规划一组社媒内容。先给出内容支柱、受众假设、选题矩阵、图文或短视频形式，以及首批可执行样稿 V0；不要假定已有账号定位。",
+        "intent": "start-social-campaign",
+        "taskFamily": "commerce",
+        "creatorKind": "image",
+        "expectedFirstArtifact": "内容支柱、选题矩阵与样稿 V0",
+        "requiredCapabilityIds": ["create.image"]
+      },
+      {
+        "id": "starter-blank-storyboard",
+        "batch": 3,
+        "label": "帮我把文案拆成分镜",
+        "description": "先给镜头结构、画面重点、声音和节奏方案。",
+        "starterPrompt": "帮我把文案拆成分镜。先给一个适合常见短视频的镜头结构、画面重点、声音与节奏 V0，并提示我粘贴文案；不要假定已经收到文案。",
+        "intent": "start-copy-storyboard",
+        "taskFamily": "video",
+        "creatorKind": "video",
+        "expectedFirstArtifact": "镜头、画面、声音与节奏 V0",
+        "requiredCapabilityIds": ["create.video"]
+      },
+      {
+        "id": "starter-blank-explainer",
+        "batch": 3,
+        "label": "帮我做一支知识讲解视频",
+        "description": "先给信息结构、视觉演示和时间节奏 V0。",
+        "starterPrompt": "帮我做一支知识讲解视频。先给出信息结构、开场钩子、视觉演示方式、时间节奏和结尾行动 V0，并明确需要我提供的知识主题；不要假定已有脚本或素材。",
+        "intent": "start-explainer-video",
+        "taskFamily": "education",
+        "creatorKind": "video",
+        "expectedFirstArtifact": "讲解结构、视觉演示与节奏 V0",
+        "requiredCapabilityIds": ["create.video"]
+      }
+    ],
+    "attachment-ready": [
+      {
+        "id": "starter-attachment-analyze",
+        "batch": 0,
+        "label": "分析我刚添加的素材，并给出可执行方案",
+        "description": "只根据实际附件类型说明能直接使用的内容和缺口。",
+        "starterPrompt": "分析我刚添加的素材，先说明可直接使用的内容、缺失信息和一套可执行 V0；不要猜测附件中看不到的品牌、人物或用途。",
+        "intent": "analyze-attachments",
+        "taskFamily": "mixed",
+        "creatorKind": "image",
+        "expectedFirstArtifact": "附件分析与可执行方案 V0",
+        "requiredCapabilityIds": ["create.image"]
+      },
+      {
+        "id": "starter-attachment-directions",
+        "batch": 0,
+        "label": "基于这些素材给我三个创作方向",
+        "description": "比较三个真实可行的方向，不自动生成。",
+        "starterPrompt": "基于我刚添加的素材给出三个明显不同、真实可行的创作方向，分别说明适用场景、主要变化和首个可编辑产物；不要自动生成或修改画布。",
+        "intent": "compare-attachment-directions",
+        "taskFamily": "mixed",
+        "creatorKind": "image",
+        "expectedFirstArtifact": "三个素材创作方向",
+        "requiredCapabilityIds": ["create.image"]
+      },
+      {
+        "id": "starter-attachment-production",
+        "batch": 0,
+        "label": "把这些素材整理成一份完整制作方案",
+        "description": "按实际媒体类型形成内容、视觉、声音和交付结构。",
+        "starterPrompt": "把我刚添加的素材整理成一份完整制作方案，按实际媒体类型给出内容结构、视觉方向、声音、缺口和交付 V0；不要覆盖原素材。",
+        "intent": "plan-from-attachments",
+        "taskFamily": "mixed",
+        "creatorKind": "video",
+        "expectedFirstArtifact": "基于附件的完整制作方案 V0",
+        "requiredCapabilityIds": ["create.video"]
+      }
+    ],
+    "selection-ready": [
+      {
+        "id": "starter-selection-improve",
+        "batch": 0,
+        "label": "只完善我选中的内容",
+        "description": "保护其他已确认内容，只处理当前选区。",
+        "starterPrompt": "只分析并完善我当前选中的内容，先给出具体修改 V0 和影响范围，保护其他已确认内容，不自动运行或覆盖。",
+        "intent": "improve-selection",
+        "taskFamily": "mixed",
+        "creatorKind": "image",
+        "expectedFirstArtifact": "选中对象的局部修改 V0",
+        "requiredCapabilityIds": ["create.image"]
+      },
+      {
+        "id": "starter-selection-compare",
+        "batch": 0,
+        "label": "给选中内容做三个可比较方向",
+        "description": "三个方向必须说明差异和适用场景。",
+        "starterPrompt": "围绕我当前选中的内容给出三个可比较方向，说明每个方向的具体变化、保留项和适用场景；不要修改其他对象。",
+        "intent": "compare-selection",
+        "taskFamily": "mixed",
+        "creatorKind": "image",
+        "expectedFirstArtifact": "选中对象的三个候选方向",
+        "requiredCapabilityIds": ["create.image"]
+      },
+      {
+        "id": "starter-selection-continue",
+        "batch": 0,
+        "label": "从选中内容继续完成下一步",
+        "description": "先指出可信的下一步和所需能力，不直接执行。",
+        "starterPrompt": "从我当前选中的内容继续完成最合理的下一步，先给出具体产物 V0、影响范围和需要的能力，不自动生成、写画布或覆盖内容。",
+        "intent": "continue-selection",
+        "taskFamily": "mixed",
+        "creatorKind": "video",
+        "expectedFirstArtifact": "选中对象的下一步 V0",
+        "requiredCapabilityIds": ["create.video"]
+      }
+    ],
+    "canvas-explicit": [
+      {
+        "id": "starter-canvas-audit",
+        "batch": 0,
+        "label": "帮我梳理当前画布和下一步",
+        "description": "先基于真实对象给进度、缺口与优先级。",
+        "starterPrompt": "我明确授权本轮使用当前画布上下文。请梳理真实进度、缺口和最值得做的下一步，并给出可编辑 V0；不要自动修改画布。",
+        "intent": "audit-current-canvas",
+        "taskFamily": "mixed",
+        "creatorKind": "story",
+        "expectedFirstArtifact": "画布进度、缺口与优先级 V0",
+        "requiredCapabilityIds": ["create.story"]
+      },
+      {
+        "id": "starter-canvas-organize",
+        "batch": 0,
+        "label": "把当前素材整理成完整作品方案",
+        "description": "只使用可验证对象，说明保留项和缺失项。",
+        "starterPrompt": "我明确授权本轮使用当前画布上下文。请把可验证的现有素材整理成完整作品方案，说明保留项、缺失项和首个可编辑产物，不自动生成。",
+        "intent": "organize-current-canvas",
+        "taskFamily": "mixed",
+        "creatorKind": "video",
+        "expectedFirstArtifact": "现有素材的完整作品方案 V0",
+        "requiredCapabilityIds": ["create.video"]
+      },
+      {
+        "id": "starter-canvas-priority",
+        "batch": 0,
+        "label": "找出当前最值得完成的一件事",
+        "description": "只给一个有事实依据的优先任务和完成路径。",
+        "starterPrompt": "我明确授权本轮使用当前画布上下文。请找出最值得完成的一件事，说明依据、影响范围和完成路径，不自动执行。",
+        "intent": "prioritize-current-canvas",
+        "taskFamily": "mixed",
+        "creatorKind": "story",
+        "expectedFirstArtifact": "当前优先任务与完成路径",
+        "requiredCapabilityIds": ["create.story"]
+      }
+    ],
+    "recoverable-failure": [
+      {
+        "id": "starter-failure-explain",
+        "batch": 0,
+        "label": "告诉我这次失败在哪里",
+        "description": "说明真实失败范围和已经保留的成果。",
+        "starterPrompt": "根据本轮明确绑定的失败任务，说明失败发生在哪一步、可能原因和已保留成果；不要启动重试。",
+        "intent": "explain-failure",
+        "taskFamily": "recovery",
+        "creatorKind": "video",
+        "expectedFirstArtifact": "失败范围与保留成果说明",
+        "requiredCapabilityIds": ["create.video"]
+      },
+      {
+        "id": "starter-failure-retry",
+        "batch": 0,
+        "label": "只重试这次失败的部分",
+        "description": "成功内容保持不动，先预览精确重试范围。",
+        "starterPrompt": "只规划本轮明确绑定的失败部分重试，保留所有成功、采用和锁定内容；先给出精确范围与预览，不自动提交。",
+        "intent": "retry-failed-only",
+        "taskFamily": "recovery",
+        "creatorKind": "video",
+        "expectedFirstArtifact": "失败项精确重试计划",
+        "requiredCapabilityIds": ["create.video"]
+      },
+      {
+        "id": "starter-failure-continue",
+        "batch": 0,
+        "label": "保留成功结果并继续后续",
+        "description": "明确跳过失败项后的可行路径和限制。",
+        "starterPrompt": "保留本轮所有已成功结果，说明跳过失败项后可以继续的后续路径、风险和缺口；不要自动生成或写画布。",
+        "intent": "continue-with-success",
+        "taskFamily": "recovery",
+        "creatorKind": "video",
+        "expectedFirstArtifact": "保留成功结果的后续方案",
+        "requiredCapabilityIds": ["create.video"]
+      }
+    ],
+    "resumed-session": []
+  }
+}

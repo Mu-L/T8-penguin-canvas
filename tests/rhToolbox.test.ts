@@ -615,7 +615,8 @@ test('RH toolbox image cutout is exposed as a reusable node capability', async (
   assert.match(outputNode, /showRhCapabilityRail = \(selected \|\| rhCapabilityBusy\) && hasEditableImages/);
   assert.match(uploadNode, /const imageSourceUrls = useMemo/);
   assert.match(uploadNode, /sourceUrls=\{imageSourceUrls\}/);
-  assert.match(outputNode, /sourceUrls=\{collected\.images\}/);
+  assert.match(outputNode, /const publishedImageUrls = imageLongEdge\.outputUrls/);
+  assert.match(outputNode, /sourceUrls=\{publishedImageUrls\}/);
   assert.match(uploadNode, /onRunningChange=\{setRhCapabilityBusy\}/);
   assert.match(outputNode, /onRunningChange=\{setRhCapabilityBusy\}/);
   assert.match(uploadNode, /logBus/);
@@ -799,9 +800,14 @@ test('RH toolbox builds nodeInfoList from configured mappings without per-tool c
     ],
   );
 
-  assert.deepEqual(classifyRhToolboxOutputs(['/files/output/a.png', '/files/output/b.mp4', '/files/output/c.wav']).imageUrls, ['/files/output/a.png']);
-  assert.deepEqual(classifyRhToolboxOutputs(['/files/output/a.png', '/files/output/b.mp4', '/files/output/c.wav']).videoUrls, ['/files/output/b.mp4']);
-  assert.deepEqual(classifyRhToolboxOutputs(['/files/output/a.png', '/files/output/b.mp4', '/files/output/c.wav']).audioUrls, ['/files/output/c.wav']);
+  const materializedOutputs = classifyRhToolboxOutputs([
+    '/files/output/a.png',
+    '/files/output/b.mov',
+    '/files/output/c.mp3',
+  ]);
+  assert.deepEqual(materializedOutputs.imageUrls, ['/files/output/a.png']);
+  assert.deepEqual(materializedOutputs.videoUrls, ['/files/output/b.mov']);
+  assert.deepEqual(materializedOutputs.audioUrls, ['/files/output/c.mp3']);
 });
 
 test('RH toolbox service exposes a single callable runner for future quick actions', () => {
@@ -812,8 +818,10 @@ test('RH toolbox service exposes a single callable runner for future quick actio
   assert.match(service, /export async function runRhToolboxTool/);
   assert.match(service, /uploadRhAsset/);
   assert.match(service, /submitRh/);
+  assert.match(service, /submitRh\(\{[\s\S]*\}, \{ submissionKey: options\.submissionKey \}\)/);
   assert.match(service, /queryRh/);
   assert.match(component, /runRhToolboxTool/);
+  assert.match(component, /submissionKey:\s*reporter\?\.providerSubmissionKey/);
   assert.match(component, /MentionPromptInput/);
   assert.match(component, /rhToolboxTextInputs/);
   assert.match(component, /hasTextInputValue/);

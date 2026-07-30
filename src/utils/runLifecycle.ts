@@ -40,7 +40,11 @@ export async function executeAfterRunLifecycleBarrier<T>(
 export function createRunNodeLifecycleController(input: {
   runContext: RunContext | null;
   executionToken: string;
-  executionEvidence?: () => { nodeRunId?: string | null; attemptId?: string | null };
+  executionEvidence?: () => {
+    nodeRunId?: string | null;
+    attemptId?: string | null;
+    providerSubmissionKey?: string | null;
+  };
   basePayload?: Record<string, unknown>;
   sink: RunNodeLifecycleSink;
 }): RunNodeLifecycleController {
@@ -77,6 +81,9 @@ export function createRunNodeLifecycleController(input: {
       },
       get attemptId() {
         return input.executionEvidence?.().attemptId || null;
+      },
+      get providerSubmissionKey() {
+        return input.executionEvidence?.().providerSubmissionKey || null;
       },
       progress: (payload = {}) => write('node.progress', payload),
       polling: (payload = {}) => write('node.polling', payload),

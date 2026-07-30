@@ -81,6 +81,9 @@ export function useRunTrigger(
       const executionContext = binding?.nodeContext || getRunNodeExecutionContext(nodeId);
       let nodeRunId: string | undefined;
       let attemptId: string | undefined;
+      let providerSubmissionKey: string | undefined;
+      let providerSubmissionState = '';
+      let providerSubmissionExpected = false;
       let executionCallbackStarted = false;
       let reusedExistingResult = false;
       let terminalWrite: Promise<void> | null = null;
@@ -113,10 +116,26 @@ export function useRunTrigger(
         if (type === 'provider.response') return { respondedAt: at };
         return {};
       };
+      const providerSubmissionMetadata = (
+        state: string,
+        payload: Record<string, unknown> = {},
+      ): Record<string, unknown> => {
+        providerSubmissionState = state;
+        return {
+          providerSubmission: {
+            version: 1,
+            slot: 'primary',
+            submissionKey: providerSubmissionKey || null,
+            state,
+            expectedOutput: providerSubmissionExpected,
+            ...payload,
+          },
+        };
+      };
       const lifecycle = createRunNodeLifecycleController({
         runContext,
         executionToken: capturedExecutionToken,
-        executionEvidence: () => ({ nodeRunId, attemptId }),
+        executionEvidence: () => ({ nodeRunId, attemptId, providerSubmissionKey }),
         basePayload: {
           nodeId: executionContext?.runNodeId || nodeId,
           contextId: runContext?.contextId || null,
@@ -160,21 +179,62 @@ export function useRunTrigger(
                   outputs: assets as RunOutputAssetCandidate[],
                   eventPayload,
                 });
+                if (attemptId && providerSubmissionExpected) {
+                  await updateProjectRunAttempt(runId, nodeRunId, attemptId, {
+                    metadata: providerSubmissionMetadata('verified', {
+                      verifiedAt: Date.now(),
+                      outputCount: assets.length,
+                    }),
+                  });
+                }
               } else if (type.startsWith('provider.')) {
                 const trace = rememberProviderTrace(extractRunProviderTrace(
                   type === 'provider.usage' && !payload.usage ? { ...payload, usage: payload } : payload,
                 ));
                 const now = Date.now();
+                if (type !== 'provider.usage' && hasProviderIdentity(trace)) {
+                  providerSubmissionExpected = true;
+                }
                 const attemptPatch = providerTraceAttemptPatch(trace);
                 const recovery = type === 'provider.submitted' || type === 'provider.polling'
                   ? inferRunRecoveryDescriptor(payload)
                   : null;
                 await appendProjectRunEvent(runId, { nodeRunId, type, payload });
                 if (attemptId) {
+                  const submissionMetadata = type === 'provider.request'
+                    ? providerSubmissionMetadata('ambiguous', {
+                        dispatchStartedAt: now,
+                        provider: trace.provider || null,
+                        model: trace.model || null,
+                      })
+                    : type === 'provider.submitted'
+                      ? providerSubmissionMetadata('submitted', {
+                          submittedAt: now,
+                          provider: trace.provider || null,
+                          model: trace.model || null,
+                          upstreamTaskId: trace.upstreamTaskId || null,
+                          requestId: trace.requestId || null,
+                        })
+                      : type === 'provider.response'
+                        ? providerSubmissionMetadata(
+                            providerSubmissionState === 'verified' ? 'verified' : 'responded',
+                            {
+                              respondedAt: now,
+                              provider: trace.provider || null,
+                              model: trace.model || null,
+                              upstreamTaskId: trace.upstreamTaskId || null,
+                              requestId: trace.requestId || null,
+                            },
+                          )
+                        : {};
                   await updateProjectRunAttempt(runId, nodeRunId, attemptId, {
                     ...attemptPatch,
                     timestamps: attemptTimestampsForEvent(type, now),
-                    metadata: { lastProviderEvent: type, ...(recovery ? { recovery } : {}) },
+                    metadata: {
+                      lastProviderEvent: type,
+                      ...(recovery ? { recovery } : {}),
+                      ...submissionMetadata,
+                    },
                   });
                 }
                 if (type === 'provider.submitted') providerSubmittedRecorded = true;
@@ -301,10 +361,32 @@ export function useRunTrigger(
             ? inputSnapshot.node.data
             : executionContext?.inputSnapshot || {};
           const initialTrace = rememberProviderTrace(extractRunProviderTrace(snapshot));
+          const generatedAttemptId = `attempt-${typeof globalThis.crypto?.randomUUID === 'function'
+            ? globalThis.crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+          const generatedAttemptEntityUid = typeof globalThis.crypto?.randomUUID === 'function'
+            ? globalThis.crypto.randomUUID()
+            : null;
+          providerSubmissionKey = generatedAttemptEntityUid || generatedAttemptId;
+          providerSubmissionExpected = hasProviderIdentity(initialTrace);
+          providerSubmissionState = providerSubmissionExpected ? 'prepared' : '';
           const attempt = await createProjectRunAttempt(runId, nodeRun.id, {
+            id: generatedAttemptId,
+            ...(generatedAttemptEntityUid ? { entityUid: generatedAttemptEntityUid } : {}),
             ...(reusedExistingResult
               ? { metadata: { reusedResult: true, source: 'existing-node-output' } }
-              : providerTraceAttemptPatch(initialTrace)),
+              : {
+                  ...providerTraceAttemptPatch(initialTrace),
+                  ...(providerSubmissionExpected
+                    ? {
+                        metadata: providerSubmissionMetadata('prepared', {
+                          preparedAt: Date.now(),
+                          provider: initialTrace.provider || null,
+                          model: initialTrace.model || null,
+                        }),
+                      }
+                    : {}),
+                }),
             status: 'running',
             timestamps: { queuedAt: Date.now(), startedAt: Date.now() },
           });
@@ -336,6 +418,14 @@ export function useRunTrigger(
             // lifecycle write. If this write fails, runFn (and therefore the
             // Provider/ffmpeg call it owns) must remain at zero invocations.
             await lifecycle.reporter.progress({ phase: 'executing', progress: 0 });
+            if (!reusedExistingResult && providerSubmissionExpected && runId && nodeRunId && attemptId) {
+              await updateProjectRunAttempt(runId, nodeRunId, attemptId, {
+                metadata: providerSubmissionMetadata('ambiguous', {
+                  dispatchStartedAt: Date.now(),
+                  reason: 'provider-call-may-have-side-effect',
+                }),
+              });
+            }
           },
           async () => {
             executionCallbackStarted = true;

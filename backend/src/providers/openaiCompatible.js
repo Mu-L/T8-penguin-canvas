@@ -1,6 +1,7 @@
 const { resolveMediaRef } = require('./mediaResolver');
 const { normalizeLlmMessageMedia } = require('./llmMedia');
 const { providerTrace } = require('./providerTrace');
+const { providerIdempotencyHeadersLike } = require('../services/providerSubmissionContext');
 
 const DEFAULT_TIMEOUT_MS = 8000;
 const IMAGE_EDIT_REMOTE_MAX_BYTES = 20 * 1024 * 1024;
@@ -19,7 +20,11 @@ async function fetchWithTimeout(url, options = {}) {
   const fetchImpl = options.fetchImpl || fetch;
   const { timeoutMs, fetchImpl: _fetchImpl, ...fetchOptions } = options;
   try {
-    return await fetchImpl(url, { ...fetchOptions, signal: controller.signal });
+    return await fetchImpl(url, {
+      ...fetchOptions,
+      headers: providerIdempotencyHeadersLike(fetchOptions.headers, fetchOptions.method),
+      signal: controller.signal,
+    });
   } finally {
     clearTimeout(timeout);
   }
@@ -117,6 +122,157 @@ function extractChatText(raw) {
   return textFromContent(content).trim();
 }
 
+function extractChatDelta(raw) {
+  const data = unwrapOpenAIResponse(raw);
+  const choice = Array.isArray(data?.choices) ? data.choices[0] : null;
+  const content = choice?.delta?.content
+    ?? choice?.message?.content
+    ?? choice?.text
+    ?? data?.output_text
+    ?? data?.text;
+  return textFromContent(content);
+}
+
+async function readChatEventStream(response, options = {}) {
+  const body = response?.body;
+  if (!body) throw new Error('扩展 LLM 流式响应缺少响应体。');
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let text = '';
+  let eventCount = 0;
+  let finishReason = '';
+  let model = '';
+  let usage;
+  let lastRaw = {};
+  let stopped = false;
+  let done = false;
+
+  const shouldStop = async () => (
+    typeof options.shouldStop === 'function' && await options.shouldStop()
+  );
+  const handleEvent = async (eventBlock) => {
+    const data = String(eventBlock || '')
+      .replace(/^\uFEFF/, '')
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).replace(/^ /, ''))
+      .join('\n');
+    if (!data) return false;
+    if (data.trim() === '[DONE]') {
+      done = true;
+      return true;
+    }
+
+    let raw;
+    try {
+      raw = JSON.parse(data);
+    } catch {
+      const error = new Error('扩展 LLM 返回了无法解析的流式事件。');
+      error.code = 'invalid_stream_event';
+      throw error;
+    }
+    if (raw?.error) {
+      const error = new Error(trimBodyForError(raw.error?.message || raw.error) || '扩展 LLM 流式调用失败。');
+      error.code = 'stream_error';
+      error.raw = raw;
+      throw error;
+    }
+
+    lastRaw = raw;
+    eventCount += 1;
+    const dataRoot = unwrapOpenAIResponse(raw);
+    const choice = Array.isArray(dataRoot?.choices) ? dataRoot.choices[0] : null;
+    finishReason = String(choice?.finish_reason || choice?.finishReason || finishReason || '');
+    model = String(dataRoot?.model || raw?.model || model || '');
+    if (dataRoot?.usage && typeof dataRoot.usage === 'object') usage = dataRoot.usage;
+    if (raw?.usage && typeof raw.usage === 'object') usage = raw.usage;
+
+    const delta = extractChatDelta(raw);
+    if (!delta) return false;
+    if (await shouldStop()) {
+      stopped = true;
+      return true;
+    }
+    text += delta;
+    if (typeof options.onDelta === 'function') {
+      await options.onDelta(delta, {
+        eventCount,
+        finishReason,
+        model,
+      });
+    }
+    return false;
+  };
+  const drain = async (flush = false) => {
+    while (!done && !stopped) {
+      const match = buffer.match(/\r?\n\r?\n/);
+      if (!match || match.index == null) break;
+      const block = buffer.slice(0, match.index);
+      buffer = buffer.slice(match.index + match[0].length);
+      if (await handleEvent(block)) break;
+    }
+    if (flush && buffer.trim() && !done && !stopped) {
+      const block = buffer;
+      buffer = '';
+      await handleEvent(block);
+    }
+  };
+  const acceptChunk = async (chunk) => {
+    buffer += typeof chunk === 'string'
+      ? chunk
+      : decoder.decode(chunk, { stream: true });
+    await drain(false);
+  };
+
+  if (typeof body.getReader === 'function') {
+    const reader = body.getReader();
+    try {
+      while (!done && !stopped) {
+        if (await shouldStop()) {
+          stopped = true;
+          break;
+        }
+        const part = await reader.read();
+        if (part.done) break;
+        await acceptChunk(part.value);
+      }
+      buffer += decoder.decode();
+      await drain(true);
+    } finally {
+      if ((done || stopped) && typeof reader.cancel === 'function') {
+        try {
+          await reader.cancel();
+        } catch {
+          // Best-effort cancellation; the durable response state remains authoritative.
+        }
+      }
+      if (typeof reader.releaseLock === 'function') reader.releaseLock();
+    }
+  } else if (typeof body[Symbol.asyncIterator] === 'function') {
+    for await (const chunk of body) {
+      if (done || stopped || await shouldStop()) {
+        stopped = !done;
+        break;
+      }
+      await acceptChunk(chunk);
+    }
+    buffer += decoder.decode();
+    await drain(true);
+  } else {
+    throw new Error('扩展 LLM 流式响应体不支持读取。');
+  }
+
+  return {
+    text,
+    eventCount,
+    finishReason,
+    model,
+    usage,
+    lastRaw,
+    stopped,
+  };
+}
 function normalizeBase64Image(value, mime = 'image/png') {
   const text = String(value || '').trim();
   if (!text) return '';
@@ -458,16 +614,20 @@ async function generateChat(provider, input = {}, options = {}) {
 
   const url = providerEndpointUrl(provider, '/chat/completions', ['chatEndpoint', 'chat_endpoint']);
   try {
+    const shouldReadStream = body.stream === true;
     const res = await fetchWithTimeout(url, {
       method: 'POST',
-      headers: bearerHeaders(provider),
+      headers: {
+        ...bearerHeaders(provider),
+        Accept: shouldReadStream ? 'text/event-stream' : 'application/json',
+      },
       body: JSON.stringify(body),
       timeoutMs: options.timeoutMs,
       fetchImpl: options.fetchImpl,
     });
-    const raw = await responseJson(res);
-    const trace = providerTrace(res, raw, { pollCount: 0 });
     if (!res.ok) {
+      const raw = await responseJson(res);
+      const trace = providerTrace(res, raw, { pollCount: 0 });
       return {
         ok: false,
         code: 'http_error',
@@ -479,6 +639,61 @@ async function generateChat(provider, input = {}, options = {}) {
         ...trace,
       };
     }
+
+    const contentType = typeof res?.headers?.get === 'function'
+      ? String(res.headers.get('content-type') || '').toLowerCase()
+      : '';
+    if (shouldReadStream && res.body && !contentType.includes('application/json')) {
+      const streamed = await readChatEventStream(res, options);
+      const traceRaw = {
+        ...(streamed.lastRaw && typeof streamed.lastRaw === 'object' ? streamed.lastRaw : {}),
+        ...(streamed.usage ? { usage: streamed.usage } : {}),
+      };
+      const trace = providerTrace(res, traceRaw, { pollCount: 0 });
+      if (streamed.stopped) {
+        return {
+          ok: false,
+          code: 'stopped',
+          providerId: provider.id,
+          protocol: provider.protocol,
+          model: streamed.model || model,
+          text: streamed.text,
+          finishReason: streamed.finishReason,
+          eventCount: streamed.eventCount,
+          error: '扩展 LLM 流式生成已停止。',
+          ...trace,
+        };
+      }
+      if (!streamed.text) {
+        return {
+          ok: false,
+          code: 'empty_text',
+          providerId: provider.id,
+          protocol: provider.protocol,
+          model: streamed.model || model,
+          eventCount: streamed.eventCount,
+          error: '扩展 LLM 没有返回文本。',
+          ...trace,
+        };
+      }
+      return {
+        ok: true,
+        kind: 'llm',
+        code: 'completed',
+        providerId: provider.id,
+        protocol: provider.protocol,
+        model: streamed.model || model,
+        text: streamed.text,
+        finishReason: streamed.finishReason,
+        truncated: ['length', 'max_tokens', 'content_length'].includes(String(streamed.finishReason || '').toLowerCase()),
+        eventCount: streamed.eventCount,
+        raw: traceRaw,
+        ...trace,
+      };
+    }
+
+    const raw = await responseJson(res);
+    const trace = providerTrace(res, raw, { pollCount: 0 });
     const text = extractChatText(raw);
     if (!text) {
       return { ok: false, code: 'empty_text', providerId: provider.id, protocol: provider.protocol, model, error: '扩展 LLM 没有返回文本。', raw, ...trace };
@@ -499,16 +714,20 @@ async function generateChat(provider, input = {}, options = {}) {
       ...trace,
     };
   } catch (e) {
+    const isTimeout = e?.name === 'AbortError';
+    const streamCode = ['invalid_stream_event', 'stream_error'].includes(String(e?.code || ''))
+      ? String(e.code)
+      : '';
     return {
       ok: false,
-      code: e?.name === 'AbortError' ? 'timeout' : 'network_error',
+      code: isTimeout ? 'timeout' : (streamCode || 'network_error'),
       providerId: provider.id,
       protocol: provider.protocol,
-      error: e?.name === 'AbortError' ? '扩展 LLM 调用超时。' : (e?.message || '扩展 LLM 调用失败。'),
+      model,
+      error: isTimeout ? '扩展 LLM 调用超时。' : (e?.message || '扩展 LLM 调用失败。'),
     };
   }
 }
-
 async function generateImage(provider, input = {}, options = {}) {
   const validation = validateProvider(provider, { apiKeyRequired: true });
   if (!validation.ok) return validation;
@@ -743,6 +962,7 @@ async function testProvider(provider, options = {}) {
 
 module.exports = {
   cleanBaseUrl,
+  extractChatDelta,
   extractChatText,
   extractImageUrls,
   extractVideoUrls,
@@ -751,6 +971,7 @@ module.exports = {
   generateImage,
   generateVideo,
   providerEndpointUrl,
+  readChatEventStream,
   testProvider,
   validateProvider,
 };

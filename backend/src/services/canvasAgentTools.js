@@ -38,9 +38,10 @@ const AGENT_INPUT_KEYS = Object.freeze({
   estimateRun: new Set(['proposal']),
 });
 const NODE_SCHEMA_BY_TYPE = new Map(nodeSchemaManifest.types.map((item) => [item.type, item]));
-// Persisted canvas-only structure nodes are deliberately excluded from the 69
-// public/generatable production node schemas, but still need an exact contract
-// when an existing canvas is inspected or validated.
+// Persisted canvas-only structure and development-authoring nodes are
+// deliberately excluded from the public/generatable production schemas, but
+// still need an exact contract when an existing development canvas is
+// inspected or validated. They remain non-generatable below.
 const INTERNAL_NODE_SCHEMA_BY_TYPE = new Map([
   ['groupBox', {
     type: 'groupBox',
@@ -52,6 +53,26 @@ const INTERNAL_NODE_SCHEMA_BY_TYPE = new Map([
     generatable: false,
     ports: { inputs: [], outputs: ['any'] },
   }],
+  ['rh-toolbox-maker', {
+    type: 'rh-toolbox-maker',
+    label: 'RH工具箱制作器',
+    category: 'internal',
+    description: '维护者开发态 RH 工具箱 manifest 制作节点',
+    hidden: true,
+    executable: false,
+    generatable: false,
+    ports: { inputs: [], outputs: ['text'] },
+  }],
+  ['fal-toolbox-maker', {
+    type: 'fal-toolbox-maker',
+    label: 'FAL应用制作工具',
+    category: 'internal',
+    description: '维护者开发态 FAL manifest 制作节点',
+    hidden: true,
+    executable: false,
+    generatable: false,
+    ports: { inputs: [], outputs: ['text'] },
+  }],
 ]);
 const INTERNAL_CONNECTION_PORTS = Object.freeze({
   groupBox: Object.freeze({
@@ -60,6 +81,28 @@ const INTERNAL_CONNECTION_PORTS = Object.freeze({
     outputs: Object.freeze([Object.freeze({
       id: 'group-out',
       kinds: Object.freeze(['any']),
+      required: false,
+      minConnections: 0,
+      maxConnections: null,
+    })]),
+  }),
+  'rh-toolbox-maker': Object.freeze({
+    resolver: 'static',
+    inputs: Object.freeze([]),
+    outputs: Object.freeze([Object.freeze({
+      id: null,
+      kinds: Object.freeze(['text']),
+      required: false,
+      minConnections: 0,
+      maxConnections: null,
+    })]),
+  }),
+  'fal-toolbox-maker': Object.freeze({
+    resolver: 'static',
+    inputs: Object.freeze([]),
+    outputs: Object.freeze([Object.freeze({
+      id: null,
+      kinds: Object.freeze(['text']),
       required: false,
       minConnections: 0,
       maxConnections: null,

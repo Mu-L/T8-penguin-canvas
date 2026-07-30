@@ -7,9 +7,35 @@ const crypto = require('node:crypto');
 // 运行模式:
 //   - 开发: backend/src/config.js 底下的 PROJECT_DIR 即项目根
 //   - 打包: 主进程 electron/main.cjs 会注入 T8PC_PACKAGED=1 与 T8PC_USER_DATA=<userData>
+//   - 开发验收: 可显式注入绝对路径 T8PC_DEV_DATA_ROOT，把临时数据库和素材隔离到
+//               项目目录之外；打包模式始终忽略该变量。
 //             数据/输入/输出/缩略图都位于该 userData 下,近可读写;
 //             前端静态产物位于 T8PC_FRONTEND_DIST(默认 resources/frontend)。
 const IS_PACKAGED = process.env.T8PC_PACKAGED === '1';
+const mib = (value) => value * 1024 * 1024;
+
+function resolveDevelopmentProjectDatabaseStoragePolicy32() {
+  if (IS_PACKAGED) return undefined;
+  const profile = String(process.env.T8PC_DEV_PROJECT_DB_STORAGE_PROFILE || '').trim();
+  if (!profile) return undefined;
+  if (profile !== 'acceptance-small-v1') {
+    throw new Error('T8PC_DEV_PROJECT_DB_STORAGE_PROFILE 仅支持 acceptance-small-v1');
+  }
+  return Object.freeze({
+    mainMaxBytes: mib(64),
+    walCheckpointTargetBytes: mib(1),
+    maximumSingleTransactionWalBytes: mib(4),
+    walPressureBytes: mib(8),
+    walReserveBytes: mib(16),
+    walResidualLimitBytes: mib(0.5),
+    shmReserveBytes: mib(4),
+    hotJournalReserveBytes: mib(8),
+    sqliteTempReserveBytes: mib(16),
+    minimumFilesystemFreeBytes: mib(64),
+    backupCandidateReserveBytes: mib(80),
+    recoveryEvidenceReserveBytes: mib(96),
+  });
+}
 const PROJECT_DIR = path.resolve(__dirname, '..', '..');
 const DEV_MANAGEMENT_AUTHORITY_FILE = path.join(PROJECT_DIR, '.t8-collaboration-management-authority.json');
 const MANAGEMENT_AUTHORITY_SCHEMA = 't8-collaboration-management-authority-v1';
@@ -110,10 +136,23 @@ function resolveBackendInstanceId() {
 }
 
 const BACKEND_INSTANCE_ID = resolveBackendInstanceId();
+function resolveDevelopmentDataRoot() {
+  if (IS_PACKAGED) return '';
+  const injected = String(process.env.T8PC_DEV_DATA_ROOT || '').trim();
+  if (!injected) return '';
+  if (!path.isAbsolute(injected)) {
+    throw new Error('T8PC_DEV_DATA_ROOT 必须是绝对路径');
+  }
+  return path.resolve(injected);
+}
+
 const USER_DATA = process.env.T8PC_USER_DATA && process.env.T8PC_USER_DATA.trim().length > 0
   ? process.env.T8PC_USER_DATA
   : PROJECT_DIR;
-const DATA_ROOT = IS_PACKAGED ? USER_DATA : PROJECT_DIR;
+const DEVELOPMENT_DATA_ROOT = resolveDevelopmentDataRoot();
+const DATA_ROOT = IS_PACKAGED
+  ? USER_DATA
+  : (DEVELOPMENT_DATA_ROOT || PROJECT_DIR);
 const USER_HOME_DIR = os.homedir() || process.env.USERPROFILE || process.env.HOME || PROJECT_DIR;
 const LEGACY_WINDOWS_DEFAULT_ROOT = 'D:\\zhenzhen';
 const DEFAULT_ZHENZHEN_ROOT = process.platform === 'win32'
@@ -154,6 +193,7 @@ const config = {
   ASSET_SEMANTIC_PIPELINE_VERSION: 'asset-semantic-v1',
   PROJECT_DB_FILE: path.join(DATA_ROOT, 'data', 't8-projects.sqlite3'),
   PROJECT_DB_BACKUP_FILE: path.join(DATA_ROOT, 'data', 't8-projects.sqlite3.backup'),
+  PROJECT_DB_STORAGE_POLICY_32: resolveDevelopmentProjectDatabaseStoragePolicy32(),
   COLLAB_HOST: process.env.T8_COLLAB_HOST || '127.0.0.1',
   COLLAB_PORT: Number(process.env.T8_COLLAB_PORT || 18767),
   COLLAB_MANAGEMENT_TOKEN: resolveManagementAuthorityToken(),

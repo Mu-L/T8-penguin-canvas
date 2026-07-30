@@ -28,7 +28,7 @@ test('lifecycle reporter serializes node and provider events with stable identit
       createdAt: 1,
     },
     executionToken: 'token-a',
-    executionEvidence: () => ({ nodeRunId: 'node-run-a', attemptId: 'attempt-a' }),
+    executionEvidence: () => ({ nodeRunId: 'node-run-a', attemptId: 'attempt-a', providerSubmissionKey: 'submission-a' }),
     basePayload: { nodeId: 'node-a', contextId: 'context-a' },
     sink: {
       write: async (type, payload) => {
@@ -63,6 +63,7 @@ test('lifecycle reporter serializes node and provider events with stable identit
   assert.equal(controller.reporter.runContext?.runId, 'run-a');
   assert.equal(controller.reporter.nodeRunId, 'node-run-a');
   assert.equal(controller.reporter.attemptId, 'attempt-a');
+  assert.equal(controller.reporter.providerSubmissionKey, 'submission-a');
 });
 
 test('failed initial lifecycle persistence invokes the expensive callback zero times', async () => {
@@ -126,7 +127,7 @@ test('topology entry and single-node action bar share the persisted RunContext p
   assert.match(canvas, /status: 'running',[\s\S]*runContextId: runContext\.contextId/);
   assert.match(canvas, /await runControl\.cancelPersistence/);
   assert.match(canvas, /executionToken = triggerRun\([\s\S]*runContext/);
-  assert.match(canvas, /<NodeActionBar[\s\S]*onRunNode=\{\(nodeId\) => handleRunGroup\(\[nodeId\]\)\}/);
+  assert.match(canvas, /<NodeActionBar[\s\S]*onRunNode=\{\(nodeId\)\s*=>\s*\{\s*void handleRunGroup\(\[nodeId\]\);\s*\}\}/);
   assert.match(actionBar, /EXECUTABLE_NODE_TYPES.*executableNodeTypes/);
   assert.match(actionBar, /void onRunNode\(selectedExe\.id\)/);
   assert.doesNotMatch(actionBar, /const EXECUTABLE_NODE_TYPES = new Set/);
@@ -157,6 +158,24 @@ test('topology entry and single-node action bar share the persisted RunContext p
   assert.match(canvas, /terminalEvidencePersistenceFailed/);
 });
 
+test('provider submissions persist one Attempt identity and Run creation fails closed on an unknown response', () => {
+  const hook = readFileSync(new URL('../src/hooks/useRunTrigger.ts', import.meta.url), 'utf8');
+  const canvas = readFileSync(new URL('../src/components/Canvas.tsx', import.meta.url), 'utf8');
+  const terminalRoute = readFileSync(new URL('../backend/src/routes/projectRuns.js', import.meta.url), 'utf8');
+
+  assert.match(hook, /providerSubmissionKey = generatedAttemptEntityUid \|\| generatedAttemptId/);
+  assert.match(hook, /metadata: providerSubmissionMetadata\('prepared'/);
+  assert.match(hook, /metadata: providerSubmissionMetadata\('ambiguous'/);
+  assert.match(hook, /metadata: providerSubmissionMetadata\('verified'/);
+  assert.match(hook, /executionEvidence: \(\) => \(\{ nodeRunId, attemptId, providerSubmissionKey \}\)/);
+  assert.match(canvas, /const proposedRunId = `run-\$\{typeof globalThis\.crypto\?\.randomUUID/);
+  assert.match(canvas, /if \(!runIntentLease\)[\s\S]*api\.getProjectRun\(proposedRunId\)/);
+  assert.match(canvas, /id: proposedRunId,[\s\S]*canvasId: persistenceSnapshot\.canvasId/);
+  assert.match(terminalRoute, /providerSubmission\.state !== 'verified'/);
+  assert.match(terminalRoute, /provider_submission_not_verified/);
+  assert.match(terminalRoute, /provider_submission_output_missing/);
+});
+
 test('every frontend polling provider reports canonical polling events through the lifecycle-aware hook', () => {
   const providerFiles = [
     'ImageNode.tsx',
@@ -177,7 +196,26 @@ test('every frontend polling provider reports canonical polling events through t
     assert.match(source, /reporter\?\.polling\(/, `${file} must archive real polling callbacks`);
     assert.match(source, /reporter\?\.providerRequest\(/, `${file} must archive provider request metadata`);
     assert.match(source, /reporter\?\.providerSubmitted\(/, `${file} must archive explicit task or request ids`);
+    assert.doesNotMatch(
+      source,
+      /void\s+reporter\?\.providerSubmitted\(/,
+      `${file} must await provider identity persistence before polling`,
+    );
     assert.match(source, /reporter\?\.providerResponse\(/, `${file} must archive terminal provider responses`);
     assert.match(source, /transportHttpStatus/, `${file} must preserve the local transport status without calling it upstream`);
+  }
+
+  for (const file of ['FalToolboxNode.tsx', 'RHToolboxNode.tsx', 'GrokOAuthAgentNode.tsx']) {
+    const source = readFileSync(new URL(`../src/components/nodes/${file}`, import.meta.url), 'utf8');
+    assert.match(
+      source,
+      /await reporter\?\.providerSubmitted\(/,
+      `${file} must durably archive the accepted provider identity before continuing`,
+    );
+    assert.match(
+      source,
+      /submissionKey:\s*reporter\?\.providerSubmissionKey/,
+      `${file} must propagate the stable Attempt identity to the provider submit transport`,
+    );
   }
 });

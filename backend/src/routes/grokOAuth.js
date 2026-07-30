@@ -7,8 +7,13 @@ const crypto = require('crypto');
 const config = require('../config');
 const { runLocalHooks } = require('../extensions/runtimeHooks');
 const { safeRemoteMediaFetch } = require('../utils/safeRemoteMediaFetch');
+const {
+  providerSubmissionContextMiddleware,
+  currentProviderSubmissionKey,
+} = require('../services/providerSubmissionContext');
 
 const router = express.Router();
+router.use(providerSubmissionContextMiddleware);
 
 const PRIVATE_DISABLED_MESSAGE = 'Grok OAuth 私有模块未启用，请使用带私有模块的本地版本。';
 const GROK_VIDEO_AGENT_POLL_INTERVAL_MS = 5000;
@@ -170,6 +175,7 @@ async function runGrokHook(action, payload = {}) {
     action,
     handled: false,
     config,
+    providerSubmissionKey: currentProviderSubmissionKey() || undefined,
     ...payload,
   });
 }

@@ -7,8 +7,11 @@ const path = require('node:path');
 const { PassThrough } = require('node:stream');
 const express = require('express');
 const sharp = require('sharp');
+const { resolvePublicAddress } = require('../backend/src/utils/safeRemoteMediaFetch');
+const { providerSubmissionContextMiddleware } = require('../backend/src/services/providerSubmissionContext');
 
 const config = require('../backend/src/config');
+const seedanceNzProvider = require('../backend/src/providers/seedanceNz');
 const originalProxyMediaMaxBytes = process.env.T8_PROXY_MEDIA_REFERENCE_MAX_BYTES;
 const originalProxyImageMaxBytes = process.env.T8_PROXY_IMAGE_REFERENCE_MAX_BYTES;
 process.env.T8_PROXY_MEDIA_REFERENCE_MAX_BYTES = String(1024 * 1024);
@@ -31,6 +34,18 @@ async function listen(handler) {
 async function closeServer(server) {
   if (!server) return;
   await new Promise((resolve) => server.close(() => resolve()));
+}
+
+function runWithProviderSubmission(key, callback) {
+  return new Promise((resolve, reject) => {
+    providerSubmissionContextMiddleware({
+      get(name) {
+        return String(name).toLowerCase() === 'x-t8-provider-submission' ? key : '';
+      },
+    }, {}, () => {
+      Promise.resolve().then(callback).then(resolve, reject);
+    });
+  });
 }
 
 async function startProxyApp() {
@@ -262,12 +277,15 @@ test('B3 Provider fetch deadline covers DNS, connect, TLS, and response headers'
   }
 });
 
-test('B3 Provider GET refreshes stale TUN connections once while POST is never replayed', async () => {
+test('B3 Provider requests use fresh TUN connections and replay writes only with one stable idempotency key', async () => {
   const originalFetch = global.fetch;
   let calls = 0;
+  const readDispatchers = [];
+  proxyRouter._test.setProxySafeRemoteTestOptions({ providerRetryDelayMs: 1 });
   try {
-    global.fetch = async () => {
+    global.fetch = async (_url, init) => {
       calls += 1;
+      readDispatchers.push(init?.dispatcher);
       if (calls === 1) {
         throw Object.assign(new TypeError('fetch failed'), {
           cause: Object.assign(new Error('socket reset after TUN switch'), { code: 'ECONNRESET' }),
@@ -282,6 +300,40 @@ test('B3 Provider GET refreshes stale TUN connections once while POST is never r
     );
     assert.equal(recovered.status, 200);
     assert.equal(calls, 2, 'read-only Provider queries may retry once after refreshing the connection pool');
+    assert.notEqual(readDispatchers[0], readDispatchers[1]);
+    assert.equal(
+      readDispatchers[1],
+      proxyRouter._test.currentProviderDispatcher(true),
+      'the recovery query must use the independent public-DNS dispatcher',
+    );
+
+    calls = 0;
+    const writeKeys = [];
+    global.fetch = async (_url, init) => {
+      calls += 1;
+      writeKeys.push(new Headers(init?.headers).get('Idempotency-Key'));
+      if (calls === 1) {
+        throw Object.assign(new TypeError('fetch failed'), {
+          cause: Object.assign(new Error('network unreachable after TUN switch'), { code: 'ENETUNREACH' }),
+        });
+      }
+      return new Response('accepted', { status: 202 });
+    };
+    const recoveredWrite = await runWithProviderSubmission(
+      'attempt-image-tun-0001',
+      () => proxyRouter._test.fetchProviderResponse(
+        'https://provider.example/generate',
+        { method: 'POST', body: '{"prompt":"safe"}' },
+        'Provider submit',
+      ),
+    );
+    assert.equal(recoveredWrite.status, 202);
+    assert.equal(calls, 2, 'a generation POST with a stable submission identity retries once on a fresh connection');
+    assert.deepEqual(
+      writeKeys,
+      ['attempt-image-tun-0001', 'attempt-image-tun-0001'],
+      'the recovery attempt must carry exactly the same upstream idempotency key',
+    );
 
     calls = 0;
     global.fetch = async () => {
@@ -292,19 +344,21 @@ test('B3 Provider GET refreshes stale TUN connections once while POST is never r
     };
     await assert.rejects(
       proxyRouter._test.fetchProviderResponse(
-        'https://provider.example/generate',
+        'https://provider.example/legacy-generate',
         { method: 'POST', body: '{"prompt":"safe"}' },
-        'Provider submit',
+        'Legacy Provider submit',
       ),
       (error) => {
         assert.equal(error?.code, 'provider_network_unavailable');
         assert.equal(error?.status, 503);
         assert.equal(error?.recoverable, true);
+        assert.equal(error?.retryAfterMs, 3_000);
+        assert.equal(error?.retryAttempted, false);
         assert.doesNotMatch(String(error?.message || ''), /关闭.*(?:代理|TUN|VPN)/);
         return true;
       },
     );
-    assert.equal(calls, 1, 'generation POST must not be replayed because that could duplicate work or charges');
+    assert.equal(calls, 1, 'legacy writes without a stable submission key must not be replayed');
 
     calls = 0;
     global.fetch = async () => {
@@ -326,8 +380,160 @@ test('B3 Provider GET refreshes stale TUN connections once while POST is never r
     assert.equal(calls, 2, 'explicitly marked read-only POST queries may retry without resubmitting generation');
   } finally {
     global.fetch = originalFetch;
+    proxyRouter._test.setProxySafeRemoteTestOptions(null);
     await proxyRouter._test.resetProviderDispatcherForTests();
   }
+});
+
+test('B3 pinned media requests disable the global Agent so TUN/VPN route changes cannot reuse an old socket', () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, '../backend/src/utils/safeRemoteMediaFetch.js'),
+    'utf8',
+  );
+  assert.match(
+    source,
+    /transport\.request\(target,\s*\{[\s\S]*?agent:\s*false,[\s\S]*?lookup\(/,
+    'each DNS-pinned media request must open a fresh socket before applying its pinned lookup',
+  );
+});
+
+test('B3 Provider fallback lookup prefers usable IPv4 while retaining IPv6-only support', async () => {
+  const records = await new Promise((resolve, reject) => {
+    proxyRouter._test.providerPublicDnsLookup(
+      'provider.example',
+      { all: true },
+      (error, addresses) => error ? reject(error) : resolve(addresses),
+      async () => [
+        { address: '2001:4860:4860::8888', family: 6 },
+        { address: '93.184.216.34', family: 4 },
+      ],
+    );
+  });
+  assert.deepEqual(records, [
+    { address: '93.184.216.34', family: 4 },
+    { address: '2001:4860:4860::8888', family: 6 },
+  ]);
+
+  const ipv6Only = await new Promise((resolve, reject) => {
+    proxyRouter._test.providerPublicDnsLookup(
+      'ipv6-provider.example',
+      { all: true },
+      (error, addresses) => error ? reject(error) : resolve(addresses),
+      async () => [{ address: '2001:4860:4860::8844', family: 6 }],
+    );
+  });
+  assert.deepEqual(ipv6Only, [{ address: '2001:4860:4860::8844', family: 6 }]);
+
+  const seedanceRecords = await new Promise((resolve, reject) => {
+    seedanceNzProvider.seedancePublicDnsLookup(
+      'api.seedance.nz',
+      { all: true },
+      (error, addresses) => error ? reject(error) : resolve(addresses),
+      async () => [
+        { address: '2606:4700::6810:85e5', family: 6 },
+        { address: '104.16.133.229', family: 4 },
+      ],
+    );
+  });
+  assert.deepEqual(seedanceRecords, [
+    { address: '104.16.133.229', family: 4 },
+    { address: '2606:4700::6810:85e5', family: 6 },
+  ]);
+
+  const literalIpv6 = await new Promise((resolve, reject) => {
+    proxyRouter._test.providerPublicDnsLookup(
+      '2606:4700::6810:85e5',
+      { all: true },
+      (error, addresses) => error ? reject(error) : resolve(addresses),
+    );
+  });
+  assert.deepEqual(literalIpv6, [{ address: '2606:4700::6810:85e5', family: 6 }]);
+});
+
+test('B3 completed task query interruptions retain the original task and never submit a replacement', async () => {
+  await withProxyFixture(async ({ appServer }) => {
+    const originalFetch = global.fetch;
+    const providerCalls = [];
+    proxyRouter._test.setProxySafeRemoteTestOptions({ providerRetryDelayMs: 1 });
+    try {
+      global.fetch = async (url, init = {}) => {
+        providerCalls.push({
+          url: String(url),
+          method: String(init?.method || 'GET').toUpperCase(),
+          body: String(init?.body || ''),
+        });
+        throw Object.assign(new TypeError('fetch failed'), {
+          cause: Object.assign(new Error('route changed after IPv6/TUN/VPN switch'), {
+            code: 'ENETUNREACH',
+          }),
+        });
+      };
+
+      const cases = [
+        {
+          path: '/api/proxy/image/status/existing-image-task?model=gpt-image-2',
+          taskId: 'existing-image-task',
+        },
+        {
+          path: '/api/proxy/mj/task/existing-midjourney-task',
+          taskId: 'existing-midjourney-task',
+        },
+        {
+          path: '/api/proxy/video/query?taskId=existing-video-task&model=veo-3.1',
+          taskId: 'existing-video-task',
+        },
+        {
+          path: '/api/proxy/audio/query?clipIds=existing-audio-task&saveLocal=false',
+          taskId: 'existing-audio-task',
+        },
+        {
+          path: '/api/proxy/runninghub/query?taskId=existing-rh-task&site=cn',
+          taskId: 'existing-rh-task',
+        },
+      ];
+
+      for (const fixture of cases) {
+        const response = await requestGet(appServer, fixture.path);
+        assert.equal(response.status, 202, response.text);
+        assert.equal(response.data?.success, true);
+        assert.equal(response.data?.code, 'task_result_query_recovering');
+        assert.equal(response.data?.data?.taskId, fixture.taskId);
+        assert.equal(response.data?.data?.recoverable, true);
+        assert.equal(response.data?.data?.retryAfterMs, 3_000);
+        assert.match(response.data?.message || '', /原任务 ID/);
+        assert.match(response.data?.message || '', /不会重新生成/);
+        assert.match(response.data?.message || '', /不会重复扣费/);
+      }
+
+      assert.equal(
+        providerCalls.length,
+        cases.length * 2,
+        'each read-only result query may retry once on a fresh connection',
+      );
+      assert.equal(
+        providerCalls.filter((call) => call.method === 'POST').length,
+        2,
+        'only the RunningHub read-only query may use POST, including its one recovery attempt',
+      );
+      assert.ok(
+        providerCalls
+          .filter((call) => call.method === 'POST')
+          .every((call) => call.url.includes('/task/openapi/outputs') && call.body.includes('existing-rh-task')),
+        'read-only POST recovery must keep the original RunningHub task id',
+      );
+      assert.ok(
+        providerCalls.every((call) => (
+          call.method !== 'POST'
+          || !/\/(?:generate|generations|submit)(?:\/|$|\?)/i.test(call.url)
+        )),
+        `a query/download recovery must never call a generation submission endpoint: ${JSON.stringify(providerCalls)}`,
+      );
+    } finally {
+      global.fetch = originalFetch;
+      proxyRouter._test.setProxySafeRemoteTestOptions(null);
+      await proxyRouter._test.resetProviderDispatcherForTests();
+    }
+  });
 });
 
 test('B3 refToBuffer, refToGrokImage, and uploadRefToZhenzhen routes reject collaborator private media before connect', async () => {
@@ -998,6 +1204,172 @@ test('B3 RunningHub output filenames come only from verified media magic and sta
   assert.match(serverSource, /mountUserMediaStatic\('\/files\/output'/);
 });
 
+test('B3 RH media validation trusts verified magic for same-kind subtype drift and still rejects unsafe mismatches', () => {
+  const png = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.alloc(16),
+  ]);
+  const mp3 = Buffer.concat([Buffer.from('ID3'), Buffer.alloc(16)]);
+  const quickTime = Buffer.concat([
+    Buffer.from([0x00, 0x00, 0x00, 0x14]),
+    Buffer.from('ftypqt  ', 'ascii'),
+    Buffer.alloc(8),
+  ]);
+  const mp4 = Buffer.concat([
+    Buffer.from([0x00, 0x00, 0x00, 0x14]),
+    Buffer.from('ftypisom', 'ascii'),
+    Buffer.alloc(8),
+  ]);
+  const sameKindCases = [
+    {
+      bytes: png,
+      declared: 'image/jpeg',
+      allowedKinds: ['image'],
+      detected: 'image/png',
+      extension: 'png',
+    },
+    {
+      bytes: quickTime,
+      declared: 'video/mp4',
+      allowedKinds: ['video'],
+      detected: 'video/quicktime',
+      extension: 'mov',
+    },
+    {
+      bytes: mp4,
+      declared: 'video/quicktime',
+      allowedKinds: ['video'],
+      detected: 'video/mp4',
+      extension: 'mp4',
+    },
+    {
+      bytes: mp3,
+      declared: 'audio/wav',
+      allowedKinds: ['audio'],
+      detected: 'audio/mpeg',
+      extension: 'mp3',
+    },
+  ];
+  for (const fixture of sameKindCases) {
+    const verified = proxyRouter._test.validateProxyMediaBuffer(
+      fixture.bytes,
+      fixture.declared,
+      {
+        allowedKinds: fixture.allowedKinds,
+        maxBytes: 1024,
+        allowSameKindSubtypeMismatch: true,
+      },
+    );
+    assert.equal(verified.detectedMime, fixture.detected);
+    assert.equal(verified.contentType, fixture.detected);
+    assert.equal(verified.contentTypeMismatch, true);
+    assert.equal(proxyRouter._test.verifiedProxyMediaExtension(verified), fixture.extension);
+  }
+  assert.throws(
+    () => proxyRouter._test.validateProxyMediaBuffer(png, 'image/jpeg', {
+      allowedKinds: ['image'],
+      maxBytes: 1024,
+    }),
+    /Content-Type.*子类型/,
+    'untrusted input uploads keep exact subtype checking unless a completed output explicitly opts in',
+  );
+
+  for (const [bytes, declared, allowedKinds] of [
+    [png, 'video/mp4', ['image', 'video', 'audio']],
+    [mp3, 'image/png', ['image', 'video', 'audio']],
+    [quickTime, 'audio/mp4', ['image', 'video', 'audio']],
+    [png, 'text/html', ['image']],
+    [Buffer.from('<html>not media</html>'), 'image/png', ['image']],
+    [Buffer.concat([Buffer.from('PK\x03\x04', 'binary'), Buffer.alloc(16)]), 'application/octet-stream', ['image', 'video', 'audio']],
+  ]) {
+    assert.throws(
+      () => proxyRouter._test.validateProxyMediaBuffer(bytes, declared, { allowedKinds, maxBytes: 1024 }),
+      /Content-Type|魔数|归档容器/,
+    );
+  }
+});
+
+test('B3 RunningHub materializes mixed image, video, and audio outputs despite same-kind CDN subtype drift', async () => {
+  const fixtures = {
+    '/image': {
+      declared: 'image/jpeg',
+      buffer: Buffer.concat([
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        Buffer.alloc(16),
+      ]),
+      extension: 'png',
+    },
+    '/video': {
+      declared: 'video/mp4',
+      buffer: Buffer.concat([
+        Buffer.from([0x00, 0x00, 0x00, 0x14]),
+        Buffer.from('ftypqt  ', 'ascii'),
+        Buffer.alloc(8),
+      ]),
+      extension: 'mov',
+    },
+    '/audio': {
+      declared: 'audio/wav',
+      buffer: Buffer.concat([Buffer.from('ID3'), Buffer.alloc(16)]),
+      extension: 'mp3',
+    },
+  };
+  const assetServer = await listen((req, res) => {
+    const fixture = fixtures[req.url];
+    if (!fixture) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    res.writeHead(200, {
+      'content-type': fixture.declared,
+      'content-length': fixture.buffer.length,
+    });
+    res.end(fixture.buffer);
+  });
+  const assetBase = `http://rh-mixed-output.test:${assetServer.address().port}`;
+  try {
+    await withProxyFixture(async ({ appServer, outputDir }) => {
+      proxyRouter._test.setProxySafeRemoteTestOptions({
+        allowPrivateForTests: (hostname) => hostname === 'rh-mixed-output.test',
+        lookupImpl: async () => [{ address: '127.0.0.1', family: 4 }],
+      });
+      const originalFetch = global.fetch;
+      global.fetch = async () => new Response(JSON.stringify({
+        code: 0,
+        data: Object.keys(fixtures).map((pathname) => ({
+          fileUrl: `${assetBase}${pathname}`,
+        })),
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+      try {
+        const response = await requestGet(
+          appServer,
+          '/api/proxy/runninghub/query?taskId=rh-mixed-subtype-drift&site=cn',
+        );
+        assert.equal(response.status, 200, response.text);
+        assert.equal(response.data?.data?.status, 'SUCCESS');
+        assert.equal(response.data?.data?.urls?.length, 3);
+        const outputExtensions = response.data.data.urls.map((url) => path.extname(url)).sort();
+        assert.deepEqual(outputExtensions, ['.mov', '.mp3', '.png']);
+        const outputFiles = fs.readdirSync(outputDir, { withFileTypes: true })
+          .filter((entry) => entry.isFile())
+          .map((entry) => entry.name);
+        assert.deepEqual(
+          outputFiles.map((name) => path.extname(name)).sort(),
+          ['.mov', '.mp3', '.png'],
+        );
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
+  } finally {
+    await closeServer(assetServer);
+  }
+});
+
 test('B3 Suno audio validation preserves the supported format matrix by magic bytes', () => {
   const mp4Box = (type, payload) => {
     const body = Buffer.from(payload);
@@ -1208,7 +1580,7 @@ test('B3 Suno completed media is localized without returning Provider signed URL
           query.text,
           /media\.test|audio-secret|audio-signature|cover-secret|cover-signature|X-Amz/i,
         );
-        assert.equal(fs.readdirSync(outputDir).length, 2);
+        assert.equal(fs.readdirSync(outputDir, { withFileTypes: true }).filter((entry) => entry.isFile()).length, 2);
       } finally {
         global.fetch = originalFetch;
       }
@@ -1492,6 +1864,28 @@ test('B3 Zhenzhen image routes bound Provider JSON and expose only normalized re
   });
 });
 
+test('B3 hostname-bound TUN Fake-IP stays on the TUN path without opening literal Fake-IP URLs', async () => {
+  let publicDnsCalls = 0;
+  const pinned = await resolvePublicAddress(
+    'generated.example',
+    async () => [{ address: '198.18.9.25', family: 4 }],
+    false,
+    async () => {
+      publicDnsCalls += 1;
+      return [{ address: '203.0.113.25', family: 4 }];
+    },
+  );
+  assert.deepEqual(pinned, { address: '198.18.9.25', family: 4, tunFake: true });
+  assert.equal(publicDnsCalls, 0, 'normal TUN downloads must use the active Fake-IP mapping first');
+  await assert.rejects(
+    resolvePublicAddress(
+      '198.18.9.25',
+      async () => [{ address: '198.18.9.25', family: 4 }],
+    ),
+    (error) => error?.code === 'private_address',
+  );
+});
+
 test('B3 completed image tasks retry transient downloads and expose actionable safe failure reasons', async () => {
   await withProxyFixture(async ({ appServer, outputDir }) => {
     const originalFetch = global.fetch;
@@ -1531,7 +1925,7 @@ test('B3 completed image tasks retry transient downloads and expose actionable s
       assert.equal(recovered.data?.data?.status, 'completed');
       assert.match(recovered.data?.data?.urls?.[0] || '', /^\/files\/output\/img_task_/);
       assert.equal(outputRequests, 3, 'transient output download must retry before failing the completed task');
-      assert.equal(fs.readdirSync(outputDir).filter((name) => name.startsWith('img_task_')).length, 1);
+      assert.equal(fs.readdirSync(outputDir).filter((name) => name.startsWith('img_task_') && !name.endsWith('.complete.json')).length, 1);
 
       global.fetch = async () => new Response(JSON.stringify({
         status: 'completed',
@@ -1547,6 +1941,7 @@ test('B3 completed image tasks retry transient downloads and expose actionable s
       const tunOutput = `http://cdn.example:${outputServer.address().port}/generated.png?token=provider-signed-secret`;
       proxyRouter._test.setProxySafeRemoteTestOptions({
         lookupImpl: async () => [{ address: '198.18.0.25', family: 4 }],
+        acceptTunFake: false,
         publicLookupImpl: async () => {
           throw Object.assign(new Error('public DNS temporarily unavailable'), {
             code: 'tun_dns_fallback_failed',
@@ -1569,6 +1964,7 @@ test('B3 completed image tasks retry transient downloads and expose actionable s
 
       proxyRouter._test.setProxySafeRemoteTestOptions({
         lookupImpl: async () => [{ address: '198.18.0.25', family: 4 }],
+        acceptTunFake: false,
         publicLookupImpl: async () => [{ address: '127.0.0.1', family: 4 }],
         allowPrivateForTests: true,
       });
@@ -1669,6 +2065,7 @@ test('B3 video, audio, and RunningHub completed tasks survive TUN Fake-IP and re
       try {
         proxyRouter._test.setProxySafeRemoteTestOptions({
           lookupImpl: async () => [{ address: '198.18.1.25', family: 4 }],
+          acceptTunFake: false,
           publicLookupImpl: async () => {
             throw Object.assign(new Error('independent DNS temporarily unavailable'), {
               code: 'tun_dns_fallback_failed',
@@ -1689,6 +2086,7 @@ test('B3 video, audio, and RunningHub completed tasks survive TUN Fake-IP and re
 
         proxyRouter._test.setProxySafeRemoteTestOptions({
           lookupImpl: async () => [{ address: '198.18.1.25', family: 4 }],
+          acceptTunFake: false,
           publicLookupImpl: async () => [{ address: '127.0.0.1', family: 4 }],
           allowPrivateForTests: true,
         });
@@ -1706,7 +2104,7 @@ test('B3 video, audio, and RunningHub completed tasks survive TUN Fake-IP and re
         assert.equal(rhRecovered.data?.data?.status, 'SUCCESS');
         assert.match(rhRecovered.data?.data?.urls?.[0] || '', /^\/files\/output\/rh_task_/);
         assert.equal(providerQueries, 6, 'recovery must query the same tasks without submitting replacements');
-        assert.equal(fs.readdirSync(outputDir).length, 3);
+        assert.equal(fs.readdirSync(outputDir, { withFileTypes: true }).filter((entry) => entry.isFile()).length, 3);
       } finally {
         global.fetch = originalFetch;
       }
@@ -1853,9 +2251,9 @@ test('B3 task-scoped video materialization coalesces concurrent polls and reuses
       )));
 
       assert.equal(new Set(urls).size, 1);
-      assert.match(urls[0], /^\/files\/output\/vid_task_[0-9a-f]{24}\.mp4$/);
+      assert.match(urls[0], /^\/files\/output\/vid_task_[0-9a-f]{24}_[0-9a-f]{16}\.mp4$/);
       assert.equal(assetHits, 1, 'concurrent completed polls must share one remote download');
-      assert.equal(fs.readdirSync(outputDir).length, 1);
+      assert.equal(fs.readdirSync(outputDir).length, 2);
 
       // 模拟后端重启后内存缓存丢失、Provider 又返回了不同签名 URL：任务键仍应落到同一个文件。
       proxyRouter._test.resetVideoMaterializationCacheForTests();
@@ -1866,7 +2264,7 @@ test('B3 task-scoped video materialization coalesces concurrent polls and reuses
       );
       assert.equal(recovered, urls[0]);
       assert.equal(assetHits, 2);
-      assert.equal(fs.readdirSync(outputDir).length, 1);
+      assert.equal(fs.readdirSync(outputDir).length, 2);
     });
   } finally {
     await closeServer(assetServer);

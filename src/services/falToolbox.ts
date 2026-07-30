@@ -11,6 +11,10 @@ import {
   type FalToolboxRunPayload,
   type FalToolboxTool,
 } from '../utils/falToolbox';
+import {
+  providerSubmissionHeaders,
+  type ProviderSubmissionTransport,
+} from './generation';
 
 export type FalToolboxProgressStage =
   | 'prepare'
@@ -36,7 +40,8 @@ export interface RunFalToolboxToolOptions {
   inputValues?: Record<string, string | string[]>;
   userParams?: Record<string, string | number | boolean>;
   signal?: AbortSignal;
-  onProgress?: (progress: RunFalToolboxProgress) => void;
+  submissionKey?: string | null;
+  onProgress?: (progress: RunFalToolboxProgress) => void | Promise<void>;
 }
 
 export interface RunFalToolboxToolResult extends FalToolboxOutputClassification {
@@ -112,10 +117,13 @@ function hasRunInputValue(value: unknown): boolean {
   return String(value).trim().length > 0;
 }
 
-export async function submitFalToolbox(payload: FalToolboxRunPayload): Promise<any> {
+export async function submitFalToolbox(
+  payload: FalToolboxRunPayload,
+  transport: ProviderSubmissionTransport = {},
+): Promise<any> {
   const r = await fetch('/api/proxy/fal-toolbox/submit', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(payload),
   });
   const data = await readJsonResponse(r);
@@ -151,7 +159,7 @@ export async function runFalToolboxTool(options: RunFalToolboxToolOptions): Prom
   if (!tool.enabled || !tool.endpoint) throw new Error('该 Fal 工具尚未启用');
 
   const progress = options.onProgress;
-  progress?.({ stage: 'prepare', message: `准备运行 ${tool.title}` });
+  await progress?.({ stage: 'prepare', message: `准备运行 ${tool.title}` });
   const picked = pickFalToolboxInputs(tool, options.inputs || {});
   const explicitInputValues = options.inputValues || {};
   if (picked.missingKeys.length > 0) {
@@ -169,9 +177,9 @@ export async function runFalToolboxTool(options: RunFalToolboxToolOptions): Prom
     userParamValues: options.userParams,
   });
 
-  progress?.({ stage: 'submit', message: '提交 FAL 任务' });
-  const submitted = await submitFalToolbox(runPayload);
-  progress?.({
+  await progress?.({ stage: 'submit', message: '提交 FAL 任务' });
+  const submitted = await submitFalToolbox(runPayload, { submissionKey: options.submissionKey });
+  await progress?.({
     stage: 'submit',
     message: '已提交 FAL 任务',
     requestId: submitted.requestId || submitted.request_id,
@@ -181,7 +189,7 @@ export async function runFalToolboxTool(options: RunFalToolboxToolOptions): Prom
   });
   const initial = classifyFalToolboxOutputs(submitted);
   if (submitted.status === 'completed' || submitted.sync === true || initial.urls.length || initial.textOutputs.length) {
-    progress?.({
+    await progress?.({
       stage: 'success',
       message: `完成 · ${initial.urls.length + initial.textOutputs.length} 个输出`,
       requestId: submitted.requestId,
@@ -214,7 +222,7 @@ export async function runFalToolboxTool(options: RunFalToolboxToolOptions): Prom
 
   for (let pollCount = 1; pollCount <= maxPolls; pollCount += 1) {
     assertNotAborted(options.signal);
-    progress?.({
+    await progress?.({
       stage: 'poll',
       message: transientPollErrors > 0 ? `轮询重试 ${transientPollErrors}/3 · ${pollCount}/${maxPolls}` : `轮询中 ${pollCount}/${maxPolls}`,
       requestId,
@@ -229,7 +237,7 @@ export async function runFalToolboxTool(options: RunFalToolboxToolOptions): Prom
         outputSchema: tool.outputSchema,
         statusPath: tool.runtime?.statusPath,
       });
-      progress?.({
+      await progress?.({
         stage: 'poll',
         message: `轮询响应 ${pollCount}/${maxPolls}`,
         requestId,
@@ -249,7 +257,7 @@ export async function runFalToolboxTool(options: RunFalToolboxToolOptions): Prom
       throw new Error(query.error || 'FAL 任务失败');
     }
     if (String(query.status || '').toLowerCase() === 'materializing') {
-      progress?.({
+      await progress?.({
         stage: 'poll',
         message: query.error || '结果已经生成，正在适配 TUN/代理网络并安全下载；原任务会保留',
         requestId,
@@ -262,7 +270,7 @@ export async function runFalToolboxTool(options: RunFalToolboxToolOptions): Prom
     }
     const classified = classifyFalToolboxOutputs(query);
     if (query.status === 'completed' || classified.urls.length || classified.textOutputs.length) {
-      progress?.({
+      await progress?.({
         stage: 'success',
         message: `完成 · ${classified.urls.length + classified.textOutputs.length} 个输出`,
         requestId,
@@ -283,6 +291,6 @@ export async function runFalToolboxTool(options: RunFalToolboxToolOptions): Prom
     }
   }
 
-  progress?.({ stage: 'error', message: 'Fal超市轮询超时', requestId });
+  await progress?.({ stage: 'error', message: 'Fal超市轮询超时', requestId });
   throw new Error('Fal超市轮询超时');
 }

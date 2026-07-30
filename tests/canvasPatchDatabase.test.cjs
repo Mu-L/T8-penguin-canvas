@@ -1698,6 +1698,233 @@ test('apply requires matching preview confirmation, overrides envelopes and retr
   }
 });
 
+test('an exact Creator Patch retry can recover across UI and Codex actors without transferring ownership', () => {
+  const db = new ProjectDatabase(':memory:');
+  try {
+    seed(db, 'canvas-patch');
+    const input = patch({ id: 'creator-cross-entry-patch' });
+    const preview = db.previewCanvasPatch('canvas-patch', input, {
+      actorId: 'codex-agent',
+      sessionId: 'codex-session',
+    });
+    const applied = db.applyCanvasPatch('canvas-patch', input, {
+      previewDigest: preview.previewDigest,
+      confirmed: true,
+      actorId: 'codex-agent',
+      sessionId: 'codex-session',
+    });
+    assert.equal(applied.duplicate, false);
+    assert.equal(applied.revision, 2);
+
+    assert.throws(() => db.applyCanvasPatch('canvas-patch', input, {
+      previewDigest: preview.previewDigest,
+      confirmed: true,
+      actorId: 'local-owner',
+      sessionId: 'local-session',
+    }), CanvasPatchPermissionError);
+
+    const recovered = db.applyCanvasPatch('canvas-patch', input, {
+      previewDigest: preview.previewDigest,
+      confirmed: true,
+      actorId: 'local-owner',
+      sessionId: 'local-session',
+      allowExactDuplicateAcrossActors: true,
+    });
+    assert.equal(recovered.duplicate, true);
+    assert.equal(recovered.revision, applied.revision);
+    assert.deepEqual(recovered.document, applied.document);
+    assert.equal(db.db.prepare(
+      'SELECT COUNT(*) AS count FROM canvas_operations WHERE canvas_id = ?',
+    ).get('canvas-patch').count, 1);
+    assert.equal(db.db.prepare(
+      'SELECT COUNT(*) AS count FROM canvas_patch_applications WHERE canvas_id = ?',
+    ).get('canvas-patch').count, 1);
+    assert.equal(db.listAuditEvents({
+      projectId: 'project-patch',
+      canvasId: 'canvas-patch',
+      action: 'canvas.patch.apply',
+    }).length, 1);
+
+    const publicLedger = db.listCanvasPatches('canvas-patch', {
+      includeAllActors: true,
+    });
+    assert.equal(Object.hasOwn(publicLedger[0], 'requestDigest'), false);
+    const evidenceLedger = db.listCanvasPatches('canvas-patch', {
+      includeAllActors: true,
+      includeRequestDigest: true,
+    });
+    assert.equal(evidenceLedger[0].requestDigest, canvasPatchRequestDigest(input));
+    assert.equal(evidenceLedger[0].actorId, 'codex-agent');
+    const exactApplication = db.getCanvasPatchApplication('canvas-patch', input.id, {
+      includeAllActors: true,
+      includeRequestDigest: true,
+    });
+    assert.equal(exactApplication.patchId, input.id);
+    assert.equal(exactApplication.requestDigest, canvasPatchRequestDigest(input));
+    assert.equal(exactApplication.previewDigest, preview.previewDigest);
+    assert.equal(exactApplication.baseRevision, 1);
+    assert.equal(exactApplication.appliedRevision, 2);
+    assert.equal(exactApplication.status, 'applied');
+    assert.deepEqual(exactApplication.affectedNodeIds, ['a']);
+    assert.deepEqual(exactApplication.affectedEdgeIds, []);
+    assert.equal(exactApplication.changes.length, 1);
+    assert.equal(exactApplication.canRevert, true);
+
+    assert.throws(() => db.revertCanvasPatch('canvas-patch', input.id, {
+      actorId: 'local-owner',
+      sessionId: 'local-session',
+      expectedRevision: 2,
+    }), CanvasPatchPermissionError);
+    const reverted = db.revertCanvasPatch('canvas-patch', input.id, {
+      actorId: 'codex-agent',
+      sessionId: 'codex-session',
+      expectedRevision: 2,
+    });
+    assert.equal(reverted.status, 'reverted');
+    assert.equal(reverted.revision, 3);
+  } finally {
+    db.close();
+  }
+});
+
+test('simultaneous UI and Codex retries of one exact Creator Patch commit once and both recover', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-creator-cross-entry-race-'));
+  const filename = path.join(directory, 'projects.sqlite3');
+  const modulePath = path.resolve(__dirname, '../backend/src/services/projectDatabase.js');
+  const workers = [];
+  try {
+    const setup = new ProjectDatabase(filename, { autoBackup: false });
+    let request;
+    try {
+      seed(setup, 'canvas-patch');
+      const input = patch({ id: 'creator-cross-entry-race-patch' });
+      const preview = setup.previewCanvasPatch('canvas-patch', input, {
+        actorId: 'local-owner',
+        sessionId: 'local-session',
+      });
+      request = { patch: input, previewDigest: preview.previewDigest };
+    } finally {
+      setup.close();
+    }
+
+    const gate = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT);
+    const workerSource = `
+      const { parentPort, workerData } = require('node:worker_threads');
+      const { ProjectDatabase } = require(workerData.modulePath);
+      const db = new ProjectDatabase(workerData.filename, {
+        autoBackup: false,
+        unsafeDisableOwnerGuardForTests: true,
+      });
+      parentPort.postMessage({ type: 'ready' });
+      Atomics.wait(new Int32Array(workerData.gate), 0, 0);
+      let message;
+      try {
+        const result = db.applyCanvasPatch('canvas-patch', workerData.request.patch, {
+          previewDigest: workerData.request.previewDigest,
+          confirmed: true,
+          actorId: workerData.actorId,
+          sessionId: workerData.sessionId,
+          allowExactDuplicateAcrossActors: true,
+        });
+        message = {
+          type: 'result',
+          ok: true,
+          duplicate: result.duplicate,
+          revision: result.revision,
+        };
+      } catch (error) {
+        message = {
+          type: 'result',
+          ok: false,
+          code: error && error.code,
+          message: String(error && error.message || ''),
+        };
+      } finally {
+        db.close();
+      }
+      parentPort.postMessage(message);
+      parentPort.close();
+    `;
+    const actors = [
+      { actorId: 'local-owner', sessionId: 'local-session' },
+      { actorId: 'codex-agent', sessionId: 'codex-session' },
+    ];
+    const workerEnv = {
+      ...process.env,
+      NODE_ENV: 'test',
+      T8_PROJECT_DATABASE_UNSAFE_TEST_WORKER: '1',
+    };
+    delete workerEnv.NODE_TEST_CONTEXT;
+    const ready = [];
+    const results = [];
+    for (const actor of actors) {
+      const worker = new Worker(workerSource, {
+        execArgv: [],
+        eval: true,
+        env: workerEnv,
+        workerData: {
+          modulePath,
+          filename,
+          gate,
+          request,
+          ...actor,
+        },
+      });
+      workers.push(worker);
+      ready.push(new Promise((resolve, reject) => {
+        const onMessage = (message) => {
+          if (message?.type !== 'ready') return;
+          worker.off('message', onMessage);
+          worker.off('error', reject);
+          resolve();
+        };
+        worker.on('message', onMessage);
+        worker.once('error', reject);
+      }));
+      results.push(new Promise((resolve, reject) => {
+        const onMessage = (message) => {
+          if (message?.type !== 'result') return;
+          worker.off('message', onMessage);
+          worker.off('error', reject);
+          resolve(message);
+        };
+        worker.on('message', onMessage);
+        worker.once('error', reject);
+      }));
+    }
+    await Promise.all(ready);
+    Atomics.store(new Int32Array(gate), 0, 1);
+    Atomics.notify(new Int32Array(gate), 0, actors.length);
+    const settled = await Promise.all(results);
+    assert.equal(settled.every((result) => result.ok), true, JSON.stringify(settled));
+    assert.deepEqual(settled.map((result) => result.duplicate).sort(), [false, true]);
+    assert.deepEqual([...new Set(settled.map((result) => result.revision))], [2]);
+    assert.equal(settled.some((result) => /SQLITE_BUSY|database is locked/i.test(result.message || '')), false);
+
+    const verified = new ProjectDatabase(filename, { autoBackup: false });
+    try {
+      assert.equal(verified.getCanvas('canvas-patch').revision, 2);
+      assert.equal(verified.db.prepare(
+        'SELECT COUNT(*) AS count FROM canvas_patch_applications WHERE canvas_id = ?',
+      ).get('canvas-patch').count, 1);
+      assert.equal(verified.db.prepare(
+        'SELECT COUNT(*) AS count FROM canvas_operations WHERE canvas_id = ?',
+      ).get('canvas-patch').count, 1);
+      assert.equal(verified.db.prepare(
+        "SELECT COUNT(*) AS count FROM audit_events WHERE canvas_id = ? AND action = 'canvas.patch.apply'",
+      ).get('canvas-patch').count, 1);
+      assert.equal(verified.db.pragma('quick_check', { simple: true }), 'ok');
+      assert.deepEqual(verified.db.pragma('foreign_key_check'), []);
+    } finally {
+      verified.close();
+    }
+  } finally {
+    await Promise.all(workers.map((worker) => worker.terminate().catch(() => null)));
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+
 test('the same patchId on two canvases derives distinct scoped operation ids instead of false deduplication', () => {
   const db = new ProjectDatabase(':memory:');
   try {

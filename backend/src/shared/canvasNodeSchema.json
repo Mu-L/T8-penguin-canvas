@@ -439,7 +439,8 @@
           "kinds": [
             "text",
             "image",
-            "audio"
+            "audio",
+            "video"
           ],
           "required": false,
           "minConnections": 0,
@@ -461,6 +462,26 @@
           "id": "audio-1",
           "kinds": [
             "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null,
+          "preferred": false
+        },
+        {
+          "id": "text",
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null,
+          "preferred": false
+        },
+        {
+          "id": "video",
+          "kinds": [
+            "video"
           ],
           "required": false,
           "minConnections": 0,
@@ -2451,38 +2472,53 @@
       "type": "audio",
       "label": "音频",
       "category": "core",
-      "description": "Suno V5.5 全模式(生成/翻唱/续写)",
+      "description": "Suno / Seed Audio 生成与 Whisper 语音转文字",
       "icon": "Music",
       "color": "violet",
       "ports": {
         "inputs": [
           "text",
           "image",
-          "audio"
+          "audio",
+          "video"
         ],
         "outputs": [
-          "audio"
+          "audio",
+          "text",
+          "video"
         ]
       },
       "executable": true,
       "generatable": true,
       "generation": {
         "allowedDataFields": {
+          "audioProviderMode": {
+            "type": "string",
+            "enum": ["suno", "seed-audio", "whisper"]
+          },
+          "whisperResponseFormat": {
+            "type": "string",
+            "enum": ["json", "verbose_json", "srt", "text", "vtt"]
+          },
           "reuseResult": {
             "type": "boolean"
           }
         },
         "defaults": {
+          "audioProviderMode": "suno",
+          "whisperResponseFormat": "json",
           "reuseResult": false
         },
         "connectionPorts": {
           "dynamic": false,
           "inputs": [
-            { "id": null, "kinds": ["text", "image", "audio"], "required": false, "minConnections": 0, "maxConnections": null }
+            { "id": null, "kinds": ["text", "image", "audio", "video"], "required": false, "minConnections": 0, "maxConnections": null }
           ],
           "outputs": [
             { "id": "audio-0", "kinds": ["audio"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": true },
-            { "id": "audio-1", "kinds": ["audio"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": false }
+            { "id": "audio-1", "kinds": ["audio"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": false },
+            { "id": "text", "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": false },
+            { "id": "video", "kinds": ["video"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": false }
           ]
         }
       }

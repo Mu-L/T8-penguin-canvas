@@ -4,6 +4,19 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const openaiCompatible = require('../backend/src/providers/openaiCompatible.js');
+const { providerSubmissionContextMiddleware } = require('../backend/src/services/providerSubmissionContext.js');
+
+function runWithSubmission<T>(key: string, callback: () => Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    providerSubmissionContextMiddleware({
+      get(name: string) {
+        return String(name).toLowerCase() === 'x-t8-provider-submission' ? key : '';
+      },
+    }, {}, () => {
+      Promise.resolve().then(callback).then(resolve, reject);
+    });
+  });
+}
 
 function jsonResponse(body: any, status = 200) {
   return {
@@ -52,6 +65,37 @@ test('OpenAI compatible chat posts to chat/completions and normalizes assistant 
   assert.equal(calls[0].body.temperature, 0.25);
 });
 
+test('OpenAI compatible writes inherit the lifecycle submission key without changing auth headers', async () => {
+  const calls: any[] = [];
+  const provider = {
+    id: 'custom-openai',
+    protocol: 'openai-compatible',
+    baseUrl: 'https://api.example.com/v1/',
+    apiKey: 'sk-secret',
+    chatModels: ['gpt-4o-mini'],
+  };
+
+  const result = await runWithSubmission('attempt-openai-0001', () => (
+    openaiCompatible.generateChat(provider, {
+      prompt: 'stable request',
+    }, {
+      fetchImpl: async (url: string, init: any) => {
+        calls.push({ url, init });
+        return jsonResponse({
+          choices: [
+            { message: { content: 'stable response' } },
+          ],
+        });
+      },
+    })
+  ));
+
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer sk-secret');
+  assert.equal(calls[0].init.headers['Idempotency-Key'], 'attempt-openai-0001');
+});
+
 test('OpenAI compatible chat preserves remote video_url multimodal parts', async () => {
   const calls: any[] = [];
   const provider = {
@@ -85,6 +129,70 @@ test('OpenAI compatible chat preserves remote video_url multimodal parts', async
   assert.equal(calls[0].body.messages[0].content[1].video_url.url, 'https://cdn.example.com/clip.mp4');
 });
 
+test('OpenAI compatible chat consumes upstream SSE deltas without replaying or trimming content', async () => {
+  const calls: any[] = [];
+  const deltas: string[] = [];
+  const provider = {
+    id: 'custom-openai',
+    protocol: 'openai-compatible',
+    baseUrl: 'https://api.example.com/v1',
+    apiKey: 'sk-secret',
+    chatModels: ['gpt-stream'],
+  };
+  const payload = [
+    'data: {"model":"gpt-stream","choices":[{"delta":{"content":"第一段"}}]}\r\n\r\n',
+    'data: {"choices":[{"delta":{"content":"，继续"}}]}\n\n',
+    'data: {"choices":[{"delta":{"content":"\\n第二行"}}]}\n\n',
+    'data: {"model":"gpt-stream","choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}\n\n',
+    'data: [DONE]\n\n',
+  ].join('');
+  const encoded = new TextEncoder().encode(payload);
+  const boundaries = [1, 7, 19, 34, 51, 93, 137, encoded.length];
+
+  const result = await openaiCompatible.generateChat(provider, {
+    prompt: 'stream it',
+    model: 'gpt-stream',
+    stream: true,
+  }, {
+    fetchImpl: async (url: string, init: any) => {
+      calls.push({ url, init, body: JSON.parse(init.body) });
+      let offset = 0;
+      return new Response(new ReadableStream<Uint8Array>({
+        pull(controller) {
+          const end = boundaries.shift();
+          if (end == null) {
+            controller.close();
+            return;
+          }
+          controller.enqueue(encoded.slice(offset, end));
+          offset = end;
+        },
+      }), {
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream; charset=utf-8',
+          'x-request-id': 'req-stream-1',
+        },
+      });
+    },
+    onDelta: async (delta: string) => {
+      deltas.push(delta);
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.kind, 'llm');
+  assert.equal(result.text, '第一段，继续\n第二行');
+  assert.deepEqual(deltas, ['第一段', '，继续', '\n第二行']);
+  assert.equal(result.model, 'gpt-stream');
+  assert.equal(result.finishReason, 'stop');
+  assert.equal(result.eventCount, 4);
+  assert.equal(result.requestId, 'req-stream-1');
+  assert.deepEqual(result.usage, { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].body.stream, true);
+  assert.equal(calls[0].init.headers.Accept, 'text/event-stream');
+});
 test('OpenAI compatible image generation normalizes url and b64_json results', async () => {
   const calls: any[] = [];
   const provider = {

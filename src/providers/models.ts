@@ -52,14 +52,65 @@ export const GPT_IMAGE_2_ZHENZHEN_SIZE_VARIANTS: Record<string, '2K' | '4K'> = {
 
 export const ZHENZHEN_IMAGE_G2_T2I_MODEL = 'zhenzhen-image-g2-t2i';
 export const ZHENZHEN_IMAGE_G2_I2I_MODEL = 'zhenzhen-image-g2-i2i';
+export const ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL = 'zhenzhen-image-g-v2-lowprice';
+export const ZHENZHEN_IMAGE_GK_V15_MODEL = 'zhenzhen-image-gk-v15';
+export const ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL = 'zhenzhen-image-gk-v15-edit';
+export const ZHENZHEN_IMAGE_NB_2_LITE_MODEL = 'zhenzhen-image-nb-2-lite';
+export const ZHENZHEN_IMAGE_NB_2_MODEL = 'zhenzhen-image-nb-2';
+export const ZHENZHEN_IMAGE_NB_PRO_MODEL = 'zhenzhen-image-nb-pro';
 export const ZHENZHEN_IMAGE_G2_MODELS = [
   ZHENZHEN_IMAGE_G2_T2I_MODEL,
   ZHENZHEN_IMAGE_G2_I2I_MODEL,
 ] as const;
+export const ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS = [
+  { value: ZHENZHEN_IMAGE_G2_T2I_MODEL, label: ZHENZHEN_IMAGE_G2_T2I_MODEL },
+  { value: ZHENZHEN_IMAGE_G2_I2I_MODEL, label: ZHENZHEN_IMAGE_G2_I2I_MODEL },
+  { value: ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL, label: ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL },
+] as const;
+export const ZHENZHEN_BUDGET_GROK_MODEL_OPTIONS = [
+  { value: ZHENZHEN_IMAGE_GK_V15_MODEL, label: ZHENZHEN_IMAGE_GK_V15_MODEL },
+  { value: ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL, label: ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL },
+] as const;
+export const ZHENZHEN_BUDGET_BANANA_2_MODEL_OPTIONS = [
+  { value: ZHENZHEN_IMAGE_NB_2_MODEL, label: ZHENZHEN_IMAGE_NB_2_MODEL },
+  { value: ZHENZHEN_IMAGE_NB_2_LITE_MODEL, label: ZHENZHEN_IMAGE_NB_2_LITE_MODEL },
+] as const;
+export const ZHENZHEN_BUDGET_BANANA_PRO_MODEL_OPTIONS = [
+  { value: ZHENZHEN_IMAGE_NB_PRO_MODEL, label: ZHENZHEN_IMAGE_NB_PRO_MODEL },
+] as const;
+export const ZHENZHEN_IMAGE_G2_MODEL_OPTIONS = ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS.slice(0, 2);
+export const ZHENZHEN_APIMART_IMAGE_MODELS = [
+  ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
+  ZHENZHEN_IMAGE_GK_V15_MODEL,
+  ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL,
+  ZHENZHEN_IMAGE_NB_2_LITE_MODEL,
+  ZHENZHEN_IMAGE_NB_2_MODEL,
+  ZHENZHEN_IMAGE_NB_PRO_MODEL,
+] as const;
+export const ZHENZHEN_BUDGET_IMAGE_MODELS = [
+  ...ZHENZHEN_IMAGE_G2_MODELS,
+  ...ZHENZHEN_APIMART_IMAGE_MODELS,
+] as const;
 export const ZHENZHEN_IMAGE_G2_RATIOS = ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'];
+export const ZHENZHEN_IMAGE_GK_V15_RATIOS = ['1:1', '16:9', '9:16', '3:2', '2:3'];
+export const ZHENZHEN_IMAGE_NB_STANDARD_RATIOS = [
+  '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9',
+];
+export const ZHENZHEN_IMAGE_NB_EXTREME_RATIOS = [
+  '1:1', '1:4', '1:8', '2:3', '3:2', '3:4', '4:1',
+  '4:3', '4:5', '5:4', '8:1', '9:16', '16:9', '21:9',
+];
 
 export function isZhenzhenImageG2Model(apiModel: string | undefined | null): boolean {
   return (ZHENZHEN_IMAGE_G2_MODELS as readonly string[]).includes(String(apiModel || '').trim());
+}
+
+export function isZhenzhenApimartImageModel(apiModel: string | undefined | null): boolean {
+  return (ZHENZHEN_APIMART_IMAGE_MODELS as readonly string[]).includes(String(apiModel || '').trim());
+}
+
+export function isZhenzhenBudgetImageModel(apiModel: string | undefined | null): boolean {
+  return (ZHENZHEN_BUDGET_IMAGE_MODELS as readonly string[]).includes(String(apiModel || '').trim());
 }
 
 export function gptImage2ZhenzhenVariantSize(apiModel: string | undefined | null): '2K' | '4K' | null {
@@ -80,8 +131,6 @@ export const IMAGE_MODELS: ImageModelDef[] = [
       { value: 'gpt-image-2', label: 'gpt-image-2' },
       { value: 'gpt-image-2-2K', label: 'gpt-image-2-2K' },
       { value: 'gpt-image-2-4K', label: 'gpt-image-2-4K' },
-      { value: ZHENZHEN_IMAGE_G2_T2I_MODEL, label: ZHENZHEN_IMAGE_G2_T2I_MODEL },
-      { value: ZHENZHEN_IMAGE_G2_I2I_MODEL, label: ZHENZHEN_IMAGE_G2_I2I_MODEL },
       { value: 'gpt-image-2-fal', label: 'gpt-image-2-fal' },
     ],
     aspectRatios: GPT_RATIOS,
@@ -430,14 +479,25 @@ export function grokVideo15NewSizeFromRatio(ratioOrSize: string): '1280x720' | '
   return '1280x720';
 }
 
+export type VideoBuiltinSource = 'zhenzhen' | 'seedance-nz';
+
+export interface VideoModelOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+  builtinSource?: VideoBuiltinSource;
+}
+
 export interface VideoModelDef {
   id: string;                // 节点默认 model 字段(也是上游真实 model)
   label: string;             // 主选项显示名
   kind: VideoKind;
   provider: ProviderType;
+  // 同一个 Tab 可以同时收录两套内置平台的模型；未标注时属于贞贞 AI 工坊。
+  builtinSource?: VideoBuiltinSource;
   description?: string;
   // 子模型下拉(参考项目 类似 gpt-image-2-web 的 g_model / veo_model / gk_model)
-  apiModelOptions: Array<{ value: string; label: string; disabled?: boolean }>;
+  apiModelOptions: VideoModelOption[];
   // 比例/尺寸 — 字段名上游各不同,这里只是 UI 选项
   ratios: string[];
   defaultRatio: string;
@@ -454,8 +514,29 @@ export interface VideoModelDef {
 }
 
 // Veo 系列子模型。第一项是切到 Veo 分类时的默认具体模型。
+export const ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL = 'zhenzhen-video-g-omni-flash';
+export const ZHENZHEN_VIDEO_GK_V15_MODEL = 'zhenzhen-video-gk-v15';
+export const ZHENZHEN_VIDEO_V31_FAST_MODEL = 'zhenzhen-video-v31-fast';
+export const ZHENZHEN_VIDEO_V31_QUALITY_MODEL = 'zhenzhen-video-v31-quality';
+export const ZHENZHEN_VIDEO_V31_LITE_MODEL = 'zhenzhen-video-v31-lite';
+export const ZHENZHEN_APIMART_VIDEO_MODELS = [
+  ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL,
+  ZHENZHEN_VIDEO_GK_V15_MODEL,
+  ZHENZHEN_VIDEO_V31_FAST_MODEL,
+  ZHENZHEN_VIDEO_V31_QUALITY_MODEL,
+  ZHENZHEN_VIDEO_V31_LITE_MODEL,
+] as const;
+
+export function isZhenzhenApimartVideoModel(apiModel: string | undefined | null): boolean {
+  return (ZHENZHEN_APIMART_VIDEO_MODELS as readonly string[]).includes(String(apiModel || '').trim());
+}
+
 const VEO_MODELS = [
   { value: 'veo-omni-10s', label: 'veo-omni-10s' },
+  { value: ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL, label: ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL, builtinSource: 'seedance-nz' as const },
+  { value: ZHENZHEN_VIDEO_V31_FAST_MODEL, label: ZHENZHEN_VIDEO_V31_FAST_MODEL, builtinSource: 'seedance-nz' as const },
+  { value: ZHENZHEN_VIDEO_V31_QUALITY_MODEL, label: ZHENZHEN_VIDEO_V31_QUALITY_MODEL, builtinSource: 'seedance-nz' as const },
+  { value: ZHENZHEN_VIDEO_V31_LITE_MODEL, label: ZHENZHEN_VIDEO_V31_LITE_MODEL, builtinSource: 'seedance-nz' as const },
   { value: 'veo3', label: 'veo3' },
   { value: 'veo3-fast', label: 'veo3-fast' },
   { value: 'veo3-pro', label: 'veo3-pro' },
@@ -482,6 +563,7 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     description: 'xAI Grok Video (最多 7 张参考图)',
     apiModelOptions: [
       { value: 'grok-video-3', label: 'grok-video-3（新版1.5）' },
+      { value: ZHENZHEN_VIDEO_GK_V15_MODEL, label: ZHENZHEN_VIDEO_GK_V15_MODEL, builtinSource: 'seedance-nz' },
       { value: 'grok-1.5-video-6s', label: 'grok-1.5-video-6s（Zhenzhen New）' },
       { value: 'grok-1.5-video-10s', label: 'grok-1.5-video-10s（Zhenzhen New）' },
       { value: 'grok-1.5-video-15s', label: 'grok-1.5-video-15s（Zhenzhen New）' },
@@ -538,6 +620,7 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     label: 'Wan',
     kind: 'wan',
     provider: 'zhenzhen',
+    builtinSource: 'seedance-nz',
     description: 'Wan 2.7 Spicy · 宽审核图生视频',
     apiModelOptions: [
       { value: 'wan-2.7-spicy-i2v', label: 'wan-2.7-spicy-i2v（图生视频）' },
@@ -556,6 +639,7 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     label: 'Happy Horse',
     kind: 'happyhorse',
     provider: 'zhenzhen',
+    builtinSource: 'seedance-nz',
     description: 'Happy Horse 1.1 · 文生/图生/参考图生视频',
     apiModelOptions: [
       { value: 'happyhorse-1.1-t2v', label: 'happyhorse-1.1-t2v（文生视频）' },
@@ -576,6 +660,7 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     label: 'Hailuo',
     kind: 'hailuo',
     provider: 'zhenzhen',
+    builtinSource: 'seedance-nz',
     description: 'Hailuo 2.3 · 文生/图生/Fast 图生视频',
     apiModelOptions: [
       { value: 'hailuo-2.3-t2v-standard', label: 'hailuo-2.3-t2v-standard（文生标准）' },
@@ -599,6 +684,7 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     label: 'Vidu',
     kind: 'vidu',
     provider: 'zhenzhen',
+    builtinSource: 'seedance-nz',
     description: 'Vidu Q3 · 文生/图生/首尾帧/参考生视频/短剧成片',
     apiModelOptions: [
       { value: 'vidu-q3-turbo-t2v', label: 'vidu-q3-turbo-t2v（文生 Turbo）' },
@@ -631,6 +717,7 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     label: 'Kling',
     kind: 'kling',
     provider: 'zhenzhen',
+    builtinSource: 'seedance-nz',
     description: 'Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑',
     apiModelOptions: [
       { value: 'kling-v3.0-std-t2v', label: 'kling-v3.0-std-t2v（文生标准）' },
@@ -669,6 +756,7 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     label: 'Upscaler',
     kind: 'upscaler',
     provider: 'zhenzhen',
+    builtinSource: 'seedance-nz',
     description: 'Zhenzhen Upscaler · 单个 MP4 视频高清化',
     apiModelOptions: [
       { value: 'zhenzhen-upscaler', label: 'zhenzhen-upscaler' },
@@ -698,6 +786,44 @@ export const VIDEO_MODELS: VideoModelDef[] = [
   },
 ];
 
+export function videoModelOptionSource(
+  model: VideoModelDef,
+  option: VideoModelOption,
+): VideoBuiltinSource {
+  return option.builtinSource || model.builtinSource || 'zhenzhen';
+}
+
+export function videoModelOptionsForSource(
+  model: VideoModelDef,
+  source: VideoBuiltinSource,
+): VideoModelOption[] {
+  return model.apiModelOptions.filter((option) => videoModelOptionSource(model, option) === source);
+}
+
+export function videoModelsForSource(source: VideoBuiltinSource): VideoModelDef[] {
+  return VIDEO_MODELS.filter(
+    (model) => model.kind !== 'seedance' && videoModelOptionsForSource(model, source).length > 0,
+  );
+}
+
+/**
+ * 兼容旧画布：旧数据只有 model，没有 videoBuiltinSource。
+ * 精确命中目录时恢复真实来源；未知模型交给调用方回退到贞贞 AI 工坊。
+ */
+export function inferVideoBuiltinSource(apiModel: unknown): VideoBuiltinSource | null {
+  const savedModel = String(apiModel || '').trim();
+  if (!savedModel) return null;
+  for (const model of VIDEO_MODELS) {
+    if (model.id === savedModel) {
+      const sources = new Set(model.apiModelOptions.map((option) => videoModelOptionSource(model, option)));
+      return sources.size === 1 ? Array.from(sources)[0] : model.builtinSource || 'zhenzhen';
+    }
+    const option = model.apiModelOptions.find((item) => item.value === savedModel);
+    if (option) return videoModelOptionSource(model, option);
+  }
+  return null;
+}
+
 // ========== 音频(Suno) ==========
 export interface AudioModelDef {
   id: string;
@@ -725,6 +851,143 @@ export const SUNO_VERSIONS: Array<{ value: string; label: string }> = [
   { value: 'v5.5', label: 'v5.5' },
 ];
 export const DEFAULT_SUNO_VERSION = 'v5.5';
+
+export type SunoNzOperation =
+  | 'suno-generation'
+  | 'suno-lyrics'
+  | 'suno-upload'
+  | 'suno-extend'
+  | 'suno-cover-song'
+  | 'suno-inspo'
+  | 'suno-mashup'
+  | 'suno-upsample-tags'
+  | 'suno-sounds'
+  | 'suno-create-voice'
+  | 'suno-stems'
+  | 'suno-stems-all'
+  | 'suno-wav'
+  | 'suno-generate-mp4'
+  | 'suno-concat'
+  | 'suno-crop'
+  | 'suno-fade-in'
+  | 'suno-fade-out'
+  | 'suno-remove-section'
+  | 'suno-replace-music'
+  | 'suno-adjust-speed'
+  | 'suno-remaster'
+  | 'suno-midi'
+  | 'suno-bpm'
+  | 'suno-aligned-lyrics'
+  | 'suno-persona'
+  | 'suno-vox'
+  | 'suno-sample'
+  | 'suno-add-vocals'
+  | 'suno-add-instrumental'
+  | 'suno-add-stem';
+
+export type SunoNzResultFamily = 'audio' | 'text' | 'video' | 'file';
+export type SunoNzReferenceType = 'none' | 'url' | 'task_audio' | 'mashup';
+export type SunoNzField =
+  | 'prompt'
+  | 'version'
+  | 'custom'
+  | 'instrumental'
+  | 'title'
+  | 'style'
+  | 'vocal_gender'
+  | 'tags'
+  | 'audioFilePath'
+  | 'audio_url'
+  | 'audio_urls'
+  | 'task_id'
+  | 'task_ids'
+  | 'audio_index'
+  | 'continue_at'
+  | 'start_s'
+  | 'end_s'
+  | 'duration_s'
+  | 'speed'
+  | 'name';
+
+export interface SunoNzActionDef {
+  value: SunoNzOperation;
+  label: string;
+  action: string;
+  requiredFields: readonly SunoNzField[];
+  allowedVersions: readonly string[];
+  defaultVersion?: string;
+  resultFamily: SunoNzResultFamily;
+  referenceType: SunoNzReferenceType;
+}
+
+export const SUNO_NZ_VERSIONS = ['v3.5', 'v4', 'v4.5', 'v4.5+', 'v4.5-all', 'v5', 'v5.5'] as const;
+const SUNO_NZ_INSPO_VERSIONS = ['v4', 'v4.5', 'v4.5+', 'v4.5-all', 'v5', 'v5.5'] as const;
+const SUNO_NZ_REPLACE_VERSIONS = ['v4', 'v4.5+', 'v5', 'v5.5'] as const;
+const SUNO_NZ_REMASTER_VERSIONS = ['v4.5+', 'v5', 'v5.5'] as const;
+const SUNO_NZ_V5_VERSIONS = ['v5', 'v5.5'] as const;
+
+const sunoNzAction = (
+  value: SunoNzOperation,
+  label: string,
+  requiredFields: readonly SunoNzField[],
+  resultFamily: SunoNzResultFamily,
+  referenceType: SunoNzReferenceType = 'none',
+  allowedVersions: readonly string[] = [],
+  defaultVersion?: string,
+): SunoNzActionDef => ({
+  value,
+  label,
+  action: value === 'suno-generation' ? '' : value.slice('suno-'.length),
+  requiredFields,
+  allowedVersions,
+  defaultVersion,
+  resultFamily,
+  referenceType,
+});
+
+/**
+ * api.seedance.nz 官方 Suno 31 项动作。
+ * 这里使用显式目录，前后端都不会根据用户输入拼接未知 action 路径。
+ */
+export const SUNO_NZ_ACTIONS: readonly SunoNzActionDef[] = [
+  sunoNzAction('suno-generation', '音乐生成', ['version', 'prompt'], 'audio', 'none', SUNO_NZ_VERSIONS),
+  sunoNzAction('suno-lyrics', '生成歌词', ['prompt'], 'text'),
+  sunoNzAction('suno-upload', '上传音频', ['audioFilePath'], 'audio', 'url'),
+  sunoNzAction('suno-extend', '续写', ['task_id', 'continue_at'], 'audio', 'task_audio', SUNO_NZ_VERSIONS, 'v5.5'),
+  sunoNzAction('suno-cover-song', '翻唱 / 换风格', ['task_id', 'prompt'], 'audio', 'task_audio', SUNO_NZ_VERSIONS, 'v5.5'),
+  sunoNzAction('suno-inspo', '灵感参考', ['audio_urls'], 'audio', 'url', SUNO_NZ_INSPO_VERSIONS, 'v5.5'),
+  sunoNzAction('suno-mashup', '双曲混合', ['task_ids', 'prompt'], 'audio', 'mashup', SUNO_NZ_VERSIONS, 'v5.5'),
+  sunoNzAction('suno-upsample-tags', '扩写风格标签', ['tags'], 'text'),
+  sunoNzAction('suno-sounds', '生成音效', ['prompt'], 'audio', 'none', SUNO_NZ_V5_VERSIONS, 'v5.5'),
+  sunoNzAction('suno-create-voice', '创建音色', ['audio_url'], 'text', 'url'),
+  sunoNzAction('suno-stems', '单分轨', ['task_id'], 'audio', 'task_audio'),
+  sunoNzAction('suno-stems-all', '全分轨', ['task_id'], 'audio', 'task_audio'),
+  sunoNzAction('suno-wav', '导出 WAV', ['task_id'], 'audio', 'task_audio'),
+  sunoNzAction('suno-generate-mp4', '生成 MP4 / MV', ['task_id'], 'video', 'task_audio'),
+  sunoNzAction('suno-concat', '拼接完整歌曲', ['task_id'], 'audio', 'task_audio'),
+  sunoNzAction('suno-crop', '裁剪', ['task_id', 'start_s', 'end_s'], 'audio', 'task_audio'),
+  sunoNzAction('suno-fade-in', '淡入', ['task_id', 'duration_s'], 'audio', 'task_audio'),
+  sunoNzAction('suno-fade-out', '淡出', ['task_id', 'duration_s'], 'audio', 'task_audio'),
+  sunoNzAction('suno-remove-section', '删除片段', ['task_id', 'start_s', 'end_s'], 'audio', 'task_audio'),
+  sunoNzAction('suno-replace-music', '替换片段', ['task_id', 'start_s', 'end_s'], 'audio', 'task_audio', SUNO_NZ_REPLACE_VERSIONS, 'v5.5'),
+  sunoNzAction('suno-adjust-speed', '调整速度', ['task_id', 'speed'], 'audio', 'task_audio'),
+  sunoNzAction('suno-remaster', '母带处理', ['task_id'], 'audio', 'task_audio', SUNO_NZ_REMASTER_VERSIONS, 'v5.5'),
+  sunoNzAction('suno-midi', '生成 MIDI', ['task_id'], 'file', 'task_audio'),
+  sunoNzAction('suno-bpm', '分析 BPM', ['task_id'], 'text', 'task_audio'),
+  sunoNzAction('suno-aligned-lyrics', '对齐歌词', ['task_id'], 'text', 'task_audio'),
+  sunoNzAction('suno-persona', '创建 Persona', ['task_id', 'name'], 'text', 'task_audio'),
+  sunoNzAction('suno-vox', '提取人声片段', ['task_id'], 'audio', 'task_audio'),
+  sunoNzAction('suno-sample', '采样生成', ['task_id', 'start_s', 'end_s', 'prompt'], 'audio', 'task_audio', SUNO_NZ_VERSIONS, 'v5.5'),
+  sunoNzAction('suno-add-vocals', '添加人声', ['task_id', 'prompt'], 'audio', 'task_audio', SUNO_NZ_V5_VERSIONS, 'v5.5'),
+  sunoNzAction('suno-add-instrumental', '添加伴奏', ['task_id', 'prompt'], 'audio', 'task_audio', SUNO_NZ_V5_VERSIONS, 'v5.5'),
+  sunoNzAction('suno-add-stem', '添加 Stem', ['task_id', 'prompt'], 'audio', 'task_audio', ['v5.5'], 'v5.5'),
+] as const;
+
+export const DEFAULT_SUNO_NZ_OPERATION: SunoNzOperation = 'suno-generation';
+
+export function getSunoNzActionDef(value: unknown): SunoNzActionDef {
+  return SUNO_NZ_ACTIONS.find((item) => item.value === value) || SUNO_NZ_ACTIONS[0];
+}
 
 // ========== LLM/Vision ==========
 // 完全对齐 gpt-image-2-web Chat Tab(index.html L1600 chat_model select)

@@ -163,6 +163,19 @@ function formatFpsValue(durationSeconds, frameCount) {
   return String(Number(fps.toFixed(6)));
 }
 
+function formatVideoTimecode(seconds) {
+  const totalMs = Math.max(0, Math.round(Number(seconds || 0) * 1000));
+  const hours = Math.floor(totalMs / 3_600_000);
+  const minutes = Math.floor((totalMs % 3_600_000) / 60_000);
+  const secs = Math.floor((totalMs % 60_000) / 1000);
+  const millis = totalMs % 1000;
+  return [
+    String(hours).padStart(2, '0'),
+    String(minutes).padStart(2, '0'),
+    `${String(secs).padStart(2, '0')}.${String(millis).padStart(3, '0')}`,
+  ].join(':');
+}
+
 function runFfmpeg(inputPath, outputPath, options = {}) {
   const ffmpeg = options.ffmpegPath || resolveBundledFfmpeg();
   const maxWidth = clampInt(options.videoMaxWidth, 128, 4096, DEFAULT_VIDEO_MAX_DIMENSION);
@@ -269,7 +282,12 @@ async function runFfmpegExtractFrames(inputPath, outputDir, options = {}) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (code === 0) resolve(pattern);
+      if (code === 0) resolve({
+        pattern,
+        durationSeconds,
+        frameCount,
+        frameIntervalSeconds: Number(fpsValue) > 0 ? 1 / Number(fpsValue) : null,
+      });
       else reject(new Error(`ffmpeg 抽帧失败(${code}): ${stderr.trim().slice(0, 600)}`));
     });
   }));
@@ -346,18 +364,32 @@ async function resolveVideoToLocalPath(value, options = {}) {
   return { path: '', cleanup: '' };
 }
 
-async function extractVideoFramesToDataUrls(value, options = {}) {
+async function extractVideoFramesWithTimingToDataUrls(value, options = {}) {
   const frameDir = fs.mkdtempSync(path.join(os.tmpdir(), 't8-llm-video-frames-'));
   let cleanupVideo = '';
   try {
     const resolved = await resolveVideoToLocalPath(value, options);
     cleanupVideo = resolved.cleanup || '';
     if (!resolved.path || !fs.existsSync(resolved.path)) return [];
-    await runFfmpegExtractFrames(resolved.path, frameDir, options);
+    const extraction = await runFfmpegExtractFrames(resolved.path, frameDir, options);
     const files = fs.readdirSync(frameDir)
       .filter((name) => /\.(jpe?g|png)$/i.test(name))
       .sort();
-    return files.map((name) => fileDataUrl(path.join(frameDir, name), 'image/jpeg'));
+    return files.map((name, index) => {
+      const rawTimestamp = Number(extraction?.frameIntervalSeconds) > 0
+        ? index * Number(extraction.frameIntervalSeconds)
+        : null;
+      const timestampSeconds = rawTimestamp == null
+        ? null
+        : Math.min(rawTimestamp, Math.max(0, Number(extraction?.durationSeconds) || rawTimestamp));
+      return {
+        url: fileDataUrl(path.join(frameDir, name), 'image/jpeg'),
+        index,
+        timestampSeconds,
+        timecode: timestampSeconds == null ? '' : formatVideoTimecode(timestampSeconds),
+        durationSeconds: Number(extraction?.durationSeconds) || null,
+      };
+    });
   } catch (e) {
     if (options.logFrameErrors) console.warn('[llmMedia] video frame extraction failed:', e?.message || e);
     return [];
@@ -367,6 +399,11 @@ async function extractVideoFramesToDataUrls(value, options = {}) {
       try { fs.rmSync(cleanupVideo, { force: true }); } catch {}
     }
   }
+}
+
+async function extractVideoFramesToDataUrls(value, options = {}) {
+  const frames = await extractVideoFramesWithTimingToDataUrls(value, options);
+  return frames.map((frame) => frame.url);
 }
 
 async function normalizeImageUrl(url, options = {}) {
@@ -429,15 +466,25 @@ async function videoPartToMessageParts(part, options = {}, index = 0) {
   if (typeof value !== 'string' || !value) return [part];
   const mode = normalizeVideoMode(options.videoMode);
   if (mode === 'frames') {
-    const frames = await extractVideoFramesToDataUrls(value, options);
+    const frames = await extractVideoFramesWithTimingToDataUrls(value, options);
     if (frames.length) {
       const label = index > 0 ? `视频 ${index + 1}` : '视频';
+      const durationSeconds = frames.find((frame) => Number(frame.durationSeconds) > 0)?.durationSeconds;
+      const timedParts = frames.flatMap((frame, frameIndex) => [
+        {
+          type: 'text',
+          text: frame.timecode
+            ? `${label}采样帧 ${frameIndex + 1}/${frames.length} · 约 ${frame.timecode}`
+            : `${label}采样帧 ${frameIndex + 1}/${frames.length} · 时间码未知`,
+        },
+        { type: 'image_url', image_url: { url: frame.url } },
+      ]);
       return [
         {
           type: 'text',
-          text: `以下是${label}按整段视频时间顺序均匀抽取的 ${frames.length} 张关键帧，请结合这些连续画面理解视频内容。`,
+          text: `以下是${label}按整段视频时间顺序均匀抽取的 ${frames.length} 张关键帧${durationSeconds ? `（视频时长约 ${formatVideoTimecode(durationSeconds)}）` : ''}。时间码均为采样近似值，不代表逐帧镜头边界；此模式不包含音轨。`,
         },
-        ...frames.map((frame) => ({ type: 'image_url', image_url: { url: frame } })),
+        ...timedParts,
       ];
     }
   }
@@ -514,6 +561,7 @@ async function normalizeLlmMessageMedia(messages, inputOrOptions = {}, maybeOpti
 module.exports = {
   DEFAULT_VIDEO_MAX_BYTES,
   extractVideoFramesToDataUrls,
+  extractVideoFramesWithTimingToDataUrls,
   normalizeLlmMessageMedia,
   resolveBundledFfmpeg,
   resolveBundledFfprobe,

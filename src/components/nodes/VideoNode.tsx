@@ -3,6 +3,16 @@ import { Handle, Position, useReactFlow, type NodeProps } from '@xyflow/react';
 import { AlertCircle, Loader2, Video as VideoIcon, Sparkles, Square, X } from 'lucide-react';
 import {
   VIDEO_MODELS,
+  inferVideoBuiltinSource,
+  isZhenzhenApimartVideoModel,
+  videoModelOptionsForSource,
+  videoModelsForSource,
+  type VideoBuiltinSource,
+  ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL,
+  ZHENZHEN_VIDEO_GK_V15_MODEL,
+  ZHENZHEN_VIDEO_V31_FAST_MODEL,
+  ZHENZHEN_VIDEO_V31_LITE_MODEL,
+  ZHENZHEN_VIDEO_V31_QUALITY_MODEL,
   GROK_VIDEO_1_5_NEW_SIZES,
   grokVideo15NewSizeFromRatio,
   isFalVideoModel,
@@ -33,6 +43,8 @@ import {
   queryVidu,
   submitWan,
   queryWan,
+  submitSeedance,
+  querySeedance,
   submitVideo,
   queryVideo,
   submitVideoFal,
@@ -152,7 +164,10 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     [advancedProviders, d?.providerSource, d?.providerId, d?.providerModel],
   );
   const isExternalSelected = providerSelection.available && providerSelection.providerSource !== 'zhenzhen';
-  const savedExternalMissing = !!d?.providerSource && d.providerSource !== 'zhenzhen' && !providerSelection.available;
+  const savedExternalMissing = !!d?.providerId
+    && !!d?.providerSource
+    && d.providerSource !== 'zhenzhen'
+    && !providerSelection.available;
   const externalModelOptions = providerSelection.provider
     ? advancedProviderModelOptions(providerSelection.provider, 'video')
     : [];
@@ -170,16 +185,54 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   // 主模型 id (对应 VIDEO_MODELS 项)
   const rawModel = typeof d?.model === 'string' ? d.model : '';
   const isLegacySora2Model = /^sora-2(?:-\d{4}-\d{2}-\d{2})?$/.test(rawModel);
-  const mainId = d?.mainId || (isLegacySora2Model ? 'sora-2' : (d?.model && VIDEO_MODELS.find((m) => m.id === d.model || m.apiModelOptions.some((o) => o.value === d.model))?.id)) || VIDEO_MODELS[0].id;
-  const modelDef = useMemo(() => VIDEO_MODELS.find((m) => m.id === mainId) || VIDEO_MODELS[0], [mainId]);
+  const savedModelDef = VIDEO_MODELS.find(
+    (model) => model.id === rawModel || model.apiModelOptions.some((option) => option.value === rawModel),
+  );
+  // 旧画布没有 videoBuiltinSource；根据已保存的真实模型恢复来源，避免升级后模型被静默切换。
+  const inferredBuiltinSource = inferVideoBuiltinSource(rawModel || d?.mainId);
+  const videoBuiltinSource: VideoBuiltinSource = d?.videoBuiltinSource === 'seedance-nz'
+    || d?.videoBuiltinSource === 'zhenzhen'
+    ? d.videoBuiltinSource
+    : d?.providerSource === 'seedance-nz' && !d?.providerId
+      ? 'seedance-nz'
+      : inferredBuiltinSource || 'zhenzhen';
+  const builtinVideoModels = useMemo(
+    () => videoModelsForSource(videoBuiltinSource),
+    [videoBuiltinSource],
+  );
+  const requestedMainId = d?.mainId
+    || (isLegacySora2Model ? 'sora-2' : savedModelDef?.id)
+    || builtinVideoModels[0]?.id
+    || VIDEO_MODELS[0].id;
+  const modelDef = useMemo(
+    () => builtinVideoModels.find((model) => model.id === requestedMainId)
+      || (savedModelDef && builtinVideoModels.find((model) => model.id === savedModelDef.id))
+      || builtinVideoModels[0]
+      || VIDEO_MODELS[0],
+    [builtinVideoModels, requestedMainId, savedModelDef],
+  );
+  const mainId = modelDef.id;
+  const builtinApiModelOptions = useMemo(
+    () => videoModelOptionsForSource(modelDef, videoBuiltinSource),
+    [modelDef, videoBuiltinSource],
+  );
   // 子模型(上游真实 model 名)
-  const apiModel: string = d?.model && modelDef.apiModelOptions.some((o) => o.value === d.model) ? d.model : modelDef.apiModelOptions[0].value;
+  const apiModel: string = rawModel && builtinApiModelOptions.some((option) => option.value === rawModel)
+    ? rawModel
+    : builtinApiModelOptions[0]?.value || modelDef.apiModelOptions[0].value;
   const isHappyHorse = !isExternalSelected && modelDef.kind === 'happyhorse';
   const isHailuo = !isExternalSelected && modelDef.kind === 'hailuo';
   const isKling = !isExternalSelected && modelDef.kind === 'kling';
   const isUpscaler = !isExternalSelected && modelDef.kind === 'upscaler';
   const isVidu = !isExternalSelected && modelDef.kind === 'vidu';
   const isWan = !isExternalSelected && modelDef.kind === 'wan';
+  const isApimartBudgetVideo = !isExternalSelected && isZhenzhenApimartVideoModel(apiModel);
+  const isApimartOmni = apiModel === ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL;
+  const isApimartGrok = apiModel === ZHENZHEN_VIDEO_GK_V15_MODEL;
+  const isApimartV31Fast = apiModel === ZHENZHEN_VIDEO_V31_FAST_MODEL;
+  const isApimartV31Quality = apiModel === ZHENZHEN_VIDEO_V31_QUALITY_MODEL;
+  const isApimartV31Lite = apiModel === ZHENZHEN_VIDEO_V31_LITE_MODEL;
+  const isApimartV31 = isApimartV31Fast || isApimartV31Quality || isApimartV31Lite;
   const happyHorseMode = apiModel.endsWith('-i2v') ? 'i2v' : apiModel.endsWith('-r2v') ? 'r2v' : 't2v';
   const hailuoMode = apiModel.includes('-i2v') ? 'i2v' : 't2v';
   const klingMode = apiModel.endsWith('-edit')
@@ -200,11 +253,27 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           : 't2v';
   const isViduUpstreamUnavailable = isVidu && (viduMode === 'r2v' || viduMode === 'short-play');
   const isKlingUpstreamUnavailable = isKling && ['kling-o3-std-r2v', 'kling-o3-pro-r2v'].includes(apiModel);
-  const isSeedanceNzVideo = isWan || isHailuo || isKling || isUpscaler || isVidu || isHappyHorse;
+  const isSeedanceNzVideo = !isExternalSelected && videoBuiltinSource === 'seedance-nz';
   // 各参数(跳过着调用 update 默认值)
-  const ratio: string = d?.ratio || modelDef.defaultRatio;
-  const duration: number = d?.duration ?? modelDef.defaultDuration ?? (modelDef.durations?.[0] || 0);
-  const resolution: string = d?.resolution || (isJimengSeedanceSelected ? '720p' : modelDef.defaultResolution || '');
+  const apimartRatioOptions = isApimartGrok
+    ? ['16:9', '9:16', '1:1', '3:2', '2:3']
+    : ['16:9', '9:16'];
+  const rawRatio: string = d?.ratio || modelDef.defaultRatio;
+  const ratio: string = isApimartBudgetVideo && !apimartRatioOptions.includes(rawRatio) ? '16:9' : rawRatio;
+  const rawDuration: number = d?.duration ?? modelDef.defaultDuration ?? (modelDef.durations?.[0] || 0);
+  const duration: number = isApimartV31
+    ? 8
+    : isApimartGrok
+      ? Math.max(6, Math.min(30, Number(rawDuration) || 6))
+      : isApimartOmni ? 0 : rawDuration;
+  const rawResolution: string = d?.resolution || (isJimengSeedanceSelected ? '720p' : modelDef.defaultResolution || '');
+  const resolution: string = isApimartOmni
+    ? '720p'
+    : isApimartV31 && !['720p', '1080p', '4k'].includes(rawResolution.toLowerCase())
+      ? '720p'
+      : isApimartGrok && !['480p', '720p'].includes(rawResolution.toLowerCase())
+        ? '720p'
+        : isApimartBudgetVideo ? rawResolution.toLowerCase() : rawResolution;
   const hailuoDuration: 6 | 10 = resolution === '1080p' ? 6 : Number(duration) === 10 ? 10 : 6;
   const klingDuration: 5 | 10 = Number(duration) === 10 ? 10 : 5;
   const klingNegativePrompt: string = typeof d?.klingNegativePrompt === 'string' ? d.klingNegativePrompt : '';
@@ -249,6 +318,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     ? ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
     : isAgnesExternalSelected
     ? ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
+    : isApimartBudgetVideo
+    ? apimartRatioOptions
     : isGrok15New
     ? ['16:9', '9:16']
     : modelDef.ratios;
@@ -256,6 +327,12 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     ? [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     : isAgnesExternalSelected
     ? [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 18]
+    : isApimartOmni
+    ? []
+    : isApimartV31
+    ? [8]
+    : isApimartGrok
+    ? Array.from({ length: 25 }, (_, index) => index + 6)
     : isGrok15New
     ? []
     : isHailuo && resolution === '1080p'
@@ -269,6 +346,12 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         : ['720p']
     : isAgnesExternalSelected
     ? ['480p', '720p', '1080p']
+    : isApimartOmni
+    ? ['720p']
+    : isApimartV31
+    ? ['720p', '1080p', '4k']
+    : isApimartGrok
+    ? ['480p', '720p']
     : isGrok15New
     ? []
     : modelDef.resolutions || [];
@@ -390,6 +473,16 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       ? hailuoMode === 't2v' ? 0 : 1
       : isHappyHorse
       ? happyHorseMode === 't2v' ? 0 : happyHorseMode === 'i2v' ? 1 : 9
+      : isApimartOmni
+      ? 16
+      : isApimartGrok
+      ? 7
+      : isApimartV31Fast
+      ? 3
+      : isApimartV31Quality
+      ? 2
+      : isApimartV31Lite
+      ? 0
       : isVeoOmni
       ? 1
       : isGrok15New
@@ -404,6 +497,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   const maxMentionVideos = isUpscaler
     ? 1
     : isKling && klingMode === 'edit'
+    ? 1
+    : isApimartOmni
     ? 1
     : isJimengSeedanceSelected ? JIMENG_SEEDANCE_LIMITS.videos : 0;
   const maxMentionAudios = isJimengSeedanceSelected ? JIMENG_SEEDANCE_LIMITS.audios : 0;
@@ -420,12 +515,14 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   const previewGroups = useMemo<ReadonlyArray<'text' | 'image' | 'video' | 'audio'>>(
     () => (modelDef.kind === 'seedance' || isJimengSeedanceSelected
       ? ['text', 'image', 'video', 'audio']
+      : isApimartOmni
+        ? ['text', 'image', 'video']
       : isUpscaler
         ? ['video']
       : isKling && klingMode === 'edit'
         ? ['text', 'video']
         : ['text', 'image']),
-    [modelDef.kind, isJimengSeedanceSelected, isUpscaler, isKling, klingMode],
+    [modelDef.kind, isJimengSeedanceSelected, isApimartOmni, isUpscaler, isKling, klingMode],
   );
 
   // 收集上游 prompt + 参考图/视频/音频 (按用户拖拽顺序), 合并本地拖入素材
@@ -489,16 +586,48 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
 
   // 切主模型时重置所有参数为该模型默认值(避免跨模型参数遗留)
   const switchMainModel = (nextId: string) => {
-    const def = VIDEO_MODELS.find((m) => m.id === nextId) || VIDEO_MODELS[0];
-    const nextModel = def.apiModelOptions[0].value;
+    const def = builtinVideoModels.find((model) => model.id === nextId) || builtinVideoModels[0] || VIDEO_MODELS[0];
+    const nextModel = videoModelOptionsForSource(def, videoBuiltinSource)[0]?.value || def.apiModelOptions[0].value;
     update({
       mainId: def.id,
       model: nextModel,
+      videoBuiltinSource,
       ratio: def.defaultRatio,
       duration: def.defaultDuration ?? def.durations?.[0],
       resolution: def.defaultResolution || '',
       ...(nextModel === 'grok-imagine-video-1.5' ? { gkfMode: 'image_to_video' } : {}),
       ...(isGrokVideo15NewModel(nextModel) ? { ratio: '16:9', resolution: '' } : {}),
+      ...(nextModel.startsWith('vidu-q3-') ? { viduSeed: -1 } : {}),
+    });
+  };
+
+  const switchBuiltinVideoSource = (nextSource: VideoBuiltinSource) => {
+    const nextModels = videoModelsForSource(nextSource);
+    const nextDef = nextModels.find((model) => model.id === modelDef.id) || nextModels[0] || VIDEO_MODELS[0];
+    const nextModel = videoModelOptionsForSource(nextDef, nextSource)[0]?.value || nextDef.apiModelOptions[0].value;
+    update({
+      providerSource: 'zhenzhen',
+      providerId: '',
+      providerModel: '',
+      videoBuiltinSource: nextSource,
+      mainId: nextDef.id,
+      model: nextModel,
+      ratio: nextDef.defaultRatio,
+      duration: nextDef.defaultDuration ?? nextDef.durations?.[0],
+      resolution: nextDef.defaultResolution || '',
+      ...(nextModel === ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL
+        ? { ratio: '16:9', duration: 0, resolution: '720p' }
+        : {}),
+      ...(nextModel === ZHENZHEN_VIDEO_GK_V15_MODEL
+        ? { ratio: '16:9', duration: 6, resolution: '720p' }
+        : {}),
+      ...(nextModel === ZHENZHEN_VIDEO_V31_FAST_MODEL
+        || nextModel === ZHENZHEN_VIDEO_V31_QUALITY_MODEL
+        || nextModel === ZHENZHEN_VIDEO_V31_LITE_MODEL
+        ? { ratio: '16:9', duration: 8, resolution: '720p' }
+        : {}),
+      ...(nextModel === 'grok-imagine-video-1.5' ? { gkfMode: 'image_to_video' } : {}),
+      ...(isGrokVideo15NewModel(nextModel) ? { ratio: '16:9', size: '1280x720', resolution: '' } : {}),
       ...(nextModel.startsWith('vidu-q3-') ? { viduSeed: -1 } : {}),
     });
   };
@@ -547,6 +676,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
               ? await queryVidu(tid)
             : isHappyHorse
               ? await queryHappyHorse(tid)
+            : isApimartBudgetVideo
+              ? await querySeedance(tid, 'seedance-nz')
               : await queryVideo(tid, apiModel);
           const normalizedStatus = String(r.status || '').trim().toUpperCase();
           const currentProgress = String(r.progress ?? '');
@@ -555,7 +686,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             model: apiModel,
             taskId: tid,
             recovery: {
-              kind: isWan ? 'wan' : isHailuo ? 'hailuo' : isKling ? 'kling' : isUpscaler ? 'upscaler' : isVidu ? 'vidu' : isHappyHorse ? 'happyhorse' : 'video',
+              kind: isWan ? 'wan' : isHailuo ? 'hailuo' : isKling ? 'kling' : isUpscaler ? 'upscaler' : isVidu ? 'vidu' : isHappyHorse ? 'happyhorse' : isApimartBudgetVideo ? 'seedance' : 'video',
               taskId: tid, model: apiModel, pollIntervalMs: POLL_INT, maxPolls: MAX,
             },
             requestId: r.requestId,
@@ -795,6 +926,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       && !(isHailuo && hailuoMode === 'i2v')
       && !(isKling && klingMode === 'i2v')
       && !(isVidu && !['t2v', 'short-play'].includes(viduMode))
+      && !(isApimartOmni && (imageUrls.length > 0 || videoUrls.length > 0))
     ) {
       setError('未连接 text 节点也未填写 prompt');
       logBus.error('生成中止: 缺少 prompt', src);
@@ -929,7 +1061,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           providerParams: isJimengSeedanceSelected
             ? { ...providerParams, frameMode: jimengSeedanceMode }
             : providerParams,
-        });
+        }, { submissionKey: reporter?.providerSubmissionKey });
         if (!isCurrentGenerationRun(runId)) return;
         const nextVideoUrl = r.videoUrls[0];
         if (!nextVideoUrl) throw new Error('扩展平台没有返回视频。');
@@ -976,6 +1108,47 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         return;
       }
 
+      if (isApimartBudgetVideo) {
+        const apimartImages = imageUrls.slice(0, maxMentionRefs);
+        const apimartVideos = isApimartOmni ? videoUrls.slice(0, 1) : [];
+        logBus.info(
+          `提交平价AI小屋视频: ${apiModel} · ${isApimartOmni ? '时长由模型决定' : `${duration}s`} · ${resolution} · ${ratio} · 图${apimartImages.length}/视${apimartVideos.length}`,
+          src,
+        );
+        const result = await submitSeedance({
+          model: apiModel,
+          prompt: finalPrompt,
+          duration: isApimartOmni ? undefined : duration,
+          ratio,
+          resolution,
+          refImages: apimartImages.length ? apimartImages : undefined,
+          videos: apimartVideos.length ? apimartVideos : undefined,
+          taskProvider: 'seedance-nz',
+        }, { submissionKey: reporter?.providerSubmissionKey });
+        if (!isCurrentGenerationRun(runId)) return;
+        await reporter?.providerSubmitted({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: result.taskId,
+          requestId: result.requestId,
+          transportHttpStatus: result.transportHttpStatus,
+          upstreamHttpStatus: result.upstreamHttpStatus,
+          usage: result.usage,
+          httpStatusSource: 'local-backend',
+        });
+        update({
+          status: 'polling',
+          taskId: result.taskId,
+          lastPrompt: finalPrompt,
+          progress: '0%',
+          provider: 'seedance-nz',
+          apiModel,
+        });
+        logBus.info(`平价AI小屋视频任务 ${result.taskId} 已提交，开始轮询`, src);
+        await startPolling(result.taskId, runId, reporter);
+        return;
+      }
+
       if (isWan) {
         const firstImage = imageUrls[0];
         logBus.info(
@@ -992,7 +1165,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           audioUrl: wanAudioUrl.trim() || undefined,
           promptExtend: wanPromptExtend,
           seed: wanSeed,
-        });
+        }, { submissionKey: reporter?.providerSubmissionKey });
         if (!isCurrentGenerationRun(runId)) return;
         await reporter?.providerSubmitted({
           provider: traceProvider,
@@ -1023,7 +1196,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           ratio,
           resolution: resolution === '1080p' ? '1080p' : '768p',
           images: hailuoImages.length ? hailuoImages : undefined,
-        });
+        }, { submissionKey: reporter?.providerSubmissionKey });
         if (!isCurrentGenerationRun(runId)) return;
         await reporter?.providerSubmitted({
           provider: traceProvider,
@@ -1061,7 +1234,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
                 negativePrompt: klingNegativePrompt.trim() || undefined,
                 images: klingImages.length ? klingImages : undefined,
               }),
-        });
+        }, { submissionKey: reporter?.providerSubmissionKey });
         if (!isCurrentGenerationRun(runId)) return;
         await reporter?.providerSubmitted({
           provider: traceProvider,
@@ -1088,7 +1261,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           model: 'zhenzhen-upscaler',
           resolution: targetResolution,
           videos: [videoUrls[0]],
-        });
+        }, { submissionKey: reporter?.providerSubmissionKey });
         if (!isCurrentGenerationRun(runId)) return;
         await reporter?.providerSubmitted({
           provider: traceProvider,
@@ -1131,7 +1304,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
                 assetDescription: viduAssetDescription.trim(),
               }
             : {}),
-        });
+        }, { submissionKey: reporter?.providerSubmissionKey });
         if (!isCurrentGenerationRun(runId)) return;
         await reporter?.providerSubmitted({
           provider: traceProvider,
@@ -1164,7 +1337,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           ratio,
           resolution: (resolution === '1080p' ? '1080p' : '720p'),
           images: happyImages.length ? happyImages : undefined,
-        });
+        }, { submissionKey: reporter?.providerSubmissionKey });
         if (!isCurrentGenerationRun(runId)) return;
         await reporter?.providerSubmitted({
           provider: traceProvider,
@@ -1250,7 +1423,9 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           src,
         );
 
-        const r = await submitVideoFal(falReq);
+        const r = await submitVideoFal(falReq, {
+          submissionKey: reporter?.providerSubmissionKey,
+        });
         if (!isCurrentGenerationRun(runId)) return;
         if (r.sync && r.videoUrl) {
           await reporter?.providerResponse({
@@ -1361,7 +1536,9 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         src,
       );
 
-      const r = await submitVideo(payload);
+      const r = await submitVideo(payload, {
+        submissionKey: reporter?.providerSubmissionKey,
+      });
       if (!isCurrentGenerationRun(runId)) return;
       await reporter?.providerSubmitted({
         provider: traceProvider,
@@ -1436,6 +1613,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         ? maxMentionRefs
         : isHappyHorse
         ? maxMentionRefs
+        : isApimartBudgetVideo
+        ? maxMentionRefs
         : isGrok15New
           ? 1
           : isJimengSeedanceSelected
@@ -1443,9 +1622,9 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             : (modelDef.maxRefImages || 7) + 4;
       if (cur.length >= cap) return;
       update({ localRefImages: [...cur, payload.url] });
-    } else if (payload.kind === 'video' && payload.url && (isJimengSeedanceSelected || isUpscaler || (isKling && klingMode === 'edit'))) {
+    } else if (payload.kind === 'video' && payload.url && (isJimengSeedanceSelected || isApimartOmni || isUpscaler || (isKling && klingMode === 'edit'))) {
       const cur = Array.isArray(d?.localRefVideos) ? d.localRefVideos : [];
-      const cap = isUpscaler || (isKling && klingMode === 'edit') ? 1 : JIMENG_SEEDANCE_LIMITS.videos;
+      const cap = isUpscaler || isApimartOmni || (isKling && klingMode === 'edit') ? 1 : JIMENG_SEEDANCE_LIMITS.videos;
       if (cur.indexOf(payload.url) !== -1 || cur.length >= cap) return;
       update({ localRefVideos: [...cur, payload.url] });
     } else if (payload.kind === 'audio' && payload.url && isJimengSeedanceSelected) {
@@ -1460,6 +1639,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     id,
     accepts: isJimengSeedanceSelected
       ? ['image', 'video', 'audio', 'text']
+      : isApimartOmni ? ['image', 'video', 'text']
+      : isApimartV31Lite ? ['text']
       : isUpscaler ? ['video']
       : isKling && klingMode === 'edit' ? ['video', 'text'] : ['image', 'text'],
     onDrop: handleDrop,
@@ -1487,6 +1668,10 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     ? happyHorseMode === 't2v'
       ? '上游素材 · 当前模型不使用参考图'
       : `上游素材 · 参考图 ${Math.min(refsCount, maxMentionRefs)}/${maxMentionRefs}`
+    : isApimartOmni
+    ? `上游素材 · 图片 ${Math.min(refsCount, 16)}/16 · 视频 ${Math.min(videoRefsCount, 1)}/1`
+    : isApimartBudgetVideo
+    ? `上游素材 · 参考图 ${Math.min(refsCount, maxMentionRefs)}/${maxMentionRefs}`
     : isJimengSeedanceSelected
     ? `上游素材 · 图${Math.min(refsCount, jimengImageLimit)}/${jimengImageLimit} 视${Math.min(videoRefsCount, JIMENG_SEEDANCE_LIMITS.videos)}/${JIMENG_SEEDANCE_LIMITS.videos} 音${Math.min(audioRefsCount, JIMENG_SEEDANCE_LIMITS.audios)}/${JIMENG_SEEDANCE_LIMITS.audios}`
     : `上游素材 · 参考图 ${Math.min(refsCount, maxMentionRefs)}/${maxMentionRefs}`;
@@ -1518,6 +1703,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           <div className="text-[10px] text-white/40">
             {isExternalSelected && providerSelection.provider
               ? `${providerSelection.provider.label || providerSelection.provider.id} · ${externalProviderModel || '未选模型'}`
+              : isSeedanceNzVideo
+                ? `贞贞的平价AI小屋 · ${apiModel}`
               : `${modelDef.label} · ${modelDef.kind}`}
           </div>
         </div>
@@ -1525,26 +1712,39 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       </div>
 
       <div className="p-2.5 space-y-2" onMouseDown={(e) => e.stopPropagation()}>
-        {videoAdvancedProviders.length > 0 && (
-          <div className="rounded border border-white/10 bg-white/[0.03] p-2 space-y-2">
+        <div className="rounded border border-white/10 bg-white/[0.03] p-2 space-y-2">
             <button
               type="button"
               onClick={() => update({ advancedProviderOpen: !d?.advancedProviderOpen })}
               className="w-full flex items-center justify-between text-[10px] font-semibold text-white/70 hover:text-white"
             >
               <span>高级来源</span>
-              <span>{isExternalSelected && providerSelection.provider ? providerSelection.provider.label : '默认视频接口'}</span>
+              <span>
+                {isExternalSelected && providerSelection.provider
+                  ? providerSelection.provider.label
+                  : videoBuiltinSource === 'seedance-nz'
+                    ? '贞贞的平价AI小屋'
+                    : '贞贞的AI工坊'}
+              </span>
             </button>
             {d?.advancedProviderOpen && (
               <div className="space-y-2">
                 <div>
                   <label className="text-[10px] text-white/50 block mb-1">平台</label>
                   <select
-                    value={isExternalSelected ? providerSelection.providerId : 'zhenzhen'}
+                    value={isExternalSelected
+                      ? providerSelection.providerId
+                      : videoBuiltinSource === 'seedance-nz'
+                        ? 'builtin:seedance-nz'
+                        : 'zhenzhen'}
                     onChange={(e) => {
                       const nextId = e.target.value;
                       if (nextId === 'zhenzhen') {
-                        update({ providerSource: 'zhenzhen', providerId: '', providerModel: '' });
+                        switchBuiltinVideoSource('zhenzhen');
+                        return;
+                      }
+                      if (nextId === 'builtin:seedance-nz') {
+                        switchBuiltinVideoSource('seedance-nz');
                         return;
                       }
                       const provider = videoAdvancedProviders.find((item) => item.id === nextId);
@@ -1568,7 +1768,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
                     style={{ background: '#18181b', color: '#ffffff' }}
                     className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
                   >
-                    <option value="zhenzhen" style={{ background: '#18181b', color: '#ffffff' }}>贞贞工坊（默认）</option>
+                    <option value="zhenzhen" style={{ background: '#18181b', color: '#ffffff' }}>贞贞的AI工坊（默认）</option>
+                    <option value="builtin:seedance-nz" style={{ background: '#18181b', color: '#ffffff' }}>贞贞的平价AI小屋</option>
                     {videoAdvancedProviders.map((provider) => (
                       <option key={provider.id} value={provider.id} style={{ background: '#18181b', color: '#ffffff' }}>
                         {provider.label || provider.id}
@@ -1607,8 +1808,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
                 )}
               </div>
             )}
-          </div>
-        )}
+        </div>
 
         {/* 主模型 */}
         {!isExternalSelected && (
@@ -1619,7 +1819,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             onChange={(e) => switchMainModel(e.target.value)}
             className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-white/30"
           >
-            {VIDEO_MODELS.filter((m) => m.kind !== 'seedance').map((m) => (
+            {builtinVideoModels.map((m) => (
               <option key={m.id} value={m.id} className="bg-zinc-900">{m.label}</option>
             ))}
           </select>
@@ -1627,7 +1827,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         )}
 
         {/* 子模型(主项目 veo_model / gk_model) */}
-        {!isExternalSelected && modelDef.apiModelOptions.length > 1 && (
+        {!isExternalSelected && builtinApiModelOptions.length > 1 && (
           <div>
             <label className="text-[10px] text-white/50 block mb-1">具体模型</label>
             <select
@@ -1640,6 +1840,17 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
                   ...(isGrokVideo15NewModel(nextModel) ? { ratio: '16:9', size: '1280x720', resolution: '' } : {}),
                    ...(nextModel === 'sora-2-zhenzhen' ? { ratio: '16:9', duration: 15, resolution: '' } : {}),
                    ...(nextModel === 'veo-omni-10s' ? { ratio: '16:9', duration: 10, resolution: '' } : {}),
+                   ...(nextModel === ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL
+                     ? { ratio: '16:9', duration: 0, resolution: '720p' }
+                     : {}),
+                   ...(nextModel === ZHENZHEN_VIDEO_GK_V15_MODEL
+                     ? { ratio: '16:9', duration: 6, resolution: '720p' }
+                     : {}),
+                   ...(nextModel === ZHENZHEN_VIDEO_V31_FAST_MODEL
+                     || nextModel === ZHENZHEN_VIDEO_V31_QUALITY_MODEL
+                     || nextModel === ZHENZHEN_VIDEO_V31_LITE_MODEL
+                     ? { ratio: '16:9', duration: 8, resolution: '720p' }
+                     : {}),
                    ...(nextModel.endsWith('-short-play')
                      ? { ratio: '9:16', duration: 8, resolution: '1080p' }
                      : nextModel.startsWith('vidu-q3-')
@@ -1649,7 +1860,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
               }}
               className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-white/30"
             >
-              {modelDef.apiModelOptions.map((o) => (
+              {builtinApiModelOptions.map((o) => (
                 <option key={o.value} value={o.value} disabled={o.disabled} className="bg-zinc-900">{o.label}</option>
               ))}
             </select>
@@ -1662,13 +1873,13 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           data={d}
           update={update}
           context={{
-            providerSource: isExternalSelected ? providerSelection.providerSource : 'zhenzhen',
+            providerSource: isExternalSelected ? providerSelection.providerSource : (isSeedanceNzVideo ? 'seedance-nz' : 'zhenzhen'),
             providerId: providerSelection.providerId,
             providerModel: isExternalSelected ? externalProviderModel : apiModel,
             model: apiModel,
             apiModel,
             mainId,
-            providerKind: isFal ? 'fal' : modelDef.kind,
+            providerKind: isFal ? 'fal' : (isSeedanceNzVideo ? 'seedance-nz-video' : modelDef.kind),
           }}
         />
 
@@ -1890,7 +2101,24 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
               : happyHorseMode === 'i2v'
                 ? '图生视频必须有参考图，只取排序后的第 1 张作为首图。'
                 : '参考图生视频需要 1-9 张图，可在提示词中使用“图1 / 图2”指代。'}
-            <div className="mt-1 text-white/35">贞贞的平价AI工坊（国内） · 3-15 秒 · 720p / 1080p</div>
+            <div className="mt-1 text-white/35">贞贞的平价AI小屋 · 3-15 秒 · 720p / 1080p</div>
+          </div>
+        )}
+
+        {isApimartBudgetVideo && (
+          <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.06] px-2 py-1.5 text-[10px] leading-relaxed text-white/55">
+            <div>贞贞的平价AI小屋 · {apiModel}</div>
+            <div className="mt-1 text-white/40">
+              {isApimartOmni
+                ? 'Omni Flash：时长由模型决定，固定 720p；支持 Prompt、最多 16 张图片，或 1 个参考视频。'
+                : isApimartGrok
+                  ? 'Grok Video 1.5：6–30 秒，480p / 720p，最多 7 张参考图。'
+                  : isApimartV31Fast
+                    ? 'Veo 3.1 Fast：固定 8 秒，720p / 1080p / 4K，最多 3 张参考图。'
+                    : isApimartV31Quality
+                      ? 'Veo 3.1 Quality：固定 8 秒，720p / 1080p / 4K；最多 2 张参考图，避免进入不支持的 3 图 reference 模式。'
+                      : 'Veo 3.1 Lite：纯文生视频，固定 8 秒，支持 720p / 1080p / 4K，不接受参考图或参考视频。'}
+            </div>
           </div>
         )}
 
@@ -1949,7 +2177,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           <div className="rounded border border-orange-300/20 bg-orange-400/[0.06] p-2 space-y-2">
             <div className="text-[10px] leading-relaxed text-white/60">
               Wan 2.7 Spicy 仅支持图生视频，必须提供 1 张首帧图；提示词可选。
-              <div className="mt-1 text-white/35">贞贞的平价AI工坊 · 海外模型 · 2-15 秒 · 720p / 1080p</div>
+              <div className="mt-1 text-white/35">贞贞的平价AI小屋 · 海外模型 · 2-15 秒 · 720p / 1080p</div>
             </div>
             <div>
               <label className="text-[10px] text-white/50 block mb-1">反向提示词（可选）</label>
@@ -2352,7 +2580,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         )}
 
         {/* veo 专用选项(非FAL) */}
-        {!isExternalSelected && !isFal && modelDef.kind === 'veo' && !isVeoOmni && (
+        {!isExternalSelected && !isFal && modelDef.kind === 'veo' && !isVeoOmni && !isApimartBudgetVideo && (
           <div className="grid grid-cols-2 gap-1.5">
             <label className="flex items-center gap-1 text-[10px] text-white/60 cursor-pointer">
               <input
@@ -2376,7 +2604,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         )}
 
         {/* Seed(非FAL) */}
-        {showGenericVideoControls && !isHappyHorse && !isKling && !isUpscaler && !isWan && (
+        {showGenericVideoControls && !isHappyHorse && !isKling && !isUpscaler && !isWan && !isApimartBudgetVideo && (
         <div>
           <label className="text-[10px] text-white/50 block mb-1">Seed (0=随机)</label>
           <input
@@ -2391,7 +2619,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         )}
 
         {/* 上游素材聚合预览区 (代替原「参考图(上游)」计数提示) */}
-        {(modelDef.supportImages || modelDef.supportVideos) && (
+        {(modelDef.supportImages || modelDef.supportVideos) && !isApimartV31Lite && (
           <MaterialPreviewSection
             texts={orderedTexts}
             images={orderedImages}
@@ -2411,7 +2639,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         )}
 
         {/* 本地拖入参考素材 (Ctrl+拖拽自其他节点) */}
-        {(modelDef.supportImages || modelDef.supportVideos) && (isUpscaler ? localRefVideos.length : localRefImages.length + localRefVideos.length + localRefAudios.length) > 0 && (
+        {(modelDef.supportImages || modelDef.supportVideos) && !isApimartV31Lite && (isUpscaler ? localRefVideos.length : localRefImages.length + localRefVideos.length + localRefAudios.length) > 0 && (
           <div className="rounded border border-emerald-400/30 bg-emerald-500/5 p-1.5 space-y-1">
             <div className="text-[10px] text-emerald-200/80">
               {isUpscaler ? `本地拖入 · 视频 ${localRefVideos.length}/1` : `本地拖入 · 图${localRefImages.length} 视${localRefVideos.length} 音${localRefAudios.length}`}

@@ -6,7 +6,10 @@ const config = require('./config');
 const { startFigmaBridgeOnAppStart } = require('./utils/figmaBridge');
 const { getRunRecoveryManager } = require('./services/runRecovery');
 const { closeProjectDatabase } = require('./services/projectDatabase');
+const { registerAgentControlInstance } = require('./services/agentControlRegistry');
+const agentControlRouter = require('./routes/agentControl');
 const canvasAgentToolsRouter = require('./routes/canvasAgentTools');
+const creatorAgentRouter = require('./routes/creatorAgent');
 
 const app = express();
 
@@ -309,6 +312,29 @@ app.use((req, res, next) => {
   return next();
 });
 const canvasAgentJsonParser = express.json({ limit: '64kb', strict: true });
+const creatorAgentJsonParser = express.json({ limit: '1mb', strict: true });
+const agentControlJsonParser = express.json({ limit: '64kb', strict: true });
+app.use('/api/agent-control/v1', (req, res, next) => {
+  const contentLength = Number(req.get('content-length'));
+  if (Number.isFinite(contentLength) && contentLength > agentControlRouter.AGENT_CONTROL_REQUEST_LIMIT) {
+    return res.status(413).json({
+      schema: agentControlRouter.AGENT_CONTROL_HTTP_SCHEMA,
+      ok: false,
+      code: 'AGENT_CONTROL_REQUEST_TOO_LARGE',
+      message: 'Agent Control 请求超过 64 KiB',
+    });
+  }
+  return agentControlJsonParser(req, res, (error) => {
+    if (!error) return next();
+    const tooLarge = error?.type === 'entity.too.large';
+    return res.status(tooLarge ? 413 : 400).json({
+      schema: agentControlRouter.AGENT_CONTROL_HTTP_SCHEMA,
+      ok: false,
+      code: tooLarge ? 'AGENT_CONTROL_REQUEST_TOO_LARGE' : 'AGENT_CONTROL_REQUEST_INVALID',
+      message: tooLarge ? 'Agent Control 请求超过 64 KiB' : 'Agent Control JSON 格式无效',
+    });
+  });
+}, agentControlRouter);
 app.use('/api/canvas-agent', (req, res, next) => {
   const contentLength = Number(req.get('content-length'));
   if (Number.isFinite(contentLength) && contentLength > 64 * 1024) {
@@ -324,6 +350,29 @@ app.use('/api/canvas-agent', (req, res, next) => {
     });
   });
 }, canvasAgentToolsRouter);
+app.use('/api/creator-agent/v1', (req, res, next) => {
+  const contentLength = Number(req.get('content-length'));
+  if (Number.isFinite(contentLength) && contentLength > creatorAgentRouter.CREATOR_AGENT_REQUEST_LIMIT) {
+    return res.status(413).json({
+      schema: creatorAgentRouter.CREATOR_AGENT_HTTP_SCHEMA,
+      ok: false,
+      code: 'CREATOR_AGENT_REQUEST_TOO_LARGE',
+      message: '创作 Agent 请求超过 1 MiB，请把大文件作为附件上传，不要嵌入对话正文',
+    });
+  }
+  return creatorAgentJsonParser(req, res, (error) => {
+    if (!error) return next();
+    const tooLarge = error?.type === 'entity.too.large';
+    return res.status(tooLarge ? 413 : 400).json({
+      schema: creatorAgentRouter.CREATOR_AGENT_HTTP_SCHEMA,
+      ok: false,
+      code: tooLarge ? 'CREATOR_AGENT_REQUEST_TOO_LARGE' : 'CREATOR_AGENT_REQUEST_INVALID',
+      message: tooLarge
+        ? '创作 Agent 请求超过 1 MiB，请把大文件作为附件上传'
+        : '创作 Agent JSON 格式无效',
+    });
+  });
+}, creatorAgentRouter);
 app.use(express.json({ limit: '120mb' }));
 app.use(express.urlencoded({ extended: true, limit: '120mb' }));
 
@@ -491,6 +540,7 @@ let httpServerClosePromise = null;
 let gracefulShutdownPromise = null;
 let startupRunRecoveryPromise = null;
 let startupSemanticModelRefreshPromise = null;
+let agentControlRegistration = null;
 let serverStartOutcome = null;
 let resolveServerStart;
 const serverStartPromise = new Promise((resolve) => { resolveServerStart = resolve; });
@@ -517,6 +567,11 @@ const server = app.listen(PORT, HOST, () => {
   // A signal can arrive after listen() was requested but before this callback.
   // In that window startup side effects must not outlive the shutdown lifecycle.
   if (shutdownStarted) return;
+  try {
+    agentControlRegistration = registerAgentControlInstance(config);
+  } catch (error) {
+    console.warn('[agent-control] instance discovery registration failed:', error?.message || error);
+  }
   console.log('==================================================');
   console.log('🐧 T8-penguin-canvas 后端服务');
   console.log('==================================================');
@@ -754,6 +809,11 @@ function waitForRuntimeStorageCloseLifecycle() {
 function gracefulShutdown(signal) {
   if (shutdownStarted) return gracefulShutdownPromise || projectDatabaseClosePromise || Promise.resolve();
   shutdownStarted = true;
+  try {
+    agentControlRegistration?.stop?.();
+  } catch (error) {
+    console.warn('[agent-control] instance discovery cleanup failed:', error?.message || error);
+  }
   closeSemanticPipeline();
   // Stop accepting new preview work/claims as soon as shutdown begins. The
   // database itself remains open until the HTTP server has drained as well.
@@ -828,6 +888,9 @@ function handleShutdownSignal(signal) {
 process.once('SIGINT', () => handleShutdownSignal('SIGINT'));
 process.once('SIGTERM', () => handleShutdownSignal('SIGTERM'));
 process.once('exit', closeSemanticPipeline);
+process.once('exit', () => {
+  try { agentControlRegistration?.stop?.(); } catch (_) {}
+});
 
 module.exports = {
   app,
@@ -842,4 +905,6 @@ module.exports = {
   applicationRequestStatus,
   waitForApplicationRequests,
   waitForRuntimeStorageCloseLifecycle,
+  agentControlAuthService: require('./services/agentControlAuth').agentControlAuthService,
+  agentControlApprovalService: require('./services/agentControlApprovals').agentControlApprovalService,
 };

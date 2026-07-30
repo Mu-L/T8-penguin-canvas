@@ -488,6 +488,9 @@ test('story node is wired into shared schema, Canvas and roadmap', () => {
   assert.match(storyNode, /贞贞AI工坊内置LLM[\s\S]*贞贞的平价AI小屋/);
   assert.match(storyNode, /generateLlm\(\{ source: builtinSource, model,/);
   assert.match(storyNode, /IMAGE_MODELS\.find\(\(item\) => item\.id === 'gpt-image-2'\)/);
+  assert.match(storyNode, /ZHENZHEN_IMAGE_G2_MODEL_OPTIONS/);
+  assert.match(storyNode, /<option value="seedance-nz">贞贞的平价AI小屋<\/option>/);
+  assert.doesNotMatch(storyNode, /贞贞平价 AI 工坊（国内）/);
   assert.match(storyNode, /LEGACY_SEEDANCE_MODEL_OPTIONS/);
   assert.match(storyNode, /SEEDANCE_NZ_MODEL_OPTIONS/);
   assert.match(storyNode, /generateExternalLlm/);
@@ -531,6 +534,9 @@ test('story production actions switch the visible workbench stage', () => {
   assert.match(storyNode, /确认镜头，进入准备资产'[\s\S]*?mode: 'review-assets'/);
   assert.match(storyNode, /mainAction\.mode === 'review-assets' \? enterAssetReview\(\) : requestRun\(mainAction\.mode\)/);
   assert.match(requestAction, /mode === 'compile'[\s\S]*?setActiveStage\('prompts'\)/);
+  assert.match(requestAction, /setLocalMessage\(`\$\{STORY_RUN_LABEL\[mode\]\}请求正在提交…`\)/);
+  assert.match(requestAction, /onSettled: \(outcome\)[\s\S]*?rejectRequest\(outcome\.error\)/);
+  assert.match(storyNode, /后台在上次异常退出后尚未完成画布数据恢复确认/);
   assert.match(assetsAction, /setActiveStage\('assets'\)/);
   assert.match(assetsAction, /storyAssetsReady\(projectRef\.current\)[\s\S]*?setActiveStage\('prompts'\)/);
   assert.match(assetsAction, /stage: 'prompts'/);
@@ -551,6 +557,12 @@ test('story production actions switch the visible workbench stage', () => {
   assert.match(storyNode, /confirmRemoveAsset\(selectedKindAsset\)/);
   assert.match(storyNode, /confirmRemoveAsset\(asset\)/);
   assert.match(storyNode, /确认删除资产「\$\{asset\.name\}」/);
+  assert.match(storyNode, /function hasClearableAssetMedia\(asset: StoryAsset\)/);
+  assert.match(storyNode, /const confirmClearAssetMedia = useCallback/);
+  assert.match(storyNode, /确认清空资产「\$\{asset\.name\}」的当前\$\{materialKind\}？资产设定、提示词和镜头关联都会保留/);
+  assert.match(storyNode, /source: 'missing', status: 'pending', url: '', taskId: '', taskProvider: '', taskModel: '', taskEndpoint: '', taskClipIds: \[\], error: '', generatedAt: ''/);
+  assert.match(storyNode, /confirmClearAssetMedia\(asset\)[\s\S]*?<Eraser size=\{11\} \/>清空/);
+  assert.match(storyNode, /confirmClearAssetMedia\(selectedAsset\)[\s\S]*?清空素材/);
   assert.match(storyNode, /左侧脸部特写，右侧同一人物正面／侧面／背面三视图/);
   assert.match(storyNode, /默认只展示服装本体，不出现人物或环境/);
   assert.match(videosAction, /setActiveStage\('videos'\)/);

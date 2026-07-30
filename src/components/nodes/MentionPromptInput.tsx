@@ -10,10 +10,19 @@ import {
   type Ref,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, AtSign, Library, Maximize2, Music, Video as VideoIcon } from 'lucide-react';
+import {
+  AlertTriangle,
+  AtSign,
+  Library,
+  Maximize2,
+  Music,
+  SlidersHorizontal,
+  Video as VideoIcon,
+} from 'lucide-react';
 import SmartImage from '../SmartImage';
 import PromptExpandModal from '../PromptExpandModal';
 import PromptTemplateLibraryModal from '../PromptTemplateLibraryModal';
+import ImagePromptAdjustmentButton from '../ImagePromptAdjustmentButton';
 import { useShortcutStore } from '../../stores/shortcuts';
 import { formatShortcutList, matchesAnyShortcut } from '../../utils/keyboardShortcuts';
 import {
@@ -26,6 +35,10 @@ import {
   type PlainInputRunSnapshot,
 } from '../../utils/imeComposition';
 import type { PromptTemplateKind } from '../../data/promptTemplateLibrary';
+import {
+  normalizeImagePromptAdjustmentSelections,
+  type ImagePromptAdjustmentSelection,
+} from '../../data/imagePromptAdjustments';
 import type { Material } from './useUpstreamMaterials';
 import {
   getUnresolvedMentionCount,
@@ -52,6 +65,9 @@ interface Props {
   title?: string;
   expandable?: boolean;
   promptTemplateKind?: PromptTemplateKind | false;
+  imagePromptAdjustments?: unknown;
+  onImagePromptAdjustmentsChange?: (next: ImagePromptAdjustmentSelection[]) => void;
+  imagePromptAdjustmentHasReferenceImages?: boolean;
   onSubmit?: (value: string, mentions: MediaMention[]) => void;
   /** Force the editor to fill a flex parent instead of growing with long text. */
   fillHeight?: boolean;
@@ -250,6 +266,9 @@ const MentionPromptInput = ({
   title = '提示词编辑',
   expandable = true,
   promptTemplateKind = false,
+  imagePromptAdjustments,
+  onImagePromptAdjustmentsChange,
+  imagePromptAdjustmentHasReferenceImages = false,
   onSubmit,
   fillHeight = false,
 }: Props) => {
@@ -273,7 +292,16 @@ const MentionPromptInput = ({
   });
   const [popupRect, setPopupRect] = useState<{ left: number; top: number; width: number } | null>(null);
   const templateEnabled = expandable && promptTemplateKind !== false;
+  const adjustmentEnabled = typeof onImagePromptAdjustmentsChange === 'function';
   const effectiveTemplateKind = promptTemplateKind || 'image';
+  const normalizedAdjustments = useMemo(
+    () => normalizeImagePromptAdjustmentSelections(imagePromptAdjustments),
+    [imagePromptAdjustments],
+  );
+  const inactiveReferenceAdjustmentCount = imagePromptAdjustmentHasReferenceImages
+    ? 0
+    : normalizedAdjustments.filter((selection) => selection.applicability === 'reference').length;
+  const editorActionCount = (expandable ? 1 : 0) + (templateEnabled ? 1 : 0) + (adjustmentEnabled ? 1 : 0);
 
   const mentionableMaterials = useMemo(
     () => materials.filter(isMentionableMaterial),
@@ -789,7 +817,9 @@ const MentionPromptInput = ({
             lineHeight: 1.45,
             caretColor: 'currentColor',
             cursor: 'text',
-            paddingRight: expandable ? (templateEnabled ? 64 : 34) : style?.paddingRight,
+            paddingRight: editorActionCount > 0
+              ? Math.max(Number(style?.paddingRight) || 0, 6 + editorActionCount * 28)
+              : style?.paddingRight,
             paddingLeft: style?.paddingLeft ?? 10,
           }}
         />
@@ -808,8 +838,24 @@ const MentionPromptInput = ({
             {placeholder}
           </div>
         )}
-        {expandable && (
+        {(expandable || adjustmentEnabled) && (
           <>
+          {adjustmentEnabled && onImagePromptAdjustmentsChange && (
+            <div
+              className="nodrag nopan absolute top-1.5 z-10"
+              style={{
+                right: 6 + (expandable ? 28 : 0) + (templateEnabled ? 28 : 0),
+              }}
+            >
+              <ImagePromptAdjustmentButton
+                selections={normalizedAdjustments}
+                onChange={onImagePromptAdjustmentsChange}
+                isDark={isDark}
+                isPixel={isPixel}
+                hasReferenceImages={imagePromptAdjustmentHasReferenceImages}
+              />
+            </div>
+          )}
           {templateEnabled && (
             <button
               type="button"
@@ -831,6 +877,7 @@ const MentionPromptInput = ({
             </button>
           )}
           <button
+            style={{ display: expandable ? undefined : 'none' }}
             type="button"
             data-prompt-expand-trigger
             className="nodrag nopan absolute right-1.5 top-1.5 z-10 inline-flex h-6 w-6 items-center justify-center rounded border border-white/10 bg-black/45 text-white/70 shadow-sm hover:text-white"
@@ -851,6 +898,34 @@ const MentionPromptInput = ({
           </>
         )}
       </div>
+      {adjustmentEnabled && normalizedAdjustments.length > 0 && (
+        <div
+          data-image-prompt-adjustment-summary
+          className="mt-1 flex min-w-0 items-center gap-1 rounded px-2 py-1 text-[9px]"
+          style={{
+            border: isPixel ? '1.5px solid var(--px-ink, #1a1410)' : '1px solid rgba(163,230,53,.22)',
+            background: isPixel
+              ? 'var(--px-muted, rgba(255,255,255,.52))'
+              : isDark
+                ? 'rgba(163,230,53,.07)'
+                : 'rgba(77,124,15,.07)',
+            color: isPixel ? 'var(--px-ink, #1a1410)' : isDark ? 'rgba(217,249,157,.86)' : '#365314',
+          }}
+          title={normalizedAdjustments.map((selection) => `${selection.labelZh}：${selection.promptZh}`).join('\n')}
+        >
+          <SlidersHorizontal size={10} className="shrink-0" />
+          <span className="shrink-0 font-semibold">调节后缀</span>
+          <span className="min-w-0 flex-1 truncate">
+            {normalizedAdjustments.slice(0, 3).map((selection) => selection.labelZh).join(' · ')}
+            {normalizedAdjustments.length > 3 ? ` · +${normalizedAdjustments.length - 3}` : ''}
+          </span>
+          <span className="shrink-0 opacity-55">
+            {inactiveReferenceAdjustmentCount > 0
+              ? `${inactiveReferenceAdjustmentCount} 项待参考图`
+              : '运行时生效'}
+          </span>
+        </div>
+      )}
       {mentions.length > 0 && (
         <div
           className="mt-1 rounded px-2 py-1 text-[10px]"
@@ -900,6 +975,9 @@ const MentionPromptInput = ({
           title={title}
           expandable={false}
           promptTemplateKind={promptTemplateKind}
+          imagePromptAdjustments={normalizedAdjustments}
+          onImagePromptAdjustmentsChange={onImagePromptAdjustmentsChange}
+          imagePromptAdjustmentHasReferenceImages={imagePromptAdjustmentHasReferenceImages}
           className="h-full w-full rounded border px-3 py-2 text-sm leading-relaxed outline-none"
           style={{
             background: isPixel

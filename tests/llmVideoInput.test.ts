@@ -224,8 +224,18 @@ test('LLM media normalizer extracts requested evenly-spread keyframes', async ()
 
     const content = normalized[0].content;
     const imageParts = content.filter((part: any) => part.type === 'image_url');
+    const textParts = content.filter((part: any) => part.type === 'text').map((part: any) => part.text);
     assert.equal(content.some((part: any) => part.type === 'video_url'), false);
     assert.equal(content.some((part: any) => part.type === 'text' && /均匀抽取的 4 张关键帧/.test(part.text)), true);
+    assert.equal(content.some((part: any) => part.type === 'text' && /不包含音轨/.test(part.text)), true);
+    assert.equal(textParts.some((text: string) => /采样帧 1\/4 · 约 00:00:00\.000/.test(text)), true);
+    assert.equal(
+      textParts.filter((text: string) => /采样帧 \d+\/4 · 约 00:00:0\d\.\d{3}/.test(text)).length,
+      4,
+    );
+    const firstFrameIndex = content.findIndex((part: any) => part.type === 'image_url');
+    assert.equal(content[firstFrameIndex - 1].type, 'text');
+    assert.match(content[firstFrameIndex - 1].text, /采样帧 1\/4/);
     assert.equal(imageParts.length, 4);
     assert.equal(imageParts.every((part: any) => /^data:image\/jpeg;base64,/.test(part.image_url.url)), true);
   } finally {

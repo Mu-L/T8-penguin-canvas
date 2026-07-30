@@ -812,7 +812,7 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
         nodeInfoList,
         instanceType: instanceType || undefined,
         site: activeRhSiteRef.current,
-      });
+      }, { submissionKey: reporter?.providerSubmissionKey });
       activeRhSiteRef.current = r.site || activeRhSiteRef.current;
       await reporter?.providerSubmitted({
         provider: 'runninghub',

@@ -6,8 +6,10 @@ const config = require('../config');
 const settingsRouter = require('./settings');
 const { normalizeAdvancedProviders, maskAdvancedProviders } = require('../providers/registry');
 const { generateChatWithProvider } = require('../providers/adapters');
+const { providerSubmissionContextMiddleware } = require('../services/providerSubmissionContext');
 
 const router = express.Router();
+router.use(providerSubmissionContextMiddleware);
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_ZHENZHEN_MODEL = 'gpt-4o-mini';

@@ -659,6 +659,23 @@ router.patch('/:runId/nodes/:nodeRunId/attempts/:attemptId/terminal', (req, res)
       if (!currentAttempt || currentAttempt.nodeRunId !== currentNodeRun.id) {
         throw new Error('Attempt 不属于当前 Run/NodeRun');
       }
+      const providerSubmission = currentAttempt.metadata?.providerSubmission;
+      if (requestedStatus === 'succeeded'
+        && providerSubmission
+        && providerSubmission.expectedOutput === true) {
+        if (providerSubmission.state !== 'verified') {
+          throw Object.assign(
+            new Error('Provider 结果尚未完成下载、校验与资产持久化，不能标记为成功'),
+            { code: 'provider_submission_not_verified', status: 409 },
+          );
+        }
+        if (!Array.isArray(currentNodeRun.outputRefs) || currentNodeRun.outputRefs.length < 1) {
+          throw Object.assign(
+            new Error('Provider 结果尚未关联到当前 NodeRun，不能标记为成功'),
+            { code: 'provider_submission_output_missing', status: 409 },
+          );
+        }
+      }
       const attempt = database.updateAttempt(currentAttempt.id, {
         status: requestedStatus,
         timestamps,
@@ -686,7 +703,11 @@ router.patch('/:runId/nodes/:nodeRunId/attempts/:attemptId/terminal', (req, res)
     });
   } catch (error) {
     if (sendProjectDatabaseStorageCapacityError(res, error, { operation: 'run.attempt-terminal' })) return;
-    res.status(400).json({ success: false, error: error?.message || String(error) });
+    res.status(Number(error?.status) || 400).json({
+      success: false,
+      ...(error?.code ? { code: error.code } : {}),
+      error: error?.message || String(error),
+    });
   }
 });
 

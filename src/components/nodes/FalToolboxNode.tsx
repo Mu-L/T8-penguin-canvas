@@ -418,7 +418,7 @@ const FalToolboxNode = ({ id, data, selected }: NodeProps) => {
       const resolvedTextInputs = collectResolvedTextInputs();
       const resolvedUserParams = collectResolvedUserParams();
       const firstResolvedPrompt = resolvedTextInputs.prompt || Object.values(resolvedTextInputs)[0] || '';
-      const onProgress = (progress: RunFalToolboxProgress) => {
+      const onProgress = async (progress: RunFalToolboxProgress) => {
         setProgressMessage(progress.message);
         if (progress.requestId) update({ status: progress.stage === 'poll' ? 'polling' : 'submitting', requestId: progress.requestId });
         const payload = {
@@ -433,9 +433,9 @@ const FalToolboxNode = ({ id, data, selected }: NodeProps) => {
           stage: progress.stage,
           message: progress.message,
         };
-        if (progress.stage === 'poll') void reporter?.polling(payload);
-        else if (progress.stage === 'submit' && progress.requestId) void reporter?.providerSubmitted(payload);
-        else void reporter?.progress(payload);
+        if (progress.stage === 'poll') await reporter?.polling(payload);
+        else if (progress.stage === 'submit' && progress.requestId) await reporter?.providerSubmitted(payload);
+        else await reporter?.progress(payload);
       };
       const result = await runFalToolboxTool({
         toolId: activeTool.id,
@@ -449,6 +449,7 @@ const FalToolboxNode = ({ id, data, selected }: NodeProps) => {
         inputValues: resolvedTextInputs,
         userParams: resolvedUserParams,
         signal: aborter.signal,
+        submissionKey: reporter?.providerSubmissionKey,
         onProgress,
       });
       const textOutputs = result.textOutputs.filter(Boolean);

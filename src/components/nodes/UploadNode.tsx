@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
 import { Handle, Position, useReactFlow, type Node, type Edge, type NodeProps } from '@xyflow/react';
 import {
   AlertCircle,
@@ -32,6 +32,8 @@ import MediaMetadataBadge from '../MediaMetadataBadge';
 import RhImageCapabilityRail from '../RhImageCapabilityRail';
 import RhVideoCapabilityRail from '../RhVideoCapabilityRail';
 import SmartImage from '../SmartImage';
+import ImageLongEdgeButtons from '../ImageLongEdgeButtons';
+import { useImageLongEdgeOutputs } from '../../hooks/useImageLongEdgeOutputs';
 import { generateImage } from '../../services/generation';
 import { decodeDuckFiles, type DuckDecodeFileItem } from '../../services/api';
 import { resolveThemeTemplate } from '../../theme/defaultTemplates';
@@ -41,6 +43,7 @@ import {
   createUploadDataFromItem,
   createUploadDataFromItems,
   createUploadMediaRemovalData,
+  createUploadReplacementData,
   fileNameFromUrl,
   formatMediaSize,
   getMediaItemsFromData,
@@ -234,7 +237,48 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
   const uploadType: UploadKind | null =
     lockedUploadType === 'image' ? 'image' : d?.uploadType ?? lockedUploadType;
   const meta = uploadType ? KIND_META[uploadType] : null;
-  const mediaItems = uploadType ? getMediaItemsFromData(d, uploadType) : [];
+  const storedImageLongEdgeSourceItems: MediaItem[] = Array.isArray(d?.imageLongEdgeSourceItems)
+    ? d.imageLongEdgeSourceItems.filter(
+        (item: any) => item?.kind === 'image' && typeof item?.url === 'string' && item.url.trim(),
+      )
+    : [];
+  const currentMediaItems = uploadType ? getMediaItemsFromData(d, uploadType) : [];
+  const imageLongEdgeSourceItems =
+    uploadType === 'image' && storedImageLongEdgeSourceItems.length > 0
+      ? storedImageLongEdgeSourceItems
+      : uploadType === 'image'
+        ? currentMediaItems
+        : [];
+  const reportImageLongEdgeError = useCallback((message: string) => {
+    if (message) setError(message);
+  }, []);
+  const imageLongEdge = useImageLongEdgeOutputs({
+    sourceUrls: imageLongEdgeSourceItems.map((item) => item.url),
+    data: d,
+    update,
+    onError: reportImageLongEdgeError,
+  });
+  const scaledImageItems = imageLongEdge.outputUrls.map((url, index) => ({
+    ...(imageLongEdgeSourceItems[index] || { kind: 'image' as const }),
+    kind: 'image' as const,
+    url,
+    size: undefined,
+  }));
+  const mediaItems =
+    uploadType === 'image'
+      ? imageLongEdge.previewUrls.map((url, index) => ({
+          ...(imageLongEdgeSourceItems[index] || currentMediaItems[index] || { kind: 'image' as const }),
+          kind: 'image' as const,
+          url,
+          size: imageLongEdge.ready ? undefined : imageLongEdgeSourceItems[index]?.size,
+        }))
+      : currentMediaItems;
+  const runMediaItems =
+    uploadType === 'image' && imageLongEdge.limit !== 0
+      ? imageLongEdge.ready
+        ? scaledImageItems
+        : []
+      : currentMediaItems;
   const url: string | undefined = mediaItems[0]?.url;
   const rhDuckMode = Boolean(
     isRhVisual &&
@@ -242,6 +286,27 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
       (rhDuckStoredMode || rhDuckStoreMode),
   );
   const yyhPortraitUploadMode = Boolean(isYyhVisual && d?.yyhPortraitHidden);
+
+  useEffect(() => {
+    if (uploadType !== 'image' || imageLongEdge.limit === 0 || !imageLongEdge.ready) return;
+    if (sameMediaUrls(currentMediaItems, scaledImageItems)) return;
+    update({
+      ...createUploadReplacementData('image', scaledImageItems),
+      imageLongEdgeLimit: imageLongEdge.limit,
+      imageLongEdgeAppliedLimit: imageLongEdge.limit,
+      imageLongEdgeSourceItems,
+      imageLongEdgeSourceUrls: imageLongEdgeSourceItems.map((item) => item.url),
+      imageLongEdgeOutputUrls: scaledImageItems.map((item) => item.url),
+    });
+  }, [
+    currentMediaItems,
+    imageLongEdge.limit,
+    imageLongEdge.ready,
+    imageLongEdgeSourceItems,
+    scaledImageItems,
+    update,
+    uploadType,
+  ]);
 
   // 节点本地尺寸 state: 默认 (260, 高度由内容撑开 — 上传后图/视频会撑高 root)
   // 拖角后由 ResizableCorners onResize 同步具体 px (保证 measured 准确 + keepAspectRatio 生效 + handleBounds 准确)
@@ -255,8 +320,11 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
   //   3. 创建后节点 id 以 'output-auto-up-' 开头, 避开 'output-auto-' 网格重排接管
   const handleRun = async () => {
     setError(null);
-    if (!uploadType || !meta || mediaItems.length === 0) {
-      const msg = '请先上传素材';
+    if (!uploadType || !meta || runMediaItems.length === 0) {
+      const msg =
+        uploadType === 'image' && imageLongEdge.limit !== 0
+          ? '图片正在按长边缩放，请完成后再运行'
+          : '请先上传素材';
       setError(msg);
       throw new Error(msg);
     }
@@ -275,11 +343,11 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
       };
     };
 
-    let outputGroups: Array<{ kind: MediaKind; items: MediaItem[] }> = [{ kind: uploadType, items: mediaItems }];
+    let outputGroups: Array<{ kind: MediaKind; items: MediaItem[] }> = [{ kind: uploadType, items: runMediaItems }];
     let outputFromRhDuckDecode = false;
     if (rhDuckMode && uploadType === 'image') {
       try {
-        const decoded = await decodeDuckFiles(mediaItems.map((item) => item.url));
+        const decoded = await decodeDuckFiles(runMediaItems.map((item) => item.url));
         if (decoded.decodedCount > 0) {
           const decodedBySource = new Map(decoded.items.map((item) => [item.sourceUrl, item]));
           const grouped = new Map<MediaKind, MediaItem[]>();
@@ -288,7 +356,7 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
             list.push(item);
             grouped.set(item.kind, list);
           };
-          mediaItems.forEach((item) => {
+          runMediaItems.forEach((item) => {
             const decodedItem = toDecodedMediaItem(item, decodedBySource.get(item.url));
             if (decodedItem) push(decodedItem);
           });
@@ -390,6 +458,11 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
       uploadType: rhDuckMode ? 'image' : lockedUploadType,
       lockedUploadType: lockedUploadType === 'model3d' ? 'model3d' : undefined,
       ...(rhDuckMode ? { rhDuckHiddenUpload: true } : {}),
+      imageLongEdgeLimit: 0,
+      imageLongEdgeAppliedLimit: 0,
+      imageLongEdgeSourceItems: [],
+      imageLongEdgeSourceUrls: [],
+      imageLongEdgeOutputUrls: [],
     });
     setError(null);
   };
@@ -397,6 +470,29 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
   const handleRemoveUploadItem = (index: number) => {
     if (!uploadType) return;
     const emptyUploadType = lockedUploadType ?? (rhDuckMode ? 'image' : null);
+    if (uploadType === 'image' && imageLongEdge.limit !== 0) {
+      const nextSources = imageLongEdgeSourceItems.filter((_, itemIndex) => itemIndex !== index);
+      const nextOutputs = imageLongEdge.outputUrls.filter((_, itemIndex) => itemIndex !== index);
+      const nextOutputItems = nextOutputs.map((nextUrl, itemIndex) => ({
+        ...(nextSources[itemIndex] || { kind: 'image' as const }),
+        kind: 'image' as const,
+        url: nextUrl,
+        size: undefined,
+      }));
+      update({
+        ...createUploadReplacementData('image', nextOutputItems),
+        uploadType: nextSources.length > 0 ? 'image' : emptyUploadType,
+        imageLongEdgeLimit: imageLongEdge.limit,
+        imageLongEdgeAppliedLimit: nextSources.length === nextOutputs.length ? imageLongEdge.limit : 0,
+        imageLongEdgeSourceItems: nextSources,
+        imageLongEdgeSourceUrls: nextSources.map((item) => item.url),
+        imageLongEdgeOutputUrls: nextOutputs,
+        ...(rhDuckMode ? { rhDuckHiddenUpload: true } : {}),
+      });
+      setError(null);
+      if (editingUrl === mediaItems[index]?.url) setEditingUrl(null);
+      return;
+    }
     update({
       ...createUploadMediaRemovalData(d, uploadType, index, emptyUploadType),
       lockedUploadType: lockedUploadType === 'model3d' ? 'model3d' : undefined,
@@ -446,10 +542,24 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
         uploaded.push(await uploadSingleFile(file, kind));
       }
       const base = uploadType === kind ? mediaItems : [];
-      update({
-        ...createUploadDataFromItems(kind, [...base, ...uploaded]),
-        ...(rhDuckMode ? { rhDuckHiddenUpload: true } : {}),
-      });
+      if (kind === 'image' && imageLongEdge.limit !== 0) {
+        const sources = [...imageLongEdgeSourceItems, ...uploaded];
+        update({
+          ...createUploadReplacementData('image', []),
+          uploadType: 'image',
+          imageLongEdgeLimit: imageLongEdge.limit,
+          imageLongEdgeAppliedLimit: 0,
+          imageLongEdgeSourceItems: sources,
+          imageLongEdgeSourceUrls: [],
+          imageLongEdgeOutputUrls: [],
+          ...(rhDuckMode ? { rhDuckHiddenUpload: true } : {}),
+        });
+      } else {
+        update({
+          ...createUploadDataFromItems(kind, [...base, ...uploaded]),
+          ...(rhDuckMode ? { rhDuckHiddenUpload: true } : {}),
+        });
+      }
       if (skipped > 0) {
         setError(`已上传 ${uploaded.length} 个${KIND_META[kind].label}，跳过 ${skipped} 个非同类型文件`);
       }
@@ -872,6 +982,10 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
     event.preventDefault();
     event.stopPropagation();
     if (typeof document === 'undefined') return;
+    if (uploadType === 'image' && imageLongEdge.limit !== 0 && !imageLongEdge.ready) {
+      setError('图片正在按长边缩放，请完成后再下载');
+      return;
+    }
     mediaItems.forEach((item, i) => {
       const anchor = document.createElement('a');
       anchor.href = item.url;
@@ -1115,13 +1229,47 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
           <div className="group/upload-section space-y-1.5">
             <div className={`flex items-center gap-1.5 text-[10px] ${isDark ? 'text-white/50' : 'text-zinc-500'}`}>
               <meta.icon size={11} />
-              <span className="flex-1">{meta.label} ({mediaItems.length})</span>
-              <CollectionSplitButton
-                count={mediaItems.length}
-                kindLabel={meta.label}
-                onSplit={splitUploadCollection}
-                className="opacity-100 transition"
-              />
+              <span className="flex-1">
+                {meta.label} ({mediaItems.length})
+                {uploadType === 'image' && imageLongEdge.busy ? ' · 缩放中' : ''}
+              </span>
+              {uploadType === 'image' && (
+                <ImageLongEdgeButtons
+                  value={imageLongEdge.limit}
+                  busy={imageLongEdge.busy}
+                  onChange={(next) => {
+                    setError(null);
+                    if (next === 0) {
+                      update({
+                        ...createUploadReplacementData('image', imageLongEdgeSourceItems),
+                        imageLongEdgeLimit: 0,
+                        imageLongEdgeAppliedLimit: 0,
+                        imageLongEdgeSourceItems: [],
+                        imageLongEdgeSourceUrls: [],
+                        imageLongEdgeOutputUrls: [],
+                      });
+                      return;
+                    }
+                    update({
+                      ...createUploadReplacementData('image', []),
+                      uploadType: 'image',
+                      imageLongEdgeLimit: next,
+                      imageLongEdgeAppliedLimit: 0,
+                      imageLongEdgeSourceItems,
+                      imageLongEdgeSourceUrls: [],
+                      imageLongEdgeOutputUrls: [],
+                    });
+                  }}
+                />
+              )}
+              {(uploadType !== 'image' || imageLongEdge.limit === 0 || imageLongEdge.ready) && (
+                <CollectionSplitButton
+                  count={mediaItems.length}
+                  kindLabel={meta.label}
+                  onSplit={splitUploadCollection}
+                  className="opacity-100 transition"
+                />
+              )}
             </div>
 
             {uploadType === 'image' && (
@@ -1135,15 +1283,17 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
                         className="w-full h-auto rounded block cursor-zoom-in"
                         thumbSize={mediaItems.length >= 2 ? 320 : 720}
                         style={{ background: '#0008', objectFit: 'contain', maxHeight: mediaItems.length >= 2 ? 120 : 480 }}
-                        data-drag-source
+                        data-drag-source={imageLongEdge.limit === 0 || imageLongEdge.ready ? true : undefined}
                         data-drag-kind="image"
                         data-drag-url={item.url}
                         data-drag-preview={item.url}
                         data-drag-node-id={id}
                         data-resource-title={item.name}
-                        onMouseDown={(e) =>
-                          beginMaterialDrag(e, { kind: 'image', url: item.url, sourceNodeId: id, previewUrl: item.url })
-                        }
+                        onMouseDown={(e) => {
+                          if (imageLongEdge.limit === 0 || imageLongEdge.ready) {
+                            beginMaterialDrag(e, { kind: 'image', url: item.url, sourceNodeId: id, previewUrl: item.url });
+                          }
+                        }}
                         onDoubleClick={(e) => {
                           e.stopPropagation();
                           setEditingUrl(item.url);

@@ -487,7 +487,7 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
                 web_search: webSearch,
                 frameMode: activeFrameMode,
               },
-        });
+        }, { submissionKey: reporter?.providerSubmissionKey });
         if (!isCurrentGenerationRun(runId)) return;
         const nextVideoUrl = r.videoUrls[0];
         if (!nextVideoUrl) throw new Error('扩展平台没有返回视频。');
@@ -554,11 +554,11 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
 
       if (isSeedanceNzSelected && activeFrameMode === 'first'
         && (imageUrls.length !== 1 || videoUrls.length > 0 || audioUrls.length > 0)) {
-        throw new Error('贞贞的平价AI工坊（国内）的首帧模式只接受 1 张图片；混合素材请改为“自动/多参”');
+        throw new Error('贞贞的平价AI小屋的首帧模式只接受 1 张图片；混合素材请改为“自动/多参”');
       }
       if (isSeedanceNzSelected && activeFrameMode === 'firstlast'
         && (imageUrls.length !== 2 || videoUrls.length > 0 || audioUrls.length > 0)) {
-        throw new Error('贞贞的平价AI工坊（国内）的首尾帧模式只接受 2 张图片；混合素材请改为“自动/多参”');
+        throw new Error('贞贞的平价AI小屋的首尾帧模式只接受 2 张图片；混合素材请改为“自动/多参”');
       }
 
       const payload: SeedanceSubmitRequest = {
@@ -593,7 +593,9 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
         src,
       );
 
-      const r = await submitSeedance(payload);
+      const r = await submitSeedance(payload, {
+        submissionKey: reporter?.providerSubmissionKey,
+      });
       if (!isCurrentGenerationRun(runId)) return;
       const submittedProvider = r.taskProvider || effectiveTaskProvider;
       await reporter?.providerSubmitted({
@@ -725,7 +727,7 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
             {isExternalSelected && providerSelection.provider
               ? `${providerSelection.provider.label || providerSelection.provider.id} · ${externalProviderModel || '未选模型'}`
               : (isSeedanceNzSelected
-                ? `贞贞的平价AI工坊（国内） · ${seedanceNzModel}`
+                ? `贞贞的平价AI小屋 · ${seedanceNzModel}`
                 : '贞贞的AI工坊（海外） · Seedance 2.0')}
           </div>
         </div>
@@ -745,8 +747,8 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
                 {isExternalSelected && providerSelection.provider
                   ? providerSelection.provider.label
                   : (builtinSource === 'auto'
-                    ? `主力自动 · ${effectiveTaskProvider === 'seedance-nz' ? '国内平价工坊' : '海外AI工坊'}`
-                    : (effectiveTaskProvider === 'seedance-nz' ? '贞贞的平价AI工坊（国内）' : '贞贞的AI工坊（海外）'))}
+                    ? `主力自动 · ${effectiveTaskProvider === 'seedance-nz' ? '平价AI小屋' : '海外AI工坊'}`
+                    : (effectiveTaskProvider === 'seedance-nz' ? '贞贞的平价AI小屋' : '贞贞的AI工坊（海外）'))}
               </span>
             </button>
             {d?.advancedProviderOpen && (
@@ -784,10 +786,10 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
                     className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
                   >
                     <option value="builtin:auto" style={{ background: '#18181b', color: '#ffffff' }}>
-                      主力 API（自动：优先国内平价工坊）
+                      主力 API（自动：优先平价AI小屋）
                     </option>
                     <option value="builtin:seedance-nz" style={{ background: '#18181b', color: '#ffffff' }}>
-                      贞贞的平价AI工坊（国内） · api.seedance.nz
+                      贞贞的平价AI小屋 · api.seedance.nz
                     </option>
                     <option value="builtin:zhenzhen-legacy" style={{ background: '#18181b', color: '#ffffff' }}>
                       贞贞的AI工坊（海外） · ai.t8star.org
@@ -878,7 +880,7 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
             )}
             {isSeedanceNzSelected && !hasSeedanceNzKey && (
               <div className="mt-1 text-[10px] text-amber-200">
-                尚未配置“贞贞的平价AI工坊（国内） API Key”，请先到 API 设置填写。
+                尚未配置“贞贞的平价AI小屋 API Key”，请先到 API 设置填写。
               </div>
             )}
           </div>

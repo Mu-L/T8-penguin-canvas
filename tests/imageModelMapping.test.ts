@@ -4,9 +4,22 @@ import fs from 'node:fs';
 
 import {
   IMAGE_MODELS,
+  ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS,
+  ZHENZHEN_BUDGET_GROK_MODEL_OPTIONS,
+  ZHENZHEN_BUDGET_BANANA_2_MODEL_OPTIONS,
+  ZHENZHEN_BUDGET_BANANA_PRO_MODEL_OPTIONS,
+  ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
   ZHENZHEN_IMAGE_G2_I2I_MODEL,
+  ZHENZHEN_IMAGE_G2_MODEL_OPTIONS,
   ZHENZHEN_IMAGE_G2_RATIOS,
   ZHENZHEN_IMAGE_G2_T2I_MODEL,
+  ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL,
+  ZHENZHEN_IMAGE_GK_V15_MODEL,
+  ZHENZHEN_IMAGE_NB_2_LITE_MODEL,
+  ZHENZHEN_IMAGE_NB_2_MODEL,
+  ZHENZHEN_IMAGE_NB_PRO_MODEL,
+  ZHENZHEN_IMAGE_NB_EXTREME_RATIOS,
+  ZHENZHEN_IMAGE_NB_STANDARD_RATIOS,
   gptImage2ZhenzhenVariantSize,
   isFalModel,
   isZhenzhenImageG2Model,
@@ -35,7 +48,7 @@ test('Nano Banana image models expose the 9:21 portrait aspect ratio', () => {
 });
 
 test('old saved nano-banana-2 apiModel values are not submitted as upstream model ids', () => {
-  assert.match(imageNodeSource, /modelDef\.apiModelOptions\.some\(\(opt\) => opt\.value === savedApiModel\)/);
+  assert.match(imageNodeSource, /builtinApiModelOptions\.some\(\(opt\) => opt\.value === savedApiModel\)/);
   assert.match(proxySource, /function normalizeImageApiModel\(model\)/);
   assert.match(proxySource, /raw === 'nano-banana-2'\) return 'gemini-3\.1-flash-image'/);
   assert.match(proxySource, /raw === 'gemini-3\.1-flash-image-preview'\) return 'gemini-3\.1-flash-image'/);
@@ -92,23 +105,75 @@ test('GPT Image 2 2K and 4K variants stay on the Zhenzhen gpt-image-2 route', ()
   assert.match(proxySource, /size: gptImage2ForcedSize \? undefined : size/);
 });
 
-test('Zhenzhen Image G-2 models are exposed inside GPT2 but use the isolated seedance.nz protocol', () => {
+test('Zhenzhen Image G-2 models live under the separate budget platform and keep the isolated seedance.nz protocol', () => {
   const gpt2 = IMAGE_MODELS.find((model) => model.id === 'gpt-image-2');
   const options = gpt2?.apiModelOptions.map((option) => option.value) || [];
 
-  assert.ok(options.includes(ZHENZHEN_IMAGE_G2_T2I_MODEL));
-  assert.ok(options.includes(ZHENZHEN_IMAGE_G2_I2I_MODEL));
+  assert.equal(options.includes(ZHENZHEN_IMAGE_G2_T2I_MODEL), false);
+  assert.equal(options.includes(ZHENZHEN_IMAGE_G2_I2I_MODEL), false);
+  assert.deepEqual(
+    ZHENZHEN_IMAGE_G2_MODEL_OPTIONS.map((option) => option.value),
+    [ZHENZHEN_IMAGE_G2_T2I_MODEL, ZHENZHEN_IMAGE_G2_I2I_MODEL],
+  );
   assert.equal(isZhenzhenImageG2Model(ZHENZHEN_IMAGE_G2_T2I_MODEL), true);
   assert.equal(isZhenzhenImageG2Model(ZHENZHEN_IMAGE_G2_I2I_MODEL), true);
   assert.equal(isFalModel(ZHENZHEN_IMAGE_G2_T2I_MODEL), false);
   assert.deepEqual(ZHENZHEN_IMAGE_G2_RATIOS, ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9']);
-  assert.match(imageNodeSource, /isSeedreamNz \|\| isZhenzhenImageG2/);
-  assert.match(imageNodeSource, /model: isZhenzhenImageG2 \? apiModel as/);
+  assert.match(imageNodeSource, /isSeedreamNz \|\| isZhenzhenBudgetImageSelected/);
+  assert.match(imageNodeSource, /imageBuiltinSource === 'seedance-nz' \|\| isZhenzhenBudgetImageModel\(savedApiModel\)/);
+  assert.match(imageNodeSource, /value="builtin:seedance-nz"[\s\S]*贞贞的平价AI小屋/);
+  assert.match(imageNodeSource, /builtinApiModelOptions\.map\(\(opt\) =>/);
+  assert.match(imageNodeSource, /model: isZhenzhenBudgetImageSelected/);
   assert.match(imageNodeSource, /resolution: isZhenzhenImageG2/);
   assert.match(imageNodeSource, /图生图模式：必须提供 1–10 张参考图/);
   assert.match(imageNodeSource, /文生图模式：只使用 Prompt，已连接的参考图不会发送/);
   assert.match(proxySource, /seedanceNz\.submitImageTask/);
   assert.doesNotMatch(proxySource, /raw === 'zhenzhen-image-g2-t2i'\) return 'gpt-image-2'/);
+});
+
+test('APIMart images are isolated in their matching budget-house tabs', () => {
+  assert.deepEqual(
+    ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS.map((option) => option.value),
+    [
+      ZHENZHEN_IMAGE_G2_T2I_MODEL,
+      ZHENZHEN_IMAGE_G2_I2I_MODEL,
+      ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
+    ],
+  );
+  assert.deepEqual(
+    ZHENZHEN_BUDGET_GROK_MODEL_OPTIONS.map((option) => option.value),
+    [ZHENZHEN_IMAGE_GK_V15_MODEL, ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL],
+  );
+  assert.deepEqual(
+    ZHENZHEN_BUDGET_BANANA_2_MODEL_OPTIONS.map((option) => option.value),
+    [ZHENZHEN_IMAGE_NB_2_MODEL, ZHENZHEN_IMAGE_NB_2_LITE_MODEL],
+  );
+  assert.deepEqual(
+    ZHENZHEN_BUDGET_BANANA_PRO_MODEL_OPTIONS.map((option) => option.value),
+    [ZHENZHEN_IMAGE_NB_PRO_MODEL],
+  );
+  assert.equal(IMAGE_MODELS.find((item) => item.id === 'nano-banana-2')?.apiModelOptions.some(
+    (option) => option.value === ZHENZHEN_IMAGE_NB_2_MODEL,
+  ), false);
+  assert.equal(IMAGE_MODELS.find((item) => item.id === 'nano-banana-pro')?.apiModelOptions.some(
+    (option) => option.value === ZHENZHEN_IMAGE_NB_PRO_MODEL,
+  ), false);
+  assert.deepEqual(ZHENZHEN_IMAGE_NB_STANDARD_RATIOS, [
+    '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9',
+  ]);
+  assert.ok(ZHENZHEN_IMAGE_NB_EXTREME_RATIOS.includes('1:8'));
+  assert.ok(ZHENZHEN_IMAGE_NB_EXTREME_RATIOS.includes('8:1'));
+  assert.match(imageNodeSource, /modelDef\.id === 'nano-banana-2'/);
+  assert.match(imageNodeSource, /modelDef\.id === 'nano-banana-2'\s*\?\s*ZHENZHEN_IMAGE_NB_2_MODEL/);
+  assert.match(
+    imageNodeSource,
+    /const nextApiModel[\s\S]{0,400}newDef\.id === 'nano-banana-2'\s*\?\s*ZHENZHEN_IMAGE_NB_2_MODEL/,
+  );
+  assert.match(imageNodeSource, /ZHENZHEN_BUDGET_BANANA_2_MODEL_OPTIONS/);
+  assert.match(imageNodeSource, /ZHENZHEN_BUDGET_BANANA_PRO_MODEL_OPTIONS/);
+  assert.match(imageNodeSource, /apimartImageCount/);
+  assert.match(imageNodeSource, /isZhenzhenGrokImageEdit/);
+  assert.match(imageNodeSource, /必须提供 1 张参考图/);
 });
 
 test('Seedream V5 Pro is isolated behind its own image protocol and supports up to 10 edit references', () => {
@@ -137,7 +202,7 @@ test('Seedream V5 Pro is isolated behind its own image protocol and supports up 
 test('Seedream tab keeps legacy source by default and exposes isolated seedance.nz image routing', () => {
   assert.match(imageNodeSource, /d\?\.seedreamApiSource === 'seedance-nz' \? 'seedance-nz' : 'zhenzhen'/);
   assert.match(imageNodeSource, /贞贞的AI工坊（海外） · 原 Seedream/);
-  assert.match(imageNodeSource, /贞贞的平价AI工坊（国内） · api\.seedance\.nz/);
+  assert.match(imageNodeSource, /贞贞的平价AI小屋 · api\.seedance\.nz/);
   assert.match(imageNodeSource, /seedream-v5-pro-i2i/);
   assert.match(imageNodeSource, /seedream-v5-pro-t2i/);
   assert.match(imageNodeSource, /submitSeedreamNz/);

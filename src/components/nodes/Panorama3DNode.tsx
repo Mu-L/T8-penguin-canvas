@@ -2254,7 +2254,7 @@ const Panorama3DNode = (p: NodeProps) => {
           { role: 'system', content: params.plannerSystemPrompt },
           { role: 'user', content: params.plannerUserPrompt },
         ],
-      });
+      }, { submissionKey: reporter.providerSubmissionKey });
       const trace = extractRunProviderTrace(res);
       await reporter.providerResponse({
         provider: 'zhenzhen-llm',
@@ -3645,7 +3645,7 @@ const Panorama3DNode = (p: NodeProps) => {
     taskCompletionSound.notifyComplete(p.id, 'image');
   }, [generatedHistory, p.id, update]);
 
-  const generatePanorama = useCallback(async () => {
+  const generatePanorama = useCallback(async (reporter?: RunNodeLifecycleReporter) => {
     const mode: PanoramaGenerationMode = panelMode === 'image' ? 'image' : 'text';
     const prompt = userPrompt.trim();
     const referenceUrl = mode === 'image' ? imageReferenceUrl : '';
@@ -3684,7 +3684,7 @@ const Panorama3DNode = (p: NodeProps) => {
       `panorama:${p.id.slice(0, 6)}`,
     );
     try {
-      const submit = await submitImageAsync(request);
+      const submit = await submitImageAsync(request, { submissionKey: reporter?.providerSubmissionKey });
       if (submit.sync && submit.urls?.length) {
         applyGeneratedPanorama(submit.urls[0], { mode, prompt, promptFinal: finalPrompt, sizeLevel, referenceUrl });
         logBus.success(`3D全景生成完成 → ${submit.urls[0]}`, `panorama:${p.id.slice(0, 6)}`);
@@ -3739,12 +3739,12 @@ const Panorama3DNode = (p: NodeProps) => {
     }
   }, [applyGeneratedPanorama, buildPromptFinalFor, imageReferenceUrl, p.id, panelMode, sizeLevel, update, userPrompt, viewCenter, viewerPosition]);
 
-  const runNode = useCallback(async () => {
+  const runNode = useCallback(async (reporter?: RunNodeLifecycleReporter) => {
     if (panelMode === 'preview') {
       await exportFrame();
       return;
     }
-    await generatePanorama();
+    await generatePanorama(reporter);
   }, [exportFrame, generatePanorama, panelMode]);
 
   const runNodeWithSecondaryAction = useCallback(async (reporter: RunNodeLifecycleReporter) => {
@@ -3775,7 +3775,7 @@ const Panorama3DNode = (p: NodeProps) => {
     const requestedMode = String(liveData?.panoramaRunMode || 'generate') as PanoramaNodeRunMode;
     try {
       if (!persistedRequestId) {
-        await runNode();
+        await runNode(reporter);
         return;
       }
       if (contextRequestId !== persistedRequestId) {
@@ -3783,7 +3783,7 @@ const Panorama3DNode = (p: NodeProps) => {
       }
       switch (requestedMode) {
         case 'generate':
-          await generatePanorama();
+          await generatePanorama(reporter);
           break;
         case 'frame':
           await exportFrame();

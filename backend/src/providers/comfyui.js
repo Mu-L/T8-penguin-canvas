@@ -6,6 +6,7 @@ const {
 } = require('./mediaResolver');
 const { isAllowedComfyuiUrl } = require('./comfyuiAccess');
 const { mergeProviderTrace, providerTrace } = require('./providerTrace');
+const { providerIdempotencyHeadersLike } = require('../services/providerSubmissionContext');
 
 const DEFAULT_TIMEOUT_MS = 5000;
 const GENERATION_TIMEOUT_MS = 60 * 60 * 1000;
@@ -24,7 +25,11 @@ async function fetchWithTimeout(url, options = {}) {
   void _fetchImpl;
   void _timeoutMs;
   try {
-    return await fetchImpl(url, { ...fetchOptions, signal: controller.signal });
+    return await fetchImpl(url, {
+      ...fetchOptions,
+      headers: providerIdempotencyHeadersLike(fetchOptions.headers, fetchOptions.method),
+      signal: controller.signal,
+    });
   } finally {
     clearTimeout(timeout);
   }

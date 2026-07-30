@@ -777,7 +777,7 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
         nodeInfoList,
         instanceType: instanceType || undefined,
         site: activeRhSiteRef.current,
-      });
+      }, { submissionKey: reporter?.providerSubmissionKey });
       applyResolvedRhSite(r.site);
       await reporter?.providerSubmitted({
         provider: 'runninghub',

@@ -676,6 +676,51 @@ test('persisted groupBox uses its internal exact port contract without becoming 
   );
 });
 
+test('persisted development toolbox makers validate without becoming public generatable nodes', () => {
+  for (const type of ['rh-toolbox-maker', 'fal-toolbox-maker']) {
+    const document = {
+      schema: 't8-canvas-document',
+      schemaVersion: 2,
+      projectId: 'project-a',
+      canvasId: 'canvas-a',
+      revision: 4,
+      nodes: [
+        { id: 'maker', type, position: { x: 0, y: 0 }, data: {} },
+        { id: 'out', type: 'output', position: { x: 300, y: 0 }, data: {} },
+      ],
+      edges: [{ id: 'maker-edge', source: 'maker', target: 'out' }],
+      viewport: { x: 0, y: 0, zoom: 1 },
+    };
+    const database = createDatabase({ document });
+    const validation = executeCanvasAgentTool(database, request('validateCanvas', {}, `validate-${type}`)).data;
+    assert.equal(validation.valid, true);
+    assert.equal(validation.diagnostics.some((item) => item.ruleId === 'registry.unknown-node-type'), false);
+
+    const inspected = executeCanvasAgentTool(
+      database,
+      request('inspectNodeSchema', { nodeId: 'maker' }, `inspect-${type}`),
+    ).data.item;
+    assert.equal(inspected.type, type);
+    assert.equal(inspected.hidden, true);
+    assert.equal(inspected.generatable, false);
+    assert.deepEqual(inspected.ports.outputs.map((port) => ({ id: port.id, kinds: port.kinds })), [
+      { id: null, kinds: ['text'] },
+    ]);
+
+    assert.equal(nodeSchemaManifest.types.some((item) => item.type === type), false);
+    assert.throws(
+      () => executeCanvasAgentTool(database, request('simulateExecutionPlan', {
+        proposal: executionProposal([
+          { id: 'maker-new', type, position: { x: 500, y: 0 } },
+        ], []),
+      }, `generate-${type}`)),
+      (error) => error instanceof CanvasAgentToolError
+        && error.code === 'agent_node_type_forbidden'
+        && error.status === 403,
+    );
+  }
+});
+
 test('subflow contracts ignore embedded data and reject duplicate authoritative port ids', () => {
   const duplicate = definition({
     inputs: [

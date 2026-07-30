@@ -1,0 +1,307 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+const surfaces = require('../backend/src/shared/creativeCapabilitySurfaces.json');
+const {
+  VERSIONED_TOOL_REQUEST_SCHEMA,
+} = require('../backend/src/services/agentControlCapabilityTools.js');
+const {
+  CreatorAgentToolProposalError,
+  assertCreatorToolProposalCurrent,
+  compileCreatorToolProposal,
+} = require('../backend/src/services/creatorAgentToolProposals.js');
+const {
+  CreatorAgentSessionError,
+  createCreatorAgentSessionStore,
+} = require('../backend/src/services/creatorAgentSessions.js');
+
+function stableString(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableString).join(',')}]`;
+  return `{${Object.keys(value).sort()
+    .map((key) => `${JSON.stringify(key)}:${stableString(value[key])}`)
+    .join(',')}}`;
+}
+
+function responseEvidence(overrides = {}) {
+  const value = {
+    schema: 't8-creator-agent-response-evidence-v1',
+    mode: 'online-model',
+    status: 'completed',
+    providerCalls: 1,
+    provider: 'seedance-nz',
+    model: 'glm-5',
+    finishReason: 'stop',
+    requestId: 'request-tool-proposals',
+    errorCode: null,
+    qualityCode: 'response-usable',
+    modelDecisionDigest: 'b'.repeat(64),
+    ...overrides,
+  };
+  value.evidenceDigest = crypto.createHash('sha256')
+    .update(stableString(value))
+    .digest('hex');
+  return value;
+}
+
+function fixture() {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 't8-creator-tool-proposal-'));
+  const store = createCreatorAgentSessionStore({ rootDir });
+  const session = store.create({
+    projectId: 'project-local',
+    canvasId: 'canvas-tool-proposals',
+    context: { canvasRevision: 12 },
+  });
+  const plan = {
+    ready: true,
+    kind: 'image',
+    planId: 'plan-tool-proposals-1',
+    planDigest: 'a'.repeat(64),
+    impact: { patchOperationCount: 0 },
+  };
+  const turn = store.appendTurn(session.id, {
+    text: '先做一版电影感角色主视觉',
+    assistantText: '这是已经完成并可编辑的角色主视觉 V0，包含主体、构图、光线和下一步。',
+    responseEvidence: responseEvidence(),
+
+    plan,
+  });
+  return {
+    rootDir,
+    store,
+    sessionId: session.id,
+    assistantEvent: turn.assistantEvent,
+    session: turn.session,
+    cleanup() {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    },
+  };
+}
+
+function request(operation = 'plan', input = {}) {
+  return {
+    schema: VERSIONED_TOOL_REQUEST_SCHEMA,
+    tool: 'zcanvas_create_image',
+    version: surfaces.capabilityManifestVersion,
+    operation,
+    projectId: 'project-local',
+    canvasId: 'canvas-tool-proposals',
+    clientRequestId: 'creator-tool-proposal-request-1',
+    input: {
+      prompt: '电影感角色主视觉',
+      ratio: '16:9',
+      ...input,
+    },
+  };
+}
+
+function rawProposal(overrides = {}) {
+  return {
+    schema: 't8-creator-model-tool-proposal-v1',
+    request: request(),
+    ...overrides,
+  };
+}
+
+test('model tool proposal compiles against exact response/plan/canvas bindings and never executes', () => {
+  const fx = fixture();
+  try {
+    const proposal = compileCreatorToolProposal({
+      proposal: rawProposal(),
+      session: fx.session,
+      assistantEvent: fx.assistantEvent,
+      createdAt: '2026-07-29T00:00:00.000Z',
+    });
+    assert.equal(proposal.binding.sessionId, fx.sessionId);
+    assert.equal(proposal.binding.responseId, fx.assistantEvent.payload.responseId);
+    assert.equal(proposal.binding.responseDigest, fx.assistantEvent.payload.responseDigest);
+    assert.equal(proposal.binding.planId, 'plan-tool-proposals-1');
+    assert.equal(proposal.binding.planDigest, 'a'.repeat(64));
+    assert.equal(proposal.binding.canvasRevision, 12);
+    assert.equal(proposal.tool.version, surfaces.capabilityManifestVersion);
+    assert.equal(proposal.tool.creatorLabel, '生成图片');
+    assert.equal(proposal.gate.riskLevel, 'L0');
+    assert.equal(proposal.gate.dispatchAllowed, false);
+    assert.deepEqual(proposal.execution, {
+      status: 'not-started',
+      canvasWrites: 0,
+      providerCalls: 0,
+      fileWrites: 0,
+    });
+
+    const stored = fx.store.recordToolProposal(fx.sessionId, { proposal });
+    assert.equal(stored.duplicate, false);
+    assert.equal(stored.session.toolProposals.length, 1);
+    assert.equal(stored.event.type, 'assistant.tool-proposal.validated');
+    assert.equal(stored.event.payload.execution.providerCalls, 0);
+    const repeated = fx.store.recordToolProposal(fx.sessionId, { proposal });
+    assert.equal(repeated.duplicate, true);
+    assert.equal(repeated.session.toolProposals.length, 1);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('apply and run proposals remain approval-gated with zero side effects', () => {
+  const fx = fixture();
+  try {
+    for (const [operation, riskLevel] of [['apply', 'L1'], ['run', 'L2']]) {
+      const proposal = compileCreatorToolProposal({
+        proposal: rawProposal({ request: request(operation) }),
+        session: fx.session,
+        assistantEvent: fx.assistantEvent,
+      });
+      assert.equal(proposal.gate.riskLevel, riskLevel);
+      assert.equal(proposal.gate.approvalRequired, true);
+      assert.equal(proposal.gate.previewRequired, true);
+      assert.equal(proposal.gate.dispatchAllowed, false);
+      assert.equal(proposal.execution.status, 'not-started');
+      assert.equal(proposal.execution.canvasWrites, 0);
+      assert.equal(proposal.execution.providerCalls, 0);
+      assert.ok(proposal.gate.requiredScopes.length > 0);
+      assert.throws(
+        () => assertCreatorToolProposalCurrent(proposal, fx.session, { grantedScopes: [] }),
+        (error) => error instanceof CreatorAgentToolProposalError
+          && error.code === 'CREATOR_TOOL_PROPOSAL_SCOPE_REQUIRED',
+      );
+      assert.doesNotThrow(() => assertCreatorToolProposalCurrent(
+        proposal,
+        fx.session,
+        { grantedScopes: proposal.gate.requiredScopes },
+      ));
+    }
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('proposal compiler rejects low-level internals, credentials, URLs and canvas patches', () => {
+  const fx = fixture();
+  try {
+    const forbidden = [
+      ['url', 'https://example.invalid/private'],
+      ['headers', { Authorization: 'Bearer secret' }],
+      ['apiKey', 'sk-secret'],
+      ['canvasPatch', { operations: [] }],
+      ['nodes', []],
+      ['edges', []],
+      ['providerPayload', { raw: true }],
+    ];
+    for (const [key, value] of forbidden) {
+      assert.throws(
+        () => compileCreatorToolProposal({
+          proposal: rawProposal({ request: request('plan', { nested: { [key]: value } }) }),
+          session: fx.session,
+          assistantEvent: fx.assistantEvent,
+        }),
+        (error) => error instanceof CreatorAgentToolProposalError
+          && error.code === 'CAPABILITY_TOOL_LOW_LEVEL_FIELD_FORBIDDEN',
+        key,
+      );
+    }
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('proposal compiler fails closed on scope and stale response/plan/artifact/canvas bindings', () => {
+  const fx = fixture();
+  try {
+    assert.throws(
+      () => compileCreatorToolProposal({
+        proposal: rawProposal({
+          request: { ...request(), projectId: 'other-project' },
+        }),
+        session: fx.session,
+        assistantEvent: fx.assistantEvent,
+      }),
+      (error) => error.code === 'CREATOR_TOOL_PROPOSAL_SCOPE_MISMATCH',
+    );
+    const staleCases = [
+      { responseId: 'response-old' },
+      { responseDigest: 'c'.repeat(64) },
+      { planId: 'plan-old' },
+      { planDigest: 'd'.repeat(64) },
+      { artifactVersionId: 'cav_old' },
+      { artifactDigest: 'e'.repeat(64) },
+      { canvasRevision: 11 },
+    ];
+    for (const expected of staleCases) {
+      assert.throws(
+        () => compileCreatorToolProposal({
+          proposal: rawProposal({ expected }),
+          session: fx.session,
+          assistantEvent: fx.assistantEvent,
+        }),
+        (error) => error instanceof CreatorAgentToolProposalError
+          && error.code === 'CREATOR_TOOL_PROPOSAL_STALE',
+        JSON.stringify(expected),
+      );
+    }
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('same proposal id with changed content conflicts and old proposals become stale after a new response', () => {
+  const fx = fixture();
+  try {
+    const proposalId = 'ctp_model_proposal_123456';
+    const first = compileCreatorToolProposal({
+      proposal: rawProposal({ proposalId }),
+      session: fx.session,
+      assistantEvent: fx.assistantEvent,
+    });
+    fx.store.recordToolProposal(fx.sessionId, { proposal: first });
+    const changed = compileCreatorToolProposal({
+      proposal: rawProposal({
+        proposalId,
+        request: request('plan', { prompt: '另一个完全不同的主视觉' }),
+      }),
+      session: fx.store.read(fx.sessionId),
+      assistantEvent: fx.assistantEvent,
+    });
+    assert.throws(
+      () => fx.store.recordToolProposal(fx.sessionId, { proposal: changed }),
+      (error) => error instanceof CreatorAgentSessionError
+        && error.code === 'CREATOR_TOOL_PROPOSAL_CONFLICT',
+    );
+
+    fx.store.appendTurn(fx.sessionId, {
+      text: '把主视觉改成雨夜版本',
+      assistantText: '雨夜版本 V1 已整理：保留角色身份，重做湿地反光、冷暖霓虹与镜头层次。',
+      responseEvidence: responseEvidence({
+        mode: 'offline-structure',
+        status: 'completed',
+        providerCalls: 0,
+        provider: null,
+        model: null,
+        finishReason: null,
+        requestId: null,
+        errorCode: 'model-not-ready',
+        qualityCode: 'response-usable',
+        modelDecisionDigest: 'b'.repeat(64),
+      }),
+      plan: {
+        ready: true,
+        kind: 'image',
+        planId: 'plan-tool-proposals-2',
+        planDigest: 'f'.repeat(64),
+        impact: { patchOperationCount: 0 },
+      },
+    });
+    assert.throws(
+      () => assertCreatorToolProposalCurrent(first, fx.store.read(fx.sessionId)),
+      (error) => error instanceof CreatorAgentToolProposalError
+        && error.code === 'CREATOR_TOOL_PROPOSAL_STALE',
+    );
+  } finally {
+    fx.cleanup();
+  }
+});

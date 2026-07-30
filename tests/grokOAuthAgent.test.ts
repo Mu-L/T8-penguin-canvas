@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
+import { streamGrokOAuthAgent } from '../src/services/grokOAuth.ts';
 
 function read(path: string) {
   return readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -371,9 +372,61 @@ test('Grok OAuth video polling does not hang after submit', () => {
   }
 });
 
+test('Grok OAuth stream awaits lifecycle evidence before consuming the next event', async () => {
+  const previousFetch = globalThis.fetch;
+  const encoder = new TextEncoder();
+  const sse = [
+    'data: {"type":"tool.progress","requestId":"req-order-1","progress":5}',
+    '',
+    'data: {"type":"done","done":true,"result":{"status":"completed"}}',
+    '',
+  ].join('\n');
+  const order: string[] = [];
+  let requestHeaders: Headers | null = null;
+
+  globalThis.fetch = async (_input, init) => {
+    requestHeaders = new Headers(init?.headers);
+    return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(sse));
+        controller.close();
+      },
+    }),
+    { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+  );
+  };
+
+  try {
+    await streamGrokOAuthAgent(
+      { mode: 'chat', prompt: 'ordering test' },
+      {
+        submissionKey: 'attempt-grok-order-0001',
+        onEvent: async (event) => {
+          const label = String(event.type || event.event || '');
+          order.push(`${label}:start`);
+          await Promise.resolve();
+          order.push(`${label}:persisted`);
+        },
+      },
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+
+  assert.deepEqual(order, [
+    'tool.progress:start',
+    'tool.progress:persisted',
+    'done:start',
+    'done:persisted',
+  ]);
+  assert.equal(requestHeaders?.get('X-T8-Provider-Submission'), 'attempt-grok-order-0001');
+});
+
 test('Grok OAuth Agent has stable studio status, previews, and publish guards', () => {
   const node = read('../src/components/nodes/GrokOAuthAgentNode.tsx');
   const privateHook = readOptional('../local-private/extensions/backend/grokOAuth.cjs');
+  const backendRoute = read('../backend/src/routes/grokOAuth.js');
 
   assert.match(node, /const noticeBusy = !error && \(isBusy \|\| !!uploadingKind\)/);
   assert.match(node, /const noticeCardText = readablePalette\.noticeText/);
@@ -388,6 +441,9 @@ test('Grok OAuth Agent has stable studio status, previews, and publish guards', 
   assert.match(node, /Grok 产物 100% 预览/);
   assert.match(node, /publishingArtifactIdsRef/);
   assert.match(node, /publishingArtifactIdsRef\.current\.has\(current\.id\)/);
+  assert.match(node, /submissionKey:\s*reporter\?\.providerSubmissionKey/);
+  assert.match(backendRoute, /router\.use\(providerSubmissionContextMiddleware\)/);
+  assert.match(backendRoute, /providerSubmissionKey:\s*currentProviderSubmissionKey\(\) \|\| undefined/);
 
   if (privateHook) {
     assert.match(privateHook, /buildChatGenerationParams/);
@@ -402,6 +458,9 @@ test('Grok OAuth Agent has stable studio status, previews, and publish guards', 
     assert.match(privateHook, /body\.images/);
     assert.match(privateHook, /body\.imageUrl/);
     assert.match(privateHook, /MAX_XAI_IMAGE_EDIT_REFERENCES = 3/);
+    assert.match(privateHook, /normalizeProviderSubmissionKey\(providerSubmissionKey\) \|\| crypto\.randomUUID\(\)/);
+    assert.match(privateHook, /providerSubmissionHeaders\(providerSubmissionKey\)/);
+    assert.match(privateHook, /\(\{ body, providerSubmissionKey \}\) => videoSubmit\(body, providerSubmissionKey\)/);
     assert.match(privateHook, /imageEditPart/);
     assert.match(privateHook, /return \{ type: 'image_url', url \}/);
     assert.match(privateHook, /\/images\/edits/);

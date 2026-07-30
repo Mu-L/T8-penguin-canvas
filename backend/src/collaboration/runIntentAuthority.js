@@ -47,19 +47,28 @@ const LOCAL_EXECUTION_NODE_TYPES = new Set([
 const IMAGE_RUNTIME_MODELS = Object.freeze({
   'gpt-image-2': {
     defaultModel: 'gpt-image-2-all',
-    models: ['gpt-image-2-all', 'gpt-image-2', 'gpt-image-2-2K', 'gpt-image-2-4K', 'gpt-image-2-fal'],
+    models: [
+      'gpt-image-2-all', 'gpt-image-2', 'gpt-image-2-2K', 'gpt-image-2-4K', 'gpt-image-2-fal',
+      'zhenzhen-image-g2-t2i', 'zhenzhen-image-g2-i2i', 'zhenzhen-image-g-v2-lowprice',
+    ],
   },
   'nano-banana-2': {
     defaultModel: 'gemini-3.1-flash-image',
-    models: ['gemini-3.1-flash-image', 'gemini-3.1-flash-lite-image', 'nano-banana-2-fal'],
+    models: [
+      'gemini-3.1-flash-image', 'gemini-3.1-flash-lite-image', 'nano-banana-2-fal',
+      'zhenzhen-image-nb-2-lite', 'zhenzhen-image-nb-2',
+    ],
   },
   'nano-banana-pro': {
     defaultModel: 'nano-banana-pro',
-    models: ['nano-banana-pro', 'nano-banana-pro-2k', 'nano-banana-pro-4k', 'gemini-3-pro-image', 'nano-banana-pro-fal'],
+    models: [
+      'nano-banana-pro', 'nano-banana-pro-2k', 'nano-banana-pro-4k', 'gemini-3-pro-image',
+      'nano-banana-pro-fal', 'zhenzhen-image-nb-pro',
+    ],
   },
   'grok-image': {
     defaultModel: 'grok-4.2-image',
-    models: ['grok-4.2-image'],
+    models: ['grok-4.2-image', 'zhenzhen-image-gk-v15', 'zhenzhen-image-gk-v15-edit'],
   },
   'seedream-v5-pro': {
     defaultModel: 'seedream-v5-pro',
@@ -79,9 +88,14 @@ const VIDEO_RUNTIME_MODELS = Object.freeze({
     'grok-1.5-video-15s',
     'grok-imagine-video-1.5',
     'grok-video-fal',
+    'zhenzhen-video-gk-v15',
   ],
   'veo3.1': [
     'veo-omni-10s',
+    'zhenzhen-video-g-omni-flash',
+    'zhenzhen-video-v31-fast',
+    'zhenzhen-video-v31-quality',
+    'zhenzhen-video-v31-lite',
     'veo3',
     'veo3-fast',
     'veo3-pro',
@@ -102,6 +116,24 @@ const VIDEO_RUNTIME_MODELS = Object.freeze({
   'happyhorse-1.1': ['happyhorse-1.1-t2v', 'happyhorse-1.1-i2v', 'happyhorse-1.1-r2v'],
   'seedance-2.0': ['seedance-2.0'],
 });
+
+const SEEDANCE_NZ_IMAGE_RUNTIME_MODELS = new Set([
+  'zhenzhen-image-g2-t2i',
+  'zhenzhen-image-g2-i2i',
+  'zhenzhen-image-g-v2-lowprice',
+  'zhenzhen-image-gk-v15',
+  'zhenzhen-image-gk-v15-edit',
+  'zhenzhen-image-nb-2-lite',
+  'zhenzhen-image-nb-2',
+  'zhenzhen-image-nb-pro',
+]);
+const SEEDANCE_NZ_VIDEO_RUNTIME_MODELS = new Set([
+  'zhenzhen-video-g-omni-flash',
+  'zhenzhen-video-gk-v15',
+  'zhenzhen-video-v31-fast',
+  'zhenzhen-video-v31-quality',
+  'zhenzhen-video-v31-lite',
+]);
 
 const VIDEO_FAL_MODELS = new Set([
   'veo3.1-fal',
@@ -307,7 +339,10 @@ function providerDeclarationForNode(node, context = {}) {
       };
     }
     return {
-      provider: resolved.model.endsWith('-fal') ? 'fal' : 'zhenzhen',
+      provider: boundedString(data.imageBuiltinSource) === 'seedance-nz'
+        || SEEDANCE_NZ_IMAGE_RUNTIME_MODELS.has(resolved.model)
+        ? 'seedance-nz'
+        : resolved.model.endsWith('-fal') ? 'fal' : 'zhenzhen',
       model: resolved.model,
     };
   }
@@ -317,6 +352,9 @@ function providerDeclarationForNode(node, context = {}) {
     return {
       provider: VIDEO_FAL_MODELS.has(resolved.model)
         ? 'fal'
+        : boundedString(data.videoBuiltinSource) === 'seedance-nz'
+          || SEEDANCE_NZ_VIDEO_RUNTIME_MODELS.has(resolved.model)
+          ? 'seedance-nz'
         : (resolved.familyId === 'wan-2.7-spicy' || resolved.familyId === 'happyhorse-1.1')
           ? 'seedance-nz'
           : 'zhenzhen',

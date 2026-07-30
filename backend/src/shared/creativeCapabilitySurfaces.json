@@ -1,0 +1,2858 @@
+{
+  "schema": "t8-creative-capability-surfaces-v1",
+  "capabilityManifestVersion": "0.1.0-dev",
+  "generatedFrom": {
+    "capabilityManifest": "tools/zcanvas-cli/creativeCapabilityManifest.json",
+    "capabilityGraph": "tools/zcanvas-cli/generated/creative-capability-graph.json"
+  },
+  "sourceDigest": "862cf87d748e9be79d2859bdb3d31845274b8912eb8169995be6071f98473796",
+  "capabilityGraphDigest": "53bb30b0bdcff3669a1a72bd2e3d85d94bac7ba0f5b1de992481919d291c10d8",
+  "counts": {
+    "capabilities": 31,
+    "agentTools": 31,
+    "cliOperations": 31,
+    "uiActions": 31
+  },
+  "capabilities": [
+    {
+      "id": "create.image",
+      "creatorLabel": "生成图片",
+      "category": "image",
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify"
+      ],
+      "agentTool": {
+        "name": "zcanvas_create_image",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "create.image",
+        "handler": "creative-plan:create.image",
+        "service": "agentControlCreative",
+        "method": "createPlan",
+        "bindingOperation": "image"
+      },
+      "cli": {
+        "command": "create",
+        "subcommand": "image",
+        "operation": "create.image"
+      },
+      "ui": {
+        "action": "create.image",
+        "requestAction": "create.image",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "run",
+            "riskLevel": "L2",
+            "approvalRequired": true,
+            "boundary": "provider-or-external",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "create.video",
+      "creatorLabel": "生成视频",
+      "category": "video",
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify"
+      ],
+      "agentTool": {
+        "name": "zcanvas_create_video",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "create.video",
+        "handler": "creative-plan:create.video",
+        "service": "agentControlCreative",
+        "method": "createPlan",
+        "bindingOperation": "video"
+      },
+      "cli": {
+        "command": "create",
+        "subcommand": "video",
+        "operation": "create.video"
+      },
+      "ui": {
+        "action": "create.video",
+        "requestAction": "create.video",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "run",
+            "riskLevel": "L2",
+            "approvalRequired": true,
+            "boundary": "provider-or-external",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "create.audio",
+      "creatorLabel": "生成音频",
+      "category": "audio",
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify"
+      ],
+      "agentTool": {
+        "name": "zcanvas_create_audio",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "create.audio",
+        "handler": "creative-plan:create.audio",
+        "service": "agentControlCreative",
+        "method": "createPlan",
+        "bindingOperation": "audio"
+      },
+      "cli": {
+        "command": "create",
+        "subcommand": "audio",
+        "operation": "create.audio"
+      },
+      "ui": {
+        "action": "create.audio",
+        "requestAction": "create.audio",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "run",
+            "riskLevel": "L2",
+            "approvalRequired": true,
+            "boundary": "provider-or-external",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "create.script",
+      "creatorLabel": "完善剧本",
+      "category": "script",
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify"
+      ],
+      "agentTool": {
+        "name": "zcanvas_create_script",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "create.script",
+        "handler": "creative-plan:create.script",
+        "service": "agentControlCreative",
+        "method": "createPlan",
+        "bindingOperation": "script"
+      },
+      "cli": {
+        "command": "create",
+        "subcommand": "script",
+        "operation": "create.script"
+      },
+      "ui": {
+        "action": "create.script",
+        "requestAction": "create.script",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "run",
+            "riskLevel": "L2",
+            "approvalRequired": true,
+            "boundary": "provider-or-external",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "create.story",
+      "creatorLabel": "全自动制片",
+      "category": "production",
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify",
+        "resume"
+      ],
+      "agentTool": {
+        "name": "zcanvas_create_story",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "create.story",
+        "handler": "creative-plan:create.story",
+        "service": "agentControlCreative",
+        "method": "createPlan",
+        "bindingOperation": "story"
+      },
+      "cli": {
+        "command": "create",
+        "subcommand": "story",
+        "operation": "create.story"
+      },
+      "ui": {
+        "action": "create.story",
+        "requestAction": "create.story",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "run",
+            "riskLevel": "L2",
+            "approvalRequired": true,
+            "boundary": "provider-or-external",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "resume",
+            "riskLevel": "L2",
+            "approvalRequired": true,
+            "boundary": "provider-or-external",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "canvas.node-add",
+      "creatorLabel": "新增画布节点",
+      "category": "canvas",
+      "approval": "L1",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify",
+        "rollback"
+      ],
+      "agentTool": {
+        "name": "zcanvas_canvas_node_add",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "graph.node-add",
+        "handler": "creative-action:graph.node-add",
+        "service": "agentControlCreative",
+        "method": "actionPlan",
+        "bindingOperation": "graph.node-add"
+      },
+      "cli": {
+        "command": "graph",
+        "subcommand": "add",
+        "operation": "graph.add"
+      },
+      "ui": {
+        "action": "canvas.node-add",
+        "requestAction": "graph.node-add",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "rollback",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "recovery-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "video.extract-frames",
+      "creatorLabel": "视频抽帧",
+      "category": "video",
+      "approval": "L1",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify",
+        "rollback"
+      ],
+      "agentTool": {
+        "name": "zcanvas_video_extract_frames",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "video.extract-frames",
+        "handler": "creative-action:video.extract-frames",
+        "service": "agentControlCreative",
+        "method": "actionPlan",
+        "bindingOperation": "video.extract-frames"
+      },
+      "cli": {
+        "command": "media",
+        "subcommand": "extract-frames",
+        "operation": "media.extract-frames"
+      },
+      "ui": {
+        "action": "video.extract-frames",
+        "requestAction": "video.extract-frames",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "run",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "local-compute",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "rollback",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "recovery-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "image.remove-solid-background",
+      "creatorLabel": "移除纯色背景",
+      "category": "image",
+      "approval": "L1",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify",
+        "rollback"
+      ],
+      "agentTool": {
+        "name": "zcanvas_image_remove_solid_background",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "image.remove-solid-background",
+        "handler": "creative-action:image.remove-solid-background",
+        "service": "agentControlCreative",
+        "method": "actionPlan",
+        "bindingOperation": "image.remove-solid-background"
+      },
+      "cli": {
+        "command": "media",
+        "subcommand": "remove-solid-background",
+        "operation": "media.remove-solid-background"
+      },
+      "ui": {
+        "action": "image.remove-solid-background",
+        "requestAction": "image.remove-solid-background",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "run",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "local-compute",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "rollback",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "recovery-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "image.resample-upscale",
+      "creatorLabel": "Lanczos 等比放大",
+      "category": "image",
+      "approval": "L1",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify",
+        "rollback"
+      ],
+      "agentTool": {
+        "name": "zcanvas_image_resample_upscale",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "image.resample-upscale",
+        "handler": "creative-action:image.resample-upscale",
+        "service": "agentControlCreative",
+        "method": "actionPlan",
+        "bindingOperation": "image.resample-upscale"
+      },
+      "cli": {
+        "command": "media",
+        "subcommand": "resample-upscale",
+        "operation": "media.resample-upscale"
+      },
+      "ui": {
+        "action": "image.resample-upscale",
+        "requestAction": "image.resample-upscale",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "run",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "local-compute",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "rollback",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "recovery-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "edit.image",
+      "creatorLabel": "修改图片",
+      "category": "image",
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write",
+        "asset:read"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify",
+        "rollback"
+      ],
+      "agentTool": {
+        "name": "zcanvas_edit_image",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "create.edit-image",
+        "handler": "creative-plan:create.edit-image",
+        "service": "agentControlCreative",
+        "method": "createPlan",
+        "bindingOperation": "edit-image"
+      },
+      "cli": {
+        "command": "edit",
+        "subcommand": "image",
+        "operation": "edit.image"
+      },
+      "ui": {
+        "action": "edit.image",
+        "requestAction": "create.edit-image",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read",
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read",
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write",
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "run",
+            "riskLevel": "L2",
+            "approvalRequired": true,
+            "boundary": "provider-or-external",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write",
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read",
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "rollback",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "recovery-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write",
+              "asset:read"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "edit.video",
+      "creatorLabel": "修改视频",
+      "category": "video",
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write",
+        "asset:read"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify",
+        "rollback"
+      ],
+      "agentTool": {
+        "name": "zcanvas_edit_video",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "create.edit-video",
+        "handler": "creative-plan:create.edit-video",
+        "service": "agentControlCreative",
+        "method": "createPlan",
+        "bindingOperation": "edit-video"
+      },
+      "cli": {
+        "command": "edit",
+        "subcommand": "video",
+        "operation": "edit.video"
+      },
+      "ui": {
+        "action": "edit.video",
+        "requestAction": "create.edit-video",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read",
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read",
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write",
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "run",
+            "riskLevel": "L2",
+            "approvalRequired": true,
+            "boundary": "provider-or-external",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write",
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read",
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "rollback",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "recovery-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write",
+              "asset:read"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "story.analyze",
+      "creatorLabel": "分析剧本",
+      "category": "production",
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify"
+      ],
+      "agentTool": {
+        "name": "zcanvas_story_analyze",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "story.analyze",
+        "handler": "creative-action:story.analyze",
+        "service": "agentControlCreative",
+        "method": "actionPlan",
+        "bindingOperation": "story.analyze"
+      },
+      "cli": {
+        "command": "story",
+        "subcommand": "analyze",
+        "operation": "story.analyze"
+      },
+      "ui": {
+        "action": "story.analyze",
+        "requestAction": "story.analyze",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "story.import",
+      "creatorLabel": "导入 Story",
+      "category": "production",
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify"
+      ],
+      "agentTool": {
+        "name": "zcanvas_story_import",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "story.import",
+        "handler": "creative-action:story.import",
+        "service": "agentControlCreative",
+        "method": "actionPlan",
+        "bindingOperation": "story.import"
+      },
+      "cli": {
+        "command": "story",
+        "subcommand": "import",
+        "operation": "story.import"
+      },
+      "ui": {
+        "action": "story.import",
+        "requestAction": "story.import",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "story.bind-asset",
+      "creatorLabel": "绑定资产",
+      "category": "production",
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write",
+        "asset:read"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify",
+        "rollback"
+      ],
+      "agentTool": {
+        "name": "zcanvas_story_bind_asset",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "story.bind-asset",
+        "handler": "creative-action:story.bind-asset",
+        "service": "agentControlCreative",
+        "method": "actionPlan",
+        "bindingOperation": "story.bind-asset"
+      },
+      "cli": {
+        "command": "story",
+        "subcommand": "bind-asset",
+        "operation": "story.bind-asset"
+      },
+      "ui": {
+        "action": "story.bind-asset",
+        "requestAction": "story.bind-asset",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read",
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read",
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write",
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read",
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "rollback",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "recovery-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write",
+              "asset:read"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "story.compile",
+      "creatorLabel": "合成提示词",
+      "category": "production",
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify"
+      ],
+      "agentTool": {
+        "name": "zcanvas_story_compile",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "story.compile",
+        "handler": "creative-action:story.compile",
+        "service": "agentControlCreative",
+        "method": "actionPlan",
+        "bindingOperation": "story.compile"
+      },
+      "cli": {
+        "command": "story",
+        "subcommand": "compile",
+        "operation": "story.compile"
+      },
+      "ui": {
+        "action": "story.compile",
+        "requestAction": "story.compile",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "story.plan-previews",
+      "creatorLabel": "计划分镜预览",
+      "category": "production",
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify",
+        "resume"
+      ],
+      "agentTool": {
+        "name": "zcanvas_story_plan_previews",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "story.plan-previews",
+        "handler": "creative-action:story.plan-previews",
+        "service": "agentControlCreative",
+        "method": "actionPlan",
+        "bindingOperation": "story.plan-previews"
+      },
+      "cli": {
+        "command": "story",
+        "subcommand": "plan-previews",
+        "operation": "story.plan-previews"
+      },
+      "ui": {
+        "action": "story.plan-previews",
+        "requestAction": "story.plan-previews",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "run",
+            "riskLevel": "L2",
+            "approvalRequired": true,
+            "boundary": "provider-or-external",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "resume",
+            "riskLevel": "L2",
+            "approvalRequired": true,
+            "boundary": "provider-or-external",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "story.adopt-preview",
+      "creatorLabel": "采用预览",
+      "category": "production",
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write",
+        "asset:read"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify",
+        "rollback"
+      ],
+      "agentTool": {
+        "name": "zcanvas_story_adopt_preview",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "story.adopt-preview",
+        "handler": "creative-action:story.adopt-preview",
+        "service": "agentControlCreative",
+        "method": "actionPlan",
+        "bindingOperation": "story.adopt-preview"
+      },
+      "cli": {
+        "command": "story",
+        "subcommand": "adopt-preview",
+        "operation": "story.adopt-preview"
+      },
+      "ui": {
+        "action": "story.adopt-preview",
+        "requestAction": "story.adopt-preview",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read",
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read",
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write",
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read",
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "rollback",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "recovery-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write",
+              "asset:read"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "director.materialize",
+      "creatorLabel": "生成导演分镜台",
+      "category": "production",
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify"
+      ],
+      "agentTool": {
+        "name": "zcanvas_director_materialize",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "director.materialize",
+        "handler": "creative-action:director.materialize",
+        "service": "agentControlCreative",
+        "method": "actionPlan",
+        "bindingOperation": "director.materialize"
+      },
+      "cli": {
+        "command": "director",
+        "subcommand": "materialize",
+        "operation": "director.materialize"
+      },
+      "ui": {
+        "action": "director.materialize",
+        "requestAction": "director.materialize",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "video-edit.compose",
+      "creatorLabel": "合成为片",
+      "category": "delivery",
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify",
+        "resume"
+      ],
+      "agentTool": {
+        "name": "zcanvas_video_edit_compose",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "video-edit.compose",
+        "handler": "creative-action:video-edit.compose",
+        "service": "agentControlCreative",
+        "method": "actionPlan",
+        "bindingOperation": "video-edit.compose"
+      },
+      "cli": {
+        "command": "video-edit",
+        "subcommand": "compose",
+        "operation": "video-edit.compose"
+      },
+      "ui": {
+        "action": "video-edit.compose",
+        "requestAction": "video-edit.compose",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "run",
+            "riskLevel": "L2",
+            "approvalRequired": true,
+            "boundary": "provider-or-external",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "resume",
+            "riskLevel": "L2",
+            "approvalRequired": true,
+            "boundary": "provider-or-external",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "iterate.compare",
+      "creatorLabel": "比较候选",
+      "category": "review",
+      "approval": "L0",
+      "requiredScopes": [
+        "canvas:read"
+      ],
+      "supports": [
+        "inspect",
+        "verify"
+      ],
+      "agentTool": {
+        "name": "zcanvas_iterate_compare",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "inspect",
+        "directOperations": [
+          "inspect",
+          "verify"
+        ],
+        "requestAction": "iterate.compare",
+        "handler": "creative-read:iterate.compare",
+        "service": "agentControlCreative",
+        "method": "readAction",
+        "bindingOperation": "compare"
+      },
+      "cli": {
+        "command": "iterate",
+        "subcommand": "compare",
+        "operation": "iterate.compare"
+      },
+      "ui": {
+        "action": "iterate.compare",
+        "requestAction": "iterate.compare",
+        "operations": [
+          {
+            "operation": "inspect",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "iterate.review",
+      "creatorLabel": "检查实际候选",
+      "category": "review",
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify"
+      ],
+      "agentTool": {
+        "name": "zcanvas_iterate_review",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "review",
+        "handler": "creative-action:review",
+        "service": "agentControlCreative",
+        "method": "actionPlan",
+        "bindingOperation": "review"
+      },
+      "cli": {
+        "command": "iterate",
+        "subcommand": "review",
+        "operation": "iterate.review"
+      },
+      "ui": {
+        "action": "iterate.review",
+        "requestAction": "review",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "iterate.accept",
+      "creatorLabel": "采用候选",
+      "category": "review",
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "inspect",
+        "plan",
+        "preview",
+        "apply",
+        "verify",
+        "rollback"
+      ],
+      "agentTool": {
+        "name": "zcanvas_iterate_accept",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "accept",
+        "handler": "creative-action:accept",
+        "service": "agentControlCreative",
+        "method": "actionPlan",
+        "bindingOperation": "accept"
+      },
+      "cli": {
+        "command": "iterate",
+        "subcommand": "accept",
+        "operation": "iterate.accept"
+      },
+      "ui": {
+        "action": "iterate.accept",
+        "requestAction": "accept",
+        "operations": [
+          {
+            "operation": "inspect",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "rollback",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "recovery-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "iterate.lock",
+      "creatorLabel": "锁定一致性",
+      "category": "review",
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify",
+        "resume"
+      ],
+      "agentTool": {
+        "name": "zcanvas_iterate_lock",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "lock",
+        "handler": "creative-action:lock",
+        "service": "agentControlCreative",
+        "method": "actionPlan",
+        "bindingOperation": "lock"
+      },
+      "cli": {
+        "command": "iterate",
+        "subcommand": "lock",
+        "operation": "iterate.lock"
+      },
+      "ui": {
+        "action": "iterate.lock",
+        "requestAction": "lock",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "resume",
+            "riskLevel": "L2",
+            "approvalRequired": true,
+            "boundary": "provider-or-external",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "iterate.unlock",
+      "creatorLabel": "解除一致性锁",
+      "category": "review",
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify",
+        "rollback"
+      ],
+      "agentTool": {
+        "name": "zcanvas_iterate_unlock",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "unlock",
+        "handler": "creative-action:unlock",
+        "service": "agentControlCreative",
+        "method": "actionPlan",
+        "bindingOperation": "unlock"
+      },
+      "cli": {
+        "command": "iterate",
+        "subcommand": "unlock",
+        "operation": "iterate.unlock"
+      },
+      "ui": {
+        "action": "iterate.unlock",
+        "requestAction": "unlock",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "rollback",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "recovery-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "iterate.branch",
+      "creatorLabel": "创建探索分支",
+      "category": "review",
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "compare",
+        "verify",
+        "rollback"
+      ],
+      "agentTool": {
+        "name": "zcanvas_iterate_branch",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "branch",
+        "handler": "creative-action:branch",
+        "service": "agentControlCreative",
+        "method": "actionPlan",
+        "bindingOperation": "branch"
+      },
+      "cli": {
+        "command": "iterate",
+        "subcommand": "branch",
+        "operation": "iterate.branch"
+      },
+      "ui": {
+        "action": "iterate.branch",
+        "requestAction": "branch",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "compare",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "rollback",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "recovery-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "iterate.rollback",
+      "creatorLabel": "恢复候选版本",
+      "category": "review",
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify",
+        "rollback"
+      ],
+      "agentTool": {
+        "name": "zcanvas_iterate_rollback",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "plan",
+        "directOperations": [
+          "plan",
+          "preview"
+        ],
+        "requestAction": "rollback",
+        "handler": "creative-action:rollback",
+        "service": "agentControlCreative",
+        "method": "actionPlan",
+        "bindingOperation": "rollback"
+      },
+      "cli": {
+        "command": "iterate",
+        "subcommand": "rollback",
+        "operation": "iterate.rollback"
+      },
+      "ui": {
+        "action": "iterate.rollback",
+        "requestAction": "rollback",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read"
+            ]
+          },
+          {
+            "operation": "rollback",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "recovery-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "run.start",
+      "creatorLabel": "开始生成",
+      "category": "execution",
+      "approval": "L2",
+      "requiredScopes": [
+        "run:read",
+        "run:execute"
+      ],
+      "supports": [
+        "preview",
+        "run",
+        "verify",
+        "resume",
+        "cancel"
+      ],
+      "agentTool": {
+        "name": "zcanvas_run_start",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "preview",
+        "directOperations": [
+          "preview"
+        ],
+        "requestAction": "run.start",
+        "handler": "run:start",
+        "service": "agentControlRuns",
+        "method": "startPreview",
+        "bindingOperation": "start"
+      },
+      "cli": {
+        "command": "run",
+        "subcommand": "start",
+        "operation": "run.start"
+      },
+      "ui": {
+        "action": "run.start",
+        "requestAction": "run.start",
+        "operations": [
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "run:read"
+            ]
+          },
+          {
+            "operation": "run",
+            "riskLevel": "L2",
+            "approvalRequired": true,
+            "boundary": "provider-or-external",
+            "requiredScopes": [
+              "run:read",
+              "run:execute"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "run:read"
+            ]
+          },
+          {
+            "operation": "resume",
+            "riskLevel": "L2",
+            "approvalRequired": true,
+            "boundary": "provider-or-external",
+            "requiredScopes": [
+              "run:read",
+              "run:execute"
+            ]
+          },
+          {
+            "operation": "cancel",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "recovery-write",
+            "requiredScopes": [
+              "run:read",
+              "run:execute"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "asset.place",
+      "creatorLabel": "把已保存素材放到画布",
+      "category": "asset",
+      "approval": "L1",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write",
+        "asset:read"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify",
+        "rollback"
+      ],
+      "agentTool": {
+        "name": "zcanvas_asset_place",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "preview",
+        "directOperations": [
+          "preview"
+        ],
+        "requestAction": "asset.place",
+        "handler": "asset:place",
+        "service": "agentControlAssets",
+        "method": "inspectPlace",
+        "bindingOperation": "place"
+      },
+      "cli": {
+        "command": "asset",
+        "subcommand": "place",
+        "operation": "asset.place"
+      },
+      "ui": {
+        "action": "asset.place",
+        "requestAction": "asset.place",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read",
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read",
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write",
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "canvas:read",
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "rollback",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "recovery-write",
+            "requiredScopes": [
+              "canvas:read",
+              "canvas:write",
+              "asset:read"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "asset.import",
+      "creatorLabel": "导入外部素材",
+      "category": "asset",
+      "approval": "L2",
+      "requiredScopes": [
+        "asset:transfer"
+      ],
+      "supports": [
+        "preview",
+        "apply",
+        "verify"
+      ],
+      "agentTool": {
+        "name": "zcanvas_asset_import",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "preview",
+        "directOperations": [
+          "preview"
+        ],
+        "requestAction": "asset.import",
+        "handler": "asset:import",
+        "service": "agentControlAssets",
+        "method": "inspectImport",
+        "bindingOperation": "import"
+      },
+      "cli": {
+        "command": "asset",
+        "subcommand": "import",
+        "operation": "asset.import"
+      },
+      "ui": {
+        "action": "asset.import",
+        "requestAction": "asset.import",
+        "operations": [
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "asset:transfer"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L2",
+            "approvalRequired": true,
+            "boundary": "external-read-or-transfer",
+            "requiredScopes": [
+              "asset:transfer"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "delivery.package",
+      "creatorLabel": "打包交付",
+      "category": "delivery",
+      "approval": "L2",
+      "requiredScopes": [
+        "asset:read",
+        "asset:transfer"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify"
+      ],
+      "agentTool": {
+        "name": "zcanvas_delivery_package",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "preview",
+        "directOperations": [
+          "preview"
+        ],
+        "requestAction": "delivery.package",
+        "handler": "delivery:package",
+        "service": "agentControlDelivery",
+        "method": "inspectPackage",
+        "bindingOperation": "package"
+      },
+      "cli": {
+        "command": "delivery",
+        "subcommand": "package",
+        "operation": "delivery.package"
+      },
+      "ui": {
+        "action": "delivery.package",
+        "requestAction": "delivery.package",
+        "operations": [
+          {
+            "operation": "plan",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "asset:read"
+            ]
+          },
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "asset:read",
+              "asset:transfer"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L2",
+            "approvalRequired": true,
+            "boundary": "external-read-or-transfer",
+            "requiredScopes": [
+              "asset:read",
+              "asset:transfer"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "asset:read"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "browser.handoff",
+      "creatorLabel": "浏览器接力",
+      "category": "handoff",
+      "approval": "L1",
+      "requiredScopes": [
+        "browser:handoff"
+      ],
+      "supports": [
+        "preview",
+        "apply",
+        "verify"
+      ],
+      "agentTool": {
+        "name": "zcanvas_browser_handoff",
+        "version": "0.1.0-dev",
+        "protocol": "t8-versioned-creative-tool-v1",
+        "requestSchema": "t8-versioned-creative-tool-request-v1",
+        "resultSchema": "t8-versioned-creative-tool-result-v1",
+        "defaultOperation": "preview",
+        "directOperations": [
+          "preview"
+        ],
+        "requestAction": "browser.open",
+        "handler": "browser:open",
+        "service": "agentControlBrowser",
+        "method": "createBrowserHandoff",
+        "bindingOperation": "open"
+      },
+      "cli": {
+        "command": "browser",
+        "subcommand": "open",
+        "operation": "browser.open"
+      },
+      "ui": {
+        "action": "browser.handoff",
+        "requestAction": "browser.open",
+        "operations": [
+          {
+            "operation": "preview",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": [
+              "browser:handoff"
+            ]
+          },
+          {
+            "operation": "apply",
+            "riskLevel": "L1",
+            "approvalRequired": true,
+            "boundary": "reversible-canvas-write",
+            "requiredScopes": [
+              "browser:handoff"
+            ]
+          },
+          {
+            "operation": "verify",
+            "riskLevel": "L0",
+            "approvalRequired": false,
+            "boundary": "local-read",
+            "requiredScopes": []
+          }
+        ]
+      }
+    }
+  ]
+}

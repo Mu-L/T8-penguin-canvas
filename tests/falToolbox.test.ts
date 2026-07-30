@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+
 import { assertProductionNodeSchema } from './helpers/canvasNodeSchema.ts';
 import { getNodeOutputs } from '../src/config/portTypes.ts';
 
@@ -451,6 +452,10 @@ test('Fal toolbox backend is additive and keeps old FAL routes', () => {
   assert.match(proxy, /router\.post\('\/fal-toolbox\/query'/);
   assert.match(proxy, /queue\.fal\.run/);
   assert.match(proxy, /ensureDefaultZhenzhenKey\(settings, res, 'Fal超市'\)/);
+  const service = readFileSync(new URL('../src/services/falToolbox.ts', import.meta.url), 'utf8');
+  const node = readFileSync(new URL('../src/components/nodes/FalToolboxNode.tsx', import.meta.url), 'utf8');
+  assert.match(service, /providerSubmissionHeaders\(transport\)/);
+  assert.match(node, /submissionKey:\s*reporter\?\.providerSubmissionKey/);
 });
 
 test('Fal toolbox maker is dev-only and guarded from packaged builds', () => {

@@ -261,7 +261,7 @@ function missingOverseasCredentialMessage(kind: string, hint: unknown) {
 }
 
 function missingDomesticCredentialMessage() {
-  return '未检测到“贞贞的平价AI工坊（国内） API Key”。请点击右上角齿轮打开“API 设置”，填写并保存该 Key，然后重新运行。';
+  return '未检测到“贞贞的平价AI小屋 API Key”。请点击右上角齿轮打开“API 设置”，填写并保存该 Key，然后重新运行。';
 }
 
 function selectedRuntimeCredentialGroup(data: Record<string, unknown>) {
@@ -417,7 +417,7 @@ function builtInCredentialNotice(node: Node, settings: ApiSettings): RunPrefligh
       : capabilityNotice(
           node,
           'provider.seedance-nz-credential-missing',
-          '未检测到“贞贞的平价AI工坊（国内） API Key”。请点击右上角齿轮打开“API 设置”，填写并保存，然后重新运行。',
+          '未检测到“贞贞的平价AI小屋 API Key”。请点击右上角齿轮打开“API 设置”，填写并保存，然后重新运行。',
         );
   }
 

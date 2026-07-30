@@ -144,6 +144,11 @@ export function createEmptyUploadMediaData(): Record<string, any> {
     fileSizes: [],
     mime: '',
     mimes: [],
+    imageLongEdgeLimit: 0,
+    imageLongEdgeAppliedLimit: 0,
+    imageLongEdgeSourceItems: [],
+    imageLongEdgeSourceUrls: [],
+    imageLongEdgeOutputUrls: [],
   };
   for (const meta of Object.values(MEDIA_KIND_META)) {
     data[meta.singleField] = undefined;

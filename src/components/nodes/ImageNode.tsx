@@ -24,9 +24,25 @@ import {
   DEFAULT_MJ_RATIO,
   DEFAULT_MJ_SPEED,
   gptImage2ZhenzhenVariantSize,
+  isZhenzhenApimartImageModel,
+  isZhenzhenBudgetImageModel,
   isZhenzhenImageG2Model,
+  ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS,
+  ZHENZHEN_BUDGET_GROK_MODEL_OPTIONS,
+  ZHENZHEN_BUDGET_BANANA_2_MODEL_OPTIONS,
+  ZHENZHEN_BUDGET_BANANA_PRO_MODEL_OPTIONS,
+  ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
   ZHENZHEN_IMAGE_G2_I2I_MODEL,
   ZHENZHEN_IMAGE_G2_RATIOS,
+  ZHENZHEN_IMAGE_G2_T2I_MODEL,
+  ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL,
+  ZHENZHEN_IMAGE_GK_V15_MODEL,
+  ZHENZHEN_IMAGE_GK_V15_RATIOS,
+  ZHENZHEN_IMAGE_NB_2_LITE_MODEL,
+  ZHENZHEN_IMAGE_NB_2_MODEL,
+  ZHENZHEN_IMAGE_NB_PRO_MODEL,
+  ZHENZHEN_IMAGE_NB_EXTREME_RATIOS,
+  ZHENZHEN_IMAGE_NB_STANDARD_RATIOS,
 } from '../../providers/models';
 import {
   submitImageAsync,
@@ -40,6 +56,10 @@ import {
   queryMjTask,
   uploadMjImage,
   buildMjPrompt,
+  submitMidjourneyNz,
+  queryMidjourneyNz,
+  type MidjourneyNzOperation,
+  type MidjourneyNzTaskResult,
   generateExternalImage,
   type MjSpeed,
 } from '../../services/generation';
@@ -80,6 +100,16 @@ import { canonicalizeComfyFieldsByWorkflow, comfyFieldInputValue } from '../../u
 import { LocalNodeAddonSlot } from 'virtual:t8-local-extensions';
 import type { RunNodeLifecycleReporter } from '../../types/project';
 import JimengCliHelpButton from './JimengCliHelpButton';
+import {
+  combinePromptWithImageAdjustments,
+  normalizeImagePromptAdjustmentSelections,
+  type ImagePromptAdjustmentSelection,
+} from '../../data/imagePromptAdjustments';
+import MidjourneyNzPanel from './MidjourneyNzPanel';
+import {
+  buildMidjourneyNzRequest,
+  midjourneyNzRequiresPrompt,
+} from '../../utils/midjourneyNz';
 
 /**
  * ImageNode - 图像生成(ZhenzhenMagic)
@@ -178,6 +208,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   const generationRunRef = useRef(0);
 
   const [error, setError] = useState<string | null>(null);
+  const [downloadNotice, setDownloadNotice] = useState<string | null>(null);
   const d = data as any;
   const model = d?.model || IMAGE_MODELS[0].id;
   const modelDef = useMemo(() => IMAGE_MODELS.find((m) => m.id === model) || IMAGE_MODELS[0], [model]);
@@ -378,17 +409,89 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   const sizeLevel = d?.sizeLevel || modelDef.defaultSize;
   // 子模型变体(对齐 gpt-image-2-web 的 g_model/n_model)
   const savedApiModel = typeof d?.apiModel === 'string' ? d.apiModel : '';
-  const apiModel = modelDef.apiModelOptions.some((opt) => opt.value === savedApiModel)
+  // 旧画布没有 imageBuiltinSource；保存过平价小屋模型时自动恢复对应平台。
+  const isBudgetImageTab = modelDef.id === 'gpt-image-2'
+    || modelDef.id === 'nano-banana-2'
+    || modelDef.id === 'nano-banana-pro'
+    || modelDef.id === 'grok-image';
+  const isZhenzhenBudgetImageSelected = !isExternalSelected
+    && isBudgetImageTab
+    && (d?.imageBuiltinSource === 'seedance-nz' || isZhenzhenBudgetImageModel(savedApiModel));
+  const isZhenzhenBudgetMjSelected = !isExternalSelected
+    && modelDef.paramKind === 'mj'
+    && d?.imageBuiltinSource === 'seedance-nz';
+  const isZhenzhenBudgetPlatformSelected = isZhenzhenBudgetImageSelected || isZhenzhenBudgetMjSelected;
+  const budgetDefaultApiModel = modelDef.id === 'grok-image'
+    ? ZHENZHEN_IMAGE_GK_V15_MODEL
+    : modelDef.id === 'nano-banana-2'
+      ? ZHENZHEN_IMAGE_NB_2_MODEL
+      : modelDef.id === 'nano-banana-pro'
+        ? ZHENZHEN_IMAGE_NB_PRO_MODEL
+        : ZHENZHEN_IMAGE_G2_T2I_MODEL;
+  const builtinApiModelOptions = isZhenzhenBudgetImageSelected
+    ? modelDef.id === 'grok-image'
+      ? ZHENZHEN_BUDGET_GROK_MODEL_OPTIONS
+      : modelDef.id === 'nano-banana-2'
+        ? ZHENZHEN_BUDGET_BANANA_2_MODEL_OPTIONS
+        : modelDef.id === 'nano-banana-pro'
+          ? ZHENZHEN_BUDGET_BANANA_PRO_MODEL_OPTIONS
+          : ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS
+    : modelDef.apiModelOptions;
+  const apiModel = builtinApiModelOptions.some((opt) => opt.value === savedApiModel)
     ? savedApiModel
-    : modelDef.apiModel;
-  const isZhenzhenImageG2 = !isExternalSelected && isZhenzhenImageG2Model(apiModel);
+    : (isZhenzhenBudgetImageSelected ? budgetDefaultApiModel : modelDef.apiModel);
+  const isZhenzhenImageG2 = isZhenzhenBudgetImageSelected && isZhenzhenImageG2Model(apiModel);
   const isZhenzhenImageG2I2I = apiModel === ZHENZHEN_IMAGE_G2_I2I_MODEL;
-  const effectiveAspectRatios = isZhenzhenImageG2 ? ZHENZHEN_IMAGE_G2_RATIOS : modelDef.aspectRatios;
+  const isZhenzhenApimartImage = isZhenzhenBudgetImageSelected && isZhenzhenApimartImageModel(apiModel);
+  const isZhenzhenLowpriceImage = apiModel === ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL;
+  const isZhenzhenGrokImage = apiModel === ZHENZHEN_IMAGE_GK_V15_MODEL;
+  const isZhenzhenGrokImageEdit = apiModel === ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL;
+  const isZhenzhenNb2Lite = apiModel === ZHENZHEN_IMAGE_NB_2_LITE_MODEL;
+  const isZhenzhenNb2 = apiModel === ZHENZHEN_IMAGE_NB_2_MODEL;
+  const isZhenzhenNbPro = apiModel === ZHENZHEN_IMAGE_NB_PRO_MODEL;
+  const isZhenzhenNb = isZhenzhenNb2Lite || isZhenzhenNb2 || isZhenzhenNbPro;
+  const zhenzhenNbImageCount = isZhenzhenNb2Lite
+    ? Math.min(4, Math.max(1, Number(d?.apimartImageCount) || 1))
+    : 1;
+  const seedanceNzProviderLabel = isZhenzhenBudgetPlatformSelected
+    ? '贞贞的平价AI小屋'
+    : '贞贞的平价AI小屋';
+  const effectiveAspectRatios = isZhenzhenImageG2
+    ? ZHENZHEN_IMAGE_G2_RATIOS
+    : (isZhenzhenGrokImage || isZhenzhenGrokImageEdit)
+      ? ZHENZHEN_IMAGE_GK_V15_RATIOS
+      : (isZhenzhenNb2 || isZhenzhenNb2Lite)
+        ? ZHENZHEN_IMAGE_NB_EXTREME_RATIOS
+        : isZhenzhenNbPro
+          ? ZHENZHEN_IMAGE_NB_STANDARD_RATIOS
+      : isZhenzhenLowpriceImage
+        ? modelDef.aspectRatios.filter((item) => item !== 'Auto')
+        : modelDef.aspectRatios;
   const effectiveAspectRatio = effectiveAspectRatios.includes(aspectRatio)
     ? aspectRatio
-    : (isZhenzhenImageG2 ? 'adaptive' : modelDef.defaultAspectRatio);
-  const effectiveSizes = isZhenzhenImageG2 ? ['1K'] : modelDef.sizes;
-  const effectiveSizeLevel = isZhenzhenImageG2 ? '1K' : sizeLevel;
+    : (isZhenzhenImageG2 ? 'adaptive' : '1:1');
+  const effectiveSizes = isZhenzhenImageG2
+    ? ['1K']
+    : isZhenzhenLowpriceImage
+      ? ['1K', '2K', '4K']
+      : isZhenzhenNb2
+        ? ['0.5K', '1K', '2K', '4K']
+        : isZhenzhenNb2Lite
+          ? ['1K']
+          : isZhenzhenNbPro
+            ? ['1K', '2K', '4K']
+      : (isZhenzhenGrokImage || isZhenzhenGrokImageEdit)
+        ? []
+        : modelDef.sizes;
+  const effectiveSizeLevel = isZhenzhenImageG2
+    ? '1K'
+    : isZhenzhenNb2Lite
+      ? '1K'
+      : isZhenzhenNb2 && !['0.5K', '1K', '2K', '4K'].includes(sizeLevel)
+        ? '1K'
+        : (isZhenzhenLowpriceImage || isZhenzhenNbPro) && !['1K', '2K', '4K'].includes(sizeLevel)
+          ? '1K'
+          : sizeLevel;
 
   // ========== FAL 渠道识别及参数(不影响其他模型) ==========
   const isFal = isFalModel(apiModel);
@@ -397,7 +500,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   const isStandardGptImage2 = !isExternalSelected
     && modelDef.paramKind === 'gpt-size'
     && !isFal
-    && !isZhenzhenImageG2;
+    && !isZhenzhenBudgetImageSelected;
   const gptImageQuality: 'auto' | 'high' | 'medium' | 'low' = ['auto', 'high', 'medium', 'low'].includes(d?.gptImageQuality)
     ? d.gptImageQuality
     : 'auto';
@@ -423,6 +526,8 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
 
   // ========== MJ 渠道识别及参数(完全对齐 gpt-image-2-web mj_* 控件 L1552~L1580) ==========
   const isMj = modelDef.paramKind === 'mj';
+  const mjNzOperation = (d?.mjNzOperation || 'midjourney-imagine') as MidjourneyNzOperation;
+  const mjNzVideoSource: 'image' | 'task' = d?.mjNzVideoSource === 'task' ? 'task' : 'image';
   const isGrokImage = modelDef.paramKind === 'grok-image';
   const isSeedream = modelDef.paramKind === 'seedream-v5';
   const seedreamApiSource: 'zhenzhen' | 'seedance-nz' = d?.seedreamApiSource === 'seedance-nz' ? 'seedance-nz' : 'zhenzhen';
@@ -460,14 +565,31 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   // 参考图上限(FAL 使用 FAL_REGISTRY.maxRefs,其他走原设计)
   const maxRefs = isExternalSelected
     ? Math.max(8, modelDef.maxReferenceImages || 0)
-    : isZhenzhenImageG2
+    : isZhenzhenImageG2I2I
       ? 10
+    : isZhenzhenLowpriceImage
+      ? 16
+      : isZhenzhenNb
+        ? 14
+      : isZhenzhenGrokImageEdit
+          ? 1
+          : (isZhenzhenImageG2 || isZhenzhenGrokImage)
+            ? 0
       : (falDef?.maxRefs ?? modelDef.maxReferenceImages);
   const status: 'idle' | 'generating' | 'success' | 'error' = d?.status || 'idle';
   const imageUrl = d?.imageUrl as string | undefined;
+  const videoUrl = d?.videoUrl as string | undefined;
+  const outputText = typeof d?.outputText === 'string' ? d.outputText : '';
   const localPrompt = d?.prompt || '';
   const imageOnlyOutput = d?.imageOnlyOutput !== false;
   const promptMentions: MediaMention[] = Array.isArray(d?.promptMentions) ? d.promptMentions : [];
+  const imagePromptAdjustments = useMemo(
+    () => normalizeImagePromptAdjustmentSelections(d?.imagePromptAdjustments),
+    [d?.imagePromptAdjustments],
+  );
+  const updateImagePromptAdjustments = (next: ImagePromptAdjustmentSelection[]) => {
+    update({ imagePromptAdjustments: next });
+  };
   // 节点内本地上传的参考图(除了上游接入的,这里是手动上传)
   const refImages: string[] = Array.isArray(d?.referenceImages) ? d.referenceImages : [];
 
@@ -533,7 +655,44 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   // 切换模型时,如果当前比例/尺寸不在新模型选项里则重置
   const switchModel = (mId: string) => {
     const newDef = IMAGE_MODELS.find((m) => m.id === mId) || IMAGE_MODELS[0];
-    const patch: any = { model: mId, apiModel: newDef.apiModel };
+    if (
+      isZhenzhenBudgetPlatformSelected
+      && (
+        newDef.id === 'gpt-image-2'
+        || newDef.id === 'nano-banana-2'
+        || newDef.id === 'nano-banana-pro'
+        || newDef.id === 'grok-image'
+        || newDef.id === 'midjourney'
+      )
+    ) {
+      if (newDef.id === 'midjourney') {
+        update({
+          model: newDef.id,
+          apiModel: newDef.apiModel,
+          imageBuiltinSource: 'seedance-nz',
+          mjNzOperation: d?.mjNzOperation || 'midjourney-imagine',
+          mjNzSpeed: d?.mjNzSpeed || 'fast',
+        });
+        return;
+      }
+      const nextApiModel = newDef.id === 'grok-image'
+        ? ZHENZHEN_IMAGE_GK_V15_MODEL
+        : newDef.id === 'nano-banana-2'
+          ? ZHENZHEN_IMAGE_NB_2_MODEL
+          : newDef.id === 'nano-banana-pro'
+            ? ZHENZHEN_IMAGE_NB_PRO_MODEL
+            : ZHENZHEN_IMAGE_G2_T2I_MODEL;
+      update({
+        model: newDef.id,
+        apiModel: nextApiModel,
+        imageBuiltinSource: 'seedance-nz',
+        aspectRatio: newDef.id === 'gpt-image-2' ? 'adaptive' : '1:1',
+        sizeLevel: newDef.id === 'grok-image' ? '' : '1K',
+        apimartImageCount: 1,
+      });
+      return;
+    }
+    const patch: any = { model: mId, apiModel: newDef.apiModel, imageBuiltinSource: 'zhenzhen' };
     if (newDef.paramKind === 'mj') {
       if (!d?.mjVersion) patch.mjVersion = DEFAULT_MJ_VERSION;
       if (!d?.mjAr) patch.mjAr = DEFAULT_MJ_RATIO;
@@ -548,15 +707,47 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
 
   const switchApiModel = (nextApiModel: string) => {
     const nextSize = gptImage2ZhenzhenVariantSize(nextApiModel);
-    if (isZhenzhenImageG2Model(nextApiModel)) {
-      const nextRatio = ZHENZHEN_IMAGE_G2_RATIOS.includes(aspectRatio) ? aspectRatio : 'adaptive';
-      update({ apiModel: nextApiModel, sizeLevel: '1K', aspectRatio: nextRatio });
+    if (isZhenzhenBudgetImageModel(nextApiModel)) {
+      const nextModel = nextApiModel === ZHENZHEN_IMAGE_GK_V15_MODEL || nextApiModel === ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL
+        ? 'grok-image'
+        : nextApiModel === ZHENZHEN_IMAGE_NB_2_MODEL || nextApiModel === ZHENZHEN_IMAGE_NB_2_LITE_MODEL
+          ? 'nano-banana-2'
+          : nextApiModel === ZHENZHEN_IMAGE_NB_PRO_MODEL
+            ? 'nano-banana-pro'
+            : 'gpt-image-2';
+      const nextRatio = isZhenzhenImageG2Model(nextApiModel)
+        ? (ZHENZHEN_IMAGE_G2_RATIOS.includes(aspectRatio) ? aspectRatio : 'adaptive')
+        : nextModel === 'grok-image'
+          ? (ZHENZHEN_IMAGE_GK_V15_RATIOS.includes(aspectRatio) ? aspectRatio : '1:1')
+          : nextModel === 'nano-banana-2'
+            ? (ZHENZHEN_IMAGE_NB_EXTREME_RATIOS.includes(aspectRatio) ? aspectRatio : '1:1')
+            : nextModel === 'nano-banana-pro'
+              ? (ZHENZHEN_IMAGE_NB_STANDARD_RATIOS.includes(aspectRatio) ? aspectRatio : '1:1')
+          : (aspectRatio !== 'Auto' && IMAGE_MODELS[0].aspectRatios.includes(aspectRatio) ? aspectRatio : '1:1');
+      update({
+        model: nextModel,
+        apiModel: nextApiModel,
+        imageBuiltinSource: 'seedance-nz',
+        sizeLevel: nextApiModel === ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL
+          ? (['1K', '2K', '4K'].includes(sizeLevel) ? sizeLevel : '1K')
+          : nextApiModel === ZHENZHEN_IMAGE_NB_2_MODEL
+            ? (['0.5K', '1K', '2K', '4K'].includes(sizeLevel) ? sizeLevel : '1K')
+            : nextApiModel === ZHENZHEN_IMAGE_NB_2_LITE_MODEL
+              ? '1K'
+              : nextApiModel === ZHENZHEN_IMAGE_NB_PRO_MODEL
+                ? (['1K', '2K', '4K'].includes(sizeLevel) ? sizeLevel : '1K')
+                : isZhenzhenImageG2Model(nextApiModel) ? '1K' : '',
+        aspectRatio: nextRatio,
+        apimartImageCount: nextApiModel === ZHENZHEN_IMAGE_NB_2_LITE_MODEL
+          ? Math.min(4, Math.max(1, Number(d?.apimartImageCount) || 1))
+          : 1,
+      });
       return;
     }
-    const leavingG2Patch = isZhenzhenImageG2 ? { aspectRatio: modelDef.defaultAspectRatio } : {};
+    const leavingG2Patch = isZhenzhenBudgetImageSelected ? { aspectRatio: modelDef.defaultAspectRatio } : {};
     update(nextSize
-      ? { apiModel: nextApiModel, sizeLevel: nextSize, ...leavingG2Patch }
-      : { apiModel: nextApiModel, ...leavingG2Patch });
+      ? { apiModel: nextApiModel, imageBuiltinSource: 'zhenzhen', sizeLevel: nextSize, ...leavingG2Patch }
+      : { apiModel: nextApiModel, imageBuiltinSource: 'zhenzhen', ...leavingG2Patch });
   };
 
   // 从上游节点 + 本地上传按用户排序后的顺序聚合 prompt + 参考图
@@ -631,6 +822,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
 
   const handleGenerate = async (reporter?: RunNodeLifecycleReporter) => {
     setError(null);
+    setDownloadNotice(null);
     const { prompt: upstreamPrompt, images: upstreamImages } = collectUpstream();
     const resolvedLocalPrompt = resolveMediaMentions(localPrompt, promptMentions, mentionMaterials);
     const comfyProviderPrompt = isComfyExternal
@@ -639,12 +831,35 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
     const resolvedComfyPrompt = isComfyExternal
       ? resolveMediaMentions(comfyProviderPrompt || localPrompt, promptMentions, mentionMaterials)
       : '';
-    const finalPrompt = (upstreamPrompt || (isComfyExternal ? resolvedComfyPrompt : resolvedLocalPrompt) || '').trim();
+    const basePrompt = (
+      upstreamPrompt
+      || (isComfyExternal ? resolvedComfyPrompt : resolvedLocalPrompt)
+      || ''
+    ).trim();
+    const compiledPrompt = (!isComfyExternal || comfyHasPromptField)
+      ? combinePromptWithImageAdjustments(
+          basePrompt,
+          imagePromptAdjustments,
+          {
+            hasReferenceImages: upstreamImages.length > 0,
+            language: 'auto',
+          },
+        )
+      : { finalPrompt: basePrompt, active: [], inactive: [], text: '', language: 'zh' as const };
+    const finalPrompt = compiledPrompt.finalPrompt;
     const src = `image:${id.slice(0, 6)}`;
-    if (!finalPrompt && (!isComfyExternal || comfyHasPromptField)) {
+    const promptRequired = !isZhenzhenBudgetMjSelected
+      || midjourneyNzRequiresPrompt(mjNzOperation, mjNzVideoSource);
+    if (!basePrompt && promptRequired && (!isComfyExternal || comfyHasPromptField)) {
       setError('未连接 text 节点也未填写 prompt');
       logBus.error('生成中止: 缺少 prompt', src);
       return;
+    }
+    if (compiledPrompt.inactive.length > 0) {
+      logBus.info(
+        `图像调节未应用: ${compiledPrompt.inactive.map((item) => `${item.labelZh}（${item.reason}）`).join('、')}`,
+        src,
+      );
     }
     if (isZhenzhenImageG2 && finalPrompt.length > 20000) {
       setError('Zhenzhen Image G-2 提示词不能超过 20000 字符');
@@ -654,6 +869,11 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
     if (isZhenzhenImageG2I2I && upstreamImages.length === 0) {
       setError('zhenzhen-image-g2-i2i 至少需要 1 张参考图');
       logBus.error('生成中止: G-2 图生图缺少参考图', src);
+      return;
+    }
+    if (isZhenzhenGrokImageEdit && upstreamImages.length === 0) {
+      setError(`${ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL} 必须提供 1 张参考图`);
+      logBus.error('生成中止: Grok Image 1.5 编辑缺少参考图', src);
       return;
     }
     if (isSeedream && !isSeedreamNz && !/^\d+x\d+$/.test(seedreamResolvedSize)) {
@@ -666,7 +886,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
       const width = Number(match?.[1]);
       const height = Number(match?.[2]);
       if (!match || width < 240 || width > 8192 || height < 240 || height > 8192) {
-        setError('贞贞的平价AI工坊（国内） Seedream 自定义宽高必须为 240-8192，例如 2048x1536');
+        setError('贞贞的平价AI小屋 Seedream 自定义宽高必须为 240-8192，例如 2048x1536');
         logBus.error(`生成中止: Seedream NZ 尺寸格式无效 ${seedreamNzResolvedSize || '(空)'}`, src);
         return;
       }
@@ -676,7 +896,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
       ? providerSelection.provider.id
       : isFal
         ? 'fal'
-        : isSeedreamNz || isZhenzhenImageG2
+        : isSeedreamNz || isZhenzhenBudgetPlatformSelected
           ? 'seedance-nz'
           : isMj
             ? 'zhenzhen-mj'
@@ -685,8 +905,10 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
       ? externalProviderModel
       : isSeedreamNz
         ? seedreamNzUiModel
-        : isZhenzhenImageG2
+        : isZhenzhenBudgetImageSelected
           ? apiModel
+        : isZhenzhenBudgetMjSelected
+          ? mjNzOperation
         : isMj
           ? mjVersion
           : apiModel;
@@ -752,7 +974,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           negative: externalNegativePrompt || undefined,
           n: Math.max(1, Math.min(externalImageCountLimit, Number(d?.providerParams?.n || 1))),
           providerParams: externalProviderParams,
-        });
+        }, { submissionKey: reporter?.providerSubmissionKey });
         if (!isCurrentGenerationRun(runId)) return;
         const urls = res.imageUrls || [];
         if (!urls.length) throw new Error('扩展平台完成但未返回图片');
@@ -798,6 +1020,197 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
 
       // ============ MJ 路径(对齐 gpt-image-2-web runMJ L4437~L4716) ============
       if (isMj) {
+        if (isZhenzhenBudgetMjSelected) {
+          if (!zhenzhenSd2ApiKey) {
+            throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
+          }
+          if (mjNzOperation === 'midjourney-blend' && (allRefs.length < 2 || allRefs.length > 4)) {
+            throw new Error('midjourney-blend 必须提供 2–4 张参考图');
+          }
+          if (mjNzOperation === 'midjourney-describe' && allRefs.length !== 1) {
+            throw new Error('midjourney-describe 必须且只能提供 1 张参考图');
+          }
+          if (mjNzOperation === 'midjourney-edits' && (allRefs.length < 1 || allRefs.length > 4)) {
+            throw new Error('midjourney-edits 必须提供 1–4 张参考图');
+          }
+          if (
+            mjNzOperation === 'midjourney-video'
+            && mjNzVideoSource === 'image'
+            && allRefs.length < 1
+          ) {
+            throw new Error('midjourney-video 直接图片模式必须提供 1 张首帧参考图');
+          }
+          if (
+            mjNzOperation === 'midjourney-video'
+            && mjNzVideoSource === 'image'
+            && String(d?.mjNzVideoType || '').includes('_start_end_')
+            && allRefs.length < 2
+          ) {
+            throw new Error('Midjourney 首尾帧视频模式还需要第 2 张参考图作为尾帧');
+          }
+          if (
+            mjNzOperation === 'midjourney-modal'
+            && d?.mjNzModalMode !== 'outpaint'
+            && allRefs.length < 1
+          ) {
+            throw new Error('Midjourney 局部重绘必须把 PNG 遮罩作为第 1 张参考图');
+          }
+
+          const request = buildMidjourneyNzRequest(d, finalPrompt, allRefs);
+          logBus.info(
+            `平价AI小屋 MJ 提交: action=${mjNzOperation} ref=${allRefs.length} task=${request.task_id ? 'yes' : 'no'}`,
+            src,
+          );
+          const submit = await submitMidjourneyNz(request, {
+            submissionKey: reporter?.providerSubmissionKey,
+          });
+          if (!isCurrentGenerationRun(runId)) return;
+          const submittedTaskId = String(submit.taskId || '').trim();
+          if (submittedTaskId) {
+            await reporter?.providerSubmitted({
+              provider: traceProvider,
+              model: traceModel,
+              upstreamTaskId: submittedTaskId,
+              requestId: submit.requestId,
+              transportHttpStatus: submit.transportHttpStatus,
+              upstreamHttpStatus: submit.upstreamHttpStatus,
+              usage: submit.usage,
+              httpStatusSource: 'local-backend',
+            });
+          }
+
+          const finishMidjourneyNz = async (
+            result: MidjourneyNzTaskResult,
+            pollCount = 0,
+          ): Promise<boolean> => {
+            const resultStatus = String(result.status || '').toLowerCase();
+            const taskId = String(result.taskId || submittedTaskId || '').trim();
+            if (resultStatus === 'modal') {
+              update({
+                status: 'idle',
+                progress: '等待遮罩 / Modal',
+                taskId,
+                mjNzLastTaskId: taskId,
+                mjNzSourceTaskId: taskId,
+                mjNzOperation: 'midjourney-modal',
+                mjNzButtons: result.buttons || [],
+                error: null,
+              });
+              logBus.success('Midjourney 已进入 MODAL：请连接 PNG 遮罩后再次生成', src);
+              await reporter?.providerResponse({
+                provider: traceProvider,
+                model: traceModel,
+                upstreamTaskId: taskId,
+                requestId: result.requestId || submit.requestId,
+                transportHttpStatus: result.transportHttpStatus,
+                upstreamHttpStatus: result.upstreamHttpStatus,
+                usage: result.usage,
+                pollCount,
+                status: 'succeeded',
+                httpStatusSource: 'local-backend',
+              });
+              return true;
+            }
+            if (!['completed', 'success', 'succeeded', 'done'].includes(resultStatus)) return false;
+            const imageUrls = Array.isArray(result.imageUrls) ? result.imageUrls : [];
+            const videoUrls = Array.isArray(result.videoUrls) ? result.videoUrls : [];
+            const outputText = String(result.text || '').trim();
+            const resultFamily = String(result.resultFamily || (
+              videoUrls.length ? 'video' : outputText ? 'text' : 'image'
+            ));
+            if (!imageUrls.length && !videoUrls.length && !outputText) {
+              throw new Error('Midjourney 任务完成但没有返回可用结果');
+            }
+            update({
+              status: 'success',
+              progress: '100%',
+              imageUrl: imageUrls[0] || null,
+              imageUrls,
+              videoUrl: videoUrls[0] || null,
+              videoUrls,
+              outputText,
+              textSegments: outputText ? [outputText] : [],
+              imageOnlyOutput: resultFamily === 'text' ? false : imageOnlyOutput,
+              lastPrompt: finalPrompt,
+              usedI2I: allRefs.length > 0,
+              taskId: taskId || d?.taskId,
+              mjNzLastTaskId: taskId || d?.mjNzLastTaskId,
+              mjNzButtons: result.buttons || [],
+              mjNzResultFamily: resultFamily,
+              requestId: result.requestId,
+              transportHttpStatus: result.transportHttpStatus,
+              upstreamHttpStatus: result.upstreamHttpStatus,
+              usage: result.usage,
+              pollCount,
+            });
+            logBus.success(
+              `平价AI小屋 MJ 完成 · ${resultFamily}${imageUrls.length ? ` · 图片 ${imageUrls.length}` : ''}${videoUrls.length ? ` · 视频 ${videoUrls.length}` : ''}${outputText ? ' · 文本' : ''}`,
+              src,
+            );
+            taskCompletionSound.notifyComplete(id, resultFamily === 'video' ? 'video' : 'image');
+            await reporter?.providerResponse({
+              provider: traceProvider,
+              model: traceModel,
+              upstreamTaskId: taskId,
+              requestId: result.requestId || submit.requestId,
+              transportHttpStatus: result.transportHttpStatus,
+              upstreamHttpStatus: result.upstreamHttpStatus,
+              usage: result.usage,
+              pollCount,
+              status: 'succeeded',
+              httpStatusSource: 'local-backend',
+            });
+            return true;
+          };
+
+          if (await finishMidjourneyNz(submit)) return;
+          if (!submittedTaskId) throw new Error('Midjourney 未返回任务 ID 或同步结果');
+          update({
+            progress: submit.progress || '5%',
+            taskId: submittedTaskId,
+            mjNzLastTaskId: submittedTaskId,
+            mjNzButtons: submit.buttons || [],
+          });
+
+          const interval = Math.max(1, Math.min(30, Number(d?.mjNzPollInterval) || 3)) * 1000;
+          const maxPoll = Math.max(minPollCountForTimeout(interval), 1200);
+          let nextPollDelay = interval;
+          for (let i = 0; i < maxPoll; i++) {
+            await new Promise((resolve) => setTimeout(resolve, nextPollDelay));
+            nextPollDelay = interval;
+            if (!isCurrentGenerationRun(runId)) return;
+            const query = await queryMidjourneyNz(submittedTaskId);
+            if (!isCurrentGenerationRun(runId)) return;
+            await reporter?.polling({
+              provider: traceProvider,
+              model: traceModel,
+              taskId: submittedTaskId,
+              requestId: query.requestId,
+              transportHttpStatus: query.transportHttpStatus,
+              upstreamHttpStatus: query.upstreamHttpStatus,
+              usage: query.usage,
+              httpStatusSource: 'local-backend',
+              pollCount: i + 1,
+              pollLimit: maxPoll,
+              status: query.status,
+              progress: query.progress,
+            });
+            const queryStatus = String(query.status || '').toLowerCase();
+            if (queryStatus === 'materializing') {
+              nextPollDelay = Math.max(interval, Math.min(30_000, Number(query.retryAfterMs) || 5_000));
+              update({ progress: '100% · 正在下载' });
+              setDownloadNotice(query.error || 'Midjourney 已生成，正在保存结果到本机。');
+              continue;
+            }
+            if (query.progress) update({ progress: query.progress });
+            if (await finishMidjourneyNz(query, i + 1)) return;
+            if (['failed', 'failure', 'error'].includes(queryStatus)) {
+              throw new Error(query.error || 'Midjourney 任务失败');
+            }
+          }
+          throw new Error(`Midjourney 轮询超时：${Math.round((maxPoll * interval) / 1000)} 秒`);
+        }
+
         logBus.info(
           `MJ提交: version=${mjVersion} ar=${mjAr} speed=${mjSpeed} ref=${allRefs.length} sref=${mjSrefImages.length} oref=${mjOrefImages.length} prompt="${finalPrompt.slice(0, 60)}${finalPrompt.length > 60 ? '…' : ''}"`,
           src,
@@ -849,7 +1262,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           speed: mjSpeed,
           base64Array,
           remix: true,
-        });
+        }, { submissionKey: reporter?.providerSubmissionKey });
         if (!isCurrentGenerationRun(runId)) return;
         const taskId = submit.taskId;
         await reporter?.providerSubmitted({
@@ -892,6 +1305,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           });
           if (String(q.status || '').toLowerCase() === 'materializing') {
             update({ progress: '100% · 正在下载' });
+            setDownloadNotice(q.error || '图片已经生成，正在通过当前 TUN/代理或直连网络保存到本机。');
             if (i === 0 || (i + 1) % 10 === 0) {
               logBus.warn(
                 q.error || 'MJ 图片已生成，正在适配 TUN/代理网络并安全下载，不会重新提交任务',
@@ -982,7 +1396,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           enable_web_search: falKind === 'nbpro-fal' ? nbWebSearch : undefined,
           image_mode: falKind === 'nbpro-fal' ? nbImgMode : undefined,
           providerParams,
-        });
+        }, { submissionKey: reporter?.providerSubmissionKey });
         if (!isCurrentGenerationRun(runId)) return;
 
         // 同步完成
@@ -1058,6 +1472,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           });
           if (st === 'materializing') {
             update({ progress: '100% · 正在下载' });
+            setDownloadNotice(q.error || '图片已经生成，正在通过当前 TUN/代理或直连网络保存到本机。');
             if (i === 0 || (i + 1) % 10 === 0) {
               logBus.warn(
                 q.error || 'FAL 图片已生成，正在适配 TUN/代理网络并安全下载，不会重新提交任务',
@@ -1109,41 +1524,76 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         throw new Error(`FAL 超时: ${(maxPoll * interval) / 1000}s 未完成`);
       }
 
-      // seedance.nz has a separate asynchronous image API for Seedream and
-      // Zhenzhen Image G-2. Keep it isolated from the legacy GPT2/Seedream route.
-      if (isSeedreamNz || isZhenzhenImageG2) {
-        if (!zhenzhenSd2ApiKey) throw new Error('请先在 API 设置中填写“贞贞的平价AI工坊（国内） API Key”');
-        const providerRefs = isZhenzhenImageG2 && !isZhenzhenImageG2I2I ? [] : allRefs;
-        const expectedModel = isZhenzhenImageG2
+      // seedance.nz uses a dedicated asynchronous image protocol for Seedream,
+      // Zhenzhen Image G-2 and APIMart image models.
+      if (isSeedreamNz || isZhenzhenBudgetImageSelected) {
+        if (!zhenzhenSd2ApiKey) throw new Error(`请先在 API 设置中填写“${seedanceNzProviderLabel} API Key”`);
+        const providerRefs = isZhenzhenImageG2 && !isZhenzhenImageG2I2I
+          ? []
+          : isZhenzhenGrokImage
+            ? []
+            : isZhenzhenGrokImageEdit
+              ? allRefs.slice(0, 1)
+              : allRefs;
+        const expectedModel = isZhenzhenBudgetImageSelected
           ? apiModel
           : seedreamNzModelFamily === 'overseas'
             ? (providerRefs.length ? 'dola-seedream-5.0-pro-i2i' : 'dola-seedream-5.0-pro-t2i')
             : (providerRefs.length ? 'seedream-v5-pro-i2i' : 'seedream-v5-pro-t2i');
-        const imageFamilyLabel = isZhenzhenImageG2 ? 'Zhenzhen Image G-2' : 'Seedream';
+        const imageFamilyLabel = isZhenzhenImageG2
+          ? 'Zhenzhen Image G-2'
+          : isZhenzhenNb
+            ? 'Zhenzhen Image Nano Banana'
+          : isZhenzhenApimartImage
+            ? 'APIMart Image'
+            : 'Seedream';
         const sizeLabel = isZhenzhenImageG2
           ? '1k'
+          : isZhenzhenLowpriceImage
+            ? `${effectiveSizeLevel.toLowerCase()} · ${effectiveAspectRatio}`
+            : isZhenzhenNb
+              ? `${effectiveSizeLevel.toLowerCase()} · ${effectiveAspectRatio} · n=${zhenzhenNbImageCount}`
+            : (isZhenzhenGrokImage || isZhenzhenGrokImageEdit)
+              ? effectiveAspectRatio
           : (seedreamNzResolution === 'custom' ? seedreamNzResolvedSize : seedreamNzResolution);
         logBus.info(
-          `贞贞的平价AI工坊 ${imageFamilyLabel} 提交: model=${expectedModel} 参考图=${providerRefs.length} 尺寸=${sizeLabel}`,
+          `${seedanceNzProviderLabel} ${imageFamilyLabel} 提交: model=${expectedModel} 参考图=${providerRefs.length} 尺寸=${sizeLabel}`,
           src,
         );
         const submit = await submitSeedreamNz({
           prompt: finalPrompt,
           images: providerRefs,
-          model: isZhenzhenImageG2 ? apiModel as 'zhenzhen-image-g2-t2i' | 'zhenzhen-image-g2-i2i' : undefined,
-          modelFamily: isZhenzhenImageG2 ? undefined : seedreamNzModelFamily,
+          model: isZhenzhenBudgetImageSelected
+            ? apiModel as
+              | 'zhenzhen-image-g2-t2i'
+              | 'zhenzhen-image-g2-i2i'
+              | 'zhenzhen-image-g-v2-lowprice'
+              | 'zhenzhen-image-gk-v15'
+              | 'zhenzhen-image-gk-v15-edit'
+              | 'zhenzhen-image-nb-2-lite'
+              | 'zhenzhen-image-nb-2'
+              | 'zhenzhen-image-nb-pro'
+            : undefined,
+          modelFamily: isZhenzhenBudgetImageSelected ? undefined : seedreamNzModelFamily,
           resolution: isZhenzhenImageG2
             ? '1k'
+            : isZhenzhenLowpriceImage
+              ? effectiveSizeLevel.toLowerCase() as '1k' | '2k' | '4k'
+              : isZhenzhenNb
+                ? effectiveSizeLevel.toLowerCase() as '0.5k' | '1k' | '2k' | '4k'
             : (seedreamNzResolution === 'custom' ? undefined : seedreamNzResolution),
           ratio: isZhenzhenImageG2
             ? effectiveAspectRatio as 'adaptive' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16' | '21:9'
             : undefined,
-          size: !isZhenzhenImageG2 && seedreamNzResolution === 'custom' ? seedreamNzResolvedSize : undefined,
-          output_format: isZhenzhenImageG2 ? undefined : seedreamOutputFormat,
-        });
+          size: isZhenzhenApimartImage
+            ? effectiveAspectRatio
+            : !isZhenzhenImageG2 && seedreamNzResolution === 'custom' ? seedreamNzResolvedSize : undefined,
+          n: isZhenzhenNb ? zhenzhenNbImageCount : isZhenzhenApimartImage ? 1 : undefined,
+          output_format: isZhenzhenBudgetImageSelected ? undefined : seedreamOutputFormat,
+        }, { submissionKey: reporter?.providerSubmissionKey });
         if (!isCurrentGenerationRun(runId)) return;
         const taskId = submit.taskId;
-        if (!taskId) throw new Error(`贞贞的平价AI工坊（国内）${imageFamilyLabel} 未返回任务 ID`);
+        if (!taskId) throw new Error(`${seedanceNzProviderLabel}${imageFamilyLabel} 未返回任务 ID`);
         await reporter?.providerSubmitted({
           provider: traceProvider,
           model: traceModel,
@@ -1184,9 +1634,10 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           const queryStatus = String(query.status || '').toLowerCase();
           if (queryStatus === 'materializing') {
             update({ progress: '100% · 正在下载' });
+            setDownloadNotice(query.error || '图片已经生成，正在通过当前 TUN/代理或直连网络保存到本机。');
             if (i === 0 || (i + 1) % 10 === 0) {
               logBus.warn(
-                query.error || `贞贞的平价AI工坊（国内）${imageFamilyLabel} 已生成，正在适配 TUN/代理网络并安全下载`,
+                query.error || `${seedanceNzProviderLabel}${imageFamilyLabel} 已生成，正在适配 TUN/代理网络并安全下载`,
                 src,
               );
             }
@@ -1194,8 +1645,8 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           }
           if (queryStatus === 'completed' || queryStatus === 'success' || queryStatus === 'done') {
             const url = query.urls?.[0];
-            if (!url) throw new Error(`贞贞的平价AI工坊（国内）${imageFamilyLabel} 任务完成但未返回图片`);
-            logBus.success(`贞贞的平价AI工坊（国内）${imageFamilyLabel} 完成 → ${url}`, src);
+            if (!url) throw new Error(`${seedanceNzProviderLabel}${imageFamilyLabel} 任务完成但未返回图片`);
+            logBus.success(`${seedanceNzProviderLabel}${imageFamilyLabel} 完成 → ${url}`, src);
             update({
               status: 'success',
               progress: '100%',
@@ -1225,10 +1676,10 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             return;
           }
           if (queryStatus === 'failed' || queryStatus === 'failure' || queryStatus === 'error') {
-            throw new Error(query.error || `贞贞的平价AI工坊（国内）${imageFamilyLabel} 任务失败`);
+            throw new Error(query.error || `${seedanceNzProviderLabel}${imageFamilyLabel} 任务失败`);
           }
         }
-        throw new Error(`贞贞的平价AI工坊（国内）${imageFamilyLabel} 超时: ${(maxPoll * interval) / 1000}s 未完成`);
+        throw new Error(`${seedanceNzProviderLabel}${imageFamilyLabel} 超时: ${(maxPoll * interval) / 1000}s 未完成`);
       }
 
       // ============ 原有标准路径(GPT2 standard / nano-banana / nano-banana-pro 未动) ============
@@ -1251,7 +1702,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         quality: isStandardGptImage2 ? gptImageQuality : undefined,
         moderation: isStandardGptImage2 ? gptImageModeration : undefined,
         providerParams,
-      });
+      }, { submissionKey: reporter?.providerSubmissionKey });
       if (!isCurrentGenerationRun(runId)) return;
 
       // 分支一:同步完成
@@ -1334,6 +1785,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         if (st === 'materializing') {
           nextPollDelay = Math.max(interval, Math.min(30_000, Number(q.retryAfterMs) || 5_000));
           update({ progress: '100% · 正在下载' });
+          setDownloadNotice(q.error || '图片已经生成，正在通过当前 TUN/代理或直连网络保存到本机。');
           if (i === 0 || (i + 1) % 10 === 0) {
             logBus.warn(
               q.error || '图片已生成，正在适配 TUN/代理网络并安全下载，不会重新提交任务',
@@ -1466,8 +1918,10 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           <div className="text-[10px] text-white/40">
             {isExternalSelected && providerSelection.provider
               ? `${providerSelection.provider.label || providerSelection.provider.id} · ${externalProviderModel || '未选模型'}`
+              : isZhenzhenBudgetPlatformSelected
+                ? `贞贞的平价AI小屋 · ${isZhenzhenBudgetMjSelected ? mjNzOperation : apiModel}`
               : isSeedreamNz
-                ? `贞贞的平价AI工坊（国内） · ${seedreamNzUiModel}`
+                ? `贞贞的平价AI小屋 · ${seedreamNzUiModel}`
                 : `${modelDef.label} · ${modelDef.description}`}
           </div>
         </div>
@@ -1476,26 +1930,64 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
 
       {/* 配置区 */}
       <div className="p-2.5 space-y-2" onMouseDown={(e) => e.stopPropagation()}>
-        {imageAdvancedProviders.length > 0 && (
-          <div className="rounded border border-white/10 bg-white/[0.03] p-2 space-y-2">
+        <div className="rounded border border-white/10 bg-white/[0.03] p-2 space-y-2">
             <button
               type="button"
               onClick={() => update({ advancedProviderOpen: !d?.advancedProviderOpen })}
               className="w-full flex items-center justify-between text-[10px] font-semibold text-white/70 hover:text-white"
             >
               <span>高级来源</span>
-              <span>{isExternalSelected && providerSelection.provider ? providerSelection.provider.label : '默认贞贞工坊'}</span>
+              <span>
+                {isExternalSelected && providerSelection.provider
+                  ? providerSelection.provider.label
+                  : isZhenzhenBudgetPlatformSelected
+                    ? '贞贞的平价AI小屋'
+                    : '默认贞贞工坊'}
+              </span>
             </button>
             {d?.advancedProviderOpen && (
               <div className="space-y-2">
                 <div>
                   <label className="text-[10px] text-white/50 block mb-1">平台</label>
                   <select
-                    value={isExternalSelected ? providerSelection.providerId : 'zhenzhen'}
+                    value={isExternalSelected
+                      ? providerSelection.providerId
+                      : isZhenzhenBudgetPlatformSelected
+                        ? 'builtin:seedance-nz'
+                        : 'zhenzhen'}
                     onChange={(e) => {
                       const nextId = e.target.value;
                       if (nextId === 'zhenzhen') {
-                        update({ providerSource: 'zhenzhen', providerId: '', providerModel: '', ...clearModelscopeLoraParams() });
+                        const leavingBudgetPlatform = d?.imageBuiltinSource === 'seedance-nz'
+                          || isZhenzhenBudgetImageModel(savedApiModel);
+                        update({
+                          providerSource: 'zhenzhen',
+                          providerId: '',
+                          providerModel: '',
+                          imageBuiltinSource: 'zhenzhen',
+                          ...(leavingBudgetPlatform
+                            ? {
+                                apiModel: modelDef.apiModel,
+                                aspectRatio: modelDef.defaultAspectRatio,
+                                sizeLevel: modelDef.defaultSize,
+                              }
+                            : {}),
+                          ...clearModelscopeLoraParams(),
+                        });
+                        return;
+                      }
+                      if (nextId === 'builtin:seedance-nz') {
+                        update({
+                          providerSource: 'zhenzhen',
+                          providerId: '',
+                          providerModel: '',
+                          imageBuiltinSource: 'seedance-nz',
+                          model: 'gpt-image-2',
+                          apiModel: ZHENZHEN_IMAGE_G2_T2I_MODEL,
+                          aspectRatio: 'adaptive',
+                          sizeLevel: '1K',
+                          ...clearModelscopeLoraParams(),
+                        });
                         return;
                       }
                       const provider = imageAdvancedProviders.find((item) => item.id === nextId);
@@ -1512,6 +2004,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
                     className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
                   >
                     <option value="zhenzhen" style={{ background: '#18181b', color: '#ffffff' }}>贞贞工坊（默认）</option>
+                    <option value="builtin:seedance-nz" style={{ background: '#18181b', color: '#ffffff' }}>贞贞的平价AI小屋</option>
                     {imageAdvancedProviders.map((provider) => (
                       <option key={provider.id} value={provider.id} style={{ background: '#18181b', color: '#ffffff' }}>
                         {provider.label || provider.id}
@@ -1815,6 +2308,9 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
                                   isDark={isDark}
                                   isPixel={isPixel}
                                   promptTemplateKind="image"
+                                  imagePromptAdjustments={imagePromptAdjustments}
+                                  onImagePromptAdjustmentsChange={updateImagePromptAdjustments}
+                                  imagePromptAdjustmentHasReferenceImages={orderedImages.length > 0}
                                   className="w-full min-h-[68px] resize-y rounded bg-white/5 border border-white/10 px-2 py-1 text-[11px] text-white outline-none focus:border-cyan-300/60 placeholder:text-white/30"
                                 />
                                 {orderedTexts.length > 0 && (
@@ -1953,8 +2449,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
                 )}
               </div>
             )}
-          </div>
-        )}
+        </div>
 
         {/* 模型 TAB 切换(对应主项目 gpt-image-2-web Tab 0/1/2) */}
         {!isExternalSelected && <div>
@@ -1963,7 +2458,14 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             className={`flex gap-0.5 p-0.5 rounded ${isPixel ? '' : 'bg-white/5'}`}
             style={isPixel ? { background: 'var(--px-muted)', border: '1.5px solid var(--px-ink)' } : undefined}
           >
-            {IMAGE_MODELS.map((m) => {
+            {IMAGE_MODELS
+              .filter((m) => !isZhenzhenBudgetPlatformSelected
+                || m.id === 'gpt-image-2'
+                || m.id === 'nano-banana-2'
+                || m.id === 'nano-banana-pro'
+                || m.id === 'grok-image'
+                || m.id === 'midjourney')
+              .map((m) => {
               const isActive = m.id === model;
               return (
                 <button
@@ -1997,7 +2499,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
                 className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-cyan-400/60"
               >
                 <option value="zhenzhen" style={{ background: '#18181b', color: '#ffffff' }}>贞贞的AI工坊（海外） · 原 Seedream</option>
-                <option value="seedance-nz" style={{ background: '#18181b', color: '#ffffff' }}>贞贞的平价AI工坊（国内） · api.seedance.nz</option>
+                <option value="seedance-nz" style={{ background: '#18181b', color: '#ffffff' }}>贞贞的平价AI小屋 · api.seedance.nz</option>
               </select>
             </div>
             {isSeedreamNz && (
@@ -2016,7 +2518,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
                 </div>
                 <div className="text-[10px] leading-4 text-cyan-100/75">
                   实际模型：{seedreamNzUiModel}（{seedreamNzModelRegion}，按参考图自动切换）
-                  {!zhenzhenSd2ApiKey && <div className="mt-1 text-amber-300">尚未配置“贞贞的平价AI工坊（国内） API Key”</div>}
+                  {!zhenzhenSd2ApiKey && <div className="mt-1 text-amber-300">尚未配置“贞贞的平价AI小屋 API Key”</div>}
                 </div>
               </div>
             )}
@@ -2033,22 +2535,50 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
               style={{ background: '#18181b', color: '#ffffff' }}
               className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
             >
-              {modelDef.apiModelOptions.map((opt) => (
+              {builtinApiModelOptions.map((opt) => (
                 <option key={opt.value} value={opt.value} style={{ background: '#18181b', color: '#ffffff' }}>{opt.label}</option>
               ))}
             </select>
           </div>
         )}
 
-        {isZhenzhenImageG2 && !isExternalSelected && (
+        {isZhenzhenBudgetImageSelected && !isExternalSelected && (
           <div className="rounded border border-cyan-400/25 bg-cyan-500/5 px-2 py-1.5 text-[10px] leading-4 text-cyan-100/80">
-            <div>贞贞的平价AI工坊（国内） · 异步 G-2 · 固定 1K</div>
+            <div>{`贞贞的平价AI小屋 · ${apiModel}`}</div>
             <div>
-              {isZhenzhenImageG2I2I
-                ? '图生图模式：必须提供 1–10 张参考图。'
-                : '文生图模式：只使用 Prompt，已连接的参考图不会发送。'}
+              {isZhenzhenImageG2
+                ? isZhenzhenImageG2I2I
+                  ? '图生图模式：必须提供 1–10 张参考图；固定 1K。'
+                  : '文生图模式：只使用 Prompt，已连接的参考图不会发送；固定 1K。'
+                : isZhenzhenLowpriceImage
+                  ? 'GPT Image 2 平价模型：支持 1K/2K/4K，可选 1–16 张参考图。'
+                  : isZhenzhenNb2Lite
+                    ? 'Nano Banana 2 Lite：固定 1K，支持 1–4 张输出和最多 14 张参考图。'
+                    : isZhenzhenNb2
+                      ? 'Nano Banana 2：支持 0.5K/1K/2K/4K、超宽/超高比例和最多 14 张参考图；单次固定 1 张输出。'
+                      : isZhenzhenNbPro
+                        ? 'Nano Banana Pro：支持 1K/2K/4K、标准比例和最多 14 张参考图；单次固定 1 张输出。'
+                  : isZhenzhenGrokImageEdit
+                    ? 'Grok Image 1.5 编辑：必须提供参考图，仅使用第 1 张。'
+                    : 'Grok Image 1.5 文生图：只使用 Prompt，不发送参考图。'}
             </div>
-            {!zhenzhenSd2ApiKey && <div className="text-amber-300">尚未配置“贞贞的平价AI工坊（国内） API Key”</div>}
+            {!zhenzhenSd2ApiKey && <div className="text-amber-300">尚未配置“贞贞的平价AI小屋 API Key”</div>}
+          </div>
+        )}
+
+        {isZhenzhenNb2Lite && !isExternalSelected && (
+          <div>
+            <label className="text-[10px] text-white/50 block mb-1">生成张数</label>
+            <select
+              value={zhenzhenNbImageCount}
+              onChange={(e) => update({ apimartImageCount: Number(e.target.value) })}
+              style={{ background: '#18181b', color: '#ffffff' }}
+              className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
+            >
+              {[1, 2, 3, 4].map((count) => (
+                <option key={count} value={count} style={{ background: '#18181b', color: '#ffffff' }}>{count}</option>
+              ))}
+            </select>
           </div>
         )}
 
@@ -2058,12 +2588,16 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           data={d}
           update={update}
           context={{
-            providerSource: isExternalSelected ? providerSelection.providerSource : ((isSeedreamNz || isZhenzhenImageG2) ? 'seedance-nz' : 'zhenzhen'),
+            providerSource: isExternalSelected ? providerSelection.providerSource : ((isSeedreamNz || isZhenzhenBudgetPlatformSelected) ? 'seedance-nz' : 'zhenzhen'),
             providerId: providerSelection.providerId,
             providerModel: isExternalSelected ? externalProviderModel : (isSeedreamNz ? seedreamNzUiModel : apiModel),
             model: modelDef.id,
             apiModel,
-            providerKind: isFal ? 'fal' : (isZhenzhenImageG2 ? 'zhenzhen-image-g2' : modelDef.paramKind),
+            providerKind: isFal
+              ? 'fal'
+              : isZhenzhenBudgetMjSelected
+                ? 'seedance-nz-midjourney'
+                : (isZhenzhenBudgetImageSelected ? 'seedance-nz-image' : modelDef.paramKind),
           }}
         />
 
@@ -2425,7 +2959,16 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         )}
 
         {/* ========== MJ 专属参数面板(完全对齐 gpt-image-2-web mj_* 控件 L1552~L1580) ========== */}
-        {!isExternalSelected && isMj && (
+        {!isExternalSelected && isMj && isZhenzhenBudgetMjSelected && (
+          <MidjourneyNzPanel
+            data={d}
+            update={update}
+            imageCount={orderedImages.length}
+            hasApiKey={!!zhenzhenSd2ApiKey}
+          />
+        )}
+
+        {!isExternalSelected && isMj && !isZhenzhenBudgetMjSelected && (
           <div className="space-y-2 rounded border border-purple-400/30 bg-purple-500/5 p-2">
             <div className="text-[10px] text-purple-300 font-semibold tracking-wide">
               ✨ Midjourney(严格对齐主项目 runMJ)
@@ -2645,11 +3188,11 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             groups={['text', 'image']}
             title={isMj
               ? '主参考图 · 上游+本地'
-              : isZhenzhenImageG2 && !isZhenzhenImageG2I2I
-                ? '参考图 · G-2 文生图模式不会发送'
+              : (isZhenzhenImageG2 && !isZhenzhenImageG2I2I) || isZhenzhenGrokImage
+                ? '参考图 · 当前文生图模型不会发送'
                 : '参考图 · 上游+本地'}
             imageUploadAction={
-              (!isZhenzhenImageG2 || isZhenzhenImageG2I2I) && orderedImages.length < maxRefs
+              maxRefs > 0 && orderedImages.length < maxRefs
                 ? {
                     onClick: handlePickFile,
                     title: '上传本地参考图',
@@ -2691,6 +3234,9 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             isDark={isDark}
             isPixel={isPixel}
             promptTemplateKind="image"
+            imagePromptAdjustments={imagePromptAdjustments}
+            onImagePromptAdjustmentsChange={updateImagePromptAdjustments}
+            imagePromptAdjustmentHasReferenceImages={orderedImages.length > 0}
             className="w-full h-14 resize-none rounded bg-white/5 border border-white/10 px-2 py-1 text-[11px] text-white outline-none focus:border-white/30 placeholder:text-white/30"
           />
         </div>}
@@ -2731,6 +3277,13 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           </button>
         )}
 
+        {status === 'generating' && downloadNotice && (
+          <div className="flex items-start gap-1 text-[10px] text-amber-200 bg-amber-500/10 border border-amber-500/20 rounded px-2 py-1">
+            <AlertCircle size={11} className="mt-0.5 flex-shrink-0" />
+            <span className="break-all">{downloadNotice}</span>
+          </div>
+        )}
+
         {error && (
           <div className="flex items-start gap-1 text-[10px] text-red-300 bg-red-500/10 border border-red-500/20 rounded px-2 py-1">
             <AlertCircle size={11} className="mt-0.5 flex-shrink-0" />
@@ -2762,6 +3315,28 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             }
             title="Ctrl+拖拽可送到其他节点"
           />
+        </div>
+      )}
+      {isZhenzhenBudgetMjSelected && videoUrl && !hasAutoOutput && (
+        <div className="border-t border-white/10 p-2">
+          <video
+            src={videoUrl}
+            controls
+            preload="metadata"
+            className="w-full rounded bg-black"
+            data-drag-source
+            data-drag-kind="video"
+            data-drag-url={videoUrl}
+            data-drag-preview={videoUrl}
+            data-drag-node-id={id}
+          />
+        </div>
+      )}
+      {isZhenzhenBudgetMjSelected && outputText && !hasAutoOutput && (
+        <div className="border-t border-white/10 p-2">
+          <div className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-cyan-300/15 bg-cyan-500/5 p-2 text-[10px] leading-4 text-cyan-50/80">
+            {outputText}
+          </div>
         </div>
       )}
     </div>

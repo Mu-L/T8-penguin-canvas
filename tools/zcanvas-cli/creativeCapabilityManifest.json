@@ -1,0 +1,1393 @@
+{
+  "schema": "t8-creative-capability-manifest-v1",
+  "version": "0.1.0-dev",
+  "principles": {
+    "oneSentenceStart": true,
+    "directCanvasMutation": false,
+    "previewBeforeApply": true,
+    "explicitApprovalForWrites": true,
+    "preserveAcceptedAndLocked": true,
+    "requirePhysicalArtifactEvidence": true
+  },
+  "capabilities": [
+    {
+      "id": "create.image",
+      "aliases": [
+        "生成图片",
+        "做一张图",
+        "图片创作"
+      ],
+      "creatorLabel": "生成图片",
+      "summary": "从一句要求创建可编辑的图片候选工作流。",
+      "category": "image",
+      "handler": "creative-plan:create.image",
+      "nodeTypes": [
+        "text",
+        "image",
+        "output"
+      ],
+      "inputKinds": [
+        "text",
+        "image"
+      ],
+      "outputKinds": [
+        "image"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "node-schema",
+        "asset-persisted"
+      ],
+      "cli": {
+        "command": "create",
+        "subcommand": "image"
+      }
+    },
+    {
+      "id": "create.video",
+      "aliases": [
+        "生成视频",
+        "做一条视频",
+        "视频创作"
+      ],
+      "creatorLabel": "生成视频",
+      "summary": "创建可编辑的视频候选工作流并保留素材连续性。",
+      "category": "video",
+      "handler": "creative-plan:create.video",
+      "nodeTypes": [
+        "text",
+        "seedance",
+        "output"
+      ],
+      "inputKinds": [
+        "text",
+        "image",
+        "video",
+        "audio"
+      ],
+      "outputKinds": [
+        "video"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "node-schema",
+        "attempt",
+        "asset-persisted"
+      ],
+      "cli": {
+        "command": "create",
+        "subcommand": "video"
+      }
+    },
+    {
+      "id": "create.audio",
+      "aliases": [
+        "生成音频",
+        "配音",
+        "做音乐",
+        "音频创作"
+      ],
+      "creatorLabel": "生成音频",
+      "summary": "创建配音、音乐、声音或转写工作流。",
+      "category": "audio",
+      "handler": "creative-plan:create.audio",
+      "nodeTypes": [
+        "text",
+        "audio",
+        "grok-oauth-agent",
+        "output"
+      ],
+      "inputKinds": [
+        "text",
+        "image",
+        "audio"
+      ],
+      "outputKinds": [
+        "audio",
+        "text"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "node-schema",
+        "attempt",
+        "asset-persisted"
+      ],
+      "cli": {
+        "command": "create",
+        "subcommand": "audio"
+      }
+    },
+    {
+      "id": "create.script",
+      "aliases": [
+        "写剧本",
+        "完善剧本",
+        "脚本创作"
+      ],
+      "creatorLabel": "完善剧本",
+      "summary": "把一句创意整理为可继续编辑的剧本工作流。",
+      "category": "script",
+      "handler": "creative-plan:create.script",
+      "nodeTypes": [
+        "llm",
+        "output"
+      ],
+      "inputKinds": [
+        "text",
+        "image",
+        "video",
+        "audio"
+      ],
+      "outputKinds": [
+        "text"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "node-schema"
+      ],
+      "cli": {
+        "command": "create",
+        "subcommand": "script"
+      }
+    },
+    {
+      "id": "create.story",
+      "aliases": [
+        "全自动制片",
+        "制作短片",
+        "一句话成片",
+        "Story"
+      ],
+      "creatorLabel": "全自动制片",
+      "summary": "创建从剧本、资产、分镜、提示词到视频与成片的 Story 制片对象。",
+      "category": "production",
+      "handler": "creative-plan:create.story",
+      "nodeTypes": [
+        "story"
+      ],
+      "inputKinds": [
+        "text",
+        "image",
+        "video",
+        "audio"
+      ],
+      "outputKinds": [
+        "text",
+        "image",
+        "video",
+        "audio",
+        "story"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify",
+        "resume"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "node-schema",
+        "story-revision",
+        "asset-lineage"
+      ],
+      "cli": {
+        "command": "create",
+        "subcommand": "story"
+      }
+    },
+    {
+      "id": "canvas.node-add",
+      "aliases": [
+        "新增节点",
+        "加入画布节点",
+        "创建功能节点"
+      ],
+      "creatorLabel": "新增画布节点",
+      "summary": "依据权威节点 Schema 新增一个可编辑节点；只创建画布结构，不自动运行模型或外部任务。",
+      "category": "canvas",
+      "handler": "creative-action:graph.node-add",
+      "nodeTypeSelector": "creator-visible",
+      "nodeTypes": [],
+      "inputKinds": [
+        "text",
+        "canvas-node"
+      ],
+      "outputKinds": [
+        "canvas-node"
+      ],
+      "approval": "L1",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify",
+        "rollback"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "node-schema"
+      ],
+      "cli": {
+        "command": "graph",
+        "subcommand": "add"
+      }
+    },
+    {
+      "id": "video.extract-frames",
+      "aliases": [
+        "视频抽帧",
+        "均匀抽帧",
+        "从视频提取画面"
+      ],
+      "creatorLabel": "视频抽帧",
+      "summary": "为一个兼容视频上游建立浏览器本地均匀抽帧节点；应用只创建可编辑工作流，运行需单独批准。",
+      "category": "video",
+      "handler": "creative-action:video.extract-frames",
+      "nodeTypes": [
+        "frame-extractor",
+        "output"
+      ],
+      "inputKinds": [
+        "video",
+        "canvas-node"
+      ],
+      "outputKinds": [
+        "image"
+      ],
+      "approval": "L1",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify",
+        "rollback"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "node-schema",
+        "attempt",
+        "asset-persisted"
+      ],
+      "cli": {
+        "command": "media",
+        "subcommand": "extract-frames"
+      }
+    },
+    {
+      "id": "image.remove-solid-background",
+      "aliases": [
+        "移除纯色背景",
+        "纯色背景抠图",
+        "边缘连通背景透明"
+      ],
+      "creatorLabel": "移除纯色背景",
+      "summary": "建立本地边缘连通纯色背景移除节点；它不是通用 AI 抠图，不会冒充复杂背景分割。",
+      "category": "image",
+      "handler": "creative-action:image.remove-solid-background",
+      "nodeTypes": [
+        "remove-bg",
+        "output"
+      ],
+      "inputKinds": [
+        "image",
+        "canvas-node"
+      ],
+      "outputKinds": [
+        "image"
+      ],
+      "approval": "L1",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify",
+        "rollback"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "node-schema",
+        "attempt",
+        "asset-persisted"
+      ],
+      "cli": {
+        "command": "media",
+        "subcommand": "remove-solid-background"
+      }
+    },
+    {
+      "id": "image.resample-upscale",
+      "aliases": [
+        "Lanczos 放大",
+        "插值放大",
+        "等比像素放大"
+      ],
+      "creatorLabel": "Lanczos 等比放大",
+      "summary": "建立本地 Lanczos3 等比重采样节点；它只增加像素尺寸，不宣称 AI 超分或细节修复。",
+      "category": "image",
+      "handler": "creative-action:image.resample-upscale",
+      "nodeTypes": [
+        "upscale",
+        "output"
+      ],
+      "inputKinds": [
+        "image",
+        "canvas-node"
+      ],
+      "outputKinds": [
+        "image"
+      ],
+      "approval": "L1",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify",
+        "rollback"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "node-schema",
+        "attempt",
+        "asset-persisted"
+      ],
+      "cli": {
+        "command": "media",
+        "subcommand": "resample-upscale"
+      }
+    },
+    {
+      "id": "edit.image",
+      "aliases": [
+        "修改图片",
+        "局部重做",
+        "保持主体改图"
+      ],
+      "creatorLabel": "修改图片",
+      "summary": "基于已持久化图片建立不覆盖原结果的编辑分支。",
+      "category": "image",
+      "handler": "creative-plan:create.edit-image",
+      "nodeTypes": [
+        "upload",
+        "image",
+        "output"
+      ],
+      "inputKinds": [
+        "text",
+        "image"
+      ],
+      "outputKinds": [
+        "image"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write",
+        "asset:read"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify",
+        "rollback"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "asset-lineage",
+        "asset-persisted"
+      ],
+      "cli": {
+        "command": "edit",
+        "subcommand": "image"
+      }
+    },
+    {
+      "id": "edit.video",
+      "aliases": [
+        "修改视频",
+        "续写视频",
+        "视频重做"
+      ],
+      "creatorLabel": "修改视频",
+      "summary": "基于已持久化视频建立不覆盖原结果的编辑分支。",
+      "category": "video",
+      "handler": "creative-plan:create.edit-video",
+      "nodeTypes": [
+        "upload",
+        "seedance",
+        "output"
+      ],
+      "inputKinds": [
+        "text",
+        "image",
+        "video",
+        "audio"
+      ],
+      "outputKinds": [
+        "video"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write",
+        "asset:read"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify",
+        "rollback"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "asset-lineage",
+        "attempt",
+        "asset-persisted"
+      ],
+      "cli": {
+        "command": "edit",
+        "subcommand": "video"
+      }
+    },
+    {
+      "id": "story.analyze",
+      "aliases": [
+        "分析剧本",
+        "拆解镜头",
+        "分析Story"
+      ],
+      "creatorLabel": "分析剧本",
+      "summary": "分析 Story 的场景、镜头、资产与声音需求，不自动开始生成。",
+      "category": "production",
+      "handler": "creative-action:story.analyze",
+      "nodeTypes": [
+        "story"
+      ],
+      "inputKinds": [
+        "text",
+        "story"
+      ],
+      "outputKinds": [
+        "story"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "story-revision",
+        "coverage-report"
+      ],
+      "cli": {
+        "command": "story",
+        "subcommand": "analyze"
+      }
+    },
+    {
+      "id": "story.import",
+      "aliases": [
+        "导入Story",
+        "导入制片项目"
+      ],
+      "creatorLabel": "导入 Story",
+      "summary": "把结构化 Story 制片对象安全导入当前画布。",
+      "category": "production",
+      "handler": "creative-action:story.import",
+      "nodeTypes": [
+        "story"
+      ],
+      "inputKinds": [
+        "story"
+      ],
+      "outputKinds": [
+        "story"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "story-revision"
+      ],
+      "cli": {
+        "command": "story",
+        "subcommand": "import"
+      }
+    },
+    {
+      "id": "story.bind-asset",
+      "aliases": [
+        "绑定资产",
+        "使用画布素材",
+        "替换Story素材"
+      ],
+      "creatorLabel": "绑定资产",
+      "summary": "把已持久化素材绑定到 Story，同时保留来源和版本。",
+      "category": "production",
+      "handler": "creative-action:story.bind-asset",
+      "nodeTypes": [
+        "story"
+      ],
+      "inputKinds": [
+        "image",
+        "video",
+        "audio",
+        "story"
+      ],
+      "outputKinds": [
+        "story"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write",
+        "asset:read"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify",
+        "rollback"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "story-revision",
+        "asset-lineage"
+      ],
+      "cli": {
+        "command": "story",
+        "subcommand": "bind-asset"
+      }
+    },
+    {
+      "id": "story.compile",
+      "aliases": [
+        "合成提示词",
+        "编译分镜提示词"
+      ],
+      "creatorLabel": "合成提示词",
+      "summary": "根据已确认镜头和资产编译可编辑的视频提示词。",
+      "category": "production",
+      "handler": "creative-action:story.compile",
+      "nodeTypes": [
+        "story"
+      ],
+      "inputKinds": [
+        "story"
+      ],
+      "outputKinds": [
+        "text",
+        "story"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "story-revision",
+        "coverage-report"
+      ],
+      "cli": {
+        "command": "story",
+        "subcommand": "compile"
+      }
+    },
+    {
+      "id": "story.plan-previews",
+      "aliases": [
+        "生成预览",
+        "计划预览图",
+        "分镜预览"
+      ],
+      "creatorLabel": "计划分镜预览",
+      "summary": "只为缺失、失败且未锁定的 Story 项目建立预览计划。",
+      "category": "production",
+      "handler": "creative-action:story.plan-previews",
+      "nodeTypes": [
+        "story"
+      ],
+      "inputKinds": [
+        "story"
+      ],
+      "outputKinds": [
+        "image",
+        "story"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify",
+        "resume"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "story-revision",
+        "attempt",
+        "asset-persisted"
+      ],
+      "cli": {
+        "command": "story",
+        "subcommand": "plan-previews"
+      }
+    },
+    {
+      "id": "story.adopt-preview",
+      "aliases": [
+        "采用预览",
+        "选择分镜候选"
+      ],
+      "creatorLabel": "采用预览",
+      "summary": "采用一个已持久化候选并保留其他版本。",
+      "category": "production",
+      "handler": "creative-action:story.adopt-preview",
+      "nodeTypes": [
+        "story"
+      ],
+      "inputKinds": [
+        "image",
+        "story"
+      ],
+      "outputKinds": [
+        "story"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write",
+        "asset:read"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify",
+        "rollback"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "story-revision",
+        "asset-lineage"
+      ],
+      "cli": {
+        "command": "story",
+        "subcommand": "adopt-preview"
+      }
+    },
+    {
+      "id": "director.materialize",
+      "aliases": [
+        "生成导演分镜台",
+        "打开导演分镜"
+      ],
+      "creatorLabel": "生成导演分镜台",
+      "summary": "从 Story 物化导演分镜台并绑定同一生产状态。",
+      "category": "production",
+      "handler": "creative-action:director.materialize",
+      "nodeTypes": [
+        "story",
+        "director-storyboard"
+      ],
+      "inputKinds": [
+        "story"
+      ],
+      "outputKinds": [
+        "storyboard"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "story-revision",
+        "node-schema"
+      ],
+      "cli": {
+        "command": "director",
+        "subcommand": "materialize"
+      }
+    },
+    {
+      "id": "video-edit.compose",
+      "aliases": [
+        "合成为片",
+        "进入剪辑",
+        "制作成片"
+      ],
+      "creatorLabel": "合成为片",
+      "summary": "把已完成镜头物化到剪辑台，保留镜头顺序和素材来源。",
+      "category": "delivery",
+      "handler": "creative-action:video-edit.compose",
+      "nodeTypes": [
+        "story",
+        "director-storyboard",
+        "video-edit"
+      ],
+      "inputKinds": [
+        "video",
+        "audio",
+        "storyboard"
+      ],
+      "outputKinds": [
+        "video"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "run",
+        "verify",
+        "resume"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "asset-lineage",
+        "attempt",
+        "asset-persisted"
+      ],
+      "cli": {
+        "command": "video-edit",
+        "subcommand": "compose"
+      }
+    },
+    {
+      "id": "iterate.compare",
+      "aliases": [
+        "比较候选",
+        "对比版本"
+      ],
+      "creatorLabel": "比较候选",
+      "summary": "读取候选版本、锁定项与真实媒体证据，不修改画布。",
+      "category": "review",
+      "handler": "creative-read:iterate.compare",
+      "nodeTypes": [],
+      "inputKinds": [
+        "image",
+        "video",
+        "audio",
+        "text"
+      ],
+      "outputKinds": [
+        "review"
+      ],
+      "approval": "L0",
+      "requiredScopes": [
+        "canvas:read"
+      ],
+      "supports": [
+        "inspect",
+        "verify"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "asset-lineage"
+      ],
+      "cli": {
+        "command": "iterate",
+        "subcommand": "compare"
+      }
+    },
+    {
+      "id": "iterate.review",
+      "aliases": [
+        "检查候选",
+        "评审作品"
+      ],
+      "creatorLabel": "检查实际候选",
+      "summary": "保存基于真实图像、视频、音频或文本作品的结构化检查证据。禁止只按 Prompt 或模型名评价。",
+      "category": "review",
+      "handler": "creative-action:review",
+      "nodeTypes": [],
+      "inputKinds": [
+        "image",
+        "video",
+        "audio",
+        "text"
+      ],
+      "outputKinds": [
+        "review"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "actual-media",
+        "content-hash"
+      ],
+      "cli": {
+        "command": "iterate",
+        "subcommand": "review"
+      }
+    },
+    {
+      "id": "iterate.accept",
+      "aliases": [
+        "采用候选",
+        "选这个版本"
+      ],
+      "creatorLabel": "采用候选",
+      "summary": "仅在真实作品评审完整且硬性检查通过后采用候选，并保留其余版本供比较。",
+      "category": "review",
+      "handler": "creative-action:accept",
+      "nodeTypes": [],
+      "inputKinds": [
+        "image",
+        "video",
+        "audio",
+        "text"
+      ],
+      "outputKinds": [
+        "accepted-version"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "inspect",
+        "plan",
+        "preview",
+        "apply",
+        "verify",
+        "rollback"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "actual-media",
+        "visual-review",
+        "content-hash"
+      ],
+      "cli": {
+        "command": "iterate",
+        "subcommand": "accept"
+      }
+    },
+    {
+      "id": "iterate.lock",
+      "aliases": [
+        "锁定一致性",
+        "锁定角色",
+        "锁定产品"
+      ],
+      "creatorLabel": "锁定一致性",
+      "summary": "锁定已确认的角色、产品、风格、提示词或参数，后续只改未锁定部分。",
+      "category": "review",
+      "handler": "creative-action:lock",
+      "nodeTypes": [],
+      "inputKinds": [
+        "image",
+        "video",
+        "audio",
+        "text"
+      ],
+      "outputKinds": [
+        "continuity-lock"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify",
+        "resume"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "continuity-lock"
+      ],
+      "cli": {
+        "command": "iterate",
+        "subcommand": "lock"
+      }
+    },
+    {
+      "id": "iterate.unlock",
+      "aliases": [
+        "解除锁定",
+        "允许修改"
+      ],
+      "creatorLabel": "解除一致性锁",
+      "summary": "在明确确认后解除候选的一致性锁，使后续迭代可以修改对应内容。",
+      "category": "review",
+      "handler": "creative-action:unlock",
+      "nodeTypes": [],
+      "inputKinds": [
+        "continuity-lock"
+      ],
+      "outputKinds": [
+        "unlocked-version"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify",
+        "rollback"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "continuity-lock"
+      ],
+      "cli": {
+        "command": "iterate",
+        "subcommand": "unlock"
+      }
+    },
+    {
+      "id": "iterate.branch",
+      "aliases": [
+        "创建分支",
+        "探索新版本"
+      ],
+      "creatorLabel": "创建探索分支",
+      "summary": "保留当前候选，从它创建独立可迭代分支，不覆盖已接受版本。",
+      "category": "review",
+      "handler": "creative-action:branch",
+      "nodeTypes": [],
+      "inputKinds": [
+        "image",
+        "video",
+        "audio",
+        "text"
+      ],
+      "outputKinds": [
+        "candidate-branch"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "compare",
+        "verify",
+        "rollback"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "candidate-lineage"
+      ],
+      "cli": {
+        "command": "iterate",
+        "subcommand": "branch"
+      }
+    },
+    {
+      "id": "iterate.rollback",
+      "aliases": [
+        "恢复上一版",
+        "回退版本"
+      ],
+      "creatorLabel": "恢复候选版本",
+      "summary": "恢复候选的已保存版本，同时保留当前状态作为可追溯版本。",
+      "category": "review",
+      "handler": "creative-action:rollback",
+      "nodeTypes": [],
+      "inputKinds": [
+        "candidate-version"
+      ],
+      "outputKinds": [
+        "candidate-version"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify",
+        "rollback"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "candidate-lineage"
+      ],
+      "cli": {
+        "command": "iterate",
+        "subcommand": "rollback"
+      }
+    },
+    {
+      "id": "run.start",
+      "aliases": [
+        "开始生成",
+        "运行计划"
+      ],
+      "creatorLabel": "开始生成",
+      "summary": "在明确批准后启动已预览的运行计划。",
+      "category": "execution",
+      "handler": "run:start",
+      "nodeTypes": [],
+      "inputKinds": [
+        "plan"
+      ],
+      "outputKinds": [
+        "run"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "run:read",
+        "run:execute"
+      ],
+      "supports": [
+        "preview",
+        "run",
+        "verify",
+        "resume",
+        "cancel"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "run-intent",
+        "node-run",
+        "attempt"
+      ],
+      "cli": {
+        "command": "run",
+        "subcommand": "start"
+      }
+    },
+    {
+      "id": "asset.place",
+      "aliases": [
+        "发送到画布",
+        "加入画布",
+        "放置素材"
+      ],
+      "creatorLabel": "把已保存素材放到画布",
+      "summary": "把当前项目中已校验的素材作为可撤回节点放入画布，可选连接到明确节点和端口。",
+      "category": "asset",
+      "handler": "asset:place",
+      "nodeTypes": [
+        "upload",
+        "text"
+      ],
+      "inputKinds": [
+        "image",
+        "video",
+        "audio",
+        "text",
+        "model"
+      ],
+      "outputKinds": [
+        "canvas-patch"
+      ],
+      "approval": "L1",
+      "requiredScopes": [
+        "canvas:read",
+        "canvas:write",
+        "asset:read"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify",
+        "rollback"
+      ],
+      "evidence": [
+        "canvas-revision",
+        "canvas-patch",
+        "asset-lineage"
+      ],
+      "cli": {
+        "command": "asset",
+        "subcommand": "place"
+      }
+    },
+    {
+      "id": "asset.import",
+      "aliases": [
+        "导入素材",
+        "上传本机素材"
+      ],
+      "creatorLabel": "导入外部素材",
+      "summary": "在明确批准后把本机文件导入当前项目素材中心。",
+      "category": "asset",
+      "handler": "asset:import",
+      "nodeTypes": [
+        "upload",
+        "output"
+      ],
+      "inputKinds": [
+        "image",
+        "video",
+        "audio",
+        "text",
+        "model"
+      ],
+      "outputKinds": [
+        "asset"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "asset:transfer"
+      ],
+      "supports": [
+        "preview",
+        "apply",
+        "verify"
+      ],
+      "evidence": [
+        "asset-persisted",
+        "asset-lineage"
+      ],
+      "cli": {
+        "command": "asset",
+        "subcommand": "import"
+      }
+    },
+    {
+      "id": "delivery.package",
+      "aliases": [
+        "打包交付",
+        "整理成片",
+        "导出项目"
+      ],
+      "creatorLabel": "打包交付",
+      "summary": "收集、打包并复核图片、视频、音频和文本交付物。",
+      "category": "delivery",
+      "handler": "delivery:package",
+      "nodeTypes": [
+        "output",
+        "video-edit"
+      ],
+      "inputKinds": [
+        "image",
+        "video",
+        "audio",
+        "text",
+        "model"
+      ],
+      "outputKinds": [
+        "package"
+      ],
+      "approval": "L2",
+      "requiredScopes": [
+        "asset:read",
+        "asset:transfer"
+      ],
+      "supports": [
+        "plan",
+        "preview",
+        "apply",
+        "verify"
+      ],
+      "evidence": [
+        "delivery-manifest",
+        "file-sha256",
+        "physical-artifact"
+      ],
+      "cli": {
+        "command": "delivery",
+        "subcommand": "package"
+      }
+    },
+    {
+      "id": "browser.handoff",
+      "aliases": [
+        "浏览器打开",
+        "网页接力"
+      ],
+      "creatorLabel": "浏览器接力",
+      "summary": "仅在用户明确要求时，为当前本机画布创建可见、无登录态继承的受限 handoff。",
+      "category": "handoff",
+      "handler": "browser:open",
+      "nodeTypes": [],
+      "inputKinds": [
+        "canvas-context"
+      ],
+      "outputKinds": [
+        "browser-handoff"
+      ],
+      "approval": "L1",
+      "requiredScopes": [
+        "browser:handoff"
+      ],
+      "supports": [
+        "preview",
+        "apply",
+        "verify"
+      ],
+      "evidence": [
+        "handoff-id",
+        "visible-target"
+      ],
+      "cli": {
+        "command": "browser",
+        "subcommand": "open"
+      }
+    }
+  ]
+}

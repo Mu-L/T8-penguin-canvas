@@ -77,9 +77,18 @@ function ensureManagementAuthority(): string {
   }
 }
 
-function collaborationManagementProxy(token: string): ProxyOptions {
+function developmentBackendTarget(): string {
+  const value = String(process.env.T8PC_DEV_BACKEND_ORIGIN || '').trim();
+  if (!value) return 'http://127.0.0.1:18766';
+  if (!/^http:\/\/127\.0\.0\.1:(?:[1-9]\d{0,4})$/.test(value)) {
+    throw new Error('T8PC_DEV_BACKEND_ORIGIN 必须是 127.0.0.1 的 HTTP 端口');
+  }
+  return value;
+}
+
+function collaborationManagementProxy(token: string, backendTarget: string): ProxyOptions {
   return {
-    target: 'http://127.0.0.1:18766',
+    target: backendTarget,
     changeOrigin: true,
     configure(proxy) {
       proxy.on('proxyReq', (proxyRequest, request) => {
@@ -123,6 +132,7 @@ function localExtensionsPlugin() {
 // 端口策略:前端 11422 / 后端 18766(避开主项目 5176/18765 与常见 51xx 占用)
 export default defineConfig(({ command }) => {
   const managementToken = command === 'serve' ? ensureManagementAuthority() : '';
+  const backendTarget = command === 'serve' ? developmentBackendTarget() : 'http://127.0.0.1:18766';
   return {
   plugins: [react(), localExtensionsPlugin()],
   assetsInclude: ['**/*.mid'],
@@ -157,24 +167,24 @@ export default defineConfig(({ command }) => {
     },
     proxy: {
       ...(managementToken ? {
-        '/api/collaboration': collaborationManagementProxy(managementToken),
+        '/api/collaboration': collaborationManagementProxy(managementToken, backendTarget),
       } : {}),
       // 后端 API 代理
       '/api': {
-        target: 'http://127.0.0.1:18766',
+        target: backendTarget,
         changeOrigin: true,
       },
       // 静态文件服务代理
       '/files': {
-        target: 'http://127.0.0.1:18766',
+        target: backendTarget,
         changeOrigin: true,
       },
       '/output': {
-        target: 'http://127.0.0.1:18766',
+        target: backendTarget,
         changeOrigin: true,
       },
       '/input': {
-        target: 'http://127.0.0.1:18766',
+        target: backendTarget,
         changeOrigin: true,
       },
     },
