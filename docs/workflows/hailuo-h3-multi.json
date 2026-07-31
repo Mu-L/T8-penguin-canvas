@@ -1,0 +1,45 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "Hailuo H3 多模态参考（平价AI小屋）",
+  "nodes": [
+    {
+      "id": "hailuo-h3-multi",
+      "type": "video",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "Hailuo H3 多模态参考",
+        "mainId": "hailuo-2.3",
+        "model": "hailuo-h3-multi",
+        "videoBuiltinSource": "seedance-nz",
+        "ratio": "16:9",
+        "duration": 5,
+        "resolution": "2K",
+        "localPrompt": "说明图片、视频和音频参考素材在成片中的作用",
+        "reuseResult": false
+      }
+    }
+  ],
+  "edges": [],
+  "nodeCount": 1,
+  "edgeCount": 0,
+  "nodeTypes": [
+    "video"
+  ],
+  "topologyPreview": {
+    "nodes": [
+      {
+        "id": "hailuo-h3-multi",
+        "type": "video",
+        "label": "Hailuo H3 多模态参考",
+        "x": 50,
+        "y": 50
+      }
+    ],
+    "edges": []
+  },
+  "savedAt": "2026-07-31T00:00:00.000Z"
+}

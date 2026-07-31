@@ -68,6 +68,27 @@ const SUNO_POLL_INTERVAL_MS = 3000;
 const SUNO_POLL_TIMEOUT_SECONDS = 3600;
 const SUNO_MAX_POLL = Math.ceil((SUNO_POLL_TIMEOUT_SECONDS * 1000) / SUNO_POLL_INTERVAL_MS);
 
+function audioUploadExtension(mime: string, preferredName: string, url: string): string {
+  const normalizedMime = String(mime || '').toLowerCase().split(';')[0].trim();
+  const byMime: Record<string, string> = {
+    'audio/mpeg': 'mp3',
+    'audio/mp3': 'mp3',
+    'audio/wav': 'wav',
+    'audio/x-wav': 'wav',
+    'audio/mp4': 'm4a',
+    'audio/ogg': 'ogg',
+    'application/ogg': 'ogg',
+    'audio/flac': 'flac',
+    'audio/aac': 'aac',
+    'audio/x-ms-wma': 'wma',
+  };
+  const nameExt = String(preferredName || '').match(/\.(mp3|wav|m4a|ogg|flac|aac|wma)$/i)?.[1];
+  if (nameExt) return nameExt.toLowerCase();
+  if (byMime[normalizedMime]) return byMime[normalizedMime];
+  const urlExt = String(url || '').split(/[?#]/)[0].match(/\.(mp3|wav|m4a|ogg|flac|aac|wma)$/i)?.[1];
+  return (urlExt || 'mp3').toLowerCase();
+}
+
 const AudioNode = ({ id, data, selected }: NodeProps) => {
   const update = useUpdateNodeData(id);
   const hasAutoOutput = useHasAutoOutput(id);
@@ -246,11 +267,11 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
   };
 
   // 将 URL 抓为 File 后上传(上游节点传入 audioUrl 时)
-  const fetchUrlAndUpload = async (url: string): Promise<string> => {
+  const fetchUrlAndUpload = async (url: string, preferredName = ''): Promise<string> => {
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`下载上游音频失败: ${resp.status}`);
     const blob = await resp.blob();
-    const ext = (url.match(/\.(mp3|wav|m4a|ogg|flac|aac)/i)?.[1] || 'mp3').toLowerCase();
+    const ext = audioUploadExtension(blob.type, preferredName, url);
     const file = new File([blob], `upstream_audio.${ext}`, { type: blob.type || 'audio/mpeg' });
     return await uploadFile(file);
   };
@@ -808,7 +829,10 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
       let clipIdForRef = uploadedClipId;
       if ((mode === 'cover' || mode === 'extend') && !clipIdForRef && upstream.audioUrl) {
         logBus.info('检测到上游音频 URL, 自动上传 Suno...', src);
-        clipIdForRef = await fetchUrlAndUpload(upstream.audioUrl);
+        clipIdForRef = await fetchUrlAndUpload(
+          upstream.audioUrl,
+          upstream.audioUrl === localRefAudio ? uploadedFilename : '',
+        );
       }
       if ((mode === 'cover' || mode === 'extend') && !clipIdForRef) {
         throw new Error(`${mode === 'cover' ? '翻唱' : '续写'}模式需先上传参考音频 (或连接上游音频节点)`);
@@ -895,10 +919,10 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
   // === 跨节点拖拽: target (Seed Audio additionally accepts one reference image) ===
   const handleDrop = (payload: MaterialPayload) => {
     if (payload.kind === 'audio' && payload.url) {
-      update({ localRefAudio: payload.url, uploadedClipId: '', uploadedFilename: '' });
+      update({ localRefAudio: payload.url, uploadedClipId: '', uploadedFilename: payload.name || '' });
       logBus.info('已接受拖入参考音频, 生成时将自动上传', src);
     } else if (isWhisper && payload.kind === 'video' && payload.url) {
-      update({ localRefAudio: payload.url, uploadedClipId: '', uploadedFilename: '' });
+      update({ localRefAudio: payload.url, uploadedClipId: '', uploadedFilename: payload.name || '' });
       logBus.info('已接受拖入 MP4 视频，Whisper 将直接转写其中的语音', src);
     } else if (isSeedAudio && payload.kind === 'image' && payload.url) {
       update({ localRefImage: payload.url });

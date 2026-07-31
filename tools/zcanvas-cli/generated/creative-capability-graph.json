@@ -17,14 +17,14 @@
     "creativeCapabilityManifest": "36908537be76c1b8bfcecbe1fec079d8a335e6d7d03f470ecd562f823658e0f5",
     "canvasNodeSchema": "c594306f7a1efc8124a25d83c3294ea7fe87c0718e4305a282a3f10f8896e0e7",
     "canvasNodeSchemaFile": "330bd64abf3de1d183f61dee477670ef72192052a2d516e22805511e6bdc93d1",
-    "runtimeCatalogSources": "0150f7bb46d8299abdae6e4cdd049174eb4f61ce46562c916e03b68427770516",
-    "runtimeCatalogArtifact": "12da452a347171135712ac60faf23b29780b8a646f9391953cf215a7a967a024",
+    "runtimeCatalogSources": "96739c3b3b53a1d90fb4a08cfa8089d7a0a05645d595cbaaf29729399c8932bd",
+    "runtimeCatalogArtifact": "07b3b37edac7b7e70525e9ccce9f5c2a246f84a71874cfec489bf446453493e3",
     "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
     "capabilityGraphCompiler": "1a611d7e91dcf523e0536a92e9adb6ba2d884689a65fa10274bcda3a05ef9840",
     "coverageReceiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7",
     "canonicalTextDigestCompiler": "b0afcf28a257fbbd8f391edc117348f8f2ede1b4a039ae91bce25a8d563ac0cf"
   },
-  "aggregateDigest": "8028c974da2fdcefd34a0755353b7eba94761e05707a24960e61254a8138b05e",
+  "aggregateDigest": "4e5abef0f24549f88f44c28e68b1f912fb05320721f0a823e95846bd16606539",
   "principles": {
     "oneSentenceStart": true,
     "directCanvasMutation": false,
@@ -48,17 +48,17 @@
     "accountedNodes": 70,
     "unexplainedNodes": 0,
     "fullyOperableNodes": 14,
-    "runtimeEntries": 197,
+    "runtimeEntries": 200,
     "runtimeByKind": {
       "llm": 29,
       "image": 28,
-      "video": 85,
+      "video": 88,
       "audio": 8,
       "actions": 47
     },
     "runtimeByProvider": {
       "grok-oauth": 2,
-      "seedance-nz": 140,
+      "seedance-nz": 143,
       "zhenzhen": 48,
       "fal": 7
     },
@@ -6017,7 +6017,7 @@
   ],
   "runtime": {
     "schema": "t8-creative-runtime-catalog-v1",
-    "sourceDigest": "0150f7bb46d8299abdae6e4cdd049174eb4f61ce46562c916e03b68427770516",
+    "sourceDigest": "96739c3b3b53a1d90fb4a08cfa8089d7a0a05645d595cbaaf29729399c8932bd",
     "platforms": [
       {
         "id": "zhenzhen",
@@ -8588,6 +8588,66 @@
         }
       },
       {
+        "id": "video:seedance-nz:hailuo-h3-i2v",
+        "kind": "video",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "hailuo-h3-i2v",
+        "label": "hailuo-h3-i2v（H3 首尾帧图生视频）",
+        "family": "hailuo-2.3",
+        "available": true,
+        "catalogSection": "video",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "video:seedance-nz:hailuo-h3-multi",
+        "kind": "video",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "hailuo-h3-multi",
+        "label": "hailuo-h3-multi（H3 多模态参考）",
+        "family": "hailuo-2.3",
+        "available": true,
+        "catalogSection": "video",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "video:seedance-nz:hailuo-h3-t2v",
+        "kind": "video",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "hailuo-h3-t2v",
+        "label": "hailuo-h3-t2v（H3 文生视频）",
+        "family": "hailuo-2.3",
+        "available": true,
+        "catalogSection": "video",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
         "id": "video:seedance-nz:happyhorse-1.1-i2v",
         "kind": "video",
         "provider": "seedance-nz",
@@ -10357,6 +10417,9 @@
       "video:seedance-nz:hailuo-2.3-i2v-standard",
       "video:seedance-nz:hailuo-2.3-t2v-pro",
       "video:seedance-nz:hailuo-2.3-t2v-standard",
+      "video:seedance-nz:hailuo-h3-i2v",
+      "video:seedance-nz:hailuo-h3-multi",
+      "video:seedance-nz:hailuo-h3-t2v",
       "video:seedance-nz:happyhorse-1.1-i2v",
       "video:seedance-nz:happyhorse-1.1-r2v",
       "video:seedance-nz:happyhorse-1.1-t2v",
@@ -10436,7 +10499,7 @@
     "sourceDigests": {
       "capabilityManifest": "36908537be76c1b8bfcecbe1fec079d8a335e6d7d03f470ecd562f823658e0f5",
       "nodeSchema": "c594306f7a1efc8124a25d83c3294ea7fe87c0718e4305a282a3f10f8896e0e7",
-      "runtimeCatalog": "0150f7bb46d8299abdae6e4cdd049174eb4f61ce46562c916e03b68427770516",
+      "runtimeCatalog": "96739c3b3b53a1d90fb4a08cfa8089d7a0a05645d595cbaaf29729399c8932bd",
       "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
       "receiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7"
     },
@@ -10449,7 +10512,7 @@
       "runtime": {
         "llm": 29,
         "image": 28,
-        "video": 85,
+        "video": 88,
         "audio": 8,
         "actions": 47
       },
@@ -10465,6 +10528,6 @@
       "missingCompatibilityEdges": []
     },
     "complete": true,
-    "digest": "84eb3d1197da935e6be299812e5adfb57fe29b157fcedfd24a6a00b9879c4df9"
+    "digest": "fdb7b23f802c663653fcf6d91e6f2674dc1636dfd885ac5297e92ebefa0bf177"
   }
 }

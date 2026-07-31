@@ -1,50 +1,92 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.7.2",
-  "lastUpdated": "2026-07-31-v2.7.2-rh-text-output-terminal-fix-released",
+  "version": "2.7.3",
+  "lastUpdated": "2026-07-31-v2.7.3-hailuo-h3-resource-upstream-release-candidate",
   "release": {
-    "status": "released-postrelease-evidence-pending",
-    "version": "2.7.2",
+    "status": "release-candidate",
+    "version": "2.7.3",
     "date": "2026-07-31",
-    "publishedAt": "2026-07-30T20:31:01Z",
-    "tag": "v2.7.2",
-    "latest": true,
-    "sourceCommit": "8ecc882fb6e030b38c7f37b4d16e69267cce537f",
-    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.2",
+    "publishedAt": null,
+    "tag": "v2.7.3",
+    "latest": false,
+    "sourceCommit": null,
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.3",
     "artifacts": {
       "installer": {
-        "name": "T8-PenguinCanvas-Setup-2.7.2.exe",
-        "size": 1304665337,
-        "sha256": "26847cd07c4dc1bbb491ec3ebd9688e3aa7e47d1bbefd91b43e60c50d0d2cf44"
+        "name": "T8-PenguinCanvas-Setup-2.7.3.exe",
+        "size": null,
+        "sha256": null
       },
       "blockmap": {
-        "name": "T8-PenguinCanvas-Setup-2.7.2.exe.blockmap",
-        "size": 1359962,
-        "sha256": "d60ba173f3de3a748efb9cee36db8f63d6b73c81826f5a66e03cd8e50eebf9ac"
+        "name": "T8-PenguinCanvas-Setup-2.7.3.exe.blockmap",
+        "size": null,
+        "sha256": null
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": 362,
-        "sha256": "f2a76e9fb8ae5e52b5e1efae2c0067c67a2ad5c937f3f08fd3d593a663bed818"
+        "size": null,
+        "sha256": null
       }
     },
     "verification": [
-      "v2.7.2 已正式发布为 GitHub Latest Release；Tag 与 Release target 精确固定到安装包对应源码 8ecc882fb6e030b38c7f37b4d16e69267cce537f，后续发布事实提交不得移动该 Tag。",
-      "RunningHub 文本输出真实 WebApp 与定向回归已通过；TypeScript、feature-sync、公开面、RH 工具箱、协作延期和 core/development 工作树发布前门均已通过。",
-      "Electron/Vite/后端加密与运行时归档的正式应用构建只执行一次；在运行时归档恢复后，Electron/NSIS 安装包也只封装一次，post-build 完整通过，没有重复打包。",
-      "安装包、blockmap 与 latest.yml 的 size、SHA-256 已通过 sealed recovery、GitHub digest/size 元数据、发布前完整远端回下载字节核验和最终 Latest 状态校验。",
+      "v2.7.3 已获用户明确授权发布；正式 Tag、Release target 与自动更新资产将在唯一一次 Electron/NSIS 正式打包完成后回写。",
+      "Hailuo H3 三模型真实 Provider 任务与资源库上游素材定向回归已通过；完整发布前门将在固定发布提交上执行。",
+      "安装包、blockmap 与 latest.yml 的 size、SHA-256、sealed recovery、GitHub 元数据和完整远端回下载证据将在发布完成后回写。",
       "用户已明确授权先发布、后补真实 Provider、协作多端与安装升级证据；延期不将尚未执行的证据标记为通过。"
     ]
   },
   "versionSequencePolicy": {
     "status": "active",
     "date": "2026-07-30",
-    "currentVersion": "2.7.2",
+    "currentVersion": "2.7.3",
     "rules": [
       "版本号每一段只使用 0-9；v2.6.9 的下一正式版本固定为 v2.7.0。",
       "禁止创建、打包、推送、打 tag、发布或写入自动更新元数据为 v2.6.10。",
       "v2.7.1 的下一正式版本固定为 v2.7.2。",
+      "v2.7.2 的下一正式版本固定为 v2.7.3。",
       "后续改版本前必须同步核对 package.json、package-lock.json、README、features.json、项目 SKILL.md、Release notes、自动更新元数据和 Git tag。"
+    ]
+  },
+  "hailuoH3VideoModels": {
+    "status": "release-candidate-v2.7.3-live-provider-verified",
+    "date": "2026-07-31",
+    "releaseIncluded": true,
+    "platform": "贞贞的平价AI小屋",
+    "models": [
+      "hailuo-h3-t2v",
+      "hailuo-h3-i2v",
+      "hailuo-h3-multi"
+    ],
+    "highlights": [
+      "视频节点 Hailuo TAB 在独立贞贞的平价AI小屋来源下新增 Hailuo H3 文生视频、首尾帧图生视频和图片/视频/音频多模态参考视频，原 Hailuo 2.3 与其他视频来源保持不变。",
+      "严格按官方 H3 合同固定 2K、5~15 秒：t2v 只使用提示词和画幅；i2v 使用 1 张首帧并可选第 2 张尾帧且不提交画幅；multi 要求提示词并支持最多 9 张图片、3 个 MP4 视频和 3 个 MP3/WAV 音频。",
+      "三个模式分别校验提示词、素材数量、MIME、文件大小和参数边界，参考素材先上传到平价AI小屋再提交；完成结果继续沿现有安全下载与本地持久化链路写回画布。",
+      "新增 hailuo-h3-t2v、hailuo-h3-i2v、hailuo-h3-multi 三份可导入工作流模板，明确保存 source、model、5 秒和 2K 等关键字段，不保存 API Key、任务 ID、签名 URL 或 Provider 原始响应。"
+    ],
+    "verification": [
+      "官方 docs/llms.txt 与 ComfyUI_Seedance 的 H3 节点、前端动态输入及三份示例工作流已逐项交叉核对。",
+      "Provider、前端、路由、来源隔离、模型默认值和工作流导入定向回归 71/71 通过；能力目录同步为 31 项公开动作、200 项运行时条目和 70/70 节点覆盖。",
+      "用户于 2026-07-31 明确授权付费测试后，hailuo-h3-t2v 与 hailuo-h3-multi 均被平台接受、到达完成终态、下载为本地 MP4 并通过 ftyp 文件头校验。",
+      "hailuo-h3-t2v 实证文件为 3839300 bytes、SHA-256 cb2bcf0d21052645fbb04dc835a8811895b3ac8ec47a2d3a45ae66a3f8f3cb34；hailuo-h3-multi 实证文件为 1238037 bytes、SHA-256 6f9cd855703ebdba8b3311018058006fa06290eb8f4726f09e5c8b3d9f834bff。",
+      "用户随后明确授权继续验证 hailuo-h3-i2v；本次续测首次提交即被平台接受，之后只轮询同一任务至成功终态，没有重复提交已接受任务。结果下载为 1007194 bytes 的本地 MP4，SHA-256 a6698f437ed69cf63b7fdbb5963a877b35c5e738c3f78305b1191d99a0aecd2f，并同时通过 ftyp 文件头与 bundled FFmpeg 单线程容器读取校验。",
+      "hailuo-h3-t2v、hailuo-h3-i2v、hailuo-h3-multi 三个模型现均具有真实平台接受、完成终态、本地下载和媒体校验证据；任务标识、签名 URL、API Key 与 Provider 原始响应未写入项目记录。",
+      "三模型与资源库上游素材修复已纳入 v2.7.3 发布候选；正式 Electron 打包、Tag、Release 和自动更新资产事实将在唯一一次发布流程完成后回写。"
+    ]
+  },
+  "resourceLibraryUpstreamMediaFix": {
+    "status": "release-candidate-v2.7.3",
+    "date": "2026-07-31",
+    "releaseIncluded": true,
+    "highlights": [
+      "修复从资源库拖入图像、视频或音频作为图像、视频、音频等生成节点上游素材时，资源 URL 没有文件扩展名导致 Provider 上传被错误按图片校验或误判为不存在的问题。",
+      "资源库拖拽现在保留原始文件名、MIME 和字节数提示；后端从持久化资源记录恢复原始名称与本地文件类型，并继续以真实文件魔数作为最终可信格式依据。",
+      "共享平价AI小屋上传链路统一接受经过边界、大小和魔数验证的图像、视频、音频资源；图像专用入口仍保持图像限定，非媒体文件和跨类型伪装继续拒绝。",
+      "音频节点从资源库接收无扩展名 URL 时会结合原文件名和响应 MIME 恢复 mp3、wav、m4a、ogg、flac、aac 或 wma 扩展名，不再默认误传为 mp3。"
+    ],
+    "verification": [
+      "resourceLibraryUpstreamMedia、mediaResolver、imageReferencePersistence、resourceLibraryDrawer 定向回归 18/18 通过。",
+      "TypeScript type-check、proxy/mediaResolver/seedanceNz Node 语法检查和定向 diff-check 已通过。",
+      "真实文件仍在 Provider 上传边界做 image/video/audio 魔数校验；资源库数据库声明只作为提示，不覆盖真实文件类型。"
     ]
   },
   "runningHubTextOutputTerminalFix": {

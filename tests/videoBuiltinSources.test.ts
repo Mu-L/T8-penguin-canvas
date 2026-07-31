@@ -11,6 +11,7 @@ import {
   ZHENZHEN_VIDEO_V31_LITE_MODEL,
   ZHENZHEN_VIDEO_V31_QUALITY_MODEL,
 } from '../src/providers/models.ts';
+import { workflowManifestToFragment } from '../src/utils/workflowResource.ts';
 
 const read = (relative: string) => readFileSync(new URL(relative, import.meta.url), 'utf8');
 
@@ -50,6 +51,9 @@ test('video built-in sources keep workshop and budget-house catalogs independent
     'wan-2.7-spicy-i2v',
     'happyhorse-1.1-t2v',
     'hailuo-2.3-t2v-standard',
+    'hailuo-h3-t2v',
+    'hailuo-h3-i2v',
+    'hailuo-h3-multi',
     'vidu-q3-turbo-t2v',
     'kling-v3.0-std-t2v',
     'zhenzhen-upscaler',
@@ -69,6 +73,9 @@ test('old video canvases infer the correct built-in source from their saved mode
   assert.equal(inferVideoBuiltinSource(ZHENZHEN_VIDEO_GK_V15_MODEL), 'seedance-nz');
   assert.equal(inferVideoBuiltinSource(ZHENZHEN_VIDEO_V31_LITE_MODEL), 'seedance-nz');
   assert.equal(inferVideoBuiltinSource('hailuo-2.3-i2v-pro'), 'seedance-nz');
+  assert.equal(inferVideoBuiltinSource('hailuo-h3-t2v'), 'seedance-nz');
+  assert.equal(inferVideoBuiltinSource('hailuo-h3-i2v'), 'seedance-nz');
+  assert.equal(inferVideoBuiltinSource('hailuo-h3-multi'), 'seedance-nz');
   assert.equal(inferVideoBuiltinSource('hailuo-2.3'), 'seedance-nz');
   assert.equal(inferVideoBuiltinSource('unknown-video-model'), null);
 });
@@ -85,5 +92,30 @@ test('video node exposes both sources and filters tabs and submodels before exec
   assert.match(node, /taskProvider: 'seedance-nz'/);
   assert.match(node, /Veo 3\.1 Lite：纯文生视频/);
   assert.match(node, /isApimartV31Lite \? \['text'\]/);
+  assert.match(node, /nextModel\.startsWith\('hailuo-h3-'\)/);
+  assert.match(node, /\{ ratio: '16:9', duration: 5, resolution: '2K' \}/);
   assert.match(node, /providerSource: isExternalSelected \? providerSelection\.providerSource : \(isSeedanceNzVideo \? 'seedance-nz' : 'zhenzhen'\)/);
+});
+
+test('Hailuo H3 example workflows restore the exact budget-house model and supported defaults', () => {
+  const expected = new Map([
+    ['hailuo-h3-t2v.json', 'hailuo-h3-t2v'],
+    ['hailuo-h3-i2v.json', 'hailuo-h3-i2v'],
+    ['hailuo-h3-multi.json', 'hailuo-h3-multi'],
+  ]);
+
+  for (const [fileName, model] of expected) {
+    const raw = readFileSync(new URL(`../docs/workflows/${fileName}`, import.meta.url), 'utf8');
+    const fragment = workflowManifestToFragment(JSON.parse(raw));
+    assert.equal(fragment?.nodes.length, 1, `${fileName} should restore one node`);
+    assert.equal(fragment?.edges.length, 0, `${fileName} should restore without synthetic edges`);
+    const data = fragment?.nodes[0]?.data as Record<string, unknown>;
+    assert.equal(fragment?.nodes[0]?.type, 'video');
+    assert.equal(data.mainId, 'hailuo-2.3');
+    assert.equal(data.model, model);
+    assert.equal(data.videoBuiltinSource, 'seedance-nz');
+    assert.equal(data.duration, 5);
+    assert.equal(data.resolution, '2K');
+    assert.equal(data.reuseResult, false);
+  }
 });

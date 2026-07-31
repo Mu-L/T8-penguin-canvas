@@ -40,7 +40,7 @@ test('Hailuo proxy uses the domestic key and keeps task polling in its own autho
   seedanceNz.submitHailuoTask = async (request: any, apiKey: string) => {
     submittedRequest = request;
     submittedKey = apiKey;
-    return { taskId: 'hailuo-route-task-1', model: request.model, taskType: 't2v' };
+    return { taskId: 'hailuo-route-task-1', model: request.model, taskType: 'multi' };
   };
   seedanceNz.queryTask = async (_taskId: string, apiKey: string) => {
     queriedKey = apiKey;
@@ -60,18 +60,24 @@ test('Hailuo proxy uses the domestic key and keeps task polling in its own autho
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'hailuo-2.3-t2v-standard',
-      prompt: 'A paper sculpture slowly turns under studio light',
-      duration: 6,
-      resolution: '768p',
+      model: 'hailuo-h3-multi',
+      prompt: '@Image 1 follows @Video 1 and @Audio 1',
+      duration: 5,
+      resolution: '2K',
       ratio: '16:9',
+      images: ['/files/input/hailuo-h3-reference.png'],
+      videos: ['/files/input/hailuo-h3-reference.mp4'],
+      audios: ['/files/input/hailuo-h3-reference.wav'],
     }),
   }).then((response) => response.json());
 
   assert.equal(submit.success, true);
   assert.equal(submit.data.taskId, 'hailuo-route-task-1');
   assert.equal(submittedKey, 'domestic-hailuo-key');
-  assert.equal(submittedRequest.model, 'hailuo-2.3-t2v-standard');
+  assert.equal(submittedRequest.model, 'hailuo-h3-multi');
+  assert.deepEqual(submittedRequest.images, ['/files/input/hailuo-h3-reference.png']);
+  assert.deepEqual(submittedRequest.videos, ['/files/input/hailuo-h3-reference.mp4']);
+  assert.deepEqual(submittedRequest.audios, ['/files/input/hailuo-h3-reference.wav']);
 
   const status = await fetch(`${base}/api/proxy/video/hailuo/status/hailuo-route-task-1`)
     .then((response) => response.json());

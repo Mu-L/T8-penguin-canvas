@@ -1169,6 +1169,121 @@ test('seedance.nz Hailuo 2.3 validates model limits and submits through /v1/vide
   ]);
 });
 
+test('seedance.nz builds the documented Hailuo H3 t2v, first/last-frame i2v and multimodal payloads', async () => {
+  seedanceNz.resetCachesForTests();
+  const t2v = await seedanceNz.buildHailuoPayload({
+    model: 'hailuo-h3-t2v',
+    prompt: 'A warm paper lantern floats through a quiet night market',
+    duration: 5,
+    resolution: '2K',
+    ratio: 'adaptive',
+    images: [TINY_PNG_A],
+  }, 'test-key');
+  assert.deepEqual(t2v, {
+    model: 'hailuo-h3-t2v',
+    taskType: 't2v',
+    payload: {
+      model: 'hailuo-h3-t2v',
+      prompt: 'A warm paper lantern floats through a quiet night market',
+      seconds: '5',
+      metadata: { resolution: '2K', ratio: 'adaptive' },
+    },
+  });
+
+  let uploadIndex = 0;
+  const uploadFetch = async (url: string) => {
+    assert.match(url, /\/v1\/files\/upload$/);
+    uploadIndex += 1;
+    return jsonResponse({ url: `https://cdn.example.com/hailuo-h3-ref-${uploadIndex}` });
+  };
+  const i2v = await seedanceNz.buildHailuoPayload({
+    model: 'hailuo-h3-i2v',
+    prompt: 'The lantern slowly brightens',
+    duration: 15,
+    resolution: '2k',
+    ratio: '9:16',
+    images: [TINY_PNG_A, TINY_PNG_B],
+  }, 'test-key', { uploadIntervalMs: 0, fetchImpl: uploadFetch });
+  assert.deepEqual(i2v, {
+    model: 'hailuo-h3-i2v',
+    taskType: 'i2v',
+    payload: {
+      model: 'hailuo-h3-i2v',
+      prompt: 'The lantern slowly brightens',
+      seconds: '15',
+      metadata: { resolution: '2K' },
+      images: [
+        'https://cdn.example.com/hailuo-h3-ref-1',
+        'https://cdn.example.com/hailuo-h3-ref-2',
+      ],
+    },
+  });
+
+  seedanceNz.resetCachesForTests();
+  const multi = await seedanceNz.buildHailuoPayload({
+    model: 'hailuo-h3-multi',
+    prompt: '@Image 1 follows the rhythm of @Audio 1 while matching @Video 1',
+    duration: 9,
+    resolution: '2K',
+    ratio: '16:9',
+    images: [TINY_PNG_A],
+    videos: ['data:video/mp4;base64,AAAA'],
+    audios: ['data:audio/wav;base64,AAAA'],
+  }, 'test-key', { uploadIntervalMs: 0, fetchImpl: uploadFetch });
+  assert.deepEqual(multi, {
+    model: 'hailuo-h3-multi',
+    taskType: 'multi',
+    payload: {
+      model: 'hailuo-h3-multi',
+      prompt: '@Image 1 follows the rhythm of @Audio 1 while matching @Video 1',
+      seconds: '9',
+      metadata: {
+        resolution: '2K',
+        ratio: '16:9',
+        video_url: ['https://cdn.example.com/hailuo-h3-ref-4'],
+        audio_url: ['https://cdn.example.com/hailuo-h3-ref-5'],
+      },
+      images: ['https://cdn.example.com/hailuo-h3-ref-3'],
+    },
+  });
+});
+
+test('seedance.nz Hailuo H3 rejects invalid duration, resolution and missing or excessive references', async () => {
+  await assert.rejects(
+    seedanceNz.buildHailuoPayload({
+      model: 'hailuo-h3-t2v', prompt: 'Valid prompt', duration: 4, resolution: '2K', ratio: '16:9',
+    }, 'test-key'),
+    /5-15 秒/,
+  );
+  await assert.rejects(
+    seedanceNz.buildHailuoPayload({
+      model: 'hailuo-h3-t2v', prompt: 'Valid prompt', duration: 5, resolution: '1080p', ratio: '16:9',
+    }, 'test-key'),
+    /固定为 2K/,
+  );
+  await assert.rejects(
+    seedanceNz.buildHailuoPayload({
+      model: 'hailuo-h3-i2v', duration: 5, resolution: '2K', images: [],
+    }, 'test-key'),
+    /必须提供第 1 张首帧图/,
+  );
+  await assert.rejects(
+    seedanceNz.buildHailuoPayload({
+      model: 'hailuo-h3-i2v',
+      duration: 5,
+      resolution: '2K',
+      images: [TINY_PNG_A, TINY_PNG_B, `${TINY_PNG_A}A`],
+    }, 'test-key'),
+    /最多支持 2 张/,
+  );
+  await assert.rejects(
+    seedanceNz.buildHailuoPayload({
+      model: 'hailuo-h3-multi', prompt: 'Valid prompt', duration: 5, resolution: '2K',
+    }, 'test-key'),
+    /至少需要 1 个图片、视频或音频素材/,
+  );
+});
+
 test('seedance.nz builds documented Vidu Q3 t2v, i2v, start-end and r2v payloads', async () => {
   seedanceNz.resetCachesForTests();
   const t2v = await seedanceNz.buildViduPayload({

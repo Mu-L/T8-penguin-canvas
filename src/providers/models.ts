@@ -486,6 +486,19 @@ export interface VideoModelOption {
   label: string;
   disabled?: boolean;
   builtinSource?: VideoBuiltinSource;
+  description?: string;
+  ratios?: string[];
+  defaultRatio?: string;
+  durations?: number[];
+  defaultDuration?: number;
+  resolutions?: string[];
+  defaultResolution?: string;
+  supportImages?: boolean;
+  supportVideos?: boolean;
+  supportAudios?: boolean;
+  maxRefImages?: number;
+  maxRefVideos?: number;
+  maxRefAudios?: number;
 }
 
 export interface VideoModelDef {
@@ -669,6 +682,57 @@ export const VIDEO_MODELS: VideoModelDef[] = [
       { value: 'hailuo-2.3-i2v-pro', label: 'hailuo-2.3-i2v-pro（图生 Pro）' },
       { value: 'hailuo-2.3-fast-i2v', label: 'hailuo-2.3-fast-i2v（Fast 图生）' },
       { value: 'hailuo-2.3-fast-pro-i2v', label: 'hailuo-2.3-fast-pro-i2v（Fast Pro 图生）' },
+      {
+        value: 'hailuo-h3-t2v',
+        label: 'hailuo-h3-t2v（H3 文生视频）',
+        description: 'Hailuo H3 文生视频；固定 2K，支持 5-15 秒与自适应比例。',
+        ratios: ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
+        defaultRatio: '16:9',
+        durations: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+        defaultDuration: 5,
+        resolutions: ['2K'],
+        defaultResolution: '2K',
+        supportImages: false,
+        supportVideos: false,
+        supportAudios: false,
+        maxRefImages: 0,
+        maxRefVideos: 0,
+        maxRefAudios: 0,
+      },
+      {
+        value: 'hailuo-h3-i2v',
+        label: 'hailuo-h3-i2v（H3 首尾帧图生视频）',
+        description: 'Hailuo H3 图生视频；第 1 张为首帧，第 2 张可选为尾帧，固定 2K。',
+        ratios: [],
+        defaultRatio: '16:9',
+        durations: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+        defaultDuration: 5,
+        resolutions: ['2K'],
+        defaultResolution: '2K',
+        supportImages: true,
+        supportVideos: false,
+        supportAudios: false,
+        maxRefImages: 2,
+        maxRefVideos: 0,
+        maxRefAudios: 0,
+      },
+      {
+        value: 'hailuo-h3-multi',
+        label: 'hailuo-h3-multi（H3 多模态参考）',
+        description: 'Hailuo H3 多模态参考；最多 9 图、3 视频、3 音频，固定 2K。',
+        ratios: ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
+        defaultRatio: '16:9',
+        durations: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+        defaultDuration: 5,
+        resolutions: ['2K'],
+        defaultResolution: '2K',
+        supportImages: true,
+        supportVideos: true,
+        supportAudios: true,
+        maxRefImages: 9,
+        maxRefVideos: 3,
+        maxRefAudios: 3,
+      },
     ],
     ratios: ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
     defaultRatio: '16:9',

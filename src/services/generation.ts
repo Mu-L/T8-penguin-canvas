@@ -1113,41 +1113,49 @@ export async function queryHappyHorse(taskId: string): Promise<HappyHorseQueryRe
   return withProviderTransportTrace(data.data, r);
 }
 
-export type Hailuo23Model =
+export type HailuoModel =
   | 'hailuo-2.3-t2v-standard'
   | 'hailuo-2.3-t2v-pro'
   | 'hailuo-2.3-i2v-standard'
   | 'hailuo-2.3-i2v-pro'
   | 'hailuo-2.3-fast-i2v'
-  | 'hailuo-2.3-fast-pro-i2v';
+  | 'hailuo-2.3-fast-pro-i2v'
+  | 'hailuo-h3-t2v'
+  | 'hailuo-h3-i2v'
+  | 'hailuo-h3-multi';
+
+export type Hailuo23Model = Extract<HailuoModel, `hailuo-2.3-${string}`>;
+export type HailuoDuration = 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15;
 
 export interface HailuoSubmitRequest {
-  model: Hailuo23Model;
+  model: HailuoModel;
   prompt?: string;
-  duration: 6 | 10;
+  duration: HailuoDuration;
   ratio: string;
-  resolution: '768p' | '1080p';
+  resolution: '768p' | '1080p' | '2K';
   images?: string[];
+  videos?: string[];
+  audios?: string[];
 }
 
 export async function submitHailuo(req: HailuoSubmitRequest, transport: ProviderSubmissionTransport = {}): Promise<{
   taskId: string;
   model: string;
-  taskType: 't2v' | 'i2v';
+  taskType: 't2v' | 'i2v' | 'multi';
 } & ProviderTransportTrace> {
   const r = await fetch('/api/proxy/video/hailuo/submit', {
     method: 'POST',
     headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(req),
   });
-  const data = await safeJsonResponse(r, 'Hailuo 2.3 提交');
+  const data = await safeJsonResponse(r, 'Hailuo 提交');
   if (!r.ok || !data.success) throw providerResponseError(r, data);
   return withProviderTransportTrace(data.data, r);
 }
 
 export async function queryHailuo(taskId: string): Promise<HappyHorseQueryResult> {
   const r = await fetch(`/api/proxy/video/hailuo/status/${encodeURIComponent(taskId)}`);
-  const data = await safeJsonResponse(r, 'Hailuo 2.3 查询');
+  const data = await safeJsonResponse(r, 'Hailuo 查询');
   if (!r.ok || !data.success) throw providerResponseError(r, data);
   return withProviderTransportTrace(data.data, r);
 }

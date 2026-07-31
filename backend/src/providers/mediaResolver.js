@@ -12,15 +12,20 @@ const MIME_BY_EXT = {
   '.gif': 'image/gif',
   '.bmp': 'image/bmp',
   '.avif': 'image/avif',
+  '.tif': 'image/tiff',
+  '.tiff': 'image/tiff',
   '.mp4': 'video/mp4',
   '.webm': 'video/webm',
   '.mov': 'video/quicktime',
   '.m4v': 'video/mp4',
+  '.mkv': 'video/x-matroska',
   '.mp3': 'audio/mpeg',
   '.wav': 'audio/wav',
   '.ogg': 'audio/ogg',
   '.m4a': 'audio/mp4',
   '.flac': 'audio/flac',
+  '.aac': 'audio/aac',
+  '.wma': 'audio/x-ms-wma',
   '.txt': 'text/plain',
   '.json': 'application/json',
 };
@@ -136,6 +141,16 @@ function findResourceItem(db, id) {
   return db.items.find((item) => String(item?.id || '') === cleanId) || null;
 }
 
+function resourceEntryMime(entry, filePath) {
+  const pathMime = mimeFromPath(filePath, '');
+  const declaredMime = String(entry?.mime || '').trim().toLowerCase().split(';')[0];
+  // Resource URLs do not carry a file extension. Prefer the persisted file's
+  // extension when it is recognized, because older library rows may contain
+  // an empty/application-octet-stream MIME. Providers still verify the actual
+  // bytes at their upload boundary.
+  return pathMime || declaredMime || 'application/octet-stream';
+}
+
 function resolveResourceLibraryMediaPath(value, options = {}) {
   const text = String(value || '').trim().split(/[?#]/)[0];
   const fileMatch = /^\/api\/resources\/file\/([^/?#]+)/.exec(text);
@@ -152,7 +167,8 @@ function resolveResourceLibraryMediaPath(value, options = {}) {
     const filePath = safeJoinInside(root, item.fileRel);
     return filePath ? {
       path: filePath,
-      mime: item.mime || mimeFromPath(filePath),
+      mime: resourceEntryMime(item, filePath),
+      name: String(item.originalName || item.title || path.basename(filePath)).trim(),
     } : null;
   }
 
@@ -165,7 +181,8 @@ function resolveResourceLibraryMediaPath(value, options = {}) {
   const filePath = safeJoinInside(root, child.fileRel);
   return filePath ? {
     path: filePath,
-    mime: child.mime || mimeFromPath(filePath),
+    mime: resourceEntryMime(child, filePath),
+    name: String(child.name || path.basename(filePath)).trim(),
   } : null;
 }
 
@@ -255,6 +272,7 @@ async function resolveMediaRef(value, options = {}) {
         source: text,
         path: localPath,
         mime: resourcePath?.mime || mimeFromPath(localPath),
+        name: resourcePath?.name || path.basename(localPath),
       };
     }
     throw new Error(`无法解析本地媒体路径：${text.slice(0, 160)}`);
@@ -292,6 +310,7 @@ async function resolveMediaRef(value, options = {}) {
       source: text,
       path: localPath,
       mime: mimeFromPath(localPath),
+      name: path.basename(localPath),
     };
   }
 

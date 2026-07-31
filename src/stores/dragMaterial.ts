@@ -25,6 +25,12 @@ export interface MaterialPayload {
   sourceNodeId?: string;
   /** 缩略图占位预览, 用于浮层显示 (可空) */
   previewUrl?: string;
+  /** 原文件名；资源库 URL 本身不含扩展名，上传 Provider 时用于保留真实格式 */
+  name?: string;
+  /** 资源库记录的 MIME，仅作格式提示，后端仍以文件魔数校验 */
+  mime?: string;
+  /** 原素材字节数 */
+  size?: number;
 }
 
 interface DragMaterialState {

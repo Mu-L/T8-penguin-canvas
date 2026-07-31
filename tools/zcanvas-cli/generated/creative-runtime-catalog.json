@@ -1,6 +1,6 @@
 {
   "schema": "t8-creative-runtime-catalog-v1",
-  "sourceDigest": "0150f7bb46d8299abdae6e4cdd049174eb4f61ce46562c916e03b68427770516",
+  "sourceDigest": "96739c3b3b53a1d90fb4a08cfa8089d7a0a05645d595cbaaf29729399c8932bd",
   "generatedFrom": [
     "src/providers/models.ts",
     "src/config/seedance.ts",
@@ -1565,7 +1565,10 @@
         "defaultResolution": "720P",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 7,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "xAI Grok Video (最多 7 张参考图)"
       }
     },
@@ -1605,7 +1608,10 @@
         "defaultResolution": "720P",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 7,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "xAI Grok Video (最多 7 张参考图)"
       }
     },
@@ -1636,7 +1642,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 1,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Sora2 支持 FAL 与 Zhenzhen API 双渠道；旧 sora-2 保持 FAL"
       }
     },
@@ -1662,7 +1671,10 @@
         "defaultDuration": 10,
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 3,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Google Veo 系列 (默认 veo-omni-10s)"
       }
     },
@@ -1766,7 +1778,10 @@
         "defaultResolution": "768p",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 1,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Hailuo 2.3 · 文生/图生/Fast 图生视频"
       }
     },
@@ -1806,7 +1821,10 @@
         "defaultResolution": "768p",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 1,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Hailuo 2.3 · 文生/图生/Fast 图生视频"
       }
     },
@@ -1846,7 +1864,10 @@
         "defaultResolution": "768p",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 1,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Hailuo 2.3 · 文生/图生/Fast 图生视频"
       }
     },
@@ -1886,7 +1907,10 @@
         "defaultResolution": "768p",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 1,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Hailuo 2.3 · 文生/图生/Fast 图生视频"
       }
     },
@@ -1926,7 +1950,10 @@
         "defaultResolution": "768p",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 1,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Hailuo 2.3 · 文生/图生/Fast 图生视频"
       }
     },
@@ -1966,8 +1993,156 @@
         "defaultResolution": "768p",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 1,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Hailuo 2.3 · 文生/图生/Fast 图生视频"
+      }
+    },
+    {
+      "id": "video:seedance-nz:hailuo-h3-i2v",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "hailuo-h3-i2v",
+      "label": "hailuo-h3-i2v（H3 首尾帧图生视频）",
+      "family": "hailuo-2.3",
+      "available": true,
+      "parameters": {
+        "label": "hailuo-h3-i2v（H3 首尾帧图生视频）",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "hailuo-2.3",
+        "available": true,
+        "nodeKind": "hailuo",
+        "ratios": [],
+        "defaultRatio": "16:9",
+        "durations": [
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15
+        ],
+        "defaultDuration": 5,
+        "resolutions": [
+          "2K"
+        ],
+        "defaultResolution": "2K",
+        "supportsImages": true,
+        "supportsVideos": false,
+        "supportsAudios": false,
+        "maxReferenceImages": 2,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
+        "description": "Hailuo H3 图生视频；第 1 张为首帧，第 2 张可选为尾帧，固定 2K。"
+      }
+    },
+    {
+      "id": "video:seedance-nz:hailuo-h3-multi",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "hailuo-h3-multi",
+      "label": "hailuo-h3-multi（H3 多模态参考）",
+      "family": "hailuo-2.3",
+      "available": true,
+      "parameters": {
+        "label": "hailuo-h3-multi（H3 多模态参考）",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "hailuo-2.3",
+        "available": true,
+        "nodeKind": "hailuo",
+        "ratios": [
+          "adaptive",
+          "16:9",
+          "4:3",
+          "1:1",
+          "3:4",
+          "9:16",
+          "21:9"
+        ],
+        "defaultRatio": "16:9",
+        "durations": [
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15
+        ],
+        "defaultDuration": 5,
+        "resolutions": [
+          "2K"
+        ],
+        "defaultResolution": "2K",
+        "supportsImages": true,
+        "supportsVideos": true,
+        "supportsAudios": true,
+        "maxReferenceImages": 9,
+        "maxReferenceVideos": 3,
+        "maxReferenceAudios": 3,
+        "description": "Hailuo H3 多模态参考；最多 9 图、3 视频、3 音频，固定 2K。"
+      }
+    },
+    {
+      "id": "video:seedance-nz:hailuo-h3-t2v",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "hailuo-h3-t2v",
+      "label": "hailuo-h3-t2v（H3 文生视频）",
+      "family": "hailuo-2.3",
+      "available": true,
+      "parameters": {
+        "label": "hailuo-h3-t2v（H3 文生视频）",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "hailuo-2.3",
+        "available": true,
+        "nodeKind": "hailuo",
+        "ratios": [
+          "adaptive",
+          "16:9",
+          "4:3",
+          "1:1",
+          "3:4",
+          "9:16",
+          "21:9"
+        ],
+        "defaultRatio": "16:9",
+        "durations": [
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15
+        ],
+        "defaultDuration": 5,
+        "resolutions": [
+          "2K"
+        ],
+        "defaultResolution": "2K",
+        "supportsImages": false,
+        "supportsVideos": false,
+        "supportsAudios": false,
+        "maxReferenceImages": 0,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
+        "description": "Hailuo H3 文生视频；固定 2K，支持 5-15 秒与自适应比例。"
       }
     },
     {
@@ -2017,7 +2192,10 @@
         "defaultResolution": "720p",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 9,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Happy Horse 1.1 · 文生/图生/参考图生视频"
       }
     },
@@ -2068,7 +2246,10 @@
         "defaultResolution": "720p",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 9,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Happy Horse 1.1 · 文生/图生/参考图生视频"
       }
     },
@@ -2119,7 +2300,10 @@
         "defaultResolution": "720p",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 9,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Happy Horse 1.1 · 文生/图生/参考图生视频"
       }
     },
@@ -2156,7 +2340,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 4,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑"
       }
     },
@@ -2193,7 +2380,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 4,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑"
       }
     },
@@ -2230,7 +2420,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 4,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑"
       }
     },
@@ -2267,7 +2460,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 4,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑"
       }
     },
@@ -2304,7 +2500,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 4,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑"
       }
     },
@@ -2341,7 +2540,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 4,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑"
       }
     },
@@ -2378,7 +2580,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 4,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑"
       }
     },
@@ -2415,7 +2620,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 4,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑"
       }
     },
@@ -2452,7 +2660,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 4,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑"
       }
     },
@@ -2489,7 +2700,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 4,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑"
       }
     },
@@ -2526,7 +2740,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 4,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑"
       }
     },
@@ -2563,7 +2780,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 4,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑"
       }
     },
@@ -2600,7 +2820,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 4,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑"
       }
     },
@@ -2637,7 +2860,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 4,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑"
       }
     },
@@ -2674,7 +2900,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 4,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑"
       }
     },
@@ -2711,7 +2940,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 4,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑"
       }
     },
@@ -2748,7 +2980,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 4,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑"
       }
     },
@@ -2785,7 +3020,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 4,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑"
       }
     },
@@ -2822,7 +3060,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 4,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑"
       }
     },
@@ -2859,7 +3100,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 4,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑"
       }
     },
@@ -2896,7 +3140,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 4,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Kling · 文生/图生/首尾帧/O3 参考生视频与视频编辑"
       }
     },
@@ -2979,7 +3226,10 @@
         "defaultResolution": "default",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 14,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Vidu Q3 · 文生/图生/首尾帧/参考生视频/短剧成片"
       }
     },
@@ -3030,7 +3280,10 @@
         "defaultResolution": "default",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 14,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Vidu Q3 · 文生/图生/首尾帧/参考生视频/短剧成片"
       }
     },
@@ -3081,7 +3334,10 @@
         "defaultResolution": "default",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 14,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Vidu Q3 · 文生/图生/首尾帧/参考生视频/短剧成片"
       }
     },
@@ -3132,7 +3388,10 @@
         "defaultResolution": "default",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 14,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Vidu Q3 · 文生/图生/首尾帧/参考生视频/短剧成片"
       }
     },
@@ -3183,7 +3442,10 @@
         "defaultResolution": "default",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 14,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Vidu Q3 · 文生/图生/首尾帧/参考生视频/短剧成片"
       }
     },
@@ -3234,7 +3496,10 @@
         "defaultResolution": "default",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 14,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Vidu Q3 · 文生/图生/首尾帧/参考生视频/短剧成片"
       }
     },
@@ -3285,7 +3550,10 @@
         "defaultResolution": "default",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 14,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Vidu Q3 · 文生/图生/首尾帧/参考生视频/短剧成片"
       }
     },
@@ -3336,7 +3604,10 @@
         "defaultResolution": "default",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 14,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Vidu Q3 · 文生/图生/首尾帧/参考生视频/短剧成片"
       }
     },
@@ -3387,7 +3658,10 @@
         "defaultResolution": "default",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 14,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Vidu Q3 · 文生/图生/首尾帧/参考生视频/短剧成片"
       }
     },
@@ -3438,7 +3712,10 @@
         "defaultResolution": "default",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 14,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Vidu Q3 · 文生/图生/首尾帧/参考生视频/短剧成片"
       }
     },
@@ -3489,7 +3766,10 @@
         "defaultResolution": "default",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 14,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Vidu Q3 · 文生/图生/首尾帧/参考生视频/短剧成片"
       }
     },
@@ -3540,7 +3820,10 @@
         "defaultResolution": "default",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 14,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Vidu Q3 · 文生/图生/首尾帧/参考生视频/短剧成片"
       }
     },
@@ -3591,7 +3874,10 @@
         "defaultResolution": "default",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 14,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Vidu Q3 · 文生/图生/首尾帧/参考生视频/短剧成片"
       }
     },
@@ -3642,7 +3928,10 @@
         "defaultResolution": "default",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 14,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Vidu Q3 · 文生/图生/首尾帧/参考生视频/短剧成片"
       }
     },
@@ -3693,7 +3982,10 @@
         "defaultResolution": "default",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 14,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Vidu Q3 · 文生/图生/首尾帧/参考生视频/短剧成片"
       }
     },
@@ -3739,7 +4031,10 @@
         "defaultResolution": "720p",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 1,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Wan 2.7 Spicy · 宽审核图生视频"
       }
     },
@@ -3769,7 +4064,10 @@
         "defaultResolution": "1080p",
         "supportsImages": false,
         "supportsVideos": true,
+        "supportsAudios": false,
         "maxReferenceImages": 0,
+        "maxReferenceVideos": 1,
+        "maxReferenceAudios": 0,
         "description": "Zhenzhen Upscaler · 单个 MP4 视频高清化"
       }
     },
@@ -3795,7 +4093,10 @@
         "defaultDuration": 10,
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 3,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Google Veo 系列 (默认 veo-omni-10s)"
       }
     },
@@ -3835,7 +4136,10 @@
         "defaultResolution": "720P",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 7,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "xAI Grok Video (最多 7 张参考图)"
       }
     },
@@ -3861,7 +4165,10 @@
         "defaultDuration": 10,
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 3,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Google Veo 系列 (默认 veo-omni-10s)"
       }
     },
@@ -3887,7 +4194,10 @@
         "defaultDuration": 10,
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 3,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Google Veo 系列 (默认 veo-omni-10s)"
       }
     },
@@ -3913,7 +4223,10 @@
         "defaultDuration": 10,
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 3,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Google Veo 系列 (默认 veo-omni-10s)"
       }
     },
@@ -4001,7 +4314,10 @@
         "defaultResolution": "720P",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 7,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "xAI Grok Video (最多 7 张参考图)"
       }
     },
@@ -4041,7 +4357,10 @@
         "defaultResolution": "720P",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 7,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "xAI Grok Video (最多 7 张参考图)"
       }
     },
@@ -4081,7 +4400,10 @@
         "defaultResolution": "720P",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 7,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "xAI Grok Video (最多 7 张参考图)"
       }
     },
@@ -4121,7 +4443,10 @@
         "defaultResolution": "720P",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 7,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "xAI Grok Video (最多 7 张参考图)"
       }
     },
@@ -4153,7 +4478,10 @@
         "defaultDuration": 5,
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 3,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "字节 Seedance 分镜 (兼容 veo 字段)"
       }
     },
@@ -4184,7 +4512,10 @@
         "defaultResolution": "",
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 1,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Sora2 支持 FAL 与 Zhenzhen API 双渠道；旧 sora-2 保持 FAL"
       }
     },
@@ -4210,7 +4541,10 @@
         "defaultDuration": 10,
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 3,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Google Veo 系列 (默认 veo-omni-10s)"
       }
     },
@@ -4236,7 +4570,10 @@
         "defaultDuration": 10,
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 3,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Google Veo 系列 (默认 veo-omni-10s)"
       }
     },
@@ -4262,7 +4599,10 @@
         "defaultDuration": 10,
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 3,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Google Veo 系列 (默认 veo-omni-10s)"
       }
     },
@@ -4288,7 +4628,10 @@
         "defaultDuration": 10,
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 3,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Google Veo 系列 (默认 veo-omni-10s)"
       }
     },
@@ -4314,7 +4657,10 @@
         "defaultDuration": 10,
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 3,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Google Veo 系列 (默认 veo-omni-10s)"
       }
     },
@@ -4340,7 +4686,10 @@
         "defaultDuration": 10,
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 3,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Google Veo 系列 (默认 veo-omni-10s)"
       }
     },
@@ -4366,7 +4715,10 @@
         "defaultDuration": 10,
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 3,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Google Veo 系列 (默认 veo-omni-10s)"
       }
     },
@@ -4392,7 +4744,10 @@
         "defaultDuration": 10,
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 3,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Google Veo 系列 (默认 veo-omni-10s)"
       }
     },
@@ -4418,7 +4773,10 @@
         "defaultDuration": 10,
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 3,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Google Veo 系列 (默认 veo-omni-10s)"
       }
     },
@@ -4444,7 +4802,10 @@
         "defaultDuration": 10,
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 3,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Google Veo 系列 (默认 veo-omni-10s)"
       }
     },
@@ -4470,7 +4831,10 @@
         "defaultDuration": 10,
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 3,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Google Veo 系列 (默认 veo-omni-10s)"
       }
     },
@@ -4496,7 +4860,10 @@
         "defaultDuration": 10,
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 3,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Google Veo 系列 (默认 veo-omni-10s)"
       }
     },
@@ -4522,7 +4889,10 @@
         "defaultDuration": 10,
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 3,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Google Veo 系列 (默认 veo-omni-10s)"
       }
     },
@@ -4548,7 +4918,10 @@
         "defaultDuration": 10,
         "supportsImages": true,
         "supportsVideos": false,
+        "supportsAudios": false,
         "maxReferenceImages": 3,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
         "description": "Google Veo 系列 (默认 veo-omni-10s)"
       }
     }
@@ -5547,7 +5920,7 @@
   "counts": {
     "llm": 29,
     "image": 28,
-    "video": 85,
+    "video": 88,
     "audio": 8,
     "actions": 47
   }

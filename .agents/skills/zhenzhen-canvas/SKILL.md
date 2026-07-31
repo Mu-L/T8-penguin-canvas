@@ -9,11 +9,12 @@ Turn creative intent into an editable production plan, then use `zcanvas` as the
 
 ## Current release baseline
 
-- The desktop and automatic-update release represented by this source is `v2.7.2`: <https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.2>.
-- Its immutable `v2.7.2` release Tag is fixed to packaged-source commit `8ecc882fb6e030b38c7f37b4d16e69267cce537f`. Later metadata-only commits on `main` must not move that Tag.
-- This release adds terminal handling for RunningHub TXT, Markdown, JSON, and CSV outputs. Pure-text and mixed text/media tasks must download, validate, persist, and return their original task results once, without permanent `MATERIALIZING` polling or a second submission.
-- The v2.7.2 installer, blockmap, and update manifest passed local post-build validation, sealed recovery checks, GitHub digest/size checks, and a complete pre-publication byte download. The public Release is non-draft, non-prerelease, and Latest.
-- Provider work is complete only after the original task result is downloaded, validated, persisted, and linked. Real Provider-network, multi-device collaboration, and installed-upgrade evidence remains explicitly deferred by the owner and must never be reported as passed before it exists.
+- The desktop and automatic-update release candidate represented by this source is `v2.7.3`: <https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.3>.
+- Its immutable `v2.7.3` release Tag must be fixed to the exact packaged-source commit after the single authorized Electron/NSIS build. Later metadata-only commits on `main` must not move that Tag.
+- This release adds `hailuo-h3-t2v`, `hailuo-h3-i2v`, and `hailuo-h3-multi` to the Hailuo TAB under 贞贞的平价AI小屋. Keep H3 at 2K and 5–15 seconds; T2V accepts prompt/aspect ratio, I2V accepts one start image plus an optional end image, and multi accepts bounded image/video/audio references exactly as the generated capability catalog declares.
+- Resource-library image, video, and audio references must preserve original filename and MIME hints while treating validated file magic as authoritative. A `/api/resources/file/<id>` URL without an extension must remain usable as upstream Provider material and must never be forced through image-only validation.
+- The v2.7.3 installer, blockmap, update manifest, immutable tag, and GitHub Latest facts remain pending until the one authorized release flow completes; do not report them as passed early.
+- All three H3 models already have real accepted-task, terminal-result, local-download, and media-validation evidence. Multi-device collaboration and installed-upgrade evidence remains explicitly deferred by the owner and must never be reported as passed before it exists.
 
 ## Optimize for the creator
 

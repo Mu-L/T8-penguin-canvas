@@ -75,6 +75,10 @@ const MaterialDragOverlay = () => {
       const text = dragEl.getAttribute('data-drag-text') || undefined;
       const sourceNodeId = dragEl.getAttribute('data-drag-node-id') || undefined;
       const previewUrl = dragEl.getAttribute('data-drag-preview') || url;
+      const name = dragEl.getAttribute('data-drag-name') || undefined;
+      const mime = dragEl.getAttribute('data-drag-mime') || undefined;
+      const rawSize = Number(dragEl.getAttribute('data-drag-size'));
+      const size = Number.isFinite(rawSize) && rawSize >= 0 ? rawSize : undefined;
 
       // 严格拦截: 阻止 ReactFlow Pane 启动选区
       e.preventDefault();
@@ -84,7 +88,7 @@ const MaterialDragOverlay = () => {
       // 只在首个 (pointerdown) 事件中启动拖拽, 后续 mousedown 仅拦截
       if (!useDragMaterialStore.getState().dragging) {
         start(
-          { kind, url, text, sourceNodeId, previewUrl },
+          { kind, url, text, sourceNodeId, previewUrl, name, mime, size },
           e.clientX,
           e.clientY,
         );

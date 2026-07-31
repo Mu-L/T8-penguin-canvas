@@ -2131,7 +2131,7 @@ function readResourceLibraryDbForProxy(root) {
   }
 }
 
-function resolveResourceImageRef(ref) {
+function resolveResourceMediaRef(ref, maximum = PROXY_MEDIA_REFERENCE_MAX_BYTES) {
   const clean = toLocalPathnameIfSameApp(ref).split(/[?#]/)[0];
   const fileMatch = /^\/api\/resources\/file\/([^/?#]+)/.exec(clean);
   const setFileMatch = /^\/api\/resources\/set-file\/([^/?#]+)\/(\d+)/.exec(clean);
@@ -2148,13 +2148,14 @@ function resolveResourceImageRef(ref) {
     const fileRel = String(item?.fileRel || '').trim();
     if (!item || !fileRel) return null;
     const resolved = realpathInsideRoot(root, path.join(root, fileRel));
-    if (!resolved || resolved.size > PROXY_IMAGE_REFERENCE_MAX_BYTES) return null;
+    if (!resolved || resolved.size > maximum) return null;
     const full = resolved.filename;
     return {
       full,
       resolved,
-      mime: item.mime || imageMimeFromLocalPath(full),
-      ext: safeOutputExt(path.extname(full), 'png'),
+      declaredMime: String(item.mime || '').trim(),
+      fileMime: mimeTypeForProxyFilename(full),
+      originalName: String(item.originalName || item.title || path.basename(full)).trim(),
     };
   }
 
@@ -2166,32 +2167,62 @@ function resolveResourceImageRef(ref) {
   const fileRel = String(child?.fileRel || '').trim();
   if (!child || !fileRel) return null;
   const resolved = realpathInsideRoot(root, path.join(root, fileRel));
-  if (!resolved || resolved.size > PROXY_IMAGE_REFERENCE_MAX_BYTES) return null;
+  if (!resolved || resolved.size > maximum) return null;
   const full = resolved.filename;
   return {
     full,
     resolved,
-    mime: child.mime || imageMimeFromLocalPath(full),
-    ext: safeOutputExt(path.extname(full), 'png'),
+    declaredMime: String(child.mime || '').trim(),
+    fileMime: mimeTypeForProxyFilename(full),
+    originalName: String(child.name || path.basename(full)).trim(),
   };
 }
 
-function readResourceImageRefBuffer(ref) {
-  const resolved = resolveResourceImageRef(ref);
-  const opened = readResolvedFile(resolved?.resolved, PROXY_IMAGE_REFERENCE_MAX_BYTES);
+function readResourceMediaRefBuffer(ref, options = {}) {
+  const allowedKinds = Array.isArray(options.allowedKinds) && options.allowedKinds.length > 0
+    ? options.allowedKinds
+    : ['image', 'video', 'audio'];
+  const maximum = Number(options.maxBytes) || PROXY_MEDIA_REFERENCE_MAX_BYTES;
+  const resolved = resolveResourceMediaRef(ref, maximum);
+  const opened = readResolvedFile(resolved?.resolved, maximum);
   if (!resolved || !opened) return null;
-  const mime = String(resolved.mime || imageMimeFromLocalPath(resolved.full)).toLowerCase();
-  if (mime && !mime.startsWith('image/')) return null;
   const buf = opened.buffer;
-  validateProxyMediaBuffer(buf, mime, {
+  const declaredMime = normalizedContentType(resolved.declaredMime);
+  const fileMime = normalizedContentType(resolved.fileMime);
+  // Old resource-library rows can contain an empty/generic MIME or a stale
+  // same-kind subtype. The in-root file signature is authoritative; cross-kind
+  // declarations and non-media files remain denied by validateProxyMediaBuffer.
+  let verified;
+  try {
+    verified = validateProxyMediaBuffer(buf, declaredMime || fileMime, {
+      allowedKinds,
+      maxBytes: maximum,
+      allowSameKindSubtypeMismatch: true,
+    });
+  } catch {
+    return null;
+  }
+  const mime = verified.detectedMime || verified.contentType || fileMime || declaredMime;
+  const ext = extFromContentType(mime)
+    || safeOutputExt(path.extname(resolved.full), allowedKinds[0] === 'audio' ? 'mp3' : 'png');
+  return {
+    buf,
+    mime,
+    ext,
+    originalName: resolved.originalName || path.basename(resolved.full),
+    detectedKind: verified.detectedKind,
+  };
+}
+
+function resolveResourceImageRef(ref) {
+  return resolveResourceMediaRef(ref, PROXY_IMAGE_REFERENCE_MAX_BYTES);
+}
+
+function readResourceImageRefBuffer(ref) {
+  return readResourceMediaRefBuffer(ref, {
     allowedKinds: ['image'],
     maxBytes: PROXY_IMAGE_REFERENCE_MAX_BYTES,
   });
-  return {
-    buf,
-    mime: resolved.mime || imageMimeFromLocalPath(resolved.full),
-    ext: resolved.ext || safeOutputExt(path.extname(resolved.full), 'png'),
-  };
 }
 
 // 将 base64 dataURL / http(s) URL 转成 multipart Buffer
@@ -3465,7 +3496,7 @@ router.post('/video/hailuo/submit', async (req, res) => {
     proxyRouteError('proxy/video/hailuo/submit 错误', error, [apiKey]);
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
-      error: proxyPublicError(error, 'Hailuo 2.3 请求失败', [apiKey]),
+      error: proxyPublicError(error, 'Hailuo 请求失败', [apiKey]),
       ...seedanceNzTrace(error),
     });
   }
@@ -3490,7 +3521,7 @@ router.get('/video/hailuo/status/:tid', async (req, res) => {
       progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
       videoUrl: materialized.url,
       failReason: result.status === 'failed'
-        ? safeDiagnosticText(result.failReason || 'Hailuo 2.3 任务失败', 240, [apiKey])
+        ? safeDiagnosticText(result.failReason || 'Hailuo 任务失败', 240, [apiKey])
         : '',
       model: remembered?.model || '',
       taskType: remembered?.taskType || '',
@@ -3499,7 +3530,7 @@ router.get('/video/hailuo/status/:tid', async (req, res) => {
     if (materialized.failure) {
       return sendCompletedRemoteOutputFailure(res, materialized.failure, responseData, {
         defaultCode: 'hailuo_output_unusable',
-        defaultMessage: 'Hailuo 2.3 视频结果无法保存。',
+        defaultMessage: 'Hailuo 视频结果无法保存。',
       });
     }
     return res.json({
@@ -3512,7 +3543,7 @@ router.get('/video/hailuo/status/:tid', async (req, res) => {
     if (sendTaskResultQueryRecovery(res, error, { taskId: req.params.tid })) return;
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
-      error: proxyPublicError(error, 'Hailuo 2.3 查询失败', [apiKey]),
+      error: proxyPublicError(error, 'Hailuo 查询失败', [apiKey]),
       ...seedanceNzTrace(error),
     });
   }
@@ -5238,15 +5269,15 @@ async function uploadRefToZhenzhen(ref, apiKey, label = '参考素材') {
   } else if (isT8LocalMediaPath(trimmed) || trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
     let sourceName = trimmed;
     if (trimmed.startsWith('/api/resources/')) {
-      const resource = readResourceImageRefBuffer(trimmed);
+      const resource = readResourceMediaRefBuffer(trimmed, {
+        allowedKinds: ['image', 'video', 'audio'],
+        maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
+      });
       if (!resource) throw new Error(`${label} 上传失败: 本地资源不存在或越出授权目录`);
       buf = resource.buf;
       mime = resource.mime;
       ext = resource.ext;
-      validateProxyMediaBuffer(buf, mime, {
-        allowedKinds: ['image'],
-        maxBytes: PROXY_IMAGE_REFERENCE_MAX_BYTES,
-      });
+      sourceName = resource.originalName || sourceName;
     } else if (trimmed.startsWith('/')) {
       const local = readMountedFileReference(trimmed, [
         { prefixes: ['/files/input/', '/input/'], root: config.INPUT_DIR },
@@ -7840,6 +7871,8 @@ module.exports._test = Object.freeze({
   resetVideoMaterializationCacheForTests,
   resolveBuiltInLlmProvider,
   resolveMountedFileReference,
+  readResourceImageRefBuffer,
+  readResourceMediaRefBuffer,
   safeDiagnosticText,
   safeFalRequestId,
   saveRemoteVideo,

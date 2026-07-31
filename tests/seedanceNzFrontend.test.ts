@@ -161,7 +161,7 @@ test('video node exposes Wan 2.7 Spicy as an isolated built-in i2v family', () =
   assert.match(proxy, /seedanceNz\.submitWanTask/);
 });
 
-test('video node exposes Hailuo 2.3 as an isolated six-model built-in family', () => {
+test('video node exposes Hailuo 2.3 and H3 as one isolated budget-house family', () => {
   const models = read('../src/providers/models.ts');
   const node = read('../src/components/nodes/VideoNode.tsx');
   const generation = read('../src/services/generation.ts');
@@ -173,14 +173,23 @@ test('video node exposes Hailuo 2.3 as an isolated six-model built-in family', (
     'hailuo-2.3-i2v-pro',
     'hailuo-2.3-fast-i2v',
     'hailuo-2.3-fast-pro-i2v',
+    'hailuo-h3-t2v',
+    'hailuo-h3-i2v',
+    'hailuo-h3-multi',
   ]) {
     assert.match(models, new RegExp(model.replaceAll('.', '\\.')));
   }
   assert.match(models, /label: 'Hailuo'/);
   assert.match(models, /durations: \[6, 10\]/);
   assert.match(models, /resolutions: \['768p', '1080p'\]/);
+  assert.match(models, /Hailuo H3 多模态参考；最多 9 图、3 视频、3 音频，固定 2K/);
   assert.match(node, /submitHailuo/);
   assert.match(node, /queryHailuo/);
+  assert.match(node, /hailuoMode === 'multi'/);
+  assert.match(node, /imageUrls\.slice\(0, 9\)/);
+  assert.match(node, /videoUrls\.slice\(0, 3\)/);
+  assert.match(node, /audioUrls\.slice\(0, 3\)/);
+  assert.match(node, /固定 2K/);
   assert.match(node, /首帧图短边需大于 300px/);
   assert.match(node, /1080p 仅 6 秒/);
   assert.match(generation, /\/api\/proxy\/video\/hailuo\/submit/);
