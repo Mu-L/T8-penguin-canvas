@@ -1,37 +1,38 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.7.4",
-  "lastUpdated": "2026-08-01-v2.7.4-system-network-resource-ingress-release-candidate",
+  "lastUpdated": "2026-08-01-v2.7.4-system-network-resource-ingress-released",
   "release": {
-    "status": "release-candidate",
+    "status": "released",
     "version": "2.7.4",
     "date": "2026-08-01",
-    "publishedAt": null,
+    "publishedAt": "2026-07-31T19:27:23Z",
     "tag": "v2.7.4",
-    "latest": false,
-    "sourceCommit": null,
+    "latest": true,
+    "sourceCommit": "3ddb3c1cf49ffbfa12e4b62fa1b322a5b3b0dd6a",
     "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.4",
     "artifacts": {
       "installer": {
         "name": "T8-PenguinCanvas-Setup-2.7.4.exe",
-        "size": null,
-        "sha256": null
+        "size": 1304642644,
+        "sha256": "ded4b29b2485821522aa7df18ac3e7c5c536b61b0034eef96b56eedb98a73736"
       },
       "blockmap": {
         "name": "T8-PenguinCanvas-Setup-2.7.4.exe.blockmap",
-        "size": null,
-        "sha256": null
+        "size": 1359830,
+        "sha256": "24977db135ac8fdefb85464ca32a6bfbdb628d44c16aa99ee5b34d39ecba9a4e"
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": null,
-        "sha256": null
+        "size": 362,
+        "sha256": "2d11791c431f6475d5452c41c06a66ba1fa44f551b4b70dd159c49e59ba31e49"
       }
     },
     "verification": [
-      "v2.7.4 已获用户明确授权发布；正式 Tag、Release target 与自动更新资产将在唯一一次 Electron/NSIS 正式打包完成后回写。",
+      "v2.7.4 已按用户明确授权正式发布；不可移动 Tag 与 Release target 精确固定到 3ddb3c1cf49ffbfa12e4b62fa1b322a5b3b0dd6a，Release 非草稿、非预发布并为 Latest。",
       "系统网络桥接、TUN/Fake-IP、可信输出下载、Seedance 媒体和资源库入画布/上游素材聚焦回归 121/121 通过。",
-      "安装包、blockmap 与 latest.yml 的 size、SHA-256、sealed recovery、GitHub 元数据和完整远端回下载证据将在发布完成后回写。",
+      "Electron/Vite、后端加密、运行时归档、原生模块重建与 NSIS 正式流程只执行一次；post-build 和 provenance 封存通过。",
+      "安装包、blockmap 与 latest.yml 的本地 size/SHA-256、sealed recovery、GitHub digest/size 元数据和发布前完整远端回下载字节全部一致，release recovery 已清除。",
       "用户已明确授权先发布、后补真实 Provider、协作多端与安装升级证据；延期不将尚未执行的证据标记为通过。"
     ]
   },
@@ -49,7 +50,7 @@
     ]
   },
   "electronSystemNetworkBridgeAndTrustedOutputRecovery": {
-    "status": "release-candidate-v2.7.4",
+    "status": "released-v2.7.4",
     "date": "2026-08-01",
     "releaseIncluded": true,
     "highlights": [
@@ -60,12 +61,12 @@
     ],
     "verification": [
       "systemFetchBridge、trustedProviderOutputFetch、safeRemoteMediaFetch、proxyLogRedaction 与 Seedance Provider 聚焦回归全部通过。",
-      "系统网络桥接与资源库入画布合并测试共 121/121 通过；真实 Electron/NSIS 打包和自动更新资产证据由本次唯一正式发布流程生成。",
+      "系统网络桥接与资源库入画布合并测试共 121/121 通过；唯一一次正式 Electron/NSIS 打包、post-build、provenance、三资产上传及完整远端回下载验证通过。",
       "安全边界回归覆盖跨域重定向、敏感头剥离、大小限制、回环拒绝、TUN Fake-IP、NAT64、系统网络失败后 DNS 固定回退及部分流清理。"
     ]
   },
   "resourceLibraryCanvasIngressAndUpstreamMediaFixV2": {
-    "status": "release-candidate-v2.7.4",
+    "status": "released-v2.7.4",
     "date": "2026-08-01",
     "releaseIncluded": true,
     "highlights": [
@@ -6318,7 +6319,7 @@
     "version": "2.7.4",
     "semverVersion": "2.7.4",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；当前发布候选为 v2.7.4，聚焦 Electron 系统网络兼容、可信 Provider 输出恢复，以及资源库素材可靠进入画布并作为下游节点上游素材。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；当前正式版为 v2.7.4，聚焦 Electron 系统网络兼容、可信 Provider 输出恢复，以及资源库素材可靠进入画布并作为下游节点上游素材。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
     "installer": "v2.7.4 已获授权进入唯一一次 Electron/NSIS 正式发布流程；固定 source/tag、三项自动更新资产、摘要和完整远端回下载事实将在流程成功后回写。用户授权的一次性证据延期不改变未完成证据状态。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
