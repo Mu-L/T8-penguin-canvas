@@ -149,6 +149,7 @@ async function saveOneMediaOutput(url, kind = 'image', options = {}) {
     }
     const remote = await safeRemoteMediaFetch(text, {
       allowedKinds: [kind],
+      trustedProviderOutput: true,
       maxBytes: kind === 'video' ? 1024 * 1024 * 1024 : kind === 'audio' ? 256 * 1024 * 1024 : 64 * 1024 * 1024,
       deadlineMs: 5 * 60 * 1000,
       idleTimeoutMs: 30 * 1000,
@@ -683,7 +684,7 @@ router.post('/web-image', async (req, res) => {
 
     const remoteImageUrls = Array.isArray(imageResult.imageUrls) ? imageResult.imageUrls : [];
     const savedImages = await saveMediaOutputs('image', remoteImageUrls, {
-      trustedLocalOrigins: trustedLocalOutputOrigins(resolved.provider),
+      trustedLocalOrigins: trustedLocalOutputOrigins(provider),
     });
     const imageUrls = savedImages.urls;
     if (!imageUrls.length) {
@@ -751,7 +752,9 @@ router.post('/video', async (req, res) => {
     });
     if (!result.ok) return resultResponse(res, result, resolved.provider);
     const remoteVideoUrls = Array.isArray(result.videoUrls) ? result.videoUrls : [];
-    const videoUrls = await saveVideoOutputs(remoteVideoUrls);
+    const videoUrls = await saveVideoOutputs(remoteVideoUrls, {
+      trustedLocalOrigins: trustedLocalOutputOrigins(resolved.provider),
+    });
     return resultResponse(res, result, resolved.provider, {
       remoteVideoUrls,
       videoUrls,

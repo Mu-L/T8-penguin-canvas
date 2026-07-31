@@ -28,6 +28,7 @@ import { materialSetItemsToData, type MaterialSetKind, type MaterialSetItem } fr
 import { workflowManifestToFragment } from './utils/workflowResource';
 import { matchesAnyShortcut } from './utils/keyboardShortcuts';
 import { portraitResourceToNodeData } from './utils/portraitResource';
+import { createUploadDataFromItems, type MediaKind } from './utils/mediaCollection';
 import { applyUiFontPreference } from './utils/uiFont';
 import { LocalModalSlot, LocalTopbarSlot } from 'virtual:t8-local-extensions';
 
@@ -564,7 +565,7 @@ function App() {
       setZhenOpen(false);
       setAppOpen(false);
       setAixOpen(false);
-      setResourceOpen(false);
+      // 资源库是创作侧栏：点击画布后保持开启，便于连续插入和 Ctrl 拖拽素材。
     };
 
     document.addEventListener('pointerdown', onDocPointerDown, true);
@@ -748,28 +749,29 @@ function App() {
   };
 
   const handleInsertResource = async (item: ResourceItem) => {
+    const addNode = addNodeRef.current;
+    if (!addNode) throw new Error('画布尚未就绪，请稍后再试');
     const portraitData = portraitResourceToNodeData(item);
     if (portraitData) {
-      addNodeRef.current?.('portrait-master', { data: portraitData });
-      void api.updateResourceItem(item.id, { touch: true });
+      addNode('portrait-master', { data: portraitData });
       return;
     }
     if (item.kind === 'pose') {
       const poseData = await poseResourceToNodeData(item);
       if (!poseData) throw new Error('姿势资源格式无效');
-      addNodeRef.current?.('pose-master', { data: poseData });
-      void api.updateResourceItem(item.id, { touch: true });
+      addNode('pose-master', { data: poseData });
       return;
     }
     if (item.kind === 'workflow') {
       const fragment = await workflowResourceToFragment(item);
       if (!fragment) throw new Error('工作流资源格式无效');
-      insertWorkflowRef.current?.(fragment, { title: item.title || '工作流' });
-      void api.updateResourceItem(item.id, { touch: true });
+      const insertWorkflow = insertWorkflowRef.current;
+      if (!insertWorkflow) throw new Error('画布尚未就绪，请稍后再试');
+      insertWorkflow(fragment, { title: item.title || '工作流' });
       return;
     }
     if (item.kind === 'set' && item.materialSetKind && item.materialSetItems?.length) {
-      addNodeRef.current?.('material-set', {
+      addNode('material-set', {
         data: materialSetItemsToData(
           item.materialSetKind as MaterialSetKind,
           item.materialSetItems as MaterialSetItem[],
@@ -778,20 +780,19 @@ function App() {
       return;
     }
     const mediaKind = item.kind === 'panorama' ? 'image' : item.kind;
-    const data: Record<string, any> = {
-      uploadType: mediaKind,
-      fileName: item.title || item.originalName || '资源库素材',
-      fileSize: item.size || 0,
-      mime: item.mime || '',
-    };
-    if (mediaKind === 'image') {
-      data.imageUrl = item.fileUrl;
-    } else if (mediaKind === 'video') {
-      data.videoUrl = item.fileUrl;
-    } else if (mediaKind === 'audio') {
-      data.audioUrl = item.fileUrl;
+    if (!['image', 'video', 'audio'].includes(mediaKind) || !item.fileUrl) {
+      throw new Error('该资源没有可插入的图像、视频或音频文件');
     }
-    addNodeRef.current?.('upload', { data });
+    const kind = mediaKind as Extract<MediaKind, 'image' | 'video' | 'audio'>;
+    addNode('upload', {
+      data: createUploadDataFromItems(kind, [{
+        kind,
+        url: item.fileUrl,
+        name: item.originalName || item.title || '资源库素材',
+        size: item.size,
+        mime: item.mime,
+      }]),
+    });
   };
 
   return (

@@ -157,7 +157,8 @@ export function resourceItemToSendMaterials(item: ResourceItem): SendableMateria
         id: item.id,
         kind: mediaKind,
         url: item.fileUrl,
-        name: item.title || item.originalName || fileNameFromUrl(item.fileUrl),
+        // 资源接口 URL 没有扩展名；优先保留原文件名，供下游上传识别真实格式。
+        name: item.originalName || item.title || fileNameFromUrl(item.fileUrl),
         size: item.size,
         mime: item.mime,
       },

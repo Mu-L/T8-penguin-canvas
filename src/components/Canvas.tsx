@@ -197,6 +197,10 @@ import NodeActionBar from './NodeActionBar';
 import RadialNodeMenu from './RadialNodeMenu';
 import RadialMenuSettingsModal from './RadialMenuSettingsModal';
 import MaterialDragOverlay from './MaterialDragOverlay';
+import {
+  MATERIAL_CANVAS_DROP_EVENT,
+  type MaterialCanvasDropEventDetail,
+} from '../stores/dragMaterial';
 import ThemeMusicToggle from './ThemeMusicToggle';
 import CreativeDeskLayer from './CreativeDeskLayer';
 import FarmCanvasLayer, { type FarmCanvasFloatingFeedback } from './FarmCanvasLayer';
@@ -2852,7 +2856,7 @@ export interface AddNodeOptions {
   data?: Record<string, any>;
 }
 
-export type AddNodeFn = (type: NodeType, options?: AddNodeOptions) => void;
+export type AddNodeFn = (type: NodeType, options?: AddNodeOptions) => string;
 
 interface RadialMenuSession {
   anchor: RadialMenuPoint;
@@ -5604,12 +5608,41 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       };
       setNodes((prev) => [...prev, ...assignActiveNodeSerials([newNode], prev)]);
       trackAchievementEvent({ type: 'node.created', theme: visualStyle, nodeType: type });
+      return id;
     },
     [screenToFlowPosition, nodes, getViewport, setCenter, assignActiveNodeSerials, visualStyle]
   );
 
   const handleCreateGenerationTarget = useCallback(() => {
     addNode(CREATIVE_TARGET_NODE_TYPE as NodeType);
+  }, [addNode]);
+
+  useEffect(() => {
+    const onResourceCanvasDrop = (event: Event) => {
+      const detail = (event as CustomEvent<MaterialCanvasDropEventDetail>).detail;
+      const payload = detail?.payload;
+      if (
+        !payload ||
+        payload.sourceNodeId !== 'resource-library' ||
+        !payload.url ||
+        payload.kind === 'text'
+      ) {
+        return;
+      }
+      addNode('upload', {
+        atScreen: { x: detail.clientX, y: detail.clientY },
+        data: createUploadDataFromItems(payload.kind, [{
+          kind: payload.kind,
+          url: payload.url,
+          name: payload.name || fileNameFromUrl(payload.url),
+          size: payload.size,
+          mime: payload.mime,
+        }]),
+      });
+      logBus.success(`已从资源库插入${payload.kind === 'image' ? '图像' : payload.kind === 'video' ? '视频' : '音频'}素材`, '资源库');
+    };
+    window.addEventListener(MATERIAL_CANVAS_DROP_EVENT, onResourceCanvasDrop);
+    return () => window.removeEventListener(MATERIAL_CANVAS_DROP_EVENT, onResourceCanvasDrop);
   }, [addNode]);
 
   const handleOpenVibeXWorkbench = useCallback(() => {

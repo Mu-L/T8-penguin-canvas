@@ -9,7 +9,7 @@ const path = require('path');
 
 const DEFAULT_MAX_BYTES = 30 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 30_000;
-const DEFAULT_CONNECT_TIMEOUT_MS = 3_000;
+const DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_REDIRECTS = 4;
 const DEFAULT_JSON_MAX_BYTES = 2 * 1024 * 1024;
 const DEFAULT_JSON_MAX_DEPTH = 64;
@@ -77,7 +77,7 @@ function matchesIpv4Cidr(value, network, prefixLength) {
 }
 
 function isTunFakeAddress(value) {
-  const ipv4 = parseIpv4Number(value);
+  const ipv4 = ipv4NumberFromAddress(value);
   return ipv4 !== null && matchesIpv4Cidr(
     ipv4,
     TUN_FAKE_IPV4_NETWORK,
@@ -167,15 +167,32 @@ function ipv4FromMappedIpv6(bytes) {
   return bytes.readUInt32BE(12);
 }
 
+function ipv4FromStandardNat64(bytes) {
+  if (!bytes || bytes.length !== 16) return null;
+  if (bytes[0] !== 0x00 || bytes[1] !== 0x64 || bytes[2] !== 0xff || bytes[3] !== 0x9b) {
+    return null;
+  }
+  for (let index = 4; index < 12; index += 1) {
+    if (bytes[index] !== 0) return null;
+  }
+  return bytes.readUInt32BE(12);
+}
+
+function ipv4NumberFromAddress(value) {
+  const direct = parseIpv4Number(value);
+  if (direct !== null) return direct;
+  const ipv6 = parseIpv6Bytes(value);
+  if (!ipv6) return null;
+  return ipv4FromMappedIpv6(ipv6) ?? ipv4FromStandardNat64(ipv6);
+}
+
 function isLoopbackAddress(value) {
   const address = normalizeAddress(value);
   if (address === 'localhost') return true;
-  const ipv4 = parseIpv4Number(address);
+  const ipv4 = ipv4NumberFromAddress(address);
   if (ipv4 !== null) return matchesIpv4Cidr(ipv4, 0x7f000000, 8);
   const ipv6 = parseIpv6Bytes(address);
   if (!ipv6) return false;
-  const mapped = ipv4FromMappedIpv6(ipv6);
-  if (mapped !== null) return matchesIpv4Cidr(mapped, 0x7f000000, 8);
   return ipv6.subarray(0, 15).every((byte) => byte === 0) && ipv6[15] === 1;
 }
 
@@ -184,17 +201,15 @@ function isLoopbackAddress(value) {
 function isPrivateAddress(value) {
   const address = normalizeAddress(value);
   if (!address || address === 'localhost') return true;
-  const ipv4 = parseIpv4Number(address);
+  const ipv4 = ipv4NumberFromAddress(address);
   if (ipv4 !== null) {
     return BLOCKED_IPV4_RANGES.some(([network, prefixLength]) => matchesIpv4Cidr(ipv4, network, prefixLength));
   }
   const ipv6 = parseIpv6Bytes(address);
   if (!ipv6) return true;
-  // IPv4-mapped IPv6 is rejected even when the embedded IPv4 address is public:
-  // it must not provide a second spelling that bypasses the IPv4 policy.
-  if (ipv4FromMappedIpv6(ipv6) !== null) return true;
-  // RFC4291 global unicast allocation. Everything outside 2000::/3 includes
-  // unspecified, loopback, IPv4-compatible/NAT64, ULA, link/site-local and multicast.
+  // Standard IPv4-mapped and RFC 6052 well-known NAT64 addresses were already
+  // classified through their embedded IPv4 value above. Remaining addresses
+  // must be ordinary RFC 4291 global unicast.
   if ((ipv6[0] & 0xe0) !== 0x20) return true;
   return BLOCKED_IPV6_RANGES.some(({ network, prefixLength }) => matchesIpv6Cidr(ipv6, network, prefixLength));
 }
@@ -985,16 +1000,412 @@ function createTransferState(options) {
   };
 }
 
+function systemFetchBridgeMetadata() {
+  const candidate = globalThis.fetch;
+  if (typeof candidate !== 'function') return null;
+  return candidate[Symbol.for('t8-penguin-canvas.system-fetch-bridge.v1')] || null;
+}
+
+function hasSystemFetchBridge() {
+  return Boolean(systemFetchBridgeMetadata());
+}
+
+function systemFetchFallbackAllowed(error) {
+  const code = String(error?.code || '').toUpperCase();
+  const causeCode = String(error?.causeCode || error?.cause?.code || '').toUpperCase();
+  return new Set([
+    'SYSTEM_NETWORK_FETCH_FAILED',
+    'CONNECT_TIMEOUT',
+    'FETCH_TIMEOUT',
+    'REMOTE_RESPONSE_ABORTED',
+    'ECONNREFUSED',
+    'ECONNRESET',
+    'EHOSTUNREACH',
+    'ENETUNREACH',
+    'ENOTFOUND',
+    'EAI_AGAIN',
+    'ETIMEDOUT',
+    'ESOCKETTIMEDOUT',
+  ]).has(code) || new Set([
+    'ECONNREFUSED',
+    'ECONNRESET',
+    'EHOSTUNREACH',
+    'ENETUNREACH',
+    'ENOTFOUND',
+    'EAI_AGAIN',
+    'ETIMEDOUT',
+    'ESOCKETTIMEDOUT',
+    'UND_ERR_CONNECT_TIMEOUT',
+  ]).has(causeCode);
+}
+
+function systemFetchNetworkError(error) {
+  if (error?.code && error.code !== 'ABORT_ERR' && error.code !== 'ERR_ABORTED') return error;
+  const causeCode = String(error?.cause?.code || error?.code || '').trim();
+  return remoteMediaError(
+    'system_network_fetch_failed',
+    '系统网络通道读取 Provider 结果失败，正在尝试安全直连回退。',
+    { cause: error, causeCode },
+  );
+}
+
+function trustedSystemHostnameBlocked(hostname, allowPrivateForTests) {
+  const normalizedHostname = normalizeAddress(hostname);
+  const bypass = privateAddressAllowedForTests(allowPrivateForTests, normalizedHostname);
+  if (!normalizedHostname) return true;
+  if (net.isIP(normalizedHostname)) return !bypass && isPrivateAddress(normalizedHostname);
+  if (bypass) return false;
+  const withoutTrailingDot = normalizedHostname.replace(/\.+$/, '');
+  return withoutTrailingDot === 'localhost'
+    || !withoutTrailingDot.includes('.')
+    || withoutTrailingDot.endsWith('.localhost')
+    || withoutTrailingDot.endsWith('.local')
+    || withoutTrailingDot.endsWith('.internal')
+    || withoutTrailingDot.endsWith('.home.arpa');
+}
+
+function trustedSystemResolvedAddresses(result) {
+  const endpoints = Array.isArray(result?.endpoints) ? result.endpoints : [];
+  return endpoints.map((endpoint) => {
+    const address = normalizeAddress(endpoint?.address);
+    const detectedFamily = net.isIP(address);
+    const familyName = String(endpoint?.family || '').trim().toLowerCase();
+    const declaredFamily = familyName === 'ipv4' ? 4 : (familyName === 'ipv6' ? 6 : detectedFamily);
+    return { address, detectedFamily, declaredFamily };
+  });
+}
+
+async function validateTrustedSystemTarget(target, options, state) {
+  if (trustedSystemHostnameBlocked(target.hostname, options.allowPrivateForTests)) {
+    throw remoteMediaError('private_address', 'Provider 结果地址指向本机或内网，已拒绝访问。');
+  }
+  const metadata = systemFetchBridgeMetadata();
+  const resolveHost = metadata?.resolveHost;
+  if (typeof resolveHost !== 'function') {
+    await withinDeadline(resolvePublicAddresses(
+      target.hostname,
+      options.lookupImpl || dns.lookup,
+      options.allowPrivateForTests,
+      options.publicLookupImpl || resolveTunPublicDns,
+      options.acceptTunFake !== false,
+    ), state);
+    return;
+  }
+
+  let resolved;
+  try {
+    resolved = await withinDeadline(resolveHost(target.hostname), state);
+  } catch (_) {
+    // A PAC or authenticated proxy may intentionally resolve the destination
+    // remotely, so local Chromium DNS can fail while net.fetch still succeeds.
+    // This path is only reachable for authenticated Provider result URLs;
+    // literal/private/local hostnames were rejected above and user URLs keep
+    // the original DNS-pinned transport.
+    return;
+  }
+  const endpoints = trustedSystemResolvedAddresses(resolved);
+  if (!endpoints.length) return;
+  const bypass = privateAddressAllowedForTests(options.allowPrivateForTests, target.hostname);
+  const unsafe = endpoints.some((endpoint) => (
+    !endpoint.detectedFamily
+    || endpoint.declaredFamily !== endpoint.detectedFamily
+    || (!bypass && isPrivateAddress(endpoint.address) && !isTunFakeAddress(endpoint.address))
+  ));
+  if (unsafe) {
+    throw remoteMediaError('private_address', 'Provider 结果地址解析到本机或内网，已拒绝访问。');
+  }
+}
+
+async function openTrustedSystemResponse(target, options, state, sensitiveHeadersAllowed) {
+  const controller = new AbortController();
+  const connectTimeoutMs = Math.max(
+    1,
+    Math.min(state.connectTimeoutMs, remainingDeadlineMs(state)),
+  );
+  let timeoutError = null;
+  const timer = setTimeout(() => {
+    timeoutError = remoteMediaError(
+      'connect_timeout',
+      '通过系统代理、TUN 或 VPN 连接 Provider 结果地址超时。',
+    );
+    controller.abort(timeoutError);
+  }, connectTimeoutMs);
+  try {
+    const response = await globalThis.fetch(target.toString(), {
+      method: 'GET',
+      headers: requestHeaders(options, sensitiveHeadersAllowed),
+      redirect: 'manual',
+      signal: controller.signal,
+      cache: 'no-store',
+    });
+    return { controller, response };
+  } catch (error) {
+    controller.abort();
+    throw timeoutError || systemFetchNetworkError(error);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function systemResponseHeader(response, name) {
+  const headers = response?.headers;
+  if (!headers) return '';
+  if (typeof headers.get === 'function') return String(headers.get(name) || '');
+  return String(headers[String(name).toLowerCase()] || headers[name] || '');
+}
+
+function assertSystemContentLength(response, maxBytes) {
+  const raw = systemResponseHeader(response, 'content-length').trim();
+  if (!raw) return null;
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+    throw remoteMediaError('invalid_content_length', '远程资源 Content-Length 无效。');
+  }
+  const contentLength = Number(raw);
+  if (Number(raw) > maxBytes) {
+    throw remoteMediaError('item_too_large', `远程资源超过 ${maxBytes} bytes 限制。`);
+  }
+  const contentEncoding = systemResponseHeader(response, 'content-encoding').trim().toLowerCase();
+  return contentEncoding && contentEncoding !== 'identity' ? null : contentLength;
+}
+
+async function consumeTrustedSystemResponse(response, controller, state) {
+  const expectedBytes = assertSystemContentLength(response, state.maxBytes);
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    if (expectedBytes !== null && expectedBytes !== 0) throw contentLengthMismatch(expectedBytes, 0);
+    controller.abort();
+    return Buffer.alloc(0);
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  let completed = false;
+  try {
+    while (true) {
+      const remaining = remainingDeadlineMs(state);
+      const waitMs = Math.max(1, Math.min(remaining, state.idleTimeoutMs));
+      const timeoutKind = remaining <= state.idleTimeoutMs ? 'deadline' : 'idle';
+      let timer;
+      let timeoutError = null;
+      const next = reader.read();
+      const result = await Promise.race([
+        next,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => {
+            timeoutError = fetchTimeoutError(timeoutKind);
+            controller.abort(timeoutError);
+            reject(timeoutError);
+          }, waitMs);
+        }),
+      ]).finally(() => {
+        if (timer) clearTimeout(timer);
+      });
+      if (result.done) {
+        completed = true;
+        break;
+      }
+      const chunk = Buffer.from(result.value || []);
+      if (total + chunk.length > state.maxBytes) {
+        throw remoteMediaError('item_too_large', `远程资源超过 ${state.maxBytes} bytes 限制。`);
+      }
+      if (expectedBytes !== null && total + chunk.length > expectedBytes) {
+        throw contentLengthMismatch(expectedBytes, total + chunk.length);
+      }
+      chunks.push(chunk);
+      total += chunk.length;
+      if (timeoutError) throw timeoutError;
+    }
+    if (expectedBytes !== null && total !== expectedBytes) {
+      throw contentLengthMismatch(expectedBytes, total);
+    }
+    return Buffer.concat(chunks, total);
+  } catch (error) {
+    throw systemFetchNetworkError(error);
+  } finally {
+    if (!completed) {
+      try { await reader.cancel(); } catch (_) {}
+    }
+    controller.abort();
+  }
+}
+
+async function consumeTrustedSystemResponseToFile(response, controller, state, handle) {
+  const expectedBytes = assertSystemContentLength(response, state.maxBytes);
+  let reader = null;
+  let total = 0;
+  let completed = false;
+  try {
+    if (!response.body || typeof response.body.getReader !== 'function') {
+      if (expectedBytes !== null && expectedBytes !== 0) throw contentLengthMismatch(expectedBytes, 0);
+      completed = true;
+      return 0;
+    }
+    reader = response.body.getReader();
+    while (true) {
+      const remaining = remainingDeadlineMs(state);
+      const waitMs = Math.max(1, Math.min(remaining, state.idleTimeoutMs));
+      const timeoutKind = remaining <= state.idleTimeoutMs ? 'deadline' : 'idle';
+      let timer;
+      let timeoutError = null;
+      const next = reader.read();
+      const result = await Promise.race([
+        next,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => {
+            timeoutError = fetchTimeoutError(timeoutKind);
+            controller.abort(timeoutError);
+            reject(timeoutError);
+          }, waitMs);
+        }),
+      ]).finally(() => {
+        if (timer) clearTimeout(timer);
+      });
+      if (result.done) {
+        completed = true;
+        break;
+      }
+      const chunk = Buffer.from(result.value || []);
+      if (total + chunk.length > state.maxBytes) {
+        throw remoteMediaError('item_too_large', `远程资源超过 ${state.maxBytes} bytes 限制。`);
+      }
+      if (expectedBytes !== null && total + chunk.length > expectedBytes) {
+        throw contentLengthMismatch(expectedBytes, total + chunk.length);
+      }
+      await writeWholeChunk(handle, chunk, total);
+      total += chunk.length;
+      if (timeoutError) throw timeoutError;
+    }
+    if (expectedBytes !== null && total !== expectedBytes) {
+      throw contentLengthMismatch(expectedBytes, total);
+    }
+    return total;
+  } catch (error) {
+    throw systemFetchNetworkError(error);
+  } finally {
+    if (reader && !completed) {
+      try { await reader.cancel(); } catch (_) {}
+    }
+    controller.abort();
+  }
+}
+
+async function downloadTrustedProviderOutputToFile(
+  inputUrl,
+  options,
+  state,
+  handle,
+  initialRedirectCount = 0,
+) {
+  let currentUrl = inputUrl;
+  let previousTarget = null;
+  let sensitiveHeadersAllowed = true;
+  let redirectCount = Math.max(0, Math.trunc(Number(initialRedirectCount)) || 0);
+  while (true) {
+    const target = parseRemoteUrl(currentUrl, options);
+    if (previousTarget && previousTarget.origin !== target.origin) sensitiveHeadersAllowed = false;
+    await validateTrustedSystemTarget(target, options, state);
+    const { controller, response } = await openTrustedSystemResponse(
+      target,
+      options,
+      state,
+      sensitiveHeadersAllowed,
+    );
+    const status = Number(response.status || 0);
+    const location = systemResponseHeader(response, 'location');
+    if (status >= 300 && status < 400 && location) {
+      try { await response.body?.cancel?.(); } catch (_) {}
+      controller.abort();
+      if (redirectCount >= state.maxRedirects) {
+        throw remoteMediaError('too_many_redirects', '远程资源重定向次数过多。');
+      }
+      let nextUrl;
+      try { nextUrl = new URL(location, target).toString(); } catch (_) {
+        throw remoteMediaError('invalid_redirect', '远程资源重定向地址无效。');
+      }
+      redirectCount += 1;
+      previousTarget = target;
+      currentUrl = nextUrl;
+      continue;
+    }
+    if (!options.allowHttpErrors && (status < 200 || status >= 300)) {
+      try { await response.body?.cancel?.(); } catch (_) {}
+      controller.abort();
+      throw remoteMediaError('remote_http_error', `远程资源返回 HTTP ${status}。`, { status });
+    }
+    const byteSize = await consumeTrustedSystemResponseToFile(response, controller, state, handle);
+    return {
+      contentType: systemResponseHeader(response, 'content-type'),
+      finalUrl: target.toString(),
+      status,
+      byteSize,
+    };
+  }
+}
+
+async function fetchTrustedProviderOutput(inputUrl, options, state, initialRedirectCount = 0) {
+  let currentUrl = inputUrl;
+  let previousTarget = null;
+  let sensitiveHeadersAllowed = true;
+  let redirectCount = Math.max(0, Math.trunc(Number(initialRedirectCount)) || 0);
+  while (true) {
+    const target = parseRemoteUrl(currentUrl, options);
+    if (previousTarget && previousTarget.origin !== target.origin) sensitiveHeadersAllowed = false;
+    await validateTrustedSystemTarget(target, options, state);
+    const { controller, response } = await openTrustedSystemResponse(
+      target,
+      options,
+      state,
+      sensitiveHeadersAllowed,
+    );
+    const status = Number(response.status || 0);
+    const location = systemResponseHeader(response, 'location');
+    if (status >= 300 && status < 400 && location) {
+      try { await response.body?.cancel?.(); } catch (_) {}
+      controller.abort();
+      if (redirectCount >= state.maxRedirects) {
+        throw remoteMediaError('too_many_redirects', '远程资源重定向次数过多。');
+      }
+      let nextUrl;
+      try { nextUrl = new URL(location, target).toString(); } catch (_) {
+        throw remoteMediaError('invalid_redirect', '远程资源重定向地址无效。');
+      }
+      redirectCount += 1;
+      previousTarget = target;
+      currentUrl = nextUrl;
+      continue;
+    }
+    if (!options.allowHttpErrors && (status < 200 || status >= 300)) {
+      try { await response.body?.cancel?.(); } catch (_) {}
+      controller.abort();
+      throw remoteMediaError('remote_http_error', `远程资源返回 HTTP ${status}。`, { status });
+    }
+    const buffer = await consumeTrustedSystemResponse(response, controller, state);
+    return {
+      buffer,
+      contentType: systemResponseHeader(response, 'content-type'),
+      finalUrl: target.toString(),
+      status,
+    };
+  }
+}
 async function safeRemoteMediaFetch(inputUrl, options = {}, redirectCount = 0) {
   const normalizedOptions = { ...options, _protocols: allowedProtocols(options.protocols) };
   const state = createTransferState(normalizedOptions);
-  const { response, status, target } = await openSafeRemoteResponse(inputUrl, normalizedOptions, state, redirectCount);
-  const buffer = await consumeResponseBuffer(response, state);
+  if (normalizedOptions.trustedProviderOutput === true && hasSystemFetchBridge()) {
+    try {
+      return await fetchTrustedProviderOutput(inputUrl, normalizedOptions, state, redirectCount);
+    } catch (error) {
+      if (!systemFetchFallbackAllowed(error)) throw error;
+      remainingDeadlineMs(state);
+    }
+  }
+  const opened = await openSafeRemoteResponse(inputUrl, normalizedOptions, state, redirectCount);
+  const buffer = await consumeResponseBuffer(opened.response, state);
   return {
     buffer,
-    contentType: String(response.headers['content-type'] || ''),
-    finalUrl: target.toString(),
-    status,
+    contentType: String(opened.response.headers['content-type'] || ''),
+    finalUrl: opened.target.toString(),
+    status: opened.status,
   };
 }
 
@@ -1029,9 +1440,10 @@ function assertJsonComplexity(value, options = {}) {
 }
 
 /**
- * Fetch bounded JSON through the same DNS-pinned, redirect-revalidated transport.
+ * Fetch bounded JSON through the same redirect-revalidated transport.
  * Non-2xx responses are intentionally returned with their original status so
- * queue APIs can interpret bounded error/pending JSON without using fetch().
+ * queue APIs can interpret bounded error/pending JSON. Authenticated Provider
+ * status/result URLs may opt into Electron's system proxy/TUN-aware transport.
  */
 async function safeRemoteJsonFetch(inputUrl, options = {}) {
   const normalizedOptions = {
@@ -1040,9 +1452,8 @@ async function safeRemoteJsonFetch(inputUrl, options = {}) {
     maxBytes: positiveInteger(options.maxBytes, DEFAULT_JSON_MAX_BYTES),
     _protocols: allowedProtocols(options.protocols),
   };
-  const state = createTransferState(normalizedOptions);
-  const { response, status, target } = await openSafeRemoteResponse(inputUrl, normalizedOptions, state);
-  const buffer = await consumeResponseBuffer(response, state);
+  const fetched = await safeRemoteMediaFetch(inputUrl, normalizedOptions);
+  const { buffer, status } = fetched;
   const text = buffer.toString('utf8').trim();
   let data = null;
   if (text) {
@@ -1055,8 +1466,8 @@ async function safeRemoteJsonFetch(inputUrl, options = {}) {
   }
   return {
     data,
-    contentType: String(response.headers['content-type'] || ''),
-    finalUrl: target.toString(),
+    contentType: String(fetched.contentType || ''),
+    finalUrl: fetched.finalUrl,
     ok: status >= 200 && status < 300,
     status,
   };
@@ -1161,10 +1572,11 @@ async function removeCreatedDownloadTarget(absolutePath, identity) {
   }
 }
 
-async function writeWholeChunk(handle, chunk) {
+async function writeWholeChunk(handle, chunk, position = null) {
   let offset = 0;
   while (offset < chunk.length) {
-    const { bytesWritten } = await handle.write(chunk, offset, chunk.length - offset, null);
+    const writePosition = position === null ? null : position + offset;
+    const { bytesWritten } = await handle.write(chunk, offset, chunk.length - offset, writePosition);
     if (!bytesWritten) throw remoteMediaError('download_write_failed', '远程资源写入未取得进展。');
     offset += bytesWritten;
   }
@@ -1177,6 +1589,7 @@ async function writeWholeChunk(handle, chunk) {
  *   protocols: ['https:'] (defaults to ['http:', 'https:'])
  *   maxBytes, maxRedirects, deadlineMs (absolute transfer budget), idleTimeoutMs
  *   accept, userAgent, headers, lookupImpl
+ *   trustedProviderOutput: true prefers Electron/Chromium system networking
  *
  * The target is opened with wx/0600 and is removed on every unsuccessful exit.
  * Resolves to { contentType, finalUrl, status, byteSize } without buffering the body.
@@ -1190,6 +1603,26 @@ async function safeRemoteMediaDownload(inputUrl, targetPath, options = {}) {
   let response = null;
   let closed = false;
   try {
+    if (normalizedOptions.trustedProviderOutput === true && hasSystemFetchBridge()) {
+      try {
+        const downloaded = await downloadTrustedProviderOutputToFile(
+          inputUrl,
+          normalizedOptions,
+          state,
+          target.handle,
+        );
+        await target.handle.sync();
+        await target.handle.close();
+        closed = true;
+        return downloaded;
+      } catch (error) {
+        if (!systemFetchFallbackAllowed(error)) throw error;
+        remainingDeadlineMs(state);
+        // System-network chunks use explicit positions, so truncation leaves
+        // the descriptor ready for a clean DNS-pinned fallback from byte 0.
+        await target.handle.truncate(0);
+      }
+    }
     const opened = await openSafeRemoteResponse(inputUrl, normalizedOptions, state);
     response = opened.response;
     const byteSize = await consumeResponse(response, state, (chunk) => writeWholeChunk(target.handle, chunk));

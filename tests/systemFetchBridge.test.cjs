@@ -1,0 +1,231 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { Readable } = require('node:stream');
+const test = require('node:test');
+
+const {
+  SYSTEM_FETCH_BRIDGE_MARKER,
+  createSystemFetchBridge,
+  installGlobalSystemFetchBridge,
+} = require('../electron/systemFetchBridge.cjs');
+
+function createFetchRecorder(label) {
+  const calls = [];
+  const fetchImpl = async (input, init) => {
+    calls.push({ input, init });
+    return { label, input, init };
+  };
+  return { calls, fetchImpl };
+}
+
+test('ordinary HTTP(S) requests use Chromium fetch', async () => {
+  const chromium = createFetchRecorder('chromium');
+  const node = createFetchRecorder('node');
+  const bridge = createSystemFetchBridge({
+    chromiumFetch: chromium.fetchImpl,
+    nodeFetch: node.fetchImpl,
+  });
+
+  const httpResult = await bridge('http://example.test/image');
+  const httpsResult = await bridge(new URL('https://example.test/video'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{"prompt":"hello"}',
+  });
+
+  assert.equal(httpResult.label, 'chromium');
+  assert.equal(httpsResult.label, 'chromium');
+  assert.equal(chromium.calls.length, 2);
+  assert.equal(node.calls.length, 0);
+  assert.equal(chromium.calls[1].input.href, 'https://example.test/video');
+  assert.equal(chromium.calls[1].init.method, 'POST');
+});
+
+test('healthy requests do not reload proxy or DNS state', async () => {
+  const chromium = createFetchRecorder('chromium');
+  const node = createFetchRecorder('node');
+  let refreshCalls = 0;
+  const bridge = createSystemFetchBridge({
+    chromiumFetch: chromium.fetchImpl,
+    nodeFetch: node.fetchImpl,
+    refreshNetwork: async () => { refreshCalls += 1; },
+  });
+
+  await bridge('https://example.test/status');
+
+  assert.equal(chromium.calls.length, 1);
+  assert.equal(refreshCalls, 0);
+});
+
+test('failed GET refreshes system networking and retries once through Chromium', async () => {
+  const node = createFetchRecorder('node');
+  let chromiumCalls = 0;
+  let refreshCalls = 0;
+  const bridge = createSystemFetchBridge({
+    chromiumFetch: async () => {
+      chromiumCalls += 1;
+      if (chromiumCalls === 1) throw new TypeError('fetch failed');
+      return { label: 'chromium-recovered' };
+    },
+    nodeFetch: node.fetchImpl,
+    refreshNetwork: async () => { refreshCalls += 1; },
+    refreshIntervalMs: 0,
+  });
+
+  const result = await bridge('https://example.test/status');
+
+  assert.equal(result.label, 'chromium-recovered');
+  assert.equal(chromiumCalls, 2);
+  assert.equal(refreshCalls, 1);
+  assert.equal(node.calls.length, 0);
+});
+
+test('failed POST refreshes the next connection but never replays the write', async () => {
+  const node = createFetchRecorder('node');
+  let chromiumCalls = 0;
+  let refreshCalls = 0;
+  const bridge = createSystemFetchBridge({
+    chromiumFetch: async () => {
+      chromiumCalls += 1;
+      throw new TypeError('fetch failed');
+    },
+    nodeFetch: node.fetchImpl,
+    refreshNetwork: async () => { refreshCalls += 1; },
+    refreshIntervalMs: 0,
+  });
+
+  await assert.rejects(
+    bridge('https://example.test/generate', { method: 'POST', body: '{"prompt":"safe"}' }),
+    /fetch failed/,
+  );
+
+  assert.equal(chromiumCalls, 1);
+  assert.equal(refreshCalls, 1);
+  assert.equal(node.calls.length, 0);
+});
+
+test('explicit dispatcher or agent keeps the request on Node fetch', async () => {
+  const chromium = createFetchRecorder('chromium');
+  const node = createFetchRecorder('node');
+  const bridge = createSystemFetchBridge({
+    chromiumFetch: chromium.fetchImpl,
+    nodeFetch: node.fetchImpl,
+  });
+  const dispatcher = { name: 'undici-dispatcher' };
+  const agent = { name: 'node-agent' };
+
+  const dispatcherResult = await bridge('https://example.test/poll', { dispatcher });
+  const agentResult = await bridge('https://example.test/download', { agent });
+
+  assert.equal(dispatcherResult.label, 'node');
+  assert.equal(agentResult.label, 'node');
+  assert.equal(chromium.calls.length, 0);
+  assert.equal(node.calls.length, 2);
+  assert.strictEqual(node.calls[0].init.dispatcher, dispatcher);
+  assert.strictEqual(node.calls[1].init.agent, agent);
+});
+
+test('Node stream request bodies keep the request on Node fetch', async () => {
+  const chromium = createFetchRecorder('chromium');
+  const node = createFetchRecorder('node');
+  const bridge = createSystemFetchBridge({
+    chromiumFetch: chromium.fetchImpl,
+    nodeFetch: node.fetchImpl,
+  });
+  const body = Readable.from(['provider-upload']);
+
+  const result = await bridge('https://example.test/upload', {
+    method: 'POST',
+    body,
+    duplex: 'half',
+  });
+
+  assert.equal(result.label, 'node');
+  assert.equal(chromium.calls.length, 0);
+  assert.equal(node.calls.length, 1);
+  assert.strictEqual(node.calls[0].init.body, body);
+  assert.equal(node.calls[0].init.duplex, 'half');
+});
+
+test('Request objects carrying stream bodies remain on Node fetch', async () => {
+  const chromium = createFetchRecorder('chromium');
+  const node = createFetchRecorder('node');
+  const bridge = createSystemFetchBridge({
+    chromiumFetch: chromium.fetchImpl,
+    nodeFetch: node.fetchImpl,
+  });
+  const request = new Request('https://example.test/upload', {
+    method: 'POST',
+    body: Readable.toWeb(Readable.from(['provider-upload'])),
+    duplex: 'half',
+  });
+
+  const result = await bridge(request);
+
+  assert.equal(result.label, 'node');
+  assert.equal(chromium.calls.length, 0);
+  assert.equal(node.calls.length, 1);
+  assert.strictEqual(node.calls[0].input, request);
+});
+
+test('non-HTTP protocols keep the request on Node fetch', async () => {
+  const chromium = createFetchRecorder('chromium');
+  const node = createFetchRecorder('node');
+  const bridge = createSystemFetchBridge({
+    chromiumFetch: chromium.fetchImpl,
+    nodeFetch: node.fetchImpl,
+  });
+
+  const fileResult = await bridge('file:///C:/temporary/provider-result.json');
+  const dataResult = await bridge('data:text/plain,canvas');
+
+  assert.equal(fileResult.label, 'node');
+  assert.equal(dataResult.label, 'node');
+  assert.equal(chromium.calls.length, 0);
+  assert.equal(node.calls.length, 2);
+});
+
+test('global installation is idempotent and keeps the original Node fallback', async () => {
+  const chromium = createFetchRecorder('chromium');
+  const node = createFetchRecorder('node');
+  const target = { fetch: node.fetchImpl };
+
+  const first = installGlobalSystemFetchBridge({
+    target,
+    chromiumFetch: chromium.fetchImpl,
+  });
+  const second = installGlobalSystemFetchBridge({
+    target,
+    chromiumFetch: async () => {
+      throw new Error('idempotent install must not replace the existing bridge');
+    },
+  });
+
+  assert.strictEqual(first, second);
+  assert.strictEqual(target.fetch, first);
+  assert.ok(first[SYSTEM_FETCH_BRIDGE_MARKER]);
+
+  const httpResult = await target.fetch('https://example.test/provider');
+  const nodeResult = await target.fetch('file:///C:/temporary/provider-result.json');
+
+  assert.equal(httpResult.label, 'chromium');
+  assert.equal(nodeResult.label, 'node');
+  assert.equal(chromium.calls.length, 1);
+  assert.equal(node.calls.length, 1);
+});
+
+test('bridge marker preserves the Chromium resolver used for trusted output validation', () => {
+  const chromium = createFetchRecorder('chromium');
+  const node = createFetchRecorder('node');
+  const resolveHost = async () => ({
+    endpoints: [{ address: '203.0.113.10', family: 'ipv4' }],
+  });
+  const bridge = createSystemFetchBridge({
+    chromiumFetch: chromium.fetchImpl,
+    nodeFetch: node.fetchImpl,
+    resolveHost,
+  });
+
+  assert.strictEqual(bridge[SYSTEM_FETCH_BRIDGE_MARKER].resolveHost, resolveHost);
+});

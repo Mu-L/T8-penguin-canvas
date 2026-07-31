@@ -729,7 +729,7 @@ export default function ResourceLibraryDrawer({ open, onClose, onInsertMaterial 
                       ? '点击恢复为姿势大师节点'
                       : item.kind === 'workflow'
                         ? '点击插入工作流到当前画布'
-                        : 'Ctrl+拖拽到节点'
+                        : 'Ctrl+拖拽到节点，或拖到画布空白处创建素材节点'
                 }
               >
                 <div className="relative h-28 overflow-hidden bg-black/80">

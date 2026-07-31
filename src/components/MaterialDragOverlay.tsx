@@ -14,8 +14,10 @@
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
+  MATERIAL_CANVAS_DROP_EVENT,
   MATERIAL_DROP_EVENT,
   useDragMaterialStore,
+  type MaterialCanvasDropEventDetail,
   type MaterialDropEventDetail,
   type MaterialKind,
 } from '../stores/dragMaterial';
@@ -23,6 +25,37 @@ import { useThemeStore } from '../stores/theme';
 import SmartImage from './SmartImage';
 
 const PREVIEW_SIZE = 96;
+
+function findDropElementAtPoint(clientX: number, clientY: number): HTMLElement | null {
+  const stack = document.elementsFromPoint(clientX, clientY);
+  for (const el of stack) {
+    if (!(el instanceof HTMLElement)) continue;
+    if (el.hasAttribute('data-drop-kinds')) return el;
+    const closest = el.closest('[data-drop-kinds]') as HTMLElement | null;
+    if (closest) return closest;
+  }
+  return null;
+}
+
+function isBlankCanvasPoint(clientX: number, clientY: number): boolean {
+  const stack = document.elementsFromPoint(clientX, clientY);
+  const overNode = stack.some((el) => el instanceof HTMLElement && Boolean(el.closest('.react-flow__node')));
+  if (overNode) return false;
+  return stack.some((el) => (
+    el instanceof HTMLElement &&
+    (el.classList.contains('react-flow__pane') || el.classList.contains('react-flow'))
+  ));
+}
+
+function canCreateResourceNodeOnCanvas() {
+  const current = useDragMaterialStore.getState().payload;
+  return Boolean(
+    current &&
+    current.sourceNodeId === 'resource-library' &&
+    current.url &&
+    (current.kind === 'image' || current.kind === 'video' || current.kind === 'audio'),
+  );
+}
 
 const MaterialDragOverlay = () => {
   const dragging = useDragMaterialStore((s) => s.dragging);
@@ -111,23 +144,10 @@ const MaterialDragOverlay = () => {
   useEffect(() => {
     if (!dragging) return;
 
-    const onMove = (e: MouseEvent) => {
+    const onMove = (e: PointerEvent | MouseEvent) => {
       // 探测命中: data-drop-kinds 节点
       // 使用 elementsFromPoint 穿透 ReactFlow SelectionPane 覆盖层
-      const stack = document.elementsFromPoint(e.clientX, e.clientY);
-      let dropEl: HTMLElement | null = null;
-      for (const el of stack) {
-        if (!(el instanceof HTMLElement)) continue;
-        if (el.hasAttribute('data-drop-kinds')) {
-          dropEl = el;
-          break;
-        }
-        const closest = el.closest('[data-drop-kinds]') as HTMLElement | null;
-        if (closest) {
-          dropEl = closest;
-          break;
-        }
-      }
+      const dropEl = findDropElementAtPoint(e.clientX, e.clientY);
       let hoverTargetId: string | null = null;
       let accepts = false;
       if (dropEl) {
@@ -148,19 +168,42 @@ const MaterialDragOverlay = () => {
           accepts = false;
         }
       }
+      else if (isBlankCanvasPoint(e.clientX, e.clientY) && canCreateResourceNodeOnCanvas()) {
+        // 资源库 Ctrl 拖到空白画布：绿色反馈表示松手会创建上传素材节点。
+        accepts = true;
+      }
       move(e.clientX, e.clientY, hoverTargetId, accepts);
     };
 
-    const onUp = (e: MouseEvent) => {
+    const onUp = (e: PointerEvent | MouseEvent) => {
       const cur = useDragMaterialStore.getState();
-      if (cur.dragging && cur.payload && cur.hoverTargetId && cur.hoverAccepts) {
-        const detail: MaterialDropEventDetail = {
-          targetNodeId: cur.hoverTargetId,
-          payload: cur.payload,
-        };
-        window.dispatchEvent(new CustomEvent(MATERIAL_DROP_EVENT, { detail }));
+      if (cur.dragging && cur.payload) {
+        // 松手时重新命中，避免最后一次 mousemove 没来得及更新导致素材丢失。
+        const dropEl = findDropElementAtPoint(e.clientX, e.clientY);
+        const targetNodeId = dropEl?.getAttribute('data-node-id') || null;
+        const acceptedKinds = (dropEl?.getAttribute('data-drop-kinds') || '').split(',').filter(Boolean);
+        if (targetNodeId && acceptedKinds.includes(cur.payload.kind) && targetNodeId !== cur.payload.sourceNodeId) {
+          const detail: MaterialDropEventDetail = {
+            targetNodeId,
+            payload: cur.payload,
+          };
+          window.dispatchEvent(new CustomEvent(MATERIAL_DROP_EVENT, { detail }));
+        } else if (
+          cur.payload.sourceNodeId === 'resource-library' &&
+          cur.payload.url &&
+          cur.payload.kind !== 'text' &&
+          isBlankCanvasPoint(e.clientX, e.clientY)
+        ) {
+          const detail: MaterialCanvasDropEventDetail = {
+            payload: cur.payload,
+            clientX: e.clientX,
+            clientY: e.clientY,
+          };
+          window.dispatchEvent(new CustomEvent(MATERIAL_CANVAS_DROP_EVENT, { detail }));
+        }
       }
       end();
+      e.preventDefault();
       e.stopPropagation();
     };
 
@@ -168,6 +211,12 @@ const MaterialDragOverlay = () => {
       if (e.key === 'Escape') end();
     };
 
+    // pointerdown 会 preventDefault 以阻止 ReactFlow 启动框选；部分 Chromium
+    // 因此不会再派发兼容 mousemove/mouseup，必须直接监听 Pointer Events。
+    window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', onUp, true);
+    window.addEventListener('pointercancel', onUp, true);
+    // 保留 mouse 监听，兼容只派发传统鼠标事件的旧 WebView。
     window.addEventListener('mousemove', onMove, true);
     window.addEventListener('mouseup', onUp, true);
     window.addEventListener('keydown', onKey, true);
@@ -179,6 +228,9 @@ const MaterialDragOverlay = () => {
     document.body.style.userSelect = 'none';
 
     return () => {
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onUp, true);
+      window.removeEventListener('pointercancel', onUp, true);
       window.removeEventListener('mousemove', onMove, true);
       window.removeEventListener('mouseup', onUp, true);
       window.removeEventListener('keydown', onKey, true);

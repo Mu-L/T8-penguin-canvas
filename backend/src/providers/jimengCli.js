@@ -614,6 +614,7 @@ async function defaultStoreOutput(value, kind, options = {}) {
     } else {
       const remote = await safeRemoteMediaFetch(text, {
         allowedKinds: [kind],
+        trustedProviderOutput: true,
         maxBytes: kind === 'video' ? 1024 * 1024 * 1024 : 64 * 1024 * 1024,
         deadlineMs: 5 * 60 * 1000,
         idleTimeoutMs: 30 * 1000,

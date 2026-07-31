@@ -1543,6 +1543,7 @@ class AssetIndexer {
         deadlineMs,
         maxRedirects: 4,
         protocols: ['https:'],
+        trustedProviderOutput: true,
         accept: 'image/*,video/*,audio/*,model/*,text/*,application/json,application/octet-stream;q=0.8',
       });
     } catch (error) {

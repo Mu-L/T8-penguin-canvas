@@ -706,6 +706,7 @@ test('inline text and public provider media are privately materialized before th
     assert.equal(remoteCalls.length, 1);
     assert.equal(remoteCalls[0].url, 'https://provider.example/generated?id=secret-token');
     assert.equal(remoteCalls[0].options.maxBytes, 256 * 1024 * 1024);
+    assert.equal(remoteCalls[0].options.trustedProviderOutput, true);
     assert.equal(tableCount(database, 'run_output_commits'), 2);
     assert.equal(tableCount(database, 'collaboration_common_operation_batches'), 1);
     assert.equal(tableCount(database, 'collaboration_domain_operation_idempotency'), 2);

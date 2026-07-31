@@ -484,6 +484,7 @@ async function saveOneMediaOutput(url, options = {}) {
     }
     const remote = await safeRemoteMediaFetch(text, {
       allowedKinds: ['image'],
+      trustedProviderOutput: true,
       maxBytes: 64 * 1024 * 1024,
       deadlineMs: 2 * 60 * 1000,
       idleTimeoutMs: 30 * 1000,

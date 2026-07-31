@@ -68,7 +68,16 @@ export const useDragMaterialStore = create<DragMaterialState>((set) => ({
 /** 投放事件名 (CustomEvent.detail = { targetNodeId, payload }) */
 export const MATERIAL_DROP_EVENT = 'penguin:material-drop';
 
+/** 资源库素材投放到画布空白处时，请求在落点创建上传素材节点。 */
+export const MATERIAL_CANVAS_DROP_EVENT = 'penguin:material-drop-to-canvas';
+
 export interface MaterialDropEventDetail {
   targetNodeId: string;
   payload: MaterialPayload;
+}
+
+export interface MaterialCanvasDropEventDetail {
+  payload: MaterialPayload;
+  clientX: number;
+  clientY: number;
 }

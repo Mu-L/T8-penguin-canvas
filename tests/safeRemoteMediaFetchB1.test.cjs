@@ -89,9 +89,8 @@ test('non-public address classifier only permits ordinary globally-routable unic
     '255.255.255.255',
     '::',
     '::1',
-    '::ffff:8.8.8.8',
     '::ffff:7f00:1',
-    '64:ff9b::808:808',
+    '64:ff9b::7f00:1',
     '100::1',
     '2001::1',
     '2001:2::1',
@@ -109,7 +108,15 @@ test('non-public address classifier only permits ordinary globally-routable unic
   for (const address of blocked) {
     assert.equal(isPrivateAddress(address), true, `${address} must fail closed`);
   }
-  for (const address of ['1.1.1.1', '8.8.8.8', '93.184.216.34', '2001:4860:4860::8888', '2606:4700:4700::1111']) {
+  for (const address of [
+    '1.1.1.1',
+    '8.8.8.8',
+    '93.184.216.34',
+    '::ffff:8.8.8.8',
+    '64:ff9b::808:808',
+    '2001:4860:4860::8888',
+    '2606:4700:4700::1111',
+  ]) {
     assert.equal(isPrivateAddress(address), false, `${address} should be globally routable`);
   }
   assert.equal(isLoopbackAddress('127.200.1.2'), true);
@@ -128,9 +135,13 @@ test('DNS resolution fails closed when any answer is invalid or non-public', asy
     ]),
     (error) => error?.code === 'private_address',
   );
+  const mapped = await resolvePublicAddress('mapped.example', async () => [
+    { address: '::ffff:8.8.8.8', family: 6 },
+  ]);
+  assert.deepEqual(mapped, { address: '::ffff:8.8.8.8', family: 6, tunFake: false });
   await assert.rejects(
-    resolvePublicAddress('mapped.example', async () => [
-      { address: '::ffff:8.8.8.8', family: 6 },
+    resolvePublicAddress('mapped-private.example', async () => [
+      { address: '::ffff:127.0.0.1', family: 6 },
     ]),
     (error) => error?.code === 'private_address',
   );

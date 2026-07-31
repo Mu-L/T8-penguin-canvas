@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { createUploadDataFromItems } from '../src/utils/mediaCollection.ts';
 
 const require = createRequire(import.meta.url);
 const config = require('../backend/src/config.js');
@@ -191,4 +192,66 @@ test('shared workshop upload path no longer forces resource-library references t
   assert.match(uploadHelper, /readResourceMediaRefBuffer\(trimmed/);
   assert.match(uploadHelper, /allowedKinds:\s*\['image', 'video', 'audio'\]/);
   assert.doesNotMatch(uploadHelper, /readResourceImageRefBuffer\(trimmed/);
+});
+
+test('resource-library canvas ingress keeps canonical upload arrays for every entry point', () => {
+  const resource = {
+    id: 'resource-image',
+    kind: 'image' as const,
+    title: '画布展示标题',
+    originalName: '真实参考图.png',
+    fileUrl: '/api/resources/file/resource-image',
+    thumbUrl: '/api/resources/thumb/resource-image',
+    size: 321,
+    mime: 'image/png',
+    categoryId: 'image-default',
+    tags: [],
+    favorite: false,
+    createdAt: '2026-08-01T00:00:00.000Z',
+    updatedAt: '2026-08-01T00:00:00.000Z',
+  };
+  const materials = [{
+    kind: 'image' as const,
+    url: resource.fileUrl,
+    name: resource.originalName || resource.title,
+    size: resource.size,
+    mime: resource.mime,
+  }];
+  assert.equal(materials.length, 1);
+  assert.equal(materials[0].name, '真实参考图.png');
+  assert.equal(materials[0].mime, 'image/png');
+
+  const uploadData = createUploadDataFromItems('image', materials.map((item) => ({
+    kind: 'image' as const,
+    url: item.url || '',
+    name: item.name,
+    size: item.size,
+    mime: item.mime,
+  })));
+  assert.equal(uploadData.imageUrl, resource.fileUrl);
+  assert.deepEqual(uploadData.imageUrls, [resource.fileUrl]);
+  assert.equal(uploadData.fileName, '真实参考图.png');
+  assert.deepEqual(uploadData.fileNames, ['真实参考图.png']);
+  assert.equal(uploadData.mime, 'image/png');
+  assert.deepEqual(uploadData.mimes, ['image/png']);
+});
+
+test('resource-library plus, send and blank-canvas drag are wired to canonical upload creation', () => {
+  const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const canvas = fs.readFileSync(new URL('../src/components/Canvas.tsx', import.meta.url), 'utf8');
+  const overlay = fs.readFileSync(new URL('../src/components/MaterialDragOverlay.tsx', import.meta.url), 'utf8');
+  const sendMaterials = fs.readFileSync(new URL('../src/utils/sendMaterials.ts', import.meta.url), 'utf8');
+
+  assert.match(app, /const addNode = addNodeRef\.current;\s*if \(!addNode\) throw new Error/);
+  assert.match(app, /data: createUploadDataFromItems\(kind/);
+  assert.match(app, /name: item\.originalName \|\| item\.title/);
+  assert.doesNotMatch(app, /setResourceOpen\(false\);\s*\/\/ 资源库是创作侧栏/);
+  assert.match(canvas, /MATERIAL_CANVAS_DROP_EVENT/);
+  assert.match(canvas, /createUploadDataFromItems\(payload\.kind/);
+  assert.match(overlay, /isBlankCanvasPoint/);
+  assert.match(overlay, /new CustomEvent\(MATERIAL_CANVAS_DROP_EVENT/);
+  assert.match(overlay, /addEventListener\('pointermove', onMove, true\)/);
+  assert.match(overlay, /addEventListener\('pointerup', onUp, true\)/);
+  assert.match(overlay, /addEventListener\('pointercancel', onUp, true\)/);
+  assert.match(sendMaterials, /name: item\.originalName \|\| item\.title \|\| fileNameFromUrl/);
 });

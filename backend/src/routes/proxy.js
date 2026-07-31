@@ -132,7 +132,7 @@ const PROXY_REMOTE_IDLE_TIMEOUT_MS = boundedProxyInteger(
 );
 const PROVIDER_CONNECT_TIMEOUT_MS = boundedProxyInteger(
   process.env.T8_PROVIDER_CONNECT_TIMEOUT_MS,
-  3_000,
+  15_000,
   500,
   30_000,
 );
@@ -379,9 +379,12 @@ async function fetchProviderResponse(url, init = {}, label = 'Provider', options
         headers: requestHeaders,
         signal: controller.signal,
       };
-      // Do not force a custom Undici dispatcher on the primary request. Native
-      // fetch is the only path that consistently preserves the user's active
-      // system proxy/TUN/VPN behavior across Electron and standalone Node.
+      // Do not force a custom Undici dispatcher on the primary request.
+      // Packaged Electron installs a fetch bridge before loading the backend,
+      // so this attempt uses Chromium's native networking stack and therefore
+      // the real Windows proxy/PAC/TUN/IPv4/IPv6 configuration. Standalone
+      // development retains Node fetch. The recovery request below deliberately
+      // uses an explicit Undici dispatcher and therefore a fresh Node socket.
       if (recoveryDispatcher) requestInit.dispatcher = recoveryDispatcher;
       else delete requestInit.dispatcher;
       const response = await Promise.race([
@@ -655,6 +658,7 @@ async function fetchProxyRemoteMedia(url, options = {}) {
   const remote = await safeRemoteMediaFetch(url, proxySafeRemoteOptions({
     maxBytes: maximum,
     deadlineMs,
+    trustedProviderOutput: options.trustedProviderOutput === true,
     idleTimeoutMs,
     maxRedirects: 4,
     accept: options.accept || 'image/*,video/*,audio/*,application/octet-stream;q=0.5',
@@ -670,6 +674,7 @@ async function fetchProxyRemoteMedia(url, options = {}) {
 
 async function fetchFalPollJson(url, apiKey) {
   return safeRemoteJsonFetch(url, proxySafeRemoteOptions({
+    trustedProviderOutput: true,
     maxBytes: FAL_POLL_MAX_BYTES,
     maxJsonDepth: FAL_POLL_MAX_JSON_DEPTH,
     maxJsonNodes: FAL_POLL_MAX_JSON_NODES,
@@ -942,6 +947,27 @@ function mimeTypeForProxyFilename(filename) {
     '.csv': 'text/csv; charset=utf-8',
   };
   return map[ext] || 'application/octet-stream';
+}
+
+// Mounted canvas files have already crossed the app's controlled upload/output
+// boundary. Their bytes remain authoritative, while a stale filename suffix
+// is only metadata. Accept a subtype drift only when both the suffix and magic
+// independently identify the same safe top-level media kind; cross-kind files,
+// HTML/JSON, archives, and unknown signatures remain blocked.
+function validateMountedMediaBuffer(buffer, filename, options = {}) {
+  const verified = validateProxyMediaBuffer(
+    buffer,
+    mimeTypeForProxyFilename(filename),
+    {
+      allowedKinds: options.allowedKinds,
+      maxBytes: options.maxBytes,
+      allowSameKindSubtypeMismatch: true,
+    },
+  );
+  return {
+    ...verified,
+    contentType: verified.detectedMime || verified.contentType,
+  };
 }
 
 function providerResponseError(code, message, details = {}) {
@@ -1282,6 +1308,7 @@ async function fetchRunningHubTextOutput(remote, item, materializationKey) {
   const downloaded = await safeRemoteMediaFetch(remote, proxySafeRemoteOptions({
     maxBytes: RUNNINGHUB_TEXT_OUTPUT_MAX_BYTES,
     deadlineMs: PROXY_REMOTE_DEADLINE_MS,
+    trustedProviderOutput: true,
     idleTimeoutMs: PROXY_REMOTE_IDLE_TIMEOUT_MS,
     maxRedirects: 4,
     accept: 'text/plain,text/markdown,text/csv,application/json,application/octet-stream;q=0.5',
@@ -1765,9 +1792,11 @@ const IMAGE_OUTPUT_MATERIALIZATION_DEADLINE_MS = boundedProxyInteger(
   1_000,
   90_000,
 );
+// Three seconds is the retry cadence, not a live CDN transfer timeout. Slow
+// proxy, TUN and IPv6 paths may legitimately pause between response chunks.
 const IMAGE_OUTPUT_MATERIALIZATION_IDLE_TIMEOUT_MS = boundedProxyInteger(
   process.env.T8_IMAGE_OUTPUT_MATERIALIZATION_IDLE_TIMEOUT_MS,
-  3_000,
+  15_000,
   1_000,
   30_000,
 );
@@ -1881,7 +1910,8 @@ function retryableRemoteOutputError(error) {
   if (code.startsWith('tun_dns_fallback_')) return true;
   if (code === 'remote_http_error') return status === 408 || status === 425 || status === 429 || status >= 500;
   return new Set([
-    'fetch_timeout', 'remote_response_aborted', 'ECONNREFUSED', 'ECONNRESET',
+    'system_network_fetch_failed', 'connect_timeout', 'fetch_timeout',
+    'remote_response_aborted', 'ECONNREFUSED', 'ECONNRESET',
     'EHOSTUNREACH', 'ENETUNREACH', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT', 'ESOCKETTIMEDOUT',
   ]).has(code);
 }
@@ -1910,6 +1940,7 @@ async function saveRemoteImageDetailed(url, _providerFetchImpl, materializationK
     try {
       const remote = await fetchProxyRemoteMedia(url, {
         allowedKinds: ['image'],
+        trustedProviderOutput: true,
         maxBytes: PROXY_IMAGE_REFERENCE_MAX_BYTES,
         allowSameKindSubtypeMismatch: true,
         deadlineMs: remainingMs,
@@ -1956,6 +1987,7 @@ async function saveRemoteAudioDetailed(url, materializationKey = '') {
     try {
       const remote = await fetchProxyRemoteMedia(url, {
         allowedKinds: ['audio'],
+        trustedProviderOutput: true,
         maxBytes: PROXY_AUDIO_REFERENCE_MAX_BYTES,
         allowSameKindSubtypeMismatch: true,
         accept: 'audio/mpeg,audio/mp4,audio/wav,audio/ogg,audio/flac;q=0.9',
@@ -2034,22 +2066,6 @@ function aspectToGptSize(aspectRatio, sizeLevel) {
   return GPT_SIZE_MAP[key] || '1024x1024';
 }
 
-function imageMimeFromLocalPath(filePath) {
-  const ext = path.extname(filePath || '').toLowerCase().replace(/^\./, '');
-  const map = {
-    png: 'image/png',
-    jpg: 'image/jpeg',
-    jpeg: 'image/jpeg',
-    webp: 'image/webp',
-    gif: 'image/gif',
-    bmp: 'image/bmp',
-    avif: 'image/avif',
-    tif: 'image/tiff',
-    tiff: 'image/tiff',
-  };
-  return map[ext] || 'image/png';
-}
-
 function assertInsideDir(root, target) {
   const base = path.resolve(root);
   const full = path.resolve(target);
@@ -2063,12 +2079,15 @@ function toLocalPathnameIfSameApp(url) {
     const u = new URL(raw);
     const host = String(u.hostname || '').toLowerCase();
     const localHost = host === '127.0.0.1' || host === 'localhost' || host === '::1';
-    const expectedPort = String(Number(config.PORT) || 18766);
+    const allowedPorts = new Set([
+      String(Number(config.PORT) || 18766),
+      '11422',
+    ]);
     const actualPort = u.port || (u.protocol === 'http:' ? '80' : u.protocol === 'https:' ? '443' : '');
     if (
       localHost
       && u.protocol === 'http:'
-      && actualPort === expectedPort
+      && allowedPorts.has(actualPort)
       && !u.username
       && !u.password
       && !raw.includes('\\')
@@ -2100,17 +2119,14 @@ function readLocalImageRefBuffer(ref) {
     { prefixes: ['/files/thumbnails/'], root: config.THUMBNAILS_DIR },
   ], PROXY_IMAGE_REFERENCE_MAX_BYTES);
   if (!local) return null;
-  const full = local.filename;
-  const mime = imageMimeFromLocalPath(full);
-  const buf = local.buffer;
-  validateProxyMediaBuffer(buf, mime, {
+  const verified = validateMountedMediaBuffer(local.buffer, local.filename, {
     allowedKinds: ['image'],
     maxBytes: PROXY_IMAGE_REFERENCE_MAX_BYTES,
   });
   return {
-    buf,
-    mime,
-    ext: safeOutputExt(path.extname(full), 'png'),
+    buf: local.buffer,
+    mime: verified.contentType,
+    ext: verifiedProxyMediaExtension(verified),
   };
 }
 
@@ -2669,6 +2685,7 @@ async function saveRemoteSunoFileDetailed(url, materializationKey = '') {
     try {
       const remote = await safeRemoteMediaFetch(url, proxySafeRemoteOptions({
         maxBytes: PROXY_AUDIO_REFERENCE_MAX_BYTES,
+        trustedProviderOutput: true,
         deadlineMs: PROXY_REMOTE_DEADLINE_MS,
         idleTimeoutMs: PROXY_REMOTE_IDLE_TIMEOUT_MS,
         maxRedirects: 4,
@@ -5287,11 +5304,11 @@ async function uploadRefToZhenzhen(ref, apiKey, label = '参考素材') {
       if (!local) throw new Error(`${label} 上传失败: 本地资源不存在或越出授权目录`);
       sourceName = local.filename;
       buf = local.buffer;
-      mime = mimeTypeForProxyFilename(local.filename);
-      validateProxyMediaBuffer(buf, mime, {
+      const verified = validateMountedMediaBuffer(buf, local.filename, {
         allowedKinds: ['image', 'video', 'audio'],
         maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
       });
+      mime = verified.contentType;
     } else {
       const remote = await fetchProxyRemoteMedia(trimmed, {
         allowedKinds: ['image', 'video', 'audio'],
@@ -5531,6 +5548,7 @@ async function saveRemoteVideoDetailed(url, _providerFetchImpl, materializationK
       try {
         const remote = await fetchProxyRemoteMedia(url, {
           allowedKinds: ['video'],
+          trustedProviderOutput: true,
           maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
           allowSameKindSubtypeMismatch: true,
           accept: 'video/mp4,video/webm,video/quicktime,video/x-matroska;q=0.9',
@@ -5978,6 +5996,7 @@ async function saveRemoteFalToolboxFile(url, kind, materializationKey = '') {
     }
     const remote = await safeRemoteMediaFetch(url, {
       maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
+      trustedProviderOutput: true,
       deadlineMs: PROXY_REMOTE_DEADLINE_MS,
       idleTimeoutMs: PROXY_REMOTE_IDLE_TIMEOUT_MS,
       maxRedirects: 4,
@@ -7587,6 +7606,7 @@ router.get('/runninghub/query', async (req, res) => {
           }
           const downloaded = await fetchProxyRemoteMedia(remote, {
             allowedKinds: ['image', 'video', 'audio'],
+            trustedProviderOutput: true,
             maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
             allowSameKindSubtypeMismatch: true,
           });
@@ -7758,12 +7778,11 @@ router.post('/runninghub/upload-asset', express.json({ limit: '64kb', strict: tr
         return res.status(404).json({ success: false, error: '本地素材不存在、超限或越出允许目录' });
       }
       buf = local.buffer;
-      mime = mimeTypeForProxyFilename(local.filename);
-      const verified = validateProxyMediaBuffer(buf, mime, {
+      const verified = validateMountedMediaBuffer(buf, local.filename, {
         allowedKinds: ['image', 'video', 'audio'],
         maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
       });
-      mime = verified.contentType || mime;
+      mime = verified.contentType;
       baseName = path.basename(local.filename);
     } else if (/^https?:\/\//i.test(url)) {
       const remote = await fetchProxyRemoteMedia(url, {
@@ -7862,6 +7881,8 @@ module.exports._test = Object.freeze({
   fetchRunningHubTextOutput,
   fetchFalPollJson,
   storeMaterializedOutputBuffer,
+  refToBuffer,
+  validateMountedMediaBuffer,
   fetchProviderResponse,
   opaqueDiagnosticSummary,
   parseJsonResponse,

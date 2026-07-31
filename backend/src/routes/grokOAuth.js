@@ -102,6 +102,7 @@ async function saveOneMediaOutput(url, kind = 'image') {
   if (/^https?:\/\//i.test(text)) {
     const remote = await safeRemoteMediaFetch(text, {
       allowedKinds: [kind],
+      trustedProviderOutput: true,
       maxBytes: kind === 'video' ? 1024 * 1024 * 1024 : kind === 'audio' ? 256 * 1024 * 1024 : 64 * 1024 * 1024,
       deadlineMs: 5 * 60 * 1000,
       idleTimeoutMs: 30 * 1000,

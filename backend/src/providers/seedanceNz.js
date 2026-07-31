@@ -496,7 +496,7 @@ sI1ANRYvqSFC2X1VRZfDg+wD6E21BccmifG4yWc=
 const seedanceDispatcher = new Agent({
   // Never carry an API socket across TUN/VPN route changes.
   pipelining: 0,
-  connectTimeout: 3_000,
+  connectTimeout: 15_000,
   autoSelectFamily: true,
   autoSelectFamilyAttemptTimeout: 250,
   connect: {
@@ -541,7 +541,7 @@ function seedancePublicDnsLookup(
 }
 const seedancePublicDnsDispatcher = new Agent({
   pipelining: 0,
-  connectTimeout: 3_000,
+  connectTimeout: 15_000,
   autoSelectFamily: true,
   autoSelectFamilyAttemptTimeout: 250,
   connect: {
@@ -589,7 +589,7 @@ async function secureFetch(url, init = {}) {
     // Preserve the runtime/system network path first. This is the behavior
     // users had before Provider-specific dispatchers were introduced and it
     // keeps transparent TUN/VPN routing, system DNS and working IPv6 intact.
-    return await undiciFetch(url, request);
+    return await fetch(url, request);
   } catch (error) {
     if (init?.signal?.aborted) throw error;
     const safeRead = ['GET', 'HEAD'].includes(method);

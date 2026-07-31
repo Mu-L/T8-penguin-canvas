@@ -144,6 +144,40 @@ async function withProxyFixture(run) {
   }
 }
 
+test('B3 mounted canvas image references trust valid magic over a stale filename subtype', async () => {
+  await withProxyFixture(async ({ inputDir }) => {
+    const jpeg = await sharp({
+      create: {
+        width: 8,
+        height: 4,
+        channels: 3,
+        background: { r: 170, g: 15, b: 35 },
+      },
+    }).jpeg().toBuffer();
+    const misleadingName = 'reference-card.png';
+    fs.writeFileSync(path.join(inputDir, misleadingName), jpeg);
+
+    const references = [
+      `/files/input/${misleadingName}`,
+      `http://127.0.0.1:${config.PORT}/files/input/${misleadingName}`,
+      `http://127.0.0.1:11422/files/input/${misleadingName}`,
+    ];
+    for (const reference of references) {
+      const converted = await proxyRouter._test.refToBuffer(reference);
+      assert.ok(converted);
+      assert.equal(converted.mime, 'image/jpeg');
+      assert.equal(converted.ext, 'jpg');
+      assert.deepEqual(converted.buf, jpeg);
+    }
+
+    fs.writeFileSync(path.join(inputDir, 'not-an-image.png'), Buffer.from('<html>not media</html>'));
+    await assert.rejects(
+      () => proxyRouter._test.refToBuffer('/files/input/not-an-image.png'),
+      /Content-Type|魔数/,
+    );
+  });
+});
+
 function captureConsoleErrors() {
   const messages = [];
   const original = console.error;
@@ -693,8 +727,14 @@ test('B3 RunningHub upload route enforces encoded traversal, symlink, max-byte, 
     assert.equal(path.dirname(outside), path.dirname(outputDir));
     const originalFetch = global.fetch;
     let providerFetches = 0;
-    global.fetch = async () => {
+    const providerUploads = [];
+    global.fetch = async (_url, options = {}) => {
       providerFetches += 1;
+      const file = options.body?.get?.('file');
+      providerUploads.push({
+        name: String(file?.name || ''),
+        type: String(file?.type || ''),
+      });
       return new Response(JSON.stringify({ code: 0, data: { fileName: 'safe-upload.png', fileType: 'image/png' } }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -760,24 +800,27 @@ test('B3 RunningHub upload route enforces encoded traversal, symlink, max-byte, 
       assert.doesNotMatch(badMagic.text, /magic-secret/);
       assert.equal(providerFetches, 0);
 
-      fs.writeFileSync(path.join(outputDir, 'jpeg-disguised-as-png.png'), Buffer.from([
-        0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46,
-        0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
-        0xff, 0xd9,
-      ]));
-      const subtypeSpoof = await requestJson(appServer, '/api/proxy/runninghub/upload-asset', {
+      const disguisedJpeg = await sharp({
+        create: { width: 2, height: 1, channels: 3, background: { r: 180, g: 20, b: 40 } },
+      }).jpeg().toBuffer();
+      fs.writeFileSync(path.join(outputDir, 'jpeg-disguised-as-png.png'), disguisedJpeg);
+      const subtypeDrift = await requestJson(appServer, '/api/proxy/runninghub/upload-asset', {
         url: '/files/output/jpeg-disguised-as-png.png',
         site: 'cn',
       });
-      assert.equal(subtypeSpoof.status, 400, subtypeSpoof.text);
-      assert.equal(providerFetches, 0);
+      assert.equal(subtypeDrift.status, 200, subtypeDrift.text);
+      assert.equal(providerFetches, 1);
+      assert.deepEqual(providerUploads[0], {
+        name: 'jpeg-disguised-as-png.jpg',
+        type: 'image/jpeg',
+      });
 
       const overlongUrl = await requestJson(appServer, '/api/proxy/runninghub/upload-asset', {
         url: `https://example.invalid/${'x'.repeat(16_384)}`,
         site: 'cn',
       });
       assert.equal(overlongUrl.status, 400, overlongUrl.text);
-      assert.equal(providerFetches, 0);
+      assert.equal(providerFetches, 1);
 
       const safeFile = path.join(outputDir, 'safe.png');
       const safePng = await sharp({
@@ -793,7 +836,11 @@ test('B3 RunningHub upload route enforces encoded traversal, symlink, max-byte, 
       });
       assert.equal(safe.status, 200, safe.text);
       assert.equal(safe.data.data.fileName, 'safe-upload.png');
-      assert.equal(providerFetches, 1);
+      assert.equal(providerFetches, 2);
+      assert.deepEqual(providerUploads[1], {
+        name: 'safe.png',
+        type: 'image/png',
+      });
     } finally {
       global.fetch = originalFetch;
     }

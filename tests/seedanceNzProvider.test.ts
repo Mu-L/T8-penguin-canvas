@@ -15,9 +15,9 @@ test('seedance.nz keeps TLS verification enabled with the pinned official root',
   assert.match(source, /LETS_ENCRYPT_ROOT_YR/);
   assert.match(source, /rejectUnauthorized:\s*true/);
   assert.doesNotMatch(source, /rejectUnauthorized:\s*false/);
-  assert.match(source, /return await undiciFetch\(url,\s*request\)/);
+  assert.match(source, /return await fetch\(url,\s*request\)/);
   assert.ok(
-    source.indexOf('return await undiciFetch(url, request)')
+    source.indexOf('return await fetch(url, request)')
       < source.indexOf('dispatcher: seedanceDispatcher'),
     'the active system network must run before the provider-specific TLS recovery connection',
   );

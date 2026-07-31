@@ -8,7 +8,16 @@
 //   5. 打包模式数据目录指向 app.getPath('userData') 而非项目目录
 // ============================================================================
 
-const { app, BrowserWindow, shell, ipcMain, session, safeStorage, nativeImage, dialog } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  shell,
+  ipcMain,
+  session,
+  safeStorage,
+  nativeImage,
+  dialog,
+} = require('electron');
 const path = require('path');
 const fs = require('fs');
 const net = require('net');
@@ -16,6 +25,7 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const { spawn } = require('child_process');
 const { fileURLToPath } = require('url');
+const { installGlobalSystemFetchBridge } = require('./systemFetchBridge.cjs');
 
 const APP_VERSION = require('../package.json').version;
 const UPDATE_DISABLED_MESSAGE = '开发模式不会检查 GitHub Release 更新';
@@ -1845,6 +1855,30 @@ async function startBackend() {
     ? path.join(process.resourcesPath, 'frontend')
     : path.resolve(__dirname, '..', 'dist');
 
+
+  // The backend shares Electron's main process in packaged builds. Route its
+  // ordinary HTTP(S) fetches through Chromium so Windows system proxy, PAC,
+  // authenticated proxy, TUN and native IPv4/IPv6 behavior are actually used.
+  // Requests with an explicit Undici dispatcher remain on Node's stack because
+  // they are deliberate fresh-connection/DNS recovery paths.
+  const defaultNetworkSession = session.defaultSession;
+  installGlobalSystemFetchBridge({
+    chromiumFetch: defaultNetworkSession.fetch.bind(defaultNetworkSession),
+    refreshNetwork: async () => {
+      const refreshTasks = [];
+      try {
+        refreshTasks.push(defaultNetworkSession.forceReloadProxyConfig());
+      } catch (_) {}
+      try {
+        if (typeof defaultNetworkSession.clearHostResolverCache === 'function') {
+          refreshTasks.push(defaultNetworkSession.clearHostResolverCache());
+        }
+      } catch (_) {}
+      await Promise.allSettled(refreshTasks);
+    },
+    refreshIntervalMs: 3_000,
+    resolveHost: defaultNetworkSession.resolveHost.bind(defaultNetworkSession),
+  });
   // 同进程内加载后端,先注册 T8ENC1 + bytenode loader
   try {
     require('./loader.cjs');
