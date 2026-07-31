@@ -1,37 +1,38 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.7.3",
-  "lastUpdated": "2026-07-31-v2.7.3-hailuo-h3-resource-upstream-release-candidate",
+  "lastUpdated": "2026-07-31-v2.7.3-hailuo-h3-resource-upstream-released",
   "release": {
-    "status": "release-candidate",
+    "status": "released",
     "version": "2.7.3",
     "date": "2026-07-31",
-    "publishedAt": null,
+    "publishedAt": "2026-07-31T06:16:01Z",
     "tag": "v2.7.3",
-    "latest": false,
-    "sourceCommit": null,
+    "latest": true,
+    "sourceCommit": "3aeb1c4ad69bf8ab7f436a88473f4b27ef2e1f8e",
     "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.3",
     "artifacts": {
       "installer": {
         "name": "T8-PenguinCanvas-Setup-2.7.3.exe",
-        "size": null,
-        "sha256": null
+        "size": 1304623462,
+        "sha256": "e7634bac2cb2461909abbfbb2e88b8471b9c54659684c22e9b0538c05431f4a7"
       },
       "blockmap": {
         "name": "T8-PenguinCanvas-Setup-2.7.3.exe.blockmap",
-        "size": null,
-        "sha256": null
+        "size": 1359314,
+        "sha256": "b9354d2a1ecfcb16bafe138195b437f6d4f571663faa3615b8d33a1ef80b35fc"
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": null,
-        "sha256": null
+        "size": 362,
+        "sha256": "58979c52c2c6e70f9df2d923b181cef73e34b170a49a3276886d5aadd0404ac4"
       }
     },
     "verification": [
-      "v2.7.3 已获用户明确授权发布；正式 Tag、Release target 与自动更新资产将在唯一一次 Electron/NSIS 正式打包完成后回写。",
-      "Hailuo H3 三模型真实 Provider 任务与资源库上游素材定向回归已通过；完整发布前门将在固定发布提交上执行。",
-      "安装包、blockmap 与 latest.yml 的 size、SHA-256、sealed recovery、GitHub 元数据和完整远端回下载证据将在发布完成后回写。",
+      "v2.7.3 已从固定源码提交 3aeb1c4ad69bf8ab7f436a88473f4b27ef2e1f8e 完成正式 Electron/NSIS 构建；origin/main、发布分支与不可移动 Tag 在发布时均指向该安装包对应源码。",
+      "正式流程的运行时预检、Vite/Electron 构建、原生依赖重建、NSIS、post-build、provenance、sealed recovery、GitHub 元数据与自动更新清单门禁均通过，实际只生成并发布一套 NSIS 资产。",
+      "GitHub Release 为非草稿、非预发布并成为 Latest；安装包、blockmap 与 latest.yml 的远端 size、digest 和完整字节回下载均与本地发布产物一致。",
+      "Hailuo H3 三模型真实 Provider 任务、资源库上游素材修复定向回归、89 项 Electron 定向测试、type-check、能力目录和 RH 工具箱门禁均通过。",
       "用户已明确授权先发布、后补真实 Provider、协作多端与安装升级证据；延期不将尚未执行的证据标记为通过。"
     ]
   },
@@ -48,7 +49,7 @@
     ]
   },
   "hailuoH3VideoModels": {
-    "status": "release-candidate-v2.7.3-live-provider-verified",
+    "status": "released-v2.7.3-live-provider-verified",
     "date": "2026-07-31",
     "releaseIncluded": true,
     "platform": "贞贞的平价AI小屋",
@@ -70,11 +71,11 @@
       "hailuo-h3-t2v 实证文件为 3839300 bytes、SHA-256 cb2bcf0d21052645fbb04dc835a8811895b3ac8ec47a2d3a45ae66a3f8f3cb34；hailuo-h3-multi 实证文件为 1238037 bytes、SHA-256 6f9cd855703ebdba8b3311018058006fa06290eb8f4726f09e5c8b3d9f834bff。",
       "用户随后明确授权继续验证 hailuo-h3-i2v；本次续测首次提交即被平台接受，之后只轮询同一任务至成功终态，没有重复提交已接受任务。结果下载为 1007194 bytes 的本地 MP4，SHA-256 a6698f437ed69cf63b7fdbb5963a877b35c5e738c3f78305b1191d99a0aecd2f，并同时通过 ftyp 文件头与 bundled FFmpeg 单线程容器读取校验。",
       "hailuo-h3-t2v、hailuo-h3-i2v、hailuo-h3-multi 三个模型现均具有真实平台接受、完成终态、本地下载和媒体校验证据；任务标识、签名 URL、API Key 与 Provider 原始响应未写入项目记录。",
-      "三模型与资源库上游素材修复已纳入 v2.7.3 发布候选；正式 Electron 打包、Tag、Release 和自动更新资产事实将在唯一一次发布流程完成后回写。"
+      "三模型与资源库上游素材修复已进入 v2.7.3 正式 Electron 自动更新版；不可移动 Tag、GitHub Latest Release 和三项远端资产已完成元数据与完整字节回下载核验。"
     ]
   },
   "resourceLibraryUpstreamMediaFix": {
-    "status": "release-candidate-v2.7.3",
+    "status": "released-v2.7.3",
     "date": "2026-07-31",
     "releaseIncluded": true,
     "highlights": [
@@ -86,7 +87,8 @@
     "verification": [
       "resourceLibraryUpstreamMedia、mediaResolver、imageReferencePersistence、resourceLibraryDrawer 定向回归 18/18 通过。",
       "TypeScript type-check、proxy/mediaResolver/seedanceNz Node 语法检查和定向 diff-check 已通过。",
-      "真实文件仍在 Provider 上传边界做 image/video/audio 魔数校验；资源库数据库声明只作为提示，不覆盖真实文件类型。"
+      "真实文件仍在 Provider 上传边界做 image/video/audio 魔数校验；资源库数据库声明只作为提示，不覆盖真实文件类型。",
+      "该修复已进入 v2.7.3 正式 Electron 自动更新版；GitHub Release 为 Latest，安装包、blockmap 与 latest.yml 已通过远端完整回下载核验。"
     ]
   },
   "runningHubTextOutputTerminalFix": {
