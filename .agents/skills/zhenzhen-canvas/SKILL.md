@@ -9,12 +9,12 @@ Turn creative intent into an editable production plan, then use `zcanvas` as the
 
 ## Current release baseline
 
-- The current authorized desktop and automatic-update release candidate represented by this source is `v2.7.5`: <https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.5>.
-- Its immutable `v2.7.5` release Tag will be fixed to the packaged-source commit by the one formal release flow. Later metadata-only commits on `main` must not move that Tag.
+- The current released desktop and automatic-update baseline is `v2.7.5`: <https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.5>. It is published, non-prerelease, and GitHub Latest.
+- Its immutable `v2.7.5` release Tag and Release target are fixed to packaged-source commit `0d22644f9f751c11cf1dec2dc50b76e57c13b52d`. Later metadata-only commits on `main` must not move that Tag.
 - Treat T8-managed `/api/resources/file/<id>`, `/api/resources/set-file/<id>`, and `/api/project-assets/<id>/media` references as Provider-upload media that must be resolved to their controlled physical file before LLM, image, video, audio, or RunningHub submission. Preserve the original name and MIME as hints while validated bytes remain authoritative.
 - Prefer generation continuity for valid media: a positive media signature may correct stale CDN MIME or filename metadata, while a genuinely unknown codec may fall back to the declared media kind required by the consuming node. Continue rejecting HTML/JSON error bodies, archives, empty/oversized content, cross-kind input, untrusted remote destinations, and arbitrary disk paths.
 - Keep every `CanvasInner` hook before any conditional return, mount RH management modals in the document portal above ReactFlow controls, and scale the selected-node action bar with the same viewport zoom as its node.
-- The one authorized v2.7.5 release flow must produce exactly one actual Electron/NSIS artifact set. The installer, blockmap, update manifest, immutable tag, GitHub Latest metadata, digests, sizes, and complete remote re-download must be verified and then recorded in `features.json`.
+- The authorized v2.7.5 flow produced exactly one actual Electron/NSIS artifact set. Installer `T8-PenguinCanvas-Setup-2.7.5.exe` is 1,304,690,274 bytes with SHA-256 `d1cfb27a09a6de0b4586fcf963be21bc75a339d2bab7082cd4762cd0a4f07350`; its blockmap is 1,359,819 bytes with SHA-256 `10f6a59e141052b799d7bb4c5fb04da217ee5d6943326e498d3fa1314094790e`; `latest.yml` is 362 bytes with SHA-256 `7c693bc95ae94b1757f21bffec0f5b125d2177ebabf534ff9ca84dafc99ea2c8`. Post-build, provenance, sealed recovery, GitHub digest/size metadata, full remote re-download, final Latest verification, and recovery cleanup passed.
 - Multi-device collaboration, installed-upgrade, and live Provider evidence remains explicitly deferred by the owner and must never be reported as passed before it exists.
 
 ## Optimize for the creator

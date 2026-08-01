@@ -1,37 +1,37 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.7.5",
-  "lastUpdated": "2026-08-02-v2.7.5-media-compatibility-canvas-stability-release-candidate",
+  "lastUpdated": "2026-08-02-v2.7.5-released",
   "release": {
-    "status": "release-candidate",
+    "status": "released-v2.7.5",
     "version": "2.7.5",
     "date": "2026-08-02",
-    "publishedAt": null,
+    "publishedAt": "2026-08-01T17:56:31Z",
     "tag": "v2.7.5",
-    "latest": false,
-    "sourceCommit": null,
+    "latest": true,
+    "sourceCommit": "0d22644f9f751c11cf1dec2dc50b76e57c13b52d",
     "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.5",
     "artifacts": {
       "installer": {
         "name": "T8-PenguinCanvas-Setup-2.7.5.exe",
-        "size": null,
-        "sha256": null
+        "size": 1304690274,
+        "sha256": "d1cfb27a09a6de0b4586fcf963be21bc75a339d2bab7082cd4762cd0a4f07350"
       },
       "blockmap": {
         "name": "T8-PenguinCanvas-Setup-2.7.5.exe.blockmap",
-        "size": null,
-        "sha256": null
+        "size": 1359819,
+        "sha256": "10f6a59e141052b799d7bb4c5fb04da217ee5d6943326e498d3fa1314094790e"
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": null,
-        "sha256": null
+        "size": 362,
+        "sha256": "7c693bc95ae94b1757f21bffec0f5b125d2177ebabf534ff9ca84dafc99ea2c8"
       }
     },
     "verification": [
-      "v2.7.5 已获用户明确授权发布；正式 Tag、Release target 与自动更新资产将在唯一一次 Electron/NSIS 正式打包完成后回写。",
-      "上游素材物理化、RunningHub、Canvas Hook 顺序、操作栏缩放和代理安全日志聚焦回归 57/57 通过。",
-      "安装包、blockmap 与 latest.yml 的 size、SHA-256、sealed recovery、GitHub 元数据和完整远端回下载证据将在发布完成后回写。",
+      "v2.7.5 Tag 与 Release target 已固定到唯一正式 Electron/NSIS 安装包对应源码 0d22644f9f751c11cf1dec2dc50b76e57c13b52d；Release 已公开且为 GitHub Latest。",
+      "上游素材物理化、RunningHub、Canvas Hook 顺序、操作栏缩放、系统网络与代理安全日志等发布范围聚焦回归 147/147，协作发布门 4/4 通过；TypeScript、公开发布面、RH 工具箱和能力目录检查通过。",
+      "Electron/Vite/加密/运行时/原生模块/NSIS 正式流程只实际打包一次；安装包、blockmap 与 latest.yml 已通过 post-build、provenance、sealed recovery、GitHub digest/size 元数据、发布前完整远端回下载、最终 Latest 与 recovery 清理核验。",
       "用户已明确授权先发布、后补真实 Provider、协作多端与安装升级证据；延期不将尚未执行的证据标记为通过。"
     ]
   },
@@ -50,7 +50,7 @@
     ]
   },
   "mediaCompatibilityCanvasStabilityV275": {
-    "status": "release-candidate-v2.7.5",
+    "status": "released-v2.7.5",
     "date": "2026-08-02",
     "releaseIncluded": true,
     "highlights": [
@@ -61,8 +61,8 @@
       "CanvasInner 的 Creator Context hook 固定在空画布早返回之前，消除生产版 React #310；选中节点 RUN/STOP/关闭操作栏使用 ReactFlow viewport zoom 同比缩放并保持节点右上锚定。"
     ],
     "verification": [
-      "nodeActionBarZoom、canvasInteraction、resourceLibraryUpstreamMedia、runningHubSiteRouting 与 proxyLogRedactionB3 聚焦回归 57/57 通过。",
-      "TypeScript、完整发布回归、公开发布面、RH 工具箱、能力目录和唯一一次 Electron/NSIS 正式流程将在固定发布提交上继续执行。",
+      "nodeActionBarZoom、canvasInteraction、resourceLibraryUpstreamMedia、runningHubSiteRouting、系统网络、可信 Provider 输出与 proxyLogRedactionB3 等发布范围聚焦回归 147/147 通过，协作发布门 4/4 通过。",
+      "TypeScript、公开发布面、RH 工具箱、能力目录和固定提交上的唯一一次 Electron/NSIS 正式流程通过；三项资产已完成远端完整回下载与 Latest 核验。",
       "真实 Provider、协作多端与安装升级证据按用户授权后补，不会在执行前标记为通过。"
     ]
   },
