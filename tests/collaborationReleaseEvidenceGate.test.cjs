@@ -14,7 +14,7 @@ const {
 } = require('../scripts/collaboration-release-evidence.cjs');
 
 const TARGET = 'a'.repeat(40);
-const VERSION = '2.7.3';
+const VERSION = '2.7.5';
 const GENERATED_AT = '2026-07-20T00:00:00.000Z';
 const NOW = Date.parse('2026-07-20T00:01:00.000Z');
 const DEVICE_A = '1'.repeat(64);
@@ -321,7 +321,7 @@ function validate(item) {
   });
 }
 
-test('v2.7.3 owner-approved deferral accepts only a missing manifest and never marks evidence passed', () => {
+test('v2.7.5 owner-approved deferral accepts only a missing manifest and never marks evidence passed', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-collab-evidence-deferral-'));
   const evidencePath = path.join(directory, 'manifest.json');
   try {
@@ -355,7 +355,7 @@ test('v2.7.3 owner-approved deferral accepts only a missing manifest and never m
     assert.throws(() => assertCollaborationReleaseEvidenceForPublish({
       root: path.resolve(__dirname, '..'),
       evidencePath,
-      version: '2.6.3',
+      version: '2.7.4',
       target: TARGET,
       deferralApproval: COLLABORATION_RELEASE_EVIDENCE_POST_RELEASE_DEFERRAL_APPROVAL,
     }), /manifest is missing/);
