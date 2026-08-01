@@ -10,13 +10,13 @@ https://www.runninghub.cn/?inviteCode=rh-v1121
 My favorite girl Go YounJung
 # 🐧 贞贞的无限画布（企鹅共创版） · T8-penguin-canvas
 
-> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.7.4
+> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.7.5
 >
 > GitHub：<https://github.com/T8mars/T8-penguin-canvas>
 
 一个面向 AI 创作的 **节点式画布**：拖拽节点、连线编排、生成图像 / 视频 / 音频、调用 LLM、串接 RunningHub 工作流，叠加批量执行、智能对齐、打组、主题模板与终端日志。Web 浏览器和桌面端均可使用。
 
-![status](https://img.shields.io/badge/version-v2.7.4-brightgreen) ![node](https://img.shields.io/badge/node-57-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
+![status](https://img.shields.io/badge/version-v2.7.5-brightgreen) ![node](https://img.shields.io/badge/node-57-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
 
 ---
 
@@ -37,6 +37,7 @@ My favorite girl Go YounJung
 
 - 🎨 **57 个节点**，覆盖文本 / 图像 / 视频 / 音频 / LLM / RunningHub / ComfyUI / 3D / 工具 / 辅助 / 工具箱 / 输出预览 / 上传素材 / 素材集 / 批量打标 / 随机路由 / Story 全自动制片
 - 🧺 **画布级批量导入 + 素材合集打散**：上传节点支持一次选择多张图 / 多个视频 / 多段音频；也可直接把剪贴板或文件拖到画布，同类型多素材自动形成合集，上传和输出合集都可一键打散为多个独立素材节点
+- 🧩 **v2.7.5 素材兼容与画布稳定修复版**：资源库和项目资产的图片、视频、音频会在 Provider / LLM / RunningHub 提交前解析为真实物理文件；有效媒体魔数可纠正旧 CDN 的错误 MIME 或扩展名，未知新编码可按可信上下文兼容，同时继续拒绝 HTML/JSON、归档和跨类型伪装。同步修复画布随机 React #310、RH 超市弹窗被 RUN 遮挡、RH 站点解析与上传链路，以及缩小画布时 RUN 操作栏不随节点缩放的问题。
 - 🌐 **v2.7.4 系统网络与资源库入画布修复版**：Electron Provider、LLM/Vision、图像、视频、音频及可信结果下载统一优先沿 Chromium 系统网络，适配系统代理、TUN、VPN、IPv4/IPv6，写请求失败不会自动重放；资源库加号、飞机发送和 Ctrl 拖拽可可靠创建上传节点并保留原文件名、MIME 与类型，让图片、视频、音频继续作为下游节点的上游素材。
 - 🎬 **v2.7.3 Hailuo H3 与资源库上游素材修复版**：视频节点 Hailuo TAB 在贞贞的平价AI小屋来源下新增 `hailuo-h3-t2v`、`hailuo-h3-i2v`、`hailuo-h3-multi`，按官方契约支持 2K、5–15 秒以及首尾帧/多模态参考；同时修复从资源库拖入图像、视频或音频作为生成节点上游素材时，因资源 URL 没有扩展名而误判格式、上传失败的问题。
 - ✨ **v2.7.2 RunningHub 文本结果终态修复版**：修复 RH AI 应用返回 TXT、Markdown、JSON 或 CSV 时被媒体魔数校验误拦截、画布持续轮询却不出结果的问题；文本与音频、图像、视频混合输出会在同一次 SUCCESS 中安全下载、持久化并传给下游。用户指定 WebApp 已真实验证 TXT + FLAC 结果只经历 RUNNING → SUCCESS，重复查询同一 taskId 仍稳定返回且不会重新提交任务。

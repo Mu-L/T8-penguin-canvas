@@ -13107,6 +13107,20 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     };
   }, [edgeMotionMode, heavyEdgeMotion, isDecorativeEdgeVisual]);
 
+  // Keep every CanvasInner hook above the empty-canvas early return. activeId can
+  // briefly become empty while canvases are loaded or switched; placing this
+  // hook below that return changes the hook count between adjacent renders and
+  // causes React error #310 in production builds.
+  const creatorCanvasContext = useMemo(() => buildCreatorCanvasContext(
+    nodes,
+    edges,
+    getViewport(),
+    {
+      width: typeof window === 'undefined' ? 1440 : window.innerWidth,
+      height: typeof window === 'undefined' ? 900 : window.innerHeight,
+    },
+  ), [edges, getViewport, nodes, viewportMoving]);
+
   if (!activeId) {
     return (
       <div
@@ -13356,16 +13370,6 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       )}
     </>
   );
-
-  const creatorCanvasContext = useMemo(() => buildCreatorCanvasContext(
-    nodes,
-    edges,
-    getViewport(),
-    {
-      width: typeof window === 'undefined' ? 1440 : window.innerWidth,
-      height: typeof window === 'undefined' ? 900 : window.innerHeight,
-    },
-  ), [edges, getViewport, nodes, viewportMoving]);
 
   return (
     <div

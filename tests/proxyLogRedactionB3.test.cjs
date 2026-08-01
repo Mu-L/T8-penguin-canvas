@@ -173,7 +173,7 @@ test('B3 mounted canvas image references trust valid magic over a stale filename
     fs.writeFileSync(path.join(inputDir, 'not-an-image.png'), Buffer.from('<html>not media</html>'));
     await assert.rejects(
       () => proxyRouter._test.refToBuffer('/files/input/not-an-image.png'),
-      /Content-Type|魔数/,
+      /HTML\/JSON|不是媒体文件/,
     );
   });
 });
@@ -1257,7 +1257,7 @@ test('B3 RunningHub output filenames come only from verified media magic and sta
   assert.match(serverSource, /mountUserMediaStatic\('\/files\/output'/);
 });
 
-test('B3 RH media validation trusts verified magic for same-kind subtype drift and still rejects unsafe mismatches', () => {
+test('B3 media validation accepts stale MIME and unknown codecs while rejecting clear non-media or cross-kind input', () => {
   const png = Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     Buffer.alloc(16),
@@ -1310,36 +1310,68 @@ test('B3 RH media validation trusts verified magic for same-kind subtype drift a
       {
         allowedKinds: fixture.allowedKinds,
         maxBytes: 1024,
-        allowSameKindSubtypeMismatch: true,
       },
     );
     assert.equal(verified.detectedMime, fixture.detected);
     assert.equal(verified.contentType, fixture.detected);
+    assert.equal(verified.mediaKind, fixture.allowedKinds[0]);
     assert.equal(verified.contentTypeMismatch, true);
     assert.equal(proxyRouter._test.verifiedProxyMediaExtension(verified), fixture.extension);
   }
-  assert.throws(
-    () => proxyRouter._test.validateProxyMediaBuffer(png, 'image/jpeg', {
-      allowedKinds: ['image'],
-      maxBytes: 1024,
-    }),
-    /Content-Type.*子类型/,
-    'untrusted input uploads keep exact subtype checking unless a completed output explicitly opts in',
+
+  const staleCrossKindHeader = proxyRouter._test.validateProxyMediaBuffer(png, 'video/mp4', {
+    allowedKinds: ['image', 'video', 'audio'],
+    maxBytes: 1024,
+  });
+  assert.equal(staleCrossKindHeader.mediaKind, 'image');
+  assert.equal(staleCrossKindHeader.contentType, 'image/png');
+  assert.equal(staleCrossKindHeader.contentTypeMismatch, true);
+
+  const unknownImage = proxyRouter._test.validateProxyMediaBuffer(
+    Buffer.from([0x01, 0x02, 0x03, 0x04]),
+    'image/x-new-codec',
+    { allowedKinds: ['image'], maxBytes: 1024 },
   );
+  assert.equal(unknownImage.mediaKind, 'image');
+  assert.equal(unknownImage.contentType, 'image/x-new-codec');
+  assert.equal(proxyRouter._test.verifiedProxyMediaExtension(unknownImage), 'png');
+
+  const unknownMov = proxyRouter._test.validateProxyMediaBuffer(
+    Buffer.from([0x01, 0x02, 0x03, 0x04]),
+    'application/octet-stream',
+    { allowedKinds: ['video'], maxBytes: 1024, sourceName: 'signed-result.mov?token=redacted' },
+  );
+  assert.equal(unknownMov.mediaKind, 'video');
+  assert.equal(unknownMov.contentType, 'video/quicktime');
+  assert.equal(proxyRouter._test.verifiedProxyMediaExtension({ ...unknownMov, finalUrl: 'https://cdn.invalid/signed.mov?x=1' }), 'mov');
+
+  const unknownAudio = proxyRouter._test.validateProxyMediaBuffer(
+    Buffer.from([0x01, 0x02, 0x03, 0x04]),
+    'application/octet-stream',
+    { allowedKinds: ['audio'], maxBytes: 1024 },
+  );
+  assert.equal(unknownAudio.contentType, 'audio/mpeg');
+  assert.equal(proxyRouter._test.verifiedProxyMediaExtension(unknownAudio), 'mp3');
 
   for (const [bytes, declared, allowedKinds] of [
-    [png, 'video/mp4', ['image', 'video', 'audio']],
-    [mp3, 'image/png', ['image', 'video', 'audio']],
-    [quickTime, 'audio/mp4', ['image', 'video', 'audio']],
-    [png, 'text/html', ['image']],
+    [png, 'image/png', ['video']],
     [Buffer.from('<html>not media</html>'), 'image/png', ['image']],
+    [Buffer.from('{"error":"not media"}'), 'video/mp4', ['video']],
     [Buffer.concat([Buffer.from('PK\x03\x04', 'binary'), Buffer.alloc(16)]), 'application/octet-stream', ['image', 'video', 'audio']],
   ]) {
     assert.throws(
       () => proxyRouter._test.validateProxyMediaBuffer(bytes, declared, { allowedKinds, maxBytes: 1024 }),
-      /Content-Type|魔数|归档容器/,
+      /当前节点|HTML\/JSON|归档容器|支持范围/,
     );
   }
+
+  assert.throws(
+    () => proxyRouter._test.validateProxyMediaBuffer(Buffer.alloc(0), 'image/png', {
+      allowedKinds: ['image'],
+      maxBytes: 1024,
+    }),
+    /为空/,
+  );
 });
 
 test('B3 RunningHub materializes mixed image, video, and audio outputs despite same-kind CDN subtype drift', async () => {

@@ -11,7 +11,11 @@ const {
   generateVideoWithProvider,
   testProviderConnection,
 } = require('../providers/adapters');
-const { resolveMediaRef } = require('../providers/mediaResolver');
+const {
+  isT8LocalMediaPath,
+  normalizeT8LocalMediaRef,
+  resolveMediaRef,
+} = require('../providers/mediaResolver');
 const { isLoopbackAddress, safeRemoteMediaFetch } = require('../utils/safeRemoteMediaFetch');
 
 const router = express.Router();
@@ -274,10 +278,10 @@ function cleanWebText(value, maxLen = 4000) {
 }
 
 function cleanWebImageUrl(value) {
-  const text = String(value || '').trim();
+  const text = normalizeT8LocalMediaRef(value);
   if (!text || text.length > 8 * 1024 * 1024) return '';
   if (/^(https?:\/\/|data:image\/)/i.test(text)) return text;
-  if (text.startsWith('/files/') || text.startsWith('/input/') || text.startsWith('/output/')) return text;
+  if (isT8LocalMediaPath(text)) return text;
   return '';
 }
 
@@ -338,7 +342,7 @@ async function fetchWebImageAsDataUrl(imageUrl, options = {}) {
 }
 
 async function resolveWebImageForVision(imageUrl, options = {}) {
-  const text = String(imageUrl || '').trim();
+  const text = normalizeT8LocalMediaRef(imageUrl);
   if (/^data:image\/[^;,]+;base64,/i.test(text)) return text;
   if (/^https?:\/\//i.test(text)) return fetchWebImageAsDataUrl(text, options);
 

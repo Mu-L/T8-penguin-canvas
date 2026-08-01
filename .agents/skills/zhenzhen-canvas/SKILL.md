@@ -9,12 +9,13 @@ Turn creative intent into an editable production plan, then use `zcanvas` as the
 
 ## Current release baseline
 
-- The current desktop and automatic-update release is `v2.7.4`: <https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.4>.
-- Its immutable `v2.7.4` release Tag and Release target are fixed to packaged-source commit `3ddb3c1cf49ffbfa12e4b62fa1b322a5b3b0dd6a`. Later metadata-only commits on `main` must not move that Tag.
-- This release adds `hailuo-h3-t2v`, `hailuo-h3-i2v`, and `hailuo-h3-multi` to the Hailuo TAB under 贞贞的平价AI小屋. Keep H3 at 2K and 5–15 seconds; T2V accepts prompt/aspect ratio, I2V accepts one start image plus an optional end image, and multi accepts bounded image/video/audio references exactly as the generated capability catalog declares.
-- Resource-library image, video, and audio references must preserve original filename and MIME hints while treating validated file magic as authoritative. A `/api/resources/file/<id>` URL without an extension must remain usable as upstream Provider material and must never be forced through image-only validation.
-- The authorized v2.7.4 release flow produced exactly one Electron/NSIS artifact set. The installer is 1,304,642,644 bytes with SHA-256 `ded4b29b2485821522aa7df18ac3e7c5c536b61b0034eef96b56eedb98a73736`; the blockmap is 1,359,830 bytes with SHA-256 `24977db135ac8fdefb85464ca32a6bfbdb628d44c16aa99ee5b34d39ecba9a4e`; `latest.yml` is 362 bytes with SHA-256 `2d11791c431f6475d5452c41c06a66ba1fa44f551b4b70dd159c49e59ba31e49`. Post-build, provenance, sealed recovery, GitHub digest/size metadata, complete remote re-download, final Latest state, and recovery cleanup all passed and are recorded in `features.json`.
-- All three H3 models already have real accepted-task, terminal-result, local-download, and media-validation evidence. Multi-device collaboration and installed-upgrade evidence remains explicitly deferred by the owner and must never be reported as passed before it exists.
+- The current authorized desktop and automatic-update release candidate represented by this source is `v2.7.5`: <https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.5>.
+- Its immutable `v2.7.5` release Tag will be fixed to the packaged-source commit by the one formal release flow. Later metadata-only commits on `main` must not move that Tag.
+- Treat T8-managed `/api/resources/file/<id>`, `/api/resources/set-file/<id>`, and `/api/project-assets/<id>/media` references as Provider-upload media that must be resolved to their controlled physical file before LLM, image, video, audio, or RunningHub submission. Preserve the original name and MIME as hints while validated bytes remain authoritative.
+- Prefer generation continuity for valid media: a positive media signature may correct stale CDN MIME or filename metadata, while a genuinely unknown codec may fall back to the declared media kind required by the consuming node. Continue rejecting HTML/JSON error bodies, archives, empty/oversized content, cross-kind input, untrusted remote destinations, and arbitrary disk paths.
+- Keep every `CanvasInner` hook before any conditional return, mount RH management modals in the document portal above ReactFlow controls, and scale the selected-node action bar with the same viewport zoom as its node.
+- The one authorized v2.7.5 release flow must produce exactly one actual Electron/NSIS artifact set. The installer, blockmap, update manifest, immutable tag, GitHub Latest metadata, digests, sizes, and complete remote re-download must be verified and then recorded in `features.json`.
+- Multi-device collaboration, installed-upgrade, and live Provider evidence remains explicitly deferred by the owner and must never be reported as passed before it exists.
 
 ## Optimize for the creator
 

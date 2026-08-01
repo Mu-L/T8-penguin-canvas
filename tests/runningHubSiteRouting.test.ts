@@ -86,5 +86,9 @@ test('RunningHub settings and RH node surfaces expose independent domestic and o
   assert.match(rhToolsNode, /resolveRunningHubDisplaySite\(configuredRhSite, webappId, appInfo\)/);
   assert.match(rhToolsNode, /displayedRhSite === 'intl' \? '海外站' : '国内站'/);
   assert.match(rhToolsEditor, /aria-label="RunningHub 站点"/);
+  assert.match(rhToolsEditor, /import \{ createPortal \} from 'react-dom'/);
+  assert.match(rhToolsEditor, /createPortal\(modal, document\.body\)/);
+  assert.match(rhToolsEditor, /data-rh-tool-editor-modal="true"/);
+  assert.match(rhToolsEditor, /zIndex:\s*2147483000/);
   assert.match(rhToolbox, /rhSite\?: 'cn' \| 'intl'/);
 });

@@ -1,4 +1,4 @@
-const { resolveMediaRef } = require('./mediaResolver');
+const { normalizeT8LocalMediaRef, resolveMediaRef } = require('./mediaResolver');
 const { normalizeLlmMessageMedia } = require('./llmMedia');
 const { providerTrace } = require('./providerTrace');
 const { providerIdempotencyHeadersLike } = require('../services/providerSubmissionContext');
@@ -499,23 +499,8 @@ function buildImageEditFormData({ model, prompt, input, files }) {
   return form;
 }
 
-function normalizeLocalT8MediaRef(value, baseUrl) {
-  const text = String(value || '').trim();
-  if (!/^https?:\/\//i.test(text)) return text;
-  try {
-    const parsed = new URL(text);
-    const pathname = parsed.pathname || '';
-    if (!/^\/(?:files|api\/resources|api\/files|input|output)\//.test(pathname)) return text;
-    const base = baseUrl ? new URL(baseUrl) : null;
-    const host = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
-    const baseHost = base?.hostname?.replace(/^\[|\]$/g, '').toLowerCase();
-    const isSameBackend = base && parsed.protocol === base.protocol && parsed.host === base.host;
-    const isLocalBackend = ['127.0.0.1', 'localhost', '::1'].includes(host)
-      || (baseHost && host === baseHost && parsed.port === base.port);
-    return isSameBackend || isLocalBackend ? `${pathname}${parsed.search || ''}` : text;
-  } catch {
-    return text;
-  }
+function normalizeLocalT8MediaRef(value, _baseUrl) {
+  return normalizeT8LocalMediaRef(value);
 }
 
 function providerLooksLikeAgnes(provider) {

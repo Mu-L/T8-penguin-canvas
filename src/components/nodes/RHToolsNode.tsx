@@ -64,6 +64,7 @@ import {
   rhParamKey,
   type RhParamValue,
 } from '../../utils/rhTextBinding';
+import { isProviderUploadMediaReference } from '../../utils/providerMediaReference';
 import ResizableCorners from './ResizableCorners';
 import RHToolEditorModal from './RHToolEditorModal';
 import type { RHTool, RHToolsBackup } from '../../services/api';
@@ -508,12 +509,7 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
           logBus.warn(`多行 fieldValue 检测到-${fieldName}，仅保留首行`, src);
           v = first;
         }
-        const isUrlLike0 =
-          /^https?:\/\//i.test(v) ||
-          v.startsWith('/files/output/') ||
-          v.startsWith('/output/') ||
-          v.startsWith('/files/input/') ||
-          v.startsWith('/input/');
+        const isUrlLike0 = isProviderUploadMediaReference(v);
         if (!isUrlLike0) {
           const k = paramKey(nodeId, fieldName);
           const cur = paramValues[k];
@@ -526,12 +522,7 @@ const RHToolsNode = ({ id, data, selected }: NodeProps) => {
           }
         }
         if (!v) continue;
-        const isUrlLike =
-          /^https?:\/\//i.test(v) ||
-          v.startsWith('/files/output/') ||
-          v.startsWith('/output/') ||
-          v.startsWith('/files/input/') ||
-          v.startsWith('/input/');
+        const isUrlLike = isProviderUploadMediaReference(v);
         if (isUrlLike) {
           const r = await uploadRhAsset(v, activeRhSiteRef.current);
           if (r.site) activeRhSiteRef.current = r.site;

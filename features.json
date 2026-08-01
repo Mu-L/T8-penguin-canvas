@@ -1,52 +1,69 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.7.4",
-  "lastUpdated": "2026-08-01-v2.7.4-system-network-resource-ingress-released",
+  "version": "2.7.5",
+  "lastUpdated": "2026-08-02-v2.7.5-media-compatibility-canvas-stability-release-candidate",
   "release": {
-    "status": "released",
-    "version": "2.7.4",
-    "date": "2026-08-01",
-    "publishedAt": "2026-07-31T19:27:23Z",
-    "tag": "v2.7.4",
-    "latest": true,
-    "sourceCommit": "3ddb3c1cf49ffbfa12e4b62fa1b322a5b3b0dd6a",
-    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.4",
+    "status": "release-candidate",
+    "version": "2.7.5",
+    "date": "2026-08-02",
+    "publishedAt": null,
+    "tag": "v2.7.5",
+    "latest": false,
+    "sourceCommit": null,
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.5",
     "artifacts": {
       "installer": {
-        "name": "T8-PenguinCanvas-Setup-2.7.4.exe",
-        "size": 1304642644,
-        "sha256": "ded4b29b2485821522aa7df18ac3e7c5c536b61b0034eef96b56eedb98a73736"
+        "name": "T8-PenguinCanvas-Setup-2.7.5.exe",
+        "size": null,
+        "sha256": null
       },
       "blockmap": {
-        "name": "T8-PenguinCanvas-Setup-2.7.4.exe.blockmap",
-        "size": 1359830,
-        "sha256": "24977db135ac8fdefb85464ca32a6bfbdb628d44c16aa99ee5b34d39ecba9a4e"
+        "name": "T8-PenguinCanvas-Setup-2.7.5.exe.blockmap",
+        "size": null,
+        "sha256": null
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": 362,
-        "sha256": "2d11791c431f6475d5452c41c06a66ba1fa44f551b4b70dd159c49e59ba31e49"
+        "size": null,
+        "sha256": null
       }
     },
     "verification": [
-      "v2.7.4 已按用户明确授权正式发布；不可移动 Tag 与 Release target 精确固定到 3ddb3c1cf49ffbfa12e4b62fa1b322a5b3b0dd6a，Release 非草稿、非预发布并为 Latest。",
-      "系统网络桥接、TUN/Fake-IP、可信输出下载、Seedance 媒体和资源库入画布/上游素材聚焦回归 121/121 通过。",
-      "Electron/Vite、后端加密、运行时归档、原生模块重建与 NSIS 正式流程只执行一次；post-build 和 provenance 封存通过。",
-      "安装包、blockmap 与 latest.yml 的本地 size/SHA-256、sealed recovery、GitHub digest/size 元数据和发布前完整远端回下载字节全部一致，release recovery 已清除。",
+      "v2.7.5 已获用户明确授权发布；正式 Tag、Release target 与自动更新资产将在唯一一次 Electron/NSIS 正式打包完成后回写。",
+      "上游素材物理化、RunningHub、Canvas Hook 顺序、操作栏缩放和代理安全日志聚焦回归 57/57 通过。",
+      "安装包、blockmap 与 latest.yml 的 size、SHA-256、sealed recovery、GitHub 元数据和完整远端回下载证据将在发布完成后回写。",
       "用户已明确授权先发布、后补真实 Provider、协作多端与安装升级证据；延期不将尚未执行的证据标记为通过。"
     ]
   },
   "versionSequencePolicy": {
     "status": "active",
     "date": "2026-07-30",
-    "currentVersion": "2.7.4",
+    "currentVersion": "2.7.5",
     "rules": [
       "版本号每一段只使用 0-9；v2.6.9 的下一正式版本固定为 v2.7.0。",
       "禁止创建、打包、推送、打 tag、发布或写入自动更新元数据为 v2.6.10。",
       "v2.7.1 的下一正式版本固定为 v2.7.2。",
       "v2.7.2 的下一正式版本固定为 v2.7.3。",
       "v2.7.3 的下一正式版本固定为 v2.7.4。",
+      "v2.7.4 的下一正式版本固定为 v2.7.5。",
       "后续改版本前必须同步核对 package.json、package-lock.json、README、features.json、项目 SKILL.md、Release notes、自动更新元数据和 Git tag。"
+    ]
+  },
+  "mediaCompatibilityCanvasStabilityV275": {
+    "status": "release-candidate-v2.7.5",
+    "date": "2026-08-02",
+    "releaseIncluded": true,
+    "highlights": [
+      "资源库 /api/resources/file/*、素材集与项目资产 /api/project-assets/*/media 统一在 LLM、图像、视频、音频和 RunningHub 提交前解析为受控物理文件；相对 URL 与本机 loopback 绝对 URL 使用同一路径，保留原始名称和 MIME 提示。",
+      "媒体兼容恢复到生成优先原则：有效文件魔数可以纠正 CDN 的错误 MIME 子类型或扩展名；未知新编码可按可信声明 MIME、文件名或消费节点需要的媒体种类落盘，不再因元数据漂移误杀真实素材。",
+      "安全边界继续拒绝 HTML/JSON 错误页、ZIP/归档、空或超限内容、跨媒体种类伪装、不可信远程目标和任意磁盘路径；受控 input/output/thumbnails、资源库和项目资产之外的本地路径不会被读取。",
+      "RunningHub 普通节点和 RH 工具箱共享全部 T8 受控媒体引用识别与物理上传；WebApp 站点显示跟随 app-info 实际解析站点，RH 超市管理弹窗通过 document portal 避免被悬浮 RUN 控件遮挡。",
+      "CanvasInner 的 Creator Context hook 固定在空画布早返回之前，消除生产版 React #310；选中节点 RUN/STOP/关闭操作栏使用 ReactFlow viewport zoom 同比缩放并保持节点右上锚定。"
+    ],
+    "verification": [
+      "nodeActionBarZoom、canvasInteraction、resourceLibraryUpstreamMedia、runningHubSiteRouting 与 proxyLogRedactionB3 聚焦回归 57/57 通过。",
+      "TypeScript、完整发布回归、公开发布面、RH 工具箱、能力目录和唯一一次 Electron/NSIS 正式流程将在固定发布提交上继续执行。",
+      "真实 Provider、协作多端与安装升级证据按用户授权后补，不会在执行前标记为通过。"
     ]
   },
   "electronSystemNetworkBridgeAndTrustedOutputRecovery": {
@@ -6316,11 +6333,11 @@
       "T8_ENABLE_LOCAL_PRIVATE": "开发环境和普通本机构建可选；0=关闭本机 local-private/extensions 私有扩展。正式 dist:release 固定为 1，不能被父环境降级。GitHub/clean clone 因为没有 local-private 目录，不包含充值实现。",
       "T8_DISABLE_LOCAL_EXTENSIONS": "开发环境可选；1=关闭本地扩展。正式 dist:release 固定为 0，确保本机私有 sidecar 参与加密打包与后置校验。"
     },
-    "version": "2.7.4",
-    "semverVersion": "2.7.4",
+    "version": "2.7.5",
+    "semverVersion": "2.7.5",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；当前正式版为 v2.7.4，聚焦 Electron 系统网络兼容、可信 Provider 输出恢复，以及资源库素材可靠进入画布并作为下游节点上游素材。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.7.4 已获授权进入唯一一次 Electron/NSIS 正式发布流程；固定 source/tag、三项自动更新资产、摘要和完整远端回下载事实将在流程成功后回写。用户授权的一次性证据延期不改变未完成证据状态。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；当前发布候选为 v2.7.5，聚焦受控素材物理化、兼容真实媒体元数据漂移、RunningHub 上传/弹窗，以及 Canvas Hook 与操作栏缩放稳定性。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.7.5 已获授权进入唯一一次 Electron/NSIS 正式发布流程；固定 source/tag、三项自动更新资产、摘要和完整远端回下载事实将在流程成功后回写。用户授权的一次性证据延期不改变未完成证据状态。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",

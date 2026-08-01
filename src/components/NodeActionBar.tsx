@@ -21,9 +21,8 @@ import { trackAchievementEvent } from '../stores/achievements';
 import { useHiddenFeatureStore, isRhDuckUploadEnabled, isYyhPortraitEnabled } from '../stores/hiddenFeatures';
 import { resolveThemeTemplate } from '../theme/defaultTemplates';
 import { getMediaItemsFromData } from '../utils/mediaCollection';
+import { resolveNodeActionBarGeometry } from '../utils/nodeActionBarGeometry';
 import { EXECUTABLE_NODE_TYPES } from '../config/executableNodeTypes';
-
-const BAR_GAP_PX = 8; // 与节点顶部的世界坐标系间距
 
 const ACTION_COLORS: Record<string, { run: string; stop: string; close: string }> = {
   tech: { run: '#22c55e', stop: '#f97316', close: '#ef4444' },
@@ -143,12 +142,20 @@ const NodeActionBar = ({ onRunNode, onStopRun }: NodeActionBarProps) => {
     (selectedExe as any).width ||
     320;
 
-  // 节点屏幕坐标
-  const nodeScreenX = selectedExe.position.x * zoom + vx;
-  const nodeScreenY = selectedExe.position.y * zoom + vy;
-  // ActionBar 锚定: 右对齐节点右边, 在节点上方 (BAR_GAP_PX * zoom)
-  const rightX = nodeScreenX + nodeW * zoom;
-  const topY = nodeScreenY - BAR_GAP_PX * zoom;
+  // ActionBar 的锚点和尺寸都使用同一 viewport zoom：节点缩小时操作栏同步缩小。
+  // 外层只负责锚点，内层以右下角为原点缩放，避免 scale 改变右对齐位置。
+  const {
+    anchorX: rightX,
+    anchorY: topY,
+    scale: actionBarScale,
+  } = resolveNodeActionBarGeometry({
+    nodeX: selectedExe.position.x,
+    nodeY: selectedExe.position.y,
+    nodeWidth: nodeW,
+    viewportX: vx,
+    viewportY: vy,
+    zoom,
+  });
 
   const selectedStatus = String(selectedData?.status || '');
   const selectedNodeBusy = selectedStatus === 'submitting' || selectedStatus === 'polling';
@@ -317,8 +324,8 @@ const NodeActionBar = ({ onRunNode, onStopRun }: NodeActionBarProps) => {
       // pointer-events: none 让外层不阻挡画布交互; 子按钮独立 enable
       style={{
         position: 'absolute',
-        left: 0,
-        top: 0,
+        left: rightX,
+        top: topY,
         pointerEvents: 'none',
         zIndex: 50,
       }}
@@ -334,10 +341,10 @@ const NodeActionBar = ({ onRunNode, onStopRun }: NodeActionBarProps) => {
         onMouseDown={(e) => e.stopPropagation()}
         style={{
           position: 'absolute',
-          left: rightX,
-          top: topY,
-          // 整体右对齐 + 向上脱离 (translate 不受 transform-origin 影响)
-          transform: 'translate(-100%, -100%)',
+          right: 0,
+          bottom: 0,
+          transform: `scale(${actionBarScale})`,
+          transformOrigin: 'bottom right',
           display: 'inline-flex',
           alignItems: 'center',
           gap: 6,

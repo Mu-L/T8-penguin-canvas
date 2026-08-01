@@ -7,8 +7,10 @@ const config = require('../config');
 const { withFfmpegProcessSlot } = require('../utils/ffmpegProcessQueue');
 const {
   isDataUrl,
+  isT8LocalMediaPath,
   mediaRefToAbsoluteUrl,
   mimeFromPath,
+  normalizeT8LocalMediaRef,
   resolveMediaRef,
 } = require('./mediaResolver');
 
@@ -345,16 +347,14 @@ function dataUrlToTempVideoFile(value) {
 }
 
 async function resolveVideoToLocalPath(value, options = {}) {
-  const text = String(value || '').trim();
+  const text = normalizeT8LocalMediaRef(value);
   if (!text) return { path: '', cleanup: '' };
   if (isDataUrl(text)) {
     const cleanup = dataUrlToTempVideoFile(text);
     return { path: cleanup, cleanup };
   }
   if (
-    text.startsWith('/files/') ||
-    text.startsWith('/input/') ||
-    text.startsWith('/output/') ||
+    isT8LocalMediaPath(text) ||
     path.isAbsolute(text) ||
     text.startsWith('file://')
   ) {
@@ -407,9 +407,9 @@ async function extractVideoFramesToDataUrls(value, options = {}) {
 }
 
 async function normalizeImageUrl(url, options = {}) {
-  const text = String(url || '').trim();
+  const text = normalizeT8LocalMediaRef(url);
   if (!text || isDataUrl(text) || isRemoteUrl(text)) return text;
-  if (text.startsWith('/files/') || text.startsWith('/input/') || text.startsWith('/output/')) {
+  if (isT8LocalMediaPath(text)) {
     const resolved = await resolveMediaRef(text, {
       target: 'data-url',
       baseUrl: options.baseUrl || DEFAULT_BASE_URL,
@@ -421,7 +421,7 @@ async function normalizeImageUrl(url, options = {}) {
 }
 
 async function normalizeVideoUrl(url, options = {}) {
-  const text = String(url || '').trim();
+  const text = normalizeT8LocalMediaRef(url);
   if (!text) return text;
   const mode = normalizeVideoMode(options.videoMode);
   const nativeMode = mode === 'frames' ? 'compressed-base64' : mode;
@@ -440,7 +440,7 @@ async function normalizeVideoUrl(url, options = {}) {
     }
   }
 
-  if (text.startsWith('/files/') || text.startsWith('/input/') || text.startsWith('/output/') || path.isAbsolute(text) || text.startsWith('file://')) {
+  if (isT8LocalMediaPath(text) || path.isAbsolute(text) || text.startsWith('file://')) {
     let local;
     try {
       local = await resolveMediaRef(text, { target: 'local-path', baseUrl });

@@ -9,6 +9,7 @@
  * 自动填名：通过 fetchRhAppInfo(webappId) 从 T8 后端 /api/proxy/runninghub/app-info 拉取。
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Download, Upload } from 'lucide-react';
 import { useRHTools } from '../../providers/RHToolsProvider';
 import type { RHTool, RHToolCategory, RHToolsBackup } from '../../services/api';
@@ -240,10 +241,11 @@ const RHToolEditorModal: React.FC<RHToolEditorModalProps> = ({ isOpen, onClose, 
     outline: 'none',
   };
 
-  return (
+  const modal = (
     <div
       className="fixed inset-0 flex items-center justify-center"
-      style={{ zIndex: 9999, background: 'rgba(0,0,0,0.45)' }}
+      data-rh-tool-editor-modal="true"
+      style={{ zIndex: 2147483000, background: 'rgba(0,0,0,0.45)' }}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -586,6 +588,12 @@ const RHToolEditorModal: React.FC<RHToolEditorModalProps> = ({ isOpen, onClose, 
       </div>
     </div>
   );
+
+  // The node lives in ReactFlow's transformed layer. Mount the modal outside
+  // that stacking context so floating RUN controls can never cover it.
+  return typeof document !== 'undefined'
+    ? createPortal(modal, document.body)
+    : modal;
 };
 
 export default RHToolEditorModal;

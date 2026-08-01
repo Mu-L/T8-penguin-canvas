@@ -20,6 +20,7 @@ const seedanceNz = require('../providers/seedanceNz');
 const {
   isT8LocalMediaPath,
   normalizeT8LocalMediaRef,
+  resolveMediaRef,
 } = require('../providers/mediaResolver');
 const {
   normalizeRhSite,
@@ -590,28 +591,40 @@ function declaredMediaKind(contentType) {
   return 'unsupported';
 }
 
-function mediaContentTypesCompatible(
-  declaredMime,
-  detectedMime,
-  declaredKind,
-  detectedKind,
-  allowSameKindSubtypeMismatch,
-) {
-  if (!declaredMime || declaredMime === 'application/octet-stream' || declaredMime === 'binary/octet-stream') {
+function proxyMediaKindForMime(contentType) {
+  const kind = declaredMediaKind(contentType);
+  return kind && kind !== 'unsupported' ? kind : null;
+}
+
+function proxyMediaFallbackMime(kind) {
+  if (kind === 'image') return 'image/png';
+  if (kind === 'video') return 'video/mp4';
+  if (kind === 'audio') return 'audio/mpeg';
+  return 'application/octet-stream';
+}
+
+function proxyMediaSourceHint(sourceName) {
+  const clean = String(sourceName || '').split(/[?#]/)[0];
+  const mime = normalizedContentType(mimeTypeForProxyFilename(clean));
+  const kind = proxyMediaKindForMime(mime);
+  return { mime: kind ? mime : '', kind };
+}
+
+function looksLikeProxyNonMediaResponse(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0 || buffer.includes(0)) return false;
+  const sample = buffer.subarray(0, Math.min(buffer.length, 4096)).toString('utf8').replace(/^\uFEFF/, '').trimStart();
+  const lower = sample.toLowerCase();
+  if (/^(?:<!doctype\s+html|<html\b|<head\b|<body\b)/.test(lower)) return true;
+  if (/^(?:error\b|failed\b|failure\b|invalid\b|forbidden\b|unauthorized\b|access denied\b|bad gateway\b|gateway timeout\b|service unavailable\b|upstream\b.*\berror\b|not\s+(?:an?\s+)?(?:image|video|audio|media)\b)/i.test(sample)) {
     return true;
   }
-  if (!detectedMime || declaredMime === detectedMime) return true;
-  // The file signature is authoritative for both the persisted extension and
-  // the media subtype. CDNs and RH workflows frequently serve a genuine media
-  // file with a stale/generic subtype (for example an ISO-BMFF QuickTime file
-  // as video/mp4, or a PNG as image/jpeg). Once both sides independently agree
-  // on the same safe top-level media kind, an exact subtype match adds no
-  // security value and incorrectly rejects valid outputs. Cross-kind
-  // declarations, HTML/JSON, archives and unknown signatures are still denied.
-  return allowSameKindSubtypeMismatch === true
-    && !!declaredKind
-    && declaredKind !== 'unsupported'
-    && declaredKind === detectedKind;
+  if (!sample.startsWith('{') && !sample.startsWith('[')) return false;
+  try {
+    JSON.parse(buffer.toString('utf8'));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function validateProxyMediaBuffer(buffer, contentType, options = {}) {
@@ -622,27 +635,39 @@ function validateProxyMediaBuffer(buffer, contentType, options = {}) {
   const detectedKind = detectProxyMediaKind(buffer);
   const detectedMime = detectProxyMediaMime(buffer);
   if (detectedKind === 'archive') throw new Error('远程素材不能是 ZIP/归档容器');
-  if (!mediaKindAllowed(detectedKind, allowedKinds)) throw new Error('远程素材魔数不是允许的媒体类型');
-  const declaredKind = declaredMediaKind(contentType);
-  if (declaredKind === 'unsupported' || (declaredKind && !mediaKindAllowed(detectedKind, new Set([declaredKind])))) {
-    throw new Error('远程素材 Content-Type 与文件魔数不一致');
-  }
-  if (declaredKind && !allowedKinds.has(declaredKind)) throw new Error('远程素材 Content-Type 不在允许范围内');
+  if (looksLikeProxyNonMediaResponse(buffer)) throw new Error('远程地址返回了 HTML/JSON 错误内容，不是媒体文件');
   const declaredMime = normalizedContentType(contentType);
-  if (!mediaContentTypesCompatible(
-    declaredMime,
-    detectedMime,
-    declaredKind,
-    detectedKind,
-    options.allowSameKindSubtypeMismatch,
-  )) {
-    throw new Error('远程素材 Content-Type 与文件魔数子类型不一致');
+  const sourceHint = proxyMediaSourceHint(options.sourceName);
+
+  // Compatibility-first, matching the v2.5.3 behaviour: a positive signature
+  // corrects stale MIME/filename metadata instead of rejecting readable media.
+  // Unknown legacy/new codecs fall back to MIME, filename, or caller context.
+  if (detectedKind && !mediaKindAllowed(detectedKind, allowedKinds)) {
+    throw new Error('素材实际类型与当前节点需要的媒体类型不一致');
   }
+  let mediaKind = detectedKind;
+  if (mediaKind === 'video-audio') {
+    const hintedKind = [proxyMediaKindForMime(declaredMime), sourceHint.kind]
+      .find((kind) => kind && allowedKinds.has(kind));
+    mediaKind = hintedKind || (allowedKinds.has('video') ? 'video' : 'audio');
+  }
+  if (!mediaKind) {
+    const hintedKind = [proxyMediaKindForMime(declaredMime), sourceHint.kind]
+      .find((kind) => kind && allowedKinds.has(kind));
+    mediaKind = hintedKind || (allowedKinds.size === 1 ? [...allowedKinds][0] : null);
+  }
+  if (!mediaKind && allowedKinds.size > 0) mediaKind = [...allowedKinds][0];
+  if (!mediaKindAllowed(mediaKind, allowedKinds)) throw new Error('素材类型不在当前节点支持范围内');
+  const effectiveMime = detectedMime
+    || (proxyMediaKindForMime(declaredMime) === mediaKind ? declaredMime : '')
+    || (sourceHint.kind === mediaKind ? sourceHint.mime : '')
+    || proxyMediaFallbackMime(mediaKind);
   return {
     detectedKind,
     detectedMime,
     declaredMime,
-    contentType: detectedMime || declaredMime,
+    mediaKind,
+    contentType: effectiveMime,
     contentTypeMismatch: !!declaredMime && !!detectedMime && declaredMime !== detectedMime,
   };
 }
@@ -667,7 +692,7 @@ async function fetchProxyRemoteMedia(url, options = {}) {
   const verified = validateProxyMediaBuffer(remote.buffer, remote.contentType, {
     allowedKinds: options.allowedKinds,
     maxBytes: maximum,
-    allowSameKindSubtypeMismatch: options.allowSameKindSubtypeMismatch,
+    sourceName: remote.finalUrl || remote.url || url,
   });
   return { ...remote, ...verified };
 }
@@ -912,9 +937,18 @@ function extFromContentType(contentType) {
 }
 
 function verifiedProxyMediaExtension(media) {
-  const extension = extFromContentType(media?.detectedMime || media?.contentType);
-  if (!extension) throw new Error('远程素材魔数没有安全的落盘扩展映射');
-  return extension;
+  const mimeExtension = extFromContentType(media?.detectedMime || media?.contentType);
+  if (mimeExtension) return mimeExtension;
+  const sourceMime = mimeTypeForProxyFilename(
+    media?.finalUrl || media?.url || media?.filename || media?.sourceName || '',
+  );
+  const sourceExtension = extFromContentType(sourceMime);
+  if (sourceExtension) return sourceExtension;
+  const kind = media?.mediaKind || media?.detectedKind;
+  if (kind === 'image') return 'png';
+  if (kind === 'video') return 'mp4';
+  if (kind === 'audio') return 'mp3';
+  throw new Error('素材无法确定可保存的媒体扩展名');
 }
 
 function mimeTypeForProxyFilename(filename) {
@@ -950,10 +984,8 @@ function mimeTypeForProxyFilename(filename) {
 }
 
 // Mounted canvas files have already crossed the app's controlled upload/output
-// boundary. Their bytes remain authoritative, while a stale filename suffix
-// is only metadata. Accept a subtype drift only when both the suffix and magic
-// independently identify the same safe top-level media kind; cross-kind files,
-// HTML/JSON, archives, and unknown signatures remain blocked.
+// boundary. Prefer recognized bytes, while allowing old/new codecs to fall back
+// to MIME, filename, or the media kind required by the consuming node.
 function validateMountedMediaBuffer(buffer, filename, options = {}) {
   const verified = validateProxyMediaBuffer(
     buffer,
@@ -961,12 +993,12 @@ function validateMountedMediaBuffer(buffer, filename, options = {}) {
     {
       allowedKinds: options.allowedKinds,
       maxBytes: options.maxBytes,
-      allowSameKindSubtypeMismatch: true,
+      sourceName: filename,
     },
   );
   return {
     ...verified,
-    contentType: verified.detectedMime || verified.contentType,
+    contentType: verified.contentType,
   };
 }
 
@@ -1942,7 +1974,6 @@ async function saveRemoteImageDetailed(url, _providerFetchImpl, materializationK
         allowedKinds: ['image'],
         trustedProviderOutput: true,
         maxBytes: PROXY_IMAGE_REFERENCE_MAX_BYTES,
-        allowSameKindSubtypeMismatch: true,
         deadlineMs: remainingMs,
         idleTimeoutMs: Math.min(IMAGE_OUTPUT_MATERIALIZATION_IDLE_TIMEOUT_MS, remainingMs),
         accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif,image/bmp,image/tiff;q=0.9',
@@ -1989,7 +2020,6 @@ async function saveRemoteAudioDetailed(url, materializationKey = '') {
         allowedKinds: ['audio'],
         trustedProviderOutput: true,
         maxBytes: PROXY_AUDIO_REFERENCE_MAX_BYTES,
-        allowSameKindSubtypeMismatch: true,
         accept: 'audio/mpeg,audio/mp4,audio/wav,audio/ogg,audio/flac;q=0.9',
       });
       const buf = remote.buffer;
@@ -2205,20 +2235,20 @@ function readResourceMediaRefBuffer(ref, options = {}) {
   const buf = opened.buffer;
   const declaredMime = normalizedContentType(resolved.declaredMime);
   const fileMime = normalizedContentType(resolved.fileMime);
-  // Old resource-library rows can contain an empty/generic MIME or a stale
-  // same-kind subtype. The in-root file signature is authoritative; cross-kind
-  // declarations and non-media files remain denied by validateProxyMediaBuffer.
+  // Old resource-library rows can contain an empty/generic/stale MIME. Prefer
+  // recognized bytes, but use the managed filename/caller kind for codecs whose
+  // signature detector does not know yet.
   let verified;
   try {
     verified = validateProxyMediaBuffer(buf, declaredMime || fileMime, {
       allowedKinds,
       maxBytes: maximum,
-      allowSameKindSubtypeMismatch: true,
+      sourceName: resolved.originalName || resolved.full,
     });
   } catch {
     return null;
   }
-  const mime = verified.detectedMime || verified.contentType || fileMime || declaredMime;
+  const mime = verified.contentType || fileMime || declaredMime;
   const ext = extFromContentType(mime)
     || safeOutputExt(path.extname(resolved.full), allowedKinds[0] === 'audio' ? 'mp3' : 'png');
   return {
@@ -2226,7 +2256,7 @@ function readResourceMediaRefBuffer(ref, options = {}) {
     mime,
     ext,
     originalName: resolved.originalName || path.basename(resolved.full),
-    detectedKind: verified.detectedKind,
+    detectedKind: verified.detectedKind || verified.mediaKind,
   };
 }
 
@@ -2256,26 +2286,30 @@ async function refToBuffer(ref) {
     const ext = (mime.split('/')[1] || 'png').replace('jpeg', 'jpg');
     return { buf, mime, ext };
   }
-  if (
-    ref.startsWith('http://') ||
-    ref.startsWith('https://') ||
-    ref.startsWith('/files/') ||
-    ref.startsWith('/api/resources/file/') ||
-    ref.startsWith('/api/resources/set-file/')
-  ) {
-    const local = readLocalImageRefBuffer(ref);
-    if (local) return local;
-    const resource = readResourceImageRefBuffer(ref);
-    if (resource) return resource;
-    if (ref.startsWith('/')) return null;
-    const remote = await fetchProxyRemoteMedia(ref, {
+  const normalizedRef = normalizeT8LocalMediaRef(ref, {
+    allowedPorts: [config.PORT, 11422],
+  });
+  if (/^https?:\/\//i.test(normalizedRef) || isT8LocalMediaPath(normalizedRef)) {
+    const local = await readProviderLocalMediaRefBuffer(normalizedRef, {
+      allowedKinds: ['image'],
+      maxBytes: PROXY_IMAGE_REFERENCE_MAX_BYTES,
+    });
+    if (local) {
+      return {
+        buf: local.buffer,
+        mime: local.contentType,
+        ext: extFromContentType(local.contentType) || 'png',
+      };
+    }
+    if (normalizedRef.startsWith('/')) return null;
+    const remote = await fetchProxyRemoteMedia(normalizedRef, {
       allowedKinds: ['image'],
       maxBytes: PROXY_IMAGE_REFERENCE_MAX_BYTES,
       accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif,image/bmp,image/tiff;q=0.9',
     });
     const ct = remote.contentType || 'image/png';
     const buf = remote.buffer;
-    const ext = (ct.split('/')[1] || 'png').replace('jpeg', 'jpg');
+    const ext = extFromContentType(ct) || (ct.split('/')[1] || 'png').replace('jpeg', 'jpg');
     return { buf, mime: ct, ext };
   }
   return null;
@@ -2341,14 +2375,9 @@ function appendConvertedImagesToForm(form, convertedRefs) {
 
 // 将 base64/URL 参考图转成 banana 希望的 dataURL 或保留外部 URL
 function isLocalImageDataRef(ref) {
-  return (
-    typeof ref === 'string' &&
-    (
-      ref.startsWith('/files/') ||
-      ref.startsWith('/api/resources/file/') ||
-      ref.startsWith('/api/resources/set-file/')
-    )
-  );
+  if (typeof ref !== 'string') return false;
+  const normalized = normalizeT8LocalMediaRef(ref, { allowedPorts: [config.PORT, 11422] });
+  return isT8LocalMediaPath(normalized);
 }
 
 async function localImageRefToDataUrl(ref) {
@@ -2376,17 +2405,12 @@ async function refToGrokImage(ref) {
     const converted = await refToBuffer(ref);
     return converted ? `data:${converted.mime};base64,${converted.buf.toString('base64')}` : null;
   }
-  if (
-    ref.startsWith('http://') ||
-    ref.startsWith('https://') ||
-    ref.startsWith('/files/') ||
-    ref.startsWith('/api/resources/file/') ||
-    ref.startsWith('/api/resources/set-file/')
-  ) {
+  const normalizedRef = normalizeT8LocalMediaRef(ref, { allowedPorts: [config.PORT, 11422] });
+  if (/^https?:\/\//i.test(normalizedRef) || isT8LocalMediaPath(normalizedRef)) {
     try {
-      if (isLocalImageDataRef(ref)) return await localImageRefToDataUrl(ref);
-      if (ref.startsWith('/')) return null;
-      const remote = await fetchProxyRemoteMedia(ref, {
+      if (isLocalImageDataRef(normalizedRef)) return await localImageRefToDataUrl(normalizedRef);
+      if (normalizedRef.startsWith('/')) return null;
+      const remote = await fetchProxyRemoteMedia(normalizedRef, {
         allowedKinds: ['image'],
         maxBytes: PROXY_IMAGE_REFERENCE_MAX_BYTES,
         accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif,image/bmp,image/tiff;q=0.9',
@@ -5285,30 +5309,17 @@ async function uploadRefToZhenzhen(ref, apiKey, label = '参考素材') {
     ext = extFromContentType(mime) || (mime.split('/')[1] || 'png').replace('jpeg', 'jpg');
   } else if (isT8LocalMediaPath(trimmed) || trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
     let sourceName = trimmed;
-    if (trimmed.startsWith('/api/resources/')) {
-      const resource = readResourceMediaRefBuffer(trimmed, {
+    const local = isT8LocalMediaPath(trimmed)
+      ? await readProviderLocalMediaRefBuffer(trimmed, {
         allowedKinds: ['image', 'video', 'audio'],
         maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
-      });
-      if (!resource) throw new Error(`${label} 上传失败: 本地资源不存在或越出授权目录`);
-      buf = resource.buf;
-      mime = resource.mime;
-      ext = resource.ext;
-      sourceName = resource.originalName || sourceName;
-    } else if (trimmed.startsWith('/')) {
-      const local = readMountedFileReference(trimmed, [
-        { prefixes: ['/files/input/', '/input/'], root: config.INPUT_DIR },
-        { prefixes: ['/files/output/', '/output/'], root: config.OUTPUT_DIR },
-        { prefixes: ['/files/thumbnails/'], root: config.THUMBNAILS_DIR },
-      ], PROXY_MEDIA_REFERENCE_MAX_BYTES);
+      })
+      : null;
+    if (isT8LocalMediaPath(trimmed)) {
       if (!local) throw new Error(`${label} 上传失败: 本地资源不存在或越出授权目录`);
       sourceName = local.filename;
       buf = local.buffer;
-      const verified = validateMountedMediaBuffer(buf, local.filename, {
-        allowedKinds: ['image', 'video', 'audio'],
-        maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
-      });
-      mime = verified.contentType;
+      mime = local.contentType;
     } else {
       const remote = await fetchProxyRemoteMedia(trimmed, {
         allowedKinds: ['image', 'video', 'audio'],
@@ -5316,6 +5327,7 @@ async function uploadRefToZhenzhen(ref, apiKey, label = '参考素材') {
       });
       buf = remote.buffer;
       mime = remote.contentType || 'application/octet-stream';
+      sourceName = remote.filename || sourceName;
     }
     const tailExt = sourceName.split(/[?#]/)[0].match(/\.([a-z0-9]{2,8})$/i)?.[1];
     ext = extFromContentType(mime) || tailExt || (mime.split('/')[1] || 'png').replace('jpeg', 'jpg');
@@ -5550,7 +5562,6 @@ async function saveRemoteVideoDetailed(url, _providerFetchImpl, materializationK
           allowedKinds: ['video'],
           trustedProviderOutput: true,
           maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
-          allowSameKindSubtypeMismatch: true,
           accept: 'video/mp4,video/webm,video/quicktime,video/x-matroska;q=0.9',
         });
         const buf = remote.buffer;
@@ -7309,6 +7320,7 @@ router.post('/audio/upload', audioUpload.single('file'), async (req, res) => {
     verifiedAudio = validateProxyMediaBuffer(audioBuf, req.file.mimetype, {
       allowedKinds: ['audio'],
       maxBytes: 50 * 1024 * 1024,
+      sourceName: req.file.originalname,
     });
   } catch (_) {
     return res.status(400).json({
@@ -7317,11 +7329,14 @@ router.post('/audio/upload', audioUpload.single('file'), async (req, res) => {
       error: '上传文件不是受支持的音频内容，或声明类型与文件内容不一致',
     });
   }
-  const ext = extFromContentType(verifiedAudio.detectedMime);
+  const ext = verifiedProxyMediaExtension({
+    ...verifiedAudio,
+    filename: req.file.originalname,
+  });
   if (!ext || !new Set(['mp3', 'wav', 'm4a', 'ogg', 'flac', 'aac', 'wma']).has(ext)) {
     return res.status(400).json({ success: false, code: 'invalid_audio_upload', error: '上传音频格式不受支持' });
   }
-  const ct = verifiedAudio.detectedMime;
+  const ct = verifiedAudio.contentType;
   const filename = safeAudioUploadFilename(req.file.originalname, ext);
   const providerParams = parseProviderParams(req.body?.providerParams);
   if (!ensureKeyOrSelectedGroup(settings, res, 'suno', 'Suno', providerParams)) return;
@@ -7608,7 +7623,6 @@ router.get('/runninghub/query', async (req, res) => {
             allowedKinds: ['image', 'video', 'audio'],
             trustedProviderOutput: true,
             maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
-            allowSameKindSubtypeMismatch: true,
           });
           let buf = downloaded.buffer;
           let ext = verifiedProxyMediaExtension(downloaded);
@@ -7764,37 +7778,35 @@ router.post('/runninghub/upload-asset', express.json({ limit: '64kb', strict: tr
   if (!url) return res.status(400).json({ success: false, error: 'url 必填' });
   if (Buffer.byteLength(url, 'utf8') > 16_384) return res.status(400).json({ success: false, error: 'url 过长' });
   try {
+    const normalizedUrl = normalizeT8LocalMediaRef(url, {
+      allowedPorts: [config.PORT, 11422],
+    });
     // 1) 拿到 buffer + mime + filename
     let buf;
     let mime = 'application/octet-stream';
     let baseName = 'asset';
-    if (url.startsWith('/files/output/') || url.startsWith('/output/')
-      || url.startsWith('/files/input/') || url.startsWith('/input/')) {
-      const local = readMountedFileReference(url, [
-        { prefixes: ['/files/output/', '/output/'], root: config.OUTPUT_DIR },
-        { prefixes: ['/files/input/', '/input/'], root: config.INPUT_DIR },
-      ], PROXY_MEDIA_REFERENCE_MAX_BYTES);
+    if (isT8LocalMediaPath(normalizedUrl)) {
+      const local = await readProviderLocalMediaRefBuffer(normalizedUrl, {
+        allowedKinds: ['image', 'video', 'audio'],
+        maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
+      });
       if (!local) {
         return res.status(404).json({ success: false, error: '本地素材不存在、超限或越出允许目录' });
       }
       buf = local.buffer;
-      const verified = validateMountedMediaBuffer(buf, local.filename, {
-        allowedKinds: ['image', 'video', 'audio'],
-        maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
-      });
-      mime = verified.contentType;
+      mime = local.contentType;
       baseName = path.basename(local.filename);
-    } else if (/^https?:\/\//i.test(url)) {
-      const remote = await fetchProxyRemoteMedia(url, {
+    } else if (/^https?:\/\//i.test(normalizedUrl)) {
+      const remote = await fetchProxyRemoteMedia(normalizedUrl, {
         allowedKinds: ['image', 'video', 'audio'],
         maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
       });
       buf = remote.buffer;
       mime = remote.contentType || mime;
-      const tail = url.split(/[?#]/)[0];
+      const tail = normalizedUrl.split(/[?#]/)[0];
       baseName = tail.split('/').pop() || baseName;
     } else {
-      return res.status(400).json({ success: false, error: '不支持的 url: ' + url });
+      return res.status(400).json({ success: false, error: '不支持的素材引用' });
     }
     // 2) MIME 只服从已验证的响应类型/魔数，扩展名不能反向覆盖它。
     const extMatch = baseName.match(/\.([a-zA-Z0-9]+)$/);
@@ -7894,6 +7906,7 @@ module.exports._test = Object.freeze({
   resolveMountedFileReference,
   readResourceImageRefBuffer,
   readResourceMediaRefBuffer,
+  readProviderLocalMediaRefBuffer,
   safeDiagnosticText,
   safeFalRequestId,
   saveRemoteVideo,
@@ -7908,3 +7921,68 @@ module.exports._test = Object.freeze({
   validateProxyMediaBuffer,
   verifiedProxyMediaExtension,
 });
+
+async function readProviderLocalMediaRefBuffer(ref, options = {}) {
+  const allowedKinds = Array.isArray(options.allowedKinds) && options.allowedKinds.length > 0
+    ? options.allowedKinds
+    : ['image', 'video', 'audio'];
+  const maximum = Number(options.maxBytes) || PROXY_MEDIA_REFERENCE_MAX_BYTES;
+  const normalized = normalizeT8LocalMediaRef(ref, {
+    allowedPorts: [config.PORT, 11422],
+  });
+
+  if (normalized.startsWith('/api/resources/file/')
+    || normalized.startsWith('/api/resources/set-file/')) {
+    const resource = readResourceMediaRefBuffer(normalized, {
+      allowedKinds,
+      maxBytes: maximum,
+    });
+    if (!resource) return null;
+    return {
+      buffer: resource.buf,
+      contentType: resource.mime,
+      filename: resource.originalName || `resource.${resource.ext || 'bin'}`,
+      detectedKind: resource.detectedKind,
+    };
+  }
+
+  if (normalized.startsWith('/files/output/') || normalized.startsWith('/output/')
+    || normalized.startsWith('/files/input/') || normalized.startsWith('/input/')
+    || normalized.startsWith('/files/thumbnails/')) {
+    const local = readMountedFileReference(normalized, [
+      { prefixes: ['/files/output/', '/output/'], root: config.OUTPUT_DIR },
+      { prefixes: ['/files/input/', '/input/'], root: config.INPUT_DIR },
+      { prefixes: ['/files/thumbnails/'], root: config.THUMBNAILS_DIR },
+    ], maximum);
+    if (!local) return null;
+    const verified = validateMountedMediaBuffer(local.buffer, local.filename, {
+      allowedKinds,
+      maxBytes: maximum,
+    });
+    return {
+      buffer: local.buffer,
+      contentType: verified.contentType,
+      filename: path.basename(local.filename),
+      detectedKind: verified.detectedKind || verified.mediaKind,
+    };
+  }
+
+  if (normalized.startsWith('/api/project-assets/')) {
+    const resolved = await resolveMediaRef(normalized, { target: 'local-path' });
+    const stat = fs.statSync(resolved.path);
+    if (!stat.isFile() || stat.size > maximum) return null;
+    const buffer = fs.readFileSync(resolved.path);
+    const verified = validateProxyMediaBuffer(buffer, resolved.mime || mimeTypeForProxyFilename(resolved.path), {
+      allowedKinds,
+      maxBytes: maximum,
+      sourceName: resolved.name || resolved.path,
+    });
+    return {
+      buffer,
+      contentType: verified.contentType,
+      filename: resolved.name || path.basename(resolved.path),
+      detectedKind: verified.detectedKind || verified.mediaKind,
+    };
+  }
+  return null;
+}

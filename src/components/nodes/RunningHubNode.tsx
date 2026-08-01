@@ -39,6 +39,7 @@ import {
   resolveRunningHubDisplaySite,
   resolvedRhSiteFromAppInfo,
 } from '../../utils/runningHubResolvedSite';
+import { isProviderUploadMediaReference } from '../../utils/providerMediaReference';
 
 /**
  * RunningHubNode - 主工作流节点
@@ -471,12 +472,7 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
         // 最后一道兼底：如果当前值看起来不是 url（可能是 RH 内部默认 hash 或用户手填 fileName），
         // 但上游连了对应类型的媒体节点，且用户没有主动取消 sourceFromUpstream，
         // 则强制用上游 url，避免 state 异步/race condition 导致仍提交默认 hash。
-        const isUrlLike0 =
-          /^https?:\/\//i.test(v) ||
-          v.startsWith('/files/output/') ||
-          v.startsWith('/output/') ||
-          v.startsWith('/files/input/') ||
-          v.startsWith('/input/');
+        const isUrlLike0 = isProviderUploadMediaReference(v);
         if (!isUrlLike0) {
           const k = paramKey(nodeId, fieldName);
           const cur = paramValues[k];
@@ -491,12 +487,7 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
         }
         if (!v) continue; // 未提供资源 → 跳过该条目
         // 判定为本地/远程 url 的样式 → 走 /upload-asset 转 fileName
-        const isUrlLike =
-          /^https?:\/\//i.test(v) ||
-          v.startsWith('/files/output/') ||
-          v.startsWith('/output/') ||
-          v.startsWith('/files/input/') ||
-          v.startsWith('/input/');
+        const isUrlLike = isProviderUploadMediaReference(v);
         if (isUrlLike) {
           const r = await uploadRhAsset(v, activeRhSiteRef.current);
           applyResolvedRhSite(r.site);

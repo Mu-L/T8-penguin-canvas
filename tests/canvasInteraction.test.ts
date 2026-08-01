@@ -25,3 +25,16 @@ test('canvas captures clipboard shortcuts before focused node internals consume 
   assert.match(canvas, /clipboardHandledEvents\.has\(e\)/);
   assert.match(canvas, /altNodeDragIntentRef\.current \|\| altKeyPressedRef\.current/);
 });
+
+test('CanvasInner keeps creator context hook before the empty-canvas early return', () => {
+  const canvas = readFileSync(new URL('../src/components/Canvas.tsx', import.meta.url), 'utf8');
+  const componentStart = canvas.indexOf('function CanvasInner(');
+  const hookIndex = canvas.indexOf('const creatorCanvasContext = useMemo', componentStart);
+  const earlyReturnIndex = canvas.lastIndexOf('  if (!activeId) {');
+
+  assert.notEqual(componentStart, -1);
+  assert.notEqual(hookIndex, -1);
+  assert.notEqual(earlyReturnIndex, -1);
+  assert.ok(hookIndex < earlyReturnIndex, 'all CanvasInner hooks must run before an activeId early return');
+  assert.equal(canvas.indexOf('const creatorCanvasContext = useMemo', hookIndex + 1), -1);
+});

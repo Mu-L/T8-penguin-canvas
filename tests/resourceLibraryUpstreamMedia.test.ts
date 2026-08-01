@@ -5,11 +5,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { createUploadDataFromItems } from '../src/utils/mediaCollection.ts';
+import { isProviderUploadMediaReference } from '../src/utils/providerMediaReference.ts';
 
 const require = createRequire(import.meta.url);
 const config = require('../backend/src/config.js');
 const proxy = require('../backend/src/routes/proxy.js');
 const seedanceNz = require('../backend/src/providers/seedanceNz.js');
+const llmMedia = require('../backend/src/providers/llmMedia.js');
+const mediaResolver = require('../backend/src/providers/mediaResolver.js');
 
 function tinyPng(): Buffer {
   return Buffer.from([
@@ -107,6 +110,85 @@ test('resource-library upstream reader accepts real image and audio bytes instea
   });
 });
 
+test('RH media fields physicalize resource-library image and audio references before workflow submission', async () => {
+  await withResourceLibrary(async () => {
+    const image = await proxy._test.readProviderLocalMediaRefBuffer(
+      '/api/resources/file/resource-image',
+      { allowedKinds: ['image'] },
+    );
+    assert.ok(image);
+    assert.equal(image.contentType, 'image/png');
+    assert.equal(image.detectedKind, 'image');
+    assert.equal(image.filename, '参考图片.png');
+    assert.deepEqual(image.buffer, tinyPng());
+
+    const audio = await proxy._test.readProviderLocalMediaRefBuffer(
+      '/api/resources/file/resource-audio',
+      { allowedKinds: ['audio'] },
+    );
+    assert.ok(audio);
+    assert.equal(audio.contentType, 'audio/wav');
+    assert.equal(audio.detectedKind, 'audio');
+    assert.equal(audio.filename, '参考音频.wav');
+    assert.deepEqual(audio.buffer, tinyWav());
+  });
+});
+
+test('LLM media normalization reads managed resource images as bytes for relative and loopback URLs', async () => {
+  await withResourceLibrary(async () => {
+    const messages = [{
+      role: 'user',
+      content: [
+        {
+          type: 'image_url',
+          image_url: { url: '/api/resources/file/resource-image' },
+        },
+        {
+          type: 'image_url',
+          image_url: { url: 'http://127.0.0.1:18766/api/resources/file/resource-image' },
+        },
+      ],
+    }];
+
+    const normalized = await llmMedia.normalizeLlmMessageMedia(messages, {}, {
+      baseUrl: 'http://127.0.0.1:18766',
+    });
+    assert.equal(normalized.length, 1);
+    assert.equal(normalized[0].content.length, 2);
+    for (const part of normalized[0].content) {
+      assert.match(part.image_url.url, /^data:image\/png;base64,/);
+      assert.deepEqual(
+        Buffer.from(part.image_url.url.split(',', 2)[1], 'base64'),
+        tinyPng(),
+      );
+    }
+  });
+});
+
+test('managed project-asset loopback URLs normalize to the shared physical-media route', () => {
+  assert.equal(
+    mediaResolver.normalizeT8LocalMediaRef(
+      'http://localhost:18766/api/project-assets/asset-123/media?download=1',
+    ),
+    '/api/project-assets/asset-123/media?download=1',
+  );
+});
+
+test('RH nodes recognize every T8-managed media URL as provider-upload input', () => {
+  for (const value of [
+    '/files/input/ref.wav',
+    '/files/output/result.mp4',
+    '/files/thumbnails/poster.png',
+    '/api/resources/file/resource-audio',
+    '/api/resources/set-file/resource-set/2',
+    '/api/project-assets/asset-123/media',
+    'https://cdn.example.com/media.png',
+  ]) {
+    assert.equal(isProviderUploadMediaReference(value), true, value);
+  }
+  assert.equal(isProviderUploadMediaReference('rh_uploaded_file_123.wav'), false);
+});
+
 test('seedance.nz uploads resource-library image and audio with their real names and MIME types', async () => {
   await withResourceLibrary(async () => {
     seedanceNz.resetCachesForTests();
@@ -189,7 +271,7 @@ test('shared workshop upload path no longer forces resource-library references t
     ? proxySource.slice(helperStart, helperEnd)
     : '';
 
-  assert.match(uploadHelper, /readResourceMediaRefBuffer\(trimmed/);
+  assert.match(uploadHelper, /readProviderLocalMediaRefBuffer\(trimmed/);
   assert.match(uploadHelper, /allowedKinds:\s*\['image', 'video', 'audio'\]/);
   assert.doesNotMatch(uploadHelper, /readResourceImageRefBuffer\(trimmed/);
 });
@@ -254,4 +336,12 @@ test('resource-library plus, send and blank-canvas drag are wired to canonical u
   assert.match(overlay, /addEventListener\('pointerup', onUp, true\)/);
   assert.match(overlay, /addEventListener\('pointercancel', onUp, true\)/);
   assert.match(sendMaterials, /name: item\.originalName \|\| item\.title \|\| fileNameFromUrl/);
+});
+
+test('RH nodes physicalize managed media references before submission', () => {
+  for (const relative of ['RunningHubNode.tsx', 'RHToolsNode.tsx']) {
+    const source = fs.readFileSync(path.resolve('src/components/nodes', relative), 'utf8');
+    assert.equal(source.includes('isProviderUploadMediaReference(v)'), true);
+    assert.equal(source.includes('await uploadRhAsset(v,'), true);
+  }
 });
