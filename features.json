@@ -1,37 +1,38 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.7.6",
-  "lastUpdated": "2026-08-02-v2.7.6-release-approved",
+  "lastUpdated": "2026-08-02-v2.7.6-released",
   "release": {
-    "status": "release-approved-v2.7.6",
+    "status": "released-v2.7.6",
     "version": "2.7.6",
     "date": "2026-08-02",
-    "publishedAt": null,
+    "publishedAt": "2026-08-02T15:53:29Z",
     "tag": "v2.7.6",
-    "latest": false,
-    "sourceCommit": null,
+    "latest": true,
+    "sourceCommit": "d123252ca8919e49a0a4e3f87c7f3934aaf2451d",
     "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.6",
     "artifacts": {
       "installer": {
         "name": "T8-PenguinCanvas-Setup-2.7.6.exe",
-        "size": null,
-        "sha256": null
+        "size": 1304733546,
+        "sha256": "8775160eb23558798fa64ed34f504b8ca80a9dc89b2822cc7abe954b2b009e2c"
       },
       "blockmap": {
         "name": "T8-PenguinCanvas-Setup-2.7.6.exe.blockmap",
-        "size": null,
-        "sha256": null
+        "size": 1359603,
+        "sha256": "a619e0acc09b6b87277d020f74016fa5481d9c7991ade94aaa4bb46d52f201a9"
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": null,
-        "sha256": null
+        "size": 362,
+        "sha256": "c73ad70b527727d6ab06570584bd4aab44d924213c03d05e0824811a99cba31e"
       }
     },
     "verification": [
       "v2.7.6 发布范围固定为剧本大师专业工作台和 VPN / 代理远程媒体声明长度兼容修复。",
       "剧本大师聚焦回归 30/30、相邻回归 226/226，VPN 声明长度聚焦回归 30/30、相邻系统网络与 Provider 回归 111/111；TypeScript 与能力目录检查通过。",
-      "正式 Electron/Vite/加密/运行时/原生模块/NSIS 构建、Tag、Release、远端资产回下载与 Latest 核验待固定源码提交后执行，不提前记录为通过。",
+      "固定并推送 source commit d123252ca8919e49a0a4e3f87c7f3934aaf2451d 后，从独立 release worktree 完成 Vite、加密、运行时归档、Electron 原生模块与 NSIS 正式流程；前端/应用构建只执行一次，首次原生模块重建因后台开发端占用 better_sqlite3.node 中断，关闭该项目进程后从原生步骤续跑，electron-builder 与最终安装包只执行一次。",
+      "post-build、release provenance、sealed recovery、三项 GitHub digest/size、发布前完整远端回下载、固定 Tag、非草稿/非预发布、Latest 与发布后 metadata-only 复核通过；发布成功后 recovery 已清除。",
       "用户已明确授权先发布、后补真实 Provider、协作多端与安装升级证据；协作证据门仅允许缺失清单按 owner-approved-post-release-v2.7.6 延期，不能把延期标记为已通过。"
     ]
   },
@@ -51,7 +52,7 @@
     ]
   },
   "vpnProxyDeclaredLengthTolerance": {
-    "status": "release-candidate-v2.7.6",
+    "status": "released-v2.7.6",
     "date": "2026-08-02",
     "releaseIncluded": true,
     "highlights": [
@@ -62,7 +63,7 @@
     "verification": [
       "safeRemoteMediaFetch、可信 Provider 输出和文件保存边界聚焦回归 30/30 通过，覆盖声明长度大于实际、声明长度小于实际上限、内存读取、流式落盘和实际字节超限。",
       "系统网络桥接、网页素材导入、Seedance Provider、代理日志脱敏与素材语义相邻回归 111/111 通过。",
-      "未调用真实付费 Provider，也未冒充覆盖外部用户的具体 VPN 环境；用户已授权将修复纳入 v2.7.6，正式构建与远端发布结果在实际完成后补录。"
+      "未调用真实付费 Provider，也未冒充覆盖外部用户的具体 VPN 环境；修复已随 v2.7.6 正式 Electron 自动更新版发布，远端三项资产完成完整回下载、摘要与 Latest 核验，具体外部 VPN 环境证据按用户授权后补。"
     ]
   },
   "mediaCompatibilityCanvasStabilityV275": {
@@ -6352,8 +6353,8 @@
     "version": "2.7.6",
     "semverVersion": "2.7.6",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；当前发布候选为 v2.7.6，聚焦剧本大师专业工作台与 VPN / 代理远程媒体声明长度兼容。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.7.6 已获授权进入唯一一次 Electron/NSIS 正式发布流程；固定 source/tag、三项自动更新资产、摘要和完整远端回下载事实将在流程成功后回写。用户授权的一次性证据延期不改变未完成证据状态。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；当前正式版本为 v2.7.6，聚焦剧本大师专业工作台与 VPN / 代理远程媒体声明长度兼容。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.7.6 已从固定 source d123252ca8919e49a0a4e3f87c7f3934aaf2451d 正式发布；安装包 1304733546 bytes / SHA-256 8775160eb23558798fa64ed34f504b8ca80a9dc89b2822cc7abe954b2b009e2c，blockmap 1359603 bytes / SHA-256 a619e0acc09b6b87277d020f74016fa5481d9c7991ade94aaa4bb46d52f201a9，latest.yml 362 bytes / SHA-256 c73ad70b527727d6ab06570584bd4aab44d924213c03d05e0824811a99cba31e。完整远端回下载、GitHub digest/size、Tag、Latest 与最终元数据复核通过；用户授权的证据延期不改变未完成证据状态。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
@@ -7001,7 +7002,7 @@
     ]
   },
   "scriptMasterNodeDev": {
-    "status": "release-candidate-v2.7.6",
+    "status": "released-v2.7.6",
     "date": "2026-08-02",
     "releaseIncluded": true,
     "schema": "t8-script-master-project-v1",
@@ -7024,10 +7025,10 @@
       "保存 11 个领域金样例以及与 roadmap 一一对应的 11 项冻结验收清单；30 分钟 500 画面片段在移动、切分、合并、平均分配和快照恢复后保持 43,200 帧、0 gap、0 overlap；10,000+ 中文字本地解析回归低于 2 秒门。",
       "剧本大师聚焦测试 30/30、相邻 CanvasPatch/Story/Director/VideoTimeline/WorkflowDoctor 回归 226/226 通过；完整 CanvasPatch 协议组 64 项中 63 项通过，唯一失败是 HEAD 已存在的路由测试仍未纳入 allowExactDuplicateAcrossActors 上下文字段，与本节点改动无关。",
       "共享 Canvas Node Schema、NodeType、Canvas 懒加载映射、初始数据、端口契约、默认尺寸和 features 清单同步；节点显式标记为非运行生成节点。",
-      "开发期间 Provider 调用与媒体生成为 0；用户已授权将功能纳入 v2.7.6，正式 build、Electron 打包、GitHub push、tag 与 Release 结果在实际完成后补录。"
+      "开发期间 Provider 调用与媒体生成为 0；功能已随 v2.7.6 正式 Electron 自动更新版发布，固定 source/tag、post-build、provenance、三项资产完整远端回下载、摘要与 Latest 核验通过。"
     ],
     "boundaries": [
-      "P0-P5 的开发实现与本地/协议回归已收口并进入 v2.7.6 发布范围；真实 LLM/媒体 Provider E2E、真实生成质量评测、协作多端与安装升级证据按用户授权后补，不会提前标记为通过。",
+      "P0-P5 的开发实现与本地/协议回归已收口并进入 v2.7.6 正式版；真实 LLM/媒体 Provider E2E、真实生成质量评测、协作多端与安装升级证据按用户授权后补，不会提前标记为通过。",
       "编译、质检、下游预览和确认写节点都不等于视频、配音、音乐或成片已经生成；冻结验收中的结构化评分由 Codex 开发审阅完成，并明确不冒充真人艺术质量评审。"
     ]
   },
