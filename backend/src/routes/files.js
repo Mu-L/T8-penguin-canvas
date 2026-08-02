@@ -1252,8 +1252,6 @@ function publicRemoteSaveError(error) {
     url_credentials_forbidden: ['remote_url_invalid', '远程素材地址无效', 400],
     private_address: ['remote_address_forbidden', '远程素材地址不允许访问', 400],
     item_too_large: ['media_too_large', '素材超过允许大小', 413],
-    invalid_content_length: ['remote_body_invalid', '远程素材响应无效', 502],
-    content_length_mismatch: ['remote_body_incomplete', '远程素材响应不完整', 502],
     fetch_timeout: ['remote_timeout', '远程素材下载超时', 504],
     too_many_redirects: ['remote_redirect_rejected', '远程素材重定向不安全', 502],
     invalid_redirect: ['remote_redirect_rejected', '远程素材重定向不安全', 502],

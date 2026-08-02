@@ -133,7 +133,7 @@ test('creative capability manifest covers the one-sentence production spine', ()
   assert.equal(payload.principles.explicitApprovalForWrites, true);
   const nodeAdd = payload.capabilities.find((capability) => capability.id === 'canvas.node-add');
   assert.equal(nodeAdd.nodeTypeSelector, 'creator-visible');
-  assert.equal(nodeAdd.nodeTypes.length, 58);
+  assert.equal(nodeAdd.nodeTypes.length, 59);
   assert.equal(nodeAdd.nodeTypes.includes('loop'), true);
   assert.equal(nodeAdd.nodeTypes.includes('remove-bg'), false);
 });
@@ -202,8 +202,8 @@ test('capability graph validates real node types and fails closed on drift', () 
   const { manifest, digest } = readGeneratorManifest();
   const runtimeCatalog = buildRuntimeCatalog();
   const graph = buildCapabilityGraph({ manifest, manifestDigest: digest, runtimeCatalog });
-  assert.equal(graph.counts.nodes, 70);
-  assert.equal(graph.counts.runtimeEntries, 197);
+  assert.equal(graph.counts.nodes, 71);
+  assert.equal(graph.counts.runtimeEntries, 200);
   assert.equal(
     graph.counts.operations,
     graph.capabilities.reduce((sum, capability) => sum + capability.operations.length, 0),
@@ -217,15 +217,15 @@ test('capability graph validates real node types and fails closed on drift', () 
   );
   const nodeAdd = graph.capabilities.find((capability) => capability.id === 'canvas.node-add');
   assert.ok(nodeAdd);
-  assert.equal(nodeAdd.nodeTypes.length, 58);
+  assert.equal(nodeAdd.nodeTypes.length, 59);
   assert.deepEqual(nodeAdd.nodeTypes, graph.nodes.filter((node) => !node.hidden).map((node) => node.type));
-  assert.equal(graph.counts.referencedNodes, 61);
+  assert.equal(graph.counts.referencedNodes, 62);
   assert.equal(graph.counts.unreferencedNodes, 9);
-  assert.equal(graph.counts.directCapabilityNodes, 61);
+  assert.equal(graph.counts.directCapabilityNodes, 62);
   assert.equal(graph.counts.internalCompatNodes, 1);
   assert.equal(graph.counts.semanticSupersededNodes, 8);
   assert.equal(graph.counts.publicCapabilityGapNodes, 0);
-  assert.equal(graph.counts.accountedNodes, 70);
+  assert.equal(graph.counts.accountedNodes, 71);
   assert.equal(graph.counts.unexplainedNodes, 0);
   assert.equal(graph.counts.fullyOperableNodes, 14);
   assert.equal(graph.nodes.find((node) => node.type === 'loop').coverage.apply, true);
@@ -347,7 +347,7 @@ test('capability graph validates real node types and fails closed on drift', () 
   );
   const coverageMarkdown = coverageMarkdownArtifact(graph);
   assert.equal(
-    coverageMarkdown.includes('Accounted / unexplained nodes: **70 / 0**'),
+    coverageMarkdown.includes('Accounted / unexplained nodes: **71 / 0**'),
     true,
   );
   assert.equal(coverageMarkdown.includes('- Public capability gaps: none'), true);
@@ -392,11 +392,11 @@ test('dynamic coverage receipt proves node, runtime, handler, risk, verification
     executable: graph.nodes.filter((node) => node.executable).length,
     generatable: graph.nodes.filter((node) => node.generatable).length,
   });
-  assert.deepEqual(receipt.inventory.nodes, { total: 70, executable: 52, generatable: 7 });
+  assert.deepEqual(receipt.inventory.nodes, { total: 71, executable: 52, generatable: 7 });
   assert.deepEqual(receipt.inventory.runtime, {
     llm: 29,
     image: 28,
-    video: 85,
+    video: 88,
     audio: 8,
     actions: 47,
   });
@@ -415,11 +415,11 @@ test('dynamic coverage receipt proves node, runtime, handler, risk, verification
   assert.doesNotThrow(() => assertCapabilityCoverageReceipt(graph));
   const markdown = coverageMarkdownArtifact(graph);
   assert.equal(
-    markdown.includes('Dynamic node inventory (total / executable / generatable): **70 / 52 / 7**'),
+    markdown.includes('Dynamic node inventory (total / executable / generatable): **71 / 52 / 7**'),
     true,
   );
   assert.equal(
-    markdown.includes('Dynamic runtime inventory (LLM / image / video / audio / actions): **29 / 28 / 85 / 8 / 47**'),
+    markdown.includes('Dynamic runtime inventory (LLM / image / video / audio / actions): **29 / 28 / 88 / 8 / 47**'),
     true,
   );
 

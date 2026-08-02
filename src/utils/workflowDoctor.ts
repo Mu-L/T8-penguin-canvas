@@ -105,6 +105,8 @@ export type CanvasPatchDraftOperation =
   | {
     type: 'node.patch';
     nodeId: string;
+    /** Optional trusted type guard used by domain-specific draft producers. */
+    nodeType?: string;
     patch: Record<string, unknown>;
     /** 本地不可枚举的陈旧预览前置条件。 */
     expectedPosition?: { x: number; y: number };
@@ -118,7 +120,7 @@ export type CanvasPatchDraftOperation =
   };
 
 export interface CanvasPatchDraft {
-  source?: 'workflow-doctor-v1' | 'canvas-agent-plan-v1';
+  source?: 'workflow-doctor-v1' | 'canvas-agent-plan-v1' | 'script-master-v1';
   id: string;
   title: string;
   description: string;
@@ -1375,6 +1377,9 @@ function materializeDraftOperation(
   if (!operation || typeof operation !== 'object') {
     throw new Error('CanvasPatchDraft 包含不支持的操作');
   }
+  if (source === 'script-master-v1' && operation.type !== 'node.add' && operation.type !== 'node.patch') {
+    throw new Error('剧本大师下游草案只允许新增或更新受控节点');
+  }
   if (operation.type === 'edge.delete') {
     return {
       type: 'edge.delete',
@@ -1388,6 +1393,24 @@ function materializeDraftOperation(
     };
   }
   if (operation.type === 'node.patch') {
+    if (source === 'script-master-v1') {
+      const nodeType = safeScriptMasterDownstreamNodeType(operation.nodeType);
+      const patchKeys = operation.patch && typeof operation.patch === 'object' && !Array.isArray(operation.patch)
+        ? Object.keys(operation.patch)
+        : [];
+      const data = operation.patch?.data;
+      if (patchKeys.length !== 1 || patchKeys[0] !== 'data' || !data || typeof data !== 'object' || Array.isArray(data)) {
+        throw new Error(`剧本大师下游节点 ${nodeType} 只允许更新公开 data`);
+      }
+      assertCanvasAgentPlanJson(data, `scriptMaster.${nodeType}.data`);
+      return {
+        type: 'node.patch',
+        payload: {
+          nodeId: safeAuthoritativeIdentity(operation.nodeId, '节点 ID'),
+          dataPatch: JSON.parse(JSON.stringify(data)),
+        },
+      };
+    }
     const patchKeys = operation.patch && typeof operation.patch === 'object' && !Array.isArray(operation.patch)
       ? Object.keys(operation.patch)
       : [];
@@ -1415,6 +1438,38 @@ function materializeDraftOperation(
     };
   }
   if (operation.type === 'node.add') {
+    if (source === 'script-master-v1') {
+      const rawNode = operation.node;
+      if (!rawNode || typeof rawNode !== 'object' || Array.isArray(rawNode)) throw new Error('剧本大师下游节点无效');
+      if (Object.keys(rawNode).some((key) => !['data', 'id', 'position', 'type'].includes(key))) {
+        throw new Error('剧本大师下游节点包含未定义字段');
+      }
+      const id = safeAuthoritativeIdentity(rawNode.id, '节点 ID');
+      const type = safeScriptMasterDownstreamNodeType(rawNode.type);
+      const position = rawNode.position;
+      if (!position || typeof position !== 'object'
+        || typeof position.x !== 'number' || typeof position.y !== 'number'
+        || !Number.isFinite(position.x) || !Number.isFinite(position.y)
+        || Math.abs(position.x) > 1_000_000 || Math.abs(position.y) > 1_000_000) {
+        throw new Error('剧本大师下游节点坐标无效');
+      }
+      const data = rawNode.data && typeof rawNode.data === 'object' && !Array.isArray(rawNode.data)
+        ? rawNode.data as Record<string, unknown>
+        : {};
+      if (!Object.keys(data).length) throw new Error(`剧本大师下游节点 ${type} 缺少 data`);
+      assertCanvasAgentPlanJson(data, `scriptMaster.${type}.data`);
+      return {
+        type: 'node.add',
+        payload: {
+          node: {
+            id,
+            type,
+            position: { x: Object.is(position.x, -0) ? 0 : position.x, y: Object.is(position.y, -0) ? 0 : position.y },
+            data: JSON.parse(JSON.stringify(data)),
+          },
+        },
+      };
+    }
     if (source !== 'canvas-agent-plan-v1') throw new Error('CanvasPatchDraft 的 node.add 仅允许来自版本化 Agent 计划');
     const rawNode = operation.node;
     if (!rawNode || typeof rawNode !== 'object' || Array.isArray(rawNode)) throw new Error('Agent 计划节点无效');
@@ -1495,6 +1550,13 @@ function materializeDraftOperation(
 
 const AGENT_PLAN_PRIVATE_KEY = /(?:api[_-]?key|authorization|cookie|password|passwd|passphrase|private[_-]?key|client[_-]?secret|secret|credential|access[_-]?token|refresh[_-]?token|session[_-]?token|signature|managed[_-]?path|source[_-]?path|executable[_-]?path)$/i;
 const AGENT_PLAN_LOCAL_PATH = /(?:^|[\s"'`=,:;?&#])(?:[A-Za-z]:[\\/]|\\\\|\/(?:Users|home|root|tmp|var|private|mnt|workspace)(?:\/|$))/i;
+const SCRIPT_MASTER_DOWNSTREAM_NODE_TYPES = new Set(['story', 'director-storyboard', 'seedance', 'audio', 'video-edit']);
+
+function safeScriptMasterDownstreamNodeType(value: unknown): string {
+  const type = safeAuthoritativeIdentity(value, '节点类型');
+  if (!SCRIPT_MASTER_DOWNSTREAM_NODE_TYPES.has(type)) throw new Error(`剧本大师不允许写入节点类型: ${type}`);
+  return type;
+}
 
 function assertCanvasAgentPlanJson(value: unknown, path: string, depth = 0, state = { nodes: 0, chars: 0, seen: new WeakSet<object>() }) {
   state.nodes += 1;
@@ -1666,7 +1728,12 @@ export function materializeCanvasPatchDraft(
     diagnosticsResolved,
     operations: materialized,
   });
-  const id = `${draft.source === 'canvas-agent-plan-v1' ? 'agent-plan-patch' : 'doctor-patch'}-${stablePatchHash(stableEnvelope)}`;
+  const idPrefix = draft.source === 'canvas-agent-plan-v1'
+    ? 'agent-plan-patch'
+    : draft.source === 'script-master-v1'
+      ? 'script-master-patch'
+      : 'doctor-patch';
+  const id = `${idPrefix}-${stablePatchHash(stableEnvelope)}`;
   const operations: CanvasOperation[] = materialized.map((operation, index) => ({
     opId: `${id}-op-${String(index + 1).padStart(3, '0')}`,
     projectId,

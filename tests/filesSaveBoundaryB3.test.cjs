@@ -200,7 +200,7 @@ test('B3 file save boundary rejects traversal/SSRF/unbounded media and keeps upl
     assert.equal(fs.existsSync(path.join(saveDir, 'fake.png')), false);
   });
 
-  await t.test('streams a public remote media response and rejects private/redirect/oversize/truncated/spoofed responses', async () => {
+  await t.test('streams public media, ignores declared-length drift, and rejects private/redirect/oversize/spoofed responses', async () => {
     remoteServer = await listenHttp((req, res) => {
       if (req.url === '/ok.png') {
         res.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': String(PNG.length) });
@@ -213,7 +213,7 @@ test('B3 file save boundary rejects traversal/SSRF/unbounded media and keeps upl
         res.end(oversized);
         return;
       }
-      if (req.url === '/truncated.png') {
+      if (req.url === '/declared-longer.png') {
         res.shouldKeepAlive = false;
         res.writeHead(200, {
           Connection: 'close',
@@ -282,12 +282,13 @@ test('B3 file save boundary rejects traversal/SSRF/unbounded media and keeps upl
     assert.equal(oversized.response.status, 413, JSON.stringify(oversized.payload));
     assert.equal(oversized.payload.code, 'media_too_large');
 
-    const truncated = await post('/api/files/save-to-disk', {
-      url: `${publicBase}/truncated.png`,
-      filename: 'remote-truncated.png',
+    const mismatched = await post('/api/files/save-to-disk', {
+      url: `${publicBase}/declared-longer.png`,
+      filename: 'remote-length-drift.png',
     });
-    assert.equal(truncated.response.status, 502, JSON.stringify(truncated.payload));
-    assert.equal(truncated.payload.code, 'remote_body_incomplete');
+    assert.equal(mismatched.response.status, 200, JSON.stringify(mismatched.payload));
+    assert.equal(mismatched.payload.data.source, 'fetch');
+    assert.deepEqual(fs.readFileSync(path.join(saveDir, 'remote-length-drift.png')), PNG);
 
     const spoofed = await post('/api/files/save-to-disk', {
       url: `${publicBase}/spoofed.png`,
@@ -296,7 +297,7 @@ test('B3 file save boundary rejects traversal/SSRF/unbounded media and keeps upl
     assert.equal(spoofed.response.status, 415, JSON.stringify(spoofed.payload));
     assert.equal(spoofed.payload.code, 'unsupported_media');
 
-    for (const filename of ['private.png', 'redirected.png', 'remote-large.png', 'remote-truncated.png', 'remote-spoofed.png']) {
+    for (const filename of ['private.png', 'redirected.png', 'remote-large.png', 'remote-spoofed.png']) {
       assert.equal(fs.existsSync(path.join(saveDir, filename)), false, `${filename} must not survive failure`);
     }
     assert.equal(fs.readdirSync(saveDir).some((name) => name.startsWith('.t8-save-')), false);

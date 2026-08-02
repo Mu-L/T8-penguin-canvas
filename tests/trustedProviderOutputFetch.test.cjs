@@ -129,6 +129,65 @@ test('trusted Provider status JSON uses the marked system-fetch bridge', { concu
   assert.equal(bridgeCalls, 1);
 });
 
+test('trusted Provider output ignores VPN-altered Content-Length and bounds actual bytes', { concurrency: false }, async () => {
+  const body = Buffer.from('vpn-decoded-result');
+  const bridge = systemFetchBridge(async () => new Response(body, {
+    status: 200,
+    headers: {
+      'content-length': '1183525',
+      'content-type': 'image/png',
+    },
+  }));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 't8-content-length-drift-'));
+  const targetPath = path.join(tmpDir, 'provider-result.png');
+
+  try {
+    await withGlobalFetch(bridge, async () => {
+      const fetched = await safeRemoteMediaFetch('https://provider-output.test/result.png', {
+        trustedProviderOutput: true,
+        lookupImpl: publicLookup,
+        maxBytes: 64,
+        timeoutMs: 2_000,
+      });
+      assert.deepEqual(fetched.buffer, body);
+
+      const downloaded = await safeRemoteMediaDownload(
+        'https://provider-output.test/result.png',
+        targetPath,
+        {
+          trustedProviderOutput: true,
+          lookupImpl: publicLookup,
+          maxBytes: 64,
+          timeoutMs: 2_000,
+        },
+      );
+      assert.equal(downloaded.byteSize, body.length);
+      assert.deepEqual(fs.readFileSync(targetPath), body);
+    });
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+
+  const oversizedBridge = systemFetchBridge(async () => new Response(Buffer.alloc(9, 0x5a), {
+    status: 200,
+    headers: {
+      'content-length': '1',
+      'content-type': 'application/octet-stream',
+    },
+  }));
+  await withGlobalFetch(oversizedBridge, async () => {
+    await assert.rejects(
+      safeRemoteMediaFetch('https://provider-output.test/oversized.bin', {
+        trustedProviderOutput: true,
+        lookupImpl: publicLookup,
+        maxBytes: 8,
+        timeoutMs: 2_000,
+      }),
+      (error) => error?.code === 'item_too_large',
+    );
+  });
+});
+
 test('ordinary user URLs stay on the DNS-pinned transport', { concurrency: false }, async () => {
   let bridgeCalls = 0;
   let serverCalls = 0;

@@ -5,7 +5,7 @@
 
 // 节点类型(25 种保留 = 24 + upload)
 export type NodeType =
-  // Core (8)
+  // Core (9)
   | 'text'
   | 'image'
   | 'video'
@@ -13,6 +13,7 @@ export type NodeType =
   | 'seedance'
   | 'director-storyboard'
   | 'story'
+  | 'script-master'
   | 'audio'
   | 'llm'
   | 'runninghub'

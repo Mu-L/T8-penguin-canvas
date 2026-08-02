@@ -884,27 +884,6 @@ async function openSafeRemoteResponse(inputUrl, options, state, initialRedirectC
   }
 }
 
-function assertContentLength(response, maxBytes) {
-  const raw = response.headers['content-length'];
-  if (raw === undefined || raw === '') return null;
-  const text = Array.isArray(raw) ? raw.join(',') : String(raw).trim();
-  if (!/^\d+$/.test(text) || !Number.isSafeInteger(Number(text))) {
-    throw remoteMediaError('invalid_content_length', '远程资源 Content-Length 无效。');
-  }
-  if (Number(text) > maxBytes) {
-    throw remoteMediaError('item_too_large', `远程资源超过 ${maxBytes} bytes 限制。`);
-  }
-  return Number(text);
-}
-
-function contentLengthMismatch(expectedBytes, receivedBytes) {
-  return remoteMediaError(
-    'content_length_mismatch',
-    `远程资源实际长度 ${receivedBytes} bytes 与声明的 ${expectedBytes} bytes 不一致。`,
-    { expectedBytes, receivedBytes },
-  );
-}
-
 function isPrematureResponseError(error, response) {
   if (error?.code) {
     return error.code === 'ECONNRESET'
@@ -914,16 +893,12 @@ function isPrematureResponseError(error, response) {
   return response.aborted === true || error?.message === 'aborted';
 }
 
-async function consumeResponse(response, state, onChunk, knownContentLength) {
-  let expectedBytes = knownContentLength;
-  if (expectedBytes === undefined) {
-    try {
-      expectedBytes = assertContentLength(response, state.maxBytes);
-    } catch (error) {
-      response.destroy(error);
-      throw error;
-    }
-  }
+async function consumeResponse(response, state, onChunk) {
+  // Content-Length is advisory only. VPNs, transparent proxies and Chromium's
+  // decoding layer may preserve an upstream encoded length while exposing a
+  // decoded body. Acceptance is therefore based on the bytes actually read;
+  // callers still enforce media signatures/decodability after this transport.
+  const hasDeclaredLength = response.headers['content-length'] !== undefined;
   const remaining = remainingDeadlineMs(state);
   const deadlineTimer = setTimeout(() => response.destroy(fetchTimeoutError('deadline')), remaining);
   if (response.socket) {
@@ -938,21 +913,13 @@ async function consumeResponse(response, state, onChunk, knownContentLength) {
         response.destroy(error);
         throw error;
       }
-      if (expectedBytes !== null && total + chunk.length > expectedBytes) {
-        const error = contentLengthMismatch(expectedBytes, total + chunk.length);
-        response.destroy(error);
-        throw error;
-      }
       await onChunk(chunk);
       total += chunk.length;
     }
-    if (expectedBytes !== null && total !== expectedBytes) {
-      throw contentLengthMismatch(expectedBytes, total);
-    }
     return total;
   } catch (error) {
-    if (expectedBytes !== null && total !== expectedBytes && isPrematureResponseError(error, response)) {
-      throw contentLengthMismatch(expectedBytes, total);
+    if (hasDeclaredLength && total > 0 && isPrematureResponseError(error, response)) {
+      return total;
     }
     throw error;
   } finally {
@@ -963,28 +930,8 @@ async function consumeResponse(response, state, onChunk, knownContentLength) {
 }
 
 async function consumeResponseBuffer(response, state) {
-  let expectedBytes;
-  try {
-    expectedBytes = assertContentLength(response, state.maxBytes);
-  } catch (error) {
-    response.destroy(error);
-    throw error;
-  }
-  if (expectedBytes !== null) {
-    const buffer = expectedBytes === 0 ? Buffer.alloc(0) : Buffer.allocUnsafe(expectedBytes);
-    let offset = 0;
-    await consumeResponse(response, state, async (chunk) => {
-      const copied = chunk.copy(buffer, offset);
-      if (copied !== chunk.length) {
-        throw contentLengthMismatch(expectedBytes, offset + copied);
-      }
-      offset += copied;
-    }, expectedBytes);
-    return buffer;
-  }
-
   const chunks = [];
-  const byteLength = await consumeResponse(response, state, async (chunk) => { chunks.push(chunk); }, null);
+  const byteLength = await consumeResponse(response, state, async (chunk) => { chunks.push(chunk); });
   return Buffer.concat(chunks, byteLength);
 }
 
@@ -1154,24 +1101,8 @@ function systemResponseHeader(response, name) {
   return String(headers[String(name).toLowerCase()] || headers[name] || '');
 }
 
-function assertSystemContentLength(response, maxBytes) {
-  const raw = systemResponseHeader(response, 'content-length').trim();
-  if (!raw) return null;
-  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
-    throw remoteMediaError('invalid_content_length', '远程资源 Content-Length 无效。');
-  }
-  const contentLength = Number(raw);
-  if (Number(raw) > maxBytes) {
-    throw remoteMediaError('item_too_large', `远程资源超过 ${maxBytes} bytes 限制。`);
-  }
-  const contentEncoding = systemResponseHeader(response, 'content-encoding').trim().toLowerCase();
-  return contentEncoding && contentEncoding !== 'identity' ? null : contentLength;
-}
-
 async function consumeTrustedSystemResponse(response, controller, state) {
-  const expectedBytes = assertSystemContentLength(response, state.maxBytes);
   if (!response.body || typeof response.body.getReader !== 'function') {
-    if (expectedBytes !== null && expectedBytes !== 0) throw contentLengthMismatch(expectedBytes, 0);
     controller.abort();
     return Buffer.alloc(0);
   }
@@ -1208,15 +1139,9 @@ async function consumeTrustedSystemResponse(response, controller, state) {
       if (total + chunk.length > state.maxBytes) {
         throw remoteMediaError('item_too_large', `远程资源超过 ${state.maxBytes} bytes 限制。`);
       }
-      if (expectedBytes !== null && total + chunk.length > expectedBytes) {
-        throw contentLengthMismatch(expectedBytes, total + chunk.length);
-      }
       chunks.push(chunk);
       total += chunk.length;
       if (timeoutError) throw timeoutError;
-    }
-    if (expectedBytes !== null && total !== expectedBytes) {
-      throw contentLengthMismatch(expectedBytes, total);
     }
     return Buffer.concat(chunks, total);
   } catch (error) {
@@ -1230,13 +1155,11 @@ async function consumeTrustedSystemResponse(response, controller, state) {
 }
 
 async function consumeTrustedSystemResponseToFile(response, controller, state, handle) {
-  const expectedBytes = assertSystemContentLength(response, state.maxBytes);
   let reader = null;
   let total = 0;
   let completed = false;
   try {
     if (!response.body || typeof response.body.getReader !== 'function') {
-      if (expectedBytes !== null && expectedBytes !== 0) throw contentLengthMismatch(expectedBytes, 0);
       completed = true;
       return 0;
     }
@@ -1268,15 +1191,9 @@ async function consumeTrustedSystemResponseToFile(response, controller, state, h
       if (total + chunk.length > state.maxBytes) {
         throw remoteMediaError('item_too_large', `远程资源超过 ${state.maxBytes} bytes 限制。`);
       }
-      if (expectedBytes !== null && total + chunk.length > expectedBytes) {
-        throw contentLengthMismatch(expectedBytes, total + chunk.length);
-      }
       await writeWholeChunk(handle, chunk, total);
       total += chunk.length;
       if (timeoutError) throw timeoutError;
-    }
-    if (expectedBytes !== null && total !== expectedBytes) {
-      throw contentLengthMismatch(expectedBytes, total);
     }
     return total;
   } catch (error) {

@@ -431,6 +431,35 @@
         }
       ]
     },
+    "script-master": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "metadata"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
     "audio": {
       "resolver": "static",
       "inputs": [
@@ -2462,6 +2491,32 @@
         ]
       },
       "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "script-master",
+      "label": "剧本大师",
+      "category": "core",
+      "description": "专业剧本解析、稳定素材绑定、多轨时间线与能力感知 PromptPack 编译工作台",
+      "icon": "ScrollText",
+      "color": "violet",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ],
+        "outputs": [
+          "text",
+          "metadata"
+        ]
+      },
+      "executable": false,
       "generatable": false,
       "generation": {
         "allowedDataFields": {},

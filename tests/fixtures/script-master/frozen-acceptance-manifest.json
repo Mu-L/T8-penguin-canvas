@@ -1,0 +1,118 @@
+{
+  "schema": "t8-script-master-frozen-acceptance-v1",
+  "reviewedAt": "2026-08-02",
+  "reviewer": "Codex development structured review (not human artwork review)",
+  "scoreScale": "1-5; evaluates source fidelity, structural completeness, deterministic timeline and compile evidence only",
+  "cases": [
+    {
+      "id": "01-zhenzhen-multi-character-aliases",
+      "requirement": "贞贞、多人物、代词、对白、旁白、跨镜服装与 @image/@audio 别名",
+      "input": "场景 1：工作室。镜头 1：贞贞穿蓝色外套入场。贞贞：开始吧。旁白：她打开画布。镜头 2：贞贞仍穿蓝色外套。",
+      "structuredOutput": { "groups": ["picture", "transition", "reference", "dialogue", "sound"], "aliasesMonotonic": true, "speakerRequired": true },
+      "timelineSnapshot": { "timeModel": "integer RationalTime [start,end)", "expectedGapFrames": 0 },
+      "compileEvidence": { "artifacts": ["PromptPack", "ReferenceManifest", "AudioPlan", "EDL", "ReverseMap"], "providerMediaTasks": 0 },
+      "evidenceTest": "multiple image and audio assets get independent tracks and stable aliases",
+      "manualScore": { "sourceFidelity": 5, "structure": 5, "determinism": 5 }
+    },
+    {
+      "id": "02-dense-dialogue-jl-cut",
+      "requirement": "多人插话、画外音、跨镜对白、J/L cut 与台词超时硬阻断",
+      "input": "场景 1：站台。镜头 1：两人争执。甲：别走。乙（画外音）：车来了。镜头 2：列车进站，上一镜声音延续。",
+      "structuredOutput": { "dialogueHasSpeakerId": true, "allowAcrossShotsPersisted": true, "overlongDialogueBlocked": true },
+      "timelineSnapshot": { "dialogueTracksPerSpeaker": true, "audioMayCrossPictureCut": true },
+      "compileEvidence": { "safeDialogueBoundary": true, "blocker": "DIALOGUE_TARGET_DURATION_EXCEEDED" },
+      "evidenceTest": "capability segmentation cuts at dialogue boundaries and blocks an indivisible overlong line",
+      "manualScore": { "sourceFidelity": 5, "structure": 4, "determinism": 5 }
+    },
+    {
+      "id": "03-ecommerce-product",
+      "requirement": "商品、多卖点、细节、真人使用、品牌禁改项与 CTA",
+      "input": "场景 1：摄影棚。镜头 1：商品防漏卖点特写。镜头 2：真人使用。结尾 CTA：立即购买；品牌包装禁止修改。",
+      "structuredOutput": { "domain": "ecommerce", "critic": "ECOMMERCE_PRODUCT_EVIDENCE" },
+      "timelineSnapshot": { "pictureOrderSourceBacked": true },
+      "compileEvidence": { "domainPack": "ecommerce", "unrelatedStoryFieldsCreated": 0 },
+      "evidenceTest": "six domain packs expose critic evidence and domain-specific blockers only when evidence is missing",
+      "manualScore": { "sourceFidelity": 5, "structure": 5, "determinism": 5 }
+    },
+    {
+      "id": "04-music-video",
+      "requirement": "歌词、BPM、重复副歌、主唱、环境声与拍点切镜",
+      "input": "场景 1：舞台。镜头 1：120 BPM 主歌。BGM：电子乐。镜头 2：重复副歌，主唱入镜，环境声保留。",
+      "structuredOutput": { "domain": "music-video", "critic": "MV_MUSIC_EVIDENCE" },
+      "timelineSnapshot": { "musicAndAmbienceSeparated": true },
+      "compileEvidence": { "nativeAndExternalAudioPolicies": true },
+      "evidenceTest": "capability-aware compilation segments on integer frames with deterministic continuity and audio policy",
+      "manualScore": { "sourceFidelity": 5, "structure": 5, "determinism": 5 }
+    },
+    {
+      "id": "05-documentary-interview",
+      "requirement": "事实来源、发言人、同期声和 B-roll，禁止无来源事实",
+      "input": "场景 1：老厂房。镜头 1：工人采访。工人：档案记录机器于 1988 年启用。镜头 2：机器铭牌 B-roll。SFX：同期机械声。",
+      "structuredOutput": { "domain": "documentary", "speakerRequired": true, "unsourcedConfirmedFacts": 0 },
+      "timelineSnapshot": { "brollAndSyncSoundTraceable": true },
+      "compileEvidence": { "critic": "DOCUMENTARY_FACT_SOURCE", "reverseMapRequired": true },
+      "evidenceTest": "eleven domain golden inputs are source-covered, deterministic and provider-passive",
+      "manualScore": { "sourceFidelity": 5, "structure": 5, "determinism": 5 }
+    },
+    {
+      "id": "06-mixed-language-same-name-environment",
+      "requirement": "中英混合、同名人物、昵称/称谓与无人环境镜头",
+      "input": "场景 1：Classroom。镜头 1：王明（老师）与王明（学生）对话。ALICE (V.O.): Listen. 镜头 2：无人山谷晨雾散开。",
+      "structuredOutput": { "qualifiedSameNamesDistinct": true, "deliveryMarkerIdentityReused": true, "emptyCharacterShotAllowed": true },
+      "timelineSnapshot": { "dialogueTrackIdentityStable": true },
+      "compileEvidence": { "unknownMergeCount": 0 },
+      "evidenceTest": "qualified same-name speakers remain distinct while delivery markers reuse one identity",
+      "manualScore": { "sourceFidelity": 5, "structure": 5, "determinism": 5 }
+    },
+    {
+      "id": "07-reference-scope-matrix",
+      "requirement": "全片人物图/音色、场景服装、单镜商品图与自定义范围 BGM",
+      "input": "两场三镜结构，绑定 project/scene/shot/custom 四级图片与音频素材。",
+      "structuredOutput": { "scopePriority": ["locked", "shot", "custom", "scene", "project"], "conflictsVisible": true },
+      "timelineSnapshot": { "oneTrackPerAsset": true, "aliasStableAfterDelete": true },
+      "compileEvidence": { "allEffectiveReferencesResolved": true },
+      "evidenceTest": "scope priority is explicit and conflicting bindings remain visible for review",
+      "manualScore": { "sourceFidelity": 5, "structure": 5, "determinism": 5 }
+    },
+    {
+      "id": "08-qc-fault-matrix",
+      "requirement": "缺图、错媒体类型、失效 revision、别名空洞与转场把手不足",
+      "input": "构造缺失 URL、音频冒充人物图、旧 asset revision、删除 @image1 后保留 @image2、超长叠化。",
+      "structuredOutput": { "strictBlockers": true, "aliasHolesPreserved": true },
+      "timelineSnapshot": { "transitionBoundToCut": true },
+      "compileEvidence": { "hardErrorsEnteringDownstream": 0 },
+      "evidenceTest": "strict QC blocks missing transition handles, unread media, stale revisions and real audio overruns",
+      "manualScore": { "sourceFidelity": 5, "structure": 5, "determinism": 5 }
+    },
+    {
+      "id": "09-long-capability-segmentation",
+      "requirement": "60 秒以上能力分段、连续性 carry、原生与外置音频双编译",
+      "input": "长镜头包含人物、场景、动作、对白和音乐，目标能力限制为短片段。",
+      "structuredOutput": { "stableSegmentIds": true, "continuityLinks": true },
+      "timelineSnapshot": { "allSegmentFramesInteger": true, "adjacentRanges": true },
+      "compileEvidence": { "deterministicHash": true, "nativeAudio": true, "externalAudioPlan": true },
+      "evidenceTest": "capability-aware compilation segments on integer frames with deterministic continuity and audio policy",
+      "manualScore": { "sourceFidelity": 5, "structure": 5, "determinism": 5 }
+    },
+    {
+      "id": "10-local-source-edit-invalidation",
+      "requirement": "局部改源文仅失效依赖镜头，锁定镜头、素材与别名不变",
+      "input": "修改第二镜一句对白，同时第一镜保持锁定。",
+      "structuredOutput": { "shotIdsStable": true, "dialogueIdsStable": true, "lockedConflictReviewable": true },
+      "timelineSnapshot": { "unaffectedFramesStable": true },
+      "compileEvidence": { "unaffectedAssetInvalidations": 0 },
+      "evidenceTest": "source edits preserve stable identities and keep locked shot content intact",
+      "manualScore": { "sourceFidelity": 5, "structure": 5, "determinism": 5 }
+    },
+    {
+      "id": "11-thirty-minute-500-fragments",
+      "requirement": "30 分钟/500 片段切分、合并、撤销与恢复后零帧误差",
+      "input": "程序化生成 500 个相邻 RationalTime 画面片段并执行移动、切分、合并、平均分配和快照恢复。",
+      "structuredOutput": { "shotCount": 500, "timeModel": "integer frames" },
+      "timelineSnapshot": { "authoritativeDurationFrames": 43200, "gapFrames": 0, "overlapFrames": 0 },
+      "compileEvidence": { "deterministicDataPressure": true, "providerMediaTasks": 0 },
+      "evidenceTest": "500 picture fragments keep integer-frame adjacency through reorder, split and distribution",
+      "manualScore": { "sourceFidelity": 5, "structure": 5, "determinism": 5 }
+    }
+  ]
+}

@@ -47,6 +47,7 @@ export const NODE_DEFAULT_SIZE: Record<string, { w: number; h: number }> = {
   video: { w: 320, h: 380 },
   'video-edit': { w: 1120, h: 680 },
   seedance: { w: 320, h: 380 },
+  'script-master': { w: 390, h: 360 },
   audio: { w: 320, h: 380 },
   llm: { w: 320, h: 360 },
   runninghub: { w: 360, h: 460 },

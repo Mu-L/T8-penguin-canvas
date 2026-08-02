@@ -215,6 +215,10 @@ import SmartImage from './SmartImage';
 import { useCanvasHistory } from '../hooks/useCanvasHistory';
 import { materializeCanvasPatchDraft, type CanvasPatchDraft, type WorkflowDoctorCanvasHighlight } from '../utils/workflowDoctor';
 import {
+  SCRIPT_MASTER_CANVAS_PATCH_REQUEST_EVENT,
+  type ScriptMasterCanvasPatchRequestDetail,
+} from '../utils/scriptMasterCanvasBridge';
+import {
   activateCanvasPatchPending,
   advanceCanvasPatchMutation,
   canvasPatchHistoryBarrier,
@@ -1327,6 +1331,7 @@ const VideoEditNode = lazyCanvasNode(() => import('./nodes/VideoEditNode'), 'Vid
 const SeedanceNode = lazyCanvasNode(() => import('./nodes/SeedanceNode'), 'SeedanceNode');
 const DirectorStoryboardNode = lazyCanvasNode(() => import('./nodes/DirectorStoryboardNode'), 'DirectorStoryboardNode');
 const StoryNode = lazyCanvasNode(() => import('./nodes/StoryNode'), 'StoryNode');
+const ScriptMasterNode = lazyCanvasNode(() => import('./nodes/ScriptMasterNode'), 'ScriptMasterNode');
 const AudioNode = lazyCanvasNode(() => import('./nodes/AudioNode'), 'AudioNode');
 const RunningHubNode = lazyCanvasNode(() => import('./nodes/RunningHubNode'), 'RunningHubNode');
 const RhConfigNode = lazyCanvasNode(() => import('./nodes/RhConfigNode'), 'RhConfigNode');
@@ -1394,7 +1399,7 @@ const FalToolboxMakerNode = import.meta.env?.DEV
 
 // Phase 4 阶段:全部 24 个节点均已实现业务逻辑
 const SPECIFIC_NODES: Record<string, any> = {
-  // Core (8)
+  // Core (9)
   text: TextNode,
   image: ImageNode,
   video: VideoNode,
@@ -1402,6 +1407,7 @@ const SPECIFIC_NODES: Record<string, any> = {
   seedance: SeedanceNode, // 完全对齐 gpt-image-2-web Seedance2.0(独立 /seedance/v3 路径)
   'director-storyboard': DirectorStoryboardNode,
   story: StoryNode,
+  'script-master': ScriptMasterNode,
   audio: AudioNode,
   llm: LLMNode,
   runninghub: RunningHubNode,
@@ -1718,6 +1724,15 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     videoUrl: '',
     videoUrls: [],
     status: 'idle',
+  },
+  'script-master': {
+    scriptMasterProject: null,
+    scriptMasterProjectId: '',
+    scriptMasterRevision: 0,
+    outputText: '',
+    prompt: '',
+    status: 'idle',
+    error: '',
   },
   cinematic: { kind: 'cinematic', cinematicLanguage: 'en', cinematicStrength: 'balanced' },
   'video-motion': { kind: 'video-motion', motionLanguage: 'en' },
@@ -6128,6 +6143,24 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       return result;
     });
   }, [activeId, commitAuthoritativeCanvasPatchDocument, currentPersistableCanvas, enqueueCanvasMutation, fetchAuthoritativeCanvasPatchDocument]);
+
+  useEffect(() => {
+    const handleScriptMasterPatchRequest = (event: Event) => {
+      const detail = (event as CustomEvent<ScriptMasterCanvasPatchRequestDetail>).detail;
+      if (!detail || (detail.action !== 'preview' && detail.action !== 'apply')) return;
+      if (detail.action === 'preview') {
+        void handlePreviewCanvasPatch(detail.draft).then(detail.resolve).catch((error) => {
+          detail.reject(error instanceof Error ? error : new Error(String(error)));
+        });
+        return;
+      }
+      void handleApplyCanvasPatch(detail.patch, detail.preview).then(detail.resolve).catch((error) => {
+        detail.reject(error instanceof Error ? error : new Error(String(error)));
+      });
+    };
+    window.addEventListener(SCRIPT_MASTER_CANVAS_PATCH_REQUEST_EVENT, handleScriptMasterPatchRequest);
+    return () => window.removeEventListener(SCRIPT_MASTER_CANVAS_PATCH_REQUEST_EVENT, handleScriptMasterPatchRequest);
+  }, [handleApplyCanvasPatch, handlePreviewCanvasPatch]);
 
   const handleRevertCanvasPatch = useCallback(async (patchId: string, _baseRevision: number) => {
     const canvasId = activeId;

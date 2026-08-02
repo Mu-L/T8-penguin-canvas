@@ -15,8 +15,8 @@
   },
   "sourceDigests": {
     "creativeCapabilityManifest": "36908537be76c1b8bfcecbe1fec079d8a335e6d7d03f470ecd562f823658e0f5",
-    "canvasNodeSchema": "c594306f7a1efc8124a25d83c3294ea7fe87c0718e4305a282a3f10f8896e0e7",
-    "canvasNodeSchemaFile": "330bd64abf3de1d183f61dee477670ef72192052a2d516e22805511e6bdc93d1",
+    "canvasNodeSchema": "bb61bd74d5f6de3bba1503f50029f34b64211d36fff6846fb9fd3dd03102e9c1",
+    "canvasNodeSchemaFile": "103e8405ed1db9c267838593f337e8b847cc6260089a15c31e51fd9fe7bbdfd8",
     "runtimeCatalogSources": "bb999a55796a6ea1091d08699c99c65a4c375d86ab5009fc25051a813cf4a6f6",
     "runtimeCatalogArtifact": "cf3f7c0ae16832dddc06249c36a167c4f48c1b8d138b4605d3d115ab7636461f",
     "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
@@ -24,7 +24,7 @@
     "coverageReceiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7",
     "canonicalTextDigestCompiler": "b0afcf28a257fbbd8f391edc117348f8f2ede1b4a039ae91bce25a8d563ac0cf"
   },
-  "aggregateDigest": "c25377b7aeeaa6731dfc6f6254f2495a9dd02e9d5f21eb25caf56651760c879d",
+  "aggregateDigest": "74995837281bc77aa7162846fcfcdb24b3e0029b23a2a85b6a72acc230c79a11",
   "principles": {
     "oneSentenceStart": true,
     "directCanvasMutation": false,
@@ -36,16 +36,16 @@
   "counts": {
     "capabilities": 31,
     "handlers": 31,
-    "nodes": 70,
+    "nodes": 71,
     "executableNodes": 52,
     "generatableNodes": 7,
-    "referencedNodes": 61,
+    "referencedNodes": 62,
     "unreferencedNodes": 9,
-    "directCapabilityNodes": 61,
+    "directCapabilityNodes": 62,
     "internalCompatNodes": 1,
     "semanticSupersededNodes": 8,
     "publicCapabilityGapNodes": 0,
-    "accountedNodes": 70,
+    "accountedNodes": 71,
     "unexplainedNodes": 0,
     "fullyOperableNodes": 14,
     "runtimeEntries": 200,
@@ -509,6 +509,7 @@
         "seedance",
         "director-storyboard",
         "story",
+        "script-master",
         "audio",
         "llm",
         "runninghub",
@@ -3527,6 +3528,54 @@
         "run": true,
         "verify": true,
         "resume": true,
+        "rollback": true,
+        "recover": true
+      }
+    },
+    {
+      "type": "script-master",
+      "label": "剧本大师",
+      "description": "专业剧本解析、稳定素材绑定、多轨时间线与能力感知 PromptPack 编译工作台",
+      "category": "core",
+      "hidden": false,
+      "executable": false,
+      "generatable": false,
+      "agentExposure": "direct-capability",
+      "coverageReason": "registered-capability-reference",
+      "accounting": {
+        "status": "direct-capability",
+        "reasonCode": "registered-capability-reference",
+        "semanticCapabilityIds": [
+          "canvas.node-add"
+        ],
+        "evidence": [
+          "tools/zcanvas-cli/creativeCapabilityManifest.json"
+        ]
+      },
+      "inputs": [
+        "text",
+        "image",
+        "video",
+        "audio"
+      ],
+      "outputs": [
+        "text",
+        "metadata"
+      ],
+      "capabilityIds": [
+        "canvas.node-add"
+      ],
+      "handlerIds": [
+        "creative-action:graph.node-add"
+      ],
+      "coverage": {
+        "understand": true,
+        "plan": true,
+        "preview": true,
+        "apply": true,
+        "run": false,
+        "verify": true,
+        "resume": false,
         "rollback": true,
         "recover": true
       }
@@ -10246,6 +10295,7 @@
       "feishu-bitable-input",
       "feishu-bitable-output",
       "video",
+      "script-master",
       "runninghub",
       "runninghub-wallet",
       "rh-tools",
@@ -10498,14 +10548,14 @@
     "schema": "t8-creative-capability-coverage-receipt-v1",
     "sourceDigests": {
       "capabilityManifest": "36908537be76c1b8bfcecbe1fec079d8a335e6d7d03f470ecd562f823658e0f5",
-      "nodeSchema": "c594306f7a1efc8124a25d83c3294ea7fe87c0718e4305a282a3f10f8896e0e7",
+      "nodeSchema": "bb61bd74d5f6de3bba1503f50029f34b64211d36fff6846fb9fd3dd03102e9c1",
       "runtimeCatalog": "bb999a55796a6ea1091d08699c99c65a4c375d86ab5009fc25051a813cf4a6f6",
       "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
       "receiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7"
     },
     "inventory": {
       "nodes": {
-        "total": 70,
+        "total": 71,
         "executable": 52,
         "generatable": 7
       },
@@ -10528,6 +10578,6 @@
       "missingCompatibilityEdges": []
     },
     "complete": true,
-    "digest": "bc1ea248d55c90c53ddc7dcd9c56d22a02a36b8d520a20ea9546547273200edf"
+    "digest": "3dfb5936a464e9c5ba8c895e80dfcca9260c23e6abbf63b5f8a2f3c78c85c04f"
   }
 }

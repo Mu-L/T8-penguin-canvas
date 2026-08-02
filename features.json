@@ -1,44 +1,44 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.7.5",
-  "lastUpdated": "2026-08-02-v2.7.5-released",
+  "version": "2.7.6",
+  "lastUpdated": "2026-08-02-v2.7.6-release-approved",
   "release": {
-    "status": "released-v2.7.5",
-    "version": "2.7.5",
+    "status": "release-approved-v2.7.6",
+    "version": "2.7.6",
     "date": "2026-08-02",
-    "publishedAt": "2026-08-01T17:56:31Z",
-    "tag": "v2.7.5",
-    "latest": true,
-    "sourceCommit": "0d22644f9f751c11cf1dec2dc50b76e57c13b52d",
-    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.5",
+    "publishedAt": null,
+    "tag": "v2.7.6",
+    "latest": false,
+    "sourceCommit": null,
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.6",
     "artifacts": {
       "installer": {
-        "name": "T8-PenguinCanvas-Setup-2.7.5.exe",
-        "size": 1304690274,
-        "sha256": "d1cfb27a09a6de0b4586fcf963be21bc75a339d2bab7082cd4762cd0a4f07350"
+        "name": "T8-PenguinCanvas-Setup-2.7.6.exe",
+        "size": null,
+        "sha256": null
       },
       "blockmap": {
-        "name": "T8-PenguinCanvas-Setup-2.7.5.exe.blockmap",
-        "size": 1359819,
-        "sha256": "10f6a59e141052b799d7bb4c5fb04da217ee5d6943326e498d3fa1314094790e"
+        "name": "T8-PenguinCanvas-Setup-2.7.6.exe.blockmap",
+        "size": null,
+        "sha256": null
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": 362,
-        "sha256": "7c693bc95ae94b1757f21bffec0f5b125d2177ebabf534ff9ca84dafc99ea2c8"
+        "size": null,
+        "sha256": null
       }
     },
     "verification": [
-      "v2.7.5 Tag 与 Release target 已固定到唯一正式 Electron/NSIS 安装包对应源码 0d22644f9f751c11cf1dec2dc50b76e57c13b52d；Release 已公开且为 GitHub Latest。",
-      "上游素材物理化、RunningHub、Canvas Hook 顺序、操作栏缩放、系统网络与代理安全日志等发布范围聚焦回归 147/147，协作发布门 4/4 通过；TypeScript、公开发布面、RH 工具箱和能力目录检查通过。",
-      "Electron/Vite/加密/运行时/原生模块/NSIS 正式流程只实际打包一次；安装包、blockmap 与 latest.yml 已通过 post-build、provenance、sealed recovery、GitHub digest/size 元数据、发布前完整远端回下载、最终 Latest 与 recovery 清理核验。",
-      "用户已明确授权先发布、后补真实 Provider、协作多端与安装升级证据；延期不将尚未执行的证据标记为通过。"
+      "v2.7.6 发布范围固定为剧本大师专业工作台和 VPN / 代理远程媒体声明长度兼容修复。",
+      "剧本大师聚焦回归 30/30、相邻回归 226/226，VPN 声明长度聚焦回归 30/30、相邻系统网络与 Provider 回归 111/111；TypeScript 与能力目录检查通过。",
+      "正式 Electron/Vite/加密/运行时/原生模块/NSIS 构建、Tag、Release、远端资产回下载与 Latest 核验待固定源码提交后执行，不提前记录为通过。",
+      "用户已明确授权先发布、后补真实 Provider、协作多端与安装升级证据；协作证据门仅允许缺失清单按 owner-approved-post-release-v2.7.6 延期，不能把延期标记为已通过。"
     ]
   },
   "versionSequencePolicy": {
     "status": "active",
     "date": "2026-07-30",
-    "currentVersion": "2.7.5",
+    "currentVersion": "2.7.6",
     "rules": [
       "版本号每一段只使用 0-9；v2.6.9 的下一正式版本固定为 v2.7.0。",
       "禁止创建、打包、推送、打 tag、发布或写入自动更新元数据为 v2.6.10。",
@@ -46,7 +46,23 @@
       "v2.7.2 的下一正式版本固定为 v2.7.3。",
       "v2.7.3 的下一正式版本固定为 v2.7.4。",
       "v2.7.4 的下一正式版本固定为 v2.7.5。",
+      "v2.7.5 的下一正式版本固定为 v2.7.6。",
       "后续改版本前必须同步核对 package.json、package-lock.json、README、features.json、项目 SKILL.md、Release notes、自动更新元数据和 Git tag。"
+    ]
+  },
+  "vpnProxyDeclaredLengthTolerance": {
+    "status": "release-candidate-v2.7.6",
+    "date": "2026-08-02",
+    "releaseIncluded": true,
+    "highlights": [
+      "图像、视频、音频、RunningHub、远程素材保存与 Provider 状态读取共用的安全下载层不再把 Content-Length 当作最终文件尺寸，也不再因声明字节数与实际响应体不一致而判定下载失败。",
+      "Electron Chromium 系统网络桥接与 DNS 固定回退都以实际收到的字节为准；VPN、TUN、透明代理或 CDN 解压、转码、分块和响应头重写不会再触发“实际长度与声明长度不一致”的误报。",
+      "安全边界仍按实际字节流执行单项大小上限、连接/空闲/总时限，并继续拒绝空媒体、HTML/JSON 错误页、归档、跨媒体类型伪装、私网目标和不安全落盘路径；有效媒体内容校验仍是最终成功门。"
+    ],
+    "verification": [
+      "safeRemoteMediaFetch、可信 Provider 输出和文件保存边界聚焦回归 30/30 通过，覆盖声明长度大于实际、声明长度小于实际上限、内存读取、流式落盘和实际字节超限。",
+      "系统网络桥接、网页素材导入、Seedance Provider、代理日志脱敏与素材语义相邻回归 111/111 通过。",
+      "未调用真实付费 Provider，也未冒充覆盖外部用户的具体 VPN 环境；用户已授权将修复纳入 v2.7.6，正式构建与远端发布结果在实际完成后补录。"
     ]
   },
   "mediaCompatibilityCanvasStabilityV275": {
@@ -6333,11 +6349,11 @@
       "T8_ENABLE_LOCAL_PRIVATE": "开发环境和普通本机构建可选；0=关闭本机 local-private/extensions 私有扩展。正式 dist:release 固定为 1，不能被父环境降级。GitHub/clean clone 因为没有 local-private 目录，不包含充值实现。",
       "T8_DISABLE_LOCAL_EXTENSIONS": "开发环境可选；1=关闭本地扩展。正式 dist:release 固定为 0，确保本机私有 sidecar 参与加密打包与后置校验。"
     },
-    "version": "2.7.5",
-    "semverVersion": "2.7.5",
+    "version": "2.7.6",
+    "semverVersion": "2.7.6",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；当前发布候选为 v2.7.5，聚焦受控素材物理化、兼容真实媒体元数据漂移、RunningHub 上传/弹窗，以及 Canvas Hook 与操作栏缩放稳定性。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.7.5 已获授权进入唯一一次 Electron/NSIS 正式发布流程；固定 source/tag、三项自动更新资产、摘要和完整远端回下载事实将在流程成功后回写。用户授权的一次性证据延期不改变未完成证据状态。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；当前发布候选为 v2.7.6，聚焦剧本大师专业工作台与 VPN / 代理远程媒体声明长度兼容。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.7.6 已获授权进入唯一一次 Electron/NSIS 正式发布流程；固定 source/tag、三项自动更新资产、摘要和完整远端回下载事实将在流程成功后回写。用户授权的一次性证据延期不改变未完成证据状态。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
@@ -6984,7 +7000,38 @@
       "自动更新到带新影片的版本后，旧成就数据仍能解锁并播放新资源。"
     ]
   },
-  "totalNodes": 55,
+  "scriptMasterNodeDev": {
+    "status": "release-candidate-v2.7.6",
+    "date": "2026-08-02",
+    "releaseIncluded": true,
+    "schema": "t8-script-master-project-v1",
+    "highlights": [
+      "新增轻量剧本大师节点卡与独立专业工作台，采用上方全局、左侧素材、中央镜头、右侧检查器、底部多轨时间线布局；打开工作台不会自动调用 LLM、图像、视频或音频 Provider。",
+      "确定性导入支持 TXT、Markdown、Fountain 和 JSON 文本，保留原文、内容摘要、行号/字符范围、场景头、镜头头、显式人物、对白和 BGM/Ambience/SFX/Voiceover 标签；LLM 分析只在用户显式点击后调用统一平台/模型选择器，严格 JSON 候选先审阅再采纳，且不触发任何媒体 Provider。",
+      "项目、场景、镜头、对白、声音、资产与绑定均使用稳定内部 ID；@imageN/@videoN/@audioN 仅为持久化导出别名，图片、视频、音频各自维护单调计数器，删除后不重编号。",
+      "每张参考图、参考视频和每段音频可建立独立参考/声音轨；同一镜头可同时解析和编译 @image1 @image2 与 @audio1 @audio2，不再把每类素材收缩成单个 URL。",
+      "时间使用整数帧 RationalTime 和半开区间 [start,end)，画面轨检查空隙/重叠/非法时长；逐镜确定性编译 PromptPack、ReferenceBindingManifest、AudioPlan、EDL、ReverseMap 和 Director 适配数据。",
+      "引用作用域显式支持全片、本场、本镜和自定义范围，并按用户锁定、本镜、自定义、本场、全片排序；冲突保留为可见警告，不按数组尾项静默覆盖。",
+      "时间线复用现有 VideoTimeline 控制器语义，提供选择、移动、双端修剪、切刀、合并、框选、多选、吸附、键盘逐帧微移、复制、删除、新增、平均分配、播放/循环、撤销重做及轨道锁定/隐藏/静音；镜头重排和改时长会同步重定时对白与声音。",
+      "能力注册表覆盖 Seedance 通用、Fast/Pro 原生音频和纯视频外置 AudioPlan；长镜头按整数帧与对白安全边界确定性分段，完整台词超过目标单段上限时硬阻断，不把整片伪装成一段 Prompt。",
+      "严格质检覆盖来源 100%、说话人、引用 revision/hash、媒体真实可读性、媒体类型、实际音频时长、转场把手、目标引用/字符上限与六类领域证据；同名人物带身份限定时保持独立，画外音等表演标记仍复用同一人物。",
+      "素材列表与多轨时间线均采用带 overscan 的窗口化渲染；图片/视频/音频探测异步可取消，音频额外生成有界波形峰值并随项目持久化；本地历史快照支持崩溃重开后的撤销/重做恢复。",
+      "Story、导演分镜、Seedance、音频和视频剪辑下游通过受控 script-master-v1 CanvasPatch 草案新增或更新稳定节点；必须先取得服务端精确预览并由用户明确确认，写入后记录 patch、canvas revision、run 与回写血缘，不自动启动生成。",
+      "叙事、电商、广告、MV、纪录/访谈和口播/教学共享同一底座并使用独立领域关注字段、证据要求和 Critic；未确认类型不会默认补写故事。"
+    ],
+    "verification": [
+      "剧本大师聚焦回归覆盖确定性解析与局部重导入稳定 ID、锁定冲突、显式 LLM 候选/失效、多图片/多音频独立轨、别名删除不重排、作用域优先级、能力分段、对白安全切点、PromptPack 全引用、原生/外置 AudioPlan、严格媒体/转场/来源门、六领域、下游创建/更新/重试/回写、崩溃恢复、虚拟化与可访问性契约。",
+      "保存 11 个领域金样例以及与 roadmap 一一对应的 11 项冻结验收清单；30 分钟 500 画面片段在移动、切分、合并、平均分配和快照恢复后保持 43,200 帧、0 gap、0 overlap；10,000+ 中文字本地解析回归低于 2 秒门。",
+      "剧本大师聚焦测试 30/30、相邻 CanvasPatch/Story/Director/VideoTimeline/WorkflowDoctor 回归 226/226 通过；完整 CanvasPatch 协议组 64 项中 63 项通过，唯一失败是 HEAD 已存在的路由测试仍未纳入 allowExactDuplicateAcrossActors 上下文字段，与本节点改动无关。",
+      "共享 Canvas Node Schema、NodeType、Canvas 懒加载映射、初始数据、端口契约、默认尺寸和 features 清单同步；节点显式标记为非运行生成节点。",
+      "开发期间 Provider 调用与媒体生成为 0；用户已授权将功能纳入 v2.7.6，正式 build、Electron 打包、GitHub push、tag 与 Release 结果在实际完成后补录。"
+    ],
+    "boundaries": [
+      "P0-P5 的开发实现与本地/协议回归已收口并进入 v2.7.6 发布范围；真实 LLM/媒体 Provider E2E、真实生成质量评测、协作多端与安装升级证据按用户授权后补，不会提前标记为通过。",
+      "编译、质检、下游预览和确认写节点都不等于视频、配音、音乐或成片已经生成；冻结验收中的结构化评分由 Codex 开发审阅完成，并明确不冒充真人艺术质量评审。"
+    ]
+  },
+  "totalNodes": 56,
   "phases": {
     "phase0": {
       "label": "基础设施",
@@ -9027,7 +9074,7 @@
     },
     "core": {
       "label": "核心节点",
-      "count": 8,
+      "count": 9,
       "nodes": [
         {
           "type": "text",
@@ -9058,6 +9105,11 @@
           "type": "story",
           "label": "Story 全自动制片",
           "description": "六步把剧本自动转为可编辑分镜、分类资产、分层提示词、SD2.0 分镜视频与顺序成片；支持上传/复用/AI 补资产、停止恢复、只重试失败、任务上限、Director/VideoEdit 联动和 revision 防迟到覆盖"
+        },
+        {
+          "type": "script-master",
+          "label": "剧本大师",
+          "description": "专业剧本解析、稳定多素材绑定、整数帧多轨时间线与能力感知 PromptPack 编译工作台；多张参考图和多段音频分别保留独立 @imageN/@audioN 别名与轨道，删除后不重编号"
         },
         {
           "type": "audio",
@@ -10115,7 +10167,8 @@
       "video-output",
       "browser",
       "rh-config",
-      "comfyui-app-maker"
+      "comfyui-app-maker",
+      "script-master"
     ]
   },
   "developerOnlyNodeTypes": {

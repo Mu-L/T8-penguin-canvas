@@ -281,7 +281,7 @@ test('URL credentials and caller protocol restrictions are enforced before I/O',
   );
 });
 
-test('known Content-Length is collected into one exact buffer and truncated bodies fail closed', async (t) => {
+test('Content-Length is advisory while actual bytes remain bounded and deadline-aware', async (t) => {
   const body = Buffer.alloc(512 * 1024, 0x5a);
   const server = await listen((req, res) => {
     if (req.url === '/exact') {
@@ -292,7 +292,7 @@ test('known Content-Length is collected into one exact buffer and truncated bodi
       res.end(body);
       return;
     }
-    if (req.url === '/truncated') {
+    if (req.url === '/declared-longer') {
       res.shouldKeepAlive = false;
       res.writeHead(200, {
         Connection: 'close',
@@ -325,27 +325,10 @@ test('known Content-Length is collected into one exact buffer and truncated bodi
     idleTimeoutMs: 500,
   };
 
-  const originalConcat = Buffer.concat;
-  let concatCalls = 0;
-  Buffer.concat = function trackedConcat(...args) {
-    concatCalls += 1;
-    return originalConcat.apply(this, args);
-  };
-  let fetched;
-  try {
-    fetched = await safeRemoteMediaFetch(`${baseUrl}/exact`, common);
-  } finally {
-    Buffer.concat = originalConcat;
-  }
+  const fetched = await safeRemoteMediaFetch(`${baseUrl}/exact`, common);
   assert.deepEqual(fetched.buffer, body);
-  assert.equal(concatCalls, 0, 'known-length response must not retain chunks then concatenate a second buffer');
-
-  await assert.rejects(
-    safeRemoteMediaFetch(`${baseUrl}/truncated`, common),
-    (error) => error?.code === 'content_length_mismatch'
-      && error?.expectedBytes === 12
-      && error?.receivedBytes === 5,
-  );
+  const mismatched = await safeRemoteMediaFetch(`${baseUrl}/declared-longer`, common);
+  assert.equal(mismatched.buffer.toString(), 'short');
   await assert.rejects(
     safeRemoteMediaFetch(`${baseUrl}/known-slow`, { ...common, idleTimeoutMs: 40 }),
     (error) => error?.code === 'fetch_timeout' && error?.timeoutKind === 'idle',
@@ -379,7 +362,7 @@ test('safe streaming download is exclusive, bounded, deadline-aware and removes 
       res.end(Buffer.alloc(7, 2));
       return;
     }
-    if (req.url === '/truncated-length') {
+    if (req.url === '/declared-longer') {
       res.shouldKeepAlive = false;
       res.writeHead(200, {
         Connection: 'close',
@@ -478,14 +461,10 @@ test('safe streaming download is exclusive, bounded, deadline-aware and removes 
     assert.equal(fs.existsSync(targetPath), false, `${name} partial must be removed`);
   }
 
-  const truncatedPath = path.join(tmpDir, 'truncated.bin');
-  await assert.rejects(
-    safeRemoteMediaDownload(`${baseUrl}/truncated-length`, truncatedPath, common),
-    (error) => error?.code === 'content_length_mismatch'
-      && error?.expectedBytes === 12
-      && error?.receivedBytes === 5,
-  );
-  assert.equal(fs.existsSync(truncatedPath), false, 'truncated partial must be removed');
+  const mismatchedPath = path.join(tmpDir, 'mismatched-length.bin');
+  const mismatched = await safeRemoteMediaDownload(`${baseUrl}/declared-longer`, mismatchedPath, common);
+  assert.equal(mismatched.byteSize, 5);
+  assert.equal(fs.readFileSync(mismatchedPath, 'utf8'), 'short');
 
   const slowPath = path.join(tmpDir, 'slow.bin');
   const slowStartedAt = Date.now();

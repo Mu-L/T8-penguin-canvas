@@ -523,7 +523,7 @@ test('E5 authoritative validation detects recursive fixed-version subflow depend
   )), false);
 });
 
-test('all 70 production node instances resolve one authoritative connection contract', () => {
+test('all 71 production node instances resolve one authoritative connection contract', () => {
   const safe = definition();
   const dynamicData = {
     upload: { uploadType: 'image' },
@@ -550,8 +550,8 @@ test('all 70 production node instances resolve one authoritative connection cont
     document,
     getSubflowDefinition: (id, version, projectId) => id === safe.id && Number(version) === safe.version && projectId === safe.projectId ? clone(safe) : null,
   });
-  assert.equal(nodeSchemaManifest.types.length, 70);
-  assert.equal(Object.keys(nodeSchemaManifest.connectionPorts).length, 70);
+  assert.equal(nodeSchemaManifest.types.length, 71);
+  assert.equal(Object.keys(nodeSchemaManifest.connectionPorts).length, 71);
   const validation = executeCanvasAgentTool(database, request('validateCanvas', {}, 'all-contracts')).data;
   assert.equal(validation.diagnostics.some((item) => item.ruleId === 'ports.contract-unresolved'), false);
   for (const node of nodes) {

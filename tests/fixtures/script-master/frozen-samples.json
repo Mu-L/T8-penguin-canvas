@@ -1,0 +1,57 @@
+[
+  {
+    "id": "narrative-dialogue",
+    "domain": "narrative",
+    "source": "场景 1：雨夜站台\n镜头 1：最后一班车\n画面：女孩握紧车票，列车灯光靠近。\n女孩：我决定留下。"
+  },
+  {
+    "id": "narrative-environment",
+    "domain": "narrative",
+    "source": "场景 1：山谷清晨\n镜头 1：雾散\n画面：无人山谷里晨雾沿松林缓慢散开。\nSFX：远处鸟鸣"
+  },
+  {
+    "id": "ecommerce-product",
+    "domain": "ecommerce",
+    "source": "场景 1：白色摄影棚\n镜头 1：商品特写\n画面：产品保温杯展示防漏卖点，结尾 CTA 为立即购买。"
+  },
+  {
+    "id": "ecommerce-demo",
+    "domain": "ecommerce",
+    "source": "场景 1：厨房台面\n镜头 1：真人使用\n画面：用户演示产品一键清洗功能，并展示商品包装与下单提示。"
+  },
+  {
+    "id": "advertising-brand",
+    "domain": "advertising",
+    "source": "场景 1：城市天台\n镜头 1：品牌钩子\n画面：开场以品牌 Logo 和蓝色包装建立记忆点，结尾行动是扫码体验。"
+  },
+  {
+    "id": "music-video-chorus",
+    "domain": "music-video",
+    "source": "场景 1：霓虹舞台\n镜头 1：副歌表演\n画面：歌手在 120 BPM 拍点上完成副歌表演。\nBGM：电子音乐副歌"
+  },
+  {
+    "id": "music-video-lyric",
+    "domain": "music-video",
+    "source": "场景 1：海边黄昏\n镜头 1：歌词意象\n画面：歌词中的纸船随节拍漂向落日。\nBGM：主歌进入间奏"
+  },
+  {
+    "id": "documentary-interview",
+    "domain": "documentary",
+    "source": "场景 1：老厂房\n镜头 1：工人采访\n画面：退休工人坐在旧机床旁接受采访。\n工人：这台机器从一九八八年开始运转。"
+  },
+  {
+    "id": "documentary-broll",
+    "domain": "documentary",
+    "source": "场景 1：河岸修复区\n镜头 1：同期记录\n画面：镜头记录志愿者按现场标牌清理河岸。\nSFX：真实水流同期声"
+  },
+  {
+    "id": "tutorial-steps",
+    "domain": "tutorial",
+    "source": "场景 1：桌面教学\n镜头 1：第一步\n画面：第一步打开设置，第二步选择导出，第三步核对文件名。\n讲师：完成后点击保存。"
+  },
+  {
+    "id": "tutorial-screen-demo",
+    "domain": "tutorial",
+    "source": "场景 1：屏幕录制\n镜头 1：步骤 1\n画面：步骤 1 选择素材，步骤 2 拖入时间线，步骤 3 检查声音轨。"
+  }
+]
