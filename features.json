@@ -1,37 +1,37 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.7.7",
-  "lastUpdated": "2026-08-04-v2.7.7-release-authorized",
+  "lastUpdated": "2026-08-04-v2.7.7-released",
   "release": {
-    "status": "release-authorized-v2.7.7",
+    "status": "released-v2.7.7",
     "version": "2.7.7",
     "date": "2026-08-04",
-    "publishedAt": null,
+    "publishedAt": "2026-08-04T07:05:09Z",
     "tag": "v2.7.7",
-    "latest": false,
-    "sourceCommit": null,
+    "latest": true,
+    "sourceCommit": "594c6b3b76d3eb3173918c3525be6414638279ae",
     "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.7",
     "artifacts": {
       "installer": {
         "name": "T8-PenguinCanvas-Setup-2.7.7.exe",
-        "size": null,
-        "sha256": null
+        "size": 1304750175,
+        "sha256": "d92b75b9f8613f54dd51a12aeb8f8da8ef68d93ae2690b96f9ef8a49f4249ddd"
       },
       "blockmap": {
         "name": "T8-PenguinCanvas-Setup-2.7.7.exe.blockmap",
-        "size": null,
-        "sha256": null
+        "size": 1359687,
+        "sha256": "d8dbf3e44cb34a6e52c40263c101601849e2be35b6f92df34ba3a02e5c866502"
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": null,
-        "sha256": null
+        "size": 362,
+        "sha256": "4d326aad3da5398e8315aad08dc82b5fb80516c995462788f26fdc160641f1c1"
       }
     },
     "verification": [
       "v2.7.7 发布范围固定为 MiniMax H3 提示词增强器与剧本大师工作台可读性调整。",
       "H3/RunIntent/Agent/端口与执行权威回归 41/41、扩展 Provider/完整视频/体检/Workflow Doctor 相邻回归 83/83、剧本大师可读性定向回归 5/5；TypeScript、能力目录、公开面与生产前端构建通过。",
-      "正式 Electron/NSIS、post-build、provenance、sealed recovery、GitHub 自动更新资产和 Latest 状态由固定发布提交上的唯一正式流程生成并核验，未完成前不标记为通过。",
+      "正式 Electron/NSIS 安装包只生成一套；post-build、provenance、sealed recovery、GitHub digest/size、发布前完整远端回下载、固定 Tag、非草稿/非预发布、Latest 与发布后元数据复核均通过，recovery 已清除。",
       "用户已明确授权先发布、后补真实 Provider、协作多端、安装升级与外部环境证据；协作证据门仅允许缺失清单按 owner-approved-post-release-v2.7.7 延期，不能把延期标记为已通过。"
     ]
   },
@@ -6353,8 +6353,8 @@
     "version": "2.7.7",
     "semverVersion": "2.7.7",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.7.7 已获正式发布授权，聚焦 MiniMax H3 提示词增强器与剧本大师工作台可读性。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.7.7 正式 Electron/NSIS 安装包、blockmap 与 latest.yml 将由固定并推送 source commit 上的 dist:release 唯一流程生成；产物大小、摘要、Tag、Latest 与远端回下载证据在发布完成后补录，未生成前不伪报通过。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.7.7 已正式发布，聚焦 MiniMax H3 提示词增强器与剧本大师工作台可读性。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.7.7 正式 Electron/NSIS 安装包、blockmap 与 latest.yml 已由固定 source commit 594c6b3b76d3eb3173918c3525be6414638279ae 上的 dist:release 唯一流程生成；三项资产通过 post-build、provenance、sealed recovery、GitHub digest/size、完整远端回下载和最终 Latest 核验。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
@@ -7002,7 +7002,7 @@
     ]
   },
   "minimaxH3PromptEnhancerNode": {
-    "status": "release-authorized-v2.7.7",
+    "status": "released-v2.7.7",
     "date": "2026-08-04",
     "releaseIncluded": true,
     "nodeType": "minimax-h3-prompt-enhancer",
@@ -7034,7 +7034,7 @@
       "72 个生产节点端口合同 8/8、53 个可执行节点权威 3/3 通过；能力图同步为 31 项动作、200 项运行目录、72/72 节点已解释，MiniMax H3 的 create.script Run 覆盖为 true。",
       "扩展 Provider、完整视频多模态、Run 体检、Seedance LLM 与 Workflow Doctor 相邻回归 83/83 通过；H3/RunIntent/Agent/端口/执行权威合并回归 41/41 通过。",
       "TypeScript type-check、feature-sync、public:check、worktree development 门、git diff-check 与 Vite 生产前端 build 通过，构建产物包含独立 MiniMaxH3PromptEnhancerNode 懒加载 chunk。",
-      "未调用真实付费 Provider；源码与本地合同验证纳入 v2.7.7 正式发布范围，Electron/NSIS、自动更新资产与 GitHub Release 由正式发布流程生成。"
+      "未调用真实付费 Provider；源码与本地合同验证已随 v2.7.7 正式发布，Electron/NSIS、自动更新资产与 GitHub Latest Release 已由唯一正式发布流程生成并核验。"
     ],
     "boundaries": [
       "扩展 Provider 的凭据、Base URL 和模型清单继续由全局 API 设置管理，不保存到节点、画布、能力图或日志。",
@@ -7042,7 +7042,7 @@
     ]
   },
   "scriptMasterWorkbenchReadability": {
-    "status": "release-authorized-v2.7.7",
+    "status": "released-v2.7.7",
     "date": "2026-08-03",
     "releaseIncluded": true,
     "highlights": [
@@ -7058,7 +7058,7 @@
     ],
     "boundaries": [
       "本轮只调整剧本大师的字体、间距、栏宽、素材卡和时间线显示密度，不改变确定性解析、稳定 ID、素材绑定、编译、CanvasPatch、项目数据或 Provider 行为。",
-      "可读性调整纳入 v2.7.7 正式发布范围；Electron/NSIS、自动更新资产与 GitHub Release 由正式发布流程生成。"
+      "可读性调整已随 v2.7.7 正式发布；Electron/NSIS、自动更新资产与 GitHub Latest Release 已由唯一正式发布流程生成并核验。"
     ]
   },
   "scriptMasterNodeDev": {
