@@ -1332,6 +1332,7 @@ const SeedanceNode = lazyCanvasNode(() => import('./nodes/SeedanceNode'), 'Seeda
 const DirectorStoryboardNode = lazyCanvasNode(() => import('./nodes/DirectorStoryboardNode'), 'DirectorStoryboardNode');
 const StoryNode = lazyCanvasNode(() => import('./nodes/StoryNode'), 'StoryNode');
 const ScriptMasterNode = lazyCanvasNode(() => import('./nodes/ScriptMasterNode'), 'ScriptMasterNode');
+const MiniMaxH3PromptEnhancerNode = lazyCanvasNode(() => import('./nodes/MiniMaxH3PromptEnhancerNode'), 'MiniMaxH3PromptEnhancerNode');
 const AudioNode = lazyCanvasNode(() => import('./nodes/AudioNode'), 'AudioNode');
 const RunningHubNode = lazyCanvasNode(() => import('./nodes/RunningHubNode'), 'RunningHubNode');
 const RhConfigNode = lazyCanvasNode(() => import('./nodes/RhConfigNode'), 'RhConfigNode');
@@ -1408,6 +1409,7 @@ const SPECIFIC_NODES: Record<string, any> = {
   'director-storyboard': DirectorStoryboardNode,
   story: StoryNode,
   'script-master': ScriptMasterNode,
+  'minimax-h3-prompt-enhancer': MiniMaxH3PromptEnhancerNode,
   audio: AudioNode,
   llm: LLMNode,
   runninghub: RunningHubNode,
@@ -1915,6 +1917,27 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     maxTokens: 16384,
     stream: true,
     history: [],
+  },
+  'minimax-h3-prompt-enhancer': {
+    userPrompt: '',
+    taskType: 'T2VA',
+    durationSeconds: 5,
+    rewriteMode: 'balanced',
+    descriptionTarget: 0,
+    outputLanguage: '中文',
+    promptMode: '官方增强',
+    referenceTemplate: '',
+    referenceContext: '',
+    constraints: '',
+    seed: 0,
+    llmApiSource: 'seedance-nz',
+    providerSource: 'zhenzhen',
+    providerId: '',
+    providerModel: 'bytedance/doubao-seed-2.1-pro',
+    status: 'idle',
+    error: '',
+    enhancedPrompt: '',
+    prompt: '',
   },
   upload: { uploadType: null },
   'model-3d-upload': { uploadType: 'model3d', lockedUploadType: 'model3d' },

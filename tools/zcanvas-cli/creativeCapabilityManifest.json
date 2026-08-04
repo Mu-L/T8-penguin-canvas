@@ -169,6 +169,7 @@
       "handler": "creative-plan:create.script",
       "nodeTypes": [
         "llm",
+        "minimax-h3-prompt-enhancer",
         "output"
       ],
       "inputKinds": [

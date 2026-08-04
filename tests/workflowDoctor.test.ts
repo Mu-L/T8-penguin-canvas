@@ -138,6 +138,37 @@ test('doctor uses an explicit provider inventory for availability, regional cred
   assert.equal(incomplete.some((item) => item.ruleId === 'provider.selection-unavailable'), false);
 });
 
+test('doctor treats an unannotated MiniMax H3 node as the default domestic provider without hiding explicit extensions', () => {
+  const defaultH3: Node = {
+    id: 'h3-default',
+    type: 'minimax-h3-prompt-enhancer',
+    position: { x: 0, y: 0 },
+    data: { providerSource: 'zhenzhen', providerModel: 'bytedance/doubao-seed-2.1-pro' },
+  };
+  const defaultIssues = analyzeWorkflow([defaultH3], [], {
+    limits: { allowedModels: ['seedance-nz:bytedance/doubao-seed-2.1-pro'] },
+  });
+  assert.equal(defaultIssues.some((item) => item.ruleId === 'model.capability-mismatch'), false);
+
+  const externalH3: Node = {
+    ...defaultH3,
+    id: 'h3-external',
+    data: {
+      providerSource: 'openai-compatible',
+      providerId: 'custom-openai',
+      providerModel: 'vision-model',
+    },
+  };
+  const externalIssues = analyzeWorkflow([externalH3], [], {
+    providersComplete: true,
+    providers: [],
+  });
+  assert.equal(
+    externalIssues.some((item) => item.ruleId === 'provider.selection-unavailable' && item.nodeIds.includes('h3-external')),
+    true,
+  );
+});
+
 test('doctor only treats top-level sourceAssetId as a project AssetRef', () => {
   const nodes: Node[] = [
     { id: 'project-asset', type: 'image', position: { x: 0, y: 0 }, data: { prompt: 'x', sourceAssetId: 'asset-project' } },

@@ -196,6 +196,61 @@ test('LLM preflight checks the key belonging to the selected built-in platform',
   );
 });
 
+test('MiniMax H3 preflight defaults to the domestic key and follows an explicit built-in channel switch', () => {
+  const baseNode: Node = {
+    id: 'h3-enhancer',
+    type: 'minimax-h3-prompt-enhancer',
+    position: { x: 0, y: 0 },
+    data: {
+      providerSource: 'zhenzhen',
+      providerModel: 'bytedance/doubao-seed-2.1-pro',
+      userPrompt: '雨中的追逐镜头',
+    },
+  };
+  const input = {
+    nodes: [baseNode],
+    edges: [],
+    executionNodeIds: [baseNode.id],
+    scopeMode: 'exact-plan' as const,
+    projectId: 'project-h3',
+    providersComplete: true,
+    assets: [],
+    policy: null,
+  };
+
+  const defaultMissing = buildRunPreflightDiagnostics({ ...input, settings: EMPTY_SETTINGS });
+  assert.equal(
+    defaultMissing.capability.some((item) => item.ruleId === 'provider.seedance-nz-credential-missing'),
+    true,
+  );
+  const defaultConfigured = buildRunPreflightDiagnostics({
+    ...input,
+    settings: { ...EMPTY_SETTINGS, zhenzhenSd2ApiKey: 'configured' },
+  });
+  assert.equal(
+    defaultConfigured.capability.some((item) => item.ruleId === 'provider.seedance-nz-credential-missing'),
+    false,
+  );
+
+  const workshopInput = {
+    ...input,
+    nodes: [{ ...baseNode, data: { ...baseNode.data, llmApiSource: 'zhenzhen', model: 'gemini-3.5-flash' } }],
+  };
+  const workshopMissing = buildRunPreflightDiagnostics({ ...workshopInput, settings: EMPTY_SETTINGS });
+  assert.equal(
+    workshopMissing.capability.some((item) => item.ruleId === 'provider.llm-credential-missing'),
+    true,
+  );
+  const workshopConfigured = buildRunPreflightDiagnostics({
+    ...workshopInput,
+    settings: { ...EMPTY_SETTINGS, llmApiKey: 'configured' },
+  });
+  assert.equal(
+    workshopConfigured.capability.some((item) => item.ruleId === 'provider.llm-credential-missing'),
+    false,
+  );
+});
+
 test('Story analysis preflight checks the domestic LLM key without affecting later production stages', () => {
   const story: Node = {
     id: 'story-domestic',

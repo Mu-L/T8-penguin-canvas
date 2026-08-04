@@ -325,6 +325,7 @@ function normalizeVideoMode(value) {
   const text = String(value || '').trim().toLowerCase();
   if (text === 'frames' || text === 'keyframes' || text === 'frame') return 'frames';
   if (text === 'url') return 'url';
+  if (text === 'raw-base64' || text === 'raw_base64') return 'raw-base64';
   if (
     text === 'base64' ||
     text === 'native-base64' ||
@@ -432,6 +433,11 @@ async function normalizeVideoUrl(url, options = {}) {
   const maxBytes = numberOr(options.videoMaxBase64Bytes, DEFAULT_VIDEO_MAX_BYTES);
   if (isDataUrl(text)) {
     if (!/^data:video\//i.test(text)) return text;
+    if (mode === 'raw-base64') {
+      const size = dataUrlByteLength(text);
+      if (size > maxBytes) throw new Error(`完整视频超过上限 ${Math.ceil(size / 1024 / 1024)}MB`);
+      return text;
+    }
     if (dataUrlByteLength(text) <= maxBytes) return text;
     try {
       return await compressDataVideoToDataUrl(text, { ...options, videoMaxBase64Bytes: maxBytes });
@@ -448,6 +454,11 @@ async function normalizeVideoUrl(url, options = {}) {
       return mediaRefToAbsoluteUrl(text, { baseUrl });
     }
     try {
+      if (mode === 'raw-base64') {
+        const size = fs.existsSync(local.path) ? fs.statSync(local.path).size : Number.POSITIVE_INFINITY;
+        if (size > maxBytes) throw new Error(`完整视频超过上限 ${Math.ceil(size / 1024 / 1024)}MB`);
+        return fileDataUrl(local.path, local.mime || mimeFromPath(local.path, 'video/mp4'));
+      }
       return await compressLocalVideoToDataUrl(local.path, { ...options, videoMaxBase64Bytes: maxBytes });
     } catch {
       const size = fs.existsSync(local.path) ? fs.statSync(local.path).size : Number.POSITIVE_INFINITY;

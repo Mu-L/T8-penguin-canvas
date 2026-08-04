@@ -14,6 +14,7 @@ export type NodeType =
   | 'director-storyboard'
   | 'story'
   | 'script-master'
+  | 'minimax-h3-prompt-enhancer'
   | 'audio'
   | 'llm'
   | 'runninghub'

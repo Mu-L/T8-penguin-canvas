@@ -218,16 +218,16 @@ After approval, complete the same stored request with `asset place-apply`; do no
 
 Use `graph add --type <schema-type>` when the creator explicitly needs a node
 that is not already represented by a higher-level one-sentence workflow. The
-type must be one of the 58 non-hidden entries referenced by
+type must be one of the 60 non-hidden entries referenced by
 `canvas.node-add` in the generated capability coverage report. Hidden or
 internal node types fail closed.
 
 `graph add` is an L1, preview-first CanvasPatch operation. It only adds the
-node; it never runs the node or calls a Provider. For the seven schema-marked
+node; it never runs the node or calls a Provider. For the eight schema-marked
 generatable node types, initial data is limited to the exact
 `generation.allowedDataFields` contract. Other nodes are added empty and must
 be configured in their visible node UI. Never treat create coverage as
-run/verify coverage: only the 11 nodes that the generated graph marks fully
+run/verify coverage: only the 15 nodes that the generated graph marks fully
 operable may be described as end-to-end executable.
 
 Use the same command again after the desktop approves its exact plan. The CLI

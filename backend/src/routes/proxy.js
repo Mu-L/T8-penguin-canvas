@@ -350,7 +350,9 @@ async function fetchProviderResponse(url, init = {}, label = 'Provider', options
   const replayableSubmission = ['POST', 'PUT', 'PATCH'].includes(method)
     && Boolean(submissionKey)
     && replayableProviderBody(init?.body);
-  const maxAttempts = safeReadRequest || options?.retryNetwork === true || replayableSubmission ? 2 : 1;
+  const maxAttempts = options?.noRetry === true
+    ? 1
+    : safeReadRequest || options?.retryNetwork === true || replayableSubmission ? 2 : 1;
   let lastError = null;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -4982,6 +4984,58 @@ function hasLlmVideoParts(messages) {
   )));
 }
 
+const MINIMAX_H3_REQUEST_PROFILE = 'minimax-h3-prompt-enhancer';
+const MINIMAX_H3_MEDIA_MAX_BYTES = 50 * 1024 * 1024;
+const MINIMAX_H3_VIDEO_MIMES = [
+  'video/mp4',
+  'video/quicktime',
+  'video/x-msvideo',
+  'video/x-matroska',
+];
+
+async function uploadMiniMaxH3MessageMedia(messages, provider) {
+  const output = [];
+  let pictureIndex = 0;
+  let videoIndex = 0;
+  for (const message of Array.isArray(messages) ? messages : []) {
+    if (!Array.isArray(message?.content)) {
+      output.push(message);
+      continue;
+    }
+    const content = [];
+    for (const part of message.content) {
+      const imageUrl = part?.type === 'image_url' ? String(part?.image_url?.url || '').trim() : '';
+      const videoUrl = part?.type === 'video_url' ? String(part?.video_url?.url || '').trim() : '';
+      if (imageUrl) {
+        pictureIndex += 1;
+        const url = await seedanceNz.uploadMedia(imageUrl, 'image', provider.apiKey, {
+          baseUrl: provider.baseUrl,
+          maxBytes: MINIMAX_H3_MEDIA_MAX_BYTES,
+          normalizeImagePng: true,
+          fileName: `picture_${pictureIndex}.png`,
+          cacheVariant: `minimax-h3-picture-${pictureIndex}`,
+        });
+        content.push({ ...part, image_url: { ...part.image_url, url } });
+        continue;
+      }
+      if (videoUrl) {
+        videoIndex += 1;
+        const url = await seedanceNz.uploadMedia(videoUrl, 'video', provider.apiKey, {
+          baseUrl: provider.baseUrl,
+          maxBytes: MINIMAX_H3_MEDIA_MAX_BYTES,
+          allowedMimes: MINIMAX_H3_VIDEO_MIMES,
+          cacheVariant: `minimax-h3-video-${videoIndex}`,
+        });
+        content.push({ ...part, video_url: { ...part.video_url, url } });
+        continue;
+      }
+      content.push(part);
+    }
+    output.push({ ...message, content });
+  }
+  return output;
+}
+
 function redactExactSecrets(value, exactSecrets = []) {
   let text = String(value ?? '');
   for (const secret of new Set((Array.isArray(exactSecrets) ? exactSecrets : [exactSecrets])
@@ -5158,11 +5212,14 @@ router.post('/llm', async (req, res) => {
   //   - 图片: 本地 /files/* 转 base64 dataURL
   //   - 视频: 默认用项目内置 ffmpeg 抽关键帧转 image_url；或按用户选择发送原视频 Base64 / URL
   // 避免上游 LLM 服务拿着本地相对路径报 convert_request_failed。
+  const minimaxH3Profile = req.body?.requestProfile === MINIMAX_H3_REQUEST_PROFILE;
   let normalizedMessages;
   try {
-    normalizedMessages = await normalizeLlmMessageMedia(messages, req.body || {}, {
-      baseUrl: `http://127.0.0.1:${config.PORT}`,
-    });
+    normalizedMessages = minimaxH3Profile && provider.source === 'seedance-nz'
+      ? await uploadMiniMaxH3MessageMedia(messages, provider)
+      : await normalizeLlmMessageMedia(messages, req.body || {}, {
+          baseUrl: `http://127.0.0.1:${config.PORT}`,
+        });
   } catch (e) {
     return res.status(400).json({ success: false, error: proxyPublicError(e, '多模态素材预处理失败') });
   }
@@ -5184,7 +5241,7 @@ router.post('/llm', async (req, res) => {
         Authorization: `Bearer ${provider.apiKey}`,
       },
       body: JSON.stringify(payload),
-    });
+    }, 'Provider', { noRetry: minimaxH3Profile });
 
     // ===== 流式分支:SSE pass-through =====
     if (payload.stream) {

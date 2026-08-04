@@ -423,6 +423,24 @@ function providerDeclarationForNode(node, context = {}) {
     return { provider: 'grok-oauth', model };
   }
 
+  if (type === 'minimax-h3-prompt-enhancer') {
+    if (data.llmApiSource !== 'zhenzhen') {
+      const model = boundedString(data.providerModel) || 'bytedance/doubao-seed-2.1-pro';
+      if (!SEEDANCE_NZ_LLM_MODEL_SET.has(model)) {
+        throw authorityError(
+          'intent_execution_model_unresolved',
+          'MiniMax H3 的贞贞平价小屋模型不在已验证模型列表中',
+          [node.id],
+        );
+      }
+      return { provider: 'seedance-nz', model };
+    }
+    return {
+      provider: 'zhenzhen',
+      model: boundedString(data.model) || DEFAULT_LLM_MODEL,
+    };
+  }
+
   if (type === 'llm') {
     if (data.llmApiSource === 'seedance-nz') {
       const model = boundedString(data.providerModel) || 'bytedance/doubao-seed-2.0-mini';

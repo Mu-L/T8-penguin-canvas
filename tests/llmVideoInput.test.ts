@@ -184,6 +184,61 @@ test('LLM media normalizer preserves Base64 video mode as native video_url', asy
   }
 });
 
+test('MiniMax H3 raw Base64 mode preserves every original video byte instead of transcoding or dropping audio', async () => {
+  const ffmpegPath = resolveBundledFfmpeg();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 't8-llm-video-raw-test-'));
+  const videoPath = path.join(dir, 'sample-with-audio.mp4');
+  try {
+    const made = spawnSync(ffmpegPath, [
+      '-y',
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc=size=96x64:duration=1',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=440:duration=1',
+      '-shortest',
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      videoPath,
+    ], { encoding: 'utf8' });
+    assert.equal(made.status, 0, made.stderr || made.stdout);
+    const original = fs.readFileSync(videoPath);
+
+    const normalized = await normalizeLlmMessageMedia([{
+      role: 'user',
+      content: [{ type: 'video_url', video_url: { url: videoPath } }],
+    }], {
+      llmVideoMode: 'raw-base64',
+      videoMaxBase64Mb: 50,
+    });
+    const dataUrl = normalized[0].content[0].video_url.url;
+    assert.match(dataUrl, /^data:video\/mp4;base64,/);
+    assert.deepEqual(Buffer.from(dataUrl.split(',')[1], 'base64'), original);
+    await assert.rejects(
+      normalizeLlmMessageMedia([{
+        role: 'user',
+        content: [{ type: 'video_url', video_url: { url: dataUrl } }],
+      }], {
+        llmVideoMode: 'raw-base64',
+        videoMaxBase64Mb: 0.000001,
+      }),
+      /完整视频超过上限/,
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('LLM media normalizer extracts requested evenly-spread keyframes', async () => {
   const ffmpegPath = resolveBundledFfmpeg();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 't8-llm-video-frames-test-'));

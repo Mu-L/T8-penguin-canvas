@@ -1335,7 +1335,17 @@ async function uploadMedia(source, kind, apiKey, options = {}) {
   if (cached && Date.now() - cached.createdAt < ttlMs) return cached.promise;
 
   const promise = withUploadQueue(apiKey, intervalMs, async () => {
-    const file = await mediaBuffer(text, kind, options.maxBytes, options);
+    let file = await mediaBuffer(text, kind, options.maxBytes, options);
+    if (kind === 'image' && options.normalizeImagePng === true) {
+      const buffer = await sharp(file.buffer).png().toBuffer();
+      ensureSize(buffer, kind, options.maxBytes);
+      file = {
+        ...file,
+        buffer,
+        mime: 'image/png',
+        fileName: String(options.fileName || 'picture.png'),
+      };
+    }
     if (Array.isArray(options.allowedMimes) && !options.allowedMimes.includes(String(file.mime || '').toLowerCase())) {
       throw new Error(`seedance.nz 不支持该${kind}格式`);
     }

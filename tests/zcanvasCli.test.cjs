@@ -60,18 +60,18 @@ test('zcanvas capabilities separates implementation from current runtime availab
   );
   assert.deepEqual(
     result.json.data.creativeCapabilityCoverage.coverageReceipt.inventory.nodes,
-    { total: 70, executable: 52, generatable: 7 },
+    { total: 72, executable: 53, generatable: 8 },
   );
   assert.deepEqual(
     result.json.data.creativeCapabilityCoverage.coverageReceipt.inventory.runtime,
-    { llm: 29, image: 28, video: 85, audio: 8, actions: 47 },
+    { llm: 29, image: 28, video: 88, audio: 8, actions: 47 },
   );
   assert.equal(result.json.data.creativeCapabilityCoverage.coverageReceipt.complete, true);
   assert.equal(result.json.data.creativeCapabilityCoverage.counts.missingOperationRisk, 0);
   assert.deepEqual(result.json.data.creativeCapabilityCoverage.staticRuntime, {
-    known: 197,
+    known: 200,
     executable: 0,
-    requiresLiveReadiness: 197,
+    requiresLiveReadiness: 200,
   });
   assert.equal(
     result.json.data.creativeCapabilities.every((item) => item.operations.length === item.supports.length),

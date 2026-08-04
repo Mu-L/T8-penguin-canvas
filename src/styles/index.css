@@ -13634,3 +13634,50 @@ html[data-theme-visual="saint-seiya"] .t8-generation-target-icon {
     padding-inline: 14px;
   }
 }
+
+/* Script Master is a full-screen editing surface, so its copy must remain
+   readable at 100% desktop zoom instead of inheriting node-card micro type. */
+[data-script-master-workbench="true"] {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+[data-script-master-workbench="true"] [class~="text-[8px]"] {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+[data-script-master-workbench="true"] [class~="text-[9px]"] {
+  font-size: 13px;
+  line-height: 20px;
+}
+
+[data-script-master-workbench="true"] [class~="text-[10px]"] {
+  font-size: 14px;
+  line-height: 21px;
+}
+
+[data-script-master-workbench="true"] [class~="text-[11px]"] {
+  font-size: 15px;
+  line-height: 22px;
+}
+
+[data-script-master-workbench="true"] [class~="text-xs"] {
+  font-size: 16px;
+  line-height: 24px;
+}
+
+[data-script-master-workbench="true"] [class~="text-sm"] {
+  font-size: 18px;
+  line-height: 26px;
+}
+
+[data-script-master-workbench="true"] [class~="text-lg"] {
+  font-size: 26px;
+  line-height: 34px;
+}
+
+[data-script-master-workbench="true"] :is(button, input, select, textarea)[class] {
+  font-size: 14px;
+  line-height: 1.4;
+}

@@ -546,6 +546,33 @@
         }
       ]
     },
+    "minimax-h3-prompt-enhancer": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text",
+            "image",
+            "video"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
     "runninghub": {
       "resolver": "static",
       "inputs": [
@@ -2600,6 +2627,101 @@
       "generation": {
         "allowedDataFields": {},
         "defaults": {},
+        "connectionPorts": {
+          "dynamic": false,
+          "inputs": [
+            { "id": null, "kinds": ["text", "image", "video"], "required": false, "minConnections": 0, "maxConnections": null }
+          ],
+          "outputs": [
+            { "id": null, "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": null }
+          ]
+        }
+      }
+    },
+    {
+      "type": "minimax-h3-prompt-enhancer",
+      "label": "MiniMax H3提示词增强器",
+      "category": "inspiration",
+      "description": "按 MiniMax H3 官方结构增强 T2VA / I2VA / FL2VA / L2VA / Ref2VA 提示词，支持完整图片/视频理解与所有扩展 LLM 渠道",
+      "icon": "Sparkles",
+      "color": "violet",
+      "ports": {
+        "inputs": [
+          "text",
+          "image",
+          "video"
+        ],
+        "outputs": [
+          "text"
+        ]
+      },
+      "executable": true,
+      "generatable": true,
+      "generation": {
+        "allowedDataFields": {
+          "userPrompt": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "taskType": {
+            "type": "string",
+            "enum": ["T2VA", "I2VA", "FL2VA", "L2VA", "Ref2VA"]
+          },
+          "durationSeconds": {
+            "type": "integer",
+            "minimum": 4,
+            "maximum": 15
+          },
+          "rewriteMode": {
+            "type": "string",
+            "enum": ["strict", "balanced", "creative"]
+          },
+          "descriptionTarget": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          },
+          "outputLanguage": {
+            "type": "string",
+            "enum": ["中文", "English"]
+          },
+          "promptMode": {
+            "type": "string",
+            "enum": ["官方增强", "参考模板融合"]
+          },
+          "referenceTemplate": {
+            "type": "string",
+            "maxLength": 40000
+          },
+          "referenceContext": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "constraints": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "seed": {
+            "type": "integer"
+          }
+        },
+        "defaults": {
+          "userPrompt": "",
+          "taskType": "T2VA",
+          "durationSeconds": 5,
+          "rewriteMode": "balanced",
+          "descriptionTarget": 0,
+          "outputLanguage": "中文",
+          "promptMode": "官方增强",
+          "referenceTemplate": "",
+          "referenceContext": "",
+          "constraints": "",
+          "seed": 0,
+          "llmApiSource": "seedance-nz",
+          "providerSource": "zhenzhen",
+          "providerId": "",
+          "providerModel": "bytedance/doubao-seed-2.1-pro"
+        },
         "connectionPorts": {
           "dynamic": false,
           "inputs": [

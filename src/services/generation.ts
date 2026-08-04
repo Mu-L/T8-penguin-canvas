@@ -706,8 +706,8 @@ export interface GenerateLlmRequest {
   source?: 'zhenzhen' | 'seedance-nz';
   temperature?: number;
   max_tokens?: number;
-  /** 视频传入方式：frames 默认用内置 ffmpeg 抽关键帧；native-base64 发送压缩原视频；url 转绝对 URL。 */
-  llmVideoMode?: 'frames' | 'native-base64' | 'compressed-base64' | 'url';
+  /** 视频传入方式：frames 抽关键帧；native/compressed-base64 重编码视频；raw-base64 有界保留完整原文件；url 转绝对 URL。 */
+  llmVideoMode?: 'frames' | 'native-base64' | 'compressed-base64' | 'raw-base64' | 'url';
   videoMaxWidth?: number;
   videoMaxHeight?: number;
   videoMaxBase64Mb?: number;
@@ -716,6 +716,8 @@ export interface GenerateLlmRequest {
   videoFrameCount?: number;
   /** 流式开关;默认 false(非流式) */
   stream?: boolean;
+  /** 后端受控请求配置；MiniMax H3 使用真实媒体上传并禁止自动重放付费请求。 */
+  requestProfile?: 'minimax-h3-prompt-enhancer';
 }
 
 export interface GenerateLlmResult {

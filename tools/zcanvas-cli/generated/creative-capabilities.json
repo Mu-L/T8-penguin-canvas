@@ -3,7 +3,7 @@
   "generatedFrom": "tools/zcanvas-cli/creativeCapabilityManifest.json",
   "sourceSchema": "t8-creative-capability-manifest-v1",
   "sourceVersion": "0.1.0-dev",
-  "sourceDigest": "36908537be76c1b8bfcecbe1fec079d8a335e6d7d03f470ecd562f823658e0f5",
+  "sourceDigest": "1c5d2c0bd62a8392dfd557a55d750ef5fe02ac032c2c2a5de42a09e16669ac30",
   "principles": {
     "oneSentenceStart": true,
     "directCanvasMutation": false,
@@ -108,6 +108,7 @@
       "handler": "creative-plan:create.script",
       "nodeTypes": [
         "llm",
+        "minimax-h3-prompt-enhancer",
         "output"
       ],
       "supports": [
@@ -185,6 +186,7 @@
         "script-master",
         "audio",
         "llm",
+        "minimax-h3-prompt-enhancer",
         "runninghub",
         "runninghub-wallet",
         "rh-tools",

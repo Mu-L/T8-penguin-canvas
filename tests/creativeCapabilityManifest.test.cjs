@@ -133,7 +133,7 @@ test('creative capability manifest covers the one-sentence production spine', ()
   assert.equal(payload.principles.explicitApprovalForWrites, true);
   const nodeAdd = payload.capabilities.find((capability) => capability.id === 'canvas.node-add');
   assert.equal(nodeAdd.nodeTypeSelector, 'creator-visible');
-  assert.equal(nodeAdd.nodeTypes.length, 59);
+  assert.equal(nodeAdd.nodeTypes.length, 60);
   assert.equal(nodeAdd.nodeTypes.includes('loop'), true);
   assert.equal(nodeAdd.nodeTypes.includes('remove-bg'), false);
 });
@@ -202,7 +202,7 @@ test('capability graph validates real node types and fails closed on drift', () 
   const { manifest, digest } = readGeneratorManifest();
   const runtimeCatalog = buildRuntimeCatalog();
   const graph = buildCapabilityGraph({ manifest, manifestDigest: digest, runtimeCatalog });
-  assert.equal(graph.counts.nodes, 71);
+  assert.equal(graph.counts.nodes, 72);
   assert.equal(graph.counts.runtimeEntries, 200);
   assert.equal(
     graph.counts.operations,
@@ -217,17 +217,18 @@ test('capability graph validates real node types and fails closed on drift', () 
   );
   const nodeAdd = graph.capabilities.find((capability) => capability.id === 'canvas.node-add');
   assert.ok(nodeAdd);
-  assert.equal(nodeAdd.nodeTypes.length, 59);
+  assert.equal(nodeAdd.nodeTypes.length, 60);
   assert.deepEqual(nodeAdd.nodeTypes, graph.nodes.filter((node) => !node.hidden).map((node) => node.type));
-  assert.equal(graph.counts.referencedNodes, 62);
+  assert.equal(graph.counts.referencedNodes, 63);
   assert.equal(graph.counts.unreferencedNodes, 9);
-  assert.equal(graph.counts.directCapabilityNodes, 62);
+  assert.equal(graph.counts.directCapabilityNodes, 63);
   assert.equal(graph.counts.internalCompatNodes, 1);
   assert.equal(graph.counts.semanticSupersededNodes, 8);
   assert.equal(graph.counts.publicCapabilityGapNodes, 0);
-  assert.equal(graph.counts.accountedNodes, 71);
+  assert.equal(graph.counts.accountedNodes, 72);
   assert.equal(graph.counts.unexplainedNodes, 0);
-  assert.equal(graph.counts.fullyOperableNodes, 14);
+  assert.equal(graph.counts.fullyOperableNodes, 15);
+  assert.equal(graph.nodes.find((node) => node.type === 'minimax-h3-prompt-enhancer').coverage.run, true);
   assert.equal(graph.nodes.find((node) => node.type === 'loop').coverage.apply, true);
   assert.equal(graph.nodes.find((node) => node.type === 'loop').coverage.run, false);
   assert.equal(graph.nodes.find((node) => node.type === 'remove-bg').coverage.apply, true);
@@ -347,7 +348,7 @@ test('capability graph validates real node types and fails closed on drift', () 
   );
   const coverageMarkdown = coverageMarkdownArtifact(graph);
   assert.equal(
-    coverageMarkdown.includes('Accounted / unexplained nodes: **71 / 0**'),
+    coverageMarkdown.includes('Accounted / unexplained nodes: **72 / 0**'),
     true,
   );
   assert.equal(coverageMarkdown.includes('- Public capability gaps: none'), true);
@@ -392,7 +393,7 @@ test('dynamic coverage receipt proves node, runtime, handler, risk, verification
     executable: graph.nodes.filter((node) => node.executable).length,
     generatable: graph.nodes.filter((node) => node.generatable).length,
   });
-  assert.deepEqual(receipt.inventory.nodes, { total: 71, executable: 52, generatable: 7 });
+  assert.deepEqual(receipt.inventory.nodes, { total: 72, executable: 53, generatable: 8 });
   assert.deepEqual(receipt.inventory.runtime, {
     llm: 29,
     image: 28,
@@ -415,7 +416,7 @@ test('dynamic coverage receipt proves node, runtime, handler, risk, verification
   assert.doesNotThrow(() => assertCapabilityCoverageReceipt(graph));
   const markdown = coverageMarkdownArtifact(graph);
   assert.equal(
-    markdown.includes('Dynamic node inventory (total / executable / generatable): **71 / 52 / 7**'),
+    markdown.includes('Dynamic node inventory (total / executable / generatable): **72 / 53 / 8**'),
     true,
   );
   assert.equal(

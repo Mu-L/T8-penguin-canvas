@@ -1,0 +1,44 @@
+{
+  "schema": "t8-minimax-h3-prompt-enhancer-contract-v1",
+  "sourceReference": "F:/AI-T8-video-onekey/ComfyUI/custom_nodes/comfyui-minimax-h3-prompt-enhancer-T8",
+  "defaultProvider": "seedance-nz",
+  "defaultModel": "bytedance/doubao-seed-2.1-pro",
+  "taskTypes": ["T2VA", "I2VA", "FL2VA", "L2VA", "Ref2VA"],
+  "rewriteModes": {
+    "strict": 0.2,
+    "balanced": 0.7,
+    "creative": 1.2
+  },
+  "outputLanguages": ["中文", "English"],
+  "promptModes": ["官方增强", "参考模板融合"],
+  "limits": {
+    "durationSeconds": { "minimum": 4, "maximum": 15, "default": 5 },
+    "descriptionTarget": { "automatic": 0, "minimum": 80, "maximum": 1000 },
+    "referenceImages": 9,
+    "referenceVideos": 3,
+    "referenceMediaTotal": 12,
+    "referenceVideoSeconds": { "minimum": 2, "maximum": 15, "totalMaximum": 15 },
+    "mediaFileBytes": 52428800
+  },
+  "defaults": {
+    "taskType": "T2VA",
+    "rewriteMode": "balanced",
+    "outputLanguage": "中文",
+    "promptMode": "官方增强",
+    "descriptionTarget": 0,
+    "seed": 0
+  },
+  "basicOutputFields": [
+    "integrated_multimodal_description",
+    "overall_soundscape",
+    "non_diegetic_music"
+  ],
+  "referenceOutputFields": [
+    "subject_definitions",
+    "summary",
+    "retention_analysis",
+    "detailed_description",
+    "overall_soundscape",
+    "non_diegetic_music"
+  ]
+}
