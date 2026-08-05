@@ -1,9 +1,9 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.7.9",
-  "lastUpdated": "2026-08-05-v2.7.9-release-authorized",
+  "lastUpdated": "2026-08-05-v2.7.9-released",
   "runningHubChromiumForbiddenHeaderCompatibility": {
-    "status": "release-authorized-v2.7.9",
+    "status": "released-v2.7.9",
     "date": "2026-08-05",
     "releaseIncluded": true,
     "highlights": [
@@ -15,7 +15,7 @@
     "verification": [
       "新增 Chromium 请求头清理和 Node stream Content-Length 保留回归；与 RunningHub 五条上游路径不含手写 Host 的路由合同合计 17/17 通过。",
       "RunningHub 站点、文本输出、RH 工具箱、文本绑定与抠图相邻回归 42/42 通过；系统网络、可信 Provider 输出、安全远程媒体、日志脱敏与提交幂等相邻回归 74/74 通过。",
-      "TypeScript type-check、feature-sync:check、public:check、JSON/diff 检查与生产前端 build 通过；该修复已获准纳入 v2.7.9 唯一正式发布流程，反馈用户的具体 VPN、安装版本和远程 Provider 环境仍按授权后补，延期不得记录为通过。"
+      "TypeScript type-check、feature-sync:check、public:check、JSON/diff 检查与生产前端 build 通过；该修复已随 v2.7.9 唯一正式 Electron/NSIS 自动更新流程发布，反馈用户的具体 VPN、安装版本和远程 Provider 环境仍按授权后补，延期不得记录为通过。"
     ]
   },
   "previsStudioCapability": {
@@ -60,35 +60,35 @@
     ]
   },
   "release": {
-    "status": "release-authorized-v2.7.9",
+    "status": "released-v2.7.9",
     "version": "2.7.9",
     "date": "2026-08-05",
-    "publishedAt": null,
+    "publishedAt": "2026-08-05T11:53:23Z",
     "tag": "v2.7.9",
-    "latest": false,
-    "sourceCommit": null,
+    "latest": true,
+    "sourceCommit": "8aa5d2fa50d4ccc9ee9d32a0580cc09879e718d1",
     "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.9",
     "artifacts": {
       "installer": {
         "name": "T8-PenguinCanvas-Setup-2.7.9.exe",
-        "size": null,
-        "sha256": null
+        "size": 1317434488,
+        "sha256": "71e1abc7efd6216de6aa815d29c223d05192bcd31ccd02f527bc65d95b71e9ac"
       },
       "blockmap": {
         "name": "T8-PenguinCanvas-Setup-2.7.9.exe.blockmap",
-        "size": null,
-        "sha256": null
+        "size": 1373191,
+        "sha256": "50d27a9a670ccf85ce477c066ac01f05ea44c0a884ca0d5f5d82b513cfde9e77"
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": null,
-        "sha256": null
+        "size": 362,
+        "sha256": "f0eb9c13104b933a4b38c6752c5cccfc3015cbcd01a89b3c12fad69555b9970b"
       }
     },
     "verification": [
       "v2.7.9 发布范围固定为独立 Seedance 2.0 提示词增强器与 RunningHub Chromium 禁止请求头兼容修复，不回退 v2.7.4 之后的系统代理、TUN、VPN、IPv4/IPv6 与资源安全链路。",
       "Seedance 2.0 合同/UI/Schema/预检/Doctor、RunIntent、端口与能力图定向回归通过；RunningHub 桥接/路由 17/17、RH 相邻 42/42、系统网络与安全下载相邻 74/74 通过；TypeScript、能力同步、公开面与生产前端构建通过。",
-      "正式 Electron/NSIS、post-build、provenance、sealed recovery、GitHub 自动更新三资产、固定 Tag、非草稿/非预发布与 Latest 状态只能由固定发布提交上的唯一流程生成并核验，未完成前不标记为通过。",
+      "固定提交 8aa5d2fa50d4ccc9ee9d32a0580cc09879e718d1 上的唯一正式流程完成 Electron/NSIS、post-build、provenance、sealed recovery、GitHub 自动更新三资产、发布前完整远端回下载、固定 Tag、非草稿/非预发布、Latest 与 recovery 清理核验。",
       "用户已明确授权先发布、后补真实 Provider、反馈用户 VPN/安装环境、协作多端与安装升级证据；协作证据门仅允许缺失清单按 owner-approved-post-release-v2.7.9 延期，不能把延期标记为已通过。"
     ]
   },
@@ -6412,8 +6412,8 @@
     "version": "2.7.9",
     "semverVersion": "2.7.9",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.7.9 已获正式发布授权，聚焦 Seedance 2.0 提示词增强器与 RunningHub Chromium 禁止请求头兼容修复。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.7.9 正式 Electron/NSIS 安装包、blockmap 与 latest.yml 将由固定并推送 source commit 上的 dist:release 唯一流程生成；产物大小、摘要、Tag、Latest 与远端回下载事实在发布完成后补录，未生成前不伪报通过。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.7.9 已正式发布，包含 Seedance 2.0 提示词增强器与 RunningHub Chromium 禁止请求头兼容修复。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.7.9 已从固定 source commit 8aa5d2fa50d4ccc9ee9d32a0580cc09879e718d1 的唯一 dist:release 流程生成并发布：安装包 1,317,434,488 bytes / SHA-256 71e1abc7efd6216de6aa815d29c223d05192bcd31ccd02f527bc65d95b71e9ac；blockmap 1,373,191 bytes / SHA-256 50d27a9a670ccf85ce477c066ac01f05ea44c0a884ca0d5f5d82b513cfde9e77；latest.yml 362 bytes / SHA-256 f0eb9c13104b933a4b38c6752c5cccfc3015cbcd01a89b3c12fad69555b9970b。post-build、provenance、sealed recovery、GitHub digest/size、完整远端回下载、Tag/target 与 Latest 均通过。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
@@ -7131,7 +7131,7 @@
     ]
   },
   "seedance20PromptEnhancerNode": {
-    "status": "release-authorized-v2.7.9",
+    "status": "released-v2.7.9",
     "date": "2026-08-05",
     "releaseIncluded": true,
     "nodeType": "seedance20-prompt-enhancer",
@@ -7167,7 +7167,7 @@
       "Seedance 2.0 RunIntent Provider/模型权威 2/2 通过；与 MiniMax H3 合并权威回归 5/5 通过。",
       "节点连接端口与 Canvas Run 执行权威审计 15/15、能力清单与动态覆盖审计 10/10 通过；TypeScript、feature-sync:check、public:check、JSON 与 diff 检查通过。",
       "生产前端 build 通过并生成独立 Seedance20PromptEnhancerNode chunk；能力图已由源清单重新生成，31 项动作、200 项运行目录、74/74 节点已解释、0 公共缺口。",
-      "该节点已获准纳入 v2.7.9 唯一正式 Electron/NSIS 自动更新发布流程；真实或付费 Provider、安装版视觉与外部环境证据按用户授权发布后补录，延期不记为通过。"
+      "该节点已随 v2.7.9 唯一正式 Electron/NSIS 自动更新流程发布，包内独立 Seedance 2.0 节点 chunk 与发布门禁通过；真实或付费 Provider、安装版视觉与外部环境证据按用户授权发布后补录，延期不记为通过。"
     ],
     "boundaries": [
       "参考实现默认的 bytedance/doubao-seed-evolving 未复制到画布默认值；按产品要求继续固定贞贞平价小屋 bytedance/doubao-seed-2.1-pro。",
