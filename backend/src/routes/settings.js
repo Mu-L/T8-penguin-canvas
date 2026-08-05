@@ -503,6 +503,8 @@ const RH_TOOLBOX_OUTPUT_ROLES = new Set(['append-output', 'replace-source', 'tex
 const RH_TOOLBOX_PARENT_IDS = new Set(['image', 'video', 'audio', 'model3d', 'text']);
 const RH_TOOLBOX_DEFAULT_POLL_INTERVAL_MS = 5000;
 const RH_TOOLBOX_DEFAULT_MAX_POLLS = 720;
+const RH_SMART_TRANSLATION_WEBAPP_ID = '2084616885802463233';
+const RH_SMART_TRANSLATION_CATEGORY_ID = 'text-category-nfjhp';
 
 function cleanRhToolboxId(value, fallback) {
   const raw = String(value || '').trim().toLowerCase();
@@ -644,7 +646,7 @@ function normalizeRhToolboxManifestPayload(raw) {
       ? Math.max(1, Math.floor(Number(item.runtime.maxPolls)))
       : RH_TOOLBOX_DEFAULT_MAX_POLLS;
 
-    tools.push({
+    let normalizedTool = {
       id,
       title: cleanRhToolboxText(item?.title, id, 160),
       description: cleanRhToolboxText(item?.description, '', 4000),
@@ -677,7 +679,51 @@ function normalizeRhToolboxManifestPayload(raw) {
         }
         : { icon: 'Wrench', showInNode: true },
       version: Number.isFinite(Number(item?.version)) ? Number(item.version) : 1,
-    });
+    };
+
+    // 兼容已经持久化的旧制作器草稿：该 WebApp 曾被错误识别成图像抠图。
+    // 服务端也执行合同收敛，确保重启、GET/PUT 与打包后的用户数据都返回
+    // 同一个 text.translate 输入/输出协议。
+    if (webappId === RH_SMART_TRANSLATION_WEBAPP_ID) {
+      normalizedTool = {
+        ...normalizedTool,
+        title: '智能翻译',
+        description: '自动识别中英文并互译，其他语言默认翻译为中文',
+        order: 60,
+        categoryId: categoryIds.has(RH_SMART_TRANSLATION_CATEGORY_ID)
+          ? RH_SMART_TRANSLATION_CATEGORY_ID
+          : normalizedTool.categoryId,
+        capabilities: ['text.translate'],
+        inputSchema: [{
+          key: 'prompt',
+          label: '待翻译文本',
+          kind: 'text',
+          rhNodeId: '5',
+          fieldName: 'prompt',
+          required: true,
+          multiple: false,
+          uploadAsset: false,
+          order: 0,
+        }],
+        outputSchema: [{
+          key: 'output-text',
+          label: '翻译结果',
+          kind: 'text',
+          role: 'text-only',
+        }],
+        fixedParams: [],
+        userParams: [],
+        ui: {
+          icon: 'Languages',
+          showInNode: true,
+          showInImageEditor: false,
+          showInVideoEditor: false,
+          showInTextEditor: true,
+          showInAudioEditor: false,
+        },
+      };
+    }
+    tools.push(normalizedTool);
   });
 
   categories.sort((a, b) => (Number(a.order || 0) - Number(b.order || 0)) || String(a.name).localeCompare(String(b.name), 'zh-Hans-CN'));

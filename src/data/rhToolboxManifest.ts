@@ -12,8 +12,16 @@ import type { RhToolboxManifest } from '../utils/rhToolbox';
 export const RH_TOOLBOX_MANIFEST: RhToolboxManifest = {
   "schema": "t8-rh-toolbox-manifest",
   "version": 1,
-  "updatedAt": "2026-07-23T11:09:55.033Z",
+  "updatedAt": "2026-08-04T12:47:03.009Z",
   "categories": [
+    {
+      "id": "text-category-nfjhp",
+      "name": "翻译",
+      "parentId": "text",
+      "description": "智能文本翻译 RunningHub 工具",
+      "order": 50,
+      "icon": "Languages"
+    },
     {
       "id": "custom-rh-tools",
       "name": "抠图",
@@ -495,6 +503,57 @@ export const RH_TOOLBOX_MANIFEST: RhToolboxManifest = {
         "showInNode": true,
         "showInVideoEditor": true
       }
+    },
+    {
+      "id": "translate-cutout-v1",
+      "title": "智能翻译",
+      "description": "自动识别中英文并互译，其他语言默认翻译为中文",
+      "categoryId": "text-category-nfjhp",
+      "webappId": "2084616885802463233",
+      "rhSite": "cn",
+      "enabled": true,
+      "order": 60,
+      "capabilities": [
+        "text.translate"
+      ],
+      "inputSchema": [
+        {
+          "key": "prompt",
+          "label": "待翻译文本",
+          "kind": "text",
+          "rhNodeId": "5",
+          "fieldName": "prompt",
+          "required": true,
+          "multiple": false,
+          "uploadAsset": false,
+          "order": 0
+        }
+      ],
+      "outputSchema": [
+        {
+          "key": "output-text",
+          "label": "翻译结果",
+          "kind": "text",
+          "role": "text-only"
+        }
+      ],
+      "fixedParams": [],
+      "userParams": [],
+      "runtime": {
+        "instanceType": "",
+        "pollIntervalMs": 5000,
+        "maxPolls": 720,
+        "fetchAppInfo": true
+      },
+      "ui": {
+        "icon": "Languages",
+        "showInNode": true,
+        "showInImageEditor": false,
+        "showInVideoEditor": false,
+        "showInTextEditor": true,
+        "showInAudioEditor": false
+      },
+      "version": 1
     },
     {
       "id": "jimenfenshen1",

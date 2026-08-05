@@ -1341,6 +1341,7 @@ const RHToolboxNode = lazyCanvasNode(() => import('./nodes/RHToolboxNode'), 'RHT
 const FalToolboxNode = lazyCanvasNode(() => import('./nodes/FalToolboxNode'), 'FalToolboxNode');
 const Model3DPreviewNode = lazyCanvasNode(() => import('./nodes/Model3DPreviewNode'), 'Model3DPreviewNode');
 const FaceExpression3DNode = lazyCanvasNode(() => import('./nodes/FaceExpression3DNode'), 'FaceExpression3DNode');
+const PrevisStudioNode = lazyCanvasNode(() => import('./nodes/PrevisStudioNode'), 'PrevisStudioNode');
 const GrokOAuthAgentNode = lazyCanvasNode(() => import('./nodes/GrokOAuthAgentNode'), 'GrokOAuthAgentNode');
 const CodexCliAgentNode = lazyCanvasNode(() => import('./nodes/CodexCliAgentNode'), 'CodexCliAgentNode');
 const CodexImageConjureNode = lazyCanvasNode(() => import('./nodes/CodexImageConjureNode'), 'CodexImageConjureNode');
@@ -1424,6 +1425,7 @@ const SPECIFIC_NODES: Record<string, any> = {
   'fal-toolbox': FalToolboxNode,
   'model-3d-preview': Model3DPreviewNode,
   'face-expression-3d': FaceExpression3DNode,
+  'previs-studio': PrevisStudioNode,
   'model-3d-upload': UploadNode,
   'grok-oauth-agent': GrokOAuthAgentNode,
   'codex-cli-agent': CodexCliAgentNode,
@@ -1922,6 +1924,7 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     userPrompt: '',
     taskType: 'T2VA',
     durationSeconds: 5,
+    shotCount: 0,
     rewriteMode: 'balanced',
     descriptionTarget: 0,
     outputLanguage: '中文',
@@ -2120,6 +2123,26 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     status: 'idle',
     error: '',
     size: { w: 520, h: 520 },
+  },
+  'previs-studio': {
+    previsProject: null,
+    previsProjectRevision: 0,
+    previsRunKind: 'image',
+    previsRunRequestId: '',
+    previsSource: {
+      repository: 'https://github.com/GuiYi-Xi/monoform-previs-studio',
+      commit: '77f4bae83eeee550a6f416757231f438155bf674',
+      author: 'GuiYi-Xi',
+    },
+    imageUrl: '',
+    imageUrls: [],
+    videoUrl: '',
+    videoUrls: [],
+    outputText: '',
+    metadata: null,
+    status: 'idle',
+    error: '',
+    size: { w: 500, h: 460 },
   },
   'comfyui-store': {
     comfyuiStoreProviderId: '',

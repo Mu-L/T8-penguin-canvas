@@ -5,6 +5,7 @@ import {
   resolveRhToolboxCapability,
 } from '../utils/rhToolboxCapabilities';
 import type { RhToolboxTool } from '../utils/rhToolbox';
+import { RH_SMART_TRANSLATION_TOOL_ID } from '../utils/rhToolbox';
 import {
   getRhToolboxManifest,
   runRhToolboxTool,
@@ -14,6 +15,10 @@ import {
 import { getRhToolboxPersistentManifest } from './api';
 import type { RhToolboxManifest } from '../utils/rhToolbox';
 import { mergeRhToolboxManifests } from '../utils/rhToolbox';
+import {
+  protectSmartTranslationText,
+  restoreSmartTranslationText,
+} from '../utils/smartTranslation';
 
 export interface RunRhImageCapabilityOptions {
   capability: string;
@@ -85,6 +90,22 @@ export interface RunRhVideoCapabilityResult {
   taskId: string;
   videoUrls: string[];
   outputUrl: string;
+  result: RunRhToolboxToolResult;
+  raw?: any;
+}
+
+export interface RunRhTextTranslationOptions {
+  text: string;
+  protectedTerms?: string[];
+  signal?: AbortSignal;
+  onProgress?: (progress: RunRhToolboxProgress) => void;
+}
+
+export interface RunRhTextTranslationResult {
+  tool: RhToolboxTool;
+  taskId: string;
+  translatedText: string;
+  textOutputs: string[];
   result: RunRhToolboxToolResult;
   raw?: any;
 }
@@ -267,6 +288,43 @@ export async function runRhVideoCapability(
     taskId: result.taskId,
     videoUrls,
     outputUrl: videoUrls[0],
+    result,
+    raw: result.raw,
+  };
+}
+
+/**
+ * Shared RH smart-translation capability used by the toolbox and node UI.
+ * It performs exactly one provider submission per click and fails closed when
+ * the WebApp returns no text or drops protected @ media-reference tokens.
+ */
+export async function runRhTextTranslation(
+  options: RunRhTextTranslationOptions,
+): Promise<RunRhTextTranslationResult> {
+  const protectedText = protectSmartTranslationText(options.text, options.protectedTerms);
+  const manifest = await getRhToolboxCapabilityManifest();
+  const tool = resolveRhToolboxCapability(manifest, {
+    surface: 'text',
+    capability: 'text.translate',
+    preferredToolId: RH_SMART_TRANSLATION_TOOL_ID,
+  });
+  if (!tool) throw new Error('未找到可用的 RH 智能翻译能力');
+
+  const inputValues = buildRhToolboxCapabilityInputValues(tool, 'text', protectedText.requestText);
+  const result = await runRhToolboxTool({
+    toolId: tool.id,
+    manifest,
+    inputValues,
+    signal: options.signal,
+    onProgress: options.onProgress,
+  });
+  const rawText = result.textOutputs.map((value) => String(value || '').trim()).filter(Boolean).join('\n\n');
+  const translatedText = restoreSmartTranslationText(rawText, protectedText.replacements);
+  return {
+    tool,
+    taskId: result.taskId,
+    translatedText,
+    textOutputs: [translatedText],
     result,
     raw: result.raw,
   };

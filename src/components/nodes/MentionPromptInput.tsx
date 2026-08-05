@@ -7,6 +7,7 @@ import {
   type CSSProperties,
   type FormEvent,
   type MutableRefObject,
+  type ReactNode,
   type Ref,
 } from 'react';
 import { createPortal } from 'react-dom';
@@ -69,6 +70,8 @@ interface Props {
   onImagePromptAdjustmentsChange?: (next: ImagePromptAdjustmentSelection[]) => void;
   imagePromptAdjustmentHasReferenceImages?: boolean;
   onSubmit?: (value: string, mentions: MediaMention[]) => void;
+  /** Optional one-slot action rendered immediately before template/expand controls. */
+  toolbarAction?: ReactNode;
   /** Force the editor to fill a flex parent instead of growing with long text. */
   fillHeight?: boolean;
 }
@@ -270,6 +273,7 @@ const MentionPromptInput = ({
   onImagePromptAdjustmentsChange,
   imagePromptAdjustmentHasReferenceImages = false,
   onSubmit,
+  toolbarAction,
   fillHeight = false,
 }: Props) => {
   const localRef = useRef<HTMLDivElement | null>(null);
@@ -301,7 +305,10 @@ const MentionPromptInput = ({
   const inactiveReferenceAdjustmentCount = imagePromptAdjustmentHasReferenceImages
     ? 0
     : normalizedAdjustments.filter((selection) => selection.applicability === 'reference').length;
-  const editorActionCount = (expandable ? 1 : 0) + (templateEnabled ? 1 : 0) + (adjustmentEnabled ? 1 : 0);
+  const editorActionCount = (expandable ? 1 : 0)
+    + (templateEnabled ? 1 : 0)
+    + (adjustmentEnabled ? 1 : 0)
+    + (toolbarAction ? 1 : 0);
 
   const mentionableMaterials = useMemo(
     () => materials.filter(isMentionableMaterial),
@@ -838,13 +845,24 @@ const MentionPromptInput = ({
             {placeholder}
           </div>
         )}
-        {(expandable || adjustmentEnabled) && (
+        {(expandable || adjustmentEnabled || toolbarAction) && (
           <>
+          {toolbarAction && (
+            <div
+              data-prompt-toolbar-action
+              className="nodrag nopan absolute top-1.5 z-10"
+              style={{
+                right: 6 + (expandable ? 28 : 0) + (templateEnabled ? 28 : 0),
+              }}
+            >
+              {toolbarAction}
+            </div>
+          )}
           {adjustmentEnabled && onImagePromptAdjustmentsChange && (
             <div
               className="nodrag nopan absolute top-1.5 z-10"
               style={{
-                right: 6 + (expandable ? 28 : 0) + (templateEnabled ? 28 : 0),
+                right: 6 + (expandable ? 28 : 0) + (templateEnabled ? 28 : 0) + (toolbarAction ? 28 : 0),
               }}
             >
               <ImagePromptAdjustmentButton

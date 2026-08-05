@@ -16,6 +16,7 @@ export interface MiniMaxH3Input {
   prompt: string;
   taskType: MiniMaxH3TaskType;
   durationSeconds: number;
+  shotCount: number;
   rewriteMode: MiniMaxH3RewriteMode;
   descriptionTarget: number;
   outputLanguage: MiniMaxH3OutputLanguage;
@@ -55,6 +56,7 @@ type MiniMaxH3Contract = {
   promptModes: MiniMaxH3PromptMode[];
   limits: {
     durationSeconds: { minimum: number; maximum: number; default: number };
+    shotCount: { automatic: number; minimum: number; maximum: number };
     descriptionTarget: { automatic: number; minimum: number; maximum: number };
     referenceImages: number;
     referenceVideos: number;
@@ -64,6 +66,7 @@ type MiniMaxH3Contract = {
   };
   defaults: {
     taskType: MiniMaxH3TaskType;
+    shotCount: number;
     rewriteMode: MiniMaxH3RewriteMode;
     outputLanguage: MiniMaxH3OutputLanguage;
     promptMode: MiniMaxH3PromptMode;
@@ -180,6 +183,13 @@ export function validateMiniMaxH3Input(input: MiniMaxH3Input): MiniMaxH3MediaPla
   if (duration < contract.limits.durationSeconds.minimum || duration > contract.limits.durationSeconds.maximum) {
     throw new Error(`目标时长必须为 ${contract.limits.durationSeconds.minimum}-${contract.limits.durationSeconds.maximum} 秒。`);
   }
+  const rawShotCount = Number(input.shotCount);
+  const shotCount = Math.trunc(rawShotCount);
+  if (!Number.isInteger(rawShotCount)
+    || (shotCount !== contract.limits.shotCount.automatic
+      && (shotCount < contract.limits.shotCount.minimum || shotCount > contract.limits.shotCount.maximum))) {
+    throw new Error(`镜头数量必须为自动，或 ${contract.limits.shotCount.minimum}-${contract.limits.shotCount.maximum}。`);
+  }
   const target = Math.trunc(Number(input.descriptionTarget));
   if (target !== contract.limits.descriptionTarget.automatic
     && (target < contract.limits.descriptionTarget.minimum || target > contract.limits.descriptionTarget.maximum)) {
@@ -248,18 +258,28 @@ function lengthTargetInstruction(input: MiniMaxH3Input): string {
   return `Choose a concise but complete length for ${field} based on the requested duration and information density.`;
 }
 
+function shotCountInstruction(shotCount: number): string {
+  if (shotCount === MINIMAX_H3_PROMPT_ENHANCER_CONTRACT.limits.shotCount.automatic) {
+    return 'Shot count mode: AUTO. Decide the most suitable number of timeline shots from the user\'s intent, attached media, target duration, action density, and pacing. Prefer camera movement within one shot when a separate cut is not useful.';
+  }
+  return `Shot count mode: fixed. The timeline must contain exactly ${shotCount} shots, numbered consecutively from [Shot 1] through [Shot ${shotCount}], with each label appearing exactly once. [Shot 1] has no timestamp; every later shot has a valid strictly increasing timestamp below the target duration. This explicit fixed count overrides any approximate shot-count number or range in the user's prompt or reference template. Do not report or explain the count outside the required timeline.`;
+}
+
 export function buildMiniMaxH3Messages(input: MiniMaxH3Input, mediaPlan?: MiniMaxH3MediaPlanItem[]): MiniMaxH3Message[] {
   const plan = mediaPlan || validateMiniMaxH3Input(input);
+  const shotCount = Math.trunc(Number(input.shotCount));
   const systemContent = [
     COMMON_SYSTEM_RULES,
     LANGUAGE_RULES[input.outputLanguage],
     MODE_RULES[input.rewriteMode],
     PROMPT_MODE_RULES[input.promptMode],
     TASK_RULES[input.taskType],
+    shotCountInstruction(shotCount),
   ].join('\n\n');
   const lines = [
     `H3 task type: ${input.taskType}`,
     `Target duration: ${Math.trunc(input.durationSeconds).toFixed(2)} seconds`,
+    `Shot count control: ${shotCount === MINIMAX_H3_PROMPT_ENHANCER_CONTRACT.limits.shotCount.automatic ? 'AUTO' : `exactly ${shotCount}`}`,
     `Rewrite mode: ${input.rewriteMode}`,
     `Selected output language: ${input.outputLanguage}`,
     `Prompt construction mode: ${input.promptMode}`,

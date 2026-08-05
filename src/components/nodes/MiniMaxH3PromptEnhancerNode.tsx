@@ -52,6 +52,7 @@ const ZHENZHEN_LLM_MODELS = LLM_MODELS.filter((model) => !model.imageOutput);
 const DEFAULT_ZHENZHEN_MODEL = ZHENZHEN_LLM_MODELS.find((model) => model.id === 'gemini-3.5-flash')?.id
   || ZHENZHEN_LLM_MODELS[0]?.id
   || '';
+const SHOT_COUNT_OPTIONS = Array.from({ length: 20 }, (_, index) => index + 1);
 
 function enumValue<T extends string>(value: unknown, values: readonly T[], fallback: T): T {
   return values.includes(value as T) ? value as T : fallback;
@@ -81,6 +82,9 @@ function MiniMaxH3PromptEnhancerNode({ id, data, selected }: NodeProps) {
   );
   const promptMode = enumValue<MiniMaxH3PromptMode>(d.promptMode, contract.promptModes, contract.defaults.promptMode);
   const durationSeconds = Math.max(4, Math.min(15, Math.trunc(Number(d.durationSeconds) || 5)));
+  const shotCount = d.shotCount === undefined || d.shotCount === null || d.shotCount === ''
+    ? contract.defaults.shotCount
+    : Number.isInteger(Number(d.shotCount)) ? Number(d.shotCount) : -1;
   const descriptionTarget = Math.max(0, Math.min(1000, Math.trunc(Number(d.descriptionTarget) || 0)));
   const seed = Math.trunc(Number(d.seed) || 0);
   const status = String(d.status || 'idle');
@@ -161,6 +165,7 @@ function MiniMaxH3PromptEnhancerNode({ id, data, selected }: NodeProps) {
         prompt: effectivePrompt,
         taskType,
         durationSeconds,
+        shotCount,
         rewriteMode,
         descriptionTarget,
         outputLanguage,
@@ -176,7 +181,7 @@ function MiniMaxH3PromptEnhancerNode({ id, data, selected }: NodeProps) {
       const messages = buildMiniMaxH3Messages(input, mediaPlan) as LlmMessage[];
       await reporter?.providerRequest({ provider: activeProvider, model: activeModel });
       logBus.info(
-        `MiniMax H3 增强 · ${providerLabel} · ${activeModel} · ${taskType} · 图片 ${imageUrls.length} · 视频 ${videoUrls.length}`,
+        `MiniMax H3 增强 · ${providerLabel} · ${activeModel} · ${taskType} · 镜头 ${shotCount || '自动'} · 图片 ${imageUrls.length} · 视频 ${videoUrls.length}`,
         `H3·#${id.slice(-4)}`,
       );
 
@@ -231,6 +236,7 @@ function MiniMaxH3PromptEnhancerNode({ id, data, selected }: NodeProps) {
         usage: result.usage,
         lastRun: {
           taskType,
+          shotCount,
           provider: activeProvider,
           model: activeModel,
           imageCount: imageUrls.length,
@@ -328,6 +334,19 @@ function MiniMaxH3PromptEnhancerNode({ id, data, selected }: NodeProps) {
                 <input type="number" min={4} max={15} value={durationSeconds} onChange={(event) => update({ durationSeconds: Number(event.target.value) })} className="w-full rounded-md border border-white/10 bg-zinc-900 px-2 py-1.5 text-xs text-white outline-none" />
                 <span className="text-[10px] text-white/40">秒</span>
               </div>
+            </div>
+            <div>
+              <FieldLabel>镜头数量</FieldLabel>
+              <select
+                value={shotCount}
+                onChange={(event) => update({ shotCount: Number(event.target.value) })}
+                aria-label="镜头数量"
+                title="自动由模型结合内容、素材、时长与节奏判断；固定值要求输出对应数量的连续镜头。"
+                className="w-full rounded-md border border-white/10 bg-zinc-900 px-2 py-1.5 text-xs text-white outline-none"
+              >
+                <option value={contract.limits.shotCount.automatic}>自动判断（默认）</option>
+                {SHOT_COUNT_OPTIONS.map((value) => <option key={value} value={value}>{value} 个镜头</option>)}
+              </select>
             </div>
             <div>
               <FieldLabel>改写模式</FieldLabel>

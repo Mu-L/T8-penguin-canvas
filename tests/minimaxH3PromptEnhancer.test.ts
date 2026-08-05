@@ -18,6 +18,7 @@ function input(overrides: Partial<MiniMaxH3Input> = {}): MiniMaxH3Input {
     prompt: '一只企鹅在雨夜的球场完成最后一次射门',
     taskType: 'T2VA',
     durationSeconds: 5,
+    shotCount: 0,
     rewriteMode: 'balanced',
     descriptionTarget: 0,
     outputLanguage: '中文',
@@ -34,6 +35,8 @@ test('MiniMax H3 shared contract preserves the reference modes while overriding 
   assert.equal(MINIMAX_H3_PROMPT_ENHANCER_CONTRACT.defaultProvider, 'seedance-nz');
   assert.equal(MINIMAX_H3_DEFAULT_MODEL, 'bytedance/doubao-seed-2.1-pro');
   assert.deepEqual(MINIMAX_H3_PROMPT_ENHANCER_CONTRACT.taskTypes, ['T2VA', 'I2VA', 'FL2VA', 'L2VA', 'Ref2VA']);
+  assert.deepEqual(MINIMAX_H3_PROMPT_ENHANCER_CONTRACT.limits.shotCount, { automatic: 0, minimum: 1, maximum: 20 });
+  assert.equal(MINIMAX_H3_PROMPT_ENHANCER_CONTRACT.defaults.shotCount, 0);
   assert.equal(miniMaxH3Temperature('strict'), 0.2);
   assert.equal(miniMaxH3Temperature('balanced'), 0.7);
   assert.equal(miniMaxH3Temperature('creative'), 1.2);
@@ -52,6 +55,21 @@ test('MiniMax H3 validates exact task media contracts and API-key-like text fail
   assert.throws(() => validateMiniMaxH3Input(input({ taskType: 'I2VA' })), /只能连接 1 张图片/);
   assert.throws(() => validateMiniMaxH3Input(input({ prompt: 'secret sk-abcdefghijklmnop' })), /疑似 API Key/);
   assert.throws(() => validateMiniMaxH3Input(input({ promptMode: '参考模板融合' })), /必须填写参考模板/);
+  assert.throws(() => validateMiniMaxH3Input(input({ shotCount: -1 })), /镜头数量必须为自动，或 1-20/);
+  assert.throws(() => validateMiniMaxH3Input(input({ shotCount: 21 })), /镜头数量必须为自动，或 1-20/);
+  assert.throws(() => validateMiniMaxH3Input(input({ shotCount: 1.5 })), /镜头数量必须为自动，或 1-20/);
+});
+
+test('shot-count LIST keeps AUTO compatible and sends fixed 1-20 constraints to the LLM', () => {
+  const automatic = buildMiniMaxH3Messages(input({ shotCount: 0 }));
+  assert.match(String(automatic[0].content), /Shot count mode: AUTO/);
+  assert.match(String(automatic[1].content), /Shot count control: AUTO/);
+
+  const fixed = buildMiniMaxH3Messages(input({ shotCount: 12 }));
+  assert.match(String(fixed[0].content), /exactly 12 shots/);
+  assert.match(String(fixed[0].content), /\[Shot 1\] through \[Shot 12\]/);
+  assert.match(String(fixed[0].content), /overrides any approximate shot-count number or range/);
+  assert.match(String(fixed[1].content), /Shot count control: exactly 12/);
 });
 
 test('Ref2VA keeps full temporal evidence limits instead of silently reducing videos to frames', () => {
@@ -124,7 +142,10 @@ test('Canvas node, proxy and schema wire the default channel, single paid reques
   assert.match(node, /savedExternalModelMissing/);
   assert.match(node, /savedSeedanceModelMissing/);
   assert.match(node, /不会静默切换模型/);
+  assert.match(node, /<FieldLabel>镜头数量<\/FieldLabel>/);
+  assert.match(node, /Array\.from\(\{ length: 20 \}/);
   assert.match(canvas, /providerModel: 'bytedance\/doubao-seed-2\.1-pro'/);
+  assert.match(canvas, /'minimax-h3-prompt-enhancer': \{[\s\S]*shotCount: 0/);
   assert.match(proxy, /noRetry: minimaxH3Profile/);
   assert.match(proxy, /uploadMiniMaxH3MessageMedia/);
   assert.match(read('backend/src/providers/seedanceNz.js'), /normalizeImagePng[\s\S]*ensureSize\(buffer, kind, options\.maxBytes\)/);
@@ -132,4 +153,6 @@ test('Canvas node, proxy and schema wire the default channel, single paid reques
   assert.equal(entry.executable, true);
   assert.equal(entry.generatable, true);
   assert.deepEqual(entry.ports, { inputs: ['text', 'image', 'video'], outputs: ['text'] });
+  assert.deepEqual(entry.generation.allowedDataFields.shotCount, { type: 'integer', minimum: 0, maximum: 20 });
+  assert.equal(entry.generation.defaults.shotCount, 0);
 });

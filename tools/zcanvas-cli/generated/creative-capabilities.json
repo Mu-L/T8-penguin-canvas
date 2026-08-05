@@ -227,6 +227,7 @@
         "topaz-image-upscale",
         "topaz-video-upscale",
         "face-expression-3d",
+        "previs-studio",
         "panorama-3d"
       ],
       "supports": [

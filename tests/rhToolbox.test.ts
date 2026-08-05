@@ -7,6 +7,7 @@ const loadRhToolboxUtils = async () => import('../src/utils/rhToolbox.ts');
 const loadRhToolboxCapabilities = async () => import('../src/utils/rhToolboxCapabilities.ts');
 const loadRhToolboxDeveloper = async () => import('../src/utils/rhToolboxDeveloper.ts');
 const loadRhToolboxManifest = async () => import('../src/data/rhToolboxManifest.ts');
+const loadSmartTranslation = async () => import('../src/utils/smartTranslation.ts');
 const rhToolboxMakerNodeUrl = new URL('../src/components/nodes/RHToolboxMakerNode.tsx', import.meta.url);
 const rhToolboxDeveloperUrl = new URL('../src/utils/rhToolboxDeveloper.ts', import.meta.url);
 const hasRhToolboxMakerSource = existsSync(rhToolboxMakerNodeUrl);
@@ -46,6 +47,95 @@ test('RH image capability service exposes cutout, upscale, and expand wrappers f
   assert.match(service, /capability:\s*'image\.expand'/);
   assert.match(presets, /defaultParamPresetId:\s*'landscape-16-9'/);
   assert.match(presets, /wide-21-9/);
+});
+
+test('RH smart translation is a persisted text capability shared by Text, LLM/Vision, and text Output surfaces', async () => {
+  const { RH_TOOLBOX_MANIFEST } = await loadRhToolboxManifest();
+  const {
+    buildRhToolboxNodeInfoList,
+    buildRhToolboxQuickActions,
+    findRhToolboxToolById,
+    normalizeRhToolboxManifest,
+  } = await loadRhToolboxUtils();
+  const { resolveRhToolboxCapability } = await loadRhToolboxCapabilities();
+  const { protectSmartTranslationText, restoreSmartTranslationText } = await loadSmartTranslation();
+  const manifest = normalizeRhToolboxManifest(RH_TOOLBOX_MANIFEST);
+  const tool = findRhToolboxToolById(manifest, 'translate-cutout-v1');
+
+  assert.equal(tool?.title, '智能翻译');
+  assert.equal(tool?.webappId, '2084616885802463233');
+  assert.deepEqual(tool?.capabilities, ['text.translate']);
+  assert.equal(tool?.inputSchema[0]?.kind, 'text');
+  assert.equal(tool?.inputSchema[0]?.rhNodeId, '5');
+  assert.equal(tool?.inputSchema[0]?.fieldName, 'prompt');
+  assert.equal(tool?.inputSchema[0]?.required, true);
+  assert.deepEqual(tool?.outputSchema, [{
+    key: 'output-text',
+    label: '翻译结果',
+    kind: 'text',
+    role: 'text-only',
+  }]);
+  assert.equal(tool?.ui?.showInTextEditor, true);
+  assert.equal(resolveRhToolboxCapability(manifest, {
+    surface: 'text',
+    capability: 'text.translate',
+    preferredToolId: 'translate-cutout-v1',
+  })?.id, 'translate-cutout-v1');
+  assert.deepEqual(buildRhToolboxQuickActions(manifest, 'text').map((action) => action.toolId), ['translate-cutout-v1']);
+  assert.deepEqual(buildRhToolboxNodeInfoList(tool!, {
+    inputValues: { prompt: 'who are you' },
+  }), [{ nodeId: '5', fieldName: 'prompt', fieldValue: 'who are you', valueType: 'text' }]);
+
+  const staleMakerManifest = normalizeRhToolboxManifest({
+    schema: 't8-rh-toolbox-manifest',
+    version: 1,
+    categories: [{ id: 'text-category-nfjhp', name: '翻译', parentId: 'text' }],
+    tools: [{
+      id: 'translate-cutout-v1',
+      title: '智能翻译',
+      categoryId: 'text-category-nfjhp',
+      webappId: '2084616885802463233',
+      enabled: true,
+      capabilities: ['image.cutout', 'image.edit'],
+      inputSchema: [{ key: 'prompt', kind: 'text', rhNodeId: '5', fieldName: 'prompt', required: false }],
+      outputSchema: [{ key: 'output-image', kind: 'image', role: 'append-output' }],
+      ui: { showInTextEditor: false },
+    }],
+  });
+  const migrated = findRhToolboxToolById(staleMakerManifest, 'translate-cutout-v1');
+  assert.deepEqual(migrated?.capabilities, ['text.translate']);
+  assert.equal(migrated?.inputSchema[0]?.required, true);
+  assert.equal(migrated?.outputSchema[0]?.kind, 'text');
+  assert.equal(migrated?.ui?.showInTextEditor, true);
+
+  const protectedText = protectSmartTranslationText('hello @img1', ['@img1']);
+  assert.equal(protectedText.requestText, 'hello __T8_MEDIA_REF_1__');
+  assert.equal(restoreSmartTranslationText('你好 __t8_media_ref_1__', protectedText.replacements), '你好 @img1');
+  assert.throws(
+    () => restoreSmartTranslationText('你好', protectedText.replacements),
+    /未保留素材引用 @img1/,
+  );
+
+  const service = readFileSync(new URL('../src/services/rhToolboxCapabilities.ts', import.meta.url), 'utf8');
+  const button = readFileSync(new URL('../src/components/SmartTranslateButton.tsx', import.meta.url), 'utf8');
+  const mentionInput = readFileSync(new URL('../src/components/nodes/MentionPromptInput.tsx', import.meta.url), 'utf8');
+  const textNode = readFileSync(new URL('../src/components/nodes/TextNode.tsx', import.meta.url), 'utf8');
+  const llmNode = readFileSync(new URL('../src/components/nodes/LLMNode.tsx', import.meta.url), 'utf8');
+  const outputNode = readFileSync(new URL('../src/components/nodes/OutputNode.tsx', import.meta.url), 'utf8');
+  const backendSettings = readFileSync(new URL('../backend/src/routes/settings.js', import.meta.url), 'utf8');
+  assert.match(service, /export async function runRhTextTranslation/);
+  assert.match(service, /capability:\s*'text\.translate'/);
+  assert.match(service, /restoreSmartTranslationText/);
+  assert.match(button, /data-smart-translate-trigger/);
+  assert.match(button, /status:\s*'stale'/);
+  assert.match(mentionInput, /toolbarAction\?: ReactNode/);
+  assert.match(textNode, /<SmartTranslateButton[\s\S]*text=\{text\}/);
+  assert.match(textNode, /rebaseMediaMentions/);
+  assert.match(llmNode, /<SmartTranslateButton[\s\S]*text=\{localPrompt\}/);
+  assert.match(outputNode, /<SmartTranslateButton[\s\S]*text=\{displayText\}/);
+  assert.match(outputNode, /update\(\{ outputText: translatedText, smartTranslation: record \}\)/);
+  assert.match(backendSettings, /RH_SMART_TRANSLATION_WEBAPP_ID/);
+  assert.match(backendSettings, /capabilities:\s*\['text\.translate'\]/);
 });
 
 test('RH video material shortcuts ship frame extraction, cutout, and RH video upscalers', async () => {
@@ -180,12 +270,13 @@ test('RH toolbox manifest ships maintainer release tools for packaged users', as
   const manifest = normalizeRhToolboxManifest(RH_TOOLBOX_MANIFEST);
 
   assert.equal(manifest.schema, 't8-rh-toolbox-manifest');
-  assert.match(String(manifest.updatedAt || ''), /^2026-07-23/);
-  assert.equal(manifest.categories.length, 11);
+  assert.match(String(manifest.updatedAt || ''), /^2026-08-04/);
+  assert.equal(manifest.categories.length, 12);
   const categories = new Map(manifest.categories.map((category) => [category.id, category]));
   assert.deepEqual(
     [
       'custom-rh-tools',
+      'text-category-nfjhp',
       'video-category-fwv2n',
       'image-category-d5zwl',
       'image-category-remove-subject',
@@ -200,6 +291,7 @@ test('RH toolbox manifest ships maintainer release tools for packaged users', as
       .map((id) => [id, categories.get(id)?.name, categories.get(id)?.parentId]),
     [
       ['custom-rh-tools', '抠图', 'image'],
+      ['text-category-nfjhp', '翻译', 'text'],
       ['video-category-fwv2n', '图生视频', 'video'],
       ['image-category-d5zwl', '图像编辑', 'image'],
       ['image-category-remove-subject', '消除主体', 'image'],
@@ -212,7 +304,7 @@ test('RH toolbox manifest ships maintainer release tools for packaged users', as
       ['image-category-8h6ed', '移除主体', 'image'],
     ],
   );
-  assert.equal(listRhToolboxTools(manifest).length, 14);
+  assert.equal(listRhToolboxTools(manifest).length, 15);
   assert.deepEqual(
     listRhToolboxTools(manifest).map((tool) => tool.id),
     [
@@ -222,6 +314,7 @@ test('RH toolbox manifest ships maintainer release tools for packaged users', as
       'bernini1',
       'berninituxiangbianji',
       'bernini2',
+      'translate-cutout-v1',
       'jimenfenshen1',
       'kuotu-1',
       'video-removebg-v1',
@@ -240,7 +333,7 @@ test('RH toolbox manifest ships maintainer release tools for packaged users', as
       `${tool.id} should keep at least a 60 minute RH polling budget`,
     );
   }
-  assert.equal(listRhToolboxTools(manifest, { includeDisabled: true }).length, 14);
+  assert.equal(listRhToolboxTools(manifest, { includeDisabled: true }).length, 15);
   assert.equal(isRhToolboxBuiltinCategoryId('image-tools'), true);
   assert.equal(isRhToolboxBuiltinCategoryId('custom-rh-tools'), false);
   assert.equal(getRhToolboxToolMajorCategory(manifest.tools[0], manifest.categories), 'image');

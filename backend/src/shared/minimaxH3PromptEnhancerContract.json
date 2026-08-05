@@ -13,6 +13,7 @@
   "promptModes": ["官方增强", "参考模板融合"],
   "limits": {
     "durationSeconds": { "minimum": 4, "maximum": 15, "default": 5 },
+    "shotCount": { "automatic": 0, "minimum": 1, "maximum": 20 },
     "descriptionTarget": { "automatic": 0, "minimum": 80, "maximum": 1000 },
     "referenceImages": 9,
     "referenceVideos": 3,
@@ -22,6 +23,7 @@
   },
   "defaults": {
     "taskType": "T2VA",
+    "shotCount": 0,
     "rewriteMode": "balanced",
     "outputLanguage": "中文",
     "promptMode": "官方增强",

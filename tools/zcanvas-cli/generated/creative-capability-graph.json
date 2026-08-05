@@ -15,8 +15,8 @@
   },
   "sourceDigests": {
     "creativeCapabilityManifest": "1c5d2c0bd62a8392dfd557a55d750ef5fe02ac032c2c2a5de42a09e16669ac30",
-    "canvasNodeSchema": "3ea900ec84fda6e5d4766fd4690b0262c5f187ae16cbbeb8b29a10589e478fd3",
-    "canvasNodeSchemaFile": "03a36d1bfa8d03f28b6c1fa4be929a8c97d6ff3072fab4eace383959dd76ba38",
+    "canvasNodeSchema": "80179537cee15cd12c720d2c193ab283a220b6406166cd228530010e1be34069",
+    "canvasNodeSchemaFile": "61e2ecd3b72ca7e8994428d32650a205eccdbee55aea327db7f58a491474ea23",
     "runtimeCatalogSources": "45758bb4e607cc1dcdecd8029e30ed8054faf4b7e808034329261debec22e4d6",
     "runtimeCatalogArtifact": "da2a8e0847290a19b83f3ea06429b6f0c8ad7531e9ab93f5d30ff65c1eed0ede",
     "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
@@ -24,7 +24,7 @@
     "coverageReceiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7",
     "canonicalTextDigestCompiler": "b0afcf28a257fbbd8f391edc117348f8f2ede1b4a039ae91bce25a8d563ac0cf"
   },
-  "aggregateDigest": "5dd93650bd74ebc9ab632b097dd62b96e971fa1b84abbf50e21e8e1cef775096",
+  "aggregateDigest": "ecb86b54d782bba3fba5e3bf3b38ae5381ed65727bb1de8b9edd1fadfeeea518",
   "principles": {
     "oneSentenceStart": true,
     "directCanvasMutation": false,
@@ -36,16 +36,16 @@
   "counts": {
     "capabilities": 31,
     "handlers": 31,
-    "nodes": 72,
-    "executableNodes": 53,
+    "nodes": 73,
+    "executableNodes": 54,
     "generatableNodes": 8,
-    "referencedNodes": 63,
+    "referencedNodes": 64,
     "unreferencedNodes": 9,
-    "directCapabilityNodes": 63,
+    "directCapabilityNodes": 64,
     "internalCompatNodes": 1,
     "semanticSupersededNodes": 8,
     "publicCapabilityGapNodes": 0,
-    "accountedNodes": 72,
+    "accountedNodes": 73,
     "unexplainedNodes": 0,
     "fullyOperableNodes": 15,
     "runtimeEntries": 200,
@@ -554,6 +554,7 @@
         "topaz-image-upscale",
         "topaz-video-upscale",
         "face-expression-3d",
+        "previs-studio",
         "panorama-3d"
       ],
       "supports": [
@@ -6071,6 +6072,53 @@
       }
     },
     {
+      "type": "previs-studio",
+      "label": "白模预演",
+      "description": "完整白模场景、67 骨骼与 IK、相机和关键帧动画工作台，可输出 Seedance 构图静帧与动作运镜参考视频",
+      "category": "3d",
+      "hidden": false,
+      "executable": true,
+      "generatable": false,
+      "agentExposure": "direct-capability",
+      "coverageReason": "registered-capability-reference",
+      "accounting": {
+        "status": "direct-capability",
+        "reasonCode": "registered-capability-reference",
+        "semanticCapabilityIds": [
+          "canvas.node-add"
+        ],
+        "evidence": [
+          "tools/zcanvas-cli/creativeCapabilityManifest.json"
+        ]
+      },
+      "inputs": [
+        "model3d"
+      ],
+      "outputs": [
+        "image",
+        "video",
+        "text",
+        "metadata"
+      ],
+      "capabilityIds": [
+        "canvas.node-add"
+      ],
+      "handlerIds": [
+        "creative-action:graph.node-add"
+      ],
+      "coverage": {
+        "understand": true,
+        "plan": true,
+        "preview": true,
+        "apply": true,
+        "run": false,
+        "verify": true,
+        "resume": false,
+        "rollback": true,
+        "recover": true
+      }
+    },
+    {
       "type": "panorama-3d",
       "label": "3D全景",
       "description": "Three.js 360 全景预览与取景导出，内置 GPT Image 2 文生/图生 21:9 全景贴图生成",
@@ -10386,6 +10434,7 @@
       "topaz-image-upscale",
       "topaz-video-upscale",
       "face-expression-3d",
+      "previs-studio",
       "panorama-3d"
     ],
     "missingOperationRisk": [],
@@ -10599,15 +10648,15 @@
     "schema": "t8-creative-capability-coverage-receipt-v1",
     "sourceDigests": {
       "capabilityManifest": "1c5d2c0bd62a8392dfd557a55d750ef5fe02ac032c2c2a5de42a09e16669ac30",
-      "nodeSchema": "3ea900ec84fda6e5d4766fd4690b0262c5f187ae16cbbeb8b29a10589e478fd3",
+      "nodeSchema": "80179537cee15cd12c720d2c193ab283a220b6406166cd228530010e1be34069",
       "runtimeCatalog": "45758bb4e607cc1dcdecd8029e30ed8054faf4b7e808034329261debec22e4d6",
       "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
       "receiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7"
     },
     "inventory": {
       "nodes": {
-        "total": 72,
-        "executable": 53,
+        "total": 73,
+        "executable": 54,
         "generatable": 8
       },
       "runtime": {
@@ -10629,6 +10678,6 @@
       "missingCompatibilityEdges": []
     },
     "complete": true,
-    "digest": "77335038d4bb8ff819f5643ff179a4a59f6e0868589b6038e4b001b89bc0d681"
+    "digest": "01765136b44fda46391032484a4aac04f98cbb2f823e4bf30d57b3ca54395033"
   }
 }

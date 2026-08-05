@@ -15,6 +15,7 @@ const REQUIRED_TOOL_IDS = [
   'bernini1',
   'berninituxiangbianji',
   'bernini2',
+  'translate-cutout-v1',
   'video-removebg-v1',
   'video-nividia-upscale',
   'video-flashvsr',
@@ -25,6 +26,7 @@ const REQUIRED_CATEGORY_IDS = [
   'image-category-d5zwl',
   'video-category-e2v4g',
   'image-category-e78o2',
+  'text-category-nfjhp',
   'video-category-9d33p',
   'video-category-9dael',
 ];

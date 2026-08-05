@@ -138,6 +138,20 @@ export function updateMentionRanges(prevText: string, nextText: string, mentions
   return nextMentions;
 }
 
+/** Rebind unchanged @ tokens after a whole-text transform such as translation. */
+export function rebaseMediaMentions(nextText: string, mentions: MediaMention[]): MediaMention[] {
+  if (!mentions.length) return [];
+  const rebased: MediaMention[] = [];
+  let cursor = 0;
+  for (const mention of mentions.slice().sort((a, b) => a.start - b.start)) {
+    const start = nextText.indexOf(mention.token, cursor);
+    if (start < 0) continue;
+    rebased.push({ ...mention, start, end: start + mention.token.length });
+    cursor = start + mention.token.length;
+  }
+  return rebased;
+}
+
 export function insertMediaMention(
   text: string,
   mentions: MediaMention[],

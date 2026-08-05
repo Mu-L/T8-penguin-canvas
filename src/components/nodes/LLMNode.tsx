@@ -42,7 +42,7 @@ import { useThemeStore } from '../../stores/theme';
 import MentionPromptInput from './MentionPromptInput';
 import SmartImage from '../SmartImage';
 import PromptTextarea from '../PromptTextarea';
-import { resolveMediaMentions, type MediaMention } from './mediaMentions';
+import { rebaseMediaMentions, resolveMediaMentions, type MediaMention } from './mediaMentions';
 import { splitText } from '../../utils/textSplit';
 import { defaultSizeOf, placeBatchNodes, type Rect as PlacementRect } from '../../utils/nodePlacement';
 import { taskCompletionSound } from '../../stores/taskCompletionSound';
@@ -64,6 +64,8 @@ import {
   SEEDANCE_NZ_LLM_MODELS,
   resolveSeedanceNzLlmModel,
 } from '../../config/llm';
+import SmartTranslateButton from '../SmartTranslateButton';
+import type { SmartTranslationRecord } from '../../utils/smartTranslation';
 
 /**
  * LLM / Vision 节点 —— 完全对齐 gpt-image-2-web Chat (index.html L1600 / L8128~L8400)
@@ -335,6 +337,10 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
   const orderedImages = useOrderedMaterials(allImagesUnordered, materialOrder);
   const orderedVideos = useOrderedMaterials(allVideosUnordered, materialOrder);
   const orderedTexts = useOrderedMaterials(visibleUpstreamTexts, materialOrder);
+  const translationProtectedTerms = useMemo(
+    () => Array.from(new Set(userPromptMentions.map((mention) => mention.token).filter(Boolean))),
+    [userPromptMentions],
+  );
   const setMaterialOrder = (newOrder: string[]) => update({ materialOrder: newOrder });
   const handleRemoveLocalMaterial = (m: Material) => {
     if (m.origin !== 'local') return;
@@ -349,6 +355,18 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
     });
   };
   const handleRestoreExcludedMaterials = () => update({ excludedMaterialIds: [] });
+  const handleTranslationRecord = useCallback((record: SmartTranslationRecord) => {
+    update({ smartTranslation: record });
+    if (record.status !== 'success') setError(record.error || '智能翻译失败');
+  }, [update]);
+  const handleTranslated = useCallback((translatedText: string, record: SmartTranslationRecord) => {
+    setError(null);
+    update({
+      userPrompt: translatedText,
+      userPromptMentions: rebaseMediaMentions(translatedText, userPromptMentions),
+      smartTranslation: record,
+    });
+  }, [update, userPromptMentions]);
 
   // 上游: 收集 text + image + video (使用按用户拖拽顺序排好的 ordered 列表，与预览区呈现一致)
   const collectUpstream = (): { text: string; images: string[]; videos: string[] } => {
@@ -1089,6 +1107,16 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
             isDark={isDark}
             isPixel={isPixel}
             promptTemplateKind="image"
+            toolbarAction={(
+              <SmartTranslateButton
+                text={localPrompt}
+                nodeId={id}
+                protectedTerms={translationProtectedTerms}
+                lastRecord={d?.smartTranslation}
+                onTranslated={handleTranslated}
+                onRecord={handleTranslationRecord}
+              />
+            )}
             className="w-full h-60 resize-none rounded bg-white/5 border border-white/10 px-2 py-1 text-[11px] text-white outline-none focus:border-white/30 placeholder:text-white/30 overflow-y-auto"
           />
         </div>

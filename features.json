@@ -1,44 +1,85 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.7.7",
-  "lastUpdated": "2026-08-04-v2.7.7-released",
-  "release": {
-    "status": "released-v2.7.7",
-    "version": "2.7.7",
+  "version": "2.7.8",
+  "lastUpdated": "2026-08-05-v2.7.8-release-authorized",
+  "previsStudioCapability": {
+    "status": "release-authorized-v2.7.8",
+    "date": "2026-08-05",
+    "releaseIncluded": true,
+    "source": {
+      "repository": "https://github.com/GuiYi-Xi/monoform-previs-studio",
+      "commit": "77f4bae83eeee550a6f416757231f438155bf674",
+      "author": "GuiYi-Xi"
+    },
+    "highlights": [
+      "新增可执行 `previs-studio` 白模预演节点，完整移植人物、基础几何体、外部 GLB/GLTF、摄像机、姿态、骨骼、物体/镜头关键帧、时间线、撤销重做、工程导入导出、PNG 与 MP4 导出工作台；节点页和全屏工作台均显示出处并感谢原作者。",
+      "紧凑节点不常驻 WebGL，完整工作台按需拆包并通过 Shadow DOM 隔离原项目样式；工程同时保存到节点数据与节点独立 localStorage，画布关闭或应用重启后可恢复，外部模型通过 T8 受控上传落盘。",
+      "输入端口接受 `model3d`，输出端口提供标准 `image`、`video`、`text`、`metadata`；当前帧输出构图参考 PNG，动画输出 5 秒、24 FPS、H.264 MP4，可直接作为 Seedance 2.0 图像或运动/镜头视频参考。",
+      "导出接入 Canvas Run/NodeRun/Attempt 生命周期和全局 STOP；取消会中断逐帧编码并失败关闭，不会把停止后的资源误写为成功，输出附带 `t8-previs-output-v1` 尺寸、帧率、时间、用途、工程修订和固定上游提交。"
+    ],
+    "verification": [
+      "Canvas Node Schema、节点注册、端口、初始数据与能力图已同步，73/73 节点均被解释且生成图无缺口。",
+      "白模节点专项回归 6/6 通过，覆盖注册、按需加载、完整工作台表面、PNG/MP4/停止合同、归属信息、受控 output 归档、显式权威 output 事件和固定二进制摘要。",
+      "实际 Chromium 在 1280×720 下加载 3 个场景对象、1 个人物和 2 个 WebGL 画布，左栏/主视口/右侧属性/时间线与出处/导出区重叠均为 0；真实生成并回显 1280×720 PNG 与 120 帧、5 秒、24 FPS H.264 MP4，二者均落在 `/files/output/previs/` 且运行中心没有输出证据错误。",
+      "真实全局 STOP 在动画导出过程中使节点显示已停止，受控输出链接数量未增加；TypeScript、能力目录、公开面与生产前端构建通过。该能力已获准纳入 v2.7.8 唯一正式发布流程，尚未完成的安装版与外部设备证据继续明确后补。"
+    ]
+  },
+  "smartTranslationCapability": {
+    "status": "release-authorized-v2.7.8",
     "date": "2026-08-04",
-    "publishedAt": "2026-08-04T07:05:09Z",
-    "tag": "v2.7.7",
-    "latest": true,
-    "sourceCommit": "594c6b3b76d3eb3173918c3525be6414638279ae",
-    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.7",
+    "releaseIncluded": true,
+    "provider": "runninghub",
+    "webappId": "2084616885802463233",
+    "capability": "text.translate",
+    "highlights": [
+      "RH工具箱正式内置“智能翻译”，把早期制作器误识别的 image.cutout / 图片输出合同纠正为 node #5 prompt 文本输入与 text-only 文本输出；源 manifest、本机持久化清单和服务端持久化归一使用同一合同。",
+      "共享 runRhTextTranslation 能力只在一次用户点击时提交一次 RunningHub 任务，不自动重放；文本节点、LLM/Vision 用户输入和输出素材文本区共用同一入口，不各自直连 Provider。",
+      "三个节点新增紧凑“译”按钮：中英文自动互译，其他语言默认译为中文；成功结果写回节点的权威文本字段，并把脱敏后的 Provider、toolId、taskId、requestId、原文、译文与完成状态持久化到 smartTranslation。",
+      "翻译期间原文发生变化时结果标为 stale 且不覆盖新内容；文本/LLM 中的 @ 素材引用先替换为受保护占位符，远端未完整保留引用时失败关闭，避免翻译破坏素材绑定。"
+    ],
+    "verification": [
+      "RH工具箱 manifest、旧错误合同迁移、引用保护、共享 service 与三个 UI 接线专项回归 24/24 通过。",
+      "RH工具箱、Prompt 编辑、文本节点尺寸、LLM 视频输入/模型选择、输出素材持久化与 RunningHub 文本输出相邻回归 53/53 通过。",
+      "TypeScript、能力目录同步、公开源码检查、生产前端构建与构建产物 RH 能力标记检查通过；该能力已获准纳入 v2.7.8，真实 RunningHub WebApp 与安装版证据按用户授权在发布后补录。"
+    ]
+  },
+  "release": {
+    "status": "release-authorized-v2.7.8",
+    "version": "2.7.8",
+    "date": "2026-08-05",
+    "publishedAt": null,
+    "tag": "v2.7.8",
+    "latest": false,
+    "sourceCommit": null,
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.8",
     "artifacts": {
       "installer": {
-        "name": "T8-PenguinCanvas-Setup-2.7.7.exe",
-        "size": 1304750175,
-        "sha256": "d92b75b9f8613f54dd51a12aeb8f8da8ef68d93ae2690b96f9ef8a49f4249ddd"
+        "name": "T8-PenguinCanvas-Setup-2.7.8.exe",
+        "size": null,
+        "sha256": null
       },
       "blockmap": {
-        "name": "T8-PenguinCanvas-Setup-2.7.7.exe.blockmap",
-        "size": 1359687,
-        "sha256": "d8dbf3e44cb34a6e52c40263c101601849e2be35b6f92df34ba3a02e5c866502"
+        "name": "T8-PenguinCanvas-Setup-2.7.8.exe.blockmap",
+        "size": null,
+        "sha256": null
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": 362,
-        "sha256": "4d326aad3da5398e8315aad08dc82b5fb80516c995462788f26fdc160641f1c1"
+        "size": null,
+        "sha256": null
       }
     },
     "verification": [
-      "v2.7.7 发布范围固定为 MiniMax H3 提示词增强器与剧本大师工作台可读性调整。",
-      "H3/RunIntent/Agent/端口与执行权威回归 41/41、扩展 Provider/完整视频/体检/Workflow Doctor 相邻回归 83/83、剧本大师可读性定向回归 5/5；TypeScript、能力目录、公开面与生产前端构建通过。",
-      "正式 Electron/NSIS 安装包只生成一套；post-build、provenance、sealed recovery、GitHub digest/size、发布前完整远端回下载、固定 Tag、非草稿/非预发布、Latest 与发布后元数据复核均通过，recovery 已清除。",
-      "用户已明确授权先发布、后补真实 Provider、协作多端、安装升级与外部环境证据；协作证据门仅允许缺失清单按 owner-approved-post-release-v2.7.7 延期，不能把延期标记为已通过。"
+      "v2.7.8 发布范围固定为 MiniMax H3 AUTO/1–20 镜头数量、RH 工具箱持久化智能翻译，以及带出处致谢的完整白模预演工作台。",
+      "白模预演专项回归 6/6、RH 智能翻译专项 24/24 与相邻回归 53/53、H3 定向回归 7/7 与相关权威回归 71/71；TypeScript、能力目录、公开面与生产前端构建通过。",
+      "正式 Electron/NSIS、post-build、provenance、sealed recovery、GitHub 自动更新资产、固定 Tag、非草稿/非预发布与 Latest 状态由固定发布提交上的唯一流程生成并核验，未完成前不标记为通过。",
+      "用户已明确授权先发布、后补真实 Provider、协作多端、安装升级与外部环境证据；协作证据门仅允许缺失清单按 owner-approved-post-release-v2.7.8 延期，不能把延期标记为已通过。"
     ]
   },
   "versionSequencePolicy": {
     "status": "active",
     "date": "2026-07-30",
-    "currentVersion": "2.7.7",
+    "currentVersion": "2.7.8",
     "rules": [
       "版本号每一段只使用 0-9；v2.6.9 的下一正式版本固定为 v2.7.0。",
       "禁止创建、打包、推送、打 tag、发布或写入自动更新元数据为 v2.6.10。",
@@ -48,6 +89,7 @@
       "v2.7.4 的下一正式版本固定为 v2.7.5。",
       "v2.7.5 的下一正式版本固定为 v2.7.6。",
       "v2.7.6 的下一正式版本固定为 v2.7.7。",
+      "v2.7.7 的下一正式版本固定为 v2.7.8。",
       "后续改版本前必须同步核对 package.json、package-lock.json、README、features.json、项目 SKILL.md、Release notes、自动更新元数据和 Git tag。"
     ]
   },
@@ -6350,11 +6392,11 @@
       "T8_ENABLE_LOCAL_PRIVATE": "开发环境和普通本机构建可选；0=关闭本机 local-private/extensions 私有扩展。正式 dist:release 固定为 1，不能被父环境降级。GitHub/clean clone 因为没有 local-private 目录，不包含充值实现。",
       "T8_DISABLE_LOCAL_EXTENSIONS": "开发环境可选；1=关闭本地扩展。正式 dist:release 固定为 0，确保本机私有 sidecar 参与加密打包与后置校验。"
     },
-    "version": "2.7.7",
-    "semverVersion": "2.7.7",
+    "version": "2.7.8",
+    "semverVersion": "2.7.8",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.7.7 已正式发布，聚焦 MiniMax H3 提示词增强器与剧本大师工作台可读性。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.7.7 正式 Electron/NSIS 安装包、blockmap 与 latest.yml 已由固定 source commit 594c6b3b76d3eb3173918c3525be6414638279ae 上的 dist:release 唯一流程生成；三项资产通过 post-build、provenance、sealed recovery、GitHub digest/size、完整远端回下载和最终 Latest 核验。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.7.8 已获正式发布授权，聚焦白模预演、RH 智能翻译与 MiniMax H3 镜头数量控制。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.7.8 正式 Electron/NSIS 安装包、blockmap 与 latest.yml 将由固定并推送 source commit 上的 dist:release 唯一流程生成；产物大小、摘要、Tag、Latest 与远端回下载事实在发布完成后补录，未生成前不伪报通过。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
@@ -6999,6 +7041,36 @@
       "未解锁影片无法播放；解锁后可播放、拖动进度条、继续播放和清缓存。",
       "加密影片原始素材不得进入 git、build 明文目录或 Electron resources。",
       "自动更新到带新影片的版本后，旧成就数据仍能解锁并播放新资源。"
+    ]
+  },
+  "minimaxH3ShotCountControl": {
+    "status": "release-authorized-v2.7.8",
+    "date": "2026-08-04",
+    "releaseIncluded": true,
+    "nodeType": "minimax-h3-prompt-enhancer",
+    "highlights": [
+      "MiniMax H3 提示词增强器新增“镜头数量”LIST：默认“自动判断”，并提供 1-20 个镜头的固定选项；旧画布未保存该字段时继续使用自动判断，不改变既有结果倾向。",
+      "固定数量会同时进入 LLM system 约束与 user 参数摘要，要求从 [Shot 1] 到 [Shot N] 连续编号、标签各出现一次，后续镜头时间码严格递增且小于目标时长。",
+      "固定镜头数量优先于基础提示词或参考模板中的模糊数量范围；AUTO 仍由模型结合用户意图、参考素材、目标时长、动作密度和节奏判断，并优先避免无意义切镜。",
+      "镜头数量只作为传给 LLM 的明确生成约束，不增加第二次请求，也不把本地返回镜头计数升级为成功条件。"
+    ],
+    "sourceFiles": [
+      "backend/src/shared/minimaxH3PromptEnhancerContract.json",
+      "src/utils/minimaxH3PromptEnhancer.ts",
+      "src/components/nodes/MiniMaxH3PromptEnhancerNode.tsx",
+      "src/components/Canvas.tsx",
+      "backend/src/shared/canvasNodeSchema.json",
+      "tests/minimaxH3PromptEnhancer.test.ts"
+    ],
+    "verification": [
+      "原 ComfyUI 参考节点使用整合包内置 Python 完整回归 46/46 通过，包含 AUTO / 固定镜头约束进入模型、1-20 边界、旧位置参数兼容及示例工作流字段。",
+      "H3 定向回归 7/7 通过，覆盖共享合同、AUTO、固定 12 镜头、1-20 边界、越界/小数失败关闭、节点 LIST、Canvas 默认值与 Creator/CLI Schema 字段。",
+      "H3、RunIntent、精确端口、能力图、Seedance LLM 与 Workflow Doctor 相关回归 71/71 通过；TypeScript type-check、feature-sync、public:check、git diff-check 与 Vite 生产构建通过。",
+      "扩展执行入口套件 6 项中 5 项通过，唯一失败定位到未改动的 BatchTaggerNode 既有源码顺序断言，与 H3 镜头数量无关；该功能已获准纳入 v2.7.8，真实或付费 Provider 证据按授权在发布后补录。"
+    ],
+    "boundaries": [
+      "内部值 0 仅表示 AUTO；用户可固定的镜头数量严格为 1-20。",
+      "固定镜头数量影响传给 LLM 的提示词，不绕过现有 Provider、模型、凭据、媒体、Run 生命周期或一次付费请求边界。"
     ]
   },
   "minimaxH3PromptEnhancerNode": {

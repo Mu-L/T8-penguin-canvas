@@ -6,9 +6,11 @@ import ResizableCorners from './ResizableCorners';
 import { getCornerResizeBehavior } from '../../utils/nodeResizeBehavior';
 import { normalizeRhNodeId } from '../../utils/rhTextBinding';
 import MentionPromptInput from './MentionPromptInput';
-import { resolveMediaMentions, type MediaMention } from './mediaMentions';
+import { rebaseMediaMentions, resolveMediaMentions, type MediaMention } from './mediaMentions';
 import { useDownstreamMediaMaterials, useUpstreamMaterials, type Material } from './useUpstreamMaterials';
 import { useThemeStore } from '../../stores/theme';
+import SmartTranslateButton from '../SmartTranslateButton';
+import type { SmartTranslationRecord } from '../../utils/smartTranslation';
 
 /**
  * 文本节点 - 提示词输入
@@ -54,6 +56,10 @@ const TextNode = ({ id, data, selected }: NodeProps) => {
   const resolvedPrompt = useMemo(
     () => resolveMediaMentions(text, promptMentions, mentionMaterials),
     [text, promptMentions, mentionMaterials],
+  );
+  const translationProtectedTerms = useMemo(
+    () => Array.from(new Set(promptMentions.map((mention) => mention.token).filter(Boolean))),
+    [promptMentions],
   );
   const { theme, style } = useThemeStore();
   const isDark = theme === 'dark';
@@ -119,6 +125,23 @@ const TextNode = ({ id, data, selected }: NodeProps) => {
       update({ rhNodeId: digits });
     },
     [update],
+  );
+  const handleTranslationRecord = useCallback(
+    (record: SmartTranslationRecord) => update({ smartTranslation: record }),
+    [update],
+  );
+  const handleTranslated = useCallback(
+    (translatedText: string, record: SmartTranslationRecord) => {
+      const translatedMentions = rebaseMediaMentions(translatedText, promptMentions);
+      update({
+        prompt: translatedText,
+        text: translatedText,
+        promptMentions: translatedMentions,
+        promptResolved: resolveMediaMentions(translatedText, translatedMentions, mentionMaterials),
+        smartTranslation: record,
+      });
+    },
+    [mentionMaterials, promptMentions, update],
   );
 
   return (
@@ -205,6 +228,16 @@ const TextNode = ({ id, data, selected }: NodeProps) => {
           promptTemplateKind="image"
           isDark={isDark}
           isPixel={isPixel}
+          toolbarAction={(
+            <SmartTranslateButton
+              text={text}
+              nodeId={id}
+              protectedTerms={translationProtectedTerms}
+              lastRecord={d?.smartTranslation}
+              onTranslated={handleTranslated}
+              onRecord={handleTranslationRecord}
+            />
+          )}
           expandable
           fillHeight={!!size.h}
           className={`w-full resize-none rounded-md bg-white/5 border border-white/10 px-2 py-1.5 text-xs text-white outline-none focus:border-white/30 placeholder:text-white/30 nodrag nowheel ${

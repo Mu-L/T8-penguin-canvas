@@ -2025,6 +2025,58 @@
         }
       ]
     },
+    "previs-studio": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": "model3d",
+          "kinds": [
+            "model3d"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": "image",
+          "kinds": [
+            "image"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "video",
+          "kinds": [
+            "video"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "text",
+          "kinds": [
+            "text"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        },
+        {
+          "id": "metadata",
+          "kinds": [
+            "metadata"
+          ],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
     "panorama-3d": {
       "resolver": "static",
       "inputs": [
@@ -2672,6 +2724,11 @@
             "minimum": 4,
             "maximum": 15
           },
+          "shotCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20
+          },
           "rewriteMode": {
             "type": "string",
             "enum": ["strict", "balanced", "creative"]
@@ -2709,6 +2766,7 @@
           "userPrompt": "",
           "taskType": "T2VA",
           "durationSeconds": 5,
+          "shotCount": 0,
           "rewriteMode": "balanced",
           "descriptionTarget": 0,
           "outputLanguage": "中文",
@@ -4012,6 +4070,31 @@
         ],
         "outputs": [
           "image",
+          "metadata"
+        ]
+      },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {},
+        "defaults": {}
+      }
+    },
+    {
+      "type": "previs-studio",
+      "label": "白模预演",
+      "category": "3d",
+      "description": "完整白模场景、67 骨骼与 IK、相机和关键帧动画工作台，可输出 Seedance 构图静帧与动作运镜参考视频",
+      "icon": "Box",
+      "color": "amber",
+      "ports": {
+        "inputs": [
+          "model3d"
+        ],
+        "outputs": [
+          "image",
+          "video",
+          "text",
           "metadata"
         ]
       },

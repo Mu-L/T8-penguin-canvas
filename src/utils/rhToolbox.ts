@@ -162,6 +162,9 @@ export const RH_TOOLBOX_DEFAULT_POLL_TIMEOUT_MS = 60 * 60 * 1000;
 export const RH_TOOLBOX_DEFAULT_MAX_POLLS = Math.ceil(
   RH_TOOLBOX_DEFAULT_POLL_TIMEOUT_MS / RH_TOOLBOX_DEFAULT_POLL_INTERVAL_MS,
 );
+export const RH_SMART_TRANSLATION_TOOL_ID = 'translate-cutout-v1';
+export const RH_SMART_TRANSLATION_WEBAPP_ID = '2084616885802463233';
+export const RH_SMART_TRANSLATION_CATEGORY_ID = 'text-category-nfjhp';
 
 export const RH_TOOLBOX_MAJOR_CATEGORIES: RhToolboxMajorCategory[] = [
   { id: 'image', name: '图像', description: '图像生成、编辑、修复和放大工具', order: 10 },
@@ -683,7 +686,7 @@ export function normalizeRhToolboxManifest(manifest: Partial<RhToolboxManifest> 
     const maxPolls = Number.isFinite(raw?.runtime?.maxPolls)
       ? Math.max(minMaxPolls, Math.floor(Number(raw.runtime.maxPolls)))
       : minMaxPolls;
-    tools.push({
+    let normalizedTool: RhToolboxTool = {
       id,
       title: cleanText(raw?.title, id),
       description: cleanText(raw?.description),
@@ -719,7 +722,51 @@ export function normalizeRhToolboxManifest(manifest: Partial<RhToolboxManifest> 
           }
         : { showInNode: true },
       version: Number.isFinite(raw?.version) ? Number(raw.version) : 1,
-    });
+    };
+
+    // 早期制作器把智能翻译 WebApp 误推断成 image.cutout / image 输出。
+    // 以已确认的 WebApp ID 收敛为唯一文本合同，使旧持久化清单升级后也能
+    // 立即被文本节点、LLM/Vision 与输出素材节点作为共享能力调用。
+    if (webappId === RH_SMART_TRANSLATION_WEBAPP_ID) {
+      normalizedTool = {
+        ...normalizedTool,
+        title: '智能翻译',
+        description: '自动识别中英文并互译，其他语言默认翻译为中文',
+        order: 60,
+        categoryId: categoryIds.has(RH_SMART_TRANSLATION_CATEGORY_ID)
+          ? RH_SMART_TRANSLATION_CATEGORY_ID
+          : normalizedTool.categoryId,
+        capabilities: ['text.translate'],
+        inputSchema: [{
+          key: 'prompt',
+          label: '待翻译文本',
+          kind: 'text',
+          rhNodeId: '5',
+          fieldName: 'prompt',
+          required: true,
+          multiple: false,
+          uploadAsset: false,
+          order: 0,
+        }],
+        outputSchema: [{
+          key: 'output-text',
+          label: '翻译结果',
+          kind: 'text',
+          role: 'text-only',
+        }],
+        fixedParams: [],
+        userParams: [],
+        ui: {
+          icon: 'Languages',
+          showInNode: true,
+          showInImageEditor: false,
+          showInVideoEditor: false,
+          showInTextEditor: true,
+          showInAudioEditor: false,
+        },
+      };
+    }
+    tools.push(normalizedTool);
   }
 
   return {

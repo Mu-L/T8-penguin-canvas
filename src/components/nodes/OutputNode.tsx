@@ -68,6 +68,8 @@ import {
   type SecondaryProviderActionEnvelope,
 } from '../../utils/secondaryProviderAction';
 import type { RunNodeLifecycleReporter } from '../../types/project';
+import SmartTranslateButton from '../SmartTranslateButton';
+import type { SmartTranslationRecord } from '../../utils/smartTranslation';
 
 type OutputProduceMeta =
   | ImageEditProduceMeta
@@ -621,6 +623,17 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
     update({ outputText: '' });
     setEditing(false);
   };
+  const handleTranslationRecord = useCallback(
+    (record: SmartTranslationRecord) => update({ smartTranslation: record }),
+    [update],
+  );
+  const handleTranslated = useCallback(
+    (translatedText: string, record: SmartTranslationRecord) => {
+      update({ outputText: translatedText, smartTranslation: record });
+      setEditing(false);
+    },
+    [update],
+  );
 
   const isEdited = overrideText !== '' && overrideText !== liveText;
   const HANDLE = PORT_COLOR.any;
@@ -1405,6 +1418,13 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
             <div className={`flex items-center gap-1.5 text-[10px] ${isDark ? 'text-white/50' : 'text-zinc-500'}`}>
               <TypeIcon size={11} />
               <span className="flex-1">文本{isEdited ? ' · 已编辑' : ''}</span>
+              <SmartTranslateButton
+                text={displayText}
+                nodeId={id}
+                lastRecord={d?.smartTranslation}
+                onTranslated={handleTranslated}
+                onRecord={handleTranslationRecord}
+              />
               {!editing && (
                 <button
                   onClick={enterEdit}
