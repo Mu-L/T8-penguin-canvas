@@ -1,9 +1,9 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.8.1",
-  "lastUpdated": "2026-08-06-v2.8.1-release-authorized",
+  "lastUpdated": "2026-08-06-v2.8.1-release-published",
   "qwenImage30AndMinimaxH3Ow": {
-    "status": "release-authorized-v2.8.1",
+    "status": "released-v2.8.1",
     "date": "2026-08-06",
     "releaseIncluded": true,
     "provider": "seedance-nz",
@@ -38,11 +38,11 @@
     ],
     "boundaries": [
       "默认图像、视频模型与旧画布已保存字段不变；只有用户切换到 Qwen Image TAB 或 Hailuo 下的 MiniMax H3 OW 模型才进入新协议。",
-      "本能力已获准纳入 v2.8.1 唯一正式发布流程；Electron、自动更新资产与 GitHub Release 仍须由固定发布提交上的流程生成并核验。"
+      "本能力已随 v2.8.1 唯一正式 Electron/NSIS 自动更新流程发布；反馈用户安装环境、协作多端与安装升级证据继续按授权后补。"
     ]
   },
   "minimaxH3DigitalHumanMvSkill": {
-    "status": "release-authorized-v2.8.1",
+    "status": "released-v2.8.1",
     "date": "2026-08-06",
     "releaseIncluded": true,
     "nodeType": "minimax-h3-prompt-enhancer",
@@ -70,11 +70,11 @@
     "boundaries": [
       "默认仍为无预设、兼容协议、seedance-nz 与 bytedance/doubao-seed-2.1-pro；旧画布不迁移预设、语言、渠道或模型，同一次运行仍只发起一次 LLM 请求。",
       "输入端口继续为 text/image/video，输出为 text；音频连接、真实音频分析、自动切歌、视频生成、片段拼接、剪辑、调色和交付均不在本节点范围。",
-      "未调用真实或付费 LLM Provider；本能力已获准纳入 v2.8.1 唯一正式发布流程，发布后仍需补录外部 Provider 与安装环境证据。"
+      "未调用真实或付费 LLM Provider；本能力已随 v2.8.1 唯一正式 Electron/NSIS 自动更新流程发布，外部 Provider 与安装环境证据继续后补。"
     ]
   },
   "runningHubReadOnlyAppInfoFallback": {
-    "status": "release-authorized-v2.8.1",
+    "status": "released-v2.8.1",
     "date": "2026-08-06",
     "releaseIncluded": true,
     "affectedSurfaces": [
@@ -97,7 +97,7 @@
     ],
     "boundaries": [
       "未修改或读取任何 RunningHub API Key；未提交、生成、上传、取消或下载真实付费任务。",
-      "反馈用户安装版的 code=332 外部环境仍需新版分发后复验；本修复已获准纳入 v2.8.1 唯一正式发布流程，延期证据不能标记为通过。"
+      "本修复已随 v2.8.1 唯一正式 Electron/NSIS 自动更新流程发布；反馈用户安装版的 code=332 外部环境仍需复验，延期证据不能标记为通过。"
     ]
   },
   "runningHubCrossSiteWebappLookup": {
@@ -191,35 +191,35 @@
     ]
   },
   "release": {
-    "status": "release-authorized-v2.8.1",
+    "status": "released-v2.8.1",
     "version": "2.8.1",
     "date": "2026-08-06",
-    "publishedAt": null,
+    "publishedAt": "2026-08-05T21:34:17Z",
     "tag": "v2.8.1",
-    "latest": false,
-    "sourceCommit": null,
+    "latest": true,
+    "sourceCommit": "6e6be689df35edc14d407697ed56b8312aec22a4",
     "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.8.1",
     "artifacts": {
       "installer": {
         "name": "T8-PenguinCanvas-Setup-2.8.1.exe",
-        "size": null,
-        "sha256": null
+        "size": 1317461216,
+        "sha256": "ca5285af6da80c849ed73ffcf8e760ae3b4e44263a3af02c30a81d19c68e8e59"
       },
       "blockmap": {
         "name": "T8-PenguinCanvas-Setup-2.8.1.exe.blockmap",
-        "size": null,
-        "sha256": null
+        "size": 1373047,
+        "sha256": "f87cd204c8d4d1726b7477d99d99d65f922615f72563c9c477d2815daba6f1b0"
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": null,
-        "sha256": null
+        "size": 362,
+        "sha256": "4d50ebbdaca9b9ede21db42c37631dc763480a54aa09fdf8e81556d38d43fa80"
       }
     },
     "verification": [
       "v2.8.1 发布范围固定为 Qwen Image 3.0 八模型、MiniMax H3 OW 三模型及配套工作流、MiniMax H3 官方 Skill/数字人 MV 增强，以及 RunningHub app-info 只读双站兜底；不回退 v2.8.0 或更早版本的节点、模型、协议和网络能力。",
       "Qwen/MiniMax 定向回归 10/10、相邻回归 131/131、H3 数字人 MV 定向 11/11、H3 相邻 149/149、RH 代理安全 37/37、RH 相邻 79/79 与 Chromium 网络桥 11/11 已通过；11 个新增生成模型均完成真实提交、轮询、下载及媒体校验。",
-      "正式 Electron/NSIS、私有后端加密、post-build、provenance、sealed recovery、GitHub 自动更新三资产、发布前完整远端回下载、固定 Tag、非草稿/非预发布、Latest 与 recovery 清理只能由固定发布提交上的唯一流程完成，未完成前不得标记为通过。",
+      "固定提交 6e6be689df35edc14d407697ed56b8312aec22a4 上的唯一正式流程完成 4426 模块生产构建、私有后端加密、Electron/NSIS、post-build、provenance、sealed recovery、GitHub 自动更新三资产、发布前完整远端回下载、固定 Tag、非草稿/非预发布、Latest 与 recovery 清理核验；发布后独立完整回下载复核再次通过。",
       "用户已明确授权先发布、后补反馈用户安装环境、协作多端与安装升级证据；协作证据门仅允许完全缺失的清单按 owner-approved-post-release-v2.8.1 延期，不能把延期标记为已通过。"
     ]
   },
@@ -6545,8 +6545,8 @@
     "version": "2.8.1",
     "semverVersion": "2.8.1",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.1 已获准进入唯一正式发布流程，包含 Qwen Image 3.0、MiniMax H3 OW、H3 官方 Skill/数字人 MV 增强与 RunningHub 只读双站查询兜底。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.8.1 正式安装包、blockmap 与 latest.yml 只能由固定 source commit 上的唯一 dist:release 流程生成；在 post-build、provenance、sealed recovery、GitHub digest/size、完整远端回下载、Tag/target 与 Latest 全部通过前，不记录大小、摘要或发布成功。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.1 已正式发布，包含 Qwen Image 3.0、MiniMax H3 OW、H3 官方 Skill/数字人 MV 增强与 RunningHub 只读双站查询兜底。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.8.1 已从固定 source commit 6e6be689df35edc14d407697ed56b8312aec22a4 的唯一 dist:release 流程生成并发布：安装包 1,317,461,216 bytes / SHA-256 ca5285af6da80c849ed73ffcf8e760ae3b4e44263a3af02c30a81d19c68e8e59；blockmap 1,373,047 bytes / SHA-256 f87cd204c8d4d1726b7477d99d99d65f922615f72563c9c477d2815daba6f1b0；latest.yml 362 bytes / SHA-256 4d50ebbdaca9b9ede21db42c37631dc763480a54aa09fdf8e81556d38d43fa80。4426 模块生产构建、私有后端加密、post-build、provenance、sealed recovery、GitHub digest/size、发布前与发布后完整远端回下载、Tag/target 与 Latest 均通过，recovery 已清除。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
@@ -7218,7 +7218,7 @@
     "verification": [
       "H3 合同/验证/编译/UI/Schema 与 Provider 权威定向回归 12/12 通过；相关执行、连线、能力清单与 Agent UI 相邻回归 103/103 通过。",
       "TypeScript type-check、共享 H3 合同与 Canvas Node Schema JSON 解析、public-check、feature-sync 74/74（0 个公开缺口）及 2857 模块生产前端 build 通过。",
-      "未调用真实或付费 LLM Provider；本能力已获准纳入 v2.8.1 唯一正式发布流程，外部 Provider 与安装环境证据仍按授权后补。"
+      "未调用真实或付费 LLM Provider；本能力已随 v2.8.1 唯一正式 Electron/NSIS 自动更新流程发布，外部 Provider 与安装环境证据仍按授权后补。"
     ],
     "boundaries": [
       "画布产品默认值保持 seedance-nz / bytedance/doubao-seed-2.1-pro；参考节点自身的 bytedance/doubao-seed-evolving 不覆盖产品默认。",
