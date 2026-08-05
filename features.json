@@ -1,9 +1,9 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.8.0",
-  "lastUpdated": "2026-08-05-v2.8.0-release-authorized",
+  "lastUpdated": "2026-08-05-v2.8.0-release-published",
   "runningHubCrossSiteWebappLookup": {
-    "status": "release-authorized-v2.8.0",
+    "status": "released-v2.8.0",
     "date": "2026-08-05",
     "releaseIncluded": true,
     "highlights": [
@@ -15,11 +15,11 @@
     "verification": [
       "真实只读 Provider 实测：海外 WebApp 2075149522166181890 在 site=intl 下直接成功、rhSite=intl、无回退并返回 4 个字段；国内 WebApp 2084704734417612802 在 site=intl 下先返回 901，修复后一次回退到 cn 成功、rhSite=cn 并返回 6 个字段。",
       "RunningHub 站点定向回归 6/6、app-info 路由与脱敏回归 2/2、TypeScript type-check 通过。",
-      "该修复已获准纳入 v2.8.0 唯一正式发布流程；真实付费任务、反馈用户安装环境与外部 VPN 证据仍按授权发布后补，延期不记为通过。"
+      "该修复已随 v2.8.0 唯一正式 Electron/NSIS 自动更新流程发布；真实付费任务、反馈用户安装环境与外部 VPN 证据仍按授权发布后补，延期不记为通过。"
     ]
   },
   "providerGenerationDownloadHardening": {
-    "status": "release-authorized-v2.8.0",
+    "status": "released-v2.8.0",
     "date": "2026-08-05",
     "releaseIncluded": true,
     "basedOn": "PenguinCanvas-v2.7.4-故障原因与修复报告-匿名版-20260801.md",
@@ -32,7 +32,7 @@
     "verification": [
       "Seedream、Creator、Seedance 上传、Canvas Hook、Provider 系统网络、提交幂等、完成任务原 taskId 恢复以及图像/视频/音频/RunningHub 安全下载扩展专项与相邻回归 153/153 通过。",
       "TypeScript type-check、feature-sync:check、public:check、rh-toolbox:check 与生产 build 通过；能力图保持 31 actions、200 runtime entries、74/74 nodes accounted、0 public gaps，Vite 转换 2857 个模块。",
-      "该加固已获准纳入 v2.8.0 唯一正式发布流程；真实付费 Provider、反馈用户的 VPN/安装环境、协作多端与安装升级证据继续发布后补，不得外推为所有外部网络环境已经验证。"
+      "该加固已随 v2.8.0 唯一正式 Electron/NSIS 自动更新流程发布；真实付费 Provider、反馈用户的 VPN/安装环境、协作多端与安装升级证据继续发布后补，不得外推为所有外部网络环境已经验证。"
     ]
   },
   "runningHubChromiumForbiddenHeaderCompatibility": {
@@ -93,35 +93,35 @@
     ]
   },
   "release": {
-    "status": "release-authorized-v2.8.0",
+    "status": "released-v2.8.0",
     "version": "2.8.0",
     "date": "2026-08-05",
-    "publishedAt": null,
+    "publishedAt": "2026-08-05T14:43:39Z",
     "tag": "v2.8.0",
-    "latest": false,
-    "sourceCommit": null,
+    "latest": true,
+    "sourceCommit": "2b984be4696a9abe3627832e3d39ba02f7338fdb",
     "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.8.0",
     "artifacts": {
       "installer": {
         "name": "T8-PenguinCanvas-Setup-2.8.0.exe",
-        "size": null,
-        "sha256": null
+        "size": 1317437404,
+        "sha256": "4daf8baaa995e8b96b868b5202041b1f27bcd68df6f349b189c05815c9e4392e"
       },
       "blockmap": {
         "name": "T8-PenguinCanvas-Setup-2.8.0.exe.blockmap",
-        "size": null,
-        "sha256": null
+        "size": 1372947,
+        "sha256": "c4efcfb24db6d8638d79f33601ed80063b61f92e29b452b0852c9dc982a5511a"
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": null,
-        "sha256": null
+        "size": 362,
+        "sha256": "d023c4c3ef8995875c78d16c1feac757fd60bda6c1df4a8081dde4d00941f344"
       }
     },
     "verification": [
       "v2.8.0 发布范围固定为 RunningHub 国内/海外 WebApp 自动识别与 Provider 生成、流式持久化及结果下载稳定性加固，不回退 v2.7.4 之后的系统代理、TUN、VPN、IPv4/IPv6 和后续节点、模型、协议能力。",
       "Provider 生成/下载与相邻回归 153/153、RunningHub 跨站定向 6/6、app-info 路由/脱敏 2/2 通过；TypeScript、能力同步、公开面、RH 工具箱与生产前端构建通过。",
-      "正式 Electron/NSIS、post-build、provenance、sealed recovery、GitHub 自动更新三资产、发布前完整远端回下载、固定 Tag、非草稿/非预发布、Latest 与 recovery 清理只能由固定发布提交上的唯一流程完成，未完成前不得标记为通过。",
+      "固定提交 2b984be4696a9abe3627832e3d39ba02f7338fdb 上的唯一正式流程完成 Electron/NSIS、4426 模块生产构建、私有后端加密、post-build、provenance、sealed recovery、GitHub 自动更新三资产、发布前完整远端回下载、固定 Tag、非草稿/非预发布、Latest 与 recovery 清理核验。",
       "用户已明确授权先发布、后补真实 Provider、反馈用户 VPN/安装环境、协作多端与安装升级证据；协作证据门仅允许缺失清单按 owner-approved-post-release-v2.8.0 延期，不能把延期标记为已通过。"
     ]
   },
@@ -6446,8 +6446,8 @@
     "version": "2.8.0",
     "semverVersion": "2.8.0",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.0 已获准进入唯一正式发布流程，包含 RunningHub 国内/海外 WebApp 自动识别与 Provider 生成下载稳定性加固。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.8.0 正式安装包、blockmap 与 latest.yml 只能由固定 source commit 上的唯一 dist:release 流程生成；在 post-build、provenance、sealed recovery、GitHub digest/size、完整远端回下载、Tag/target 与 Latest 全部通过前，不记录大小、摘要或发布成功。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.0 已正式发布，包含 RunningHub 国内/海外 WebApp 自动识别与 Provider 生成下载稳定性加固。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.8.0 已从固定 source commit 2b984be4696a9abe3627832e3d39ba02f7338fdb 的唯一 dist:release 流程生成并发布：安装包 1,317,437,404 bytes / SHA-256 4daf8baaa995e8b96b868b5202041b1f27bcd68df6f349b189c05815c9e4392e；blockmap 1,372,947 bytes / SHA-256 c4efcfb24db6d8638d79f33601ed80063b61f92e29b452b0852c9dc982a5511a；latest.yml 362 bytes / SHA-256 d023c4c3ef8995875c78d16c1feac757fd60bda6c1df4a8081dde4d00941f344。post-build、provenance、sealed recovery、GitHub digest/size、完整远端回下载、Tag/target 与 Latest 均通过，recovery 已清除。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
