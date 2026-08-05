@@ -146,7 +146,7 @@ test('Canvas node, proxy and schema wire the default channel, single paid reques
   assert.match(node, /Array\.from\(\{ length: 20 \}/);
   assert.match(canvas, /providerModel: 'bytedance\/doubao-seed-2\.1-pro'/);
   assert.match(canvas, /'minimax-h3-prompt-enhancer': \{[\s\S]*shotCount: 0/);
-  assert.match(proxy, /noRetry: minimaxH3Profile/);
+  assert.match(proxy, /noRetry: promptEnhancerProfile/);
   assert.match(proxy, /uploadMiniMaxH3MessageMedia/);
   assert.match(read('backend/src/providers/seedanceNz.js'), /normalizeImagePng[\s\S]*ensureSize\(buffer, kind, options\.maxBytes\)/);
   const entry = schema.types.find((item: any) => item.type === 'minimax-h3-prompt-enhancer');

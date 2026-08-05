@@ -444,7 +444,7 @@ function findCycle(nodes: Node[], edges: Edge[]) {
 function providerNodeKind(node: Node): WorkflowProviderNodeKind | null {
   if (node.type === 'image') return 'image';
   if (node.type === 'video' || node.type === 'seedance') return 'video';
-  if (node.type === 'llm' || node.type === 'minimax-h3-prompt-enhancer' || node.type === 'batch-tagger') return 'llm';
+  if (node.type === 'llm' || node.type === 'minimax-h3-prompt-enhancer' || node.type === 'seedance20-prompt-enhancer' || node.type === 'batch-tagger') return 'llm';
   return null;
 }
 
@@ -627,10 +627,11 @@ function diagnoseProviders(nodes: Node[], context: WorkflowDoctorContext, issues
     const isBatchTagger = node.type === 'batch-tagger';
     const explicitProviderSource = String(data.providerSource || '').trim();
     const usesExternalProvider = !!explicitProviderSource && explicitProviderSource !== 'zhenzhen';
-    const selectedLlmApiSource = node.type === 'minimax-h3-prompt-enhancer'
+    const isPromptEnhancer = node.type === 'minimax-h3-prompt-enhancer' || node.type === 'seedance20-prompt-enhancer';
+    const selectedLlmApiSource = isPromptEnhancer
       ? (data.llmApiSource === 'zhenzhen' ? 'zhenzhen' : 'seedance-nz')
       : data.llmApiSource;
-    const isSeedanceNzLlm = (node.type === 'llm' || node.type === 'minimax-h3-prompt-enhancer')
+    const isSeedanceNzLlm = (node.type === 'llm' || isPromptEnhancer)
       && !usesExternalProvider
       && selectedLlmApiSource === 'seedance-nz';
     const source = String(

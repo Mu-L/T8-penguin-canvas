@@ -14,9 +14,9 @@
     "coverageReceiptCompiler": "tools/zcanvas-cli/src/capabilityCoverage.cjs"
   },
   "sourceDigests": {
-    "creativeCapabilityManifest": "1c5d2c0bd62a8392dfd557a55d750ef5fe02ac032c2c2a5de42a09e16669ac30",
-    "canvasNodeSchema": "80179537cee15cd12c720d2c193ab283a220b6406166cd228530010e1be34069",
-    "canvasNodeSchemaFile": "61e2ecd3b72ca7e8994428d32650a205eccdbee55aea327db7f58a491474ea23",
+    "creativeCapabilityManifest": "ce6ad80e45c55d8972944abd1c6f847e6e3651b2311b8dd293a5268ba381fc50",
+    "canvasNodeSchema": "ad8076205aee01380d13d0b5ef3532bc5be0d0d6cb51d2f826be504b6c7a15fa",
+    "canvasNodeSchemaFile": "d12736e71596aeba91197724b26d0933a5823466bf9f368770b10d4ccf6ad363",
     "runtimeCatalogSources": "45758bb4e607cc1dcdecd8029e30ed8054faf4b7e808034329261debec22e4d6",
     "runtimeCatalogArtifact": "da2a8e0847290a19b83f3ea06429b6f0c8ad7531e9ab93f5d30ff65c1eed0ede",
     "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
@@ -24,7 +24,7 @@
     "coverageReceiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7",
     "canonicalTextDigestCompiler": "b0afcf28a257fbbd8f391edc117348f8f2ede1b4a039ae91bce25a8d563ac0cf"
   },
-  "aggregateDigest": "ecb86b54d782bba3fba5e3bf3b38ae5381ed65727bb1de8b9edd1fadfeeea518",
+  "aggregateDigest": "4758f2335aad5da57137736663a053af784383e2d3582d69166326265ff30543",
   "principles": {
     "oneSentenceStart": true,
     "directCanvasMutation": false,
@@ -36,18 +36,18 @@
   "counts": {
     "capabilities": 31,
     "handlers": 31,
-    "nodes": 73,
-    "executableNodes": 54,
-    "generatableNodes": 8,
-    "referencedNodes": 64,
+    "nodes": 74,
+    "executableNodes": 55,
+    "generatableNodes": 9,
+    "referencedNodes": 65,
     "unreferencedNodes": 9,
-    "directCapabilityNodes": 64,
+    "directCapabilityNodes": 65,
     "internalCompatNodes": 1,
     "semanticSupersededNodes": 8,
     "publicCapabilityGapNodes": 0,
-    "accountedNodes": 73,
+    "accountedNodes": 74,
     "unexplainedNodes": 0,
-    "fullyOperableNodes": 15,
+    "fullyOperableNodes": 16,
     "runtimeEntries": 200,
     "runtimeByKind": {
       "llm": 29,
@@ -330,6 +330,7 @@
       "nodeTypes": [
         "llm",
         "minimax-h3-prompt-enhancer",
+        "seedance20-prompt-enhancer",
         "output"
       ],
       "supports": [
@@ -514,6 +515,7 @@
         "audio",
         "llm",
         "minimax-h3-prompt-enhancer",
+        "seedance20-prompt-enhancer",
         "runninghub",
         "runninghub-wallet",
         "rh-tools",
@@ -3688,6 +3690,55 @@
       "type": "minimax-h3-prompt-enhancer",
       "label": "MiniMax H3提示词增强器",
       "description": "按 MiniMax H3 官方结构增强 T2VA / I2VA / FL2VA / L2VA / Ref2VA 提示词，支持完整图片/视频理解与所有扩展 LLM 渠道",
+      "category": "inspiration",
+      "hidden": false,
+      "executable": true,
+      "generatable": true,
+      "agentExposure": "direct-capability",
+      "coverageReason": "registered-capability-reference",
+      "accounting": {
+        "status": "direct-capability",
+        "reasonCode": "registered-capability-reference",
+        "semanticCapabilityIds": [
+          "canvas.node-add",
+          "create.script"
+        ],
+        "evidence": [
+          "tools/zcanvas-cli/creativeCapabilityManifest.json"
+        ]
+      },
+      "inputs": [
+        "text",
+        "image",
+        "video"
+      ],
+      "outputs": [
+        "text"
+      ],
+      "capabilityIds": [
+        "canvas.node-add",
+        "create.script"
+      ],
+      "handlerIds": [
+        "creative-action:graph.node-add",
+        "creative-plan:create.script"
+      ],
+      "coverage": {
+        "understand": true,
+        "plan": true,
+        "preview": true,
+        "apply": true,
+        "run": true,
+        "verify": true,
+        "resume": false,
+        "rollback": true,
+        "recover": true
+      }
+    },
+    {
+      "type": "seedance20-prompt-enhancer",
+      "label": "Seedance 2.0提示词增强器",
+      "description": "按 Seedance 2.0 官方方法增强生成、首尾帧、多参考、视频编辑、延长与轨道补齐提示词，支持完整图片/视频理解与所有扩展 LLM 渠道",
       "category": "inspiration",
       "hidden": false,
       "executable": true,
@@ -10647,17 +10698,17 @@
   "coverageReceipt": {
     "schema": "t8-creative-capability-coverage-receipt-v1",
     "sourceDigests": {
-      "capabilityManifest": "1c5d2c0bd62a8392dfd557a55d750ef5fe02ac032c2c2a5de42a09e16669ac30",
-      "nodeSchema": "80179537cee15cd12c720d2c193ab283a220b6406166cd228530010e1be34069",
+      "capabilityManifest": "ce6ad80e45c55d8972944abd1c6f847e6e3651b2311b8dd293a5268ba381fc50",
+      "nodeSchema": "ad8076205aee01380d13d0b5ef3532bc5be0d0d6cb51d2f826be504b6c7a15fa",
       "runtimeCatalog": "45758bb4e607cc1dcdecd8029e30ed8054faf4b7e808034329261debec22e4d6",
       "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
       "receiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7"
     },
     "inventory": {
       "nodes": {
-        "total": 73,
-        "executable": 54,
-        "generatable": 8
+        "total": 74,
+        "executable": 55,
+        "generatable": 9
       },
       "runtime": {
         "llm": 29,
@@ -10678,6 +10729,6 @@
       "missingCompatibilityEdges": []
     },
     "complete": true,
-    "digest": "01765136b44fda46391032484a4aac04f98cbb2f823e4bf30d57b3ca54395033"
+    "digest": "e303404d62ec170a6b06c06a6b4017889512aac61cf7cd86bf163d5ded07d75f"
   }
 }

@@ -1333,6 +1333,7 @@ const DirectorStoryboardNode = lazyCanvasNode(() => import('./nodes/DirectorStor
 const StoryNode = lazyCanvasNode(() => import('./nodes/StoryNode'), 'StoryNode');
 const ScriptMasterNode = lazyCanvasNode(() => import('./nodes/ScriptMasterNode'), 'ScriptMasterNode');
 const MiniMaxH3PromptEnhancerNode = lazyCanvasNode(() => import('./nodes/MiniMaxH3PromptEnhancerNode'), 'MiniMaxH3PromptEnhancerNode');
+const Seedance20PromptEnhancerNode = lazyCanvasNode(() => import('./nodes/Seedance20PromptEnhancerNode'), 'Seedance20PromptEnhancerNode');
 const AudioNode = lazyCanvasNode(() => import('./nodes/AudioNode'), 'AudioNode');
 const RunningHubNode = lazyCanvasNode(() => import('./nodes/RunningHubNode'), 'RunningHubNode');
 const RhConfigNode = lazyCanvasNode(() => import('./nodes/RhConfigNode'), 'RhConfigNode');
@@ -1411,6 +1412,7 @@ const SPECIFIC_NODES: Record<string, any> = {
   story: StoryNode,
   'script-master': ScriptMasterNode,
   'minimax-h3-prompt-enhancer': MiniMaxH3PromptEnhancerNode,
+  'seedance20-prompt-enhancer': Seedance20PromptEnhancerNode,
   audio: AudioNode,
   llm: LLMNode,
   runninghub: RunningHubNode,
@@ -1930,6 +1932,34 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     outputLanguage: '中文',
     promptMode: '官方增强',
     referenceTemplate: '',
+    referenceContext: '',
+    constraints: '',
+    seed: 0,
+    llmApiSource: 'seedance-nz',
+    providerSource: 'zhenzhen',
+    providerId: '',
+    providerModel: 'bytedance/doubao-seed-2.1-pro',
+    status: 'idle',
+    error: '',
+    enhancedPrompt: '',
+    prompt: '',
+  },
+  'seedance20-prompt-enhancer': {
+    userPrompt: '',
+    taskIntent: 'AUTO',
+    complexityMode: 'auto',
+    durationSeconds: 0,
+    shotCount: 0,
+    rewriteMode: 'balanced',
+    outputDetail: 'auto',
+    outputLanguage: '中文',
+    promptMode: '官方优化',
+    referenceSyntax: 'official-cn',
+    subtitlePolicy: 'auto',
+    stabilityConstraints: 'auto',
+    customLengthTarget: 0,
+    referenceTemplate: '',
+    referenceRoles: '',
     referenceContext: '',
     constraints: '',
     seed: 0,

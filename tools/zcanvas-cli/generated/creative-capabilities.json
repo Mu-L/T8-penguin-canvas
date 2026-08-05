@@ -3,7 +3,7 @@
   "generatedFrom": "tools/zcanvas-cli/creativeCapabilityManifest.json",
   "sourceSchema": "t8-creative-capability-manifest-v1",
   "sourceVersion": "0.1.0-dev",
-  "sourceDigest": "1c5d2c0bd62a8392dfd557a55d750ef5fe02ac032c2c2a5de42a09e16669ac30",
+  "sourceDigest": "ce6ad80e45c55d8972944abd1c6f847e6e3651b2311b8dd293a5268ba381fc50",
   "principles": {
     "oneSentenceStart": true,
     "directCanvasMutation": false,
@@ -109,6 +109,7 @@
       "nodeTypes": [
         "llm",
         "minimax-h3-prompt-enhancer",
+        "seedance20-prompt-enhancer",
         "output"
       ],
       "supports": [
@@ -187,6 +188,7 @@
         "audio",
         "llm",
         "minimax-h3-prompt-enhancer",
+        "seedance20-prompt-enhancer",
         "runninghub",
         "runninghub-wallet",
         "rh-tools",

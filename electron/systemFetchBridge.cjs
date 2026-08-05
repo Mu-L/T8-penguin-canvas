@@ -3,6 +3,17 @@
 const net = require('node:net');
 
 const SYSTEM_FETCH_BRIDGE_MARKER = Symbol.for('t8-penguin-canvas.system-fetch-bridge.v1');
+const CHROMIUM_MANAGED_REQUEST_HEADERS = new Set([
+  'connection',
+  'content-length',
+  'expect',
+  'host',
+  'keep-alive',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+]);
 
 function requestUrl(input) {
   if (typeof input === 'string') return input;
@@ -92,12 +103,58 @@ function requiresNodeTransport(input, init) {
   );
 }
 
-function chromiumRequestInit(init) {
-  if (!init || typeof init !== 'object') return init;
-  const result = { ...init };
+function isChromiumManagedRequestHeader(name) {
+  const normalized = String(name || '').trim().toLowerCase();
+  return CHROMIUM_MANAGED_REQUEST_HEADERS.has(normalized)
+    || normalized.startsWith('proxy-')
+    || normalized.startsWith('sec-');
+}
+
+function chromiumRequestHeaders(headers) {
+  if (!headers) return headers;
+  if (typeof Headers !== 'undefined' && headers instanceof Headers) {
+    const result = new Headers(headers);
+    for (const name of [...result.keys()]) {
+      if (isChromiumManagedRequestHeader(name)) result.delete(name);
+    }
+    return result;
+  }
+  if (Array.isArray(headers)) {
+    return headers.filter((entry) => (
+      Array.isArray(entry)
+      && entry.length >= 2
+      && !isChromiumManagedRequestHeader(entry[0])
+    ));
+  }
+  if (typeof headers === 'object') {
+    return Object.fromEntries(
+      Object.entries(headers).filter(([name]) => !isChromiumManagedRequestHeader(name)),
+    );
+  }
+  return headers;
+}
+
+function chromiumRequestInit(input, init) {
+  const hasInit = Boolean(init && typeof init === 'object');
+  const inputHeaders = input && typeof input === 'object' ? input.headers : null;
+  if (!hasInit && !inputHeaders) return init;
+  const result = hasInit ? { ...init } : {};
   delete result.dispatcher;
   delete result.agent;
   delete result.duplex;
+  const initHeaders = Object.prototype.hasOwnProperty.call(result, 'headers')
+    ? result.headers
+    : null;
+  const requestHeaders = initHeaders || inputHeaders;
+  if (requestHeaders) {
+    // Electron's session.fetch delegates authority, connection management and
+    // body framing to Chromium. Forwarding these caller-authored headers makes
+    // Chromium reject the request locally with net::ERR_INVALID_ARGUMENT.
+    // Semantic Provider headers (Authorization, Content-Type, API keys, etc.)
+    // remain untouched. Request-object headers are covered too; Node-only
+    // stream/dispatcher requests bypass this path.
+    result.headers = chromiumRequestHeaders(requestHeaders);
+  }
   return result;
 }
 
@@ -139,7 +196,7 @@ function createSystemFetchBridge(options = {}) {
     if (!isHttpRequest(input) || isDirectLocalRequest(input) || requiresNodeTransport(input, init)) {
       return nodeFetch(input, init);
     }
-    const chromiumInit = chromiumRequestInit(init);
+    const chromiumInit = chromiumRequestInit(input, init);
     try {
       return await chromiumFetch(input, chromiumInit);
     } catch (error) {

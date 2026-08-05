@@ -16,12 +16,32 @@ test('RunningHub site routing keeps the legacy key on the domestic site', () => 
   const overseas = routing.getRhSiteConfig(settings, 'intl');
 
   assert.equal(domestic.baseUrl, 'https://www.runninghub.cn');
-  assert.equal(domestic.host, 'www.runninghub.cn');
+  assert.equal(Object.prototype.hasOwnProperty.call(domestic, 'host'), false);
   assert.equal(domestic.apiKey, 'cn-key');
   assert.equal(overseas.baseUrl, 'https://www.runninghub.ai');
-  assert.equal(overseas.host, 'www.runninghub.ai');
+  assert.equal(Object.prototype.hasOwnProperty.call(overseas, 'host'), false);
   assert.equal(overseas.apiKey, 'intl-key');
   assert.equal(routing.normalizeRhSite(undefined), 'cn');
+});
+
+test('RunningHub URL owns the upstream authority and no route hand-writes Host', () => {
+  const proxyRoute = readFileSync(new URL('../backend/src/routes/proxy.js', import.meta.url), 'utf8');
+  const start = proxyRoute.indexOf("router.post('/runninghub/submit'");
+  const end = proxyRoute.indexOf('module.exports = router;', start);
+  assert.ok(start > 0 && end > start, 'RunningHub route block must remain discoverable');
+  const runningHubRoutes = proxyRoute.slice(start, end);
+
+  assert.doesNotMatch(runningHubRoutes, /\bHost\s*:/);
+  assert.doesNotMatch(runningHubRoutes, /candidate\.host/);
+  for (const path of [
+    '/task/openapi/ai-app/run',
+    '/task/openapi/outputs',
+    '/task/openapi/cancel',
+    '/task/openapi/upload',
+    '/api/webapp/apiCallDemo',
+  ]) {
+    assert.match(runningHubRoutes, new RegExp(path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
 });
 
 test('RunningHub site candidates prefer the selected site and can use the configured alternate', () => {

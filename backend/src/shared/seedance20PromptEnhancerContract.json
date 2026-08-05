@@ -1,0 +1,54 @@
+{
+  "schema": "t8-seedance20-prompt-enhancer-contract-v1",
+  "sourceReference": "F:/AI-T8-video-onekey/ComfyUI/custom_nodes/comfyui-minimax-h3-prompt-enhancer-T8/seedance20.py",
+  "defaultProvider": "seedance-nz",
+  "defaultModel": "bytedance/doubao-seed-2.1-pro",
+  "taskIntents": [
+    "AUTO",
+    "T2V",
+    "I2V",
+    "FL-I2V",
+    "MultiRef",
+    "VideoEdit",
+    "VideoExtend",
+    "TrackFill",
+    "Combined"
+  ],
+  "complexityModes": ["auto", "simple", "complex"],
+  "rewriteModes": {
+    "strict": 0.2,
+    "balanced": 0.7,
+    "creative": 1.2
+  },
+  "outputDetails": ["auto", "concise", "standard", "detailed"],
+  "outputLanguages": ["中文", "English"],
+  "promptModes": ["官方优化", "参考模板融合"],
+  "referenceSyntaxes": ["official-cn", "seedance-nz-en"],
+  "subtitlePolicies": ["auto", "none", "required", "preserve"],
+  "stabilityPolicies": ["auto", "minimal", "strong"],
+  "limits": {
+    "durationSeconds": { "automatic": 0, "minimum": 4, "maximum": 15 },
+    "shotCount": { "automatic": 0, "minimum": 1, "maximum": 20 },
+    "customLengthTarget": { "automatic": 0, "minimum": 80, "maximum": 4000 },
+    "referenceImages": 9,
+    "referenceVideos": 3,
+    "referenceMediaTotal": 12,
+    "referenceVideoSeconds": { "minimum": 2, "maximum": 15, "totalMaximum": 15 },
+    "mediaFileBytes": 52428800
+  },
+  "defaults": {
+    "taskIntent": "AUTO",
+    "complexityMode": "auto",
+    "durationSeconds": 0,
+    "shotCount": 0,
+    "rewriteMode": "balanced",
+    "outputDetail": "auto",
+    "outputLanguage": "中文",
+    "promptMode": "官方优化",
+    "referenceSyntax": "official-cn",
+    "subtitlePolicy": "auto",
+    "stabilityConstraints": "auto",
+    "customLengthTarget": 0,
+    "seed": 0
+  }
+}

@@ -411,19 +411,20 @@ function builtInCredentialNotice(node: Node, settings: ApiSettings): RunPrefligh
       : capabilityNotice(node, 'provider.suno-credential-missing', missingOverseasCredentialMessage('Suno 音频模型', 'suno'));
   }
 
-  if (node.type === 'minimax-h3-prompt-enhancer') {
+  if (node.type === 'minimax-h3-prompt-enhancer' || node.type === 'seedance20-prompt-enhancer') {
+    const enhancerLabel = node.type === 'seedance20-prompt-enhancer' ? 'Seedance 2.0' : 'MiniMax H3';
     if (data.llmApiSource !== 'zhenzhen') {
       return configuredSecret(settings.zhenzhenSd2ApiKey)
         ? null
         : capabilityNotice(
             node,
             'provider.seedance-nz-credential-missing',
-            '未检测到 MiniMax H3 默认渠道所需的“贞贞的平价AI小屋 API Key”。请点击右上角齿轮打开“API 设置”，填写并保存，然后重新运行。',
+            `未检测到 ${enhancerLabel} 默认渠道所需的“贞贞的平价AI小屋 API Key”。请点击右上角齿轮打开“API 设置”，填写并保存，然后重新运行。`,
           );
     }
     return configuredSecret(settings.llmApiKey)
       ? null
-      : capabilityNotice(node, 'provider.llm-credential-missing', '未检测到 MiniMax H3 当前渠道所需的“贞贞的AI工坊-独立 LLM API Key”。请点击右上角齿轮打开“API 设置”，填写并保存，然后重新运行。');
+      : capabilityNotice(node, 'provider.llm-credential-missing', `未检测到 ${enhancerLabel} 当前渠道所需的“贞贞的AI工坊-独立 LLM API Key”。请点击右上角齿轮打开“API 设置”，填写并保存，然后重新运行。`);
   }
 
   if (node.type === 'llm' && data.llmApiSource === 'seedance-nz') {

@@ -15,6 +15,7 @@ export type NodeType =
   | 'story'
   | 'script-master'
   | 'minimax-h3-prompt-enhancer'
+  | 'seedance20-prompt-enhancer'
   | 'audio'
   | 'llm'
   | 'runninghub'

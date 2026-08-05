@@ -10,13 +10,13 @@ https://www.runninghub.cn/?inviteCode=rh-v1121
 My favorite girl Go YounJung
 # 🐧 贞贞的无限画布（企鹅共创版） · T8-penguin-canvas
 
-> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.7.8
+> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.7.9
 >
 > GitHub：<https://github.com/T8mars/T8-penguin-canvas>
 
 一个面向 AI 创作的 **节点式画布**：拖拽节点、连线编排、生成图像 / 视频 / 音频、调用 LLM、串接 RunningHub 工作流，叠加批量执行、智能对齐、打组、主题模板与终端日志。Web 浏览器和桌面端均可使用。
 
-![status](https://img.shields.io/badge/version-v2.7.8-brightgreen) ![node](https://img.shields.io/badge/node-60-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
+![status](https://img.shields.io/badge/version-v2.7.9-brightgreen) ![node](https://img.shields.io/badge/node-62-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
 
 ---
 
@@ -35,7 +35,8 @@ My favorite girl Go YounJung
 
 ## ✨ 功能亮点
 
-- 🎨 **60 个节点**，覆盖文本 / 图像 / 视频 / 音频 / LLM / RunningHub / ComfyUI / 3D / 工具 / 辅助 / 工具箱 / 输出预览 / 上传素材 / 素材集 / 批量打标 / 随机路由 / Story 全自动制片 / 剧本大师 / MiniMax H3 提示词增强器 / 白模预演
+- 🎨 **62 个节点**，覆盖文本 / 图像 / 视频 / 音频 / LLM / RunningHub / ComfyUI / 3D / 工具 / 辅助 / 工具箱 / 输出预览 / 上传素材 / 素材集 / 批量打标 / 随机路由 / Story 全自动制片 / 剧本大师 / MiniMax H3 / Seedance 2.0 提示词增强器 / 白模预演
+- ✨ **v2.7.9 Seedance 2.0 提示词增强与 RH 网络兼容版**：新增独立 Seedance 2.0 提示词增强器，覆盖生成、首尾帧、多参考、视频编辑、视频延长、轨道补齐、组合任务、AUTO/1–20 镜头与完整视频理解，默认保持贞贞的平价AI小屋 `bytedance/doubao-seed-2.1-pro` 并支持全部已启用扩展 LLM 渠道；同时修复自定义 RH 节点在 Chromium 系统网络栈下因手写 `Host` 导致 WebApp 查询、提交、轮询、取消或上传报 `net::ERR_INVALID_ARGUMENT` 的问题。
 - 🧺 **画布级批量导入 + 素材合集打散**：上传节点支持一次选择多张图 / 多个视频 / 多段音频；也可直接把剪贴板或文件拖到画布，同类型多素材自动形成合集，上传和输出合集都可一键打散为多个独立素材节点
 - 🎬 **v2.7.8 白模预演、智能翻译与 H3 镜头控制版**：新增完整白模预演工作台，可编辑人物、几何体、姿态、摄像机和关键帧并导出 Seedance 2.0 可用的 PNG/MP4 参考；RH 工具箱新增持久化智能翻译并接入文本、LLM/Vision 和文本输出节点；MiniMax H3 提示词增强器新增 AUTO 或 1–20 镜头数量约束。
 - ✨ **v2.7.7 MiniMax H3 提示词增强与剧本大师可读性版**：无限画布新增 MiniMax H3 提示词增强器，默认保持“贞贞的平价AI小屋”与 `bytedance/doubao-seed-2.1-pro`，并支持贞贞工坊和全部已启用扩展 LLM 渠道；剧本大师工作台同步放大文字、控件、素材行和时间线，避免拥挤与重叠。

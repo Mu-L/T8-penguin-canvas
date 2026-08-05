@@ -573,6 +573,27 @@
         }
       ]
     },
+    "seedance20-prompt-enhancer": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": ["text", "image", "video"],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": ["text"],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
     "runninghub": {
       "resolver": "static",
       "inputs": [
@@ -2772,6 +2793,78 @@
           "outputLanguage": "中文",
           "promptMode": "官方增强",
           "referenceTemplate": "",
+          "referenceContext": "",
+          "constraints": "",
+          "seed": 0,
+          "llmApiSource": "seedance-nz",
+          "providerSource": "zhenzhen",
+          "providerId": "",
+          "providerModel": "bytedance/doubao-seed-2.1-pro"
+        },
+        "connectionPorts": {
+          "dynamic": false,
+          "inputs": [
+            { "id": null, "kinds": ["text", "image", "video"], "required": false, "minConnections": 0, "maxConnections": null }
+          ],
+          "outputs": [
+            { "id": null, "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": null }
+          ]
+        }
+      }
+    },
+    {
+      "type": "seedance20-prompt-enhancer",
+      "label": "Seedance 2.0提示词增强器",
+      "category": "inspiration",
+      "description": "按 Seedance 2.0 官方方法增强生成、首尾帧、多参考、视频编辑、延长与轨道补齐提示词，支持完整图片/视频理解与所有扩展 LLM 渠道",
+      "icon": "Sparkles",
+      "color": "cyan",
+      "ports": {
+        "inputs": ["text", "image", "video"],
+        "outputs": ["text"]
+      },
+      "executable": true,
+      "generatable": true,
+      "generation": {
+        "allowedDataFields": {
+          "userPrompt": { "type": "string", "maxLength": 20000 },
+          "taskIntent": {
+            "type": "string",
+            "enum": ["AUTO", "T2V", "I2V", "FL-I2V", "MultiRef", "VideoEdit", "VideoExtend", "TrackFill", "Combined"]
+          },
+          "complexityMode": { "type": "string", "enum": ["auto", "simple", "complex"] },
+          "durationSeconds": { "type": "integer", "minimum": 0, "maximum": 15 },
+          "shotCount": { "type": "integer", "minimum": 0, "maximum": 20 },
+          "rewriteMode": { "type": "string", "enum": ["strict", "balanced", "creative"] },
+          "outputDetail": { "type": "string", "enum": ["auto", "concise", "standard", "detailed"] },
+          "outputLanguage": { "type": "string", "enum": ["中文", "English"] },
+          "promptMode": { "type": "string", "enum": ["官方优化", "参考模板融合"] },
+          "referenceSyntax": { "type": "string", "enum": ["official-cn", "seedance-nz-en"] },
+          "subtitlePolicy": { "type": "string", "enum": ["auto", "none", "required", "preserve"] },
+          "stabilityConstraints": { "type": "string", "enum": ["auto", "minimal", "strong"] },
+          "customLengthTarget": { "type": "integer", "minimum": 0, "maximum": 4000 },
+          "referenceTemplate": { "type": "string", "maxLength": 40000 },
+          "referenceRoles": { "type": "string", "maxLength": 20000 },
+          "referenceContext": { "type": "string", "maxLength": 20000 },
+          "constraints": { "type": "string", "maxLength": 20000 },
+          "seed": { "type": "integer" }
+        },
+        "defaults": {
+          "userPrompt": "",
+          "taskIntent": "AUTO",
+          "complexityMode": "auto",
+          "durationSeconds": 0,
+          "shotCount": 0,
+          "rewriteMode": "balanced",
+          "outputDetail": "auto",
+          "outputLanguage": "中文",
+          "promptMode": "官方优化",
+          "referenceSyntax": "official-cn",
+          "subtitlePolicy": "auto",
+          "stabilityConstraints": "auto",
+          "customLengthTarget": 0,
+          "referenceTemplate": "",
+          "referenceRoles": "",
           "referenceContext": "",
           "constraints": "",
           "seed": 0,

@@ -3,22 +3,22 @@
 > Machine-generated from the real Canvas Node Schema, creative capability manifest,
 > runtime model/action catalog, and handler bindings. Do not edit by hand.
 
-- Aggregate SHA-256: `ecb86b54d782bba3fba5e3bf3b38ae5381ed65727bb1de8b9edd1fadfeeea518`
+- Aggregate SHA-256: `4758f2335aad5da57137736663a053af784383e2d3582d69166326265ff30543`
 - Capabilities / handlers: **31 / 31**
-- Canvas nodes: **73**
-- Referenced / unreferenced nodes: **64 / 9**
-- Accounted / unexplained nodes: **73 / 0**
-- Direct capability nodes: **64**
+- Canvas nodes: **74**
+- Referenced / unreferenced nodes: **65 / 9**
+- Accounted / unexplained nodes: **74 / 0**
+- Direct capability nodes: **65**
 - Internal compatibility nodes: **1**
 - Semantically superseded nodes: **8**
 - Public capability gaps: **0**
-- Fully operable nodes: **15**
+- Fully operable nodes: **16**
 - Runtime model/action entries: **200**
-- Dynamic node inventory (total / executable / generatable): **73 / 54 / 8**
+- Dynamic node inventory (total / executable / generatable): **74 / 55 / 9**
 - Dynamic runtime inventory (LLM / image / video / audio / actions): **29 / 28 / 88 / 8 / 47**
 - Operation risk contracts: **152** (L0 91, L1 44, L2 17, L3 0)
 - Unknown node references: **0**
-- Coverage receipt: `t8-creative-capability-coverage-receipt-v1` / `01765136b44fda46391032484a4aac04f98cbb2f823e4bf30d57b3ca54395033`
+- Coverage receipt: `t8-creative-capability-coverage-receipt-v1` / `e303404d62ec170a6b06c06a6b4017889512aac61cf7cd86bf163d5ded07d75f`
 
 “Understand” means the node exists in the authoritative schema. Other columns are true only
 when at least one registered high-level capability explicitly advertises that operation.
@@ -44,6 +44,7 @@ when at least one registered high-level capability explicitly advertises that op
 | `audio` 音频 | core | direct-capability | yes | yes | `canvas.node-add`, `create.audio` | yes | yes | yes | yes | yes | yes |
 | `llm` LLM | core | direct-capability | yes | yes | `canvas.node-add`, `create.script` | yes | yes | yes | yes | yes | yes |
 | `minimax-h3-prompt-enhancer` MiniMax H3提示词增强器 | inspiration | direct-capability | yes | yes | `canvas.node-add`, `create.script` | yes | yes | yes | yes | yes | yes |
+| `seedance20-prompt-enhancer` Seedance 2.0提示词增强器 | inspiration | direct-capability | yes | yes | `canvas.node-add`, `create.script` | yes | yes | yes | yes | yes | yes |
 | `runninghub` RunningHub | rh | direct-capability | yes | — | `canvas.node-add` | yes | yes | yes | — | yes | yes |
 | `runninghub-wallet` RH钱包应用 | rh | direct-capability | yes | — | `canvas.node-add` | yes | yes | yes | — | yes | yes |
 | `rh-config` RH 配置 | rh | internal-compat | — | — | — | — | — | — | — | — | — |

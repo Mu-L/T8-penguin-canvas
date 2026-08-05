@@ -8,13 +8,14 @@ const path = require('node:path');
 const {
   COLLABORATION_RELEASE_EVIDENCE_CONTRACT,
   COLLABORATION_RELEASE_EVIDENCE_POST_RELEASE_DEFERRAL_APPROVAL,
+  COLLABORATION_RELEASE_EVIDENCE_POST_RELEASE_DEFERRAL_VERSION,
   COLLABORATION_RELEASE_REQUIRED_CHECKS,
   assertCollaborationReleaseEvidence,
   assertCollaborationReleaseEvidenceForPublish,
 } = require('../scripts/collaboration-release-evidence.cjs');
 
 const TARGET = 'a'.repeat(40);
-const VERSION = '2.7.7';
+const VERSION = COLLABORATION_RELEASE_EVIDENCE_POST_RELEASE_DEFERRAL_VERSION;
 const GENERATED_AT = '2026-07-20T00:00:00.000Z';
 const NOW = Date.parse('2026-07-20T00:01:00.000Z');
 const DEVICE_A = '1'.repeat(64);
@@ -321,7 +322,7 @@ function validate(item) {
   });
 }
 
-test('v2.7.7 owner-approved deferral accepts only a missing manifest and never marks evidence passed', () => {
+test('current owner-approved deferral accepts only a missing manifest and never marks evidence passed', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 't8-collab-evidence-deferral-'));
   const evidencePath = path.join(directory, 'manifest.json');
   try {

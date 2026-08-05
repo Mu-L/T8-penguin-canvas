@@ -8,14 +8,12 @@ const RH_SITES = Object.freeze({
     id: RH_SITE_CN,
     label: '国内站',
     baseUrl: 'https://www.runninghub.cn',
-    host: 'www.runninghub.cn',
     keyField: 'rhApiKey',
   }),
   [RH_SITE_INTL]: Object.freeze({
     id: RH_SITE_INTL,
     label: '海外站',
     baseUrl: 'https://www.runninghub.ai',
-    host: 'www.runninghub.ai',
     keyField: 'rhIntlApiKey',
   }),
 });
