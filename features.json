@@ -1,9 +1,9 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.7.8",
-  "lastUpdated": "2026-08-05-v2.7.8-release-authorized",
+  "lastUpdated": "2026-08-05-v2.7.8-release",
   "previsStudioCapability": {
-    "status": "release-authorized-v2.7.8",
+    "status": "released-v2.7.8",
     "date": "2026-08-05",
     "releaseIncluded": true,
     "source": {
@@ -21,11 +21,11 @@
       "Canvas Node Schema、节点注册、端口、初始数据与能力图已同步，73/73 节点均被解释且生成图无缺口。",
       "白模节点专项回归 6/6 通过，覆盖注册、按需加载、完整工作台表面、PNG/MP4/停止合同、归属信息、受控 output 归档、显式权威 output 事件和固定二进制摘要。",
       "实际 Chromium 在 1280×720 下加载 3 个场景对象、1 个人物和 2 个 WebGL 画布，左栏/主视口/右侧属性/时间线与出处/导出区重叠均为 0；真实生成并回显 1280×720 PNG 与 120 帧、5 秒、24 FPS H.264 MP4，二者均落在 `/files/output/previs/` 且运行中心没有输出证据错误。",
-      "真实全局 STOP 在动画导出过程中使节点显示已停止，受控输出链接数量未增加；TypeScript、能力目录、公开面与生产前端构建通过。该能力已获准纳入 v2.7.8 唯一正式发布流程，尚未完成的安装版与外部设备证据继续明确后补。"
+      "真实全局 STOP 在动画导出过程中使节点显示已停止，受控输出链接数量未增加；TypeScript、能力目录、公开面与生产前端构建通过。该能力已随 v2.7.8 唯一正式 Electron/NSIS 自动更新流程发布，安装升级与外部设备证据继续按授权后补。"
     ]
   },
   "smartTranslationCapability": {
-    "status": "release-authorized-v2.7.8",
+    "status": "released-v2.7.8",
     "date": "2026-08-04",
     "releaseIncluded": true,
     "provider": "runninghub",
@@ -40,39 +40,39 @@
     "verification": [
       "RH工具箱 manifest、旧错误合同迁移、引用保护、共享 service 与三个 UI 接线专项回归 24/24 通过。",
       "RH工具箱、Prompt 编辑、文本节点尺寸、LLM 视频输入/模型选择、输出素材持久化与 RunningHub 文本输出相邻回归 53/53 通过。",
-      "TypeScript、能力目录同步、公开源码检查、生产前端构建与构建产物 RH 能力标记检查通过；该能力已获准纳入 v2.7.8，真实 RunningHub WebApp 与安装版证据按用户授权在发布后补录。"
+      "TypeScript、能力目录同步、公开源码检查、生产前端构建与构建产物 RH 能力标记检查通过；该能力已随 v2.7.8 正式发布，真实 RunningHub WebApp 与安装版证据按用户授权在发布后补录。"
     ]
   },
   "release": {
-    "status": "release-authorized-v2.7.8",
+    "status": "released-v2.7.8",
     "version": "2.7.8",
     "date": "2026-08-05",
-    "publishedAt": null,
+    "publishedAt": "2026-08-05T05:35:38Z",
     "tag": "v2.7.8",
-    "latest": false,
-    "sourceCommit": null,
+    "latest": true,
+    "sourceCommit": "2048a00273353ce7b82837be734a58f578d06408",
     "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.8",
     "artifacts": {
       "installer": {
         "name": "T8-PenguinCanvas-Setup-2.7.8.exe",
-        "size": null,
-        "sha256": null
+        "size": 1295691506,
+        "sha256": "14b5cf9e3d21b43a1aced96d2332d5453e4e10dd6cac256ad3fded65fbc47163"
       },
       "blockmap": {
         "name": "T8-PenguinCanvas-Setup-2.7.8.exe.blockmap",
-        "size": null,
-        "sha256": null
+        "size": 1350223,
+        "sha256": "b5856c61757b6cb5c218e737b14613e06d7e935e8db0a7a74804d6cce5be38e3"
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": null,
-        "sha256": null
+        "size": 362,
+        "sha256": "7656cabf0953168958a190171fd83a08bb260a3737d0e58e68c47b62d496b641"
       }
     },
     "verification": [
       "v2.7.8 发布范围固定为 MiniMax H3 AUTO/1–20 镜头数量、RH 工具箱持久化智能翻译，以及带出处致谢的完整白模预演工作台。",
       "白模预演专项回归 6/6、RH 智能翻译专项 24/24 与相邻回归 53/53、H3 定向回归 7/7 与相关权威回归 71/71；TypeScript、能力目录、公开面与生产前端构建通过。",
-      "正式 Electron/NSIS、post-build、provenance、sealed recovery、GitHub 自动更新资产、固定 Tag、非草稿/非预发布与 Latest 状态由固定发布提交上的唯一流程生成并核验，未完成前不标记为通过。",
+      "固定 source commit 上的唯一正式流程已完成 Electron/NSIS、post-build、provenance、sealed recovery、GitHub 三项自动更新资产上传、发布前完整远端回下载、固定 Tag、非草稿/非预发布、Latest 与发布后元数据核验；成功后 recovery 已清除。",
       "用户已明确授权先发布、后补真实 Provider、协作多端、安装升级与外部环境证据；协作证据门仅允许缺失清单按 owner-approved-post-release-v2.7.8 延期，不能把延期标记为已通过。"
     ]
   },
@@ -6395,8 +6395,8 @@
     "version": "2.7.8",
     "semverVersion": "2.7.8",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.7.8 已获正式发布授权，聚焦白模预演、RH 智能翻译与 MiniMax H3 镜头数量控制。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.7.8 正式 Electron/NSIS 安装包、blockmap 与 latest.yml 将由固定并推送 source commit 上的 dist:release 唯一流程生成；产物大小、摘要、Tag、Latest 与远端回下载事实在发布完成后补录，未生成前不伪报通过。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.7.8 已正式发布，聚焦白模预演、RH 智能翻译与 MiniMax H3 镜头数量控制。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.7.8 正式 Electron/NSIS 安装包为 1295691506 bytes / SHA-256 14b5cf9e3d21b43a1aced96d2332d5453e4e10dd6cac256ad3fded65fbc47163；blockmap 为 1350223 bytes / SHA-256 b5856c61757b6cb5c218e737b14613e06d7e935e8db0a7a74804d6cce5be38e3；latest.yml 为 362 bytes / SHA-256 7656cabf0953168958a190171fd83a08bb260a3737d0e58e68c47b62d496b641。Tag/Release target 固定为 2048a00273353ce7b82837be734a58f578d06408，Release 非草稿、非预发布且为 Latest。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
@@ -7044,7 +7044,7 @@
     ]
   },
   "minimaxH3ShotCountControl": {
-    "status": "release-authorized-v2.7.8",
+    "status": "released-v2.7.8",
     "date": "2026-08-04",
     "releaseIncluded": true,
     "nodeType": "minimax-h3-prompt-enhancer",
@@ -7066,7 +7066,7 @@
       "原 ComfyUI 参考节点使用整合包内置 Python 完整回归 46/46 通过，包含 AUTO / 固定镜头约束进入模型、1-20 边界、旧位置参数兼容及示例工作流字段。",
       "H3 定向回归 7/7 通过，覆盖共享合同、AUTO、固定 12 镜头、1-20 边界、越界/小数失败关闭、节点 LIST、Canvas 默认值与 Creator/CLI Schema 字段。",
       "H3、RunIntent、精确端口、能力图、Seedance LLM 与 Workflow Doctor 相关回归 71/71 通过；TypeScript type-check、feature-sync、public:check、git diff-check 与 Vite 生产构建通过。",
-      "扩展执行入口套件 6 项中 5 项通过，唯一失败定位到未改动的 BatchTaggerNode 既有源码顺序断言，与 H3 镜头数量无关；该功能已获准纳入 v2.7.8，真实或付费 Provider 证据按授权在发布后补录。"
+      "扩展执行入口套件 6 项中 5 项通过，唯一失败定位到未改动的 BatchTaggerNode 既有源码顺序断言，与 H3 镜头数量无关；该功能已随 v2.7.8 正式发布，真实或付费 Provider 证据按授权在发布后补录。"
     ],
     "boundaries": [
       "内部值 0 仅表示 AUTO；用户可固定的镜头数量严格为 1-20。",
