@@ -1,7 +1,40 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.7.9",
-  "lastUpdated": "2026-08-05-v2.7.9-released",
+  "version": "2.8.0",
+  "lastUpdated": "2026-08-05-v2.8.0-release-authorized",
+  "runningHubCrossSiteWebappLookup": {
+    "status": "release-authorized-v2.8.0",
+    "date": "2026-08-05",
+    "releaseIncluded": true,
+    "highlights": [
+      "修复 RH WebApp ID 在所选站点返回 HTTP 200 + code=901 且缺少可识别错误文本时不尝试另一站的问题；共享站点分类器现在识别 423、802、806、807、811、901、1002、1004 这组站点身份、Key、WebApp 或任务归属错误码。",
+      "只对明确不可能已创建付费任务的站点归属/身份错误回退；参数校验、余额、并发、限流、超时、5xx、生成失败和其他结果不自动重放，继续保持单次提交与费用安全边界。",
+      "普通 RunningHub、RH 钱包、RH 工具、自定义 RH 应用和 RH 工具箱能力层共用同一路由修复；app-info、提交、查询、取消、上传均可继承，RH 工具编辑器也会持久化查询实际解析出的 cn 或 intl 站点。",
+      "海外 WebApp 仍优先并保持 runninghub.ai；只有实际返回站点归属错误时才按已配置 Key 回退，不把所有海外应用强制切到国内站。"
+    ],
+    "verification": [
+      "真实只读 Provider 实测：海外 WebApp 2075149522166181890 在 site=intl 下直接成功、rhSite=intl、无回退并返回 4 个字段；国内 WebApp 2084704734417612802 在 site=intl 下先返回 901，修复后一次回退到 cn 成功、rhSite=cn 并返回 6 个字段。",
+      "RunningHub 站点定向回归 6/6、app-info 路由与脱敏回归 2/2、TypeScript type-check 通过。",
+      "该修复已获准纳入 v2.8.0 唯一正式发布流程；真实付费任务、反馈用户安装环境与外部 VPN 证据仍按授权发布后补，延期不记为通过。"
+    ]
+  },
+  "providerGenerationDownloadHardening": {
+    "status": "release-authorized-v2.8.0",
+    "date": "2026-08-05",
+    "releaseIncluded": true,
+    "basedOn": "PenguinCanvas-v2.7.4-故障原因与修复报告-匿名版-20260801.md",
+    "highlights": [
+      "复核 v2.7.9 后保留现有 Chromium 系统代理、TUN、VPN、IPv4/IPv6 首选链路、可信 Provider 结果安全下载、同一 taskId 恢复、RunningHub Chromium 禁止 Host 头与 CanvasInner Hook 顺序修复，不回退后续节点、模型、协议或用户数据。",
+      "fetchProviderResponse 支持每次调用的 deadlineMs；只有同步 Seedream V5 Pro /v1/images/generations 使用 5 分钟总时限，其他 Provider 仍使用 90 秒通用默认，不改变请求路径、请求体、参考图、返回格式或轮询协议。",
+      "Creator 在线回复保留首个 SSE 片段即时持久化，后续小片段按约 320 字符合并，并在完成或停止前冲刷尾部；超过会话层 256 个上游细片段时仍逐字一致且不触发 CREATOR_RESPONSE_DELTA_INVALID。",
+      "seedance.nz 媒体上传默认总时限提升到 120 秒、空闲读取时限提升到 30 秒；只对上游明确返回 HTTP 429 的上传重试，超时、中止、连接不可用和 5xx 等接收结果不明确的上传不自动重放，避免重复远程文件和潜在重复费用。"
+    ],
+    "verification": [
+      "Seedream、Creator、Seedance 上传、Canvas Hook、Provider 系统网络、提交幂等、完成任务原 taskId 恢复以及图像/视频/音频/RunningHub 安全下载扩展专项与相邻回归 153/153 通过。",
+      "TypeScript type-check、feature-sync:check、public:check、rh-toolbox:check 与生产 build 通过；能力图保持 31 actions、200 runtime entries、74/74 nodes accounted、0 public gaps，Vite 转换 2857 个模块。",
+      "该加固已获准纳入 v2.8.0 唯一正式发布流程；真实付费 Provider、反馈用户的 VPN/安装环境、协作多端与安装升级证据继续发布后补，不得外推为所有外部网络环境已经验证。"
+    ]
+  },
   "runningHubChromiumForbiddenHeaderCompatibility": {
     "status": "released-v2.7.9",
     "date": "2026-08-05",
@@ -60,42 +93,42 @@
     ]
   },
   "release": {
-    "status": "released-v2.7.9",
-    "version": "2.7.9",
+    "status": "release-authorized-v2.8.0",
+    "version": "2.8.0",
     "date": "2026-08-05",
-    "publishedAt": "2026-08-05T11:53:23Z",
-    "tag": "v2.7.9",
-    "latest": true,
-    "sourceCommit": "8aa5d2fa50d4ccc9ee9d32a0580cc09879e718d1",
-    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.7.9",
+    "publishedAt": null,
+    "tag": "v2.8.0",
+    "latest": false,
+    "sourceCommit": null,
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.8.0",
     "artifacts": {
       "installer": {
-        "name": "T8-PenguinCanvas-Setup-2.7.9.exe",
-        "size": 1317434488,
-        "sha256": "71e1abc7efd6216de6aa815d29c223d05192bcd31ccd02f527bc65d95b71e9ac"
+        "name": "T8-PenguinCanvas-Setup-2.8.0.exe",
+        "size": null,
+        "sha256": null
       },
       "blockmap": {
-        "name": "T8-PenguinCanvas-Setup-2.7.9.exe.blockmap",
-        "size": 1373191,
-        "sha256": "50d27a9a670ccf85ce477c066ac01f05ea44c0a884ca0d5f5d82b513cfde9e77"
+        "name": "T8-PenguinCanvas-Setup-2.8.0.exe.blockmap",
+        "size": null,
+        "sha256": null
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": 362,
-        "sha256": "f0eb9c13104b933a4b38c6752c5cccfc3015cbcd01a89b3c12fad69555b9970b"
+        "size": null,
+        "sha256": null
       }
     },
     "verification": [
-      "v2.7.9 发布范围固定为独立 Seedance 2.0 提示词增强器与 RunningHub Chromium 禁止请求头兼容修复，不回退 v2.7.4 之后的系统代理、TUN、VPN、IPv4/IPv6 与资源安全链路。",
-      "Seedance 2.0 合同/UI/Schema/预检/Doctor、RunIntent、端口与能力图定向回归通过；RunningHub 桥接/路由 17/17、RH 相邻 42/42、系统网络与安全下载相邻 74/74 通过；TypeScript、能力同步、公开面与生产前端构建通过。",
-      "固定提交 8aa5d2fa50d4ccc9ee9d32a0580cc09879e718d1 上的唯一正式流程完成 Electron/NSIS、post-build、provenance、sealed recovery、GitHub 自动更新三资产、发布前完整远端回下载、固定 Tag、非草稿/非预发布、Latest 与 recovery 清理核验。",
-      "用户已明确授权先发布、后补真实 Provider、反馈用户 VPN/安装环境、协作多端与安装升级证据；协作证据门仅允许缺失清单按 owner-approved-post-release-v2.7.9 延期，不能把延期标记为已通过。"
+      "v2.8.0 发布范围固定为 RunningHub 国内/海外 WebApp 自动识别与 Provider 生成、流式持久化及结果下载稳定性加固，不回退 v2.7.4 之后的系统代理、TUN、VPN、IPv4/IPv6 和后续节点、模型、协议能力。",
+      "Provider 生成/下载与相邻回归 153/153、RunningHub 跨站定向 6/6、app-info 路由/脱敏 2/2 通过；TypeScript、能力同步、公开面、RH 工具箱与生产前端构建通过。",
+      "正式 Electron/NSIS、post-build、provenance、sealed recovery、GitHub 自动更新三资产、发布前完整远端回下载、固定 Tag、非草稿/非预发布、Latest 与 recovery 清理只能由固定发布提交上的唯一流程完成，未完成前不得标记为通过。",
+      "用户已明确授权先发布、后补真实 Provider、反馈用户 VPN/安装环境、协作多端与安装升级证据；协作证据门仅允许缺失清单按 owner-approved-post-release-v2.8.0 延期，不能把延期标记为已通过。"
     ]
   },
   "versionSequencePolicy": {
     "status": "active",
     "date": "2026-07-30",
-    "currentVersion": "2.7.9",
+    "currentVersion": "2.8.0",
     "rules": [
       "版本号每一段只使用 0-9；v2.6.9 的下一正式版本固定为 v2.7.0。",
       "禁止创建、打包、推送、打 tag、发布或写入自动更新元数据为 v2.6.10。",
@@ -107,6 +140,7 @@
       "v2.7.6 的下一正式版本固定为 v2.7.7。",
       "v2.7.7 的下一正式版本固定为 v2.7.8。",
       "v2.7.8 的下一正式版本固定为 v2.7.9。",
+      "v2.7.9 的下一正式版本固定为 v2.8.0，禁止创建 v2.7.10。",
       "后续改版本前必须同步核对 package.json、package-lock.json、README、features.json、项目 SKILL.md、Release notes、自动更新元数据和 Git tag。"
     ]
   },
@@ -6409,11 +6443,11 @@
       "T8_ENABLE_LOCAL_PRIVATE": "开发环境和普通本机构建可选；0=关闭本机 local-private/extensions 私有扩展。正式 dist:release 固定为 1，不能被父环境降级。GitHub/clean clone 因为没有 local-private 目录，不包含充值实现。",
       "T8_DISABLE_LOCAL_EXTENSIONS": "开发环境可选；1=关闭本地扩展。正式 dist:release 固定为 0，确保本机私有 sidecar 参与加密打包与后置校验。"
     },
-    "version": "2.7.9",
-    "semverVersion": "2.7.9",
+    "version": "2.8.0",
+    "semverVersion": "2.8.0",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.7.9 已正式发布，包含 Seedance 2.0 提示词增强器与 RunningHub Chromium 禁止请求头兼容修复。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.7.9 已从固定 source commit 8aa5d2fa50d4ccc9ee9d32a0580cc09879e718d1 的唯一 dist:release 流程生成并发布：安装包 1,317,434,488 bytes / SHA-256 71e1abc7efd6216de6aa815d29c223d05192bcd31ccd02f527bc65d95b71e9ac；blockmap 1,373,191 bytes / SHA-256 50d27a9a670ccf85ce477c066ac01f05ea44c0a884ca0d5f5d82b513cfde9e77；latest.yml 362 bytes / SHA-256 f0eb9c13104b933a4b38c6752c5cccfc3015cbcd01a89b3c12fad69555b9970b。post-build、provenance、sealed recovery、GitHub digest/size、完整远端回下载、Tag/target 与 Latest 均通过。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.0 已获准进入唯一正式发布流程，包含 RunningHub 国内/海外 WebApp 自动识别与 Provider 生成下载稳定性加固。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.8.0 正式安装包、blockmap 与 latest.yml 只能由固定 source commit 上的唯一 dist:release 流程生成；在 post-build、provenance、sealed recovery、GitHub digest/size、完整远端回下载、Tag/target 与 Latest 全部通过前，不记录大小、摘要或发布成功。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",

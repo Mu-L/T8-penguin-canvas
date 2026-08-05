@@ -456,6 +456,8 @@ const DEFAULT_UPLOAD_CACHE_TTL_MS = 20 * 60 * 60 * 1000;
 const DEFAULT_PROVIDER_RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
 const DEFAULT_PROVIDER_DEADLINE_MS = 30 * 1000;
 const DEFAULT_PROVIDER_IDLE_TIMEOUT_MS = 10 * 1000;
+const DEFAULT_PROVIDER_UPLOAD_DEADLINE_MS = 120 * 1000;
+const DEFAULT_PROVIDER_UPLOAD_IDLE_TIMEOUT_MS = 30 * 1000;
 const SAFE_DIAGNOSTIC_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:@/+\-]{0,159}$/;
 const SENSITIVE_DIAGNOSTIC_TOKEN = /(?:api[-_]?key|authorization|cookie|token|secret|password|credential)/i;
 
@@ -653,6 +655,30 @@ function providerBoundaryOptions(options = {}) {
       10 * 60 * 1000,
     ),
   };
+}
+
+function providerUploadBoundaryOptions(options = {}) {
+  return {
+    ...options,
+    providerDeadlineMs: boundedPositiveInteger(
+      options.providerUploadDeadlineMs ?? options.providerDeadlineMs ?? options.deadlineMs,
+      DEFAULT_PROVIDER_UPLOAD_DEADLINE_MS,
+      10 * 60 * 1000,
+    ),
+    providerIdleTimeoutMs: boundedPositiveInteger(
+      options.providerUploadIdleTimeoutMs ?? options.providerIdleTimeoutMs ?? options.idleTimeoutMs,
+      DEFAULT_PROVIDER_UPLOAD_IDLE_TIMEOUT_MS,
+      10 * 60 * 1000,
+    ),
+  };
+}
+
+function retryableProviderUploadError(error) {
+  // A timeout, abort, unavailable connection, or 5xx response can occur after
+  // the Provider has accepted the multipart body. Replaying such an ambiguous
+  // upload risks creating duplicate remote files. Only an explicit 429 is a
+  // safe, response-confirmed instruction to retry the upload.
+  return error?.code === 'SEEDANCE_UPSTREAM_ERROR' && Number(error?.status) === 429;
 }
 
 function headerValue(headers, name) {
@@ -1352,6 +1378,7 @@ async function uploadMedia(source, kind, apiKey, options = {}) {
     if (typeof options.validateBuffer === 'function') {
       await options.validateBuffer(file.buffer, file);
     }
+    const uploadBoundaryOptions = providerUploadBoundaryOptions(options);
     let lastError;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
@@ -1361,7 +1388,7 @@ async function uploadMedia(source, kind, apiKey, options = {}) {
           method: 'POST',
           headers: { Authorization: `Bearer ${apiKey}` },
           body: form,
-        }, options, 'seedance.nz 文件上传');
+        }, uploadBoundaryOptions, 'seedance.nz 文件上传');
         const data = await responseJson(response, 'seedance.nz 文件上传');
         if (!response.ok) {
           throw createUpstreamError(data, response);
@@ -1371,7 +1398,7 @@ async function uploadMedia(source, kind, apiKey, options = {}) {
         return url;
       } catch (error) {
         lastError = error;
-        const retryable = !error?.status || error.status === 429 || error.status >= 500;
+        const retryable = retryableProviderUploadError(error);
         if (!retryable || attempt === 2) break;
         await sleep(1000 * (2 ** attempt));
       }

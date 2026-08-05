@@ -1746,6 +1746,46 @@ test('seedance.nz bounds response-header wait even when fetch ignores AbortSigna
   assert.ok(Date.now() - startedAt < 500);
 });
 
+test('seedance.nz gives media uploads a 120s deadline and 30s idle boundary by default', () => {
+  const source = readFileSync(
+    new URL('../backend/src/providers/seedanceNz.js', import.meta.url),
+    'utf8',
+  );
+  assert.match(source, /DEFAULT_PROVIDER_UPLOAD_DEADLINE_MS\s*=\s*120\s*\*\s*1000/);
+  assert.match(source, /DEFAULT_PROVIDER_UPLOAD_IDLE_TIMEOUT_MS\s*=\s*30\s*\*\s*1000/);
+  assert.match(source, /providerUploadDeadlineMs\s*\?\?\s*options\.providerDeadlineMs/);
+  assert.match(source, /providerUploadIdleTimeoutMs\s*\?\?\s*options\.providerIdleTimeoutMs/);
+});
+
+test('seedance.nz never replays an upload whose timeout leaves acceptance ambiguous', async () => {
+  seedanceNz.resetCachesForTests();
+  let providerCalls = 0;
+  let signal: AbortSignal | undefined;
+  const startedAt = Date.now();
+  const error = await capturedRejection(seedanceNz.uploadMedia(
+    TINY_PNG_A,
+    'image',
+    'test-key',
+    {
+      uploadIntervalMs: 0,
+      providerDeadlineMs: 10,
+      providerUploadDeadlineMs: 45,
+      fetchImpl: async (_url: string, init?: RequestInit) => {
+        providerCalls += 1;
+        signal = init?.signal || undefined;
+        return await new Promise<Response>(() => {});
+      },
+    },
+  ));
+
+  assert.equal(error.code, 'SEEDANCE_UPSTREAM_TIMEOUT');
+  assert.equal(error.status, 504);
+  assert.equal(providerCalls, 1, 'ambiguous media uploads must not be replayed');
+  assert.equal(signal?.aborted, true);
+  assert.ok(Date.now() - startedAt >= 35, 'the upload-specific boundary must override the generic Provider value');
+  assert.ok(Date.now() - startedAt < 500);
+});
+
 test('seedance.nz localizes remote media before Provider upload', async (t) => {
   seedanceNz.resetCachesForTests();
   let originCalls = 0;

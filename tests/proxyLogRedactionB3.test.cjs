@@ -312,6 +312,30 @@ test('B3 Provider fetch deadline covers DNS, connect, TLS, and response headers'
   }
 });
 
+test('B3 Provider fetch supports a longer model-specific deadline without changing the generic default', async () => {
+  const originalFetch = global.fetch;
+  proxyRouter._test.setProxySafeRemoteTestOptions(null);
+  let signal;
+  global.fetch = async (_url, init) => {
+    signal = init?.signal;
+    await new Promise((resolve) => setTimeout(resolve, 70));
+    return new Response('ok', { status: 200 });
+  };
+  try {
+    const response = await proxyRouter._test.fetchProviderResponse(
+      'https://provider.example/slow-model',
+      { method: 'POST', body: '{"prompt":"safe"}' },
+      'slow synchronous Provider',
+      { deadlineMs: 120, noRetry: true },
+    );
+    assert.equal(response.status, 200);
+    assert.equal(signal?.aborted, false);
+  } finally {
+    global.fetch = originalFetch;
+    proxyRouter._test.setProxySafeRemoteTestOptions(null);
+  }
+});
+
 test('B3 Provider requests preserve native system networking first and replay writes only with one stable idempotency key', async () => {
   const originalFetch = global.fetch;
   let calls = 0;
@@ -1799,6 +1823,49 @@ test('B3 RunningHub app-info exposes only the form schema allowlist', async () =
       assert.equal(rejected.status, 400, rejected.text);
       assert.match(rejected.text, /code=500/);
       assert.doesNotMatch(rejected.text, /runninghub-secret-key|rh-app-error-secret/);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+});
+
+test('B3 RunningHub app-info retries the alternate site for numeric WebApp-not-found responses', async () => {
+  await withProxyFixture(async ({ appServer, settingsFile }) => {
+    const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+    fs.writeFileSync(settingsFile, JSON.stringify({
+      ...settings,
+      rhIntlApiKey: 'runninghub-intl-secret-key',
+    }));
+
+    const originalFetch = global.fetch;
+    const calls = [];
+    global.fetch = async (url) => {
+      calls.push(String(url));
+      if (String(url).startsWith('https://www.runninghub.ai/')) {
+        return new Response(JSON.stringify({ code: 901, msg: 'WEBAPP_NOT_EXISTS' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({
+        code: 0,
+        data: {
+          webappId: 'provider-overridden-id',
+          nodeInfoList: [{ nodeId: '1', fieldName: 'prompt', fieldType: 'TEXT', fieldValue: '' }],
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    try {
+      const info = await requestGet(appServer, '/api/proxy/runninghub/app-info?webappId=domestic-app&site=intl');
+      assert.equal(info.status, 200, info.text);
+      assert.equal(info.data.data.webappId, 'domestic-app');
+      assert.equal(info.data.data.rhSite, 'cn');
+      assert.equal(info.data.data.rhFallbackUsed, true);
+      assert.equal(info.data.data.nodeInfoList.length, 1);
+      assert.equal(calls.length, 2);
+      assert.match(calls[0], /^https:\/\/www\.runninghub\.ai\/api\/webapp\/apiCallDemo\?/);
+      assert.match(calls[1], /^https:\/\/www\.runninghub\.cn\/api\/webapp\/apiCallDemo\?/);
+      assert.doesNotMatch(info.text, /runninghub-intl-secret-key|runninghub-secret-key/);
     } finally {
       global.fetch = originalFetch;
     }

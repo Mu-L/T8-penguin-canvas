@@ -1220,6 +1220,58 @@ test('ready online LLM streams provider deltas into the durable session before c
   assert.equal(llmCalls, 1);
   assert.equal(fixture.writes, 0);
 });
+
+test('online LLM coalesces more than 256 tiny SSE deltas without changing one character', async (t) => {
+  const modelText = '## 短视频脚本 V0\n\n开场用一个真实通勤场景直接展示问题，中段用三个可验证卖点推进：先展示产品在真实环境中的使用动作，再用材质、规格和操作步骤建立信任，最后回到明确行动。镜头一负责提出问题，镜头二展示产品与人物关系，镜头三拆解卖点，镜头四用前后状态收束。品牌名称、具体规格、功效、认证和价格未知时全部保留明确占位符，不编造事实。第一轮只形成可编辑脚本、素材清单和三个画面方向，确认已有产品图、不可修改元素与目标平台后，才进入画布生成和尺寸扩展。补充说明每个镜头都应包含主体动作、场景关系、光线方向和可验证的产品信息，所有未知事实继续使用占位符，并在生成任何付费素材之前等待用户确认。';
+  const deltas = Array.from(modelText);
+  assert.ok(deltas.length > 256);
+  const fixture = await startFixture(t, [], {
+    credentialSettingsProvider: () => ({ llmApiKey: 'configured' }),
+    creatorLlmSettingsProvider: () => ({
+      llmApiKey: 'test-only-many-deltas-secret',
+      llmBaseUrl: 'https://mock-provider.invalid',
+    }),
+    creatorLlmGenerateChat: async (_provider, request, options) => {
+      for (let index = 0; index < deltas.length; index += 1) {
+        await options.onDelta(deltas[index], { eventIndex: index });
+      }
+      return {
+        ok: true,
+        text: modelText,
+        model: request.model,
+        finishReason: 'stop',
+        requestId: 'mock-upstream-many-deltas-1',
+      };
+    },
+  });
+  const created = await fixture.request('/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ projectId: 'project-local', canvasId: 'canvas-a' }),
+  });
+  const completed = await fixture.request(`/sessions/${created.body.data.id}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({
+      projectId: 'project-local',
+      canvasId: 'canvas-a',
+      kind: 'script',
+      text: '生成一段足够长的逐字流式脚本',
+      clientRequestId: 'creator-many-deltas-0001',
+      stream: true,
+    }),
+  });
+
+  assert.equal(completed.response.status, 201);
+  assert.equal(completed.body.data.assistantEvent.payload.text, modelText);
+  assert.ok(completed.body.data.stream.chunkCount > 1);
+  assert.ok(completed.body.data.stream.chunkCount < 256);
+  const responseId = completed.body.data.stream.responseId;
+  const persistedText = completed.body.data.session.events
+    .filter((event) => event.type === 'assistant.response.delta' && event.payload?.responseId === responseId)
+    .map((event) => event.payload.delta)
+    .join('');
+  assert.equal(persistedText, modelText);
+  assert.equal(fixture.writes, 0);
+});
 test('stopping an online upstream reply preserves the durable partial text without completing its plan', async (t) => {
   let releaseModel;
   let signalFirstDelta;

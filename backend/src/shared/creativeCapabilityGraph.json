@@ -17,14 +17,14 @@
     "creativeCapabilityManifest": "ce6ad80e45c55d8972944abd1c6f847e6e3651b2311b8dd293a5268ba381fc50",
     "canvasNodeSchema": "ad8076205aee01380d13d0b5ef3532bc5be0d0d6cb51d2f826be504b6c7a15fa",
     "canvasNodeSchemaFile": "d12736e71596aeba91197724b26d0933a5823466bf9f368770b10d4ccf6ad363",
-    "runtimeCatalogSources": "45758bb4e607cc1dcdecd8029e30ed8054faf4b7e808034329261debec22e4d6",
-    "runtimeCatalogArtifact": "da2a8e0847290a19b83f3ea06429b6f0c8ad7531e9ab93f5d30ff65c1eed0ede",
+    "runtimeCatalogSources": "b0b7e6f8531a98a6ff4a9201255565adda8e45629c27f07bc296078711e5ad76",
+    "runtimeCatalogArtifact": "dcb81748d196bc085805993368be812fe281929b99bbe7c2e2fed6eb9fd810e0",
     "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
     "capabilityGraphCompiler": "1a611d7e91dcf523e0536a92e9adb6ba2d884689a65fa10274bcda3a05ef9840",
     "coverageReceiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7",
     "canonicalTextDigestCompiler": "b0afcf28a257fbbd8f391edc117348f8f2ede1b4a039ae91bce25a8d563ac0cf"
   },
-  "aggregateDigest": "4758f2335aad5da57137736663a053af784383e2d3582d69166326265ff30543",
+  "aggregateDigest": "ea873995b577a9d2c5895d0ced4aed2043be54b58f8a0fa8c82fba516548b67a",
   "principles": {
     "oneSentenceStart": true,
     "directCanvasMutation": false,
@@ -6216,7 +6216,7 @@
   ],
   "runtime": {
     "schema": "t8-creative-runtime-catalog-v1",
-    "sourceDigest": "45758bb4e607cc1dcdecd8029e30ed8054faf4b7e808034329261debec22e4d6",
+    "sourceDigest": "b0b7e6f8531a98a6ff4a9201255565adda8e45629c27f07bc296078711e5ad76",
     "platforms": [
       {
         "id": "zhenzhen",
@@ -10700,7 +10700,7 @@
     "sourceDigests": {
       "capabilityManifest": "ce6ad80e45c55d8972944abd1c6f847e6e3651b2311b8dd293a5268ba381fc50",
       "nodeSchema": "ad8076205aee01380d13d0b5ef3532bc5be0d0d6cb51d2f826be504b6c7a15fa",
-      "runtimeCatalog": "45758bb4e607cc1dcdecd8029e30ed8054faf4b7e808034329261debec22e4d6",
+      "runtimeCatalog": "b0b7e6f8531a98a6ff4a9201255565adda8e45629c27f07bc296078711e5ad76",
       "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
       "receiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7"
     },
@@ -10729,6 +10729,6 @@
       "missingCompatibilityEdges": []
     },
     "complete": true,
-    "digest": "e303404d62ec170a6b06c06a6b4017889512aac61cf7cd86bf163d5ded07d75f"
+    "digest": "9ca7554301f18ac5b507d5464f82b9790286684e5fd4e22b99594879dd60e1be"
   }
 }

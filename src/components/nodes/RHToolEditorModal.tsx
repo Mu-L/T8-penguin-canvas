@@ -106,7 +106,7 @@ const RHToolEditorModal: React.FC<RHToolEditorModalProps> = ({ isOpen, onClose, 
       const cover = data?.covers?.[0]?.thumbnailUri || data?.covers?.[0]?.url || '';
       setForm((f) => ({
         ...f,
-        rhSite: data?.rhSite === 'intl' ? 'intl' : f.rhSite,
+        rhSite: data?.rhSite === 'intl' || data?.rhSite === 'cn' ? data.rhSite : f.rhSite,
         title: f.title || data?.webappName || '',
         coverUrl: f.coverUrl || cover,
       }));

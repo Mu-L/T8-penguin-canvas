@@ -1403,11 +1403,12 @@ function createCreatorAgentRouter(options = {}) {
         streamingResponseId = begun.responseId;
         streamingControl.responseId = begun.responseId;
         streamingControl.phase = 'streaming';
+        const durableDeltaTargetChars = 320;
         let durableDeltaCount = 0;
-        const appendDurableDelta = async (incomingDelta) => {
-          const delta = String(incomingDelta == null ? '' : incomingDelta);
+        let durableDeltaBuffer = '';
+        let firstDurableDeltaPersisted = false;
+        const persistDurableDelta = (delta) => {
           for (let offset = 0; offset < delta.length; offset += 2_000) {
-            if (streamingControl.stopRequested) return;
             const part = delta.slice(offset, offset + 2_000);
             if (!part) continue;
             sessions.appendResponseDelta(session.id, {
@@ -1417,6 +1418,25 @@ function createCreatorAgentRouter(options = {}) {
             });
             durableDeltaCount += 1;
           }
+        };
+        const appendDurableDelta = async (incomingDelta) => {
+          const delta = String(incomingDelta == null ? '' : incomingDelta);
+          if (!delta || streamingControl.stopRequested) return;
+          if (!firstDurableDeltaPersisted) {
+            persistDurableDelta(delta);
+            firstDurableDeltaPersisted = true;
+            return;
+          }
+          durableDeltaBuffer += delta;
+          while (durableDeltaBuffer.length >= durableDeltaTargetChars) {
+            persistDurableDelta(durableDeltaBuffer.slice(0, durableDeltaTargetChars));
+            durableDeltaBuffer = durableDeltaBuffer.slice(durableDeltaTargetChars);
+          }
+        };
+        const flushDurableDelta = () => {
+          if (!durableDeltaBuffer) return;
+          persistDurableDelta(durableDeltaBuffer);
+          durableDeltaBuffer = '';
         };
         const creativeResponse = await llmRuntime.createResponse(responseInput, {
           prepared: preparedResponse,
@@ -1428,6 +1448,7 @@ function createCreatorAgentRouter(options = {}) {
           : creativeResponse.evidence?.mode === 'offline-fallback'
             ? '在线模型没有返回可用正文，已保留要求并给出离线结构 V0；当前没有修改画布'
             : '当前 LLM 未就绪，已明确给出离线结构 V0；当前没有修改画布或启动生成';
+        flushDurableDelta();
         if (streamingControl.stopRequested || creativeResponse.stopped) {
           const stopped = sessions.stopStreamingTurn(session.id, {
             responseId: begun.responseId,

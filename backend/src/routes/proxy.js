@@ -125,6 +125,16 @@ const PROXY_REMOTE_DEADLINE_MS = boundedProxyInteger(
   1_000,
   5 * 60_000,
 );
+// Seedream V5 Pro is a synchronous image endpoint. High-resolution requests
+// can legitimately take longer than the generic Provider boundary before the
+// first response header arrives, so only this protocol receives a longer
+// deadline. All other Provider calls retain the 90-second default above.
+const SEEDREAM_V5_RESPONSE_DEADLINE_MS = boundedProxyInteger(
+  process.env.T8_SEEDREAM_V5_RESPONSE_DEADLINE_MS,
+  5 * 60_000,
+  30_000,
+  10 * 60_000,
+);
 const PROXY_REMOTE_IDLE_TIMEOUT_MS = boundedProxyInteger(
   process.env.T8_PROXY_REMOTE_IDLE_TIMEOUT_MS,
   15_000,
@@ -313,12 +323,12 @@ function setProxySafeRemoteTestOptions(options) {
   proxySafeRemoteTestOptions = options && typeof options === 'object' ? { ...options } : null;
 }
 
-function providerFetchDeadlineMs() {
+function providerFetchDeadlineMs(options = {}) {
   return boundedProxyInteger(
-    proxySafeRemoteTestOptions?.providerDeadlineMs,
+    proxySafeRemoteTestOptions?.providerDeadlineMs ?? options?.deadlineMs,
     PROXY_REMOTE_DEADLINE_MS,
     10,
-    5 * 60_000,
+    10 * 60_000,
   );
 }
 
@@ -341,7 +351,7 @@ function replayableProviderBody(body) {
 }
 
 async function fetchProviderResponse(url, init = {}, label = 'Provider', options = {}) {
-  const deadlineMs = providerFetchDeadlineMs();
+  const deadlineMs = providerFetchDeadlineMs(options);
   const deadlineAt = Date.now() + deadlineMs;
   const upstreamSignal = init?.signal;
   const method = String(init?.method || 'GET').trim().toUpperCase();
@@ -2952,6 +2962,8 @@ async function callImageUpstreamAsync({ apiKey, finalApiModel, paramKind, prompt
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: auth },
       body: JSON.stringify(body),
+    }, 'Seedream V5 Pro', {
+      deadlineMs: SEEDREAM_V5_RESPONSE_DEADLINE_MS,
     });
   }
 

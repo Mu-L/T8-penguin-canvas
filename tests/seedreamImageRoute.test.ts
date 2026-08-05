@@ -133,3 +133,18 @@ test('Seedream uses one synchronous JSON endpoint for text-to-image and image ed
   assert.match(invalidSize.error, /Seedream 尺寸格式无效/);
   assert.equal(upstreamCalls.length, 2);
 });
+
+test('Seedream V5 synchronous generation has a dedicated five-minute response deadline', () => {
+  const source = fs.readFileSync(
+    new URL('../backend/src/routes/proxy.js', import.meta.url),
+    'utf8',
+  );
+  assert.match(
+    source,
+    /SEEDREAM_V5_RESPONSE_DEADLINE_MS\s*=\s*boundedProxyInteger\([\s\S]*?5\s*\*\s*60_000/,
+  );
+  assert.match(
+    source,
+    /if \(paramKind === 'seedream-v5'\)[\s\S]*?fetchProviderResponse\([\s\S]*?deadlineMs:\s*SEEDREAM_V5_RESPONSE_DEADLINE_MS/,
+  );
+});

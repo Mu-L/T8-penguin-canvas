@@ -3,6 +3,23 @@
 const RH_SITE_CN = 'cn';
 const RH_SITE_INTL = 'intl';
 
+// RunningHub often returns HTTP 200 with only a numeric Provider code. These
+// codes mean the selected site's identity/resource namespace cannot satisfy
+// the request, so the same operation may safely be retried against the other
+// configured site. Keep validation, capacity, billing and generation errors
+// out of this list: replaying those would either be pointless or risk a
+// duplicate paid submission.
+const RH_SITE_FALLBACK_CODES = new Set([
+  '423',  // TASK_NOT_FOUNED
+  '802',  // APIKEY_UNAUTHORIZED
+  '806',  // APIKEY_USER_NOT_FOUND
+  '807',  // APIKEY_TASK_NOT_FOUND
+  '811',  // CORPAPIKEY_INVALID
+  '901',  // WEBAPP_NOT_EXISTS
+  '1002', // Invalid API Key
+  '1004', // Task not found
+]);
+
 const RH_SITES = Object.freeze({
   [RH_SITE_CN]: Object.freeze({
     id: RH_SITE_CN,
@@ -81,6 +98,9 @@ function runningHubFailureText(data) {
 function shouldRetryRhSiteResponse(response, data) {
   const status = Number(response?.status || 0);
   if ([401, 403, 404].includes(status)) return true;
+
+  const code = String(data?.code ?? data?.errorCode ?? data?.data?.code ?? '').trim();
+  if (RH_SITE_FALLBACK_CODES.has(code)) return true;
 
   const text = runningHubFailureText(data);
   if (!text) return false;

@@ -58,6 +58,9 @@ test('RunningHub site candidates prefer the selected site and can use the config
 
 test('RunningHub automatic site fallback is limited to credentials and missing app or task errors', () => {
   assert.equal(routing.shouldRetryRhSiteResponse({ status: 401 }, {}), true);
+  assert.equal(routing.shouldRetryRhSiteResponse({ status: 200 }, { code: 901 }), true);
+  assert.equal(routing.shouldRetryRhSiteResponse({ status: 200 }, { code: 1002 }), true);
+  assert.equal(routing.shouldRetryRhSiteResponse({ status: 200 }, { code: 1004 }), true);
   assert.equal(routing.shouldRetryRhSiteResponse({ status: 200 }, { msg: 'API key invalid' }), true);
   assert.equal(routing.shouldRetryRhSiteResponse({ status: 200 }, { msg: 'webapp does not exist' }), true);
   assert.equal(routing.shouldRetryRhSiteResponse({ status: 200 }, { msg: 'task not found' }), true);
@@ -106,6 +109,7 @@ test('RunningHub settings and RH node surfaces expose independent domestic and o
   assert.match(rhToolsNode, /resolveRunningHubDisplaySite\(configuredRhSite, webappId, appInfo\)/);
   assert.match(rhToolsNode, /displayedRhSite === 'intl' \? '海外站' : '国内站'/);
   assert.match(rhToolsEditor, /aria-label="RunningHub 站点"/);
+  assert.match(rhToolsEditor, /data\?\.rhSite === 'intl' \|\| data\?\.rhSite === 'cn'/);
   assert.match(rhToolsEditor, /import \{ createPortal \} from 'react-dom'/);
   assert.match(rhToolsEditor, /createPortal\(modal, document\.body\)/);
   assert.match(rhToolsEditor, /data-rh-tool-editor-modal="true"/);
