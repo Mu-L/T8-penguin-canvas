@@ -100,7 +100,7 @@ async function safeJsonResponse(response: Response, label: string): Promise<any>
 export interface GenerateImageRequest {
   model: string;          // 节点 id (gpt-image-2 / nano-banana-2 / nano-banana-pro / grok-image / seedream-v5-pro)
   apiModel?: string;       // 上游真实模型名(优先使用)
-  paramKind?: 'gpt-size' | 'banana-ratio' | 'grok-image' | 'seedream-v5' | 'mj';
+  paramKind?: 'gpt-size' | 'banana-ratio' | 'grok-image' | 'seedream-v5' | 'qwen-image-3.0' | 'mj';
   prompt: string;
   n?: number;
   // 主参数(双协议通用):
@@ -320,13 +320,25 @@ export interface SeedreamNzSubmitRequest {
     | 'zhenzhen-image-gk-v15-edit'
     | 'zhenzhen-image-nb-2-lite'
     | 'zhenzhen-image-nb-2'
-    | 'zhenzhen-image-nb-pro';
+    | 'zhenzhen-image-nb-pro'
+    | 'qwen-image-3.0-t2i'
+    | 'qwen-image-3.0-i2i'
+    | 'qwen-image-3.0-pro-t2i'
+    | 'qwen-image-3.0-pro-i2i'
+    | 'qwen-image-3.0-global-t2i'
+    | 'qwen-image-3.0-global-i2i'
+    | 'qwen-image-3.0-global-pro-t2i'
+    | 'qwen-image-3.0-global-pro-i2i';
   modelFamily?: 'domestic' | 'overseas';
   resolution?: '0.5k' | '1k' | '2k' | '4k';
-  ratio?: 'adaptive' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16' | '21:9';
+  ratio?: 'adaptive' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16' | '21:9' | '2:3' | '3:2' | '4:5' | '5:4';
   size?: string;
   n?: number;
   output_format?: 'png' | 'jpeg';
+  negative_prompt?: string;
+  prompt_extend?: boolean;
+  sizing_mode?: 'auto' | 'ratio' | 'custom_size';
+  seed?: number;
 }
 
 export async function submitSeedreamNz(
@@ -1124,7 +1136,10 @@ export type HailuoModel =
   | 'hailuo-2.3-fast-pro-i2v'
   | 'hailuo-h3-t2v'
   | 'hailuo-h3-i2v'
-  | 'hailuo-h3-multi';
+  | 'hailuo-h3-multi'
+  | 'minimax-h3-ow-t2v'
+  | 'minimax-h3-ow-r2v'
+  | 'minimax-h3-ow-i2v';
 
 export type Hailuo23Model = Extract<HailuoModel, `hailuo-2.3-${string}`>;
 export type HailuoDuration = 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15;
@@ -1134,7 +1149,7 @@ export interface HailuoSubmitRequest {
   prompt?: string;
   duration: HailuoDuration;
   ratio: string;
-  resolution: '768p' | '1080p' | '2K';
+  resolution: '480p' | '720p' | '768p' | '1080p' | '2K';
   images?: string[];
   videos?: string[];
   audios?: string[];
@@ -1143,7 +1158,7 @@ export interface HailuoSubmitRequest {
 export async function submitHailuo(req: HailuoSubmitRequest, transport: ProviderSubmissionTransport = {}): Promise<{
   taskId: string;
   model: string;
-  taskType: 't2v' | 'i2v' | 'multi';
+  taskType: 't2v' | 'i2v' | 'r2v' | 'multi';
 } & ProviderTransportTrace> {
   const r = await fetch('/api/proxy/video/hailuo/submit', {
     method: 'POST',

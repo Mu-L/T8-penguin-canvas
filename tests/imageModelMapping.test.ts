@@ -127,8 +127,8 @@ test('Zhenzhen Image G-2 models live under the separate budget platform and keep
   assert.match(imageNodeSource, /imageBuiltinSource === 'seedance-nz' \|\| isZhenzhenBudgetImageModel\(savedApiModel\)/);
   assert.match(imageNodeSource, /value="builtin:seedance-nz"[\s\S]*贞贞的平价AI小屋/);
   assert.match(imageNodeSource, /builtinApiModelOptions\.map\(\(opt\) =>/);
-  assert.match(imageNodeSource, /model: isZhenzhenBudgetImageSelected/);
-  assert.match(imageNodeSource, /resolution: isZhenzhenImageG2/);
+  assert.match(imageNodeSource, /model: isQwenImageTab[\s\S]*: isZhenzhenBudgetImageSelected/);
+  assert.match(imageNodeSource, /resolution: isQwenImageTab[\s\S]*: isZhenzhenImageG2/);
   assert.match(imageNodeSource, /图生图模式：必须提供 1–10 张参考图/);
   assert.match(imageNodeSource, /文生图模式：只使用 Prompt，已连接的参考图不会发送/);
   assert.match(proxySource, /seedanceNz\.submitImageTask/);

@@ -1,0 +1,209 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "Qwen Image 3.0 并发生成（循环器·并联）",
+  "nodes": [
+    {
+      "id": "qwen-image-3.0-concurrent-prompt-1",
+      "type": "text",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "并发提示词 1",
+        "text": "镜头缓慢穿过明亮的现代展厅，柔和自然光"
+      }
+    },
+    {
+      "id": "qwen-image-3.0-concurrent-prompt-2",
+      "type": "text",
+      "position": {
+        "x": 0,
+        "y": 190
+      },
+      "data": {
+        "label": "并发提示词 2",
+        "text": "一件精致产品置于极简摄影棚，电影感侧光"
+      }
+    },
+    {
+      "id": "qwen-image-3.0-concurrent-prompt-3",
+      "type": "text",
+      "position": {
+        "x": 0,
+        "y": 380
+      },
+      "data": {
+        "label": "并发提示词 3",
+        "text": "安静的未来城市清晨，薄雾与暖色日光"
+      }
+    },
+    {
+      "id": "qwen-image-3.0-concurrent-loop",
+      "type": "loop",
+      "position": {
+        "x": 390,
+        "y": 160
+      },
+      "data": {
+        "label": "Qwen Image 并发节点",
+        "mode": "parallel",
+        "kind": "text",
+        "outputs": [],
+        "progress": {
+          "done": 0,
+          "total": 0,
+          "ok": 0,
+          "fail": 0
+        }
+      }
+    },
+    {
+      "id": "qwen-concurrent-image",
+      "type": "image",
+      "position": {
+        "x": 760,
+        "y": 160
+      },
+      "data": {
+        "label": "Qwen Image 3.0 并发生成",
+        "model": "qwen-image-3.0",
+        "apiModel": "qwen-image-3.0-t2i",
+        "imageBuiltinSource": "seedance-nz",
+        "aspectRatio": "1:1",
+        "qwenSizingMode": "auto",
+        "qwenResolution": "1k",
+        "qwenCustomSize": "1024*1024",
+        "qwenImageCount": 1,
+        "qwenSeed": -1,
+        "qwenNegativePrompt": "",
+        "qwenPromptExtend": true,
+        "prompt": "",
+        "referenceImages": [],
+        "imageOnlyOutput": true,
+        "reuseResult": false
+      }
+    },
+    {
+      "id": "qwen-image-3.0-concurrent-output",
+      "type": "output",
+      "position": {
+        "x": 1130,
+        "y": 160
+      },
+      "data": {
+        "label": "并发结果"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "qwen-image-3.0-concurrent-prompt-edge-1",
+      "source": "qwen-image-3.0-concurrent-prompt-1",
+      "target": "qwen-image-3.0-concurrent-loop"
+    },
+    {
+      "id": "qwen-image-3.0-concurrent-prompt-edge-2",
+      "source": "qwen-image-3.0-concurrent-prompt-2",
+      "target": "qwen-image-3.0-concurrent-loop"
+    },
+    {
+      "id": "qwen-image-3.0-concurrent-prompt-edge-3",
+      "source": "qwen-image-3.0-concurrent-prompt-3",
+      "target": "qwen-image-3.0-concurrent-loop"
+    },
+    {
+      "id": "qwen-image-3.0-concurrent-loop-generation",
+      "source": "qwen-image-3.0-concurrent-loop",
+      "target": "qwen-concurrent-image"
+    },
+    {
+      "id": "qwen-image-3.0-concurrent-generation-output",
+      "source": "qwen-concurrent-image",
+      "target": "qwen-image-3.0-concurrent-output"
+    }
+  ],
+  "nodeCount": 6,
+  "edgeCount": 5,
+  "nodeTypes": [
+    "text",
+    "loop",
+    "image",
+    "output"
+  ],
+  "topologyPreview": {
+    "nodes": [
+      {
+        "id": "qwen-image-3.0-concurrent-prompt-1",
+        "type": "text",
+        "label": "并发提示词 1",
+        "x": 50,
+        "y": 50
+      },
+      {
+        "id": "qwen-image-3.0-concurrent-prompt-2",
+        "type": "text",
+        "label": "并发提示词 2",
+        "x": 50,
+        "y": 240
+      },
+      {
+        "id": "qwen-image-3.0-concurrent-prompt-3",
+        "type": "text",
+        "label": "并发提示词 3",
+        "x": 50,
+        "y": 430
+      },
+      {
+        "id": "qwen-image-3.0-concurrent-loop",
+        "type": "loop",
+        "label": "Qwen Image 并发节点",
+        "x": 440,
+        "y": 210
+      },
+      {
+        "id": "qwen-concurrent-image",
+        "type": "image",
+        "label": "Qwen Image 3.0 并发生成",
+        "x": 810,
+        "y": 210
+      },
+      {
+        "id": "qwen-image-3.0-concurrent-output",
+        "type": "output",
+        "label": "并发结果",
+        "x": 1180,
+        "y": 210
+      }
+    ],
+    "edges": [
+      {
+        "id": "qwen-image-3.0-concurrent-prompt-edge-1",
+        "source": "qwen-image-3.0-concurrent-prompt-1",
+        "target": "qwen-image-3.0-concurrent-loop"
+      },
+      {
+        "id": "qwen-image-3.0-concurrent-prompt-edge-2",
+        "source": "qwen-image-3.0-concurrent-prompt-2",
+        "target": "qwen-image-3.0-concurrent-loop"
+      },
+      {
+        "id": "qwen-image-3.0-concurrent-prompt-edge-3",
+        "source": "qwen-image-3.0-concurrent-prompt-3",
+        "target": "qwen-image-3.0-concurrent-loop"
+      },
+      {
+        "id": "qwen-image-3.0-concurrent-loop-generation",
+        "source": "qwen-image-3.0-concurrent-loop",
+        "target": "qwen-concurrent-image"
+      },
+      {
+        "id": "qwen-image-3.0-concurrent-generation-output",
+        "source": "qwen-concurrent-image",
+        "target": "qwen-image-3.0-concurrent-output"
+      }
+    ]
+  },
+  "savedAt": "2026-08-06T00:00:00.000Z"
+}

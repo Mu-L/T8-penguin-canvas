@@ -99,7 +99,7 @@ import JimengCliHelpButton from './JimengCliHelpButton';
  *   - Grok Video(kind=grok)     — Zhenzhen Grok 1.5 New / Grok Video 1.5 FAL / 旧版 FAL / grok-video-3 / images
  *   - Sora2    (kind=sora)      — Zhenzhen API + FAL 双渠道 / Base64 参考图(≤1)
  *   - HappyHorse(kind=happyhorse)— api.seedance.nz 文生/图生/参考图生视频(≤9 图)
- *   - Hailuo   (kind=hailuo)    — api.seedance.nz Hailuo 2.3 + H3 文生/首尾帧/多模态视频
+ *   - Hailuo   (kind=hailuo)    — api.seedance.nz Hailuo 2.3 / H3 + MiniMax H3 OW
  *   - Vidu     (kind=vidu)      — api.seedance.nz Vidu Q3 文生/图生/首尾帧/参考/短剧成片(≤14 图)
  *   - Kling    (kind=kling)     — api.seedance.nz Kling 文生/图生/首尾帧/参考/视频编辑
  *   - Wan      (kind=wan)       — api.seedance.nz Wan 2.7 Spicy 图生视频(1 张首帧)
@@ -237,7 +237,10 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   const isApimartV31 = isApimartV31Fast || isApimartV31Quality || isApimartV31Lite;
   const happyHorseMode = apiModel.endsWith('-i2v') ? 'i2v' : apiModel.endsWith('-r2v') ? 'r2v' : 't2v';
   const isHailuoH3 = isHailuo && apiModel.startsWith('hailuo-h3-');
-  const hailuoMode = apiModel.endsWith('-multi') ? 'multi' : apiModel.includes('-i2v') ? 'i2v' : 't2v';
+  const isMinimaxH3Ow = isHailuo && apiModel.startsWith('minimax-h3-ow-');
+  const hailuoMode = apiModel.endsWith('-multi')
+    ? 'multi'
+    : apiModel.endsWith('-r2v') ? 'r2v' : apiModel.includes('-i2v') ? 'i2v' : 't2v';
   const klingMode = apiModel.endsWith('-edit')
     ? 'edit'
     : apiModel.endsWith('-r2v')
@@ -281,8 +284,10 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       : isApimartGrok && !['480p', '720p'].includes(rawResolution.toLowerCase())
         ? '720p'
         : isApimartBudgetVideo ? rawResolution.toLowerCase() : rawResolution;
-  const hailuoDuration: HailuoDuration = isHailuoH3
-    ? Math.max(5, Math.min(15, Number(duration) || 5)) as HailuoDuration
+  const hailuoDuration: HailuoDuration = isMinimaxH3Ow
+    ? ([5, 10, 15].includes(Number(duration)) ? Number(duration) : 5) as HailuoDuration
+    : isHailuoH3
+      ? Math.max(5, Math.min(15, Number(duration) || 5)) as HailuoDuration
     : resolution === '1080p' ? 6 : Number(duration) === 10 ? 10 : 6;
   const klingDuration: 5 | 10 = Number(duration) === 10 ? 10 : 5;
   const klingNegativePrompt: string = typeof d?.klingNegativePrompt === 'string' ? d.klingNegativePrompt : '';
@@ -479,7 +484,9 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       : isVidu
       ? viduMode === 't2v' ? 0 : viduMode === 'i2v' ? 1 : viduMode === 'start-end' ? 2 : viduMode === 'r2v' ? 9 : 14
       : isHailuo
-      ? isHailuoH3
+      ? isMinimaxH3Ow
+        ? hailuoMode === 't2v' ? 0 : 1
+        : isHailuoH3
         ? hailuoMode === 't2v' ? 0 : hailuoMode === 'i2v' ? 2 : 9
         : hailuoMode === 't2v' ? 0 : 1
       : isHappyHorse
@@ -955,8 +962,14 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       return;
     }
     if (isHailuo && hailuoMode === 'i2v' && imageUrls.length === 0) {
-      setError(`${isHailuoH3 ? 'Hailuo H3' : 'Hailuo 2.3'} 图生视频必须连接或拖入第 1 张首帧图`);
-      logBus.error(`生成中止: ${isHailuoH3 ? 'Hailuo H3' : 'Hailuo 2.3'} 图生视频缺少首帧图`, src);
+      const hailuoLabel = isMinimaxH3Ow ? 'MiniMax H3 OW' : isHailuoH3 ? 'Hailuo H3' : 'Hailuo 2.3';
+      setError(`${hailuoLabel} 图生视频必须连接或拖入第 1 张首帧图`);
+      logBus.error(`生成中止: ${hailuoLabel} 图生视频缺少首帧图`, src);
+      return;
+    }
+    if (isMinimaxH3Ow && hailuoMode === 'r2v' && imageUrls.length === 0) {
+      setError('MiniMax H3 OW 参考生视频必须连接或拖入 1 张参考图');
+      logBus.error('生成中止: MiniMax H3 OW 参考生视频缺少参考图', src);
       return;
     }
     if (
@@ -1212,14 +1225,17 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       }
 
       if (isHailuo) {
-        const hailuoImages = hailuoMode === 'i2v'
+        const hailuoImages = hailuoMode === 'i2v' || hailuoMode === 'r2v'
           ? imageUrls.slice(0, isHailuoH3 ? 2 : 1)
           : hailuoMode === 'multi' ? imageUrls.slice(0, 9) : [];
         const hailuoVideos = isHailuoH3 && hailuoMode === 'multi' ? videoUrls.slice(0, 3) : [];
         const hailuoAudios = isHailuoH3 && hailuoMode === 'multi' ? audioUrls.slice(0, 3) : [];
-        const hailuoResolution = isHailuoH3 ? '2K' : resolution === '1080p' ? '1080p' : '768p';
+        const hailuoResolution = isMinimaxH3Ow
+          ? resolution === '720p' ? '720p' : '480p'
+          : isHailuoH3 ? '2K' : resolution === '1080p' ? '1080p' : '768p';
+        const hailuoLabel = isMinimaxH3Ow ? 'MiniMax H3 OW' : isHailuoH3 ? 'Hailuo H3' : 'Hailuo 2.3';
         logBus.info(
-          `提交 ${isHailuoH3 ? 'Hailuo H3' : 'Hailuo 2.3'}: ${apiModel} · ${hailuoDuration}s · ${hailuoResolution} · ${hailuoMode === 'i2v' ? 'follow-image' : ratio} · 图${hailuoImages.length}/视${hailuoVideos.length}/音${hailuoAudios.length}`,
+          `提交 ${hailuoLabel}: ${apiModel} · ${hailuoDuration}s · ${hailuoResolution} · ${ratio} · 图${hailuoImages.length}/视${hailuoVideos.length}/音${hailuoAudios.length}`,
           src,
         );
         const result = await submitHailuo({
@@ -1244,7 +1260,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           httpStatusSource: 'local-backend',
         });
         update({ status: 'polling', taskId: result.taskId, lastPrompt: finalPrompt, progress: '0%' });
-        logBus.info(`${isHailuoH3 ? 'Hailuo H3' : 'Hailuo 2.3'} 任务已提交，开始轮询`, src);
+        logBus.info(`${hailuoLabel} 任务已提交，开始轮询`, src);
         await startPolling(result.taskId, runId, reporter);
         return;
       }
@@ -1888,6 +1904,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
                      : {}),
                    ...(nextModel.startsWith('hailuo-h3-')
                      ? { ratio: '16:9', duration: 5, resolution: '2K' }
+                     : nextModel.startsWith('minimax-h3-ow-')
+                       ? { ratio: '16:9', duration: 5, resolution: '480p' }
                      : nextModel.startsWith('hailuo-2.3-')
                        ? { ratio: '16:9', duration: 6, resolution: '768p' }
                        : {}),
@@ -2164,7 +2182,13 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
 
         {isHailuo && (
           <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.06] px-2 py-1.5 text-[10px] leading-relaxed text-white/55">
-            {isHailuoH3
+            {isMinimaxH3Ow
+              ? hailuoMode === 't2v'
+                ? 'MiniMax H3 OW 文生视频必须填写提示词，不发送参考图。'
+                : hailuoMode === 'r2v'
+                  ? 'MiniMax H3 OW 参考生视频必须填写提示词，并使用排序后的第 1 张参考图。'
+                  : 'MiniMax H3 OW 图生视频必须使用排序后的第 1 张首帧图，提示词可选。'
+              : isHailuoH3
               ? hailuoMode === 't2v'
                 ? 'H3 文生视频必须填写提示词，不发送参考素材；比例会随请求提交。'
                 : hailuoMode === 'i2v'
@@ -2174,8 +2198,10 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
                 ? '文生视频必须填写提示词，不发送画布中的参考图；比例会随请求提交。'
                 : '图生视频使用排序后的第 1 张首帧图，提示词可选；比例跟随输入图片，不发送比例参数。'}
             <div className="mt-1 text-white/35">
-              {isHailuoH3
-                ? '贞贞的平价AI小屋 API · 按次计费 · 5-15 秒 · 固定 2K'
+              {isMinimaxH3Ow
+                ? '贞贞的平价AI小屋 API · 5 / 10 / 15 秒 · 480p / 720p'
+                : isHailuoH3
+                  ? '贞贞的平价AI小屋 API · 按次计费 · 5-15 秒 · 固定 2K'
                 : '贞贞的平价AI小屋 API · 按次计费 · 6 / 10 秒 · 768p / 1080p（1080p 仅 6 秒）'}
             </div>
             {!isHailuoH3 && hailuoMode === 'i2v' && (
@@ -2346,7 +2372,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         {isHailuo && (
           <>
             <div className="grid grid-cols-2 gap-1.5">
-              {hailuoMode !== 'i2v' && (
+              {(hailuoMode !== 'i2v' || isMinimaxH3Ow) && (
                 <div>
                   <label className="text-[10px] text-white/50 block mb-1">比例</label>
                   <select
@@ -2366,8 +2392,10 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
                   value={String(hailuoDuration)}
                   onChange={(e) => {
                     const requested = Number(e.target.value);
-                    const nextDuration = (isHailuoH3
-                      ? Math.max(5, Math.min(15, requested || 5))
+                    const nextDuration = (isMinimaxH3Ow
+                      ? ([5, 10, 15].includes(requested) ? requested : 5)
+                      : isHailuoH3
+                        ? Math.max(5, Math.min(15, requested || 5))
                       : requested === 10 ? 10 : 6) as HailuoDuration;
                     update({
                       duration: nextDuration,
@@ -2385,10 +2413,16 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             <div>
               <label className="text-[10px] text-white/50 block mb-1">分辨率</label>
               <select
-                value={isHailuoH3 ? '2K' : resolution === '1080p' ? '1080p' : '768p'}
+                value={isMinimaxH3Ow
+                  ? resolution === '720p' ? '720p' : '480p'
+                  : isHailuoH3 ? '2K' : resolution === '1080p' ? '1080p' : '768p'}
                 onChange={(e) => {
                   if (isHailuoH3) {
                     update({ resolution: '2K' });
+                    return;
+                  }
+                  if (isMinimaxH3Ow) {
+                    update({ resolution: e.target.value === '720p' ? '720p' : '480p' });
                     return;
                   }
                   const nextResolution = e.target.value === '1080p' ? '1080p' : '768p';

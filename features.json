@@ -1,7 +1,105 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.8.0",
-  "lastUpdated": "2026-08-05-v2.8.0-release-published",
+  "version": "2.8.1",
+  "lastUpdated": "2026-08-06-v2.8.1-release-authorized",
+  "qwenImage30AndMinimaxH3Ow": {
+    "status": "release-authorized-v2.8.1",
+    "date": "2026-08-06",
+    "releaseIncluded": true,
+    "provider": "seedance-nz",
+    "officialDocs": "https://api.seedance.nz/docs/llms.txt",
+    "referenceImplementation": "F:/AI-T8-video-onekey/ComfyUI/custom_nodes/ComfyUI_Seedance@3d1a539b45912c98ed1e735142d04beea26b411c",
+    "imageModels": [
+      "qwen-image-3.0-global-i2i",
+      "qwen-image-3.0-global-pro-i2i",
+      "qwen-image-3.0-global-pro-t2i",
+      "qwen-image-3.0-global-t2i",
+      "qwen-image-3.0-i2i",
+      "qwen-image-3.0-pro-i2i",
+      "qwen-image-3.0-pro-t2i",
+      "qwen-image-3.0-t2i"
+    ],
+    "videoModels": [
+      "minimax-h3-ow-i2v",
+      "minimax-h3-ow-r2v",
+      "minimax-h3-ow-t2v"
+    ],
+    "highlights": [
+      "图像节点新增 Qwen Image TAB，统一承载 8 个 Qwen Image 3.0 国内/Global、标准/Pro、T2I/I2I 模型；参数严格区分 auto、ratio+resolution 与 W*H 自定义尺寸，支持 n=1-6、seed、negative_prompt、prompt_extend，I2I 只接收 1-3 张参考图。",
+      "视频节点既有 Hailuo TAB 新增 MiniMax H3 OW T2V/R2V/I2V 三模型；三者只允许 5/10/15 秒、480p/720p 与官方八种比例，R2V 要求提示词和 1 张参考图，I2V 要求 1 张首帧且提示词可选。",
+      "提交、查询与结果下载继续复用平价小屋异步 Provider 边界：图像走 /v1/image/generations，视频走 /v1/videos；协议字段在后端按模型隔离，不改变其他 Qwen、Hailuo、Seedream 或 Seedance 模型。",
+      "保存 11 份单模型工作流，以及 Qwen Image 与 MiniMax H3 OW 各 1 份配套并发工作流；并发工作流复用真实 Loop parallel 调度、预检、取消、下游克隆和结果聚合，不新增只有外观没有调度能力的重复节点。"
+    ],
+    "verification": [
+      "Qwen/MiniMax 精确目录、参数合同、非法组合、上游失败原因透传、11 份单模型工作流与 2 份并发工作流定向回归 10/10、图像/视频/Provider/运行相邻回归 131/131、TypeScript 与 2857 模块生产前端 build 通过；能力目录 31 个动作、219 个运行时条目、74/74 节点覆盖且公开缺口为 0。",
+      "使用一次性进程环境凭据逐模型完成 11/11 真实 Provider 提交、轮询、下载和媒体校验：8 张结果均为可解码 1024x1024 PNG，3 个视频均为 864x480、约 5.167 秒 H.264 MP4；上游三次模型繁忙只由验收脚本显式重跑失败模型，产品不会自动重放付费提交。",
+      "真实运行画布分别导入两份并发工作流并逐项点击：Qwen Image 8 模型、I2I 1-3 图、auto/比例+1K/2K/自定义 W*H 和 10 个比例可见且联动正确；Hailuo 下 H3 OW 三模型、T2V/R2V/I2V 提示词/单图规则、5/10/15 秒、480p/720p 和 8 个比例可见且联动正确，并发链确认为 Loop 并联循环。临时画布已删除。",
+      "API Key 只从临时进程环境读取，未写入源码、工作流、设置或脱敏证据报告；报告不保存任务 ID、签名 URL 或 Provider 原始响应。"
+    ],
+    "boundaries": [
+      "默认图像、视频模型与旧画布已保存字段不变；只有用户切换到 Qwen Image TAB 或 Hailuo 下的 MiniMax H3 OW 模型才进入新协议。",
+      "本能力已获准纳入 v2.8.1 唯一正式发布流程；Electron、自动更新资产与 GitHub Release 仍须由固定发布提交上的流程生成并核验。"
+    ]
+  },
+  "minimaxH3DigitalHumanMvSkill": {
+    "status": "release-authorized-v2.8.1",
+    "date": "2026-08-06",
+    "releaseIncluded": true,
+    "nodeType": "minimax-h3-prompt-enhancer",
+    "referenceImplementation": "F:/AI-T8-video-onekey/ComfyUI/custom_nodes/comfyui-minimax-h3-prompt-enhancer-T8@e9c5a225ea05ad94933fa4d26f3fd7ac1f21c1e9",
+    "skillSource": "G:/minimaxH3 MV制作提示词skills-digital-human-mv-prompting/digital-human-mv-prompting",
+    "skillSha256": "44927bfbc9058ce0b874cd97817743c13d5f4812b2aa570a4620f3840e69ff48",
+    "highlights": [
+      "现有“MV / 歌词贴字”预设合并参考节点的深度 MV 条件模块与 digital-human-mv-prompting Skill，不新增重复预设；AUTO 只在主提示词、参考上下文或硬约束明确出现 MV、数字人演唱、歌词视频或口型意图时加载，普通标题、字幕、海报或产品贴字不会误触发。",
+      "用户歌词是唯一歌词来源，保持原语言、文字、标点、顺序与重复；画内演唱、离屏人声、器乐、纯文字 MV 分开处理，跨切镜声源保持同一 (Sx) 与 <scenetrans>，只有片尾刻意截断才使用 <cutoff>。",
+      "Ref2VA 数字人肖像默认作为 <Subject N> 身份与外观依据，只有用户明确指定首帧、尾帧、边界帧、关键帧或构图锚点时才作为独立 <Picture N>；人物、场景与字体参考按窄角色隔离，禁止从字体参考复制示例人物、歌词、场景或剧情。",
+      "源歌曲区间只作为分段规划元数据，H3 镜头时间始终从本选段 00:00.000 开始；只有用户明确提供选段区间时才允许在六段 H3 提示词前保留一行 Audio source range，且不得把全曲偏移写入 Subject、Retention、Detailed Description 或镜头时间码。",
+      "只有用户明确声明当前选段原样作为完整最终音轨时才定义 <Audio 1> 并使用 fully_copy；节点没有音频分析输入，不听取、转录、裁切、上传或验证音频，也不会从文件推断歌词、BPM、时间码或音轨复用关系。",
+      "每个分段都重述数字人的可见开场状态，提供独立的开场、推进与末帧交接姿势，避免假设 H3 能看见未连接的上一段；固定 1-20 镜头继续优先于 AUTO、参考模板和预设建议。"
+    ],
+    "ui": [
+      "选择 MV 预设后，主提示词动态展示数字人身份、歌词、演唱者/离屏人声、源歌曲区间、完整音轨声明、已知节拍、承接开场、末帧交接及字体禁止项填写模板。",
+      "高级设置同步切换人物/场景/字体参考角色映射、硬约束与模板融合提示，并明确显示节点只写提示词、不分析音频。"
+    ],
+    "verification": [
+      "MiniMax H3 合同、来源哈希、深度 MV 条件路由、数字人身份、歌词锁定、源歌曲本地时间、fully_copy、模板边界、UI 与 Schema 定向回归 11/11 通过。",
+      "H3/运行意图/节点连线/执行/能力清单/Creator UI/扩展 Provider/视频输入/工作流诊断相邻回归 149/149 通过；TypeScript type-check 与共享合同、Canvas Node Schema JSON 解析通过。",
+      "feature-sync 生成与检查通过：31 个动作、200 个运行时条目、74/74 节点（65 direct + 1 internal + 8 superseded，0 gaps）；public:check、rh-toolbox:check（15 个工具/12 个分类）、worktree development、diff-check 与 2857 模块生产前端 build 通过。",
+      "真实浏览器在运行中的本地画布创建临时 MiniMax H3 节点，展开高级设置并实际切换到“MV / 歌词贴字”；数字人身份、歌词、声源、源歌曲区间、完整音轨、BPM/节拍、开场/末帧交接与字体禁止项模板以及“不分析音频”提示卡均可见，输入框与提示卡边界无重叠。未点击 RUN，临时画布已删除。"
+    ],
+    "boundaries": [
+      "默认仍为无预设、兼容协议、seedance-nz 与 bytedance/doubao-seed-2.1-pro；旧画布不迁移预设、语言、渠道或模型，同一次运行仍只发起一次 LLM 请求。",
+      "输入端口继续为 text/image/video，输出为 text；音频连接、真实音频分析、自动切歌、视频生成、片段拼接、剪辑、调色和交付均不在本节点范围。",
+      "未调用真实或付费 LLM Provider；本能力已获准纳入 v2.8.1 唯一正式发布流程，发布后仍需补录外部 Provider 与安装环境证据。"
+    ]
+  },
+  "runningHubReadOnlyAppInfoFallback": {
+    "status": "release-authorized-v2.8.1",
+    "date": "2026-08-06",
+    "releaseIncluded": true,
+    "affectedSurfaces": [
+      "普通 RunningHub / RH 钱包节点",
+      "RH 超市及自定义 RH 应用",
+      "RH 工具节点",
+      "RH 工具箱能力层"
+    ],
+    "highlights": [
+      "反馈用户在海外站选择下查询 WebAppID 2075149522166181890 时收到 HTTP 200 + code=332；旧 app-info 路由复用了付费任务的窄错误分类器，因 332 含义不明而在第一个站点停止，没有继续尝试另一套已配置站点凭据。",
+      "app-info 是无副作用的只读字段查询，现对任一非成功 Provider 响应或单站传输/解析失败继续尝试另一已配置站点；不再依赖猜测 332、901 或未来不透明业务码的语义。",
+      "提交、上传、任务查询与取消仍使用原窄回退分类器；332 明确保持不可重放，避免把只读查询的宽容策略扩散到可能扣费或重复执行的路径。",
+      "普通 RunningHub、RH 钱包、RH 超市、RH 工具及 RH 工具箱继续共用 /api/proxy/runninghub/app-info，因此不需要各节点维护分叉式错误码清单。"
+    ],
+    "verification": [
+      "真实浏览器在运行中的画布内创建临时 RunningHub 节点，实际点击切换为“海外站 · runninghub.ai”，输入 2075149522166181890 并点击搜索；修复前后均由本机有效海外 Key 直接返回 4 个参数、保持 intl，页面无 code=332、ERR_INVALID_ARGUMENT 或查询失败。临时画布随后删除，画布数和节点数恢复为 0。",
+      "真实本机代理分别以 site=intl 与 site=cn 查询同一 WebAppID，均返回 HTTP 200、4 个字段且无回退；这证明 ID 和两个真实站点当前可访问，但不把维护者本机结果冒充为反馈用户的 Key/网络环境。",
+      "确定性路由回归精确模拟 .ai 首次返回 code=332、随后 .cn 成功：返回原 WebAppID、rhSite=cn、rhFallbackUsed=true 且只调用两个站点；同时锁定全局付费重放分类器对 332 返回 false。",
+      "完整代理安全与脱敏回归 37/37、RH/连线/执行相邻回归 79/79、Chromium 系统网络桥 11/11、TypeScript type-check、Node 语法、worktree development 与 diff-check 通过。"
+    ],
+    "boundaries": [
+      "未修改或读取任何 RunningHub API Key；未提交、生成、上传、取消或下载真实付费任务。",
+      "反馈用户安装版的 code=332 外部环境仍需新版分发后复验；本修复已获准纳入 v2.8.1 唯一正式发布流程，延期证据不能标记为通过。"
+    ]
+  },
   "runningHubCrossSiteWebappLookup": {
     "status": "released-v2.8.0",
     "date": "2026-08-05",
@@ -93,42 +191,42 @@
     ]
   },
   "release": {
-    "status": "released-v2.8.0",
-    "version": "2.8.0",
-    "date": "2026-08-05",
-    "publishedAt": "2026-08-05T14:43:39Z",
-    "tag": "v2.8.0",
-    "latest": true,
-    "sourceCommit": "2b984be4696a9abe3627832e3d39ba02f7338fdb",
-    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.8.0",
+    "status": "release-authorized-v2.8.1",
+    "version": "2.8.1",
+    "date": "2026-08-06",
+    "publishedAt": null,
+    "tag": "v2.8.1",
+    "latest": false,
+    "sourceCommit": null,
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.8.1",
     "artifacts": {
       "installer": {
-        "name": "T8-PenguinCanvas-Setup-2.8.0.exe",
-        "size": 1317437404,
-        "sha256": "4daf8baaa995e8b96b868b5202041b1f27bcd68df6f349b189c05815c9e4392e"
+        "name": "T8-PenguinCanvas-Setup-2.8.1.exe",
+        "size": null,
+        "sha256": null
       },
       "blockmap": {
-        "name": "T8-PenguinCanvas-Setup-2.8.0.exe.blockmap",
-        "size": 1372947,
-        "sha256": "c4efcfb24db6d8638d79f33601ed80063b61f92e29b452b0852c9dc982a5511a"
+        "name": "T8-PenguinCanvas-Setup-2.8.1.exe.blockmap",
+        "size": null,
+        "sha256": null
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": 362,
-        "sha256": "d023c4c3ef8995875c78d16c1feac757fd60bda6c1df4a8081dde4d00941f344"
+        "size": null,
+        "sha256": null
       }
     },
     "verification": [
-      "v2.8.0 发布范围固定为 RunningHub 国内/海外 WebApp 自动识别与 Provider 生成、流式持久化及结果下载稳定性加固，不回退 v2.7.4 之后的系统代理、TUN、VPN、IPv4/IPv6 和后续节点、模型、协议能力。",
-      "Provider 生成/下载与相邻回归 153/153、RunningHub 跨站定向 6/6、app-info 路由/脱敏 2/2 通过；TypeScript、能力同步、公开面、RH 工具箱与生产前端构建通过。",
-      "固定提交 2b984be4696a9abe3627832e3d39ba02f7338fdb 上的唯一正式流程完成 Electron/NSIS、4426 模块生产构建、私有后端加密、post-build、provenance、sealed recovery、GitHub 自动更新三资产、发布前完整远端回下载、固定 Tag、非草稿/非预发布、Latest 与 recovery 清理核验。",
-      "用户已明确授权先发布、后补真实 Provider、反馈用户 VPN/安装环境、协作多端与安装升级证据；协作证据门仅允许缺失清单按 owner-approved-post-release-v2.8.0 延期，不能把延期标记为已通过。"
+      "v2.8.1 发布范围固定为 Qwen Image 3.0 八模型、MiniMax H3 OW 三模型及配套工作流、MiniMax H3 官方 Skill/数字人 MV 增强，以及 RunningHub app-info 只读双站兜底；不回退 v2.8.0 或更早版本的节点、模型、协议和网络能力。",
+      "Qwen/MiniMax 定向回归 10/10、相邻回归 131/131、H3 数字人 MV 定向 11/11、H3 相邻 149/149、RH 代理安全 37/37、RH 相邻 79/79 与 Chromium 网络桥 11/11 已通过；11 个新增生成模型均完成真实提交、轮询、下载及媒体校验。",
+      "正式 Electron/NSIS、私有后端加密、post-build、provenance、sealed recovery、GitHub 自动更新三资产、发布前完整远端回下载、固定 Tag、非草稿/非预发布、Latest 与 recovery 清理只能由固定发布提交上的唯一流程完成，未完成前不得标记为通过。",
+      "用户已明确授权先发布、后补反馈用户安装环境、协作多端与安装升级证据；协作证据门仅允许完全缺失的清单按 owner-approved-post-release-v2.8.1 延期，不能把延期标记为已通过。"
     ]
   },
   "versionSequencePolicy": {
     "status": "active",
     "date": "2026-07-30",
-    "currentVersion": "2.8.0",
+    "currentVersion": "2.8.1",
     "rules": [
       "版本号每一段只使用 0-9；v2.6.9 的下一正式版本固定为 v2.7.0。",
       "禁止创建、打包、推送、打 tag、发布或写入自动更新元数据为 v2.6.10。",
@@ -141,6 +239,7 @@
       "v2.7.7 的下一正式版本固定为 v2.7.8。",
       "v2.7.8 的下一正式版本固定为 v2.7.9。",
       "v2.7.9 的下一正式版本固定为 v2.8.0，禁止创建 v2.7.10。",
+      "v2.8.0 的下一正式版本固定为 v2.8.1。",
       "后续改版本前必须同步核对 package.json、package-lock.json、README、features.json、项目 SKILL.md、Release notes、自动更新元数据和 Git tag。"
     ]
   },
@@ -6443,11 +6542,11 @@
       "T8_ENABLE_LOCAL_PRIVATE": "开发环境和普通本机构建可选；0=关闭本机 local-private/extensions 私有扩展。正式 dist:release 固定为 1，不能被父环境降级。GitHub/clean clone 因为没有 local-private 目录，不包含充值实现。",
       "T8_DISABLE_LOCAL_EXTENSIONS": "开发环境可选；1=关闭本地扩展。正式 dist:release 固定为 0，确保本机私有 sidecar 参与加密打包与后置校验。"
     },
-    "version": "2.8.0",
-    "semverVersion": "2.8.0",
+    "version": "2.8.1",
+    "semverVersion": "2.8.1",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.0 已正式发布，包含 RunningHub 国内/海外 WebApp 自动识别与 Provider 生成下载稳定性加固。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.8.0 已从固定 source commit 2b984be4696a9abe3627832e3d39ba02f7338fdb 的唯一 dist:release 流程生成并发布：安装包 1,317,437,404 bytes / SHA-256 4daf8baaa995e8b96b868b5202041b1f27bcd68df6f349b189c05815c9e4392e；blockmap 1,372,947 bytes / SHA-256 c4efcfb24db6d8638d79f33601ed80063b61f92e29b452b0852c9dc982a5511a；latest.yml 362 bytes / SHA-256 d023c4c3ef8995875c78d16c1feac757fd60bda6c1df4a8081dde4d00941f344。post-build、provenance、sealed recovery、GitHub digest/size、完整远端回下载、Tag/target 与 Latest 均通过，recovery 已清除。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.1 已获准进入唯一正式发布流程，包含 Qwen Image 3.0、MiniMax H3 OW、H3 官方 Skill/数字人 MV 增强与 RunningHub 只读双站查询兜底。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.8.1 正式安装包、blockmap 与 latest.yml 只能由固定 source commit 上的唯一 dist:release 流程生成；在 post-build、provenance、sealed recovery、GitHub digest/size、完整远端回下载、Tag/target 与 Latest 全部通过前，不记录大小、摘要或发布成功。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
@@ -7092,6 +7191,40 @@
       "未解锁影片无法播放；解锁后可播放、拖动进度条、继续播放和清缓存。",
       "加密影片原始素材不得进入 git、build 明文目录或 Electron resources。",
       "自动更新到带新影片的版本后，旧成就数据仍能解锁并播放新资源。"
+    ]
+  },
+  "minimaxH3OfficialSkillProfiles": {
+    "status": "release-authorized-v2.8.1",
+    "date": "2026-08-06",
+    "releaseIncluded": true,
+    "nodeType": "minimax-h3-prompt-enhancer",
+    "referenceImplementation": "F:/AI-T8-video-onekey/ComfyUI/custom_nodes/comfyui-minimax-h3-prompt-enhancer-T8@e9c5a225ea05ad94933fa4d26f3fd7ac1f21c1e9",
+    "officialSkillSource": "https://github.com/MiniMax-AI/MiniMax-H3/tree/093f3129a3f7bd27c74928b1cd31a54fbdebe057/skills",
+    "highlights": [
+      "同步参考节点提交 e9c5a225ea05ad94933fa4d26f3fd7ac1f21c1e9 与 MiniMax-H3 官方 Skill 固定提交 093f3129a3f7bd27c74928b1cd31a54fbdebe057；共享合同记录来源提交，避免规则来源漂移。",
+      "新增“现有兼容（保留中英文）/官方 Skill 严格（全英文协议）”选择。默认继续兼容旧画布和中文正文；严格档强制所有说明字段与描述正文使用英文，只保留原始对白、歌词、品牌/UI 文案和画面文字的源语言。",
+      "新增无、AUTO 与 8 个官方场景写作预设：极简产品广告、3D 动画短片、品牌宣传短片、MV/歌词贴字、双人合作游戏开场、纸拼贴讲解、立体纸艺停格讲解、手绘实拍融合。默认无预设，AUTO 最多推断一个明确匹配项。",
+      "消息编译器补齐真实发声顺序的稳定 (S1)/(S2)、多人同声、跨切镜 <scenetrans>、片尾 <cutoff>、Ref2VA Subject/Picture/Video/Audio 角色与保留标记规则，并禁止虚构对白、歌词、品牌事实、功能、指标、Logo 或可读文字。",
+      "创意预设仅参与同一次 LLM 提示词改写，不安装远程 Skill、不生成锚点素材、不执行视频生成/拼接/交付工作流，也不声称分析本节点不支持的音频附件。"
+    ],
+    "sourceFiles": [
+      "backend/src/shared/minimaxH3PromptEnhancerContract.json",
+      "src/utils/minimaxH3PromptEnhancer.ts",
+      "src/components/nodes/MiniMaxH3PromptEnhancerNode.tsx",
+      "src/components/Canvas.tsx",
+      "backend/src/shared/canvasNodeSchema.json",
+      "tests/minimaxH3PromptEnhancer.test.ts"
+    ],
+    "verification": [
+      "H3 合同/验证/编译/UI/Schema 与 Provider 权威定向回归 12/12 通过；相关执行、连线、能力清单与 Agent UI 相邻回归 103/103 通过。",
+      "TypeScript type-check、共享 H3 合同与 Canvas Node Schema JSON 解析、public-check、feature-sync 74/74（0 个公开缺口）及 2857 模块生产前端 build 通过。",
+      "未调用真实或付费 LLM Provider；本能力已获准纳入 v2.8.1 唯一正式发布流程，外部 Provider 与安装环境证据仍按授权后补。"
+    ],
+    "boundaries": [
+      "画布产品默认值保持 seedance-nz / bytedance/doubao-seed-2.1-pro；参考节点自身的 bytedance/doubao-seed-evolving 不覆盖产品默认。",
+      "旧画布缺少新字段时归一为兼容协议与无预设；非法未来值失败关闭，不静默改成其他协议或预设。",
+      "严格协议优先于输出语言选择，但不翻译或改写用户提供的对白、歌词、品牌/UI 文案与画面文字。",
+      "凭据、Base URL 和扩展模型清单继续只由全局 API 设置管理，不进入节点合同、提示词、日志或能力清单。"
     ]
   },
   "minimaxH3ShotCountControl": {
@@ -9401,7 +9534,7 @@
         {
           "type": "minimax-h3-prompt-enhancer",
           "label": "MiniMax H3提示词增强器",
-          "description": "参考 comfyui-minimax-h3-prompt-enhancer-T8 的 H3 合同，支持 T2VA/I2VA/FL2VA/L2VA/Ref2VA、多图片与完整视频理解、全部扩展 LLM 渠道；默认贞贞的平价AI小屋 bytedance/doubao-seed-2.1-pro"
+          "description": "参考 comfyui-minimax-h3-prompt-enhancer-T8、MiniMax 官方 Skill 与 digital-human-mv-prompting，支持 T2VA/I2VA/FL2VA/L2VA/Ref2VA、兼容/严格英文协议、无/AUTO/8 个创意预设、数字人 MV 身份与分段连续性、多图片与完整视频理解、全部扩展 LLM 渠道；默认贞贞的平价AI小屋 bytedance/doubao-seed-2.1-pro"
         }
       ]
     },

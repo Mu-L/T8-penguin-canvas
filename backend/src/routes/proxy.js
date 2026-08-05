@@ -7929,26 +7929,41 @@ router.get('/runninghub/app-info', async (req, res) => {
   if (!webappId) return res.status(400).json({ success: false, error: 'webappId 必填' });
   try {
     let lastData = null;
+    let lastError = null;
     for (let index = 0; index < candidates.length; index += 1) {
       const candidate = candidates[index];
-      const url = `${candidate.baseUrl}/api/webapp/apiCallDemo?apiKey=${encodeURIComponent(candidate.apiKey)}&webappId=${encodeURIComponent(webappId)}`;
-      const r = await fetchProviderResponse(url, { method: 'GET', headers: { Authorization: `Bearer ${candidate.apiKey}` } });
-      const data = await parseJsonResponse(r, `RH ${candidate.label}应用参数接口`);
-      lastData = data;
-      if (String(data?.code) === '0') {
-        return res.json({
-          success: true,
-          data: {
-            ...normalizeRhAppInfo(data.data || {}, webappId, [candidate.apiKey]),
-            rhSite: candidate.id,
-            rhFallbackUsed: candidate.id !== requestedSite,
-          },
-        });
+      try {
+        const url = `${candidate.baseUrl}/api/webapp/apiCallDemo?apiKey=${encodeURIComponent(candidate.apiKey)}&webappId=${encodeURIComponent(webappId)}`;
+        const r = await fetchProviderResponse(url, { method: 'GET', headers: { Authorization: `Bearer ${candidate.apiKey}` } });
+        const data = await parseJsonResponse(r, `RH ${candidate.label}应用参数接口`);
+        lastData = data;
+        if (String(data?.code) === '0') {
+          return res.json({
+            success: true,
+            data: {
+              ...normalizeRhAppInfo(data.data || {}, webappId, [candidate.apiKey]),
+              rhSite: candidate.id,
+              rhFallbackUsed: candidate.id !== requestedSite,
+            },
+          });
+        }
+        const next = candidates[index + 1];
+        if (!next) break;
+        // app-info is a read-only lookup. Exhaust the other configured site on
+        // every non-success instead of guessing the meaning of opaque Provider
+        // codes such as 332. Paid submit/upload paths keep their narrow replay
+        // classifier so this lookup tolerance cannot cause duplicate charges.
+        logRhSiteFallback('app-info', candidate, next, data?.msg || `Provider code ${data?.code ?? 'unknown'}`);
+      } catch (candidateError) {
+        lastError = candidateError;
+        const next = candidates[index + 1];
+        if (!next) throw candidateError;
+        // Do not include the upstream error text here: transport errors may
+        // contain a URL whose query string carries the Provider credential.
+        logRhSiteFallback('app-info', candidate, next, 'read-only lookup transport failure');
       }
-      const next = candidates[index + 1];
-      if (!next || !shouldRetryRhSiteResponse(r, data)) break;
-      logRhSiteFallback('app-info', candidate, next, data?.msg || `HTTP ${r.status}`);
     }
+    if (!lastData && lastError) throw lastError;
     const code = String(lastData?.code ?? '').replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 32) || 'unknown';
     return res.status(400).json({ success: false, error: `RH 查询失败 code=${code}` });
   } catch (e) {

@@ -43,6 +43,9 @@ import {
   ZHENZHEN_IMAGE_NB_PRO_MODEL,
   ZHENZHEN_IMAGE_NB_EXTREME_RATIOS,
   ZHENZHEN_IMAGE_NB_STANDARD_RATIOS,
+  QWEN_IMAGE_30_MODELS,
+  QWEN_IMAGE_30_RATIOS,
+  isQwenImage30I2IModel,
 } from '../../providers/models';
 import {
   submitImageAsync,
@@ -113,7 +116,7 @@ import {
 
 /**
  * ImageNode - 图像生成(ZhenzhenMagic)
- * 多 TAB 切换:GPT2 / 香蕉2 / 香蕉Pro / Grok / Seedream / MJ
+ * 多 TAB 切换:GPT2 / 香蕉2 / 香蕉Pro / Grok / Seedream / Qwen Image / MJ
  * 参数:模型 TAB / 比例 / 尺寸 / 多张参考图 / 本地 prompt
  * 上游 text 节点 → prompt(优先);上游 image 节点 → 参考图(并入 references)
  */
@@ -414,13 +417,14 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
     || modelDef.id === 'nano-banana-2'
     || modelDef.id === 'nano-banana-pro'
     || modelDef.id === 'grok-image';
+  const isQwenImageTab = modelDef.paramKind === 'qwen-image-3.0';
   const isZhenzhenBudgetImageSelected = !isExternalSelected
     && isBudgetImageTab
     && (d?.imageBuiltinSource === 'seedance-nz' || isZhenzhenBudgetImageModel(savedApiModel));
   const isZhenzhenBudgetMjSelected = !isExternalSelected
     && modelDef.paramKind === 'mj'
     && d?.imageBuiltinSource === 'seedance-nz';
-  const isZhenzhenBudgetPlatformSelected = isZhenzhenBudgetImageSelected || isZhenzhenBudgetMjSelected;
+  const isZhenzhenBudgetPlatformSelected = isZhenzhenBudgetImageSelected || isZhenzhenBudgetMjSelected || isQwenImageTab;
   const budgetDefaultApiModel = modelDef.id === 'grok-image'
     ? ZHENZHEN_IMAGE_GK_V15_MODEL
     : modelDef.id === 'nano-banana-2'
@@ -450,6 +454,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   const isZhenzhenNb2 = apiModel === ZHENZHEN_IMAGE_NB_2_MODEL;
   const isZhenzhenNbPro = apiModel === ZHENZHEN_IMAGE_NB_PRO_MODEL;
   const isZhenzhenNb = isZhenzhenNb2Lite || isZhenzhenNb2 || isZhenzhenNbPro;
+  const isQwenImageI2I = isQwenImageTab && isQwenImage30I2IModel(apiModel);
   const zhenzhenNbImageCount = isZhenzhenNb2Lite
     ? Math.min(4, Math.max(1, Number(d?.apimartImageCount) || 1))
     : 1;
@@ -530,6 +535,15 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   const mjNzVideoSource: 'image' | 'task' = d?.mjNzVideoSource === 'task' ? 'task' : 'image';
   const isGrokImage = modelDef.paramKind === 'grok-image';
   const isSeedream = modelDef.paramKind === 'seedream-v5';
+  const qwenSizingMode: 'auto' | 'ratio' | 'custom_size' = ['ratio', 'custom_size'].includes(d?.qwenSizingMode)
+    ? d.qwenSizingMode
+    : 'auto';
+  const qwenResolution: '1k' | '2k' = d?.qwenResolution === '2k' ? '2k' : '1k';
+  const qwenCustomSize = String(d?.qwenCustomSize || '1024*1024').trim().replace(/[xX×]/g, '*');
+  const qwenImageCount = Math.min(6, Math.max(1, Number(d?.qwenImageCount) || 1));
+  const qwenSeed = Number.isInteger(d?.qwenSeed) ? Math.max(-1, Math.min(2147483647, d.qwenSeed)) : -1;
+  const qwenNegativePrompt = typeof d?.qwenNegativePrompt === 'string' ? d.qwenNegativePrompt : '';
+  const qwenPromptExtend = d?.qwenPromptExtend !== false;
   const seedreamApiSource: 'zhenzhen' | 'seedance-nz' = d?.seedreamApiSource === 'seedance-nz' ? 'seedance-nz' : 'zhenzhen';
   const isSeedreamNz = isSeedream && seedreamApiSource === 'seedance-nz';
   const seedreamNzModelFamily: 'domestic' | 'overseas' = d?.seedreamNzModelFamily === 'overseas'
@@ -565,6 +579,8 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   // 参考图上限(FAL 使用 FAL_REGISTRY.maxRefs,其他走原设计)
   const maxRefs = isExternalSelected
     ? Math.max(8, modelDef.maxReferenceImages || 0)
+    : isQwenImageTab
+      ? isQwenImageI2I ? 3 : 0
     : isZhenzhenImageG2I2I
       ? 10
     : isZhenzhenLowpriceImage
@@ -655,6 +671,22 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   // 切换模型时,如果当前比例/尺寸不在新模型选项里则重置
   const switchModel = (mId: string) => {
     const newDef = IMAGE_MODELS.find((m) => m.id === mId) || IMAGE_MODELS[0];
+    if (newDef.paramKind === 'qwen-image-3.0') {
+      update({
+        model: newDef.id,
+        apiModel: newDef.apiModel,
+        imageBuiltinSource: 'seedance-nz',
+        aspectRatio: '1:1',
+        sizeLevel: '',
+        qwenSizingMode: d?.qwenSizingMode || 'auto',
+        qwenResolution: d?.qwenResolution || '1k',
+        qwenCustomSize: d?.qwenCustomSize || '1024*1024',
+        qwenImageCount: Math.min(6, Math.max(1, Number(d?.qwenImageCount) || 1)),
+        qwenSeed: Number.isInteger(d?.qwenSeed) ? d.qwenSeed : -1,
+        qwenPromptExtend: d?.qwenPromptExtend !== false,
+      });
+      return;
+    }
     if (
       isZhenzhenBudgetPlatformSelected
       && (
@@ -706,6 +738,15 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   };
 
   const switchApiModel = (nextApiModel: string) => {
+    if ((QWEN_IMAGE_30_MODELS as readonly string[]).includes(nextApiModel)) {
+      update({
+        model: 'qwen-image-3.0',
+        apiModel: nextApiModel,
+        imageBuiltinSource: 'seedance-nz',
+        aspectRatio: QWEN_IMAGE_30_RATIOS.includes(aspectRatio) ? aspectRatio : '1:1',
+      });
+      return;
+    }
     const nextSize = gptImage2ZhenzhenVariantSize(nextApiModel);
     if (isZhenzhenBudgetImageModel(nextApiModel)) {
       const nextModel = nextApiModel === ZHENZHEN_IMAGE_GK_V15_MODEL || nextApiModel === ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL
@@ -874,6 +915,21 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
     if (isZhenzhenGrokImageEdit && upstreamImages.length === 0) {
       setError(`${ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL} 必须提供 1 张参考图`);
       logBus.error('生成中止: Grok Image 1.5 编辑缺少参考图', src);
+      return;
+    }
+    if (isQwenImageTab && (finalPrompt.length < 5 || finalPrompt.length > 2000)) {
+      setError('Qwen Image 3.0 提示词必须为 5-2000 字符');
+      logBus.error(`生成中止: Qwen Image 3.0 提示词长度 ${finalPrompt.length}`, src);
+      return;
+    }
+    if (isQwenImageI2I && upstreamImages.length === 0) {
+      setError(`${apiModel} 必须提供 1-3 张参考图`);
+      logBus.error('生成中止: Qwen Image 3.0 图像编辑缺少参考图', src);
+      return;
+    }
+    if (isQwenImageTab && qwenSizingMode === 'custom_size' && !/^\d+\*\d+$/.test(qwenCustomSize)) {
+      setError('Qwen Image 3.0 自定义尺寸必须为 W*H，例如 1024*1024');
+      logBus.error(`生成中止: Qwen Image 3.0 自定义尺寸无效 ${qwenCustomSize || '(空)'}`, src);
       return;
     }
     if (isSeedream && !isSeedreamNz && !/^\d+x\d+$/.test(seedreamResolvedSize)) {
@@ -1526,28 +1582,40 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
 
       // seedance.nz uses a dedicated asynchronous image protocol for Seedream,
       // Zhenzhen Image G-2 and APIMart image models.
-      if (isSeedreamNz || isZhenzhenBudgetImageSelected) {
+      if (isSeedreamNz || isZhenzhenBudgetImageSelected || isQwenImageTab) {
         if (!zhenzhenSd2ApiKey) throw new Error(`请先在 API 设置中填写“${seedanceNzProviderLabel} API Key”`);
-        const providerRefs = isZhenzhenImageG2 && !isZhenzhenImageG2I2I
+        const providerRefs = isQwenImageTab
+          ? (isQwenImageI2I ? allRefs.slice(0, 3) : [])
+          : isZhenzhenImageG2 && !isZhenzhenImageG2I2I
           ? []
           : isZhenzhenGrokImage
             ? []
             : isZhenzhenGrokImageEdit
               ? allRefs.slice(0, 1)
               : allRefs;
-        const expectedModel = isZhenzhenBudgetImageSelected
+        const expectedModel = isQwenImageTab
+          ? apiModel
+          : isZhenzhenBudgetImageSelected
           ? apiModel
           : seedreamNzModelFamily === 'overseas'
             ? (providerRefs.length ? 'dola-seedream-5.0-pro-i2i' : 'dola-seedream-5.0-pro-t2i')
             : (providerRefs.length ? 'seedream-v5-pro-i2i' : 'seedream-v5-pro-t2i');
-        const imageFamilyLabel = isZhenzhenImageG2
+        const imageFamilyLabel = isQwenImageTab
+          ? 'Qwen Image 3.0'
+          : isZhenzhenImageG2
           ? 'Zhenzhen Image G-2'
           : isZhenzhenNb
             ? 'Zhenzhen Image Nano Banana'
           : isZhenzhenApimartImage
             ? 'APIMart Image'
             : 'Seedream';
-        const sizeLabel = isZhenzhenImageG2
+        const sizeLabel = isQwenImageTab
+          ? qwenSizingMode === 'auto'
+            ? `自动推荐 · n=${qwenImageCount}`
+            : qwenSizingMode === 'ratio'
+              ? `${qwenResolution} · ${effectiveAspectRatio} · n=${qwenImageCount}`
+              : `${qwenCustomSize} · n=${qwenImageCount}`
+          : isZhenzhenImageG2
           ? '1k'
           : isZhenzhenLowpriceImage
             ? `${effectiveSizeLevel.toLowerCase()} · ${effectiveAspectRatio}`
@@ -1563,7 +1631,17 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         const submit = await submitSeedreamNz({
           prompt: finalPrompt,
           images: providerRefs,
-          model: isZhenzhenBudgetImageSelected
+          model: isQwenImageTab
+            ? apiModel as
+              | 'qwen-image-3.0-t2i'
+              | 'qwen-image-3.0-i2i'
+              | 'qwen-image-3.0-pro-t2i'
+              | 'qwen-image-3.0-pro-i2i'
+              | 'qwen-image-3.0-global-t2i'
+              | 'qwen-image-3.0-global-i2i'
+              | 'qwen-image-3.0-global-pro-t2i'
+              | 'qwen-image-3.0-global-pro-i2i'
+            : isZhenzhenBudgetImageSelected
             ? apiModel as
               | 'zhenzhen-image-g2-t2i'
               | 'zhenzhen-image-g2-i2i'
@@ -1574,22 +1652,34 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
               | 'zhenzhen-image-nb-2'
               | 'zhenzhen-image-nb-pro'
             : undefined,
-          modelFamily: isZhenzhenBudgetImageSelected ? undefined : seedreamNzModelFamily,
-          resolution: isZhenzhenImageG2
+          modelFamily: isZhenzhenBudgetImageSelected || isQwenImageTab ? undefined : seedreamNzModelFamily,
+          resolution: isQwenImageTab
+            ? qwenSizingMode === 'ratio' ? qwenResolution : undefined
+            : isZhenzhenImageG2
             ? '1k'
             : isZhenzhenLowpriceImage
               ? effectiveSizeLevel.toLowerCase() as '1k' | '2k' | '4k'
               : isZhenzhenNb
                 ? effectiveSizeLevel.toLowerCase() as '0.5k' | '1k' | '2k' | '4k'
             : (seedreamNzResolution === 'custom' ? undefined : seedreamNzResolution),
-          ratio: isZhenzhenImageG2
+          ratio: isQwenImageTab
+            ? qwenSizingMode === 'ratio' ? effectiveAspectRatio as
+              | '1:1' | '2:3' | '3:2' | '3:4' | '4:3' | '4:5' | '5:4' | '9:16' | '16:9' | '21:9'
+              : undefined
+            : isZhenzhenImageG2
             ? effectiveAspectRatio as 'adaptive' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16' | '21:9'
             : undefined,
-          size: isZhenzhenApimartImage
+          size: isQwenImageTab
+            ? qwenSizingMode === 'custom_size' ? qwenCustomSize : undefined
+            : isZhenzhenApimartImage
             ? effectiveAspectRatio
             : !isZhenzhenImageG2 && seedreamNzResolution === 'custom' ? seedreamNzResolvedSize : undefined,
-          n: isZhenzhenNb ? zhenzhenNbImageCount : isZhenzhenApimartImage ? 1 : undefined,
-          output_format: isZhenzhenBudgetImageSelected ? undefined : seedreamOutputFormat,
+          n: isQwenImageTab ? qwenImageCount : isZhenzhenNb ? zhenzhenNbImageCount : isZhenzhenApimartImage ? 1 : undefined,
+          output_format: isZhenzhenBudgetImageSelected || isQwenImageTab ? undefined : seedreamOutputFormat,
+          negative_prompt: isQwenImageTab ? qwenNegativePrompt.trim() || undefined : undefined,
+          prompt_extend: isQwenImageTab ? qwenPromptExtend : undefined,
+          sizing_mode: isQwenImageTab ? qwenSizingMode : undefined,
+          seed: isQwenImageTab ? qwenSeed : undefined,
         }, { submissionKey: reporter?.providerSubmissionKey });
         if (!isCurrentGenerationRun(runId)) return;
         const taskId = submit.taskId;
@@ -1653,7 +1743,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
               imageUrl: url,
               imageUrls: query.urls,
               lastPrompt: finalPrompt,
-              usedI2I: isZhenzhenImageG2 ? isZhenzhenImageG2I2I : providerRefs.length > 0,
+              usedI2I: isQwenImageTab ? isQwenImageI2I : isZhenzhenImageG2 ? isZhenzhenImageG2I2I : providerRefs.length > 0,
               requestId: query.requestId,
               transportHttpStatus: query.transportHttpStatus,
               upstreamHttpStatus: query.upstreamHttpStatus,
@@ -1959,7 +2049,8 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
                       const nextId = e.target.value;
                       if (nextId === 'zhenzhen') {
                         const leavingBudgetPlatform = d?.imageBuiltinSource === 'seedance-nz'
-                          || isZhenzhenBudgetImageModel(savedApiModel);
+                          || isZhenzhenBudgetImageModel(savedApiModel)
+                          || isQwenImageTab;
                         update({
                           providerSource: 'zhenzhen',
                           providerId: '',
@@ -2464,6 +2555,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
                 || m.id === 'nano-banana-2'
                 || m.id === 'nano-banana-pro'
                 || m.id === 'grok-image'
+                || m.id === 'qwen-image-3.0'
                 || m.id === 'midjourney')
               .map((m) => {
               const isActive = m.id === model;
@@ -2566,6 +2658,19 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           </div>
         )}
 
+        {isQwenImageTab && !isExternalSelected && (
+          <div className="rounded border border-cyan-400/25 bg-cyan-500/5 px-2 py-1.5 text-[10px] leading-4 text-cyan-100/80">
+            <div>贞贞的平价AI小屋 · {apiModel}</div>
+            <div>
+              {isQwenImageI2I
+                ? '图像编辑模式：必须按顺序提供 1–3 张参考图。'
+                : '文生图模式：只发送 Prompt，不发送已连接的参考图。'}
+            </div>
+            <div>提示词 5–2000 字符；单次可请求 1–6 张图。</div>
+            {!zhenzhenSd2ApiKey && <div className="text-amber-300">尚未配置“贞贞的平价AI小屋 API Key”</div>}
+          </div>
+        )}
+
         {isZhenzhenNb2Lite && !isExternalSelected && (
           <div>
             <label className="text-[10px] text-white/50 block mb-1">生成张数</label>
@@ -2602,7 +2707,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         />
 
         {/* 比例 + 尺寸;Seedream 使用像素尺寸 + 输出格式,Grok Image 只需要比例 */}
-        {(!isFal && !isMj && !isComfyExternal) && (
+        {(!isFal && !isMj && !isComfyExternal && !isQwenImageTab) && (
           <div className={`grid gap-2 ${isSeedream || (!isGrokImage && effectiveSizes.length) ? 'grid-cols-2' : 'grid-cols-1'}`}>
             {effectiveAspectRatios.length > 0 && <div>
               <label className="text-[10px] text-white/50 block mb-1">比例</label>
@@ -2688,6 +2793,112 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
                 />
               </div>
             )}
+          </div>
+        )}
+        {isQwenImageTab && !isExternalSelected && (
+          <div className="space-y-2 rounded border border-cyan-400/25 bg-cyan-500/5 p-2">
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">尺寸模式</label>
+                <select
+                  value={qwenSizingMode}
+                  onChange={(e) => update({ qwenSizingMode: e.target.value })}
+                  style={{ background: '#18181b', color: '#ffffff' }}
+                  className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-cyan-400/60"
+                >
+                  <option value="auto" style={{ background: '#18181b', color: '#ffffff' }}>自动推荐</option>
+                  <option value="ratio" style={{ background: '#18181b', color: '#ffffff' }}>比例 + 分辨率</option>
+                  <option value="custom_size" style={{ background: '#18181b', color: '#ffffff' }}>自定义尺寸</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">生成张数</label>
+                <select
+                  value={qwenImageCount}
+                  onChange={(e) => update({ qwenImageCount: Number(e.target.value) })}
+                  style={{ background: '#18181b', color: '#ffffff' }}
+                  className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-cyan-400/60"
+                >
+                  {[1, 2, 3, 4, 5, 6].map((count) => (
+                    <option key={count} value={count} style={{ background: '#18181b', color: '#ffffff' }}>{count}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            {qwenSizingMode === 'ratio' && (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] text-white/50 block mb-1">比例</label>
+                  <select
+                    value={effectiveAspectRatio}
+                    onChange={(e) => update({ aspectRatio: e.target.value })}
+                    style={{ background: '#18181b', color: '#ffffff' }}
+                    className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-cyan-400/60"
+                  >
+                    {QWEN_IMAGE_30_RATIOS.map((item) => (
+                      <option key={item} value={item} style={{ background: '#18181b', color: '#ffffff' }}>{item}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-white/50 block mb-1">分辨率</label>
+                  <select
+                    value={qwenResolution}
+                    onChange={(e) => update({ qwenResolution: e.target.value })}
+                    style={{ background: '#18181b', color: '#ffffff' }}
+                    className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-cyan-400/60"
+                  >
+                    <option value="1k" style={{ background: '#18181b', color: '#ffffff' }}>1K</option>
+                    <option value="2k" style={{ background: '#18181b', color: '#ffffff' }}>2K</option>
+                  </select>
+                </div>
+              </div>
+            )}
+            {qwenSizingMode === 'custom_size' && (
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">自定义尺寸（W*H）</label>
+                <input
+                  value={qwenCustomSize}
+                  onChange={(e) => update({ qwenCustomSize: e.target.value })}
+                  placeholder="1024*1024"
+                  inputMode="text"
+                  style={{ background: '#18181b', color: '#ffffff' }}
+                  className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-cyan-400/60"
+                />
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">Seed（-1 随机）</label>
+                <input
+                  type="number"
+                  min={-1}
+                  max={2147483647}
+                  value={qwenSeed}
+                  onChange={(e) => update({ qwenSeed: Math.max(-1, Math.min(2147483647, Number(e.target.value) || 0)) })}
+                  style={{ background: '#18181b', color: '#ffffff' }}
+                  className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-cyan-400/60"
+                />
+              </div>
+              <label className="flex items-end gap-2 pb-1 text-[10px] text-white/65">
+                <input
+                  type="checkbox"
+                  checked={qwenPromptExtend}
+                  onChange={(e) => update({ qwenPromptExtend: e.target.checked })}
+                  className="accent-cyan-400"
+                />
+                启用提示词扩写
+              </label>
+            </div>
+            <div>
+              <label className="text-[10px] text-white/50 block mb-1">反向提示词（可选）</label>
+              <textarea
+                value={qwenNegativePrompt}
+                onChange={(e) => update({ qwenNegativePrompt: e.target.value })}
+                placeholder="不希望出现在图像中的内容"
+                className="h-12 w-full resize-none rounded border border-white/10 bg-black/20 px-2 py-1 text-[11px] text-white outline-none focus:border-cyan-400/60 placeholder:text-white/25"
+              />
+            </div>
           </div>
         )}
         {isStandardGptImage2 && (

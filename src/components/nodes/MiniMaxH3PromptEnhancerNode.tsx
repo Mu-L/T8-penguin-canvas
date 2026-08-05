@@ -40,6 +40,8 @@ import {
   type MiniMaxH3Input,
   type MiniMaxH3OutputLanguage,
   type MiniMaxH3PromptMode,
+  type MiniMaxH3OfficialSkillProfile,
+  type MiniMaxH3CreativePreset,
   type MiniMaxH3RewriteMode,
   type MiniMaxH3TaskType,
 } from '../../utils/minimaxH3PromptEnhancer';
@@ -53,6 +55,21 @@ const DEFAULT_ZHENZHEN_MODEL = ZHENZHEN_LLM_MODELS.find((model) => model.id === 
   || ZHENZHEN_LLM_MODELS[0]?.id
   || '';
 const SHOT_COUNT_OPTIONS = Array.from({ length: 20 }, (_, index) => index + 1);
+const MV_CREATIVE_PRESET = 'MV / 歌词贴字';
+const MV_PROMPT_PLACEHOLDER = [
+  'MV类型 / 视觉风格：',
+  '数字人身份、外观与表演（可空）：',
+  '歌词原文（逐字保留，可空）：',
+  '演唱者或离屏人声：',
+  '源歌曲区间（可空，如 01:04.000-01:19.000）：',
+  '当前选段是否作为完整最终音轨：',
+  '已知 BPM、时间点或节拍事件（可空）：',
+  '承接开场状态与末帧交接（可空）：',
+  '字体包装与禁止项：',
+].join('\n');
+const MV_REFERENCE_PLACEHOLDER = '<Picture 1>=数字人身份与外观；<Picture 2>=场景与灯光；<Picture 3>=字体包装，只参考字体、版式和动效。';
+const MV_CONSTRAINTS_PLACEHOLDER = '例如：不新增或改写歌词；不遮挡眼睛和关键口型；固定保留服装；源歌曲区间只用于选段，镜头时间从 00:00.000 开始。';
+const MV_TEMPLATE_PLACEHOLDER = '参考模板（只迁移镜头组织、运镜、转场与视觉语法；不复制人物、歌词、BPM、源歌曲区间、剧情或镜头数）';
 
 function enumValue<T extends string>(value: unknown, values: readonly T[], fallback: T): T {
   return values.includes(value as T) ? value as T : fallback;
@@ -81,6 +98,17 @@ function MiniMaxH3PromptEnhancerNode({ id, data, selected }: NodeProps) {
     contract.defaults.outputLanguage,
   );
   const promptMode = enumValue<MiniMaxH3PromptMode>(d.promptMode, contract.promptModes, contract.defaults.promptMode);
+  const officialSkillProfile = enumValue<MiniMaxH3OfficialSkillProfile>(
+    d.officialSkillProfile,
+    contract.officialSkillProfiles,
+    contract.defaults.officialSkillProfile,
+  );
+  const creativePreset = enumValue<MiniMaxH3CreativePreset>(
+    d.creativePreset,
+    contract.creativePresets,
+    contract.defaults.creativePreset,
+  );
+  const isMvPreset = creativePreset === MV_CREATIVE_PRESET;
   const durationSeconds = Math.max(4, Math.min(15, Math.trunc(Number(d.durationSeconds) || 5)));
   const shotCount = d.shotCount === undefined || d.shotCount === null || d.shotCount === ''
     ? contract.defaults.shotCount
@@ -170,6 +198,8 @@ function MiniMaxH3PromptEnhancerNode({ id, data, selected }: NodeProps) {
         descriptionTarget,
         outputLanguage,
         promptMode,
+        officialSkillProfile,
+        creativePreset,
         referenceTemplate: String(d.referenceTemplate || ''),
         referenceContext: String(d.referenceContext || ''),
         constraints: String(d.constraints || ''),
@@ -237,6 +267,8 @@ function MiniMaxH3PromptEnhancerNode({ id, data, selected }: NodeProps) {
         lastRun: {
           taskType,
           shotCount,
+          officialSkillProfile,
+          creativePreset,
           provider: activeProvider,
           model: activeModel,
           imageCount: imageUrls.length,
@@ -316,10 +348,16 @@ function MiniMaxH3PromptEnhancerNode({ id, data, selected }: NodeProps) {
             onChange={(event) => update({ userPrompt: event.target.value })}
             rows={4}
             maxLength={20000}
-            placeholder={upstreamPrompt ? '已连接上游文本；这里可继续补充创意' : '输入视频创意 / 提示词（必填）'}
+            placeholder={upstreamPrompt ? '已连接上游文本；这里可继续补充创意' : isMvPreset ? MV_PROMPT_PLACEHOLDER : '输入视频创意 / 提示词（必填）'}
+            title={isMvPreset ? '数字人 MV 模式：歌词、源歌曲区间、BPM 和音轨复用结论只采信用户文本；节点不会声称分析音频。' : undefined}
             className="w-full resize-y rounded-lg border border-white/10 bg-black/25 px-2.5 py-2 text-xs leading-5 text-white outline-none placeholder:text-white/25 focus:border-violet-400/60"
           />
           {upstreamPrompt && <div className="rounded-md border border-sky-400/20 bg-sky-400/5 px-2 py-1 text-[10px] text-sky-100/70">已接收 {upstream.texts.length} 条上游文本，并与本地补充合并。</div>}
+          {isMvPreset && (
+            <div className="rounded-md border border-fuchsia-400/25 bg-fuchsia-400/[0.08] px-2 py-1.5 text-[10px] leading-4 text-fuchsia-100/80">
+              数字人 MV：Ref2VA 肖像默认作为身份主体，不会误当首帧；源歌曲区间只用于分段规划，H3 镜头时间始终从 00:00.000 开始。当前节点只写提示词，不读取、转录或裁切音频。
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-2">
             <div>
@@ -350,7 +388,7 @@ function MiniMaxH3PromptEnhancerNode({ id, data, selected }: NodeProps) {
             </div>
             <div>
               <FieldLabel>改写模式</FieldLabel>
-              <select value={rewriteMode} onChange={(event) => update({ rewriteMode: event.target.value })} className="w-full rounded-md border border-white/10 bg-zinc-900 px-2 py-1.5 text-xs text-white outline-none">
+              <select value={rewriteMode} onChange={(event) => update({ rewriteMode: event.target.value })} title="只控制扩写幅度：严格最保守、均衡补全细节、创意扩展风格；它不控制官方协议语言。" className="w-full rounded-md border border-white/10 bg-zinc-900 px-2 py-1.5 text-xs text-white outline-none">
                 <option value="strict">严格 · 0.2</option>
                 <option value="balanced">均衡 · 0.7</option>
                 <option value="creative">创意 · 1.2</option>
@@ -425,9 +463,26 @@ function MiniMaxH3PromptEnhancerNode({ id, data, selected }: NodeProps) {
                   <input type="number" min={0} max={1000} step={10} value={descriptionTarget} onChange={(event) => update({ descriptionTarget: Number(event.target.value) })} className="w-full rounded-md border border-white/10 bg-zinc-900 px-2 py-1.5 text-xs text-white outline-none" />
                 </div>
               </div>
-              {promptMode === '参考模板融合' && <textarea value={String(d.referenceTemplate || '')} onChange={(event) => update({ referenceTemplate: event.target.value })} rows={3} placeholder="参考模板（必填，只借鉴结构、节奏、镜头和声音设计）" className="w-full resize-y rounded-md border border-white/10 bg-zinc-900 px-2 py-1.5 text-xs leading-5 text-white outline-none placeholder:text-white/25" />}
-              <textarea value={String(d.referenceContext || '')} onChange={(event) => update({ referenceContext: event.target.value })} rows={2} placeholder="参考素材补充（身份、关系等媒体无法确认的信息）" className="w-full resize-y rounded-md border border-white/10 bg-zinc-900 px-2 py-1.5 text-xs leading-5 text-white outline-none placeholder:text-white/25" />
-              <textarea value={String(d.constraints || '')} onChange={(event) => update({ constraints: event.target.value })} rows={2} placeholder="硬性要求（必须保留 / 禁止新增或改变）" className="w-full resize-y rounded-md border border-white/10 bg-zinc-900 px-2 py-1.5 text-xs leading-5 text-white outline-none placeholder:text-white/25" />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <FieldLabel>官方 Skill 协议</FieldLabel>
+                  <select value={officialSkillProfile} onChange={(event) => update({ officialSkillProfile: event.target.value })} title="默认兼容旧画布；严格协议按 MiniMax 官方 Skill 强制英文说明正文。" className="w-full rounded-md border border-white/10 bg-zinc-900 px-2 py-1.5 text-xs text-white outline-none">
+                    {contract.officialSkillProfiles.map((value) => <option key={value}>{value}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <FieldLabel>官方创意预设</FieldLabel>
+                  <select value={creativePreset} onChange={(event) => update({ creativePreset: event.target.value })} title="无、自动判断或 8 个场景写作预设；MV 预设包含数字人身份、歌词、分段本地时间与连续性规则，但不执行音频分析或制作工作流。" className="w-full rounded-md border border-white/10 bg-zinc-900 px-2 py-1.5 text-xs text-white outline-none">
+                    {contract.creativePresets.map((value) => <option key={value}>{value}</option>)}
+                  </select>
+                </div>
+              </div>
+              {officialSkillProfile === '官方 Skill 严格（全英文协议）' && (
+                <div className="rounded border border-violet-400/25 bg-violet-400/10 px-2 py-1.5 text-[10px] leading-4 text-violet-100">严格协议优先于“输出语言”，说明字段与描述正文强制英文；原始对白、歌词、品牌/UI 文案和画面文字保留原语言。</div>
+              )}
+              {promptMode === '参考模板融合' && <textarea value={String(d.referenceTemplate || '')} onChange={(event) => update({ referenceTemplate: event.target.value })} rows={3} placeholder={isMvPreset ? MV_TEMPLATE_PLACEHOLDER : '参考模板（必填，只借鉴结构、节奏、镜头和声音设计）'} title={isMvPreset ? MV_TEMPLATE_PLACEHOLDER : undefined} className="w-full resize-y rounded-md border border-white/10 bg-zinc-900 px-2 py-1.5 text-xs leading-5 text-white outline-none placeholder:text-white/25" />}
+              <textarea value={String(d.referenceContext || '')} onChange={(event) => update({ referenceContext: event.target.value })} rows={2} placeholder={isMvPreset ? MV_REFERENCE_PLACEHOLDER : '参考素材补充（身份、关系等媒体无法确认的信息）'} title={isMvPreset ? 'MV 参考素材需要窄角色映射，人物、场景和字体参考互不串用。' : undefined} className="w-full resize-y rounded-md border border-white/10 bg-zinc-900 px-2 py-1.5 text-xs leading-5 text-white outline-none placeholder:text-white/25" />
+              <textarea value={String(d.constraints || '')} onChange={(event) => update({ constraints: event.target.value })} rows={2} placeholder={isMvPreset ? MV_CONSTRAINTS_PLACEHOLDER : '硬性要求（必须保留 / 禁止新增或改变）'} title={isMvPreset ? MV_CONSTRAINTS_PLACEHOLDER : undefined} className="w-full resize-y rounded-md border border-white/10 bg-zinc-900 px-2 py-1.5 text-xs leading-5 text-white outline-none placeholder:text-white/25" />
               <div>
                 <FieldLabel>Variation Seed</FieldLabel>
                 <input type="number" value={seed} onChange={(event) => update({ seed: Number(event.target.value) })} className="w-full rounded-md border border-white/10 bg-zinc-900 px-2 py-1.5 text-xs text-white outline-none" />

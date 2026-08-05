@@ -44,7 +44,8 @@ test('image proxy refuses to silently submit without converted references', () =
   assert.match(proxy, /collectConvertedImageRefs/);
   assert.match(proxy, /appendConvertedImagesToForm/);
   assert.match(proxy, /readLocalImageRefBuffer/);
-  assert.match(proxy, /if\s*\(local\)\s*return local/);
+  assert.match(proxy, /const local = await readProviderLocalMediaRefBuffer/);
+  assert.match(proxy, /if \(local\) \{[\s\S]*buf: local\.buffer,[\s\S]*mime: local\.contentType/);
   assert.match(proxy, /参考图读取失败/);
   assert.match(proxy, /requested:\s*refs\.length/);
   assert.match(proxy, /converted:\s*convertedRefs\.length/);
@@ -68,8 +69,9 @@ test('legacy base64 image converters accept resource-library references', () => 
   const banana = functionBody(proxy, 'refToBananaImage');
   const grok = functionBody(proxy, 'refToGrokImage');
 
-  assert.match(banana, /ref\.startsWith\('\/api\/resources\/file\/'\)/);
-  assert.match(banana, /ref\.startsWith\('\/api\/resources\/set-file\/'\)/);
-  assert.match(grok, /ref\.startsWith\('\/api\/resources\/file\/'\)/);
-  assert.match(grok, /ref\.startsWith\('\/api\/resources\/set-file\/'\)/);
+  assert.match(banana, /await refToBuffer\(ref\)/);
+  assert.match(grok, /isLocalImageDataRef\(normalizedRef\)/);
+  assert.match(grok, /localImageRefToDataUrl\(normalizedRef\)/);
+  assert.match(proxy, /normalized\.startsWith\('\/api\/resources\/file\/'\)/);
+  assert.match(proxy, /normalized\.startsWith\('\/api\/resources\/set-file\/'\)/);
 });

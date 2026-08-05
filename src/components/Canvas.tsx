@@ -1672,8 +1672,8 @@ function withNodeSerialBadge(Component: ComponentType<any>): ComponentType<any> 
 
 // 节点初始 data(用于区分共享组件的 kind/preset/model 等)
 const INITIAL_DATA: Record<string, Record<string, any>> = {
-  image: { model: 'gpt-image-2', apiModel: 'gpt-image-2', aspectRatio: '1:1', sizeLevel: '1K', gptImageQuality: 'auto', gptImageModeration: 'auto', referenceImages: [], imageOnlyOutput: true, reuseResult: false },
-  edit: { mode: 'edit', model: 'gpt-image-2', apiModel: 'gpt-image-2', aspectRatio: '1:1', sizeLevel: '1K', gptImageQuality: 'auto', gptImageModeration: 'auto', referenceImages: [], imageOnlyOutput: true, reuseResult: false },
+  image: { model: 'gpt-image-2', apiModel: 'gpt-image-2', aspectRatio: '1:1', sizeLevel: '1K', gptImageQuality: 'auto', gptImageModeration: 'auto', qwenSizingMode: 'auto', qwenResolution: '1k', qwenCustomSize: '1024*1024', qwenImageCount: 1, qwenSeed: -1, qwenNegativePrompt: '', qwenPromptExtend: true, referenceImages: [], imageOnlyOutput: true, reuseResult: false },
+  edit: { mode: 'edit', model: 'gpt-image-2', apiModel: 'gpt-image-2', aspectRatio: '1:1', sizeLevel: '1K', gptImageQuality: 'auto', gptImageModeration: 'auto', qwenSizingMode: 'auto', qwenResolution: '1k', qwenCustomSize: '1024*1024', qwenImageCount: 1, qwenSeed: -1, qwenNegativePrompt: '', qwenPromptExtend: true, referenceImages: [], imageOnlyOutput: true, reuseResult: false },
   video: { reuseResult: false },
   'video-edit': { ...DEFAULT_VIDEO_EDIT_DATA, clips: [], settings: { ...DEFAULT_VIDEO_EDIT_DATA.settings }, job: { ...DEFAULT_VIDEO_EDIT_DATA.job } },
   seedance: {
@@ -1931,6 +1931,8 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     descriptionTarget: 0,
     outputLanguage: '中文',
     promptMode: '官方增强',
+    officialSkillProfile: '现有兼容（保留中英文）',
+    creativePreset: '无（仅核心规则）',
     referenceTemplate: '',
     referenceContext: '',
     constraints: '',

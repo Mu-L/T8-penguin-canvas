@@ -1,0 +1,203 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "MiniMax H3 OW 并发生成（循环器·并联）",
+  "nodes": [
+    {
+      "id": "minimax-h3-ow-concurrent-prompt-1",
+      "type": "text",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "并发提示词 1",
+        "text": "镜头缓慢穿过明亮的现代展厅，柔和自然光"
+      }
+    },
+    {
+      "id": "minimax-h3-ow-concurrent-prompt-2",
+      "type": "text",
+      "position": {
+        "x": 0,
+        "y": 190
+      },
+      "data": {
+        "label": "并发提示词 2",
+        "text": "一件精致产品置于极简摄影棚，电影感侧光"
+      }
+    },
+    {
+      "id": "minimax-h3-ow-concurrent-prompt-3",
+      "type": "text",
+      "position": {
+        "x": 0,
+        "y": 380
+      },
+      "data": {
+        "label": "并发提示词 3",
+        "text": "安静的未来城市清晨，薄雾与暖色日光"
+      }
+    },
+    {
+      "id": "minimax-h3-ow-concurrent-loop",
+      "type": "loop",
+      "position": {
+        "x": 390,
+        "y": 160
+      },
+      "data": {
+        "label": "MiniMax H3 OW 并发节点",
+        "mode": "parallel",
+        "kind": "text",
+        "outputs": [],
+        "progress": {
+          "done": 0,
+          "total": 0,
+          "ok": 0,
+          "fail": 0
+        }
+      }
+    },
+    {
+      "id": "minimax-concurrent-video",
+      "type": "video",
+      "position": {
+        "x": 760,
+        "y": 160
+      },
+      "data": {
+        "label": "MiniMax H3 OW 并发生成",
+        "mainId": "hailuo-2.3",
+        "model": "minimax-h3-ow-t2v",
+        "videoBuiltinSource": "seedance-nz",
+        "ratio": "16:9",
+        "duration": 5,
+        "resolution": "480p",
+        "localPrompt": "",
+        "localRefImages": [],
+        "reuseResult": false
+      }
+    },
+    {
+      "id": "minimax-h3-ow-concurrent-output",
+      "type": "output",
+      "position": {
+        "x": 1130,
+        "y": 160
+      },
+      "data": {
+        "label": "并发结果"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "minimax-h3-ow-concurrent-prompt-edge-1",
+      "source": "minimax-h3-ow-concurrent-prompt-1",
+      "target": "minimax-h3-ow-concurrent-loop"
+    },
+    {
+      "id": "minimax-h3-ow-concurrent-prompt-edge-2",
+      "source": "minimax-h3-ow-concurrent-prompt-2",
+      "target": "minimax-h3-ow-concurrent-loop"
+    },
+    {
+      "id": "minimax-h3-ow-concurrent-prompt-edge-3",
+      "source": "minimax-h3-ow-concurrent-prompt-3",
+      "target": "minimax-h3-ow-concurrent-loop"
+    },
+    {
+      "id": "minimax-h3-ow-concurrent-loop-generation",
+      "source": "minimax-h3-ow-concurrent-loop",
+      "target": "minimax-concurrent-video"
+    },
+    {
+      "id": "minimax-h3-ow-concurrent-generation-output",
+      "source": "minimax-concurrent-video",
+      "target": "minimax-h3-ow-concurrent-output"
+    }
+  ],
+  "nodeCount": 6,
+  "edgeCount": 5,
+  "nodeTypes": [
+    "text",
+    "loop",
+    "video",
+    "output"
+  ],
+  "topologyPreview": {
+    "nodes": [
+      {
+        "id": "minimax-h3-ow-concurrent-prompt-1",
+        "type": "text",
+        "label": "并发提示词 1",
+        "x": 50,
+        "y": 50
+      },
+      {
+        "id": "minimax-h3-ow-concurrent-prompt-2",
+        "type": "text",
+        "label": "并发提示词 2",
+        "x": 50,
+        "y": 240
+      },
+      {
+        "id": "minimax-h3-ow-concurrent-prompt-3",
+        "type": "text",
+        "label": "并发提示词 3",
+        "x": 50,
+        "y": 430
+      },
+      {
+        "id": "minimax-h3-ow-concurrent-loop",
+        "type": "loop",
+        "label": "MiniMax H3 OW 并发节点",
+        "x": 440,
+        "y": 210
+      },
+      {
+        "id": "minimax-concurrent-video",
+        "type": "video",
+        "label": "MiniMax H3 OW 并发生成",
+        "x": 810,
+        "y": 210
+      },
+      {
+        "id": "minimax-h3-ow-concurrent-output",
+        "type": "output",
+        "label": "并发结果",
+        "x": 1180,
+        "y": 210
+      }
+    ],
+    "edges": [
+      {
+        "id": "minimax-h3-ow-concurrent-prompt-edge-1",
+        "source": "minimax-h3-ow-concurrent-prompt-1",
+        "target": "minimax-h3-ow-concurrent-loop"
+      },
+      {
+        "id": "minimax-h3-ow-concurrent-prompt-edge-2",
+        "source": "minimax-h3-ow-concurrent-prompt-2",
+        "target": "minimax-h3-ow-concurrent-loop"
+      },
+      {
+        "id": "minimax-h3-ow-concurrent-prompt-edge-3",
+        "source": "minimax-h3-ow-concurrent-prompt-3",
+        "target": "minimax-h3-ow-concurrent-loop"
+      },
+      {
+        "id": "minimax-h3-ow-concurrent-loop-generation",
+        "source": "minimax-h3-ow-concurrent-loop",
+        "target": "minimax-concurrent-video"
+      },
+      {
+        "id": "minimax-h3-ow-concurrent-generation-output",
+        "source": "minimax-concurrent-video",
+        "target": "minimax-h3-ow-concurrent-output"
+      }
+    ]
+  },
+  "savedAt": "2026-08-06T00:00:00.000Z"
+}

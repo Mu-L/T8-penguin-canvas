@@ -52,6 +52,36 @@ const ZHENZHEN_APIMART_IMAGE_MODELS = new Set([
   ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL,
   ...ZHENZHEN_IMAGE_NB_MODELS,
 ]);
+const QWEN_IMAGE_30_T2I_MODELS = new Set([
+  'qwen-image-3.0-t2i',
+  'qwen-image-3.0-pro-t2i',
+  'qwen-image-3.0-global-t2i',
+  'qwen-image-3.0-global-pro-t2i',
+]);
+const QWEN_IMAGE_30_I2I_MODELS = new Set([
+  'qwen-image-3.0-i2i',
+  'qwen-image-3.0-pro-i2i',
+  'qwen-image-3.0-global-i2i',
+  'qwen-image-3.0-global-pro-i2i',
+]);
+const QWEN_IMAGE_30_MODELS = new Set([
+  'qwen-image-3.0-t2i',
+  'qwen-image-3.0-i2i',
+  'qwen-image-3.0-pro-t2i',
+  'qwen-image-3.0-pro-i2i',
+  'qwen-image-3.0-global-t2i',
+  'qwen-image-3.0-global-i2i',
+  'qwen-image-3.0-global-pro-t2i',
+  'qwen-image-3.0-global-pro-i2i',
+]);
+const QWEN_IMAGE_30_SIZING_MODES = new Set(['auto', 'ratio', 'custom_size']);
+const QWEN_IMAGE_30_RESOLUTIONS = new Set(['1k', '2k']);
+const QWEN_IMAGE_30_RATIOS = new Set([
+  '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9',
+]);
+const QWEN_IMAGE_30_PROMPT_MIN_LENGTH = 5;
+const QWEN_IMAGE_30_PROMPT_MAX_LENGTH = 2000;
+const QWEN_IMAGE_30_MAX_REFERENCE_IMAGES = 3;
 const ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL = 'zhenzhen-video-g-omni-flash';
 const ZHENZHEN_VIDEO_GK_V15_MODEL = 'zhenzhen-video-gk-v15';
 const ZHENZHEN_VIDEO_V31_FAST_MODEL = 'zhenzhen-video-v31-fast';
@@ -85,6 +115,7 @@ const IMAGE_MODELS = new Set([
   ...Object.values(IMAGE_MODEL_PAIRS).flat(),
   ...ZHENZHEN_IMAGE_G2_MODELS,
   ...ZHENZHEN_APIMART_IMAGE_MODELS,
+  ...QWEN_IMAGE_30_MODELS,
 ]);
 const IMAGE_RESOLUTIONS = new Set(['1k', '2k']);
 const IMAGE_OUTPUT_FORMATS = new Set(['jpeg', 'png']);
@@ -157,7 +188,20 @@ const HAILUO_H3_MODELS = new Set([
   HAILUO_H3_I2V_MODEL,
   HAILUO_H3_MULTI_MODEL,
 ]);
-const HAILUO_MODELS = new Set([...HAILUO23_MODELS, ...HAILUO_H3_MODELS]);
+const MINIMAX_H3_OW_T2V_MODEL = 'minimax-h3-ow-t2v';
+const MINIMAX_H3_OW_R2V_MODEL = 'minimax-h3-ow-r2v';
+const MINIMAX_H3_OW_I2V_MODEL = 'minimax-h3-ow-i2v';
+const MINIMAX_H3_OW_MODELS = new Set([
+  MINIMAX_H3_OW_T2V_MODEL,
+  MINIMAX_H3_OW_R2V_MODEL,
+  MINIMAX_H3_OW_I2V_MODEL,
+]);
+const MINIMAX_H3_OW_SECONDS = new Set(['5', '10', '15']);
+const MINIMAX_H3_OW_RESOLUTIONS = new Set(['480p', '720p']);
+const MINIMAX_H3_OW_RATIOS = new Set([
+  '1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9',
+]);
+const HAILUO_MODELS = new Set([...HAILUO23_MODELS, ...HAILUO_H3_MODELS, ...MINIMAX_H3_OW_MODELS]);
 const HAILUO_H3_SECONDS = new Set(Array.from({ length: 11 }, (_, index) => String(index + 5)));
 const HAILUO_H3_RESOLUTION = '2K';
 const HAILUO_H3_PROMPT_MAX_LENGTH = 20480;
@@ -2246,6 +2290,9 @@ async function buildZhenzhenImageG2Payload(request, apiKey, options = {}) {
 
 async function buildImagePayload(request, apiKey, options = {}) {
   const requestedModel = String(request.model || '').trim().toLowerCase();
+  if (QWEN_IMAGE_30_MODELS.has(requestedModel)) {
+    return buildQwenImage30Payload(request, apiKey, options);
+  }
   if (ZHENZHEN_APIMART_IMAGE_MODELS.has(requestedModel)) {
     return buildApimartImagePayload(request, apiKey, options);
   }
@@ -2286,6 +2333,76 @@ async function buildImagePayload(request, apiKey, options = {}) {
     }
   }
   return { payload, model, taskType: refs.length ? 'i2i' : 't2i' };
+}
+
+function normalizeQwenImage30CustomSize(value) {
+  return String(value || '').trim().replace(/[xX×]/g, '*');
+}
+
+async function buildQwenImage30Payload(request, apiKey, options = {}) {
+  const model = String(request.model || '').trim().toLowerCase();
+  if (!QWEN_IMAGE_30_MODELS.has(model)) {
+    throw new Error(`未知 Qwen Image 3.0 模型：${model || '(空)'}`);
+  }
+  const prompt = String(request.prompt || '').trim();
+  if (prompt.length < QWEN_IMAGE_30_PROMPT_MIN_LENGTH || prompt.length > QWEN_IMAGE_30_PROMPT_MAX_LENGTH) {
+    throw new Error(`Qwen Image 3.0 提示词必须为 ${QWEN_IMAGE_30_PROMPT_MIN_LENGTH}-${QWEN_IMAGE_30_PROMPT_MAX_LENGTH} 字符`);
+  }
+  const sizingMode = String(request.sizingMode || request.sizing_mode || 'auto').trim().toLowerCase();
+  if (!QWEN_IMAGE_30_SIZING_MODES.has(sizingMode)) {
+    throw new Error(`Qwen Image 3.0 未知尺寸模式：${sizingMode || '(空)'}`);
+  }
+  const n = Number(request.n ?? 1);
+  if (!Number.isInteger(n) || n < 1 || n > 6) throw new Error('Qwen Image 3.0 n 必须是 1-6 的整数');
+  const seed = Number(request.seed ?? -1);
+  if (!Number.isInteger(seed) || seed < -1 || seed > 2147483647) {
+    throw new Error('Qwen Image 3.0 seed 必须是 -1 到 2147483647 的整数');
+  }
+
+  const payload = {
+    model,
+    prompt,
+    n,
+    prompt_extend: request.prompt_extend !== false && request.promptExtend !== false,
+  };
+  const negativePrompt = String(request.negative_prompt || request.negativePrompt || '').trim();
+  if (negativePrompt) payload.negative_prompt = negativePrompt;
+
+  const metadata = {};
+  if (seed >= 0) metadata.seed = seed;
+  if (sizingMode === 'ratio') {
+    const ratio = String(request.ratio || '1:1').trim();
+    const resolution = String(request.resolution || '1k').trim().toLowerCase();
+    if (!QWEN_IMAGE_30_RATIOS.has(ratio)) throw new Error(`Qwen Image 3.0 不支持比例 ${ratio}`);
+    if (!QWEN_IMAGE_30_RESOLUTIONS.has(resolution)) throw new Error('Qwen Image 3.0 分辨率只支持 1k 或 2k');
+    metadata.ratio = ratio;
+    metadata.resolution = resolution;
+  } else if (sizingMode === 'custom_size') {
+    const size = normalizeQwenImage30CustomSize(request.size || request.custom_size || request.customSize);
+    if (!/^\d+\*\d+$/.test(size) || size.split('*').some((part) => Number(part) <= 0)) {
+      throw new Error('Qwen Image 3.0 自定义尺寸必须为正整数 W*H，例如 1024*1024');
+    }
+    payload.size = size;
+  }
+  if (Object.keys(metadata).length > 0) payload.metadata = metadata;
+
+  const refs = normalizeList(request.images || request.refImages);
+  const taskType = QWEN_IMAGE_30_I2I_MODELS.has(model) ? 'i2i' : 't2i';
+  if (taskType === 'i2i') {
+    if (refs.length < 1 || refs.length > QWEN_IMAGE_30_MAX_REFERENCE_IMAGES) {
+      throw new Error(`Qwen Image 3.0 图像编辑需要 1-${QWEN_IMAGE_30_MAX_REFERENCE_IMAGES} 张参考图`);
+    }
+    payload.images = [];
+    for (const source of refs) {
+      payload.images.push(await uploadMedia(source, 'image', apiKey, {
+        ...options,
+        maxBytes: IMAGE_REFERENCE_MAX_BYTES,
+        allowedMimes: ['image/jpeg', 'image/png', 'image/webp'],
+        cacheVariant: 'qwen-image-3.0-i2i-v1',
+      }));
+    }
+  }
+  return { payload, model, taskType };
 }
 
 async function buildWanPayload(request, apiKey, options = {}) {
@@ -2358,6 +2475,39 @@ async function validateHailuoFirstImage(buffer) {
 async function buildHailuoPayload(request, apiKey, options = {}) {
   const model = String(request.model || '').trim();
   if (!HAILUO_MODELS.has(model)) throw new Error(`未知 Hailuo 模型：${model || '(空)'}`);
+
+  if (MINIMAX_H3_OW_MODELS.has(model)) {
+    const prompt = String(request.prompt || '').trim();
+    const taskType = model === MINIMAX_H3_OW_T2V_MODEL
+      ? 't2v'
+      : model === MINIMAX_H3_OW_R2V_MODEL ? 'r2v' : 'i2v';
+    if ((taskType === 't2v' || taskType === 'r2v') && !prompt) {
+      throw new Error('MiniMax H3 OW 文生视频与参考生视频必须填写提示词');
+    }
+    if (prompt.length > HAILUO_H3_PROMPT_MAX_LENGTH) {
+      throw new Error(`MiniMax H3 OW 提示词不能超过 ${HAILUO_H3_PROMPT_MAX_LENGTH} 字符`);
+    }
+    const seconds = String(request.duration ?? request.seconds ?? '5').trim();
+    if (!MINIMAX_H3_OW_SECONDS.has(seconds)) throw new Error('MiniMax H3 OW 时长只支持 5、10 或 15 秒');
+    const resolution = String(request.resolution || '480p').trim().toLowerCase();
+    if (!MINIMAX_H3_OW_RESOLUTIONS.has(resolution)) throw new Error('MiniMax H3 OW 分辨率只支持 480p 或 720p');
+    const ratio = String(request.ratio || '16:9').trim();
+    if (!MINIMAX_H3_OW_RATIOS.has(ratio)) throw new Error(`MiniMax H3 OW 不支持比例 ${ratio}`);
+
+    const payload = { model, seconds, metadata: { resolution, ratio } };
+    if (prompt) payload.prompt = prompt;
+    if (taskType !== 't2v') {
+      const imageSources = normalizeList(request.images || request.refImages);
+      if (imageSources.length === 0) throw new Error('MiniMax H3 OW 图生与参考生视频必须提供 1 张图片');
+      payload.images = [await uploadMedia(imageSources[0], 'image', apiKey, {
+        ...options,
+        maxBytes: IMAGE_REFERENCE_MAX_BYTES,
+        allowedMimes: ['image/jpeg', 'image/png', 'image/webp'],
+        cacheVariant: 'minimax-h3-ow-image-v1',
+      })];
+    }
+    return { payload, model, taskType };
+  }
 
   if (HAILUO_H3_MODELS.has(model)) {
     const prompt = String(request.prompt || '').trim();
@@ -3393,12 +3543,22 @@ async function queryImageTask(taskId, apiKey, options = {}) {
   const status = normalizeImageTaskStatus(record?.status || data?.status);
   const nested = record?.data && typeof record.data === 'object' ? record.data : {};
   const imageUrls = status === 'succeeded' ? imageTaskResultUrls(record, nested) : [];
+  const failReason = status === 'failed'
+    ? String(
+      record?.fail_reason
+      || record?.failReason
+      || nested?.error?.message
+      || nested?.message
+      || data?.message
+      || '图像任务失败',
+    ).trim() || '图像任务失败'
+    : null;
   return {
     status,
     progress: safeProgress(record?.progress ?? data?.progress),
     imageUrl: imageUrls[0] || null,
     imageUrls,
-    failReason: status === 'failed' ? '图像任务失败' : null,
+    failReason,
     ...safeProviderTrace(response, data),
   };
 }
@@ -3470,6 +3630,12 @@ module.exports = {
   HAILUO_H3_SECONDS,
   HAILUO_H3_T2V_MODEL,
   HAILUO_MODELS,
+  MINIMAX_H3_OW_I2V_MODEL,
+  MINIMAX_H3_OW_MODELS,
+  MINIMAX_H3_OW_R2V_MODEL,
+  MINIMAX_H3_OW_RESOLUTIONS,
+  MINIMAX_H3_OW_SECONDS,
+  MINIMAX_H3_OW_T2V_MODEL,
   KLING_EDIT_MODELS,
   KLING_I2V_MODELS,
   KLING_MODELS,
@@ -3491,6 +3657,11 @@ module.exports = {
   IMAGE_MODEL_PAIRS,
   IMAGE_MODELS,
   IMAGE_RESOLUTIONS,
+  QWEN_IMAGE_30_I2I_MODELS,
+  QWEN_IMAGE_30_MODELS,
+  QWEN_IMAGE_30_RATIOS,
+  QWEN_IMAGE_30_RESOLUTIONS,
+  QWEN_IMAGE_30_T2I_MODELS,
   MIDJOURNEY_ACTION_SPECS,
   MIDJOURNEY_ANIMATE_MODES,
   MIDJOURNEY_BATCH_SIZES,
@@ -3545,6 +3716,7 @@ module.exports = {
   buildApimartImagePayload,
   buildApimartVideoPayload,
   buildImagePayload,
+  buildQwenImage30Payload,
   buildMidjourneyPayload,
   buildZhenzhenImageG2Payload,
   deriveTaskType,

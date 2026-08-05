@@ -1284,6 +1284,165 @@ test('seedance.nz Hailuo H3 rejects invalid duration, resolution and missing or 
   );
 });
 
+test('seedance.nz builds all documented Qwen Image 3.0 payload modes without cross-contaminating size fields', async () => {
+  assert.deepEqual([...seedanceNz.QWEN_IMAGE_30_MODELS], [
+    'qwen-image-3.0-t2i',
+    'qwen-image-3.0-i2i',
+    'qwen-image-3.0-pro-t2i',
+    'qwen-image-3.0-pro-i2i',
+    'qwen-image-3.0-global-t2i',
+    'qwen-image-3.0-global-i2i',
+    'qwen-image-3.0-global-pro-t2i',
+    'qwen-image-3.0-global-pro-i2i',
+  ]);
+
+  const common = {
+    model: 'qwen-image-3.0-t2i',
+    prompt: 'a clean product photograph in a daylight studio',
+    negative_prompt: 'blur',
+    prompt_extend: true,
+    n: 2,
+    seed: 9,
+  };
+  const auto = await seedanceNz.buildQwenImage30Payload({ ...common, sizing_mode: 'auto' }, 'test-key');
+  assert.deepEqual(auto.payload, {
+    model: 'qwen-image-3.0-t2i',
+    prompt: common.prompt,
+    negative_prompt: 'blur',
+    prompt_extend: true,
+    n: 2,
+    metadata: { seed: 9 },
+  });
+
+  const ratio = await seedanceNz.buildQwenImage30Payload({
+    ...common, sizing_mode: 'ratio', ratio: '16:9', resolution: '2k',
+  }, 'test-key');
+  assert.deepEqual(ratio.payload.metadata, { seed: 9, ratio: '16:9', resolution: '2k' });
+  assert.equal('size' in ratio.payload, false);
+
+  const custom = await seedanceNz.buildQwenImage30Payload({
+    ...common, sizing_mode: 'custom_size', size: '1024x1536', seed: -1,
+  }, 'test-key');
+  assert.equal(custom.payload.size, '1024*1536');
+  assert.equal('metadata' in custom.payload, false);
+
+  seedanceNz.resetCachesForTests();
+  let uploadIndex = 0;
+  const i2i = await seedanceNz.buildQwenImage30Payload({
+    model: 'qwen-image-3.0-global-pro-i2i',
+    prompt: 'edit these references into a coherent cinematic key visual',
+    sizing_mode: 'auto',
+    images: [TINY_PNG_A, TINY_PNG_B],
+  }, 'test-key', {
+    uploadIntervalMs: 0,
+    fetchImpl: async () => jsonResponse({ url: `https://cdn.example.com/qwen-${++uploadIndex}.png` }),
+  });
+  assert.equal(i2i.taskType, 'i2i');
+  assert.deepEqual(i2i.payload.images, [
+    'https://cdn.example.com/qwen-1.png',
+    'https://cdn.example.com/qwen-2.png',
+  ]);
+});
+
+test('seedance.nz rejects undocumented Qwen Image 3.0 combinations before submission', async () => {
+  await assert.rejects(
+    seedanceNz.buildQwenImage30Payload({ model: 'qwen-image-3.0-t2i', prompt: 'tiny' }, 'test-key'),
+    /5-2000/,
+  );
+  await assert.rejects(
+    seedanceNz.buildQwenImage30Payload({
+      model: 'qwen-image-3.0-i2i', prompt: 'valid edit prompt', sizing_mode: 'auto', images: [],
+    }, 'test-key'),
+    /需要 1-3 张参考图/,
+  );
+  await assert.rejects(
+    seedanceNz.buildQwenImage30Payload({
+      model: 'qwen-image-3.0-t2i', prompt: 'valid image prompt', sizing_mode: 'custom_size', size: 'bad-size',
+    }, 'test-key'),
+    /W\*H/,
+  );
+});
+
+test('seedance.nz image query preserves the documented upstream failure reason without exposing result URLs', async () => {
+  const result = await seedanceNz.queryImageTask('qwen-failed-task', 'test-key', {
+    fetchImpl: async () => jsonResponse({
+      code: 'success',
+      data: {
+        status: 'FAILURE',
+        progress: '100%',
+        fail_reason: 'Model is currently busy, please retry later',
+        result_url: 'Model is currently busy, please retry later',
+      },
+    }),
+  });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.failReason, 'Model is currently busy, please retry later');
+  assert.equal(result.imageUrl, null);
+  assert.deepEqual(result.imageUrls, []);
+});
+
+test('seedance.nz builds MiniMax H3 OW t2v, r2v and i2v exactly as documented', async () => {
+  assert.deepEqual([...seedanceNz.MINIMAX_H3_OW_MODELS], [
+    'minimax-h3-ow-t2v',
+    'minimax-h3-ow-r2v',
+    'minimax-h3-ow-i2v',
+  ]);
+  const t2v = await seedanceNz.buildHailuoPayload({
+    model: 'minimax-h3-ow-t2v',
+    prompt: 'a slow cinematic dolly through a quiet white gallery',
+    duration: 5,
+    resolution: '480p',
+    ratio: '16:9',
+  }, 'test-key');
+  assert.deepEqual(t2v, {
+    model: 'minimax-h3-ow-t2v',
+    taskType: 't2v',
+    payload: {
+      model: 'minimax-h3-ow-t2v',
+      prompt: 'a slow cinematic dolly through a quiet white gallery',
+      seconds: '5',
+      metadata: { resolution: '480p', ratio: '16:9' },
+    },
+  });
+
+  for (const model of ['minimax-h3-ow-r2v', 'minimax-h3-ow-i2v']) {
+    seedanceNz.resetCachesForTests();
+    const built = await seedanceNz.buildHailuoPayload({
+      model,
+      prompt: model.endsWith('i2v') ? '' : 'preserve the reference character identity',
+      duration: 15,
+      resolution: '720p',
+      ratio: '9:16',
+      images: [TINY_PNG_A, TINY_PNG_B],
+    }, 'test-key', {
+      uploadIntervalMs: 0,
+      fetchImpl: async () => jsonResponse({ url: 'https://cdn.example.com/minimax-reference.png' }),
+    });
+    assert.equal(built.taskType, model.endsWith('r2v') ? 'r2v' : 'i2v');
+    assert.deepEqual(built.payload.images, ['https://cdn.example.com/minimax-reference.png']);
+    assert.deepEqual(built.payload.metadata, { resolution: '720p', ratio: '9:16' });
+  }
+});
+
+test('seedance.nz validates MiniMax H3 OW prompt, image, seconds, resolution and ratio', async () => {
+  await assert.rejects(
+    seedanceNz.buildHailuoPayload({ model: 'minimax-h3-ow-r2v', duration: 5, resolution: '480p', ratio: '16:9' }, 'test-key'),
+    /必须填写提示词/,
+  );
+  await assert.rejects(
+    seedanceNz.buildHailuoPayload({
+      model: 'minimax-h3-ow-i2v', duration: 5, resolution: '480p', ratio: '16:9', images: [],
+    }, 'test-key'),
+    /必须提供 1 张图片/,
+  );
+  await assert.rejects(
+    seedanceNz.buildHailuoPayload({
+      model: 'minimax-h3-ow-t2v', prompt: 'valid prompt', duration: 6, resolution: '1080p', ratio: 'adaptive',
+    }, 'test-key'),
+    /时长只支持 5、10 或 15 秒/,
+  );
+});
+
 test('seedance.nz builds documented Vidu Q3 t2v, i2v, start-end and r2v payloads', async () => {
   seedanceNz.resetCachesForTests();
   const t2v = await seedanceNz.buildViduPayload({

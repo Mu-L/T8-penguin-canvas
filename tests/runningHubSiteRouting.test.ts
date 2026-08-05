@@ -61,6 +61,7 @@ test('RunningHub automatic site fallback is limited to credentials and missing a
   assert.equal(routing.shouldRetryRhSiteResponse({ status: 200 }, { code: 901 }), true);
   assert.equal(routing.shouldRetryRhSiteResponse({ status: 200 }, { code: 1002 }), true);
   assert.equal(routing.shouldRetryRhSiteResponse({ status: 200 }, { code: 1004 }), true);
+  assert.equal(routing.shouldRetryRhSiteResponse({ status: 200 }, { code: 332 }), false);
   assert.equal(routing.shouldRetryRhSiteResponse({ status: 200 }, { msg: 'API key invalid' }), true);
   assert.equal(routing.shouldRetryRhSiteResponse({ status: 200 }, { msg: 'webapp does not exist' }), true);
   assert.equal(routing.shouldRetryRhSiteResponse({ status: 200 }, { msg: 'task not found' }), true);

@@ -2369,7 +2369,7 @@
       "type": "image",
       "label": "图像",
       "category": "core",
-      "description": "GPT Image 2 / Nano Banana Pro / Nano Banana 2 (多 TAB 模型切换)",
+      "description": "GPT Image 2 / Nano Banana / Grok / Seedream / Qwen Image 3.0 / Midjourney（多 TAB 模型切换）",
       "icon": "Image",
       "color": "amber",
       "ports": {
@@ -2455,7 +2455,7 @@
       "type": "video",
       "label": "视频",
       "category": "core",
-      "description": "Veo / Grok Video",
+      "description": "Veo / Grok / Hailuo / MiniMax H3 OW 等多模型视频生成",
       "icon": "Video",
       "color": "rose",
       "ports": {
@@ -2715,7 +2715,7 @@
       "type": "minimax-h3-prompt-enhancer",
       "label": "MiniMax H3提示词增强器",
       "category": "inspiration",
-      "description": "按 MiniMax H3 官方结构增强 T2VA / I2VA / FL2VA / L2VA / Ref2VA 提示词，支持完整图片/视频理解与所有扩展 LLM 渠道",
+      "description": "按 MiniMax H3 官方 Skill 增强 T2VA / I2VA / FL2VA / L2VA / Ref2VA 提示词，支持兼容/严格英文协议、无/AUTO/8 个创意预设、数字人 MV 身份与分段连续性、完整图片/视频理解及所有扩展 LLM 渠道",
       "icon": "Sparkles",
       "color": "violet",
       "ports": {
@@ -2767,6 +2767,14 @@
             "type": "string",
             "enum": ["官方增强", "参考模板融合"]
           },
+          "officialSkillProfile": {
+            "type": "string",
+            "enum": ["现有兼容（保留中英文）", "官方 Skill 严格（全英文协议）"]
+          },
+          "creativePreset": {
+            "type": "string",
+            "enum": ["无（仅核心规则）", "AUTO（根据意图判断）", "极简产品广告", "3D 动画短片", "品牌宣传短片", "MV / 歌词贴字", "双人合作游戏开场", "纸拼贴讲解", "立体纸艺停格讲解", "手绘实拍融合"]
+          },
           "referenceTemplate": {
             "type": "string",
             "maxLength": 40000
@@ -2792,6 +2800,8 @@
           "descriptionTarget": 0,
           "outputLanguage": "中文",
           "promptMode": "官方增强",
+          "officialSkillProfile": "现有兼容（保留中英文）",
+          "creativePreset": "无（仅核心规则）",
           "referenceTemplate": "",
           "referenceContext": "",
           "constraints": "",

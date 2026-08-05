@@ -1829,7 +1829,7 @@ test('B3 RunningHub app-info exposes only the form schema allowlist', async () =
   });
 });
 
-test('B3 RunningHub app-info retries the alternate site for numeric WebApp-not-found responses', async () => {
+test('B3 RunningHub app-info exhausts the alternate site for opaque read-only lookup failures', async () => {
   await withProxyFixture(async ({ appServer, settingsFile }) => {
     const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
     fs.writeFileSync(settingsFile, JSON.stringify({
@@ -1842,7 +1842,7 @@ test('B3 RunningHub app-info retries the alternate site for numeric WebApp-not-f
     global.fetch = async (url) => {
       calls.push(String(url));
       if (String(url).startsWith('https://www.runninghub.ai/')) {
-        return new Response(JSON.stringify({ code: 901, msg: 'WEBAPP_NOT_EXISTS' }), {
+        return new Response(JSON.stringify({ code: 332 }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         });
@@ -1856,9 +1856,9 @@ test('B3 RunningHub app-info retries the alternate site for numeric WebApp-not-f
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     };
     try {
-      const info = await requestGet(appServer, '/api/proxy/runninghub/app-info?webappId=domestic-app&site=intl');
+      const info = await requestGet(appServer, '/api/proxy/runninghub/app-info?webappId=2075149522166181890&site=intl');
       assert.equal(info.status, 200, info.text);
-      assert.equal(info.data.data.webappId, 'domestic-app');
+      assert.equal(info.data.data.webappId, '2075149522166181890');
       assert.equal(info.data.data.rhSite, 'cn');
       assert.equal(info.data.data.rhFallbackUsed, true);
       assert.equal(info.data.data.nodeInfoList.length, 1);

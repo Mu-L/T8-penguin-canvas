@@ -1,0 +1,52 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "Qwen Image 3.0 文生图 · qwen-image-3.0-global-t2i",
+  "nodes": [
+    {
+      "id": "qwen-image-3.0-global-t2i",
+      "type": "image",
+      "position": {
+        "x": 0,
+        "y": 40
+      },
+      "data": {
+        "label": "Qwen Image 3.0 文生图 · qwen-image-3.0-global-t2i",
+        "model": "qwen-image-3.0",
+        "apiModel": "qwen-image-3.0-global-t2i",
+        "imageBuiltinSource": "seedance-nz",
+        "aspectRatio": "1:1",
+        "qwenSizingMode": "auto",
+        "qwenResolution": "1k",
+        "qwenCustomSize": "1024*1024",
+        "qwenImageCount": 1,
+        "qwenSeed": -1,
+        "qwenNegativePrompt": "",
+        "qwenPromptExtend": true,
+        "prompt": "电影感产品摄影，干净背景，柔和棚拍光线",
+        "referenceImages": [],
+        "imageOnlyOutput": true,
+        "reuseResult": false
+      }
+    }
+  ],
+  "edges": [],
+  "nodeCount": 1,
+  "edgeCount": 0,
+  "nodeTypes": [
+    "image"
+  ],
+  "topologyPreview": {
+    "nodes": [
+      {
+        "id": "qwen-image-3.0-global-t2i",
+        "type": "image",
+        "label": "Qwen Image 3.0 文生图 · qwen-image-3.0-global-t2i",
+        "x": 50,
+        "y": 90
+      }
+    ],
+    "edges": []
+  },
+  "savedAt": "2026-08-06T00:00:00.000Z"
+}

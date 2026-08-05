@@ -11,8 +11,9 @@ export type ProviderType = 'zhenzhen' | 'llm-direct' | 'runninghub';
 //  - 'banana-ratio': nano-banana 协议,使用 aspect_ratio + image_size(1K/2K/4K) + image[]
 //  - 'grok-image'  : Grok Image 协议,JSON /generations,参考图默认 base64 dataURL
 //  - 'seedream-v5' : Seedream V5 Pro 协议,JSON /generations,size 为像素串,image[] 可选
+//  - 'qwen-image-3.0': Qwen Image 3.0 协议,auto / 比例+分辨率 / 自定义 W*H 三种互斥尺寸模式
 //  - 'mj'          : Midjourney 协议,走专属 /api/proxy/mj/* 路由(speed_map + sref/oref)
-export type ImageParamKind = 'gpt-size' | 'banana-ratio' | 'grok-image' | 'seedream-v5' | 'mj';
+export type ImageParamKind = 'gpt-size' | 'banana-ratio' | 'grok-image' | 'seedream-v5' | 'qwen-image-3.0' | 'mj';
 
 export interface ImageModelDef {
   id: string;             // 节点内部 id(如 'gpt-image-2')
@@ -103,6 +104,39 @@ export const ZHENZHEN_IMAGE_NB_EXTREME_RATIOS = [
 
 export function isZhenzhenImageG2Model(apiModel: string | undefined | null): boolean {
   return (ZHENZHEN_IMAGE_G2_MODELS as readonly string[]).includes(String(apiModel || '').trim());
+}
+
+export const QWEN_IMAGE_30_T2I_MODELS = [
+  'qwen-image-3.0-t2i',
+  'qwen-image-3.0-pro-t2i',
+  'qwen-image-3.0-global-t2i',
+  'qwen-image-3.0-global-pro-t2i',
+] as const;
+export const QWEN_IMAGE_30_I2I_MODELS = [
+  'qwen-image-3.0-i2i',
+  'qwen-image-3.0-pro-i2i',
+  'qwen-image-3.0-global-i2i',
+  'qwen-image-3.0-global-pro-i2i',
+] as const;
+export const QWEN_IMAGE_30_MODELS = [
+  'qwen-image-3.0-t2i',
+  'qwen-image-3.0-i2i',
+  'qwen-image-3.0-pro-t2i',
+  'qwen-image-3.0-pro-i2i',
+  'qwen-image-3.0-global-t2i',
+  'qwen-image-3.0-global-i2i',
+  'qwen-image-3.0-global-pro-t2i',
+  'qwen-image-3.0-global-pro-i2i',
+] as const;
+export type QwenImage30Model = typeof QWEN_IMAGE_30_MODELS[number];
+export const QWEN_IMAGE_30_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
+
+export function isQwenImage30Model(apiModel: string | undefined | null): apiModel is QwenImage30Model {
+  return (QWEN_IMAGE_30_MODELS as readonly string[]).includes(String(apiModel || '').trim());
+}
+
+export function isQwenImage30I2IModel(apiModel: string | undefined | null): boolean {
+  return (QWEN_IMAGE_30_I2I_MODELS as readonly string[]).includes(String(apiModel || '').trim());
 }
 
 export function isZhenzhenApimartImageModel(apiModel: string | undefined | null): boolean {
@@ -222,6 +256,23 @@ export const IMAGE_MODELS: ImageModelDef[] = [
     supportsReference: true,
     maxReferenceImages: 10,
     description: 'Seedream V5 Pro · 文生图/多图编辑',
+  },
+  {
+    id: 'qwen-image-3.0',
+    apiModel: 'qwen-image-3.0-t2i',
+    label: 'Qwen Image 3.0',
+    tabLabel: 'Qwen Image',
+    provider: 'zhenzhen',
+    paramKind: 'qwen-image-3.0',
+    capabilities: ['t2i', 'i2i', 'edit', 'text-render'],
+    apiModelOptions: QWEN_IMAGE_30_MODELS.map((value) => ({ value, label: value })),
+    aspectRatios: QWEN_IMAGE_30_RATIOS,
+    defaultAspectRatio: '1:1',
+    sizes: [],
+    defaultSize: '',
+    supportsReference: true,
+    maxReferenceImages: 3,
+    description: 'Qwen Image 3.0 / Pro · 国内与 Global 文生图、图像编辑',
   },
   // ========================================================================
   // Midjourney — 完全对齐 gpt-image-2-web/index.html runMJ L4437~L4694
@@ -732,6 +783,57 @@ export const VIDEO_MODELS: VideoModelDef[] = [
         maxRefImages: 9,
         maxRefVideos: 3,
         maxRefAudios: 3,
+      },
+      {
+        value: 'minimax-h3-ow-t2v',
+        label: 'minimax-h3-ow-t2v（MiniMax H3 OW 文生视频）',
+        description: 'MiniMax H3 OW 文生视频；5/10/15 秒，480p/720p。',
+        ratios: ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9'],
+        defaultRatio: '16:9',
+        durations: [5, 10, 15],
+        defaultDuration: 5,
+        resolutions: ['480p', '720p'],
+        defaultResolution: '480p',
+        supportImages: false,
+        supportVideos: false,
+        supportAudios: false,
+        maxRefImages: 0,
+        maxRefVideos: 0,
+        maxRefAudios: 0,
+      },
+      {
+        value: 'minimax-h3-ow-r2v',
+        label: 'minimax-h3-ow-r2v（MiniMax H3 OW 参考生视频）',
+        description: 'MiniMax H3 OW 参考图生视频；必须提供提示词与 1 张参考图。',
+        ratios: ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9'],
+        defaultRatio: '16:9',
+        durations: [5, 10, 15],
+        defaultDuration: 5,
+        resolutions: ['480p', '720p'],
+        defaultResolution: '480p',
+        supportImages: true,
+        supportVideos: false,
+        supportAudios: false,
+        maxRefImages: 1,
+        maxRefVideos: 0,
+        maxRefAudios: 0,
+      },
+      {
+        value: 'minimax-h3-ow-i2v',
+        label: 'minimax-h3-ow-i2v（MiniMax H3 OW 图生视频）',
+        description: 'MiniMax H3 OW 图生视频；必须提供 1 张首帧图，提示词可选。',
+        ratios: ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9'],
+        defaultRatio: '16:9',
+        durations: [5, 10, 15],
+        defaultDuration: 5,
+        resolutions: ['480p', '720p'],
+        defaultResolution: '480p',
+        supportImages: true,
+        supportVideos: false,
+        supportAudios: false,
+        maxRefImages: 1,
+        maxRefVideos: 0,
+        maxRefAudios: 0,
       },
     ],
     ratios: ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],

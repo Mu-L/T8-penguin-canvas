@@ -1,0 +1,79 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "MiniMax H3 OW 参考生视频（平价AI小屋）",
+  "nodes": [
+    {
+      "id": "minimax-h3-ow-r2v-reference",
+      "type": "upload",
+      "position": {
+        "x": 0,
+        "y": 40
+      },
+      "data": {
+        "label": "上传参考图",
+        "uploadType": "image",
+        "lockedUploadType": "image"
+      }
+    },
+    {
+      "id": "minimax-h3-ow-r2v",
+      "type": "video",
+      "position": {
+        "x": 420,
+        "y": 40
+      },
+      "data": {
+        "label": "MiniMax H3 OW 参考生视频",
+        "mainId": "hailuo-2.3",
+        "model": "minimax-h3-ow-r2v",
+        "videoBuiltinSource": "seedance-nz",
+        "ratio": "16:9",
+        "duration": 5,
+        "resolution": "480p",
+        "localPrompt": "保持参考人物身份一致，镜头缓慢推进",
+        "localRefImages": [],
+        "reuseResult": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "minimax-h3-ow-r2v-reference-edge",
+      "source": "minimax-h3-ow-r2v-reference",
+      "target": "minimax-h3-ow-r2v"
+    }
+  ],
+  "nodeCount": 2,
+  "edgeCount": 1,
+  "nodeTypes": [
+    "upload",
+    "video"
+  ],
+  "topologyPreview": {
+    "nodes": [
+      {
+        "id": "minimax-h3-ow-r2v-reference",
+        "type": "upload",
+        "label": "上传参考图",
+        "x": 50,
+        "y": 90
+      },
+      {
+        "id": "minimax-h3-ow-r2v",
+        "type": "video",
+        "label": "MiniMax H3 OW 参考生视频",
+        "x": 470,
+        "y": 90
+      }
+    ],
+    "edges": [
+      {
+        "id": "minimax-h3-ow-r2v-reference-edge",
+        "source": "minimax-h3-ow-r2v-reference",
+        "target": "minimax-h3-ow-r2v"
+      }
+    ]
+  },
+  "savedAt": "2026-08-06T00:00:00.000Z"
+}
