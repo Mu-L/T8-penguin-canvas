@@ -1,9 +1,9 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.8.2",
-  "lastUpdated": "2026-08-06-v2.8.2-release-authorized",
+  "lastUpdated": "2026-08-06-v2.8.2-release-published",
   "windowsUnicodePathCompatibility": {
-    "status": "release-authorized-v2.8.2",
+    "status": "released-v2.8.2",
     "date": "2026-08-06",
     "releaseIncluded": true,
     "affectedRuntime": "Electron 33 main-process Chromium session.fetch response adapter",
@@ -19,7 +19,7 @@
       "System bridge, Electron integration, packaged path resolution and Seedream local-reference tests pass 23/23."
     ],
     "boundaries": [
-      "This capability is included in the owner-authorized v2.8.2 fixed-source release; artifact hashes, Tag and Latest status remain pending until the single formal release flow completes.",
+      "This capability was packaged and published by the single owner-authorized v2.8.2 fixed-source Electron/NSIS release flow.",
       "Affected-user installed-build confirmation remains pending after release and must not be reported as passed."
     ]
   },
@@ -212,19 +212,35 @@
     ]
   },
   "release": {
-    "status": "release-authorized-v2.8.2",
+    "status": "released-v2.8.2",
     "version": "2.8.2",
     "date": "2026-08-06",
-    "publishedAt": null,
+    "publishedAt": "2026-08-06T09:22:24Z",
     "tag": "v2.8.2",
-    "latest": false,
-    "sourceCommit": null,
+    "latest": true,
+    "sourceCommit": "435a8bee730bd7a21147f5d7ebc11ca5b0c41e91",
     "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.8.2",
-    "artifacts": null,
+    "artifacts": {
+      "installer": {
+        "name": "T8-PenguinCanvas-Setup-2.8.2.exe",
+        "size": 1317462098,
+        "sha256": "7f2804c22697bc3f58b46c13696c485bbd6f0b154d387c5247cb50ad96922abd"
+      },
+      "blockmap": {
+        "name": "T8-PenguinCanvas-Setup-2.8.2.exe.blockmap",
+        "size": 1373311,
+        "sha256": "fb2ac48b18813b08c07cf308636ee5e497861e2fd68e56eb7556372cdd3dc53e"
+      },
+      "updateManifest": {
+        "name": "latest.yml",
+        "size": 362,
+        "sha256": "3f85df3e8a4ac8617bf4edf5b160bd46570c6dfdb69e19728d2b19a16b8d8fa5"
+      }
+    },
     "verification": [
       "v2.8.2 发布范围固定为 Windows 中文用户名、userData、安装路径和素材文件名触发的 Electron 33 主进程 Unicode 响应头兼容修复；不回退 v2.8.1 或更早版本的节点、模型、工作流、协议和网络能力。",
-      "真实 Electron A/B 与系统网络桥、打包路径、Seedream 中文素材链定向回归 23/23 已通过；TypeScript、能力同步、公开源码、RH 工具箱和生产构建在固定源码提交前继续复核。",
-      "Electron/NSIS、私有后端加密、运行时归档、post-build、provenance、sealed recovery、GitHub 自动更新三资产、完整远端回下载、固定 Tag、非草稿/非预发布、Latest 与 recovery 清理必须由固定 source commit 上的唯一 dist:release 流程产生，当前不得预填通过或摘要。",
+      "真实 Electron A/B 与系统网络桥、打包路径、Seedream 中文素材链定向回归 23/23 通过；协作延期门 4/4、TypeScript、74/74 能力同步且 0 公共缺口、公开源码、RH 工具箱和正式 4426 模块生产构建通过。",
+      "固定提交 435a8bee730bd7a21147f5d7ebc11ca5b0c41e91 上的唯一正式流程完成私有后端加密、两套运行时归档、Electron/NSIS、post-build、provenance、sealed recovery、GitHub digest/size、发布前与发布后完整远端回下载、固定 Tag、非草稿/非预发布、Latest 与 recovery 清理核验。",
       "用户已明确授权先发布、后补反馈用户安装环境、协作多端与安装升级证据；协作证据门只允许完全缺失的清单按 owner-approved-post-release-v2.8.2 延期，不能把延期标记为已通过。"
     ]
   },
@@ -6551,8 +6567,8 @@
     "version": "2.8.2",
     "semverVersion": "2.8.2",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.2 已获授权进入固定源码的唯一正式发布流程，范围为 Windows 中文用户名、userData、安装路径和素材文件名的 Electron 33 Unicode 响应头兼容修复。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.8.2 Electron/NSIS 自动更新资产只能由固定 source commit 上的唯一 dist:release 流程生成；安装包、blockmap、latest.yml 的实际大小与摘要、Tag/target、Latest、远端回下载和 recovery 清理结果将在发布成功后据实回填，当前不得预填。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.2 已正式发布，范围为 Windows 中文用户名、userData、安装路径和素材文件名的 Electron 33 Unicode 响应头兼容修复。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.8.2 已从固定 source commit 435a8bee730bd7a21147f5d7ebc11ca5b0c41e91 的唯一 dist:release 流程生成并发布：安装包 1,317,462,098 bytes / SHA-256 7f2804c22697bc3f58b46c13696c485bbd6f0b154d387c5247cb50ad96922abd；blockmap 1,373,311 bytes / SHA-256 fb2ac48b18813b08c07cf308636ee5e497861e2fd68e56eb7556372cdd3dc53e；latest.yml 362 bytes / SHA-256 3f85df3e8a4ac8617bf4edf5b160bd46570c6dfdb69e19728d2b19a16b8d8fa5。4426 模块生产构建、私有后端加密、两套运行时归档、post-build、provenance、sealed recovery、GitHub digest/size、发布前与发布后完整远端回下载、Tag/target 与 Latest 均通过，recovery 已清除。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
