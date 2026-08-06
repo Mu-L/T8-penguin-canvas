@@ -112,3 +112,13 @@ test('packaged mode ignores the development-only root override', () => {
   assert.equal(packaged.isPackaged, true);
   assert.equal(path.resolve(packaged.baseDir), path.resolve(packagedRoot));
 });
+
+test('packaged data directories preserve a Chinese Windows user path', () => {
+  const packagedRoot = path.join(os.tmpdir(), 'Windows用户-自定义账户', 'AppData', 'Roaming', 'T8-PenguinCanvas');
+  const packaged = readConfigPaths({
+    T8PC_PACKAGED: '1',
+    T8PC_USER_DATA: packagedRoot,
+  });
+  assert.equal(path.resolve(packaged.baseDir), path.resolve(packagedRoot));
+  assert.equal(path.resolve(packaged.dataDir), path.join(path.resolve(packagedRoot), 'data'));
+});

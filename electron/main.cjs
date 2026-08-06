@@ -25,7 +25,10 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const { spawn } = require('child_process');
 const { fileURLToPath } = require('url');
-const { installGlobalSystemFetchBridge } = require('./systemFetchBridge.cjs');
+const {
+  installChromiumResponseHeaderBridge,
+  installGlobalSystemFetchBridge,
+} = require('./systemFetchBridge.cjs');
 
 const APP_VERSION = require('../package.json').version;
 const UPDATE_DISABLED_MESSAGE = '开发模式不会检查 GitHub Release 更新';
@@ -1862,6 +1865,13 @@ async function startBackend() {
   // Requests with an explicit Undici dispatcher remain on Node's stack because
   // they are deliberate fresh-connection/DNS recovery paths.
   const defaultNetworkSession = session.defaultSession;
+  // Electron 33 copies Chromium response headers into Undici Headers without
+  // first preserving UTF-8 values as a ByteString. A Provider that echoes a
+  // Chinese Windows username, local path or filename in Content-Disposition
+  // can therefore throw an uncaught main-process TypeError. Normalize only
+  // those response header values at the Chromium boundary; filesystem paths,
+  // URLs and response bodies remain unchanged.
+  installChromiumResponseHeaderBridge(defaultNetworkSession);
   installGlobalSystemFetchBridge({
     chromiumFetch: defaultNetworkSession.fetch.bind(defaultNetworkSession),
     refreshNetwork: async () => {

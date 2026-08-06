@@ -6,7 +6,10 @@ const test = require('node:test');
 
 const {
   SYSTEM_FETCH_BRIDGE_MARKER,
+  byteStringSafeResponseHeaderValue,
+  chromiumResponseHeaders,
   createSystemFetchBridge,
+  installChromiumResponseHeaderBridge,
   installGlobalSystemFetchBridge,
 } = require('../electron/systemFetchBridge.cjs');
 
@@ -105,6 +108,75 @@ test('Chromium transport strips caller-supplied authority and body-framing heade
   assert.equal(node.calls.length, 0);
 
   assert.equal(forbiddenHeaders.Host, 'https://wrong-authority.example', 'caller headers remain untouched');
+});
+
+test('Chromium response headers preserve UTF-8 paths as ByteString-safe bytes', () => {
+  const unicodePath = 'C:\\Users\\自定义用户\\AppData\\Roaming\\T8-PenguinCanvas\\输出图.png';
+  const expected = Buffer.from(unicodePath, 'utf8').toString('latin1');
+  const normalized = chromiumResponseHeaders({
+    'Content-Disposition': [`attachment; filename="${unicodePath}"`],
+    'X-Output-Path': [unicodePath],
+    'Content-Type': ['image/png'],
+  });
+
+  assert.equal(
+    normalized['Content-Disposition'][0],
+    `attachment; filename="${Buffer.from(unicodePath, 'utf8').toString('latin1')}"`,
+  );
+  assert.equal(normalized['X-Output-Path'][0], expected);
+  assert.equal(normalized['Content-Type'][0], 'image/png');
+  assert.equal(Buffer.from(normalized['X-Output-Path'][0], 'latin1').toString('utf8'), unicodePath);
+  assert.doesNotThrow(() => new Headers(normalized));
+});
+
+test('ASCII and latin1 response headers retain their original identity', () => {
+  const headers = {
+    'Content-Type': ['application/json'],
+    ETag: ['"caf\u00e9"'],
+  };
+  assert.strictEqual(chromiumResponseHeaders(headers), headers);
+  assert.equal(byteStringSafeResponseHeaderValue('caf\u00e9'), 'caf\u00e9');
+});
+
+test('response header bridge is idempotent and changes only Unicode values', () => {
+  const registrations = [];
+  const networkSession = {
+    webRequest: {
+      onHeadersReceived(filter, listener) {
+        registrations.push({ filter, listener });
+      },
+    },
+  };
+
+  installChromiumResponseHeaderBridge(networkSession);
+  installChromiumResponseHeaderBridge(networkSession);
+  assert.equal(registrations.length, 1);
+  assert.deepEqual(registrations[0].filter, { urls: ['http://*/*', 'https://*/*'] });
+
+  const unicodeValue = 'C:\\Users\\自媒体\\图片.png';
+  let unicodeResult;
+  registrations[0].listener({ responseHeaders: { 'X-Path': [unicodeValue] } }, (result) => {
+    unicodeResult = result;
+  });
+  assert.equal(
+    unicodeResult.responseHeaders['X-Path'][0],
+    Buffer.from(unicodeValue, 'utf8').toString('latin1'),
+  );
+
+  let asciiResult;
+  registrations[0].listener({ responseHeaders: { 'Content-Type': ['image/png'] } }, (result) => {
+    asciiResult = result;
+  });
+  assert.deepEqual(asciiResult, {});
+
+  let rendererResult;
+  registrations[0].listener({
+    webContentsId: 7,
+    responseHeaders: { 'X-Path': [unicodeValue] },
+  }, (result) => {
+    rendererResult = result;
+  });
+  assert.deepEqual(rendererResult, {});
 });
 
 test('healthy requests do not reload proxy or DNS state', async () => {

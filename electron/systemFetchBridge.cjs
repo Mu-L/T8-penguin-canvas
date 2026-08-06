@@ -3,6 +3,7 @@
 const net = require('node:net');
 
 const SYSTEM_FETCH_BRIDGE_MARKER = Symbol.for('t8-penguin-canvas.system-fetch-bridge.v1');
+const SYSTEM_FETCH_RESPONSE_HEADER_MARKER = Symbol.for('t8-penguin-canvas.system-fetch-response-headers.v1');
 const CHROMIUM_MANAGED_REQUEST_HEADERS = new Set([
   'connection',
   'content-length',
@@ -158,6 +159,67 @@ function chromiumRequestInit(input, init) {
   return result;
 }
 
+function byteStringSafeResponseHeaderValue(value) {
+  const text = String(value ?? '');
+  for (let index = 0; index < text.length; index += 1) {
+    if (text.charCodeAt(index) > 0xff) {
+      // Electron 33's session.fetch builds its WHATWG Response by copying the
+      // Chromium response header strings into Undici Headers. Chromium may
+      // expose a valid UTF-8 filename/path as Unicode here, while Headers.set
+      // requires a WebIDL ByteString and throws in the main process. Preserve
+      // the original UTF-8 bytes as a latin1 JS string so every code unit is
+      // accepted without dropping or changing the response body.
+      return Buffer.from(text, 'utf8').toString('latin1');
+    }
+  }
+  return text;
+}
+
+function chromiumResponseHeaders(headers) {
+  if (!headers || typeof headers !== 'object' || Array.isArray(headers)) return headers;
+  let changed = false;
+  const normalized = {};
+  for (const [name, rawValues] of Object.entries(headers)) {
+    const values = Array.isArray(rawValues) ? rawValues : [rawValues];
+    const nextValues = values.map((value) => {
+      const current = String(value ?? '');
+      const next = byteStringSafeResponseHeaderValue(current);
+      if (next !== current) changed = true;
+      return next;
+    });
+    normalized[name] = Array.isArray(rawValues) ? nextValues : nextValues[0];
+  }
+  return changed ? normalized : headers;
+}
+
+function installChromiumResponseHeaderBridge(networkSession) {
+  const webRequest = networkSession?.webRequest;
+  if (!webRequest || typeof webRequest.onHeadersReceived !== 'function') {
+    throw new TypeError('networkSession.webRequest.onHeadersReceived must be a function');
+  }
+  if (networkSession[SYSTEM_FETCH_RESPONSE_HEADER_MARKER]) return;
+  webRequest.onHeadersReceived(
+    { urls: ['http://*/*', 'https://*/*'] },
+    (details, callback) => {
+      // Renderer fetch stays entirely inside Chromium and does not use the
+      // main-process Undici Response adapter. Keep those response header
+      // strings untouched; session.fetch/net.fetch use -1 or no WebContents.
+      if (Number.isInteger(details?.webContentsId) && details.webContentsId >= 0) {
+        callback({});
+        return;
+      }
+      const responseHeaders = chromiumResponseHeaders(details?.responseHeaders);
+      callback(responseHeaders === details?.responseHeaders ? {} : { responseHeaders });
+    },
+  );
+  Object.defineProperty(networkSession, SYSTEM_FETCH_RESPONSE_HEADER_MARKER, {
+    configurable: false,
+    enumerable: false,
+    value: true,
+    writable: false,
+  });
+}
+
 function createSystemFetchBridge(options = {}) {
   const chromiumFetch = options.chromiumFetch;
   const nodeFetch = options.nodeFetch;
@@ -239,6 +301,10 @@ function installGlobalSystemFetchBridge(options = {}) {
 
 module.exports = {
   SYSTEM_FETCH_BRIDGE_MARKER,
+  SYSTEM_FETCH_RESPONSE_HEADER_MARKER,
+  byteStringSafeResponseHeaderValue,
+  chromiumResponseHeaders,
   createSystemFetchBridge,
+  installChromiumResponseHeaderBridge,
   installGlobalSystemFetchBridge,
 };
