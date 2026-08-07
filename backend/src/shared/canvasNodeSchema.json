@@ -594,6 +594,23 @@
         }
       ]
     },
+    "mv-music-master": {
+      "resolver": "static",
+      "inputs": [
+        { "id": "master-audio", "kinds": ["audio"], "required": true, "minConnections": 1, "maxConnections": 1 },
+        { "id": "lyrics", "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": 1 },
+        { "id": "identity-image", "kinds": ["image"], "required": true, "minConnections": 1, "maxConnections": 9 },
+        { "id": "style-image", "kinds": ["image"], "required": false, "minConnections": 0, "maxConnections": 9 },
+        { "id": "motion-reference", "kinds": ["video"], "required": false, "minConnections": 0, "maxConnections": 3 }
+      ],
+      "outputs": [
+        { "id": "final-video", "kinds": ["video"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": true },
+        { "id": "master-audio", "kinds": ["audio"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": false },
+        { "id": "storyboards", "kinds": ["image"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": false },
+        { "id": "prompt-pack", "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": false },
+        { "id": "manifest", "kinds": ["metadata"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": false }
+      ]
+    },
     "runninghub": {
       "resolver": "static",
       "inputs": [
@@ -2890,6 +2907,82 @@
           ],
           "outputs": [
             { "id": null, "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": null }
+          ]
+        }
+      }
+    },
+    {
+      "type": "mv-music-master",
+      "label": "MV 音乐大师",
+      "category": "core",
+      "description": "从完整歌曲、歌词、人设与风格参考完成语义安全切段、分批导演提示词、分镜图、Seedance/H3 分段视频及原曲单轨成片的可恢复 MV 工作台",
+      "icon": "Clapperboard",
+      "color": "fuchsia",
+      "ports": {
+        "inputs": ["audio", "text", "image", "video"],
+        "outputs": ["video", "audio", "image", "text", "metadata"]
+      },
+      "executable": true,
+      "generatable": true,
+      "generation": {
+        "allowedDataFields": {
+          "lyricsText": { "type": "string", "maxLength": 200000 },
+          "styleDescription": { "type": "string", "maxLength": 20000 },
+          "mvType": { "type": "string", "enum": ["narrative", "performance", "dance", "abstract", "lyric-visual", "hybrid"] },
+          "creativity": { "type": "string", "enum": ["conservative", "balanced", "creative", "custom"] },
+          "shotMode": { "type": "string", "enum": ["bpm-auto", "semantic-auto", "fixed"] },
+          "fixedShotCount": { "type": "integer", "minimum": 1, "maximum": 20 },
+          "aspectRatio": { "type": "string", "enum": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] },
+          "subtitlePolicy": { "type": "string", "enum": ["lyrics", "spatial-lyrics", "none"] },
+          "llmApiSource": { "type": "string", "enum": ["seedance-nz", "zhenzhen"] },
+          "providerSource": { "type": "string", "maxLength": 200 },
+          "providerId": { "type": "string", "maxLength": 200 },
+          "providerModel": { "type": "string", "maxLength": 300 },
+          "mvImageProvider": { "type": "string", "enum": ["seedance-nz", "zhenzhen"] },
+          "mvImageModel": { "type": "string", "enum": ["zhenzhen-image-g2-i2i", "zhenzhen-image-g-v2-lowprice", "gpt-image-2-all", "gpt-image-2", "gpt-image-2-2K", "gpt-image-2-4K"] },
+          "mvVideoFamily": { "type": "string", "enum": ["seedance", "hailuo"] },
+          "mvVideoProvider": { "type": "string", "enum": ["seedance-nz", "zhenzhen"] },
+          "mvVideoModel": { "type": "string", "enum": ["standard", "fast", "mini", "global-standard", "global-fast", "global-mini", "doubao-seedance-2-0-fast-260128", "doubao-seedance-2-0-260128", "doubao-seedance-2.0-mini", "hailuo-h3-multi", "hailuo-h3-i2v", "minimax-h3-ow-r2v", "minimax-h3-ow-i2v"] },
+          "mvVideoResolution": { "type": "string", "enum": ["480p", "720p", "1080p", "2k", "4k", "native1080p", "native4K", "2K"] },
+          "mvComposeResolution": { "type": "string", "enum": ["720p", "1080p", "2k", "4k"] }
+        },
+        "defaults": {
+          "lyricsText": "",
+          "styleDescription": "",
+          "mvType": "hybrid",
+          "creativity": "balanced",
+          "shotMode": "bpm-auto",
+          "fixedShotCount": 4,
+          "aspectRatio": "16:9",
+          "subtitlePolicy": "lyrics",
+          "llmApiSource": "seedance-nz",
+          "providerSource": "zhenzhen",
+          "providerId": "",
+          "providerModel": "bytedance/doubao-seed-2.1-pro",
+          "mvImageProvider": "seedance-nz",
+          "mvImageModel": "zhenzhen-image-g2-i2i",
+          "mvVideoFamily": "seedance",
+          "mvVideoProvider": "seedance-nz",
+          "mvVideoModel": "fast",
+          "mvVideoResolution": "1080p",
+          "mvComposeResolution": "1080p",
+          "status": "idle"
+        },
+        "connectionPorts": {
+          "dynamic": false,
+          "inputs": [
+            { "id": "master-audio", "kinds": ["audio"], "required": true, "minConnections": 1, "maxConnections": 1 },
+            { "id": "lyrics", "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": 1 },
+            { "id": "identity-image", "kinds": ["image"], "required": true, "minConnections": 1, "maxConnections": 9 },
+            { "id": "style-image", "kinds": ["image"], "required": false, "minConnections": 0, "maxConnections": 9 },
+            { "id": "motion-reference", "kinds": ["video"], "required": false, "minConnections": 0, "maxConnections": 3 }
+          ],
+          "outputs": [
+            { "id": "final-video", "kinds": ["video"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": true },
+            { "id": "master-audio", "kinds": ["audio"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": false },
+            { "id": "storyboards", "kinds": ["image"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": false },
+            { "id": "prompt-pack", "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": false },
+            { "id": "manifest", "kinds": ["metadata"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": false }
           ]
         }
       }

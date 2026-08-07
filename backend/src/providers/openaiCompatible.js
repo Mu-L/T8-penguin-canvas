@@ -16,9 +16,13 @@ function hasApiKey(provider) {
 
 async function fetchWithTimeout(url, options = {}) {
   const controller = new AbortController();
+  const externalSignal = options.signal;
+  const forwardAbort = () => controller.abort(externalSignal?.reason);
+  if (externalSignal?.aborted) forwardAbort();
+  else externalSignal?.addEventListener?.('abort', forwardAbort, { once: true });
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs || DEFAULT_TIMEOUT_MS);
   const fetchImpl = options.fetchImpl || fetch;
-  const { timeoutMs, fetchImpl: _fetchImpl, ...fetchOptions } = options;
+  const { timeoutMs, fetchImpl: _fetchImpl, signal: _externalSignal, ...fetchOptions } = options;
   try {
     return await fetchImpl(url, {
       ...fetchOptions,
@@ -27,6 +31,7 @@ async function fetchWithTimeout(url, options = {}) {
     });
   } finally {
     clearTimeout(timeout);
+    externalSignal?.removeEventListener?.('abort', forwardAbort);
   }
 }
 
@@ -320,6 +325,7 @@ async function fetchImageReference(url, options = {}) {
     headers: { Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8' },
     timeoutMs: options.timeoutMs,
     fetchImpl: options.fetchImpl,
+    signal: options.signal,
   });
   if (!res.ok) throw new Error(`参考图下载失败：HTTP ${res.status}`);
   const contentLength = Number(res.headers?.get?.('content-length') || 0);
@@ -609,6 +615,7 @@ async function generateChat(provider, input = {}, options = {}) {
       body: JSON.stringify(body),
       timeoutMs: options.timeoutMs,
       fetchImpl: options.fetchImpl,
+      signal: options.signal,
     });
     if (!res.ok) {
       const raw = await responseJson(res);
@@ -699,17 +706,18 @@ async function generateChat(provider, input = {}, options = {}) {
       ...trace,
     };
   } catch (e) {
-    const isTimeout = e?.name === 'AbortError';
+    const isParentAbort = options.signal?.aborted === true;
+    const isTimeout = !isParentAbort && e?.name === 'AbortError';
     const streamCode = ['invalid_stream_event', 'stream_error'].includes(String(e?.code || ''))
       ? String(e.code)
       : '';
     return {
       ok: false,
-      code: isTimeout ? 'timeout' : (streamCode || 'network_error'),
+      code: isParentAbort ? 'request_aborted' : isTimeout ? 'timeout' : (streamCode || 'network_error'),
       providerId: provider.id,
       protocol: provider.protocol,
       model,
-      error: isTimeout ? '扩展 LLM 调用超时。' : (e?.message || '扩展 LLM 调用失败。'),
+      error: isParentAbort ? '扩展 LLM 调用已取消。' : isTimeout ? '扩展 LLM 调用超时。' : (e?.message || '扩展 LLM 调用失败。'),
     };
   }
 }
@@ -761,6 +769,7 @@ async function generateImage(provider, input = {}, options = {}) {
         baseUrl: options.baseUrl,
         timeoutMs: options.referenceTimeoutMs || options.timeoutMs,
         fetchImpl: options.fetchImpl,
+        signal: options.signal,
       });
     } catch (e) {
       return { ok: false, code: 'invalid_reference', providerId: provider.id, protocol: provider.protocol, error: e?.message || '参考图解析失败。' };
@@ -793,6 +802,7 @@ async function generateImage(provider, input = {}, options = {}) {
       body: requestBody,
       timeoutMs: options.timeoutMs,
       fetchImpl: options.fetchImpl,
+      signal: options.signal,
     });
     const raw = await responseJson(res);
     const trace = providerTrace(res, raw, { pollCount: 0 });
@@ -814,12 +824,13 @@ async function generateImage(provider, input = {}, options = {}) {
     }
     return { ok: true, kind: 'image', code: 'completed', providerId: provider.id, protocol: provider.protocol, model, imageUrls, raw, ...trace };
   } catch (e) {
+    const isParentAbort = options.signal?.aborted === true;
     return {
       ok: false,
-      code: e?.name === 'AbortError' ? 'timeout' : 'network_error',
+      code: isParentAbort ? 'request_aborted' : e?.name === 'AbortError' ? 'timeout' : 'network_error',
       providerId: provider.id,
       protocol: provider.protocol,
-      error: e?.name === 'AbortError' ? '扩展图像调用超时。' : (e?.message || '扩展图像调用失败。'),
+      error: isParentAbort ? '扩展图像调用已取消。' : e?.name === 'AbortError' ? '扩展图像调用超时。' : (e?.message || '扩展图像调用失败。'),
     };
   }
 }
@@ -865,6 +876,7 @@ async function generateVideo(provider, input = {}, options = {}) {
       body: JSON.stringify(body),
       timeoutMs: options.timeoutMs,
       fetchImpl: options.fetchImpl,
+      signal: options.signal,
     });
     const raw = await responseJson(res);
     const trace = providerTrace(res, raw, { pollCount: 0 });
@@ -886,12 +898,13 @@ async function generateVideo(provider, input = {}, options = {}) {
     }
     return { ok: true, kind: 'video', code: 'completed', providerId: provider.id, protocol: provider.protocol, model, taskId: extractTaskId(raw), videoUrls, raw, ...trace };
   } catch (e) {
+    const isParentAbort = options.signal?.aborted === true;
     return {
       ok: false,
-      code: e?.name === 'AbortError' ? 'timeout' : 'network_error',
+      code: isParentAbort ? 'request_aborted' : e?.name === 'AbortError' ? 'timeout' : 'network_error',
       providerId: provider.id,
       protocol: provider.protocol,
-      error: e?.name === 'AbortError' ? '扩展视频调用超时。' : (e?.message || '扩展视频调用失败。'),
+      error: isParentAbort ? '扩展视频调用已取消。' : e?.name === 'AbortError' ? '扩展视频调用超时。' : (e?.message || '扩展视频调用失败。'),
     };
   }
 }

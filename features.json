@@ -1,7 +1,94 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.8.2",
-  "lastUpdated": "2026-08-06-v2.8.2-release-published",
+  "version": "2.8.3",
+  "lastUpdated": "2026-08-07-v2.8.3-release-authorized",
+  "mvMusicMaster": {
+    "status": "release-authorized-v2.8.3",
+    "date": "2026-08-07",
+    "releaseIncluded": true,
+    "nodeType": "mv-music-master",
+    "contract": "backend/src/shared/mvMusicMasterContract.json",
+    "exampleWorkflow": "docs/workflows/mv-music-master.json",
+    "defaultLlm": {
+      "provider": "seedance-nz",
+      "model": "bytedance/doubao-seed-2.1-pro",
+      "label": "贞贞的平价AI小屋"
+    },
+    "ports": {
+      "inputs": [
+        "audio:song",
+        "text:lyrics(optional-when-pasted)",
+        "image:identity",
+        "image:style",
+        "video:motion-reference"
+      ],
+      "outputs": [
+        "video:mv",
+        "audio:master-song",
+        "image:storyboards",
+        "text:prompt-bundle",
+        "metadata:delivery-manifest"
+      ]
+    },
+    "workflow": [
+      "素材与四项授权",
+      "本地音频分析与严格分段",
+      "导演设置",
+      "分批视觉圣经合并与逐段 Prompt",
+      "分镜图候选",
+      "分段视频候选",
+      "原曲单轨合成与 QC",
+      "交付"
+    ],
+    "hardRules": [
+      "每段实际音频必须为 5.000–14.990 秒；15.000 秒及以上失败关闭。",
+      "歌词以用户确认的纯文本/LRC/SRT为权威；ASR只提供时间证据，不改写歌词，也不在句子中间切开。",
+      "分段、导演方案、Prompt、分镜候选、视频候选、最终 QC 和正式交付均有明确确认门；素材授权绑定输入范围，每个真实计费批次再以 SHA-256 精确绑定实际渠道、模型、请求体、素材和任务集合。",
+      "视觉圣经和长歌词 Prompt 均按最多6段/6000歌词与镜头字符的有界批次调用 LLM；缺段、重复、截断、歌词改写或结构/连续性 Critic 失败均不进入下一阶段。",
+      "图片只有成功加载、视频只有实际播放后才生成 CandidateReview v2；采纳生成绑定候选 asset/hash/evidence 的 AdoptionReceipt v2，新候选不会清空旧采纳版本。",
+      "每个付费候选按 requestDigest/revision 派生稳定 submissionKey，请求前保存提交意图；无 taskId 的不明确结果标记 ambiguous 并禁止批量自动重放，只有用户核对 Provider 后才能显式新建修订。",
+      "父 Run STOP 传播 AbortSignal；停止后子任务进入 interrupted/recoverable，不再下载、落盘或覆盖成功状态。",
+      "只有严格匹配当前 ReviewReceipt/AdoptionReceipt 的已采用资产才能进入版本化 EDL；EDL 先持久化再合成。最终合成丢弃所有生成视频音轨，只把完整原曲映射一次；后端强制零裁剪、零延迟、零淡化、音量1并回传原曲源 SHA/时长；用户实际播放后才签发绑定 EDL、合成 Attempt 和成片资产的 QCReport，确认后才生成 DeliveryReceipt 与正式 Delivery Manifest。",
+      "上游歌曲/歌词/人设/风格/运镜变化，或用户重新采纳 Bible、Prompt、图片、视频时，旧视频、分镜、清单和子流程交付输出立即撤销，禁止下游误用旧成片。"
+      ,"主歌曲、人设、风格与运镜输入必须先物化为项目资产并记录 SHA-256；每次付费提交前重新读取并校验真实字节，实际 Provider 请求体与素材摘要共同进入授权和稳定 submissionKey。"
+      ,"人工歌词时间草案只有起点、终点分别试听确认后才可参与分段；均匀草案、单边确认或缺少时间证据均失败关闭。"
+      ,"PromptPack 声明 promptLanguage=en；Critic 扫描 composition/action/camera/lighting/imagePrompt/continuityIn/continuityOut，禁止任何正向可见文字，并禁止声音字段复述歌词。H3 编译前再次做视觉、声音、脚本与英文词法证据校验。"
+      ,"H3 Multi 真实请求固定为 1 张权威人设原图 + 最多 8 张分镜 + 本段原音频，并按 Subject/Picture/Audio 角色编译 Ref2AV；H3/OW I2V 只把 1 张已审分镜声明为 0 秒首帧，OW R2V 则声明为非首尾帧参考。"
+      ,"视频审阅必须在前台、1x、无拖动地覆盖完整播放区间并记录 wall-clock/range/rate/visibility/seek 证据；重复审阅相同资产保持原 ReviewReceipt，不使已采纳回执失效。"
+      ,"内置 LLM 下拉只展示已声明并通过本节点视觉输入预检的模型；扩展 LLM 仍要求用户从渠道文档显式确认 OpenAI 兼容 image_url，任何非空失效渠道或模型都在 Provider 请求前失败关闭。"
+      ,"平价 Seedance 2.0 的 UI 选择别名与实际上游 canonical 模型同时持久化；付费批准、Provider 请求体、Attempt 和恢复账本均绑定 canonical seedance-2.0-*-multi。Seedance/H3 的提交与终态回执必须同时匹配已批准 provider、canonical model 与 taskType；任一不一致会持久化为 blocked，禁止自动恢复、物化、采用、交付或重放。首次提交三元组验证通过后会持久化为恢复证据；后端重启或 30 分钟任务映射过期导致终态字段缺失时，只允许回落到这份已验证证据，没有验证证据的旧任务继续失败关闭。视频家族、渠道、模型切换会原子写入合法分辨率，避免显示值与持久值分裂。"
+    ],
+    "providers": {
+      "llm": "复用画布全部已启用 LLM Provider；默认仍为平价AI小屋 2.1。内置渠道只展示已验证视觉模型，扩展渠道保留显式视觉能力确认；失效渠道或模型不静默回退。",
+      "image": "贞贞AI工坊 literal GPT Image 2 系列与贞贞的平价AI小屋 G2 系列显式分流，不把 G2 冒充 literal gpt-image-2。",
+      "video": "贞贞AI工坊/平价AI小屋 Seedance 2.0 与经运行目录证明可用的 MiniMax/Hailuo H3 显式选择；UI 别名和实际 canonical 上游模型分别展示并共同进入请求证据。"
+    },
+    "verification": {
+      "offline": [
+        "分段、歌词、BPM/ASR attribution、Prompt 合同、端口、能力图、恢复与真实 FFmpeg 合成定向测试通过。",
+        "真实 FFmpeg 回归证明两个自带不同音轨的视频只输出一条独立完整原曲，并将 A/V 漂移控制在一帧内。",
+        "浏览器工作台在 1366x768、1920x1080 与 3840x2160 下无页面横向溢出、无控件越界；四项授权互不串联，空素材失败关闭。",
+        "Electron 2.8.2 开发主进程已用隔离数据根启动独立后端、创建 Chromium 主窗口并加载真实 Vite 页面；该项只证明开发态桌面壳启动，不等于安装版或自动更新通过。"
+      ],
+      "realProviderSmoke": {
+        "scope": "一次 5.000 秒、单段、单图、单视频的小规模链路；不是全部渠道/模型质量矩阵。",
+        "llm": "bytedance/doubao-seed-2.1-pro，视觉圣经与 PromptPack 均通过结构和精确歌词校验。",
+        "image": "zhenzhen-image-g2-i2i，真实 PNG 下载、解码、尺寸和 SHA-256 校验通过。",
+        "video": "doubao-seedance-2-0-fast-260128，真实 H.264 MP4 下载、解码、时长和 SHA-256 校验通过。",
+        "final": "真实检查点恢复后重新执行本地合成，得到 1 视频流 + 1 音频流；完整原曲只绑定一次，字幕 1 条，并再次核对原曲源 SHA-256 与 5.000 秒完整时长。",
+        "retryEvidence": "首次 PromptPack 返回 HTTP 524 后流程停止且未提交图片/视频；操作员显式重试后从已验证检查点继续，没有自动重放付费提交。",
+        "qualityBoundary": "真实分镜图出现了提示词禁止的可见歌词文字，因此只记为链路/媒体物理验证通过，不记为艺术质量采纳；生产节点保留人工查看、拒绝、重生成门。",
+        "credentials": "API Key只从进程环境读取；源码、设置、工作流和脱敏报告均不保存 Key、签名 URL 或原始响应。"
+      },
+      "currentCheckpointRevalidation": "2026-08-07 在无 API Key、零新付费提交模式下复核旧 5 秒检查点；物理媒体仍可复用，但旧 PromptPack 缺少当前强制的 promptLanguage=en 且含非英文描述，新验证器按设计失败关闭。因此旧报告继续只证明当时 Provider/媒体链路，不冒充当前 PromptPack 合同通过；本轮未新增 Provider 付费请求。"
+    },
+    "remainingReleaseGates": [
+      "全部渠道/模型组合的真实质量矩阵",
+      "Electron 安装版中文用户名/中文路径、断网/重启与自动更新回归",
+      "固定 source commit 上唯一 dist:release 产生的 Electron/NSIS、自动更新资产、Tag、Latest 与远端回下载证据；成功前不预填通过或摘要"
+    ],
+    "capabilityBoundary": "Creator Agent / zcanvas CLI 当前只具备 mv-music-master 节点放置能力；节点内八阶段运行、精确恢复和最终交付仍由画布工作台执行，能力图 run/resume=false 是真实边界，不宣称 Agent 可代替用户完成阶段确认。"
+  },
   "windowsUnicodePathCompatibility": {
     "status": "released-v2.8.2",
     "date": "2026-08-06",
@@ -212,42 +299,26 @@
     ]
   },
   "release": {
-    "status": "released-v2.8.2",
-    "version": "2.8.2",
-    "date": "2026-08-06",
-    "publishedAt": "2026-08-06T09:22:24Z",
-    "tag": "v2.8.2",
-    "latest": true,
-    "sourceCommit": "435a8bee730bd7a21147f5d7ebc11ca5b0c41e91",
-    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.8.2",
-    "artifacts": {
-      "installer": {
-        "name": "T8-PenguinCanvas-Setup-2.8.2.exe",
-        "size": 1317462098,
-        "sha256": "7f2804c22697bc3f58b46c13696c485bbd6f0b154d387c5247cb50ad96922abd"
-      },
-      "blockmap": {
-        "name": "T8-PenguinCanvas-Setup-2.8.2.exe.blockmap",
-        "size": 1373311,
-        "sha256": "fb2ac48b18813b08c07cf308636ee5e497861e2fd68e56eb7556372cdd3dc53e"
-      },
-      "updateManifest": {
-        "name": "latest.yml",
-        "size": 362,
-        "sha256": "3f85df3e8a4ac8617bf4edf5b160bd46570c6dfdb69e19728d2b19a16b8d8fa5"
-      }
-    },
+    "status": "release-authorized-v2.8.3",
+    "version": "2.8.3",
+    "date": "2026-08-07",
+    "publishedAt": null,
+    "tag": "v2.8.3",
+    "latest": false,
+    "sourceCommit": null,
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.8.3",
+    "artifacts": null,
     "verification": [
-      "v2.8.2 发布范围固定为 Windows 中文用户名、userData、安装路径和素材文件名触发的 Electron 33 主进程 Unicode 响应头兼容修复；不回退 v2.8.1 或更早版本的节点、模型、工作流、协议和网络能力。",
-      "真实 Electron A/B 与系统网络桥、打包路径、Seedream 中文素材链定向回归 23/23 通过；协作延期门 4/4、TypeScript、74/74 能力同步且 0 公共缺口、公开源码、RH 工具箱和正式 4426 模块生产构建通过。",
-      "固定提交 435a8bee730bd7a21147f5d7ebc11ca5b0c41e91 上的唯一正式流程完成私有后端加密、两套运行时归档、Electron/NSIS、post-build、provenance、sealed recovery、GitHub digest/size、发布前与发布后完整远端回下载、固定 Tag、非草稿/非预发布、Latest 与 recovery 清理核验。",
-      "用户已明确授权先发布、后补反馈用户安装环境、协作多端与安装升级证据；协作证据门只允许完全缺失的清单按 owner-approved-post-release-v2.8.2 延期，不能把延期标记为已通过。"
+      "v2.8.3 发布范围固定为 MV 音乐大师八阶段工作台、5.000–14.990 秒完整句式分段、视觉圣经与逐段 Prompt、分镜/视频候选审阅采纳、版本化 EDL、完整原曲单音轨合成，以及素材摘要、Provider 身份、停止、恢复和交付回执加固；不回退 v2.8.2 或更早版本的节点、模型、工作流、协议和网络能力。",
+      "MV 核心、Provider、恢复、安全媒体、视频合成、能力目录与默认渠道模型已完成离线和小规模真实链路验证；TypeScript、公开源码、RH 工具箱、生产构建与固定提交门在发布前继续复核。",
+      "Electron/NSIS、私有后端加密、两套运行时归档、post-build、provenance、sealed recovery、GitHub 自动更新三资产、完整远端回下载、固定 Tag、非草稿/非预发布、Latest 与 recovery 清理必须由固定 source commit 上的唯一 dist:release 流程产生，当前不得预填通过或摘要。",
+      "用户已明确授权先发布、后补反馈用户安装环境、完整渠道质量矩阵、协作多端与安装升级证据；协作证据门只允许完全缺失的清单按 owner-approved-post-release-v2.8.3 延期，不能把延期标记为已通过。"
     ]
   },
   "versionSequencePolicy": {
     "status": "active",
     "date": "2026-07-30",
-    "currentVersion": "2.8.2",
+    "currentVersion": "2.8.3",
     "rules": [
       "版本号每一段只使用 0-9；v2.6.9 的下一正式版本固定为 v2.7.0。",
       "禁止创建、打包、推送、打 tag、发布或写入自动更新元数据为 v2.6.10。",
@@ -262,6 +333,7 @@
       "v2.7.9 的下一正式版本固定为 v2.8.0，禁止创建 v2.7.10。",
       "v2.8.0 的下一正式版本固定为 v2.8.1。",
       "v2.8.1 的下一正式版本固定为 v2.8.2。",
+      "v2.8.2 的下一正式版本固定为 v2.8.3。",
       "后续改版本前必须同步核对 package.json、package-lock.json、README、features.json、项目 SKILL.md、Release notes、自动更新元数据和 Git tag。"
     ]
   },
@@ -6564,11 +6636,11 @@
       "T8_ENABLE_LOCAL_PRIVATE": "开发环境和普通本机构建可选；0=关闭本机 local-private/extensions 私有扩展。正式 dist:release 固定为 1，不能被父环境降级。GitHub/clean clone 因为没有 local-private 目录，不包含充值实现。",
       "T8_DISABLE_LOCAL_EXTENSIONS": "开发环境可选；1=关闭本地扩展。正式 dist:release 固定为 0，确保本机私有 sidecar 参与加密打包与后置校验。"
     },
-    "version": "2.8.2",
-    "semverVersion": "2.8.2",
+    "version": "2.8.3",
+    "semverVersion": "2.8.3",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.2 已正式发布，范围为 Windows 中文用户名、userData、安装路径和素材文件名的 Electron 33 Unicode 响应头兼容修复。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.8.2 已从固定 source commit 435a8bee730bd7a21147f5d7ebc11ca5b0c41e91 的唯一 dist:release 流程生成并发布：安装包 1,317,462,098 bytes / SHA-256 7f2804c22697bc3f58b46c13696c485bbd6f0b154d387c5247cb50ad96922abd；blockmap 1,373,311 bytes / SHA-256 fb2ac48b18813b08c07cf308636ee5e497861e2fd68e56eb7556372cdd3dc53e；latest.yml 362 bytes / SHA-256 3f85df3e8a4ac8617bf4edf5b160bd46570c6dfdb69e19728d2b19a16b8d8fa5。4426 模块生产构建、私有后端加密、两套运行时归档、post-build、provenance、sealed recovery、GitHub digest/size、发布前与发布后完整远端回下载、Tag/target 与 Latest 均通过，recovery 已清除。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.3 已获授权进入固定源码的唯一正式发布流程，范围为 MV 音乐大师及其素材、Provider、恢复、合成与交付安全合同。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.8.3 Electron/NSIS 自动更新资产只能由固定 source commit 上的唯一 dist:release 流程生成；安装包、blockmap、latest.yml 的实际大小与摘要、Tag/target、Latest、远端回下载和 recovery 清理结果将在发布成功后据实回填，当前不得预填。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",

@@ -91,6 +91,7 @@ function normalizeRunRecoveryDescriptor(value) {
 function isRecoverableRunAttempt(attempt) {
   return Boolean(
     attempt
+    && attempt.metadata?.mvChildAttempt !== true
     && ACTIVE_STATUSES.has(String(attempt.status || ''))
     && normalizeRunRecoveryDescriptor(attempt.metadata?.recovery),
   );

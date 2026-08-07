@@ -22885,6 +22885,15 @@ class ProjectDatabase {
         '恢复终态 Run/NodeRun/Attempt 稳定身份或层级不一致',
       );
     }
+    const activeSiblingAttempts = this.listAttempts(nodeRun.id).filter((item) => (
+      item.id !== attempt.id && ACTIVE_STATUSES.has(String(item.status || ''))
+    ));
+    if (activeSiblingAttempts.length > 0) {
+      throw runRecoveryTerminalError(
+        'run_recovery_terminal_scope_invalid',
+        '恢复 Attempt 所属 NodeRun 仍有其他活动 Attempt，禁止用单个子任务终结父 NodeRun',
+      );
+    }
     this._assertLegacySnapshotGapOwnerMutable({
       projectId: run.projectId,
       canvasId: run.canvasId,
@@ -25566,6 +25575,33 @@ class ProjectDatabase {
     });
   }
 
+  findProviderSubmissionAttempt(input = {}) {
+    const projectId = String(input.projectId || '');
+    const canvasId = String(input.canvasId || '');
+    const nodeEntityUid = isUuid(input.nodeEntityUid) ? String(input.nodeEntityUid).toLowerCase() : null;
+    const nodeIdentity = String(input.originalNodeId || input.nodeId || '');
+    const submissionKey = String(input.submissionKey || '');
+    if (!projectId || !canvasId || (!nodeEntityUid && !nodeIdentity) || !submissionKey) return null;
+    const rows = this.db.prepare(`
+      SELECT ra.*
+      FROM run_attempts ra
+      JOIN node_runs nr ON nr.id = ra.node_run_id
+      JOIN runs r ON r.id = nr.run_id
+      WHERE r.project_id = ?
+        AND r.canvas_id = ?
+        AND (
+          (? IS NOT NULL AND nr.node_entity_uid = ?)
+          OR (? IS NULL AND COALESCE(nr.original_node_id, nr.node_id) = ?)
+        )
+      ORDER BY ra.created_at DESC, ra.id DESC
+    `).all(projectId, canvasId, nodeEntityUid, nodeEntityUid, nodeEntityUid, nodeIdentity);
+    for (const row of rows) {
+      const attempt = this.mapAttemptRow(row, 1);
+      if (String(attempt.metadata?.providerSubmission?.submissionKey || '') === submissionKey) return attempt;
+    }
+    return null;
+  }
+
   recordRunOutputAssets(input = {}) {
     const run = this.getRun(input.runId);
     const nodeRun = this.getNodeRun(input.nodeRunId);
@@ -26039,10 +26075,10 @@ class ProjectDatabase {
       for (const runId of activeRunIds) {
         const activeNodes = this.listNodeRuns(runId).filter((nodeRun) => ACTIVE_STATUSES.has(nodeRun.status));
         const tickets = activeNodes.map((nodeRun) => {
-          const attempt = [...this.listAttempts(nodeRun.id)].reverse().find((item) => ACTIVE_STATUSES.has(item.status));
-          return { nodeRun, attempt };
+          const activeAttempts = this.listAttempts(nodeRun.id).filter((item) => ACTIVE_STATUSES.has(item.status));
+          return { nodeRun, attempt: activeAttempts.length === 1 ? activeAttempts[0] : null, activeAttemptCount: activeAttempts.length };
         });
-        if (tickets.length > 0 && tickets.every((ticket) => isRecoverableRunAttempt(ticket.attempt))) {
+        if (tickets.length > 0 && tickets.every((ticket) => ticket.activeAttemptCount === 1 && isRecoverableRunAttempt(ticket.attempt))) {
           recoverableRunIds.push(runId);
           recoverableNodeRuns += tickets.length;
           recoverableAttempts += tickets.length;
@@ -26091,9 +26127,12 @@ class ProjectDatabase {
     `).all(...activeStatuses, ...activeStatuses, ...activeStatuses);
     const seenNodes = new Set();
     const tickets = [];
+    const activeCountByNode = new Map();
+    for (const row of rows) activeCountByNode.set(row.node_run_id, (activeCountByNode.get(row.node_run_id) || 0) + 1);
     for (const row of rows) {
       if (seenNodes.has(row.node_run_id)) continue;
       seenNodes.add(row.node_run_id);
+      if (activeCountByNode.get(row.node_run_id) !== 1) continue;
       const attempt = this.getAttempt(row.attempt_id);
       if (!isRecoverableRunAttempt(attempt)) continue;
       tickets.push({

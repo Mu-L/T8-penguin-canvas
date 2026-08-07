@@ -19,6 +19,25 @@ const {
 const { isLoopbackAddress, safeRemoteMediaFetch } = require('../utils/safeRemoteMediaFetch');
 
 const router = express.Router();
+router.use((req, res, next) => {
+  const controller = new AbortController();
+  req.t8AbortSignal = controller.signal;
+  const abort = () => {
+    if (!controller.signal.aborted) controller.abort(new Error('client_disconnected'));
+  };
+  const onClose = () => {
+    if (!res.writableEnded) abort();
+  };
+  const cleanup = () => {
+    req.off('aborted', abort);
+    res.off('close', onClose);
+    res.off('finish', cleanup);
+  };
+  req.once('aborted', abort);
+  res.once('close', onClose);
+  res.once('finish', cleanup);
+  next();
+});
 const EXTERNAL_GENERATION_TIMEOUT_MS = 60 * 60 * 1000;
 const WEB_IMAGE_FETCH_TIMEOUT_MS = 30 * 1000;
 const WEB_IMAGE_FETCH_MAX_BYTES = 20 * 1024 * 1024;
@@ -135,6 +154,7 @@ function isTrustedLocalOutputUrl(value, trustedOrigins) {
 }
 
 async function saveOneMediaOutput(url, kind = 'image', options = {}) {
+  if (options.signal?.aborted) throw options.signal.reason || new DOMException('Aborted', 'AbortError');
   const text = String(url || '').trim();
   if (!text) return '';
   const dataMatch = text.match(/^data:([^;,]+);base64,(.+)$/i);
@@ -144,7 +164,7 @@ async function saveOneMediaOutput(url, kind = 'image', options = {}) {
   }
   if (/^https?:\/\//i.test(text)) {
     if (options.fetchImpl || isTrustedLocalOutputUrl(text, options.trustedLocalOrigins)) {
-      const res = await (options.fetchImpl || fetch)(text);
+      const res = await (options.fetchImpl || fetch)(text, { signal: options.signal });
       if (!res.ok) throw new Error(`下载扩展平台输出失败：HTTP ${res.status}`);
       const mime = typeof res.headers?.get === 'function' ? res.headers.get('content-type') : '';
       const ext = outputExtFromMime(mime, outputExtFromUrl(text, defaultExtForKind(kind)));
@@ -159,6 +179,7 @@ async function saveOneMediaOutput(url, kind = 'image', options = {}) {
       idleTimeoutMs: 30 * 1000,
       maxRedirects: 4,
       userAgent: 'T8-PenguinCanvas-ExternalProvider/1.0',
+      signal: options.signal,
     });
     const ext = outputExtFromMime(
       remote.contentType,
@@ -450,6 +471,7 @@ router.post('/llm', async (req, res) => {
     const result = await generateChatWithProvider(resolved.provider, req.body || {}, {
       timeoutMs: Number(req.body?.timeoutMs) || undefined,
       baseUrl: `http://127.0.0.1:${config.PORT}`,
+      signal: req.t8AbortSignal,
     });
     return resultResponse(res, result, resolved.provider);
   } catch (e) {
@@ -477,12 +499,13 @@ router.post('/image', async (req, res) => {
     const result = await generateImageWithProvider(resolved.provider, req.body || {}, {
       timeoutMs: generationTimeoutMs(req.body?.timeoutMs),
       baseUrl: `http://127.0.0.1:${config.PORT}`,
+      signal: req.t8AbortSignal,
     });
     if (!result.ok) return resultResponse(res, result, resolved.provider);
     const remoteImageUrls = Array.isArray(result.imageUrls) ? result.imageUrls : [];
     const remoteVideoUrls = Array.isArray(result.videoUrls) ? result.videoUrls : [];
     const remoteAudioUrls = Array.isArray(result.audioUrls) ? result.audioUrls : [];
-    const outputSaveOptions = { trustedLocalOrigins: trustedLocalOutputOrigins(resolved.provider) };
+    const outputSaveOptions = { trustedLocalOrigins: trustedLocalOutputOrigins(resolved.provider), signal: req.t8AbortSignal };
     const [savedImages, savedVideos, savedAudios] = await Promise.all([
       saveMediaOutputs('image', remoteImageUrls, outputSaveOptions),
       saveMediaOutputs('video', remoteVideoUrls, outputSaveOptions),
@@ -582,6 +605,7 @@ router.post('/web-image', async (req, res) => {
     }, {
       timeoutMs: Number(req.body?.llmTimeoutMs || req.body?.timeoutMs) || undefined,
       baseUrl: `http://127.0.0.1:${config.PORT}`,
+      signal: req.t8AbortSignal,
     });
     if (!chatResult.ok) return resultResponse(res, chatResult, provider);
 
@@ -664,6 +688,7 @@ router.post('/web-image', async (req, res) => {
       timeoutMs: generationTimeoutMs(req.body?.imageTimeoutMs || req.body?.timeoutMs),
       pollIntervalMs: Number(req.body?.pollIntervalMs) || undefined,
       baseUrl: `http://127.0.0.1:${config.PORT}`,
+      signal: req.t8AbortSignal,
     });
     if (!imageResult.ok) {
       return res.json({
@@ -689,6 +714,7 @@ router.post('/web-image', async (req, res) => {
     const remoteImageUrls = Array.isArray(imageResult.imageUrls) ? imageResult.imageUrls : [];
     const savedImages = await saveMediaOutputs('image', remoteImageUrls, {
       trustedLocalOrigins: trustedLocalOutputOrigins(provider),
+      signal: req.t8AbortSignal,
     });
     const imageUrls = savedImages.urls;
     if (!imageUrls.length) {
@@ -753,11 +779,13 @@ router.post('/video', async (req, res) => {
     const result = await generateVideoWithProvider(resolved.provider, req.body || {}, {
       timeoutMs: generationTimeoutMs(req.body?.timeoutMs),
       baseUrl: `http://127.0.0.1:${config.PORT}`,
+      signal: req.t8AbortSignal,
     });
     if (!result.ok) return resultResponse(res, result, resolved.provider);
     const remoteVideoUrls = Array.isArray(result.videoUrls) ? result.videoUrls : [];
     const videoUrls = await saveVideoOutputs(remoteVideoUrls, {
       trustedLocalOrigins: trustedLocalOutputOrigins(resolved.provider),
+      signal: req.t8AbortSignal,
     });
     return resultResponse(res, result, resolved.provider, {
       remoteVideoUrls,

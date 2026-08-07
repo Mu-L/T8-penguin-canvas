@@ -15,16 +15,16 @@
   },
   "sourceDigests": {
     "creativeCapabilityManifest": "ce6ad80e45c55d8972944abd1c6f847e6e3651b2311b8dd293a5268ba381fc50",
-    "canvasNodeSchema": "da97fa5a60564b815304ce6819a2550202e8d1e7b7787836ef27fb4af7dccfc6",
-    "canvasNodeSchemaFile": "13f2e28a8c0e7060553bf09d1e085a758226de04c56d7bcf0f8769fa8a3f4e1f",
-    "runtimeCatalogSources": "e2f8c02396697fd0acd9c4d264e68783a8b5c648748c02f4c13e9b23664abaee",
-    "runtimeCatalogArtifact": "7533b5dcf137f08965f19981cadecf31afc4c18af9fbb3278e7a17d451464b1f",
+    "canvasNodeSchema": "84f98c2552f2b00a75b393c33de0bb0f45d9c582b2f9fe1c658d73fe8ecd3ec8",
+    "canvasNodeSchemaFile": "da9e1127a5eafb482f39b8596889a727583ef39e07e8cabc14373211c1d68049",
+    "runtimeCatalogSources": "c3c03db59c69e910cee25d16c72d1a7cce004962cfb38233473162d3a6226ea7",
+    "runtimeCatalogArtifact": "040cc38889f06d56cd53df9e337c38cdfa32cc5503d713a54536f7810a3aa6cf",
     "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
     "capabilityGraphCompiler": "1a611d7e91dcf523e0536a92e9adb6ba2d884689a65fa10274bcda3a05ef9840",
     "coverageReceiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7",
     "canonicalTextDigestCompiler": "b0afcf28a257fbbd8f391edc117348f8f2ede1b4a039ae91bce25a8d563ac0cf"
   },
-  "aggregateDigest": "46d814ddc18c5b082b44e749ed135a18d688db63a27090ebd5a156f2aca1ce31",
+  "aggregateDigest": "fa1d73399da22cbb2359abd59f2152b03fec8daf98a16a1bf8faea69b25708a6",
   "principles": {
     "oneSentenceStart": true,
     "directCanvasMutation": false,
@@ -36,16 +36,16 @@
   "counts": {
     "capabilities": 31,
     "handlers": 31,
-    "nodes": 74,
-    "executableNodes": 55,
-    "generatableNodes": 9,
-    "referencedNodes": 65,
+    "nodes": 75,
+    "executableNodes": 56,
+    "generatableNodes": 10,
+    "referencedNodes": 66,
     "unreferencedNodes": 9,
-    "directCapabilityNodes": 65,
+    "directCapabilityNodes": 66,
     "internalCompatNodes": 1,
     "semanticSupersededNodes": 8,
     "publicCapabilityGapNodes": 0,
-    "accountedNodes": 74,
+    "accountedNodes": 75,
     "unexplainedNodes": 0,
     "fullyOperableNodes": 16,
     "runtimeEntries": 219,
@@ -516,6 +516,7 @@
         "llm",
         "minimax-h3-prompt-enhancer",
         "seedance20-prompt-enhancer",
+        "mv-music-master",
         "runninghub",
         "runninghub-wallet",
         "rh-tools",
@@ -3785,6 +3786,57 @@
       }
     },
     {
+      "type": "mv-music-master",
+      "label": "MV 音乐大师",
+      "description": "从完整歌曲、歌词、人设与风格参考完成语义安全切段、分批导演提示词、分镜图、Seedance/H3 分段视频及原曲单轨成片的可恢复 MV 工作台",
+      "category": "core",
+      "hidden": false,
+      "executable": true,
+      "generatable": true,
+      "agentExposure": "direct-capability",
+      "coverageReason": "registered-capability-reference",
+      "accounting": {
+        "status": "direct-capability",
+        "reasonCode": "registered-capability-reference",
+        "semanticCapabilityIds": [
+          "canvas.node-add"
+        ],
+        "evidence": [
+          "tools/zcanvas-cli/creativeCapabilityManifest.json"
+        ]
+      },
+      "inputs": [
+        "audio",
+        "text",
+        "image",
+        "video"
+      ],
+      "outputs": [
+        "video",
+        "audio",
+        "image",
+        "text",
+        "metadata"
+      ],
+      "capabilityIds": [
+        "canvas.node-add"
+      ],
+      "handlerIds": [
+        "creative-action:graph.node-add"
+      ],
+      "coverage": {
+        "understand": true,
+        "plan": true,
+        "preview": true,
+        "apply": true,
+        "run": false,
+        "verify": true,
+        "resume": false,
+        "rollback": true,
+        "recover": true
+      }
+    },
+    {
       "type": "runninghub",
       "label": "RunningHub",
       "description": "RH 工作流主节点",
@@ -6216,7 +6268,7 @@
   ],
   "runtime": {
     "schema": "t8-creative-runtime-catalog-v1",
-    "sourceDigest": "e2f8c02396697fd0acd9c4d264e68783a8b5c648748c02f4c13e9b23664abaee",
+    "sourceDigest": "c3c03db59c69e910cee25d16c72d1a7cce004962cfb38233473162d3a6226ea7",
     "platforms": [
       {
         "id": "zhenzhen",
@@ -10826,6 +10878,7 @@
       "feishu-bitable-output",
       "video",
       "script-master",
+      "mv-music-master",
       "runninghub",
       "runninghub-wallet",
       "rh-tools",
@@ -11098,16 +11151,16 @@
     "schema": "t8-creative-capability-coverage-receipt-v1",
     "sourceDigests": {
       "capabilityManifest": "ce6ad80e45c55d8972944abd1c6f847e6e3651b2311b8dd293a5268ba381fc50",
-      "nodeSchema": "da97fa5a60564b815304ce6819a2550202e8d1e7b7787836ef27fb4af7dccfc6",
-      "runtimeCatalog": "e2f8c02396697fd0acd9c4d264e68783a8b5c648748c02f4c13e9b23664abaee",
+      "nodeSchema": "84f98c2552f2b00a75b393c33de0bb0f45d9c582b2f9fe1c658d73fe8ecd3ec8",
+      "runtimeCatalog": "c3c03db59c69e910cee25d16c72d1a7cce004962cfb38233473162d3a6226ea7",
       "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
       "receiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7"
     },
     "inventory": {
       "nodes": {
-        "total": 74,
-        "executable": 55,
-        "generatable": 9
+        "total": 75,
+        "executable": 56,
+        "generatable": 10
       },
       "runtime": {
         "llm": 29,
@@ -11128,6 +11181,6 @@
       "missingCompatibilityEdges": []
     },
     "complete": true,
-    "digest": "a987185d44bd8f13fa13db1b715daef15f3a7d45e4469a906466e5dbf1fb39ed"
+    "digest": "b819f628f4d974c26a7c762687b09d35bd19fe0a1fbb93a3992765ef8f73745e"
   }
 }

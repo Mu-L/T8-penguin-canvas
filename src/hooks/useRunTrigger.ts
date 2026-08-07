@@ -76,6 +76,7 @@ export function useRunTrigger(
     const capturedExecutionToken = executionToken;
     (async () => {
       const binding = getRunExecutionBinding(nodeId, capturedExecutionToken);
+      const executionAbortController = new AbortController();
       const runContext = binding?.runContext || null;
       const runId = runContext?.runId || null;
       const executionContext = binding?.nodeContext || getRunNodeExecutionContext(nodeId);
@@ -135,6 +136,7 @@ export function useRunTrigger(
       const lifecycle = createRunNodeLifecycleController({
         runContext,
         executionToken: capturedExecutionToken,
+        signal: executionAbortController.signal,
         executionEvidence: () => ({ nodeRunId, attemptId, providerSubmissionKey }),
         basePayload: {
           nodeId: executionContext?.runNodeId || nodeId,
@@ -326,6 +328,7 @@ export function useRunTrigger(
         nodeId,
         capturedExecutionToken,
         async () => {
+          executionAbortController.abort(new Error('节点运行已由用户停止'));
           await persistenceReady;
           await persistTerminal('stopped', new Error('节点运行已由用户停止'));
         },

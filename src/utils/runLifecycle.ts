@@ -40,6 +40,7 @@ export async function executeAfterRunLifecycleBarrier<T>(
 export function createRunNodeLifecycleController(input: {
   runContext: RunContext | null;
   executionToken: string;
+  signal?: AbortSignal;
   executionEvidence?: () => {
     nodeRunId?: string | null;
     attemptId?: string | null;
@@ -76,6 +77,7 @@ export function createRunNodeLifecycleController(input: {
     reporter: {
       runContext: input.runContext,
       executionToken: input.executionToken,
+      signal: input.signal,
       get nodeRunId() {
         return input.executionEvidence?.().nodeRunId || null;
       },

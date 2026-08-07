@@ -1,0 +1,74 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "MV 音乐大师 · 高质量导演确认模式",
+  "nodes": [
+    {
+      "id": "mv-music-master",
+      "type": "mv-music-master",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "MV 音乐大师",
+        "lyricsText": "",
+        "styleDescription": "",
+        "mvType": "hybrid",
+        "creativity": "balanced",
+        "shotMode": "bpm-auto",
+        "fixedShotCount": 4,
+        "aspectRatio": "16:9",
+        "subtitlePolicy": "lyrics",
+        "llmApiSource": "seedance-nz",
+        "providerSource": "zhenzhen",
+        "providerId": "",
+        "providerModel": "bytedance/doubao-seed-2.1-pro",
+        "mvImageProvider": "seedance-nz",
+        "mvImageModel": "zhenzhen-image-g2-i2i",
+        "mvVideoFamily": "seedance",
+        "mvVideoProvider": "seedance-nz",
+        "mvVideoModel": "fast",
+        "mvVideoResolution": "1080p",
+        "mvComposeResolution": "1080p",
+        "status": "idle",
+        "error": "",
+        "mvProject": {
+          "schema": "t8-mv-music-master-project-v1",
+          "revision": 0,
+          "stage": "materials",
+          "lyricUnits": [],
+          "lyricWarnings": [],
+          "approvals": {
+            "schema": "t8-mv-project-approvals-v1",
+            "musicRights": false,
+            "portraitConsent": false,
+            "styleReferenceRights": false,
+            "paidGeneration": false,
+            "maxTasksPerBatch": 50,
+            "updatedAt": 0
+          }
+        }
+      }
+    }
+  ],
+  "edges": [],
+  "nodeCount": 1,
+  "edgeCount": 0,
+  "nodeTypes": [
+    "mv-music-master"
+  ],
+  "topologyPreview": {
+    "nodes": [
+      {
+        "id": "mv-music-master",
+        "type": "mv-music-master",
+        "label": "MV 音乐大师",
+        "x": 50,
+        "y": 50
+      }
+    ],
+    "edges": []
+  },
+  "savedAt": "2026-08-07T00:00:00.000Z"
+}

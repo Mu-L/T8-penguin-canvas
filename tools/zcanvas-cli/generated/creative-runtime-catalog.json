@@ -1,6 +1,6 @@
 {
   "schema": "t8-creative-runtime-catalog-v1",
-  "sourceDigest": "e2f8c02396697fd0acd9c4d264e68783a8b5c648748c02f4c13e9b23664abaee",
+  "sourceDigest": "c3c03db59c69e910cee25d16c72d1a7cce004962cfb38233473162d3a6226ea7",
   "generatedFrom": [
     "src/providers/models.ts",
     "src/config/seedance.ts",

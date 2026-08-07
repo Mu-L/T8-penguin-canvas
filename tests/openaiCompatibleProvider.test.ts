@@ -31,6 +31,35 @@ function jsonResponse(body: any, status = 200) {
   };
 }
 
+test('OpenAI compatible adapter forwards a parent AbortSignal to a hanging LLM request', async () => {
+  const provider = {
+    id: 'custom-openai',
+    protocol: 'openai-compatible',
+    baseUrl: 'https://api.example.com/v1',
+    apiKey: 'sk-secret',
+    chatModels: ['gpt-4o-mini'],
+  };
+  const controller = new AbortController();
+  let observedSignal: AbortSignal | undefined;
+  const pending = openaiCompatible.generateChat(provider, { prompt: 'stop me' }, {
+    signal: controller.signal,
+    timeoutMs: 5_000,
+    fetchImpl: (_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+      observedSignal = init.signal as AbortSignal;
+      if (observedSignal.aborted) {
+        reject(new DOMException('Aborted', 'AbortError'));
+        return;
+      }
+      observedSignal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+    }),
+  });
+  controller.abort(new Error('test-client-stop'));
+  const result = await pending;
+  assert.equal(observedSignal?.aborted, true);
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'request_aborted');
+});
+
 test('OpenAI compatible chat posts to chat/completions and normalizes assistant text', async () => {
   const calls: any[] = [];
   const provider = {

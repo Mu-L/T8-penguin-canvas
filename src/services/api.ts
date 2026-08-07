@@ -2903,9 +2903,9 @@ export async function createProjectRunAttempt(runId: string, nodeRunId: string, 
   usage?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   error?: Record<string, unknown> | null;
-}): Promise<RunAttemptSummary> {
-  const res = await request<{ success: boolean; data: RunAttemptSummary }>(`${BASE}/project-runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeRunId)}/attempts`, { method: 'POST', body: JSON.stringify(input) });
-  return res.data;
+}): Promise<RunAttemptSummary & { reusedSubmission?: boolean }> {
+  const res = await request<{ success: boolean; data: RunAttemptSummary; reusedSubmission?: boolean }>(`${BASE}/project-runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeRunId)}/attempts`, { method: 'POST', body: JSON.stringify(input) });
+  return { ...res.data, reusedSubmission: res.reusedSubmission === true };
 }
 
 export async function updateProjectRunAttempt(runId: string, nodeRunId: string, attemptId: string, patch: {
@@ -2957,10 +2957,10 @@ export async function persistProjectRunOutputAssets(runId: string, nodeRunId: st
     metadata?: Record<string, unknown>;
   }>;
   eventPayload?: Record<string, unknown>;
-}): Promise<{ nodeRun: NodeRunSummary; assets: AssetRef[] }> {
+}, options: { signal?: AbortSignal } = {}): Promise<{ nodeRun: NodeRunSummary; assets: AssetRef[] }> {
   const res = await request<{ success: boolean; data: { nodeRun: NodeRunSummary; assets: AssetRef[] } }>(
     `${BASE}/project-runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeRunId)}/outputs`,
-    { method: 'POST', body: JSON.stringify(input) },
+    { method: 'POST', body: JSON.stringify(input), signal: options.signal },
   );
   return res.data;
 }

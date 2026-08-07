@@ -1511,7 +1511,8 @@ class AssetIndexer {
     };
   }
 
-  async materializeHostArtifactSource(prepared, stagedPaths, maximumBytes, deadlineMs) {
+  async materializeHostArtifactSource(prepared, stagedPaths, maximumBytes, deadlineMs, signal = null) {
+    throwIfHostArtifactAborted(signal);
     if (prepared.sourceType === 'inline-text') {
       return {
         ...this.writeHostArtifactStagingFile(prepared.buffer, stagedPaths),
@@ -1545,8 +1546,10 @@ class AssetIndexer {
         protocols: ['https:'],
         trustedProviderOutput: true,
         accept: 'image/*,video/*,audio/*,model/*,text/*,application/json,application/octet-stream;q=0.8',
+        signal,
       });
     } catch (error) {
+      throwIfHostArtifactAborted(signal);
       const tooLarge = error?.code === 'item_too_large';
       const status = tooLarge ? 413 : 502;
       throw hostArtifactCommitError(
@@ -1555,6 +1558,7 @@ class AssetIndexer {
         status,
       );
     }
+    throwIfHostArtifactAborted(signal);
     let stagedStat = null;
     try { stagedStat = fs.lstatSync(target.absolute); } catch (_) {}
     if (!remote || !Number.isSafeInteger(Number(remote.byteSize))
@@ -2288,6 +2292,7 @@ class AssetIndexer {
         stagedPaths,
         maximumBytes,
         deadlineAt - Date.now(),
+        signal,
       );
       throwIfHostArtifactAborted(signal);
       let initialStat;

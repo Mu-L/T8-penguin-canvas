@@ -776,6 +776,21 @@ function cancelJob(job, message = '已取消', now = Date.now()) {
   return job;
 }
 
+function bindRequestAbortToVideoJob(req, res, job) {
+  const cancel = () => {
+    if (!job?.cancelled && !isTerminalJob(job)) cancelJob(job, '客户端已停止，视频处理已取消');
+  };
+  const close = () => {
+    if (!res.writableEnded) cancel();
+  };
+  req.once('aborted', cancel);
+  res.once('close', close);
+  return () => {
+    req.removeListener('aborted', cancel);
+    res.removeListener('close', close);
+  };
+}
+
 function makeJob(action, rawExecutionEvidence, options = {}) {
   if (videoOperationsShutdownRequested) throw videoOperationLifecycleError();
   cleanupFinishedJobs();
@@ -974,6 +989,16 @@ function safeOutputName(prefix, ext = '.mp4') {
 
 function filePublicUrl(file) {
   return `/files/output/${path.basename(file)}`;
+}
+
+function sha256File(file) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(file);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.once('error', reject);
+    stream.once('end', () => resolve(hash.digest('hex')));
+  });
 }
 
 function getTransitionDefinition(value) {
@@ -1590,8 +1615,9 @@ function parseRotation(stream) {
 
 function parseProbeJson(payload) {
   const streams = Array.isArray(payload?.streams) ? payload.streams : [];
+  const audioStreams = streams.filter((stream) => stream?.codec_type === 'audio');
   const video = streams.find((stream) => stream?.codec_type === 'video') || {};
-  const audio = streams.find((stream) => stream?.codec_type === 'audio') || {};
+  const audio = audioStreams[0] || {};
   const duration = finiteNumber(payload?.format?.duration)
     ?? finiteNumber(video.duration)
     ?? finiteNumber(audio.duration);
@@ -1604,6 +1630,7 @@ function parseProbeJson(payload) {
     rotation: parseRotation(video),
     hasVideo: !!video.codec_type,
     hasAudio: !!audio.codec_type,
+    audioStreamCount: audioStreams.length,
     videoCodec: video.codec_name || '',
     audioCodec: audio.codec_name || '',
     audioSampleRate: finiteNumber(audio.sample_rate),
@@ -1722,7 +1749,7 @@ function overlayContentFilterChain(settings) {
 function shouldKeepAudio(settings, clip, index, probe) {
   if (clip?.muted || !probe?.hasAudio) return false;
   const audio = settings?.audio || 'keep';
-  if (audio === 'mute') return false;
+  if (audio === 'mute' || audio === 'master-audio-replace') return false;
   if (audio === 'first' && index > 0) return false;
   return true;
 }
@@ -2222,11 +2249,18 @@ function buildTimelineAudioEnvelopeFilters(segment) {
 async function mixTimelineAudioIntoVideo(input, output, renderPlan, settings, workDir, job) {
   const audioSegments = independentTimelineAudioSegments(renderPlan, settings);
   if (!audioSegments.length) return { timelineAudioMixed: false, timelineAudioCount: 0 };
+  if (settings?.audio === 'master-audio-replace' && audioSegments.length !== 1) {
+    throw new Error(`MV 主音轨替换只允许 1 条完整歌曲音轨，实际收到 ${audioSegments.length} 条`);
+  }
 
   const videoProbe = await probeFile(input, job);
   const probedDuration = safeRenderPlanNumber(videoProbe.duration, 0);
   const plannedDuration = safeRenderPlanNumber(renderPlan?.duration, 0);
-  const targetDuration = Math.max(0.1, probedDuration > 0 ? probedDuration : plannedDuration);
+  // MV delivery treats the single full-song timeline item as the authority.
+  // Do not inherit a few encoder frames of drift from the concatenated video.
+  const targetDuration = Math.max(0.1, settings?.audio === 'master-audio-replace' && plannedDuration > 0
+    ? plannedDuration
+    : probedDuration > 0 ? probedDuration : plannedDuration);
   const audioInputs = [];
   for (const segment of audioSegments) {
     const source = await resolveVideoSource(segment.directUrl || segment.url, workDir);
@@ -2236,23 +2270,44 @@ async function mixTimelineAudioIntoVideo(input, output, renderPlan, settings, wo
     const trimEnd = sourceDuration > 0 ? Math.min(segment.trimEnd, sourceDuration) : segment.trimEnd;
     const trimStart = sourceDuration > 0 ? Math.min(segment.trimStart, Math.max(0, sourceDuration - 0.02)) : segment.trimStart;
     const duration = Math.max(0.05, trimEnd - trimStart);
+    const normalizedVolume = Math.max(0, Math.min(4, safeRenderPlanNumber(segment.volume, 1)));
+    const normalizedFadeIn = normalizeTimelineAudioFade(segment.audioFadeIn, duration);
+    const normalizedFadeOut = normalizeTimelineAudioFade(segment.audioFadeOut, duration);
+    const normalizedCurve = normalizeTimelineAudioVolumeCurve(segment.volumeCurve);
+    if (settings?.audio === 'master-audio-replace') {
+      const tolerance = 0.001;
+      if (Math.abs(safeRenderPlanNumber(segment.timelineStart, 0)) > tolerance
+        || Math.abs(trimStart) > tolerance
+        || Math.abs(trimEnd - sourceDuration) > tolerance
+        || Math.abs(normalizedVolume - 1) > tolerance
+        || normalizedFadeIn > 0
+        || normalizedFadeOut > 0
+        || normalizedCurve !== 'flat') {
+        throw new Error('MV 主音轨必须是完整原曲：零延迟、零裁剪、零淡化、音量 1、flat 曲线');
+      }
+      if (Math.abs(sourceDuration - plannedDuration) > 0.001) {
+        throw new Error('MV 主音轨源时长必须与权威时间线完全一致');
+      }
+    }
     audioInputs.push({
       source,
+      sourceSha256: settings?.audio === 'master-audio-replace' ? await sha256File(source) : '',
+      sourceDuration,
       timelineStart: segment.timelineStart,
       trimStart,
       trimEnd: trimStart + duration,
       duration,
-      volume: segment.volume,
-      audioFadeIn: normalizeTimelineAudioFade(segment.audioFadeIn, duration),
-      audioFadeOut: normalizeTimelineAudioFade(segment.audioFadeOut, duration),
-      volumeCurve: normalizeTimelineAudioVolumeCurve(segment.volumeCurve),
+      volume: normalizedVolume,
+      audioFadeIn: normalizedFadeIn,
+      audioFadeOut: normalizedFadeOut,
+      volumeCurve: normalizedCurve,
     });
   }
   if (!audioInputs.length) return { timelineAudioMixed: false, timelineAudioCount: 0 };
 
   const filters = [];
   const mixLabels = [];
-  if (videoProbe.hasAudio) {
+  if (videoProbe.hasAudio && settings?.audio !== 'master-audio-replace') {
     filters.push(
       `[0:a:0]apad=whole_dur=${targetDuration.toFixed(3)},` +
       `atrim=0:${targetDuration.toFixed(3)},asetpts=PTS-STARTPTS[baseaud]`,
@@ -2262,6 +2317,7 @@ async function mixTimelineAudioIntoVideo(input, output, renderPlan, settings, wo
   audioInputs.forEach((segment, index) => {
     const inputIndex = index + 1;
     const delayMs = Math.max(0, Math.round(segment.timelineStart * 1000));
+    const outputLabel = settings?.audio === 'master-audio-replace' ? 'aout' : `aud${index}`;
     filters.push([
       `[${inputIndex}:a:0]atrim=start=${segment.trimStart.toFixed(3)}:end=${segment.trimEnd.toFixed(3)}`,
       'asetpts=PTS-STARTPTS',
@@ -2269,14 +2325,16 @@ async function mixTimelineAudioIntoVideo(input, output, renderPlan, settings, wo
       `adelay=${delayMs}:all=1`,
       `apad=whole_dur=${targetDuration.toFixed(3)}`,
       `atrim=0:${targetDuration.toFixed(3)}`,
-      `asetpts=PTS-STARTPTS[aud${index}]`,
+      `asetpts=PTS-STARTPTS[${outputLabel}]`,
     ].join(','));
-    mixLabels.push(`aud${index}`);
+    if (settings?.audio !== 'master-audio-replace') mixLabels.push(`aud${index}`);
   });
-  filters.push(
-    `${mixLabels.map((label) => `[${label}]`).join('')}amix=inputs=${mixLabels.length}:duration=longest:dropout_transition=0,` +
-    `apad=whole_dur=${targetDuration.toFixed(3)},atrim=0:${targetDuration.toFixed(3)},asetpts=PTS-STARTPTS[aout]`,
-  );
+  if (settings?.audio !== 'master-audio-replace') {
+    filters.push(
+      `${mixLabels.map((label) => `[${label}]`).join('')}amix=inputs=${mixLabels.length}:duration=longest:dropout_transition=0,` +
+      `apad=whole_dur=${targetDuration.toFixed(3)},atrim=0:${targetDuration.toFixed(3)},asetpts=PTS-STARTPTS[aout]`,
+    );
+  }
 
   const args = ['-y', '-i', input];
   for (const audioInput of audioInputs) args.push('-i', audioInput.source);
@@ -2294,7 +2352,13 @@ async function mixTimelineAudioIntoVideo(input, output, renderPlan, settings, wo
     output,
   );
   await runFfmpeg(args, job);
-  return { timelineAudioMixed: true, timelineAudioCount: audioInputs.length };
+  return {
+    timelineAudioMixed: true,
+    timelineAudioCount: audioInputs.length,
+    ...(settings?.audio === 'master-audio-replace'
+      ? { masterAudioSourceSha256: audioInputs[0].sourceSha256, masterAudioSourceDuration: audioInputs[0].sourceDuration }
+      : {}),
+  };
 }
 
 async function muteVideoFile(source, job) {
@@ -2558,6 +2622,7 @@ async function probeVideoUrl(url, job) {
       console.warn('[videoOps] thumbnail failed:', error?.message || error);
     }
     const stat = fs.existsSync(source) ? fs.statSync(source) : null;
+    const contentHash = stat?.isFile() ? await sha256File(source) : '';
     return {
       duration: probe.duration,
       width: probe.width,
@@ -2566,6 +2631,7 @@ async function probeVideoUrl(url, job) {
       rotation: probe.rotation,
       hasVideo: probe.hasVideo,
       hasAudio: probe.hasAudio,
+      audioStreamCount: probe.audioStreamCount,
       videoCodec: probe.videoCodec,
       audioCodec: probe.audioCodec,
       audioSampleRate: probe.audioSampleRate,
@@ -2576,9 +2642,78 @@ async function probeVideoUrl(url, job) {
       size: stat?.size,
       mime: 'video/mp4',
       thumbnailUrl,
+      contentHash,
     };
   } finally {
     fsp.rm(tmp, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function materializeMvAudioSlice(body, job = makeJob('mv-audio-slice')) {
+  const audioUrl = String(body?.audioUrl || '').trim();
+  const segmentId = String(body?.segmentId || '').trim();
+  const startUs = Number(body?.startUs);
+  const endUs = Number(body?.endUs);
+  const sourceSongSha256 = String(body?.sourceSongSha256 || '').trim().toLowerCase();
+  if (!audioUrl) throw new Error('MV 音频切片缺少主歌曲地址');
+  if (!/^segment-\d{4}$/i.test(segmentId)) throw new Error('MV 音频切片 segmentId 无效');
+  if (!Number.isSafeInteger(startUs) || !Number.isSafeInteger(endUs) || startUs < 0 || endUs <= startUs) {
+    throw new Error('MV 音频切片时间必须是安全的整数微秒');
+  }
+  const durationUs = endUs - startUs;
+  if (durationUs < 5_000_000 || durationUs > 14_990_000) {
+    throw new Error('MV 音频切片必须在 5.000–14.990 秒之间，15 秒不合法');
+  }
+  const source = resolveMountedPath(audioUrl);
+  if (!source || !fs.existsSync(source)) throw new Error('MV 主歌曲必须是已持久化的本地素材');
+  if (!/^[a-f0-9]{64}$/.test(sourceSongSha256)) throw new Error('MV 主歌曲 SHA256 回执无效');
+  const actualSourceSha256 = await sha256File(source);
+  if (actualSourceSha256 !== sourceSongSha256) throw new Error('MV 主歌曲内容已变化，拒绝复用旧分段');
+  ensureDir(config.OUTPUT_DIR);
+  const output = path.join(config.OUTPUT_DIR, safeOutputName(`mv_${segmentId}_audio`, '.wav'));
+  try {
+    job.message = `切出 ${segmentId} 权威音频`;
+    job.progress = 30;
+    await runFfmpeg([
+      '-y',
+      '-i', source,
+      '-ss', (startUs / 1_000_000).toFixed(6),
+      '-t', (durationUs / 1_000_000).toFixed(6),
+      '-vn',
+      '-c:a', 'pcm_s16le',
+      '-ar', '44100',
+      '-ac', '2',
+      output,
+    ], job, { timeoutMs: 120_000 });
+    const probe = await probeFile(output, job);
+    const stat = fs.statSync(output);
+    if (!probe.hasAudio || Number(probe.duration) <= 0 || stat.size < 1024) throw new Error('切出的 MV 音频无法解码');
+    const actualDurationUs = Math.round(Number(probe.duration) * 1_000_000);
+    if (actualDurationUs < 5_000_000 || actualDurationUs > 14_990_000) {
+      throw new Error(`切出的 MV 音频实际时长 ${actualDurationUs}us 不在 5.000-14.990 秒硬边界内`);
+    }
+    if (Math.abs(actualDurationUs - durationUs) > 25_000) throw new Error('切出的 MV 音频时长偏差超过 25ms');
+    const result = {
+      schema: 't8-mv-audio-slice-receipt-v1',
+      segmentId,
+      sourceSongSha256,
+      sourceStartUs: startUs,
+      sourceEndUs: endUs,
+      expectedDurationUs: durationUs,
+      actualDurationUs,
+      audioUrl: filePublicUrl(output),
+      byteLength: stat.size,
+      sampleRate: probe.audioSampleRate,
+      channels: probe.audioChannels,
+      sha256: crypto.createHash('sha256').update(fs.readFileSync(output)).digest('hex'),
+      createdAt: Date.now(),
+    };
+    finishJob(job, 'MV 音频切片完成', result);
+    return result;
+  } catch (error) {
+    await fsp.rm(output, { force: true }).catch(() => {});
+    failJob(job, error, 'MV 音频切片失败');
+    throw error;
   }
 }
 
@@ -2765,6 +2900,17 @@ async function composeVideoEdit(clips, settings, job = makeJob('compose'), optio
     }
     await validateEncodedVideoOutput(output, job);
     const finalProbe = await probeFile(output, job);
+    if (settings?.audio === 'master-audio-replace') {
+      const expectedDuration = safeRenderPlanNumber(options?.renderPlan?.duration, 0);
+      const fps = Math.max(1, safeRenderPlanNumber(finalProbe.fps, 30));
+      const drift = expectedDuration > 0 ? Math.abs(safeRenderPlanNumber(finalProbe.duration, 0) - expectedDuration) : 0;
+      if (timelineAudioResult.timelineAudioCount !== 1 || Number(finalProbe.audioStreamCount) !== 1) {
+        throw new Error('MV 主音轨合成失败：最终文件必须且只能包含 1 条完整歌曲音轨');
+      }
+      if (expectedDuration > 0 && drift > (1 / fps) + 0.005) {
+        throw new Error(`MV 音画时长漂移 ${drift.toFixed(3)}s，超过一帧验收阈值`);
+      }
+    }
     const stat = fs.statSync(output);
     const result = {
       jobId: job.id,
@@ -2792,6 +2938,11 @@ async function composeVideoEdit(clips, settings, job = makeJob('compose'), optio
       subtitleCount: subtitleResult.subtitleCount,
       timelineAudioMixed: timelineAudioResult.timelineAudioMixed,
       timelineAudioCount: timelineAudioResult.timelineAudioCount,
+      audioStreamCount: finalProbe.audioStreamCount,
+      masterAudioReplaced: settings?.audio === 'master-audio-replace',
+      masterAudioMode: settings?.audio === 'master-audio-replace' ? 'single-pass-transcode' : undefined,
+      masterAudioSourceSha256: timelineAudioResult.masterAudioSourceSha256,
+      masterAudioSourceDuration: timelineAudioResult.masterAudioSourceDuration,
     };
     if (options.markComplete !== false) {
       finishJob(job, '合成完成', result);
@@ -3026,6 +3177,7 @@ router.post('/probe', async (req, res) => {
   // Probe is an internal diagnostic trace. It must never mint a standalone
   // durable Run/NodeRun/Attempt; the owning execution records it when needed.
   const job = makeJob('probe');
+  const unbindAbort = bindRequestAbortToVideoJob(req, res, job);
   try {
     const url = req.body?.videoUrl || req.body?.url;
     const data = await probeVideoUrl(url, job);
@@ -3033,7 +3185,9 @@ router.post('/probe', async (req, res) => {
     res.json({ success: true, data });
   } catch (error) {
     failJob(job, error, '读取视频信息失败');
-    res.status(400).json({ success: false, error: job.error, job: publicJob(job) });
+    if (!req.aborted && !res.destroyed) res.status(job.cancelled ? 499 : 400).json({ success: false, error: job.error, job: publicJob(job) });
+  } finally {
+    unbindAbort();
   }
 });
 
@@ -3047,6 +3201,20 @@ router.post('/timeline-preview', async (req, res) => {
   } catch (error) {
     const status = job.cancelled ? 499 : 500;
     res.status(status).json({ success: false, error: error?.message || '时间线预览失败', job: publicJob(job) });
+  }
+});
+
+router.post('/mv/audio-slice', async (req, res) => {
+  if (!isLoopbackVideoOpsRequest(req)) return res.status(403).json({ success: false, error: 'MV 本地音频切片仅允许本机调用' });
+  const job = makeJob('mv-audio-slice');
+  const unbindAbort = bindRequestAbortToVideoJob(req, res, job);
+  try {
+    const data = await materializeMvAudioSlice(req.body || {}, job);
+    res.json({ success: true, data });
+  } catch (error) {
+    if (!req.aborted && !res.destroyed) res.status(job.cancelled ? 499 : 500).json({ success: false, error: error?.message || 'MV 音频切片失败', job: publicJob(job) });
+  } finally {
+    unbindAbort();
   }
 });
 
@@ -3397,9 +3565,11 @@ router._test = {
   normalizeTimelineAudioVolumeCurve,
   normalizeTimelineAudioFade,
   buildTimelineAudioEnvelopeFilters,
+  mixTimelineAudioIntoVideo,
   muteVideoFile,
   extractAudioFile,
   separateVideoAudio,
+  materializeMvAudioSlice,
   snapshotVideoFrame,
   createTimelinePreview,
   resolveVideoEditRenderPlanPayload,

@@ -73,6 +73,9 @@ test('Hailuo proxy uses the domestic key and keeps task polling in its own autho
 
   assert.equal(submit.success, true);
   assert.equal(submit.data.taskId, 'hailuo-route-task-1');
+  assert.equal(submit.data.taskProvider, 'seedance-nz');
+  assert.equal(submit.data.model, 'hailuo-h3-multi');
+  assert.equal(submit.data.taskType, 'multi');
   assert.equal(submittedKey, 'domestic-hailuo-key');
   assert.equal(submittedRequest.model, 'hailuo-h3-multi');
   assert.deepEqual(submittedRequest.images, ['/files/input/hailuo-h3-reference.png']);
@@ -84,6 +87,9 @@ test('Hailuo proxy uses the domestic key and keeps task polling in its own autho
   assert.equal(status.success, true);
   assert.equal(status.data.status, 'running');
   assert.equal(status.data.progress, '50');
+  assert.equal(status.data.taskProvider, 'seedance-nz');
+  assert.equal(status.data.model, 'hailuo-h3-multi');
+  assert.equal(status.data.taskType, 'multi');
   assert.equal(queriedKey, 'domestic-hailuo-key');
   assert.doesNotMatch(JSON.stringify({ submit, status }), /domestic-hailuo-key|legacy-key-must-not-be-used/);
 });

@@ -862,7 +862,7 @@ function finishResponseBoundary(boundary) {
 async function fetchProviderResponse(fetchImpl, url, init = {}, options = {}, label = 'seedance.nz 请求') {
   const limits = providerBoundaryOptions(options);
   const controller = new AbortController();
-  const externalSignal = init?.signal;
+  const externalSignal = init?.signal || options?.signal;
   let externalAborted = externalSignal?.aborted === true;
   const forwardAbort = () => {
     externalAborted = true;
@@ -1288,11 +1288,23 @@ function uploadUrlFromResponse(data) {
   ).trim();
 }
 
-async function sleep(ms) {
-  await new Promise((resolve) => setTimeout(resolve, ms));
+async function sleep(ms, signal) {
+  if (signal?.aborted) throw boundaryError('seedance.nz 请求已取消', 'SEEDANCE_REQUEST_ABORTED', 499);
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener?.('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener?.('abort', onAbort);
+      reject(boundaryError('seedance.nz 请求已取消', 'SEEDANCE_REQUEST_ABORTED', 499));
+    };
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+  });
 }
 
-async function withUploadQueue(apiKey, intervalMs, task) {
+async function withUploadQueue(apiKey, intervalMs, task, signal) {
   const queueKey = hashKey(apiKey);
   const state = uploadQueues.get(queueKey) || { tail: Promise.resolve(), lastAt: 0 };
   let release;
@@ -1303,7 +1315,7 @@ async function withUploadQueue(apiKey, intervalMs, task) {
   await previous;
   try {
     const waitMs = Math.max(0, Number(intervalMs || 0) - (Date.now() - state.lastAt));
-    if (waitMs > 0) await sleep(waitMs);
+    if (waitMs > 0) await sleep(waitMs, signal);
     return await task();
   } finally {
     state.lastAt = Date.now();
@@ -1377,6 +1389,7 @@ async function mediaBuffer(source, kind, maxBytes, options = {}) {
       maxRedirects: options.remoteMaxRedirects,
       lookupImpl: options.lookupImpl,
       allowPrivateForTests: options.allowPrivateForTests,
+      signal: options.signal,
     });
   } catch (error) {
     throw normalizeRemoteMediaError(error, kind, max);
@@ -1432,7 +1445,7 @@ async function uploadMedia(source, kind, apiKey, options = {}) {
           method: 'POST',
           headers: { Authorization: `Bearer ${apiKey}` },
           body: form,
-        }, uploadBoundaryOptions, 'seedance.nz 文件上传');
+        }, { ...uploadBoundaryOptions, signal: options.signal }, 'seedance.nz 文件上传');
         const data = await responseJson(response, 'seedance.nz 文件上传');
         if (!response.ok) {
           throw createUpstreamError(data, response);
@@ -1444,11 +1457,11 @@ async function uploadMedia(source, kind, apiKey, options = {}) {
         lastError = error;
         const retryable = retryableProviderUploadError(error);
         if (!retryable || attempt === 2) break;
-        await sleep(1000 * (2 ** attempt));
+        await sleep(1000 * (2 ** attempt), options.signal);
       }
     }
     throw lastError || new Error('seedance.nz 文件上传失败');
-  });
+  }, options.signal);
 
   uploadCache.set(cacheKey, { createdAt: Date.now(), promise });
   try {

@@ -1334,6 +1334,7 @@ const StoryNode = lazyCanvasNode(() => import('./nodes/StoryNode'), 'StoryNode')
 const ScriptMasterNode = lazyCanvasNode(() => import('./nodes/ScriptMasterNode'), 'ScriptMasterNode');
 const MiniMaxH3PromptEnhancerNode = lazyCanvasNode(() => import('./nodes/MiniMaxH3PromptEnhancerNode'), 'MiniMaxH3PromptEnhancerNode');
 const Seedance20PromptEnhancerNode = lazyCanvasNode(() => import('./nodes/Seedance20PromptEnhancerNode'), 'Seedance20PromptEnhancerNode');
+const MvMusicMasterNode = lazyCanvasNode(() => import('./nodes/MvMusicMasterNode'), 'MvMusicMasterNode');
 const AudioNode = lazyCanvasNode(() => import('./nodes/AudioNode'), 'AudioNode');
 const RunningHubNode = lazyCanvasNode(() => import('./nodes/RunningHubNode'), 'RunningHubNode');
 const RhConfigNode = lazyCanvasNode(() => import('./nodes/RhConfigNode'), 'RhConfigNode');
@@ -1413,6 +1414,7 @@ const SPECIFIC_NODES: Record<string, any> = {
   'script-master': ScriptMasterNode,
   'minimax-h3-prompt-enhancer': MiniMaxH3PromptEnhancerNode,
   'seedance20-prompt-enhancer': Seedance20PromptEnhancerNode,
+  'mv-music-master': MvMusicMasterNode,
   audio: AudioNode,
   llm: LLMNode,
   runninghub: RunningHubNode,
@@ -1973,6 +1975,45 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     error: '',
     enhancedPrompt: '',
     prompt: '',
+  },
+  'mv-music-master': {
+    lyricsText: '',
+    styleDescription: '',
+    mvType: 'hybrid',
+    creativity: 'balanced',
+    shotMode: 'bpm-auto',
+    fixedShotCount: 4,
+    aspectRatio: '16:9',
+    subtitlePolicy: 'lyrics',
+    llmApiSource: 'seedance-nz',
+    providerSource: 'zhenzhen',
+    providerId: '',
+    providerModel: 'bytedance/doubao-seed-2.1-pro',
+    mvImageProvider: 'seedance-nz',
+    mvImageModel: 'zhenzhen-image-g2-i2i',
+    mvVideoFamily: 'seedance',
+    mvVideoProvider: 'seedance-nz',
+    mvVideoModel: 'fast',
+    mvVideoResolution: '1080p',
+    mvComposeResolution: '1080p',
+    status: 'idle',
+    error: '',
+    mvProject: {
+      schema: 't8-mv-music-master-project-v1',
+      revision: 0,
+      stage: 'materials',
+      lyricUnits: [],
+      lyricWarnings: [],
+      approvals: {
+        schema: 't8-mv-project-approvals-v1',
+        musicRights: false,
+        portraitConsent: false,
+        styleReferenceRights: false,
+        paidGeneration: false,
+        maxTasksPerBatch: 50,
+        updatedAt: 0,
+      },
+    },
   },
   upload: { uploadType: null },
   'model-3d-upload': { uploadType: 'model3d', lockedUploadType: 'model3d' },

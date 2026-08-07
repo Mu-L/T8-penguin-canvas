@@ -153,7 +153,9 @@ test('private run-output route gates loopback JSON, keeps only materialization h
   const first = await request(endpoint, forgedBody);
   assert.equal(first.response.status, 201);
   assert.equal(first.body.data.duplicate, false);
-  assert.deepEqual(commitCalls[0], {
+  const { signal: commitSignal, ...commitCall } = commitCalls[0];
+  assert.equal(commitSignal instanceof AbortSignal, true);
+  assert.deepEqual(commitCall, {
     runId: run.id,
     nodeRunId: nodeRun.id,
     attemptId: 'attempt-a',

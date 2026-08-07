@@ -671,3 +671,34 @@ test('safe upload rejects an early success response while the request body is st
   assert.equal(responded, true);
   assert.ok(receivedBytes < body.length, 'an early response must not be accepted as a completed upload');
 });
+
+test('client abort stops an in-flight fetch and removes a partial download target', async (t) => {
+  const server = await listen((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+    res.write(Buffer.alloc(1024, 0x61));
+    const timer = setInterval(() => res.write(Buffer.alloc(1024, 0x62)), 20);
+    res.once('close', () => clearInterval(timer));
+  });
+  t.after(() => closeServer(server));
+  const url = `http://127.0.0.1:${server.address().port}/slow`;
+  const common = {
+    allowPrivateForTests: allowOnlyLoopbackTestHost,
+    protocols: ['http:'],
+    deadlineMs: 5_000,
+    idleTimeoutMs: 2_000,
+    maxBytes: 8 * 1024 * 1024,
+  };
+
+  const fetchController = new AbortController();
+  const pendingFetch = safeRemoteMediaFetch(url, { ...common, signal: fetchController.signal });
+  setTimeout(() => fetchController.abort(new Error('test-client-stop')), 40);
+  await assert.rejects(pendingFetch, (error) => error?.name === 'AbortError' && error?.code === 'request_aborted');
+
+  const target = path.join(os.tmpdir(), `t8-abort-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.bin`);
+  t.after(() => { try { fs.unlinkSync(target); } catch {} });
+  const downloadController = new AbortController();
+  const pendingDownload = safeRemoteMediaDownload(url, target, { ...common, signal: downloadController.signal });
+  setTimeout(() => downloadController.abort(new Error('test-client-stop')), 40);
+  await assert.rejects(pendingDownload, (error) => error?.name === 'AbortError' && error?.code === 'request_aborted');
+  assert.equal(fs.existsSync(target), false, 'partial target must be removed after client abort');
+});

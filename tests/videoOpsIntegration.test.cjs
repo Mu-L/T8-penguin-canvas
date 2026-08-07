@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const express = require('express');
@@ -204,6 +205,67 @@ function listenVideoOps() {
     });
   });
 }
+
+test('MV audio slices accept 5.000/14.990 seconds, reject 15.000, and support Unicode Windows-style paths', async () => {
+  const unicodeDirectory = path.join(config.INPUT_DIR, `MV 中文 用户 [路径] ${Date.now()}`);
+  const source = path.join(unicodeDirectory, '原曲 [母带] 01.wav');
+  fs.mkdirSync(unicodeDirectory, { recursive: true });
+  runFfmpeg(['-y', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=20', '-c:a', 'pcm_s16le', source]);
+  const sourceSongSha256 = crypto.createHash('sha256').update(fs.readFileSync(source)).digest('hex');
+  const relative = path.relative(config.INPUT_DIR, source).split(path.sep).map(encodeURIComponent).join('/');
+  const audioUrl = `/files/input/${relative}`;
+  const outputs = [];
+  try {
+    const five = await videoOpsRouter._test.materializeMvAudioSlice({ audioUrl, segmentId: 'segment-0001', sourceSongSha256, startUs: 1_000_000, endUs: 6_000_000 });
+    const max = await videoOpsRouter._test.materializeMvAudioSlice({ audioUrl, segmentId: 'segment-0002', sourceSongSha256, startUs: 2_000_000, endUs: 16_990_000 });
+    outputs.push(videoOpsRouter._test.resolveMountedPath(five.audioUrl), videoOpsRouter._test.resolveMountedPath(max.audioUrl));
+    assert.equal(five.expectedDurationUs, 5_000_000);
+    assert.ok(Math.abs(five.actualDurationUs - 5_000_000) <= 25_000);
+    assert.equal(max.expectedDurationUs, 14_990_000);
+    assert.ok(Math.abs(max.actualDurationUs - 14_990_000) <= 25_000);
+    assert.equal(five.sampleRate, 44_100);
+    assert.equal(five.channels, 2);
+    await assert.rejects(
+      videoOpsRouter._test.materializeMvAudioSlice({ audioUrl, segmentId: 'segment-0003', sourceSongSha256, startUs: 0, endUs: 15_000_000 }),
+      /15 秒不合法/,
+    );
+  } finally {
+    for (const output of outputs) if (output) fs.rmSync(output, { force: true });
+    fs.rmSync(unicodeDirectory, { recursive: true, force: true });
+  }
+});
+
+test('MV audio slice hard bounds survive MP3, AAC and FLAC decoding', async () => {
+  const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const cases = [
+    { extension: 'mp3', codec: ['-c:a', 'libmp3lame', '-q:a', '2'] },
+    { extension: 'm4a', codec: ['-c:a', 'aac', '-b:a', '192k'] },
+    { extension: 'flac', codec: ['-c:a', 'flac'] },
+  ];
+  const sources = [];
+  const outputs = [];
+  try {
+    for (let index = 0; index < cases.length; index += 1) {
+      const entry = cases[index];
+      const source = path.join(config.INPUT_DIR, `mv_slice_${stamp}.${entry.extension}`);
+      sources.push(source);
+      runFfmpeg(['-y', '-f', 'lavfi', '-i', 'sine=frequency=523.25:sample_rate=48000:duration=6.2', ...entry.codec, source]);
+      const sourceSongSha256 = crypto.createHash('sha256').update(fs.readFileSync(source)).digest('hex');
+      const receipt = await videoOpsRouter._test.materializeMvAudioSlice({
+        audioUrl: `/files/input/${path.basename(source)}`,
+        segmentId: `segment-${String(index + 1).padStart(4, '0')}`,
+        sourceSongSha256,
+        startUs: 500_000,
+        endUs: 5_500_000,
+      });
+      outputs.push(videoOpsRouter._test.resolveMountedPath(receipt.audioUrl));
+      assert.ok(receipt.actualDurationUs >= 5_000_000 && receipt.actualDurationUs <= 14_990_000, `${entry.extension}: ${receipt.actualDurationUs}`);
+      assert.ok(Math.abs(receipt.actualDurationUs - 5_000_000) <= 25_000, `${entry.extension}: ${receipt.actualDurationUs}`);
+    }
+  } finally {
+    for (const file of [...sources, ...outputs]) if (file) fs.rmSync(file, { force: true });
+  }
+});
 
 test('videoOps keeps linked source audio in-band and mixes only independent timeline audio', () => {
   const routeSource = fs.readFileSync(path.join(__dirname, '..', 'backend', 'src', 'routes', 'videoOps.js'), 'utf8');
@@ -481,6 +543,86 @@ test('videoOps mixes independent timeline audio render plan into composed video 
     assert.ok(probe.duration >= 1.1 && probe.duration <= 1.4, `expected video duration around 1.2s, got ${probe.duration}`);
   } finally {
     for (const file of [clip, audio, outputFile]) {
+      if (file) {
+        try { fs.unlinkSync(file); } catch (_) {}
+      }
+    }
+  }
+});
+
+test('MV compose discards every generated clip soundtrack and maps exactly one full master song without amix', async () => {
+  fs.mkdirSync(config.INPUT_DIR, { recursive: true });
+  fs.mkdirSync(config.OUTPUT_DIR, { recursive: true });
+
+  const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const clipA = path.join(config.INPUT_DIR, `mv_master_red_${stamp}.mp4`);
+  const clipB = path.join(config.INPUT_DIR, `mv_master_blue_${stamp}.mp4`);
+  const song = path.join(config.INPUT_DIR, `mv_master_song_${stamp}.wav`);
+  runFfmpeg(['-y', '-f', 'lavfi', '-i', 'color=c=red:s=160x90:r=24:d=0.6', '-f', 'lavfi', '-i', 'sine=frequency=220:duration=0.6', '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', clipA]);
+  runFfmpeg(['-y', '-f', 'lavfi', '-i', 'color=c=blue:s=160x90:r=24:d=0.6', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=0.6', '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', clipB]);
+  runFfmpeg(['-y', '-f', 'lavfi', '-i', 'sine=frequency=880:duration=1.2', '-c:a', 'pcm_s16le', song]);
+
+  let outputFile = '';
+  try {
+    const renderPlan = {
+      version: 1,
+      duration: 1.2,
+      tracks: [
+        { id: 'mv-video-track', kind: 'video', name: 'MV 画面', order: 0 },
+        { id: 'mv-audio-track', kind: 'audio', name: '原曲唯一主音轨', order: 0 },
+      ],
+      clips: [
+        { id: 'mv-a', sourceItemId: 'mv-a-item', assetId: 'mv-a-asset', trackId: 'mv-video-track', kind: 'video', timelineStart: 0, timelineEnd: 0.6, trimStart: 0, trimEnd: 0.6, muted: true, hasAudio: true, url: `/files/input/${path.basename(clipA)}` },
+        { id: 'mv-b', sourceItemId: 'mv-b-item', assetId: 'mv-b-asset', trackId: 'mv-video-track', kind: 'video', timelineStart: 0.6, timelineEnd: 1.2, trimStart: 0, trimEnd: 0.6, muted: true, hasAudio: true, url: `/files/input/${path.basename(clipB)}` },
+      ],
+      audio: [
+        { id: 'mv-master', sourceItemId: 'mv-master-item', assetId: 'mv-master-asset', trackId: 'mv-audio-track', kind: 'audio', timelineStart: 0, timelineEnd: 1.2, trimStart: 0, trimEnd: 1.2, muted: false, volume: 1, audioFadeIn: 0, audioFadeOut: 0, volumeCurve: 'flat', url: `/files/input/${path.basename(song)}` },
+      ],
+      text: [],
+      warnings: [],
+    };
+
+    const result = await videoOpsRouter._test.composeVideoEdit(
+      renderPlan.clips,
+      { aspect: '16:9', resolution: 'first', transition: 'none', transitionDuration: 0, filter: 'none', audio: 'master-audio-replace', targetDuration: 1.2 },
+      undefined,
+      { renderPlan },
+    );
+
+    outputFile = path.join(config.OUTPUT_DIR, path.basename(result.videoUrl));
+    const probe = await videoOpsRouter._test.probeFile(outputFile, null);
+    assert.equal(result.masterAudioReplaced, true);
+    assert.equal(result.masterAudioMode, 'single-pass-transcode');
+    assert.equal(result.timelineAudioCount, 1);
+    assert.equal(result.audioStreamCount, 1);
+    assert.equal(result.masterAudioSourceSha256, crypto.createHash('sha256').update(fs.readFileSync(song)).digest('hex'));
+    assert.ok(Math.abs(result.masterAudioSourceDuration - 1.2) <= 0.001);
+    assert.equal(probe.audioStreamCount, 1);
+    assert.ok(Math.abs(probe.duration - 1.2) <= (1 / 24) + 0.005, `expected <= one-frame drift, got ${probe.duration}`);
+
+    const source = fs.readFileSync(path.join(__dirname, '..', 'backend', 'src', 'routes', 'videoOps.js'), 'utf8');
+    const start = source.indexOf('async function mixTimelineAudioIntoVideo(');
+    const end = source.indexOf('async function muteVideoFile(', start);
+    const body = source.slice(start, end);
+    assert.match(body, /master-audio-replace'[\s\S]*audioSegments\.length !== 1/);
+    assert.match(body, /settings\?\.audio !== 'master-audio-replace'[\s\S]*amix=/);
+
+    const settings = { aspect: '16:9', resolution: 'first', transition: 'none', transitionDuration: 0, filter: 'none', audio: 'master-audio-replace', targetDuration: 1.2 };
+    const invalidAudioVariants = [
+      { label: 'delay', patch: { timelineStart: 0.1 } },
+      { label: 'crop', patch: { trimStart: 0.1 } },
+      { label: 'fade', patch: { audioFadeIn: 0.1 } },
+      { label: 'volume', patch: { volume: 0.8 } },
+    ];
+    for (const variant of invalidAudioVariants) {
+      const invalidPlan = { ...renderPlan, audio: [{ ...renderPlan.audio[0], ...variant.patch }] };
+      await assert.rejects(
+        videoOpsRouter._test.mixTimelineAudioIntoVideo(clipA, path.join(config.OUTPUT_DIR, `mv_invalid_${variant.label}_${stamp}.mp4`), invalidPlan, settings, config.OUTPUT_DIR),
+        /零延迟、零裁剪、零淡化、音量 1、flat 曲线/,
+      );
+    }
+  } finally {
+    for (const file of [clipA, clipB, song, outputFile]) {
       if (file) {
         try { fs.unlinkSync(file); } catch (_) {}
       }

@@ -567,6 +567,8 @@ export interface RunNodeLifecycleReporter {
    * for correlation but must never mint a replacement key.
    */
   readonly providerSubmissionKey: string | null;
+  /** Aborted when the owning Run is stopped or superseded. */
+  readonly signal?: AbortSignal;
   progress(payload?: Record<string, unknown>): Promise<void>;
   polling(payload?: Record<string, unknown>): Promise<void>;
   output(payload?: Record<string, unknown>): Promise<void>;

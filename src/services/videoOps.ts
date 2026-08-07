@@ -11,11 +11,12 @@ function videoOpRouteMissMessage(path: string, text: string): string {
   return `视频剪辑后端接口未更新或未启动：${route} 不可用。请重启后端服务或重新打开 Electron 后再试。`;
 }
 
-async function postVideoOp<T>(path: string, payload: Record<string, any>): Promise<T> {
+async function postVideoOp<T>(path: string, payload: Record<string, any>, options: { signal?: AbortSignal } = {}): Promise<T> {
   const res = await fetch(`/api/video-ops/${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    signal: options.signal,
   });
   const text = await res.text();
   let json: any = null;
@@ -41,6 +42,7 @@ export interface VideoProbeResult {
   rotation?: number;
   hasVideo?: boolean;
   hasAudio?: boolean;
+  audioStreamCount?: number;
   videoCodec?: string;
   audioCodec?: string;
   audioSampleRate?: number;
@@ -51,6 +53,7 @@ export interface VideoProbeResult {
   thumbnailUrl?: string;
   size?: number;
   mime?: string;
+  contentHash?: string;
 }
 
 export interface VideoComposeResult {
@@ -83,6 +86,29 @@ export interface VideoComposeResult {
   timelineVideoTransitionSkippedReason?: string;
   subtitleBurnedIn?: boolean;
   subtitleCount?: number;
+  timelineAudioMixed?: boolean;
+  timelineAudioCount?: number;
+  audioStreamCount?: number;
+  masterAudioSourceSha256?: string;
+  masterAudioSourceDuration?: number;
+  masterAudioReplaced?: boolean;
+  masterAudioMode?: 'single-pass-transcode';
+}
+
+export interface MvAudioSliceReceipt {
+  schema: 't8-mv-audio-slice-receipt-v1';
+  segmentId: string;
+  sourceSongSha256: string;
+  sourceStartUs: number;
+  sourceEndUs: number;
+  expectedDurationUs: number;
+  actualDurationUs: number;
+  audioUrl: string;
+  byteLength: number;
+  sampleRate?: number;
+  channels?: number;
+  sha256: string;
+  createdAt: number;
 }
 
 export interface VideoSnapshotResult {
@@ -152,16 +178,26 @@ export interface VideoComposeOptions {
   executionInput?: VideoEditExecutionInputSnapshot;
 }
 
-export function probeVideo(videoUrl: string): Promise<VideoProbeResult> {
-  return postVideoOp<VideoProbeResult>('probe', { videoUrl });
+export function probeVideo(videoUrl: string, options: { signal?: AbortSignal } = {}): Promise<VideoProbeResult> {
+  return postVideoOp<VideoProbeResult>('probe', { videoUrl }, options);
+}
+
+export function materializeMvAudioSlice(input: {
+  audioUrl: string;
+  segmentId: string;
+  sourceSongSha256: string;
+  startUs: number;
+  endUs: number;
+}, options: { signal?: AbortSignal } = {}): Promise<MvAudioSliceReceipt> {
+  return postVideoOp<MvAudioSliceReceipt>('mv/audio-slice', input, options);
 }
 
 export function composeVideoEdit(clips: VideoEditClip[], settings: VideoEditSettings, options: VideoComposeOptions = {}): Promise<VideoComposeResult> {
   return postVideoOp<VideoComposeResult>('compose', { clips, settings, ...options });
 }
 
-export function composeVideoEditAsync(clips: VideoEditClip[], settings: VideoEditSettings, options: VideoComposeOptions = {}): Promise<VideoJobStatus> {
-  return postVideoOp<VideoJobStatus>('compose', { clips, settings, async: true, ...options });
+export function composeVideoEditAsync(clips: VideoEditClip[], settings: VideoEditSettings, options: VideoComposeOptions = {}, requestOptions: { signal?: AbortSignal } = {}): Promise<VideoJobStatus> {
+  return postVideoOp<VideoJobStatus>('compose', { clips, settings, async: true, ...options }, requestOptions);
 }
 
 export function separateVideoAudioAsync(
@@ -193,8 +229,8 @@ export function loadVideoTimelinePreviewAsync(
   return postVideoOp<VideoTimelinePreviewResult>('timeline-preview', { clip, options });
 }
 
-export async function getVideoEditJob(jobId: string): Promise<VideoJobStatus> {
-  const res = await fetch(`/api/video-ops/jobs/${encodeURIComponent(jobId)}`);
+export async function getVideoEditJob(jobId: string, options: { signal?: AbortSignal } = {}): Promise<VideoJobStatus> {
+  const res = await fetch(`/api/video-ops/jobs/${encodeURIComponent(jobId)}`, { signal: options.signal });
   const json = await res.json();
   if (!res.ok || !json?.success) throw new Error(json?.error || `HTTP ${res.status}`);
   return json.data as VideoJobStatus;

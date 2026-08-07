@@ -60,6 +60,7 @@ const EXPECTED_SIGNATURES: Record<string, string> = {
   llm: 'static|null[text|image|video]->null[text]',
   'minimax-h3-prompt-enhancer': 'static|null[text|image|video]->null[text]',
   'seedance20-prompt-enhancer': 'static|null[text|image|video]->null[text]',
+  'mv-music-master': 'static|master-audio[audio],lyrics[text],identity-image[image],style-image[image],motion-reference[video]->final-video[video],master-audio[audio],storyboards[image],prompt-pack[text],manifest[metadata]',
   runninghub: 'static|null[text|image|video|audio|config]->null[image|video]',
   'runninghub-wallet': 'static|null[text|image|video|audio|config]->null[image|video]',
   'rh-config': 'static|null[text|image|video|audio]->null[config]',
@@ -158,12 +159,12 @@ function dynamicFixture(type: string): Record<string, unknown> {
   return {};
 }
 
-test('all 74 production types have a valid, exact connection authority matching audited JSX Handles', () => {
+test('all 75 production types have a valid, exact connection authority matching audited JSX Handles', () => {
   assert.equal(manifest.schema, 't8-canvas-node-schema-v1');
   assert.equal(manifest.version, 1);
-  assert.equal(manifest.types.length, 74);
-  assert.equal(new Set(manifest.types.map((entry) => entry.type)).size, 74);
-  assert.equal(Object.keys(EXPECTED_SIGNATURES).length, 74);
+  assert.equal(manifest.types.length, 75);
+  assert.equal(new Set(manifest.types.map((entry) => entry.type)).size, 75);
+  assert.equal(Object.keys(EXPECTED_SIGNATURES).length, 75);
   assert.deepEqual(Object.keys(manifest.connectionPorts).sort(), Object.keys(EXPECTED_SIGNATURES).sort());
   assert.deepEqual(manifest.types.map((entry) => entry.type).sort(), Object.keys(manifest.connectionPorts).sort());
 
@@ -189,7 +190,7 @@ test('all 74 production types have a valid, exact connection authority matching 
   }
 });
 
-test('the runtime resolver handles every one of the 74 production node types without aggregate fallback', () => {
+test('the runtime resolver handles every one of the 75 production node types without aggregate fallback', () => {
   for (const { type } of manifest.types) {
     const resolution = requireResolved(canvasNode(type, dynamicFixture(type)));
     assert.equal(resolution.resolver, manifest.connectionPorts[type].resolver, type);

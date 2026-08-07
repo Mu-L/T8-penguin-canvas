@@ -66,6 +66,21 @@ test('lifecycle reporter serializes node and provider events with stable identit
   assert.equal(controller.reporter.providerSubmissionKey, 'submission-a');
 });
 
+test('lifecycle reporter exposes the owning Run abort signal', () => {
+  const abort = new AbortController();
+  const controller = createRunNodeLifecycleController({
+    executionToken: 'token-abort',
+    signal: abort.signal,
+    sink: { write: async () => undefined },
+  });
+  assert.equal(controller.reporter.signal, abort.signal);
+  assert.equal(controller.reporter.signal?.aborted, false);
+  abort.abort();
+  assert.equal(controller.reporter.signal?.aborted, true);
+  const hook = readFileSync(new URL('../src/hooks/useRunTrigger.ts', import.meta.url), 'utf8');
+  assert.match(hook, /executionAbortController\.abort\([\s\S]{0,180}persistTerminal\('stopped'/);
+});
+
 test('failed initial lifecycle persistence invokes the expensive callback zero times', async () => {
   let callbackCalls = 0;
   let persistenceCalls = 0;

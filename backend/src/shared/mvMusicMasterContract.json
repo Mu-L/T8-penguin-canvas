@@ -1,0 +1,101 @@
+{
+  "schema": "t8-mv-music-master-contract-v1",
+  "version": 1,
+  "nodeType": "mv-music-master",
+  "defaultLlmProvider": "seedance-nz",
+  "defaultLlmModel": "bytedance/doubao-seed-2.1-pro",
+  "segmentDurationMs": {
+    "minimum": 5000,
+    "maximum": 14990
+  },
+  "shotCount": {
+    "automatic": 0,
+    "minimum": 1,
+    "maximum": 20
+  },
+  "lyricFormats": ["plain", "lrc", "srt"],
+  "lyricTimingSources": ["lrc", "srt", "asr-segment-interpolation", "manual-draft", "manual-confirmed"],
+  "manualTimingEvidence": {
+    "startBoundaryConfirmationRequired": true,
+    "endBoundaryConfirmationRequired": true,
+    "uniformDraftMayEnterSegmentation": false
+  },
+  "bpmEvidenceSources": ["local-analysis", "manual"],
+  "candidateStatuses": ["submitting", "ambiguous", "blocked", "submitted", "polling", "materializing", "recoverable", "interrupted", "succeeded", "failed"],
+  "approvalGates": ["music-rights", "portrait-consent", "style-reference-rights", "paid-provider-billing", "max-tasks-per-batch"],
+  "audioPolicy": {
+    "segmentCodec": "pcm_s16le",
+    "segmentSampleRate": 44100,
+    "segmentChannels": 2,
+    "finalMasterMode": "single-pass-transcode",
+    "finalAudioStreams": 1
+  },
+  "managedInputPolicy": {
+    "roles": ["master-audio", "identity", "style", "motion-reference"],
+    "rehashBeforePaidDispatch": true,
+    "sourceUrlOnlyIsAuthoritative": false
+  },
+  "promptPolicy": {
+    "promptLanguage": "en",
+    "lyricsMayAppearInPositiveVisualFields": false,
+    "lyricsMayRepeatInSoundFields": false,
+    "continuityFieldsAreScannedForVisibleText": true,
+    "actualProviderBodySha256Required": true
+  },
+  "providerSelectionPolicy": {
+    "builtInLlmRequiresDeclaredVisionSupport": true,
+    "externalLlmRequiresExplicitImageUrlConfirmation": true,
+    "invalidPersistedProviderOrModelFailsBeforeProviderRequest": true,
+    "seedanceNzSelectedAliasAndCanonicalModelAreBothPersisted": true,
+    "seedanceNzPaidApprovalAndAttemptUseCanonicalModel": true,
+    "videoSubmitAndTerminalReceiptsMustMatchApprovedProviderModelAndTaskType": true,
+    "providerContractMismatchIsPersistedBlockedAndNeverAutoResumedOrAdopted": true,
+    "verifiedSubmitReceiptMaySupplyTerminalMetadataAfterBackendRestartOrTaskMapExpiry": true,
+    "videoSelectionWritesCompatibleResolutionAtomically": true
+  },
+  "h3Modes": {
+    "hailuo-h3-multi": "ref2av-one-managed-portrait-plus-at-most-eight-storyboard-pictures-and-one-exact-audio-clip",
+    "hailuo-h3-i2v": "one-reviewed-storyboard-as-exact-first-frame",
+    "minimax-h3-ow-i2v": "one-reviewed-storyboard-as-exact-first-frame",
+    "minimax-h3-ow-r2v": "one-reviewed-storyboard-as-non-boundary-reference"
+  },
+  "deliveryAssets": ["final-video", "master-audio", "storyboards", "prompt-bundle", "edl", "delivery-manifest"],
+  "recovery": {
+    "childAttemptDescriptorField": "mvRecovery",
+    "genericRunRecoveryOwnsChildAttempts": false,
+    "resumeBySavedProviderTaskId": true,
+    "automaticResubmissionAfterAmbiguousState": false,
+    "clientAbortPropagatesThroughProviderPollAndMaterialization": true
+  },
+  "reviewPolicy": {
+    "receiptSchema": "t8-mv-candidate-review-v2",
+    "adoptionSchema": "t8-mv-adoption-receipt-v2",
+    "repeatedReviewIsIdempotent": true,
+    "videoPlaybackRequiresRate": 1,
+    "videoPlaybackRequiresForeground": true,
+    "videoPlaybackAllowsSeeking": false,
+    "videoPlaybackMustCoverFullDuration": true
+  },
+  "projectStates": [
+    "materials",
+    "segment-review",
+    "brief-review",
+    "prompt-review",
+    "image-review",
+    "video-review",
+    "composing",
+    "delivered"
+  ],
+  "h3OutputSections": [
+    "subject_definitions",
+    "summary",
+    "retention_analysis",
+    "detailed_description",
+    "overall_soundscape",
+    "non_diegetic_music"
+  ],
+  "references": {
+    "promptSkill": "G:/minimaxH3 MV制作提示词skills-digital-human-mv-prompting/digital-human-mv-prompting",
+    "promptSkillSha256": "44927bfbc9058ce0b874cd97817743c13d5f4812b2aa570a4620f3840e69ff48"
+  }
+}

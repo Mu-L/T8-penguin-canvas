@@ -18,7 +18,7 @@ export type VideoEditAspect = 'first' | 'source' | '16:9' | '9:16' | '1:1' | '3:
 export type VideoEditResolution = 'first' | '720p' | '1080p' | '2k' | '4k';
 export type VideoEditTransition = string;
 export type VideoEditFilter = 'none' | 'bright' | 'contrast' | 'warm' | 'cool' | 'mono' | 'cinematic';
-export type VideoEditAudioMode = 'keep' | 'mute' | 'first';
+export type VideoEditAudioMode = 'keep' | 'mute' | 'first' | 'master-audio-replace';
 export type VideoEditJobStatus = 'idle' | 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'interrupted';
 export type VideoEditOutputPresetId = 'custom' | 'vertical-short' | 'wide-video' | 'square-social' | 'portrait-poster' | 'classic-horizontal' | 'cinema-wide' | 'panorama-wide';
 export type VideoEditCreatorTemplateId = 'manual' | 'quick-montage' | 'talking-mix' | 'product-showcase' | 'before-after' | 'batch-showcase';
@@ -379,7 +379,7 @@ const ASPECTS: VideoEditAspect[] = ['first', 'source', '16:9', '9:16', '1:1', '3
 const RESOLUTIONS: VideoEditResolution[] = ['first', '720p', '1080p', '2k', '4k'];
 const TRANSITIONS: VideoEditTransition[] = VIDEO_EDIT_TRANSITIONS.map((item) => item.id);
 const FILTERS: VideoEditFilter[] = ['none', 'bright', 'contrast', 'warm', 'cool', 'mono', 'cinematic'];
-const AUDIO_MODES: VideoEditAudioMode[] = ['keep', 'mute', 'first'];
+const AUDIO_MODES: VideoEditAudioMode[] = ['keep', 'mute', 'first', 'master-audio-replace'];
 const IMPORT_SORT_MODES: VideoEditImportSortMode[] = ['current', 'name', 'source', 'duration-asc', 'duration-desc'];
 const DEFAULT_TRIM_MODES: VideoEditDefaultTrimMode[] = ['full', 'first', 'middle'];
 const AUDIO_FILTERS: VideoEditAudioFilter[] = ['all', 'with-audio', 'without-audio'];

@@ -476,3 +476,71 @@ test('shutdown fences a signal-ignoring recovery probe before ProjectDatabase cl
     try { await db.close(); } catch (_) {}
   }
 });
+
+test('restart interrupts historical MV child recovery instead of terminalizing its parent Run', () => {
+  const db = new ProjectDatabase(':memory:');
+  try {
+    const child = createActiveRecovery(db, {
+      nodeId: 'mv-music-master-history',
+      metadata: {
+        mvChildAttempt: true,
+        recovery: { kind: 'seedance', taskId: 'mv-child-task', taskProvider: 'seedance-nz' },
+      },
+    });
+    const primary = db.createAttempt({
+      nodeRunId: child.nodeRun.id,
+      provider: 'mv-orchestrator',
+      model: 'mv-music-master',
+      status: 'running',
+      metadata: { providerSubmission: { version: 1, slot: 'primary', state: 'prepared' } },
+    });
+    const prepared = db.recoverInterruptedRuns();
+    assert.equal(prepared.recoverableRuns, 0);
+    assert.equal(prepared.runs, 1);
+    assert.equal(db.listPendingRunRecoveries().length, 0);
+    assert.equal(db.getRun(child.run.id).status, 'interrupted');
+    assert.equal(db.getNodeRun(child.nodeRun.id).status, 'interrupted');
+    assert.equal(db.getAttempt(child.attempt.id).status, 'interrupted');
+    assert.equal(db.getAttempt(primary.id).status, 'interrupted');
+    const terminalTypes = db.getRunEvents(child.run.id).map((event) => event.type);
+    assert.equal(terminalTypes.includes('run.succeeded'), false);
+    assert.equal(terminalTypes.includes('node.succeeded'), false);
+  } finally {
+    db.close();
+  }
+});
+
+test('recovery terminal write rejects an active sibling Attempt atomically', () => {
+  const db = new ProjectDatabase(':memory:');
+  try {
+    const child = createActiveRecovery(db, { nodeId: 'mv-music-master-sibling', taskId: 'mv-child-task-2' });
+    const primary = db.createAttempt({
+      nodeRunId: child.nodeRun.id,
+      provider: 'mv-orchestrator',
+      model: 'mv-music-master',
+      status: 'running',
+    });
+    assert.throws(() => db.completeRecoveredRunAttempt({
+      runId: child.run.id,
+      runEntityUid: child.run.entityUid,
+      nodeRunId: child.nodeRun.id,
+      nodeRunEntityUid: child.nodeRun.entityUid,
+      attemptId: child.attempt.id,
+      attemptEntityUid: child.attempt.entityUid,
+      status: 'succeeded',
+      usage: {},
+      finishedAt: 1234,
+      recoveredAt: 1234,
+    }), (error) => error?.code === 'run_recovery_terminal_scope_invalid');
+    assert.equal(db.getRun(child.run.id).status, 'running');
+    assert.equal(db.getNodeRun(child.nodeRun.id).status, 'polling');
+    assert.equal(db.getAttempt(child.attempt.id).status, 'polling');
+    assert.equal(db.getAttempt(primary.id).status, 'running');
+    const terminalTypes = db.getRunEvents(child.run.id).map((event) => event.type);
+    assert.equal(terminalTypes.includes('provider.response'), false);
+    assert.equal(terminalTypes.includes('node.succeeded'), false);
+    assert.equal(terminalTypes.includes('run.succeeded'), false);
+  } finally {
+    db.close();
+  }
+});

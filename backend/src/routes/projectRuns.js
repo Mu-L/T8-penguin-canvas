@@ -580,21 +580,72 @@ router.post('/:runId/nodes/:nodeRunId/attempts', (req, res) => {
   const initialNodeRun = database.getNodeRun(req.params.nodeRunId);
   if (!initialNodeRun || initialNodeRun.runId !== req.params.runId) return res.status(404).json({ success: false, error: '节点运行记录不存在' });
   try {
-    const attempt = database.withProjectDatabaseWrite('run.attempt-create', () => {
+    const result = database.withProjectDatabaseWrite('run.attempt-create', () => {
       const run = database.getRun(req.params.runId);
       if (!run) throw new Error('运行记录不存在');
       const nodeRun = database.getNodeRun(req.params.nodeRunId);
       if (!nodeRun || nodeRun.runId !== run.id) throw new Error('节点运行记录不属于当前 Run');
-      return database.createAttempt({
+      const incomingMetadata = redactAndScanRunValue(req.body?.metadata || {});
+      const submissionKey = String(incomingMetadata?.providerSubmission?.submissionKey || '').trim();
+      if (incomingMetadata.approvalTask && /^[A-Za-z0-9][A-Za-z0-9._:-]{7,255}$/.test(submissionKey)) {
+        const existing = database.findProviderSubmissionAttempt({
+          projectId: run.projectId,
+          canvasId: run.canvasId,
+          nodeEntityUid: nodeRun.nodeEntityUid,
+          originalNodeId: nodeRun.originalNodeId,
+          nodeId: nodeRun.nodeId,
+          submissionKey,
+        });
+        if (existing) {
+          const sameScope = String(existing.provider || '') === String(req.body?.provider || '')
+            && String(existing.model || '') === String(req.body?.model || '')
+            && String(existing.metadata?.jobId || '') === String(incomingMetadata.jobId || '')
+            && String(existing.metadata?.jobKind || '') === String(incomingMetadata.jobKind || '')
+            && JSON.stringify(existing.metadata?.approvalTask || null) === JSON.stringify(incomingMetadata.approvalTask || null);
+          if (!sameScope) {
+            const error = new Error('Provider submissionKey 已被另一项请求占用');
+            error.code = 'provider_submission_key_collision';
+            throw error;
+          }
+          if (existing.upstreamTaskId) {
+            return {
+              attempt: database.createAttempt({
+                ...req.body,
+                nodeRunId: nodeRun.id,
+                provider: existing.provider,
+                model: existing.model,
+                upstreamTaskId: existing.upstreamTaskId,
+                requestId: existing.requestId,
+                status: 'polling',
+                usage: redactAndScanRunValue(req.body?.usage || {}),
+                metadata: {
+                  ...incomingMetadata,
+                  recoveredFromAttemptId: existing.id,
+                  mvRecovery: existing.metadata?.mvRecovery || null,
+                  providerSubmission: {
+                    ...incomingMetadata.providerSubmission,
+                    state: 'submitted',
+                    recoveredAt: Date.now(),
+                  },
+                },
+                error: null,
+              }),
+              reusedSubmission: true,
+            };
+          }
+          return { attempt: existing, reusedSubmission: true };
+        }
+      }
+      return { attempt: database.createAttempt({
         ...req.body,
         nodeRunId: nodeRun.id,
         status: normalizeNodeRunStatus(req.body?.status, 'queued'),
         usage: redactAndScanRunValue(req.body?.usage || {}),
-        metadata: redactAndScanRunValue(req.body?.metadata || {}),
+        metadata: incomingMetadata,
         error: req.body?.error ? normalizeRunError(redactAndScanRunValue(req.body.error)) : null,
-      });
+      }), reusedSubmission: false };
     });
-    res.status(201).json({ success: true, data: attempt });
+    res.status(result.reusedSubmission ? 200 : 201).json({ success: true, data: result.attempt, reusedSubmission: result.reusedSubmission });
   } catch (error) {
     if (sendProjectDatabaseStorageCapacityError(res, error, { operation: 'run.attempt-create' })) return;
     res.status(400).json({ success: false, error: error?.message || String(error) });
@@ -717,6 +768,15 @@ router.post('/:runId/nodes/:nodeRunId/outputs', async (req, res) => {
   if (!run) return;
   const nodeRun = database.getNodeRun(req.params.nodeRunId);
   if (!nodeRun || nodeRun.runId !== run.id) return res.status(404).json({ success: false, error: '节点运行记录不存在' });
+  const persistenceAbort = new AbortController();
+  const abortPersistence = () => {
+    if (!persistenceAbort.signal.aborted) persistenceAbort.abort(new Error('host output client disconnected'));
+  };
+  const abortOnResponseClose = () => {
+    if (!res.writableEnded) abortPersistence();
+  };
+  req.once('aborted', abortPersistence);
+  res.once('close', abortOnResponseClose);
   try {
     const outputs = Array.isArray(req.body?.outputs)
       ? req.body.outputs.map((item, index) => ({
@@ -733,6 +793,7 @@ router.post('/:runId/nodes/:nodeRunId/outputs', async (req, res) => {
       nodeRunId: nodeRun.id,
       attemptId: typeof req.body?.attemptId === 'string' ? req.body.attemptId : '',
       outputs,
+      signal: persistenceAbort.signal,
     });
     if (!result.duplicate) {
       runCommittedNotification('run.output.node', () => {
@@ -751,8 +812,12 @@ router.post('/:runId/nodes/:nodeRunId/outputs', async (req, res) => {
       },
     });
   } catch (error) {
+    if (persistenceAbort.signal.aborted || req.aborted || res.destroyed) return;
     if (sendProjectDatabaseStorageCapacityError(res, error, { operation: 'run.output-commit' })) return;
     res.status(hostArtifactErrorStatus(error)).json(publicHostArtifactError(error));
+  } finally {
+    req.removeListener('aborted', abortPersistence);
+    res.removeListener('close', abortOnResponseClose);
   }
 });
 
