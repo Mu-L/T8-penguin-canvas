@@ -1,7 +1,59 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.8.3",
-  "lastUpdated": "2026-08-07-v2.8.3-released",
+  "version": "2.8.4",
+  "lastUpdated": "2026-08-08-v2.8.4-release-prepared",
+  "seedance25": {
+    "status": "release-prepared-v2.8.4",
+    "date": "2026-08-08",
+    "releaseIncluded": true,
+    "provider": "seedance-nz",
+    "officialDocs": "https://api.seedance.nz/docs/llms.txt",
+    "officialDocsSnapshot": {
+      "checkedAt": "2026-08-08",
+      "lastModified": "Fri, 07 Aug 2026 14:00:08 GMT",
+      "etag": "W/\"6a75e4e8-9cfc3\"",
+      "sha256": "b90eeedbd956797d8cb8105b0038bc5fc30fb2cfdd26b4283034847b4b2cdbe7"
+    },
+    "referenceImplementation": "F:/AI-T8-video-onekey/ComfyUI/custom_nodes/ComfyUI_Seedance@b9240a2a63031047741cc6c2f77fd8eafb65b02f",
+    "nodeType": "seedance25",
+    "videoTab": "seedance-2.5",
+    "models": [
+      "seedance-2.5-global-standard-i2v",
+      "seedance-2.5-global-standard-multi",
+      "seedance-2.5-global-standard-t2v",
+      "seedance-2.5-standard-i2v",
+      "seedance-2.5-standard-multi",
+      "seedance-2.5-standard-t2v"
+    ],
+    "contract": {
+      "endpoint": "POST /v1/videos + GET /v1/videos/{task_id}",
+      "duration": "4-30 秒，或 -1 自动时长（省略 seconds，metadata.duration=-1）",
+      "defaults": "未显式设置时使用 5 秒、720p；仅影响新建节点/新工作流与缺省请求，不迁移旧画布的显式值",
+      "resolutions": ["480p", "720p", "1080p", "2k", "4k"],
+      "mediaFormats": "图片 JPG/JPEG/PNG/WEBP 且单张不超过 30MB；视频仅 MP4、音频 MP3/WAV，单个不超过 50MB",
+      "t2v": "提示词必填，不接受参考素材",
+      "i2v": "提示词可选，1-2 张图片依次为首帧/可选尾帧，不接受视频或音频",
+      "multi": "提示词必填且至少 1 个素材；最多 30 图、10 视频、10 音频，合计不超过 50 个，单段音视频 2-30 秒且音视频总长不超过 30 秒；服务端提交前读取真实媒体时长并统一写入 metadata.content"
+    },
+    "highlights": [
+      "核心节点新增独立 SD2.5 节点；视频节点新增 Seedance 2.5 TAB，两个入口复用同一 submit/query/下载物化链路。",
+      "六个国内/Global Standard 的 T2V、I2V、Multi 模型保持精确上游模型名，不经过 Seedance 2.0 档位推断，不改变旧 SD2.0、视频默认模型或已保存画布。",
+      "保存六份无密钥单模型工作流；I2V 工作流明确带首帧与可选尾帧两个图片上传节点，Multi 工作流同时带图片、视频与音频上传节点。",
+      "I2V 新建与切换模型时默认使用官方 adaptive 比例；仍保留全部官方比例和 1-2 图首尾帧能力。",
+      "按 2026-08-08 官方文档快照把新建节点、视频 TAB、schema 和六份工作流默认值统一为 5 秒/720p；旧画布已有显式参数不被迁移或回退。",
+      "Provider 在付费任务提交前强制图片/视频/音频 MIME、字节大小，以及每段音视频 2-30 秒和音视频合计 30 秒；视频节点的音频引用上限由旧截断值 3 修正为官方 10。"
+    ],
+    "verification": [
+      "Seedance 2.5 精确模型目录、5 秒/720p 缺省、请求形状、自动时长、格式/时长/50 素材边界、双 UI 入口、六份工作流、Provider 安全、旧 SD2.0、视频来源和 Creator 能力相邻回归合计 101/101 通过。",
+      "六个模型均以 4 秒、480p 完成真实提交、轮询、下载和 ffprobe 解码，脱敏验收为 6/6；T2V/Multi 输出 854x480，adaptive I2V 输出 640x640，均为 H.264、约 4.064 秒。",
+      "I2V 固定 16:9 的验收提交曾在受理前返回明确 HTTP 502 且无任务 ID；改用参考实现已验证的串行、单首帧、adaptive 组合后国内与 Global 均成功，产品仍不自动重放付费提交。",
+      "API Key 仅注入一次性进程环境；脱敏报告不包含任务 ID、签名 URL、原始响应或密钥。",
+      "2026-08-08 使用随包 FFmpeg/FFprobe 生成并实读 2.2 秒中文文件名 MP4 与 WAV，Multi 请求在零 Provider 付费提交条件下通过真实物理时长预检，并确认缺省请求为 5 秒/720p。",
+      "真实本地画布分别创建独立 SD2.5 节点和视频节点，实际切换到贞贞的平价AI小屋 / Seedance 2.5，核对六模型、adaptive 首尾帧规则、30 图/10 视频/10 音频/总计 50 个的多模态限制以及 2-30 秒单段与 30 秒总参考时长提示；控制台 error 为 0，两个临时节点均已删除。",
+      "TypeScript、public-check、能力同步（31 actions / 225 runtime / 76/76 nodes / 0 public gaps）与 2862 模块生产构建在 2026-08-08 文档刷新后重新通过。"
+    ],
+    "security": "API Key 只允许由一次性进程环境注入真实验收脚本；源码、工作流与脱敏报告不得保存密钥、任务 ID、签名 URL或 Provider 原始响应。"
+  },
   "mvMusicMaster": {
     "status": "released-v2.8.3",
     "date": "2026-08-07",
@@ -298,42 +350,42 @@
     ]
   },
   "release": {
-    "status": "released-v2.8.3",
-    "version": "2.8.3",
-    "date": "2026-08-07",
-    "publishedAt": "2026-08-07T05:33:50Z",
-    "tag": "v2.8.3",
-    "latest": true,
-    "sourceCommit": "81a650176d801a91ee20f2dfd9f5255491d8e887",
-    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.8.3",
+    "status": "release-prepared-v2.8.4",
+    "version": "2.8.4",
+    "date": "2026-08-08",
+    "publishedAt": null,
+    "tag": "v2.8.4",
+    "latest": false,
+    "sourceCommit": "pending-fixed-source-commit",
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.8.4",
     "artifacts": {
       "installer": {
-        "name": "T8-PenguinCanvas-Setup-2.8.3.exe",
-        "size": 1317546643,
-        "sha256": "a02140459368b4e827570284b72b9ab7e3156e3f526529885fe0ee56af63db15"
+        "name": "T8-PenguinCanvas-Setup-2.8.4.exe",
+        "size": null,
+        "sha256": null
       },
       "blockmap": {
-        "name": "T8-PenguinCanvas-Setup-2.8.3.exe.blockmap",
-        "size": 1373503,
-        "sha256": "3de4f12cdf52f547586da6c193eeb7eb7f178482c40e6bf17529b643dcc0a949"
+        "name": "T8-PenguinCanvas-Setup-2.8.4.exe.blockmap",
+        "size": null,
+        "sha256": null
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": 362,
-        "sha256": "8bdbf92524e39a5d26ac322b70b60cf156a25b39d8274cba246005fd5934dfc4"
+        "size": null,
+        "sha256": null
       }
     },
     "verification": [
-      "v2.8.3 发布范围固定为 MV 音乐大师八阶段工作台、5.000–14.990 秒完整句式分段、视觉圣经与逐段 Prompt、分镜/视频候选审阅采纳、版本化 EDL、完整原曲单音轨合成，以及素材摘要、Provider 身份、停止、恢复和交付回执加固；不回退 v2.8.2 或更早版本的节点、模型、工作流、协议和网络能力。",
-      "Electron 原生数据库/FFmpeg 集成 41/41、MV 非原生 36/36、Provider/媒体 79/79、能力与发布门 22/22 通过；TypeScript、75/75 能力同步且 0 公共缺口、公开源码、RH 工具箱、数据库 writer 审计和正式 4430 模块生产构建通过。",
-      "固定提交 81a650176d801a91ee20f2dfd9f5255491d8e887 上的唯一正式流程完成私有后端加密、两套运行时归档、Electron/NSIS、post-build、provenance、sealed recovery、GitHub digest/size、发布前与发布后完整远端回下载、固定 Tag、非草稿/非预发布、Latest 与 recovery 清理核验。",
-      "用户已明确授权先发布、后补反馈用户安装环境、完整渠道质量矩阵、协作多端与安装升级证据；协作证据门只允许完全缺失的清单按 owner-approved-post-release-v2.8.3 延期，不能把延期标记为已通过。"
+      "v2.8.4 发布范围固定为独立 Seedance 2.5 节点、视频节点 Seedance 2.5 TAB、六个国内/Global Standard T2V/I2V/Multi 精确模型、六份无密钥工作流，以及官方文档要求的请求形状、素材数量、MIME、字节和真实时长预检；不回退 v2.8.3 或更早版本的节点、模型、工作流、协议和网络能力。",
+      "发布前已通过 Seedance 2.5 相邻合同 101/101、TypeScript、public-check、31 actions / 225 runtime / 76/76 能力同步、2862 模块生产构建，以及真实本地 2.2 秒中文文件名 MP4/WAV FFprobe 物理预检；固定源码提交、Electron/NSIS 与 GitHub Release 事实待唯一 dist:release 完成后回填。",
+      "2026-08-07 的六模型真实 6/6 提交、轮询、下载和 ffprobe 证据继续只证明端到端模型可达性；本次官方文档刷新没有新建 Provider 付费任务，也不会自动重放不明确的付费写请求。",
+      "用户已明确授权先发布、后补反馈用户安装环境、完整渠道质量矩阵、协作多端与安装升级证据；协作证据门只允许完全缺失的清单按 owner-approved-post-release-v2.8.4 延期，不能把延期标记为已通过。"
     ]
   },
   "versionSequencePolicy": {
     "status": "active",
     "date": "2026-07-30",
-    "currentVersion": "2.8.3",
+    "currentVersion": "2.8.4",
     "rules": [
       "版本号每一段只使用 0-9；v2.6.9 的下一正式版本固定为 v2.7.0。",
       "禁止创建、打包、推送、打 tag、发布或写入自动更新元数据为 v2.6.10。",
@@ -349,6 +401,7 @@
       "v2.8.0 的下一正式版本固定为 v2.8.1。",
       "v2.8.1 的下一正式版本固定为 v2.8.2。",
       "v2.8.2 的下一正式版本固定为 v2.8.3。",
+      "v2.8.3 的下一正式版本固定为 v2.8.4。",
       "后续改版本前必须同步核对 package.json、package-lock.json、README、features.json、项目 SKILL.md、Release notes、自动更新元数据和 Git tag。"
     ]
   },
@@ -6651,11 +6704,11 @@
       "T8_ENABLE_LOCAL_PRIVATE": "开发环境和普通本机构建可选；0=关闭本机 local-private/extensions 私有扩展。正式 dist:release 固定为 1，不能被父环境降级。GitHub/clean clone 因为没有 local-private 目录，不包含充值实现。",
       "T8_DISABLE_LOCAL_EXTENSIONS": "开发环境可选；1=关闭本地扩展。正式 dist:release 固定为 0，确保本机私有 sidecar 参与加密打包与后置校验。"
     },
-    "version": "2.8.3",
-    "semverVersion": "2.8.3",
+    "version": "2.8.4",
+    "semverVersion": "2.8.4",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.3 已正式发布，范围为 MV 音乐大师及其素材、Provider、恢复、合成与交付安全合同。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.8.3 已从固定 source commit 81a650176d801a91ee20f2dfd9f5255491d8e887 的唯一 dist:release 流程生成并发布：安装包 1,317,546,643 bytes / SHA-256 a02140459368b4e827570284b72b9ab7e3156e3f526529885fe0ee56af63db15；blockmap 1,373,503 bytes / SHA-256 3de4f12cdf52f547586da6c193eeb7eb7f178482c40e6bf17529b643dcc0a949；latest.yml 362 bytes / SHA-256 8bdbf92524e39a5d26ac322b70b60cf156a25b39d8274cba246005fd5934dfc4。4430 模块生产构建、私有后端加密、两套运行时归档、post-build、provenance、sealed recovery、GitHub digest/size、发布前与发布后完整远端回下载、Tag/target 与 Latest 均通过，recovery 已清除。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.4 发布候选范围为 Seedance 2.5 独立节点、视频 TAB、六模型、六工作流及素材安全预检。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.8.4 已按用户授权进入唯一 dist:release 准备阶段；固定 source commit、安装包/blockmap/latest.yml 的真实大小与 SHA-256、Tag、Latest 和远端回下载事实必须在发布成功后回填，发布前不得伪造。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
@@ -9568,6 +9621,11 @@
           "description": "Seedance 2.0 视频分镜；上游文本/图像/视频/音频缩略图可在节点内单项排除且不断开连线"
         },
         {
+          "type": "seedance25",
+          "label": "SD2.5 节点",
+          "description": "Seedance 2.5 Standard 文生/首尾帧/多模态参考视频；默认 5 秒/720p；T2V 无素材、I2V 1-2 图、Multi 最多 30 图/10 视频/10 音频且合计不超过 50 个，服务端实检素材格式、大小及 2-30 秒/总计 30 秒时长"
+        },
+        {
           "type": "director-storyboard",
           "label": "导演分镜台",
           "description": "秒级长片分镜台：每镜头 4-15 秒，可继承或单独覆盖模型/比例/分辨率，支持独立提示词和参考素材；生成时按分镜无限并发调用 Seedance2.0，多镜头逐个完成逐个输出，首尾帧桥接默认关闭可选启用"
@@ -10182,6 +10240,23 @@
         "maxRefs": 4,
         "maxEditVideos": 1,
         "liveAvailability": "6 个非 4K t2v 已由本轮真实跑通；其余 15 个本轮凭据提交 HTTP 403，等待新的有效授权复测；O3 std/pro r2v 另因参考插件当前上游 502 暂时禁用"
+      },
+      {
+        "id": "seedance-2.5",
+        "label": "Seedance 2.5",
+        "provider": "seedance-nz",
+        "endpoint": "/v1/videos",
+        "models": [
+          "seedance-2.5-global-standard-i2v",
+          "seedance-2.5-global-standard-multi",
+          "seedance-2.5-global-standard-t2v",
+          "seedance-2.5-standard-i2v",
+          "seedance-2.5-standard-multi",
+          "seedance-2.5-standard-t2v"
+        ],
+        "durations": [-1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30],
+        "resolutions": ["480p", "720p", "1080p", "2k", "4k"],
+        "maxRefs": { "images": 30, "videos": 10, "audios": 10, "total": 50 }
       },
       {
         "id": "seedance-2.0",

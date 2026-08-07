@@ -1329,6 +1329,7 @@ const LLMNode = lazyCanvasNode(() => import('./nodes/LLMNode'), 'LLMNode');
 const VideoNode = lazyCanvasNode(() => import('./nodes/VideoNode'), 'VideoNode');
 const VideoEditNode = lazyCanvasNode(() => import('./nodes/VideoEditNode'), 'VideoEditNode');
 const SeedanceNode = lazyCanvasNode(() => import('./nodes/SeedanceNode'), 'SeedanceNode');
+const Seedance25Node = lazyCanvasNode(() => import('./nodes/Seedance25Node'), 'Seedance25Node');
 const DirectorStoryboardNode = lazyCanvasNode(() => import('./nodes/DirectorStoryboardNode'), 'DirectorStoryboardNode');
 const StoryNode = lazyCanvasNode(() => import('./nodes/StoryNode'), 'StoryNode');
 const ScriptMasterNode = lazyCanvasNode(() => import('./nodes/ScriptMasterNode'), 'ScriptMasterNode');
@@ -1409,6 +1410,7 @@ const SPECIFIC_NODES: Record<string, any> = {
   video: VideoNode,
   'video-edit': VideoEditNode,
   seedance: SeedanceNode, // 完全对齐 gpt-image-2-web Seedance2.0(独立 /seedance/v3 路径)
+  seedance25: Seedance25Node,
   'director-storyboard': DirectorStoryboardNode,
   story: StoryNode,
   'script-master': ScriptMasterNode,
@@ -1693,6 +1695,19 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     maxPoll: 360,
     pollInt: 10,
     frameMode: 'auto',
+    reuseResult: false,
+  },
+  seedance25: {
+    seedanceApiSource: 'seedance-nz',
+    model: 'seedance-2.5-global-standard-i2v',
+    duration: 5,
+    ratio: 'adaptive',
+    resolution: '720p',
+    generateAudio: true,
+    returnLastFrame: false,
+    seed: -1,
+    maxPoll: 720,
+    pollInt: 5,
     reuseResult: false,
   },
   'director-storyboard': {

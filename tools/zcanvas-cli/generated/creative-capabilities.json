@@ -3,7 +3,7 @@
   "generatedFrom": "tools/zcanvas-cli/creativeCapabilityManifest.json",
   "sourceSchema": "t8-creative-capability-manifest-v1",
   "sourceVersion": "0.1.0-dev",
-  "sourceDigest": "ce6ad80e45c55d8972944abd1c6f847e6e3651b2311b8dd293a5268ba381fc50",
+  "sourceDigest": "87a3ee522a952d87c38b533e5b2d1e77720fca619556d3776969e3510deb8a07",
   "principles": {
     "oneSentenceStart": true,
     "directCanvasMutation": false,
@@ -50,6 +50,7 @@
       "nodeTypes": [
         "text",
         "seedance",
+        "seedance25",
         "output"
       ],
       "supports": [
@@ -182,6 +183,7 @@
         "video",
         "video-edit",
         "seedance",
+        "seedance25",
         "director-storyboard",
         "story",
         "script-master",

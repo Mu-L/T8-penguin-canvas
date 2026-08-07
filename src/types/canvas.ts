@@ -11,6 +11,7 @@ export type NodeType =
   | 'video'
   | 'video-edit'
   | 'seedance'
+  | 'seedance25'
   | 'director-storyboard'
   | 'story'
   | 'script-master'

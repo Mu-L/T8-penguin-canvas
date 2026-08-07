@@ -1779,7 +1779,7 @@ test('seedance.nz never reflects plain-text or JSON upstream secrets in errors',
     },
   ));
 
-  assert.equal(plainError.code, 'SEEDANCE_INVALID_RESPONSE');
+  assert.equal(plainError.code, 'SEEDANCE_UPSTREAM_ERROR');
   assert.equal(plainError.status, 502);
   assert.equal(plainError.requestId, 'req-plain-safe');
   assert.match(String(plainError.bodyDigest), /^sha256:[a-f0-9]{16}$/);

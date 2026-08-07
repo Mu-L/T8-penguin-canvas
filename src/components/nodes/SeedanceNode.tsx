@@ -50,8 +50,19 @@ import {
   SEEDANCE_NZ_NATIVE_RESOLUTION_OPTIONS,
   SEEDANCE_NZ_RATIO_OPTIONS,
   SEEDANCE_NZ_RESOLUTION_OPTIONS,
+  SEEDANCE25_DURATION_OPTIONS,
+  SEEDANCE25_DEFAULT_DURATION,
+  SEEDANCE25_DEFAULT_RESOLUTION,
+  SEEDANCE25_MULTI_MAX_AUDIOS,
+  SEEDANCE25_MULTI_MAX_IMAGES,
+  SEEDANCE25_MULTI_MAX_TOTAL,
+  SEEDANCE25_MULTI_MAX_VIDEOS,
+  SEEDANCE25_MODEL_OPTIONS,
+  SEEDANCE25_RATIO_OPTIONS,
+  SEEDANCE25_RESOLUTION_OPTIONS,
   isSeedanceBuiltinSource,
   isSeedanceNzStandardModel,
+  seedance25TaskType,
   type SeedanceBuiltinSource,
 } from '../../config/seedance';
 import JimengCliHelpButton from './JimengCliHelpButton';
@@ -93,6 +104,7 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
   const isPixel = themeStyle === 'pixel';
 
   const d = (data as any) || {};
+  const isSeedance25 = d?.seedance25Variant === true;
   const providerParams = (d?.providerParams && typeof d.providerParams === 'object') ? d.providerParams : {};
   const advancedProviders = useApiKeysStore((s) => s.settings.advancedProviders);
   const hasSeedanceNzKey = useApiKeysStore((s) => !!String(s.settings.zhenzhenSd2ApiKey || '').trim());
@@ -108,7 +120,7 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
     }),
     [advancedProviders, d?.providerSource, d?.providerId, d?.providerModel],
   );
-  const isExternalSelected = providerSelection.available && providerSelection.providerSource !== 'zhenzhen';
+  const isExternalSelected = !isSeedance25 && providerSelection.available && providerSelection.providerSource !== 'zhenzhen';
   const isJimengCliSelected = isExternalSelected && providerSelection.provider?.protocol === 'jimeng-cli';
   const savedExternalMissing = !!d?.providerSource && d.providerSource !== 'zhenzhen' && !providerSelection.available;
   const externalModelOptions = providerSelection.provider
@@ -116,7 +128,9 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
     : [];
   const externalProviderModel = providerSelection.providerModel || externalModelOptions[0] || '';
   const savedBuiltinSource = String(d?.seedanceApiSource || '');
-  const builtinSource: SeedanceBuiltinSource = isSeedanceBuiltinSource(savedBuiltinSource)
+  const builtinSource: SeedanceBuiltinSource = isSeedance25
+    ? 'seedance-nz'
+    : isSeedanceBuiltinSource(savedBuiltinSource)
     ? savedBuiltinSource
     : 'zhenzhen-legacy';
   const effectiveTaskProvider: Exclude<SeedanceTaskProvider, 'auto'> = builtinSource === 'auto'
@@ -124,10 +138,14 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
     : builtinSource;
   const isSeedanceNzSelected = !isExternalSelected && effectiveTaskProvider === 'seedance-nz';
   const model: string = d.model || MODEL_OPTIONS[0].value;
-  const seedanceNzModel: string = d.seedanceNzModel || 'fast';
-  const duration: number = typeof d.duration === 'number' ? d.duration : 5;
-  const ratio: string = d.ratio || '16:9';
-  const resolution: string = d.resolution || '480p';
+  const seedanceNzModel: string = isSeedance25
+    ? (SEEDANCE25_MODEL_OPTIONS.some((item) => item.value === d.model)
+      ? d.model
+      : 'seedance-2.5-global-standard-i2v')
+    : d.seedanceNzModel || 'fast';
+  const duration: number = typeof d.duration === 'number' ? d.duration : isSeedance25 ? SEEDANCE25_DEFAULT_DURATION : 5;
+  const ratio: string = d.ratio || (isSeedance25 ? 'adaptive' : '16:9');
+  const resolution: string = d.resolution || (isSeedance25 ? SEEDANCE25_DEFAULT_RESOLUTION : '480p');
   const generateAudio: boolean = d.generateAudio !== false; // 默认 true
   const returnLastFrame: boolean = d.returnLastFrame === true;
   const watermark: boolean = d.watermark === true;
@@ -144,10 +162,13 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
   ) ? rawFrameMode : 'auto';
   const activeFrameMode: SeedanceFrameMode = !isJimengCliSelected && frameMode === 'multiframe' ? 'auto' : frameMode;
   const builtinModel = isSeedanceNzSelected ? seedanceNzModel : model;
-  const activeRatioOptions = isSeedanceNzSelected ? SEEDANCE_NZ_RATIO_OPTIONS : RATIO_OPTIONS;
-  const activeDurationOptions = isSeedanceNzSelected ? SEEDANCE_NZ_DURATION_OPTIONS : DURATION_OPTIONS;
+  const seedance25Mode = seedance25TaskType(builtinModel);
+  const activeRatioOptions = isSeedance25 ? SEEDANCE25_RATIO_OPTIONS : isSeedanceNzSelected ? SEEDANCE_NZ_RATIO_OPTIONS : RATIO_OPTIONS;
+  const activeDurationOptions = isSeedance25 ? SEEDANCE25_DURATION_OPTIONS : isSeedanceNzSelected ? SEEDANCE_NZ_DURATION_OPTIONS : DURATION_OPTIONS;
   const seedanceNzIsStandard = isSeedanceNzStandardModel(seedanceNzModel);
-  const activeResolutionOptions = isJimengCliSelected
+  const activeResolutionOptions = isSeedance25
+    ? SEEDANCE25_RESOLUTION_OPTIONS
+    : isJimengCliSelected
     ? activeFrameMode === 'multiframe'
       ? ['720p', '1080p']
       : externalProviderModel === 'seedance2.0_vip'
@@ -156,7 +177,7 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
     : isSeedanceNzSelected
       ? (seedanceNzIsStandard ? SEEDANCE_NZ_NATIVE_RESOLUTION_OPTIONS : SEEDANCE_NZ_RESOLUTION_OPTIONS)
       : RESOLUTION_OPTIONS;
-  const builtinRatio = activeRatioOptions.includes(ratio as any) ? ratio : '16:9';
+  const builtinRatio = activeRatioOptions.includes(ratio as any) ? ratio : isSeedance25 ? 'adaptive' : '16:9';
   const builtinResolution = activeResolutionOptions.includes(resolution as any) ? resolution : '720p';
   const status: 'idle' | 'submitting' | 'polling' | 'success' | 'error' = d.status || 'idle';
   const taskId: string | undefined = d.taskId;
@@ -439,10 +460,49 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
     const { prompt: upstreamPrompt, imageUrls, videoUrls, audioUrls } = collectUpstream();
     const resolvedLocalPrompt = resolveMediaMentions(localPrompt, promptMentions, mentionMaterials);
     const finalPrompt = (upstreamPrompt || resolvedLocalPrompt || '').trim();
-    if (!finalPrompt) {
+    if (!finalPrompt && !(isSeedance25 && seedance25Mode === 'i2v')) {
       setError('未连接 text 节点也未填写 prompt');
       logBus.error('生成中止: 缺少 prompt', src);
       return;
+    }
+    if (isSeedance25 && seedance25Mode === 't2v'
+      && (imageUrls.length > 0 || videoUrls.length > 0 || audioUrls.length > 0)) {
+      setError('Seedance 2.5 文生视频不接受参考素材');
+      return;
+    }
+    if (isSeedance25 && seedance25Mode === 'i2v') {
+      if (imageUrls.length < 1 || imageUrls.length > 2) {
+        setError('Seedance 2.5 图生视频必须提供 1-2 张图片（首帧/可选尾帧）');
+        return;
+      }
+      if (videoUrls.length > 0 || audioUrls.length > 0) {
+        setError('Seedance 2.5 图生视频不接受视频或音频素材');
+        return;
+      }
+    }
+    if (isSeedance25 && seedance25Mode === 'multi'
+      && imageUrls.length === 0 && videoUrls.length === 0 && audioUrls.length === 0) {
+      setError('Seedance 2.5 多模态参考至少需要 1 个图片、视频或音频素材');
+      return;
+    }
+    if (isSeedance25 && seedance25Mode === 'multi') {
+      const total = imageUrls.length + videoUrls.length + audioUrls.length;
+      if (imageUrls.length > SEEDANCE25_MULTI_MAX_IMAGES) {
+        setError(`Seedance 2.5 多模态参考最多支持 ${SEEDANCE25_MULTI_MAX_IMAGES} 张图片`);
+        return;
+      }
+      if (videoUrls.length > SEEDANCE25_MULTI_MAX_VIDEOS) {
+        setError(`Seedance 2.5 多模态参考最多支持 ${SEEDANCE25_MULTI_MAX_VIDEOS} 个视频`);
+        return;
+      }
+      if (audioUrls.length > SEEDANCE25_MULTI_MAX_AUDIOS) {
+        setError(`Seedance 2.5 多模态参考最多支持 ${SEEDANCE25_MULTI_MAX_AUDIOS} 个音频`);
+        return;
+      }
+      if (total > SEEDANCE25_MULTI_MAX_TOTAL) {
+        setError(`Seedance 2.5 多模态参考素材合计最多 ${SEEDANCE25_MULTI_MAX_TOTAL} 个`);
+        return;
+      }
     }
     const runId = nextGenerationRun();
     cancelActivePoll();
@@ -541,7 +601,12 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
       let firstFrame: string | undefined;
       let lastFrame: string | undefined;
       let refImages: string[] = [];
-      if (activeFrameMode === 'first' && imageUrls.length >= 1) {
+      if (isSeedance25 && seedance25Mode === 'i2v') {
+        firstFrame = imageUrls[0];
+        lastFrame = imageUrls[1];
+      } else if (isSeedance25 && seedance25Mode === 'multi') {
+        refImages = imageUrls;
+      } else if (activeFrameMode === 'first' && imageUrls.length >= 1) {
         firstFrame = imageUrls[0];
         refImages = imageUrls.slice(1);
       } else if (activeFrameMode === 'firstlast' && imageUrls.length >= 1) {
@@ -552,11 +617,11 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
         refImages = imageUrls;
       }
 
-      if (isSeedanceNzSelected && activeFrameMode === 'first'
+      if (!isSeedance25 && isSeedanceNzSelected && activeFrameMode === 'first'
         && (imageUrls.length !== 1 || videoUrls.length > 0 || audioUrls.length > 0)) {
         throw new Error('贞贞的平价AI小屋的首帧模式只接受 1 张图片；混合素材请改为“自动/多参”');
       }
-      if (isSeedanceNzSelected && activeFrameMode === 'firstlast'
+      if (!isSeedance25 && isSeedanceNzSelected && activeFrameMode === 'firstlast'
         && (imageUrls.length !== 2 || videoUrls.length > 0 || audioUrls.length > 0)) {
         throw new Error('贞贞的平价AI小屋的首尾帧模式只接受 2 张图片；混合素材请改为“自动/多参”');
       }
@@ -571,18 +636,18 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
         return_last_frame: returnLastFrame,
         watermark,
         web_search: webSearch,
-        taskProvider: builtinSource,
+        taskProvider: isSeedance25 ? 'seedance-nz' : builtinSource,
         providerParams,
       };
       if (seed !== -1) payload.seed = seed;
       if (firstFrame) payload.firstFrame = firstFrame;
       if (lastFrame) payload.lastFrame = lastFrame;
       if (refImages.length) payload.refImages = refImages;
-      if (videoUrls.length) payload.videos = videoUrls;
-      if (audioUrls.length) payload.audios = audioUrls;
+      if ((!isSeedance25 || seedance25Mode === 'multi') && videoUrls.length) payload.videos = videoUrls;
+      if ((!isSeedance25 || seedance25Mode === 'multi') && audioUrls.length) payload.audios = audioUrls;
 
       logBus.info(
-          `提交 Seedance2.0: provider=${effectiveTaskProvider} model=${builtinModel} ${duration}s ${builtinRatio} ${builtinResolution} ` +
+          `提交 ${isSeedance25 ? 'Seedance2.5' : 'Seedance2.0'}: provider=${effectiveTaskProvider} model=${builtinModel} ${duration === -1 ? 'auto' : `${duration}s`} ${builtinRatio} ${builtinResolution} ` +
           `audio=${generateAudio} retLast=${returnLastFrame} ` +
           `frame=${activeFrameMode} refs=${refImages.length}` +
           (firstFrame ? ' +first' : '') +
@@ -722,7 +787,7 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
           <Film size={13} />
         </div>
         <div className="flex-1">
-          <div className="text-sm font-semibold text-white">SD2.0</div>
+          <div className="text-sm font-semibold text-white">{isSeedance25 ? 'SD2.5' : 'SD2.0'}</div>
           <div className="text-[10px] text-white/40">
             {isExternalSelected && providerSelection.provider
               ? `${providerSelection.provider.label || providerSelection.provider.id} · ${externalProviderModel || '未选模型'}`
@@ -735,7 +800,7 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
       </div>
 
       <div className="p-2.5 space-y-2" onMouseDown={(e) => e.stopPropagation()}>
-        {(
+        {!isSeedance25 ? (
           <div className="rounded border border-white/10 bg-white/[0.03] p-2 space-y-2">
             <button
               type="button"
@@ -833,6 +898,10 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
               </div>
             )}
           </div>
+        ) : (
+          <div className="rounded border border-fuchsia-300/20 bg-fuchsia-400/[0.06] px-2 py-1.5 text-[10px] text-white/60">
+            固定渠道：贞贞的平价AI小屋 · Seedance 2.5 Standard
+          </div>
         )}
 
         {/* 模型 */}
@@ -850,7 +919,25 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
         ) : (
           <div>
             <label className="text-[10px] text-white/50 block mb-1">Model</label>
-            {isSeedanceNzSelected ? (
+            {isSeedance25 ? (
+              <select
+                value={builtinModel}
+                onChange={(e) => {
+                  const nextModel = e.target.value;
+                  update({
+                    model: nextModel,
+                    duration: SEEDANCE25_DEFAULT_DURATION,
+                    resolution: SEEDANCE25_DEFAULT_RESOLUTION,
+                    ratio: nextModel.endsWith('-i2v') ? 'adaptive' : '16:9',
+                  });
+                }}
+                className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-white/30"
+              >
+                {SEEDANCE25_MODEL_OPTIONS.map((m) => (
+                  <option key={m.value} value={m.value} className="bg-zinc-900">{m.label}</option>
+                ))}
+              </select>
+            ) : isSeedanceNzSelected ? (
               <select
                 value={seedanceNzModel}
                 onChange={(e) => {
@@ -888,7 +975,7 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
 
         <LocalNodeAddonSlot
           nodeId={id}
-          nodeType="seedance"
+          nodeType={isSeedance25 ? 'seedance25' : 'seedance'}
           data={d}
           update={update}
           context={{
@@ -897,7 +984,7 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
             providerModel: isExternalSelected ? externalProviderModel : builtinModel,
             model: builtinModel,
             apiModel: builtinModel,
-            providerKind: 'seedance',
+            providerKind: isSeedance25 ? 'seedance25' : 'seedance',
           }}
         />
 
@@ -957,7 +1044,7 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
         </div>
 
         {/* 帧使用模式 */}
-        <div>
+        {!isSeedance25 && <div>
           <label className="text-[10px] text-white/50 block mb-1">参考图模式</label>
           <select
             value={activeFrameMode}
@@ -979,7 +1066,20 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
               <option value="multiframe" className="bg-zinc-900">智能多帧(multiframe)</option>
             )}
           </select>
-        </div>
+        </div>}
+
+        {isSeedance25 && (
+          <div className="rounded border border-white/10 bg-white/5 px-2 py-1.5 text-[10px] leading-relaxed text-white/55">
+            {seedance25Mode === 't2v'
+              ? '文生视频：只提交提示词，不接受参考素材。'
+              : seedance25Mode === 'i2v'
+                ? '图生视频：1-2 张图片依次作为首帧和可选尾帧，提示词可选。'
+                : '多模态参考：提示词必填；最多 30 图、10 视频、10 音频，合计不超过 50 个。单段音视频 2-30 秒，全部参考音视频总时长不超过 30 秒，提交前会实际读取时长校验。'}
+            <div className="mt-1 text-white/35">
+              图片 JPG/JPEG/PNG/WEBP（单张≤30MB）；视频 MP4、音频 MP3/WAV（单个≤50MB）。默认 5 秒 / 720p。
+            </div>
+          </div>
+        )}
 
         {/* 开关组 */}
         {!isExternalSelected && <div className="grid grid-cols-2 gap-1.5">
@@ -1155,7 +1255,7 @@ const SeedanceNode = ({ id, data, selected }: NodeProps) => {
         <div>
           <label className="text-[10px] text-white/50 block mb-1">本地 Prompt(可选)</label>
           <MentionPromptInput
-            title="SD2.0 Prompt"
+            title={isSeedance25 ? 'SD2.5 Prompt' : 'SD2.0 Prompt'}
             value={localPrompt}
             mentions={promptMentions}
             materials={mentionMaterials}

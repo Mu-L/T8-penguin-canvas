@@ -1,7 +1,7 @@
 {
   "name": "t8-penguin-canvas",
   "private": false,
-  "version": "2.8.3",
+  "version": "2.8.4",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "T8-penguin-canvas — AI 节点画布工作流工具（Web + Electron 桌面端）",
@@ -45,6 +45,7 @@
     "audit:project-db-writers:check": "node scripts/audit-project-database-writers.cjs --compact --check",
     "feature-sync:generate": "node tools/zcanvas-cli/scripts/generateCreativeCapabilityArtifacts.cjs",
     "feature-sync:check": "node tools/zcanvas-cli/scripts/generateCreativeCapabilityArtifacts.cjs --check",
+    "verify:seedance25:live": "node scripts/verify-seedance25-live.cjs",
     "verify:mv-music-master:live": "tsx scripts/verify-mv-music-master-live.ts",
     "collaboration:evidence:attest": "node scripts/collaboration-evidence-attestation.cjs",
     "preelectron:dev": "node scripts/worktree-role.cjs development",

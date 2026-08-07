@@ -10,13 +10,13 @@ https://www.runninghub.cn/?inviteCode=rh-v1121
 My favorite girl Go YounJung
 # 🐧 贞贞的无限画布（企鹅共创版） · T8-penguin-canvas
 
-> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.8.3
+> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.8.4
 >
 > GitHub：<https://github.com/T8mars/T8-penguin-canvas>
 
 一个面向 AI 创作的 **节点式画布**：拖拽节点、连线编排、生成图像 / 视频 / 音频、调用 LLM、串接 RunningHub 工作流，叠加批量执行、智能对齐、打组、主题模板与终端日志。Web 浏览器和桌面端均可使用。
 
-![status](https://img.shields.io/badge/version-v2.8.3-brightgreen) ![node](https://img.shields.io/badge/node-75-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
+![status](https://img.shields.io/badge/version-v2.8.4-brightgreen) ![node](https://img.shields.io/badge/node-76-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
 
 ---
 
@@ -35,7 +35,8 @@ My favorite girl Go YounJung
 
 ## ✨ 功能亮点
 
-- 🎨 **75 个节点**，覆盖文本 / 图像 / 视频 / 音频 / LLM / RunningHub / ComfyUI / 3D / 工具 / 辅助 / 工具箱 / 输出预览 / 上传素材 / 素材集 / 批量打标 / 随机路由 / Story 全自动制片 / 剧本大师 / MiniMax H3 / Seedance 2.0 提示词增强器 / 白模预演 / MV 音乐大师
+- 🎨 **76 个节点**，覆盖文本 / 图像 / 视频 / 音频 / LLM / RunningHub / ComfyUI / 3D / 工具 / 辅助 / 工具箱 / 输出预览 / 上传素材 / 素材集 / 批量打标 / 随机路由 / Story 全自动制片 / 剧本大师 / MiniMax H3 / Seedance 2.0 提示词增强器 / Seedance 2.5 / 白模预演 / MV 音乐大师
+- 🎬 **v2.8.4 Seedance 2.5 标准模型版**：新增独立 SD2.5 节点，并在视频节点加入 Seedance 2.5 TAB，收录国内/Global 的 Standard T2V、I2V、Multi 六个精确模型；新建节点按最新官方文档默认 5 秒/720p，支持 4–30 秒或智能时长、首尾帧及最多 30 图/10 视频/10 音频/总计 50 个多模态素材。图片 MIME/30MB、音视频 MIME/50MB、单段 2–30 秒及音视频合计 30 秒均在付费提交前校验，旧 Seedance 2.0、默认视频模型与已保存画布参数不变。
 - 🎵 **v2.8.3 MV 音乐大师版**：上传歌曲、人设图、风格图和歌词后，以 5.000–14.990 秒完整句式分段，分批生成视觉圣经、图像提示词和视频提示词；分镜图与分段视频均支持逐段审阅、采纳和重生成，最终按版本化 EDL 合成并只保留一条完整原曲音轨。默认 LLM 仍为贞贞的平价AI小屋 `bytedance/doubao-seed-2.1-pro`，Provider、模型、素材摘要、停止/恢复和交付回执均失败关闭，不会静默切换渠道或自动重放不明确的付费提交。
 - 🪟 **v2.8.2 Windows 中文用户名与路径兼容版**：修复 Electron 33 主进程系统网络在 Provider 或文件服务响应头回显中文用户名、userData、安装路径或文件名时触发 `ByteString` / `Headers.set` 未捕获异常的问题；中文目录、中文图片名的本地读取、Seedream I2I 转换和输出保存均受回归保护。渲染器请求、真实文件路径、请求与响应正文、系统代理/PAC/TUN/VPN/IPv4/IPv6 及付费写请求不重放边界保持不变。
 - ✨ **v2.8.1 Qwen Image 3.0 / MiniMax H3 OW 与 H3 提示词增强版**：图像节点新增 8 个 Qwen Image 3.0 模型，Hailuo 新增 MiniMax H3 OW T2V/R2V/I2V；MiniMax H3 提示词增强器同步官方 Skill 与数字人 MV 写作规则。RunningHub `app-info` 作为只读查询会在任一站点失败后继续尝试另一已配置站点，而付费提交链路仍保持窄回退，避免重复扣费。默认渠道、默认模型及旧画布行为不变。

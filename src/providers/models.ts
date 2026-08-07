@@ -422,7 +422,7 @@ export const NBPRO_FAL_RESOLUTIONS = ['1K', '2K', '4K'];
 
 // ========== 视频 ==========
 // kind 决定上游 payload 协议(后端会根据 model 名自动识别,前端主要用于控制参数 UI 列表)
-export type VideoKind = 'veo' | 'grok' | 'sora' | 'seedance' | 'happyhorse' | 'hailuo' | 'kling' | 'vidu' | 'upscaler' | 'wan';
+export type VideoKind = 'veo' | 'grok' | 'sora' | 'seedance' | 'seedance25' | 'happyhorse' | 'hailuo' | 'kling' | 'vidu' | 'upscaler' | 'wan';
 
 // ---- Video FAL 渠道注册表 (1:1 对齐 gpt-image-2-web runVeo3Fal / runGrokFal / runSora2Fal) ----
 export interface VideoFalEndpointDef {
@@ -590,6 +590,18 @@ export const ZHENZHEN_APIMART_VIDEO_MODELS = [
   ZHENZHEN_VIDEO_V31_QUALITY_MODEL,
   ZHENZHEN_VIDEO_V31_LITE_MODEL,
 ] as const;
+
+export const SEEDANCE25_VIDEO_MODELS = [
+  'seedance-2.5-global-standard-i2v',
+  'seedance-2.5-global-standard-multi',
+  'seedance-2.5-global-standard-t2v',
+  'seedance-2.5-standard-i2v',
+  'seedance-2.5-standard-multi',
+  'seedance-2.5-standard-t2v',
+] as const;
+const SEEDANCE25_RATIOS = ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'];
+const SEEDANCE25_DURATIONS = [-1, ...Array.from({ length: 27 }, (_, index) => index + 4)];
+const SEEDANCE25_RESOLUTIONS = ['480p', '720p', '1080p', '2k', '4k'];
 
 export function isZhenzhenApimartVideoModel(apiModel: string | undefined | null): boolean {
   return (ZHENZHEN_APIMART_VIDEO_MODELS as readonly string[]).includes(String(apiModel || '').trim());
@@ -837,7 +849,7 @@ export const VIDEO_MODELS: VideoModelDef[] = [
       },
     ],
     ratios: ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
-    defaultRatio: '16:9',
+    defaultRatio: 'adaptive',
     durations: [6, 10],
     defaultDuration: 6,
     resolutions: ['768p', '1080p'],
@@ -935,6 +947,47 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     supportImages: false,
     supportVideos: true,
     maxRefImages: 0,
+  },
+  {
+    id: 'seedance-2.5',
+    label: 'Seedance 2.5',
+    kind: 'seedance25',
+    provider: 'zhenzhen',
+    builtinSource: 'seedance-nz',
+    description: 'Seedance 2.5 Standard · 文生、首尾帧与多模态参考视频',
+    apiModelOptions: SEEDANCE25_VIDEO_MODELS.map((value) => {
+      const mode = value.endsWith('-t2v') ? 't2v' : value.endsWith('-i2v') ? 'i2v' : 'multi';
+      return {
+        value,
+        label: `${value}${mode === 't2v' ? '（文生视频）' : mode === 'i2v' ? '（首尾帧图生视频）' : '（多模态参考）'}`,
+        description: mode === 't2v'
+          ? '仅提示词；不发送参考素材。'
+          : mode === 'i2v'
+            ? '1-2 张图片，依次作为首帧和可选尾帧；提示词可选。'
+            : '至少 1 个素材；最多 30 图、10 视频、10 音频，合计不超过 50 个。',
+        ratios: SEEDANCE25_RATIOS,
+        defaultRatio: mode === 'i2v' ? 'adaptive' : '16:9',
+        durations: SEEDANCE25_DURATIONS,
+        defaultDuration: 5,
+        resolutions: SEEDANCE25_RESOLUTIONS,
+        defaultResolution: '720p',
+        supportImages: mode !== 't2v',
+        supportVideos: mode === 'multi',
+        supportAudios: mode === 'multi',
+        maxRefImages: mode === 't2v' ? 0 : mode === 'i2v' ? 2 : 30,
+        maxRefVideos: mode === 'multi' ? 10 : 0,
+        maxRefAudios: mode === 'multi' ? 10 : 0,
+      };
+    }),
+    ratios: SEEDANCE25_RATIOS,
+    defaultRatio: 'adaptive',
+    durations: SEEDANCE25_DURATIONS,
+    defaultDuration: 5,
+    resolutions: SEEDANCE25_RESOLUTIONS,
+    defaultResolution: '720p',
+    supportImages: true,
+    supportVideos: true,
+    maxRefImages: 30,
   },
   {
     id: 'seedance-2.0',

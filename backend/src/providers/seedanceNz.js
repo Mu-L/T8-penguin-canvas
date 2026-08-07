@@ -1,6 +1,8 @@
 const crypto = require('crypto');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const net = require('node:net');
+const os = require('os');
 const path = require('path');
 const sharp = require('sharp');
 const tls = require('tls');
@@ -18,6 +20,8 @@ const {
   safeRemoteMediaFetch,
 } = require('../utils/safeRemoteMediaFetch');
 const { providerIdempotencyHeaders } = require('../services/providerSubmissionContext');
+const { resolveBundledFfprobe } = require('./llmMedia');
+const { withFfmpegProcessSlot } = require('../utils/ffmpegProcessQueue');
 
 const PROVIDER_ID = 'seedance-nz';
 const BASE_URL = config.ZHENZHEN_SD2_BASE_URL;
@@ -25,6 +29,41 @@ const TASK_TYPES = new Set(['t2v', 'i2v', 'multi']);
 const TIERS = new Set(['standard', 'fast', 'mini']);
 const RATIOS = new Set(['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9']);
 const RESOLUTIONS = new Set(['480p', '720p', '1080p', '2k', '4k', 'native1080p', 'native4k']);
+const SEEDANCE25_T2V_MODELS = new Set([
+  'seedance-2.5-global-standard-t2v',
+  'seedance-2.5-standard-t2v',
+]);
+const SEEDANCE25_I2V_MODELS = new Set([
+  'seedance-2.5-global-standard-i2v',
+  'seedance-2.5-standard-i2v',
+]);
+const SEEDANCE25_MULTI_MODELS = new Set([
+  'seedance-2.5-global-standard-multi',
+  'seedance-2.5-standard-multi',
+]);
+const SEEDANCE25_MODELS = new Set([
+  ...SEEDANCE25_T2V_MODELS,
+  ...SEEDANCE25_I2V_MODELS,
+  ...SEEDANCE25_MULTI_MODELS,
+]);
+const SEEDANCE25_RESOLUTIONS = new Set(['480p', '720p', '1080p', '2k', '4k']);
+const SEEDANCE25_PROMPT_MAX_LENGTH = 20480;
+const SEEDANCE25_DEFAULT_SECONDS = 5;
+const SEEDANCE25_DEFAULT_RESOLUTION = '720p';
+const SEEDANCE25_REFERENCE_MIN_SECONDS = 2;
+const SEEDANCE25_REFERENCE_MAX_SECONDS = 30;
+const SEEDANCE25_REFERENCE_TOTAL_SECONDS = 30;
+const SEEDANCE25_IMAGE_MAX_BYTES = 30 * 1024 * 1024;
+const SEEDANCE25_MEDIA_MAX_BYTES = 50 * 1024 * 1024;
+const SEEDANCE25_IMAGE_MIMES = Object.freeze(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);
+const SEEDANCE25_VIDEO_MIMES = Object.freeze(['video/mp4']);
+const SEEDANCE25_AUDIO_MIMES = Object.freeze(['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/wave']);
+const SEEDANCE25_MULTI_LIMITS = Object.freeze({
+  images: 30,
+  videos: 10,
+  audios: 10,
+  total: 50,
+});
 const IMAGE_MODEL_PAIRS = {
   domestic: ['seedream-v5-pro-t2i', 'seedream-v5-pro-i2i'],
   overseas: ['dola-seedream-5.0-pro-t2i', 'dola-seedream-5.0-pro-i2i'],
@@ -989,9 +1028,11 @@ async function readBoundedResponse(response, label, maxBytesOverride) {
         totalBytes += byteLength;
       }
     }
-    if (identityEncoded && Number.isFinite(advertisedLength) && advertisedLength >= 0 && totalBytes !== advertisedLength) {
-      throw invalidResponseError(label, response);
-    }
+    // Chromium/system proxies may legally normalize transfer encodings while
+    // preserving an upstream Content-Length that no longer matches the
+    // decoded body. The byte ceiling above remains authoritative; JSON callers
+    // still reject truncated bodies during parsing, so an exact equality check
+    // here only creates false negatives for otherwise complete responses.
     return Buffer.concat(chunks, totalBytes);
   } catch (error) {
     cancelBodyReader(reader, error?.code || 'response rejected');
@@ -1029,6 +1070,16 @@ function normalizeSeconds(value) {
     throw new Error('seedance.nz 时长只支持 4-15 秒或 -1 自动时长');
   }
   return String(seconds);
+}
+
+function normalizeSeedance25Seconds(value) {
+  const raw = String(value ?? SEEDANCE25_DEFAULT_SECONDS).trim();
+  if (raw === '-1') return -1;
+  const seconds = Number(raw);
+  if (!Number.isInteger(seconds) || seconds < 4 || seconds > 30) {
+    throw new Error('Seedance 2.5 时长只支持 4-30 秒或 -1 自动时长');
+  }
+  return seconds;
 }
 
 function normalizeHappyHorseSeconds(value) {
@@ -1239,6 +1290,14 @@ async function responseJson(response, label) {
   try {
     return JSON.parse(text);
   } catch {
+    // Gateways and CDN edges sometimes return branded HTML for a real 4xx/5xx.
+    // Preserve the HTTP status without reflecting the untrusted body; callers
+    // will normalize it through createUpstreamError immediately afterwards.
+    if (response && response.ok === false) {
+      return {
+        __t8BodyDigest: `sha256:${crypto.createHash('sha256').update(body).digest('hex').slice(0, 16)}`,
+      };
+    }
     throw invalidResponseError(label, response, body);
   }
 }
@@ -1257,6 +1316,9 @@ function createUpstreamError(data, responseOrStatus) {
     trace,
   );
   if (upstreamCode) error.upstreamCode = upstreamCode;
+  if (/^sha256:[a-f0-9]{16}$/.test(String(data?.__t8BodyDigest || ''))) {
+    error.bodyDigest = data.__t8BodyDigest;
+  }
   return error;
 }
 
@@ -1413,8 +1475,9 @@ async function uploadMedia(source, kind, apiKey, options = {}) {
   const baseUrl = cleanBaseUrl(options.baseUrl);
   const intervalMs = options.uploadIntervalMs ?? DEFAULT_UPLOAD_INTERVAL_MS;
   const ttlMs = options.uploadCacheTtlMs ?? DEFAULT_UPLOAD_CACHE_TTL_MS;
+  const cacheEnabled = Number(ttlMs) > 0;
   const cacheKey = `${hashKey(apiKey)}:${kind}:${Number(options.maxBytes) || 0}:${String(options.cacheVariant || '')}:${hashKey(text)}`;
-  const cached = uploadCache.get(cacheKey);
+  const cached = cacheEnabled ? uploadCache.get(cacheKey) : null;
   if (cached && Date.now() - cached.createdAt < ttlMs) return cached.promise;
 
   const promise = withUploadQueue(apiKey, intervalMs, async () => {
@@ -1463,11 +1526,11 @@ async function uploadMedia(source, kind, apiKey, options = {}) {
     throw lastError || new Error('seedance.nz 文件上传失败');
   }, options.signal);
 
-  uploadCache.set(cacheKey, { createdAt: Date.now(), promise });
+  if (cacheEnabled) uploadCache.set(cacheKey, { createdAt: Date.now(), promise });
   try {
     return await promise;
   } catch (error) {
-    uploadCache.delete(cacheKey);
+    if (cacheEnabled) uploadCache.delete(cacheKey);
     throw error;
   }
 }
@@ -1980,10 +2043,234 @@ async function queryMidjourneyTask(taskId, apiKey, options = {}) {
   };
 }
 
+function seedance25TaskTypeFromModel(model) {
+  if (SEEDANCE25_T2V_MODELS.has(model)) return 't2v';
+  if (SEEDANCE25_I2V_MODELS.has(model)) return 'i2v';
+  if (SEEDANCE25_MULTI_MODELS.has(model)) return 'multi';
+  throw new Error(`未知 Seedance 2.5 模型：${model || '(空)'}`);
+}
+
+function seedance25ProbeExtension(file, kind) {
+  const fromName = path.extname(String(file?.fileName || '')).replace(/^\./, '').toLowerCase();
+  if (/^[a-z0-9]{1,8}$/.test(fromName)) return fromName;
+  return String(extensionFromMime(file?.mime, kind) || `.${kind === 'audio' ? 'mp3' : 'mp4'}`).replace(/^\./, '');
+}
+
+async function probeSeedance25ReferenceDuration(buffer, file, kind, options = {}) {
+  if (typeof options.seedance25DurationProbe === 'function') {
+    const injected = Number(await options.seedance25DurationProbe(buffer, file, kind));
+    if (!Number.isFinite(injected) || injected <= 0) {
+      throw new Error(`无法读取 Seedance 2.5 参考${mediaKindLabel(kind)}时长`);
+    }
+    return injected;
+  }
+
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 't8-seedance25-probe-'));
+  const inputPath = path.join(tempDir, `reference.${seedance25ProbeExtension(file, kind)}`);
+  const ffprobe = options.ffprobePath || resolveBundledFfprobe();
+  const timeoutMs = Math.max(5_000, Math.min(60_000, Number(options.ffprobeTimeoutMs) || 30_000));
+  try {
+    await fs.promises.writeFile(inputPath, buffer);
+    return await withFfmpegProcessSlot(() => new Promise((resolve, reject) => {
+      let settled = false;
+      let stdout = '';
+      let stderr = '';
+      const child = spawn(ffprobe, [
+        '-v', 'error',
+        '-show_entries', 'format=duration',
+        '-of', 'json',
+        inputPath,
+      ], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      const finish = (error, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        options.signal?.removeEventListener?.('abort', onAbort);
+        if (error) reject(error);
+        else resolve(value);
+      };
+      const onAbort = () => {
+        try { child.kill('SIGKILL'); } catch {}
+        finish(new Error('任务已取消'));
+      };
+      const timer = setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch {}
+        finish(new Error(`读取 Seedance 2.5 参考${mediaKindLabel(kind)}时长超时`));
+      }, timeoutMs);
+      child.stdout.on('data', (chunk) => {
+        if (stdout.length < 64 * 1024) stdout += chunk.toString('utf8');
+      });
+      child.stderr.on('data', (chunk) => {
+        if (stderr.length < 8 * 1024) stderr += chunk.toString('utf8');
+      });
+      child.once('error', () => finish(new Error(`无法读取 Seedance 2.5 参考${mediaKindLabel(kind)}时长`)));
+      child.once('close', (code) => {
+        if (code !== 0) {
+          finish(new Error(`无法读取 Seedance 2.5 参考${mediaKindLabel(kind)}时长${stderr ? '，请检查文件是否完整' : ''}`));
+          return;
+        }
+        try {
+          const duration = Number(JSON.parse(stdout)?.format?.duration);
+          if (!Number.isFinite(duration) || duration <= 0) throw new Error('invalid duration');
+          finish(null, duration);
+        } catch {
+          finish(new Error(`无法读取 Seedance 2.5 参考${mediaKindLabel(kind)}时长`));
+        }
+      });
+      if (options.signal?.aborted) onAbort();
+      else options.signal?.addEventListener?.('abort', onAbort, { once: true });
+    }), { isCancelled: () => options.signal?.aborted === true });
+  } finally {
+    await fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function validateSeedance25ReferenceDuration(buffer, file, kind, durationState, options = {}) {
+  const duration = await probeSeedance25ReferenceDuration(buffer, file, kind, options);
+  if (duration < SEEDANCE25_REFERENCE_MIN_SECONDS || duration > SEEDANCE25_REFERENCE_MAX_SECONDS) {
+    throw new Error(
+      `Seedance 2.5 单个参考${mediaKindLabel(kind)}时长必须为 ${SEEDANCE25_REFERENCE_MIN_SECONDS}-${SEEDANCE25_REFERENCE_MAX_SECONDS} 秒`,
+    );
+  }
+  durationState.total += duration;
+  if (durationState.total > SEEDANCE25_REFERENCE_TOTAL_SECONDS + 0.001) {
+    throw new Error(`Seedance 2.5 参考视频与音频总时长不得超过 ${SEEDANCE25_REFERENCE_TOTAL_SECONDS} 秒`);
+  }
+}
+
+async function buildSeedance25Payload(request, apiKey, options = {}) {
+  const model = String(request.model || '').trim().toLowerCase();
+  const taskType = seedance25TaskTypeFromModel(model);
+  const prompt = normalizePromptMentions(request.prompt).trim();
+  if (prompt.length > SEEDANCE25_PROMPT_MAX_LENGTH) {
+    throw new Error(`Seedance 2.5 prompt 最多 ${SEEDANCE25_PROMPT_MAX_LENGTH} 字符`);
+  }
+  if ((taskType === 't2v' || taskType === 'multi') && !prompt) {
+    throw new Error(`${taskType} 任务的 prompt 不得为空`);
+  }
+
+  const firstFrame = String(request.firstFrame || '').trim();
+  const lastFrame = String(request.lastFrame || '').trim();
+  const refImages = normalizeList(request.refImages);
+  const videos = normalizeList(request.videos);
+  const audios = normalizeList(request.audios);
+  const allImages = [firstFrame, lastFrame, ...refImages].filter(Boolean);
+  const mediaCount = allImages.length + videos.length + audios.length;
+
+  if (taskType === 't2v' && mediaCount > 0) {
+    throw new Error('Seedance 2.5 t2v 不接受图片、视频或音频素材');
+  }
+  if (taskType === 'i2v') {
+    if (allImages.length < 1 || allImages.length > 2) {
+      throw new Error('Seedance 2.5 i2v 只支持 1-2 张首尾帧图片');
+    }
+    if (videos.length > 0 || audios.length > 0) {
+      throw new Error('Seedance 2.5 i2v 不接受视频或音频素材');
+    }
+  }
+  if (taskType === 'multi') {
+    if (mediaCount < 1) throw new Error('Seedance 2.5 multi 至少需要 1 个参考素材');
+    if (allImages.length > SEEDANCE25_MULTI_LIMITS.images) {
+      throw new Error(`Seedance 2.5 multi 最多支持 ${SEEDANCE25_MULTI_LIMITS.images} 张图片`);
+    }
+    if (videos.length > SEEDANCE25_MULTI_LIMITS.videos) {
+      throw new Error(`Seedance 2.5 multi 最多支持 ${SEEDANCE25_MULTI_LIMITS.videos} 个视频`);
+    }
+    if (audios.length > SEEDANCE25_MULTI_LIMITS.audios) {
+      throw new Error(`Seedance 2.5 multi 最多支持 ${SEEDANCE25_MULTI_LIMITS.audios} 个音频`);
+    }
+    if (mediaCount > SEEDANCE25_MULTI_LIMITS.total) {
+      throw new Error(`Seedance 2.5 multi 参考素材合计最多 ${SEEDANCE25_MULTI_LIMITS.total} 个`);
+    }
+  }
+
+  const resolution = String(request.resolution || SEEDANCE25_DEFAULT_RESOLUTION).trim().toLowerCase();
+  if (!SEEDANCE25_RESOLUTIONS.has(resolution)) {
+    throw new Error(`Seedance 2.5 不支持分辨率 ${request.resolution || '(空)'}`);
+  }
+  const seconds = normalizeSeedance25Seconds(request.duration);
+  const payload = {
+    model,
+    metadata: {
+      resolution,
+      ratio: normalizeRatio(request.ratio),
+      generate_audio: request.generate_audio !== false,
+      return_last_frame: request.return_last_frame === true,
+    },
+  };
+  if (seconds === -1) payload.metadata.duration = -1;
+  else payload.seconds = String(seconds);
+  if (prompt) payload.prompt = prompt;
+  if (Number.isFinite(Number(request.seed)) && Number(request.seed) >= 0) {
+    payload.metadata.seed = Number(request.seed);
+  }
+
+  if (taskType === 'i2v') {
+    payload.images = [];
+    for (const source of allImages) {
+      payload.images.push(await uploadMedia(source, 'image', apiKey, {
+        ...options,
+        maxBytes: SEEDANCE25_IMAGE_MAX_BYTES,
+        allowedMimes: SEEDANCE25_IMAGE_MIMES,
+        cacheVariant: 'seedance25-image-v2',
+      }));
+    }
+  } else if (taskType === 'multi') {
+    payload.metadata.content = [];
+    const durationState = { total: 0 };
+    for (const source of allImages) {
+      const url = await uploadMedia(source, 'image', apiKey, {
+        ...options,
+        maxBytes: SEEDANCE25_IMAGE_MAX_BYTES,
+        allowedMimes: SEEDANCE25_IMAGE_MIMES,
+        cacheVariant: 'seedance25-image-v2',
+      });
+      payload.metadata.content.push({ type: 'image_url', image_url: { url } });
+    }
+    for (const source of videos) {
+      const url = await uploadMedia(source, 'video', apiKey, {
+        ...options,
+        maxBytes: SEEDANCE25_MEDIA_MAX_BYTES,
+        allowedMimes: SEEDANCE25_VIDEO_MIMES,
+        uploadCacheTtlMs: 0,
+        validateBuffer: (buffer, file) => validateSeedance25ReferenceDuration(
+          buffer,
+          file,
+          'video',
+          durationState,
+          options,
+        ),
+      });
+      payload.metadata.content.push({ type: 'video_url', video_url: { url } });
+    }
+    for (const source of audios) {
+      const url = await uploadMedia(source, 'audio', apiKey, {
+        ...options,
+        maxBytes: SEEDANCE25_MEDIA_MAX_BYTES,
+        allowedMimes: SEEDANCE25_AUDIO_MIMES,
+        uploadCacheTtlMs: 0,
+        validateBuffer: (buffer, file) => validateSeedance25ReferenceDuration(
+          buffer,
+          file,
+          'audio',
+          durationState,
+          options,
+        ),
+      });
+      payload.metadata.content.push({ type: 'audio_url', audio_url: { url } });
+    }
+  }
+
+  return { payload, taskType, model };
+}
+
 async function buildPayload(request, apiKey, options = {}) {
   const requestedModel = String(request.model || '').trim().toLowerCase();
   if (ZHENZHEN_APIMART_VIDEO_MODELS.has(requestedModel)) {
     return buildApimartVideoPayload(request, apiKey, options);
+  }
+  if (SEEDANCE25_MODELS.has(requestedModel)) {
+    return buildSeedance25Payload(request, apiKey, options);
   }
   const taskType = deriveTaskType(request);
   ensureMediaLimits(taskType, request);
@@ -3708,6 +3995,12 @@ module.exports = {
   PROVIDER_ID,
   RATIOS,
   RESOLUTIONS,
+  SEEDANCE25_I2V_MODELS,
+  SEEDANCE25_MODELS,
+  SEEDANCE25_MULTI_MODELS,
+  SEEDANCE25_MULTI_LIMITS,
+  SEEDANCE25_RESOLUTIONS,
+  SEEDANCE25_T2V_MODELS,
   SEED_AUDIO_FORMATS,
   SEED_AUDIO_MODEL,
   SEED_AUDIO_SAMPLE_RATES,
@@ -3726,6 +4019,7 @@ module.exports = {
   buildHappyHorsePayload,
   buildWanPayload,
   buildPayload,
+  buildSeedance25Payload,
   buildApimartImagePayload,
   buildApimartVideoPayload,
   buildImagePayload,

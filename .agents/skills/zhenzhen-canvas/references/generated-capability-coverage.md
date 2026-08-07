@@ -3,22 +3,22 @@
 > Machine-generated from the real Canvas Node Schema, creative capability manifest,
 > runtime model/action catalog, and handler bindings. Do not edit by hand.
 
-- Aggregate SHA-256: `fa1d73399da22cbb2359abd59f2152b03fec8daf98a16a1bf8faea69b25708a6`
+- Aggregate SHA-256: `0956705322948987edc2d3caa077c2c96ccdfced131116d57d508bd990c60c20`
 - Capabilities / handlers: **31 / 31**
-- Canvas nodes: **75**
-- Referenced / unreferenced nodes: **66 / 9**
-- Accounted / unexplained nodes: **75 / 0**
-- Direct capability nodes: **66**
+- Canvas nodes: **76**
+- Referenced / unreferenced nodes: **67 / 9**
+- Accounted / unexplained nodes: **76 / 0**
+- Direct capability nodes: **67**
 - Internal compatibility nodes: **1**
 - Semantically superseded nodes: **8**
 - Public capability gaps: **0**
-- Fully operable nodes: **16**
-- Runtime model/action entries: **219**
-- Dynamic node inventory (total / executable / generatable): **75 / 56 / 10**
-- Dynamic runtime inventory (LLM / image / video / audio / actions): **29 / 44 / 91 / 8 / 47**
+- Fully operable nodes: **17**
+- Runtime model/action entries: **225**
+- Dynamic node inventory (total / executable / generatable): **76 / 57 / 10**
+- Dynamic runtime inventory (LLM / image / video / audio / actions): **29 / 44 / 97 / 8 / 47**
 - Operation risk contracts: **152** (L0 91, L1 44, L2 17, L3 0)
 - Unknown node references: **0**
-- Coverage receipt: `t8-creative-capability-coverage-receipt-v1` / `b819f628f4d974c26a7c762687b09d35bd19fe0a1fbb93a3992765ef8f73745e`
+- Coverage receipt: `t8-creative-capability-coverage-receipt-v1` / `9ffa8af2c072477dcf2477260bd9307684dca2f244a98c212a9113ae2369d35a`
 
 “Understand” means the node exists in the authoritative schema. Other columns are true only
 when at least one registered high-level capability explicitly advertises that operation.
@@ -38,6 +38,7 @@ when at least one registered high-level capability explicitly advertises that op
 | `video` 视频 | core | direct-capability | yes | yes | `canvas.node-add` | yes | yes | yes | — | yes | yes |
 | `video-edit` 视频剪辑 | core | direct-capability | — | — | `canvas.node-add`, `delivery.package`, `video-edit.compose` | yes | yes | yes | yes | yes | yes |
 | `seedance` SD2.0 | core | direct-capability | yes | — | `canvas.node-add`, `create.video`, `edit.video` | yes | yes | yes | yes | yes | yes |
+| `seedance25` SD2.5 | core | direct-capability | yes | — | `canvas.node-add`, `create.video` | yes | yes | yes | yes | yes | yes |
 | `director-storyboard` 导演分镜台 | core | direct-capability | yes | — | `canvas.node-add`, `director.materialize`, `video-edit.compose` | yes | yes | yes | yes | yes | yes |
 | `story` Story 全自动制片 | core | direct-capability | yes | — | `canvas.node-add`, `create.story`, `director.materialize`, `story.adopt-preview`, `story.analyze`, `story.bind-asset`, `story.compile`, `story.import`, `story.plan-previews`, `video-edit.compose` | yes | yes | yes | yes | yes | yes |
 | `script-master` 剧本大师 | core | direct-capability | — | — | `canvas.node-add` | yes | yes | yes | — | yes | yes |
@@ -108,7 +109,7 @@ receive installed / credential / region readiness at request time before it is e
 
 - llm: **29**
 - image: **44**
-- video: **91**
+- video: **97**
 - audio: **8**
 - actions: **47**
 

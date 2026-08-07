@@ -91,6 +91,14 @@ import {
 } from '../../utils/materialExclusion';
 import { LocalNodeAddonSlot } from 'virtual:t8-local-extensions';
 import JimengCliHelpButton from './JimengCliHelpButton';
+import {
+  SEEDANCE25_MULTI_MAX_AUDIOS,
+  SEEDANCE25_MULTI_MAX_IMAGES,
+  SEEDANCE25_MULTI_MAX_TOTAL,
+  SEEDANCE25_MULTI_MAX_VIDEOS,
+  SEEDANCE25_DEFAULT_DURATION,
+  SEEDANCE25_DEFAULT_RESOLUTION,
+} from '../../config/seedance';
 
 /**
  * VideoNode - 异步视频生成(完全对齐 gpt-image-2-web)
@@ -100,6 +108,7 @@ import JimengCliHelpButton from './JimengCliHelpButton';
  *   - Sora2    (kind=sora)      — Zhenzhen API + FAL 双渠道 / Base64 参考图(≤1)
  *   - HappyHorse(kind=happyhorse)— api.seedance.nz 文生/图生/参考图生视频(≤9 图)
  *   - Hailuo   (kind=hailuo)    — api.seedance.nz Hailuo 2.3 / H3 + MiniMax H3 OW
+ *   - Seedance 2.5(kind=seedance25)— api.seedance.nz 六个 Standard 文生/图生/多模态模型
  *   - Vidu     (kind=vidu)      — api.seedance.nz Vidu Q3 文生/图生/首尾帧/参考/短剧成片(≤14 图)
  *   - Kling    (kind=kling)     — api.seedance.nz Kling 文生/图生/首尾帧/参考/视频编辑
  *   - Wan      (kind=wan)       — api.seedance.nz Wan 2.7 Spicy 图生视频(1 张首帧)
@@ -224,6 +233,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   const activeModelOption = builtinApiModelOptions.find((option) => option.value === apiModel);
   const isHappyHorse = !isExternalSelected && modelDef.kind === 'happyhorse';
   const isHailuo = !isExternalSelected && modelDef.kind === 'hailuo';
+  const isSeedance25 = !isExternalSelected && modelDef.kind === 'seedance25';
   const isKling = !isExternalSelected && modelDef.kind === 'kling';
   const isUpscaler = !isExternalSelected && modelDef.kind === 'upscaler';
   const isVidu = !isExternalSelected && modelDef.kind === 'vidu';
@@ -241,6 +251,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   const hailuoMode = apiModel.endsWith('-multi')
     ? 'multi'
     : apiModel.endsWith('-r2v') ? 'r2v' : apiModel.includes('-i2v') ? 'i2v' : 't2v';
+  const seedance25Mode = apiModel.endsWith('-multi') ? 'multi' : apiModel.endsWith('-i2v') ? 'i2v' : 't2v';
   const klingMode = apiModel.endsWith('-edit')
     ? 'edit'
     : apiModel.endsWith('-r2v')
@@ -309,6 +320,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   const viduAssetNamePrefix: string = typeof d?.viduAssetNamePrefix === 'string' ? d.viduAssetNamePrefix : 'Asset';
   const viduAssetDescription: string = typeof d?.viduAssetDescription === 'string' ? d.viduAssetDescription : 'Reference asset';
   const seed: number = typeof d?.seed === 'number' ? d.seed : 0;
+  const generateAudio: boolean = d?.generateAudio !== false;
+  const returnLastFrame: boolean = d?.returnLastFrame === true;
   const enhancePrompt: boolean = d?.enhancePrompt ?? false;
   const enableUpsample: boolean = d?.enableUpsample ?? false;
   const wanNegativePrompt: string = typeof d?.wanNegativePrompt === 'string' ? d.wanNegativePrompt : '';
@@ -483,6 +496,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       ? klingMode === 'i2v' ? 2 : klingMode === 'r2v' ? 4 : 0
       : isVidu
       ? viduMode === 't2v' ? 0 : viduMode === 'i2v' ? 1 : viduMode === 'start-end' ? 2 : viduMode === 'r2v' ? 9 : 14
+      : isSeedance25
+      ? seedance25Mode === 't2v' ? 0 : seedance25Mode === 'i2v' ? 2 : SEEDANCE25_MULTI_MAX_IMAGES
       : isHailuo
       ? isMinimaxH3Ow
         ? hailuoMode === 't2v' ? 0 : 1
@@ -516,12 +531,16 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     ? 1
     : isKling && klingMode === 'edit'
     ? 1
+    : isSeedance25 && seedance25Mode === 'multi'
+    ? SEEDANCE25_MULTI_MAX_VIDEOS
     : isHailuoH3 && hailuoMode === 'multi'
-    ? 3
+    ? SEEDANCE25_MULTI_MAX_AUDIOS
     : isApimartOmni
     ? 1
     : isJimengSeedanceSelected ? JIMENG_SEEDANCE_LIMITS.videos : 0;
-  const maxMentionAudios = isHailuoH3 && hailuoMode === 'multi'
+  const maxMentionAudios = isSeedance25 && seedance25Mode === 'multi'
+    ? SEEDANCE25_MULTI_MAX_AUDIOS
+    : isHailuoH3 && hailuoMode === 'multi'
     ? 3
     : isJimengSeedanceSelected ? JIMENG_SEEDANCE_LIMITS.audios : 0;
   const mentionMaterials = useMemo(
@@ -532,6 +551,9 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     ],
     [orderedImages, orderedVideos, orderedAudios, localRefMaterials, maxMentionRefs, maxMentionVideos, maxMentionAudios],
   );
+  const supportsActiveMaterials = isSeedance25
+    ? seedance25Mode !== 't2v'
+    : Boolean(modelDef.supportImages || modelDef.supportVideos);
 
   // 分组动态跟随子模型: Seedance / 即梦 CLI 支持 image/video/audio, 其他 (grok/veo/sora) 仅 image
   const previewGroups = useMemo<ReadonlyArray<'text' | 'image' | 'video' | 'audio'>>(
@@ -543,10 +565,12 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         ? ['video']
       : isKling && klingMode === 'edit'
         ? ['text', 'video']
+      : isSeedance25 && seedance25Mode === 'multi'
+        ? ['text', 'image', 'video', 'audio']
       : isHailuoH3 && hailuoMode === 'multi'
         ? ['text', 'image', 'video', 'audio']
         : ['text', 'image']),
-    [modelDef.kind, isJimengSeedanceSelected, isApimartOmni, isUpscaler, isKling, klingMode, isHailuoH3, hailuoMode],
+    [modelDef.kind, isJimengSeedanceSelected, isApimartOmni, isUpscaler, isKling, klingMode, isSeedance25, seedance25Mode, isHailuoH3, hailuoMode],
   );
 
   // 收集上游 prompt + 参考图/视频/音频 (按用户拖拽顺序), 合并本地拖入素材
@@ -690,6 +714,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         try {
           const r = isWan
             ? await queryWan(tid)
+            : isSeedance25
+              ? await querySeedance(tid, 'seedance-nz')
             : isHailuo
               ? await queryHailuo(tid)
             : isKling
@@ -710,7 +736,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             model: apiModel,
             taskId: tid,
             recovery: {
-              kind: isWan ? 'wan' : isHailuo ? 'hailuo' : isKling ? 'kling' : isUpscaler ? 'upscaler' : isVidu ? 'vidu' : isHappyHorse ? 'happyhorse' : isApimartBudgetVideo ? 'seedance' : 'video',
+              kind: isWan ? 'wan' : isSeedance25 ? 'seedance' : isHailuo ? 'hailuo' : isKling ? 'kling' : isUpscaler ? 'upscaler' : isVidu ? 'vidu' : isHappyHorse ? 'happyhorse' : isApimartBudgetVideo ? 'seedance' : 'video',
               taskId: tid, model: apiModel, pollIntervalMs: POLL_INT, maxPolls: MAX,
             },
             requestId: r.requestId,
@@ -948,6 +974,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       && !isUpscaler
       && !(isHappyHorse && happyHorseMode !== 't2v')
       && !(isHailuo && hailuoMode === 'i2v')
+      && !(isSeedance25 && seedance25Mode === 'i2v')
       && !(isKling && klingMode === 'i2v')
       && !(isVidu && !['t2v', 'short-play'].includes(viduMode))
       && !(isApimartOmni && (imageUrls.length > 0 || videoUrls.length > 0))
@@ -966,6 +993,49 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       setError(`${hailuoLabel} 图生视频必须连接或拖入第 1 张首帧图`);
       logBus.error(`生成中止: ${hailuoLabel} 图生视频缺少首帧图`, src);
       return;
+    }
+    if (isSeedance25 && seedance25Mode === 't2v'
+      && (imageUrls.length > 0 || videoUrls.length > 0 || audioUrls.length > 0)) {
+      setError('Seedance 2.5 文生视频不接受参考素材，请断开图片、视频和音频');
+      logBus.error('生成中止: Seedance 2.5 文生视频混入参考素材', src);
+      return;
+    }
+    if (isSeedance25 && seedance25Mode === 'i2v') {
+      if (imageUrls.length < 1 || imageUrls.length > 2) {
+        setError('Seedance 2.5 图生视频必须提供 1-2 张图片（首帧/可选尾帧）');
+        logBus.error('生成中止: Seedance 2.5 图生视频图片数量不合法', src);
+        return;
+      }
+      if (videoUrls.length > 0 || audioUrls.length > 0) {
+        setError('Seedance 2.5 图生视频不接受视频或音频素材');
+        logBus.error('生成中止: Seedance 2.5 图生视频混入视频或音频', src);
+        return;
+      }
+    }
+    if (isSeedance25 && seedance25Mode === 'multi'
+      && imageUrls.length === 0 && videoUrls.length === 0 && audioUrls.length === 0) {
+      setError('Seedance 2.5 多模态参考至少需要 1 个图片、视频或音频素材');
+      logBus.error('生成中止: Seedance 2.5 多模态参考缺少素材', src);
+      return;
+    }
+    if (isSeedance25 && seedance25Mode === 'multi') {
+      const total = imageUrls.length + videoUrls.length + audioUrls.length;
+      if (imageUrls.length > SEEDANCE25_MULTI_MAX_IMAGES) {
+        setError(`Seedance 2.5 多模态参考最多支持 ${SEEDANCE25_MULTI_MAX_IMAGES} 张图片`);
+        return;
+      }
+      if (videoUrls.length > SEEDANCE25_MULTI_MAX_VIDEOS) {
+        setError(`Seedance 2.5 多模态参考最多支持 ${SEEDANCE25_MULTI_MAX_VIDEOS} 个视频`);
+        return;
+      }
+      if (audioUrls.length > SEEDANCE25_MULTI_MAX_AUDIOS) {
+        setError(`Seedance 2.5 多模态参考最多支持 ${SEEDANCE25_MULTI_MAX_AUDIOS} 个音频`);
+        return;
+      }
+      if (total > SEEDANCE25_MULTI_MAX_TOTAL) {
+        setError(`Seedance 2.5 多模态参考素材合计最多 ${SEEDANCE25_MULTI_MAX_TOTAL} 个`);
+        return;
+      }
     }
     if (isMinimaxH3Ow && hailuoMode === 'r2v' && imageUrls.length === 0) {
       setError('MiniMax H3 OW 参考生视频必须连接或拖入 1 张参考图');
@@ -1186,6 +1256,62 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           apiModel,
         });
         logBus.info(`平价AI小屋视频任务 ${result.taskId} 已提交，开始轮询`, src);
+        await startPolling(result.taskId, runId, reporter);
+        return;
+      }
+
+      if (isSeedance25) {
+        const seedance25Images = imageUrls.slice(0, seedance25Mode === 'i2v' ? 2 : seedance25Mode === 'multi' ? SEEDANCE25_MULTI_MAX_IMAGES : 0);
+        const seedance25Videos = seedance25Mode === 'multi' ? videoUrls.slice(0, SEEDANCE25_MULTI_MAX_VIDEOS) : [];
+        const seedance25Audios = seedance25Mode === 'multi' ? audioUrls.slice(0, SEEDANCE25_MULTI_MAX_AUDIOS) : [];
+        logBus.info(
+          `提交 Seedance 2.5: ${apiModel} · ${duration === -1 ? '自动时长' : `${duration}s`} · ${resolution} · ${ratio} · 图${seedance25Images.length}/视${seedance25Videos.length}/音${seedance25Audios.length}`,
+          src,
+        );
+        const result = await submitSeedance({
+          model: apiModel,
+          prompt: finalPrompt,
+          duration,
+          ratio,
+          resolution,
+          generate_audio: generateAudio,
+          return_last_frame: returnLastFrame,
+          seed: seed > 0 ? seed : undefined,
+          ...(seedance25Mode === 'i2v'
+            ? {
+                firstFrame: seedance25Images[0],
+                lastFrame: seedance25Images[1],
+              }
+            : seedance25Mode === 'multi'
+              ? {
+                  refImages: seedance25Images,
+                  videos: seedance25Videos,
+                  audios: seedance25Audios,
+                }
+              : {}),
+          taskProvider: 'seedance-nz',
+        }, { submissionKey: reporter?.providerSubmissionKey });
+        if (!isCurrentGenerationRun(runId)) return;
+        await reporter?.providerSubmitted({
+          provider: traceProvider,
+          model: result.model || traceModel,
+          upstreamTaskId: result.taskId,
+          requestId: result.requestId,
+          transportHttpStatus: result.transportHttpStatus,
+          upstreamHttpStatus: result.upstreamHttpStatus,
+          usage: result.usage,
+          httpStatusSource: 'local-backend',
+        });
+        update({
+          status: 'polling',
+          taskId: result.taskId,
+          lastPrompt: finalPrompt,
+          progress: '0%',
+          provider: 'seedance-nz',
+          apiModel: result.model || apiModel,
+          taskType: result.taskType || seedance25Mode,
+        });
+        logBus.info('Seedance 2.5 任务已提交，开始轮询', src);
         await startPolling(result.taskId, runId, reporter);
         return;
       }
@@ -1909,6 +2035,9 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
                      : nextModel.startsWith('hailuo-2.3-')
                        ? { ratio: '16:9', duration: 6, resolution: '768p' }
                        : {}),
+                   ...(nextModel.startsWith('seedance-2.5-')
+                     ? { ratio: nextModel.endsWith('-i2v') ? 'adaptive' : '16:9', duration: SEEDANCE25_DEFAULT_DURATION, resolution: SEEDANCE25_DEFAULT_RESOLUTION, generateAudio: true, returnLastFrame: false }
+                     : {}),
                    ...(nextModel.endsWith('-short-play')
                      ? { ratio: '9:16', duration: 8, resolution: '1080p' }
                      : nextModel.startsWith('vidu-q3-')
@@ -2163,6 +2292,22 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           </div>
         )}
 
+        {isSeedance25 && (
+          <div className="rounded border border-fuchsia-300/20 bg-fuchsia-400/[0.06] px-2 py-1.5 text-[10px] leading-relaxed text-white/55">
+            {seedance25Mode === 't2v'
+              ? '文生视频必须填写提示词，不发送任何参考素材。'
+              : seedance25Mode === 'i2v'
+                ? '图生视频使用排序后的第 1 张首帧图与可选第 2 张尾帧图；提示词可选。'
+                : '多模态参考必须填写提示词并至少提供 1 个素材；最多 30 图、10 视频、10 音频，合计不超过 50 个。'}
+            <div className="mt-1 text-white/35">贞贞的平价AI小屋 · Standard · 4-30 秒/自动 · 480p/720p/1080p/2k/4k · 默认 5 秒/720p</div>
+            {seedance25Mode === 'multi' && (
+              <div className="mt-1 text-white/35">
+                单段音视频 2-30 秒，全部参考音视频总时长不超过 30 秒；提交前实际读取时长。图片 JPG/JPEG/PNG/WEBP≤30MB，视频 MP4、音频 MP3/WAV≤50MB。
+              </div>
+            )}
+          </div>
+        )}
+
         {isApimartBudgetVideo && (
           <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.06] px-2 py-1.5 text-[10px] leading-relaxed text-white/55">
             <div>贞贞的平价AI小屋 · {apiModel}</div>
@@ -2361,12 +2506,35 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
               className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-white/30"
             >
                 {durationOptions.map((s) => (
-                  <option key={s} value={s} className="bg-zinc-900">{s}s</option>
+                  <option key={s} value={s} className="bg-zinc-900">{s === -1 ? '自动 (-1)' : `${s}s`}</option>
                 ))}
               </select>
             </div>
           )}
         </div>
+        )}
+
+        {isSeedance25 && (
+          <div className="grid grid-cols-2 gap-1.5">
+            <label className="flex items-center gap-1 text-[10px] text-white/60 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={generateAudio}
+                onChange={(e) => update({ generateAudio: e.target.checked })}
+                className="accent-fuchsia-400"
+              />
+              生成音频
+            </label>
+            <label className="flex items-center gap-1 text-[10px] text-white/60 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={returnLastFrame}
+                onChange={(e) => update({ returnLastFrame: e.target.checked })}
+                className="accent-fuchsia-400"
+              />
+              返回末帧
+            </label>
+          </div>
         )}
 
         {isHailuo && (
@@ -2709,7 +2877,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         )}
 
         {/* 上游素材聚合预览区 (代替原「参考图(上游)」计数提示) */}
-        {(modelDef.supportImages || modelDef.supportVideos) && !isApimartV31Lite && (
+        {supportsActiveMaterials && !isApimartV31Lite && (
           <MaterialPreviewSection
             texts={orderedTexts}
             images={orderedImages}
@@ -2729,7 +2897,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         )}
 
         {/* 本地拖入参考素材 (Ctrl+拖拽自其他节点) */}
-        {(modelDef.supportImages || modelDef.supportVideos) && !isApimartV31Lite && (isUpscaler ? localRefVideos.length : localRefImages.length + localRefVideos.length + localRefAudios.length) > 0 && (
+        {supportsActiveMaterials && !isApimartV31Lite && (isUpscaler ? localRefVideos.length : localRefImages.length + localRefVideos.length + localRefAudios.length) > 0 && (
           <div className="rounded border border-emerald-400/30 bg-emerald-500/5 p-1.5 space-y-1">
             <div className="text-[10px] text-emerald-200/80">
               {isUpscaler ? `本地拖入 · 视频 ${localRefVideos.length}/1` : `本地拖入 · 图${localRefImages.length} 视${localRefVideos.length} 音${localRefAudios.length}`}

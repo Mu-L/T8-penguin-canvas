@@ -1,0 +1,50 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "Seedance 2.5 全球 Standard 多模态参考",
+  "nodes": [
+    { "id": "seedance-2.5-global-standard-multi-image", "type": "upload", "position": { "x": 0, "y": 0 }, "data": { "label": "上传参考图（最多 30 张）", "uploadType": "image", "lockedUploadType": "image" } },
+    { "id": "seedance-2.5-global-standard-multi-video", "type": "upload", "position": { "x": 0, "y": 190 }, "data": { "label": "上传参考视频（最多 10 个）", "uploadType": "video", "lockedUploadType": "video" } },
+    { "id": "seedance-2.5-global-standard-multi-audio", "type": "upload", "position": { "x": 0, "y": 380 }, "data": { "label": "上传参考音频（最多 10 个）", "uploadType": "audio", "lockedUploadType": "audio" } },
+    {
+      "id": "seedance-2.5-global-standard-multi",
+      "type": "seedance25",
+      "position": { "x": 460, "y": 160 },
+      "data": {
+        "label": "Seedance 2.5 全球 Standard 多模态参考",
+        "model": "seedance-2.5-global-standard-multi",
+        "seedanceApiSource": "seedance-nz",
+        "duration": 5,
+        "ratio": "16:9",
+        "resolution": "720p",
+        "generateAudio": true,
+        "returnLastFrame": false,
+        "seed": -1,
+        "prompt": "使用 @Image 1 保持主体外观，参考 @Video 1 的运镜节奏，并跟随 @Audio 1 的节拍变化",
+        "reuseResult": false
+      }
+    }
+  ],
+  "edges": [
+    { "id": "seedance-2.5-global-standard-multi-image-edge", "source": "seedance-2.5-global-standard-multi-image", "target": "seedance-2.5-global-standard-multi" },
+    { "id": "seedance-2.5-global-standard-multi-video-edge", "source": "seedance-2.5-global-standard-multi-video", "target": "seedance-2.5-global-standard-multi" },
+    { "id": "seedance-2.5-global-standard-multi-audio-edge", "source": "seedance-2.5-global-standard-multi-audio", "target": "seedance-2.5-global-standard-multi" }
+  ],
+  "nodeCount": 4,
+  "edgeCount": 3,
+  "nodeTypes": ["upload", "seedance25"],
+  "topologyPreview": {
+    "nodes": [
+      { "id": "seedance-2.5-global-standard-multi-image", "type": "upload", "label": "上传参考图（最多 30 张）", "x": 50, "y": 50 },
+      { "id": "seedance-2.5-global-standard-multi-video", "type": "upload", "label": "上传参考视频（最多 10 个）", "x": 50, "y": 240 },
+      { "id": "seedance-2.5-global-standard-multi-audio", "type": "upload", "label": "上传参考音频（最多 10 个）", "x": 50, "y": 430 },
+      { "id": "seedance-2.5-global-standard-multi", "type": "seedance25", "label": "Seedance 2.5 全球 Standard 多模态参考", "x": 510, "y": 210 }
+    ],
+    "edges": [
+      { "id": "seedance-2.5-global-standard-multi-image-edge", "source": "seedance-2.5-global-standard-multi-image", "target": "seedance-2.5-global-standard-multi" },
+      { "id": "seedance-2.5-global-standard-multi-video-edge", "source": "seedance-2.5-global-standard-multi-video", "target": "seedance-2.5-global-standard-multi" },
+      { "id": "seedance-2.5-global-standard-multi-audio-edge", "source": "seedance-2.5-global-standard-multi-audio", "target": "seedance-2.5-global-standard-multi" }
+    ]
+  },
+  "savedAt": "2026-08-08T00:00:00.000Z"
+}

@@ -36,7 +36,7 @@ test('SD2 node exposes built-in provider choices and preserves provider during p
   assert.match(node, /主力 API（自动：优先平价AI小屋）/);
   assert.match(node, /贞贞的平价AI小屋 · api\.seedance\.nz/);
   assert.match(node, /贞贞的AI工坊（海外） · ai\.t8star\.org/);
-  assert.match(node, /taskProvider: builtinSource/);
+  assert.match(node, /taskProvider:\s*isSeedance25\s*\?\s*'seedance-nz'\s*:\s*builtinSource/);
   assert.match(node, /querySeedance\(tid, taskProvider\)/);
   assert.match(node, /lastTaskProvider/);
   assert.match(generation, /taskProvider=\$\{encodeURIComponent\(taskProvider\)\}/);

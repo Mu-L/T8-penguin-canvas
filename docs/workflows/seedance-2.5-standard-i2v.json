@@ -1,0 +1,56 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "Seedance 2.5 国内 Standard 首尾帧图生视频",
+  "nodes": [
+    {
+      "id": "seedance-2.5-standard-i2v-image",
+      "type": "upload",
+      "position": { "x": 0, "y": 40 },
+      "data": { "label": "上传首帧图（必填）", "uploadType": "image", "lockedUploadType": "image" }
+    },
+    {
+      "id": "seedance-2.5-standard-i2v-last-image",
+      "type": "upload",
+      "position": { "x": 0, "y": 240 },
+      "data": { "label": "上传尾帧图（可选）", "uploadType": "image", "lockedUploadType": "image" }
+    },
+    {
+      "id": "seedance-2.5-standard-i2v",
+      "type": "seedance25",
+      "position": { "x": 420, "y": 40 },
+      "data": {
+        "label": "Seedance 2.5 国内 Standard 图生视频",
+        "model": "seedance-2.5-standard-i2v",
+        "seedanceApiSource": "seedance-nz",
+        "duration": 5,
+        "ratio": "adaptive",
+        "resolution": "720p",
+        "generateAudio": true,
+        "returnLastFrame": false,
+        "seed": -1,
+        "prompt": "镜头缓慢推进，保持主体身份、构图与材质稳定",
+        "reuseResult": false
+      }
+    }
+  ],
+  "edges": [
+    { "id": "seedance-2.5-standard-i2v-image-edge", "source": "seedance-2.5-standard-i2v-image", "target": "seedance-2.5-standard-i2v" },
+    { "id": "seedance-2.5-standard-i2v-last-image-edge", "source": "seedance-2.5-standard-i2v-last-image", "target": "seedance-2.5-standard-i2v" }
+  ],
+  "nodeCount": 3,
+  "edgeCount": 2,
+  "nodeTypes": ["upload", "upload", "seedance25"],
+  "topologyPreview": {
+    "nodes": [
+      { "id": "seedance-2.5-standard-i2v-image", "type": "upload", "label": "上传首帧图（必填）", "x": 50, "y": 90 },
+      { "id": "seedance-2.5-standard-i2v-last-image", "type": "upload", "label": "上传尾帧图（可选）", "x": 50, "y": 290 },
+      { "id": "seedance-2.5-standard-i2v", "type": "seedance25", "label": "Seedance 2.5 国内 Standard 图生视频", "x": 470, "y": 90 }
+    ],
+    "edges": [
+      { "id": "seedance-2.5-standard-i2v-image-edge", "source": "seedance-2.5-standard-i2v-image", "target": "seedance-2.5-standard-i2v" },
+      { "id": "seedance-2.5-standard-i2v-last-image-edge", "source": "seedance-2.5-standard-i2v-last-image", "target": "seedance-2.5-standard-i2v" }
+    ]
+  },
+  "savedAt": "2026-08-08T00:00:00.000Z"
+}

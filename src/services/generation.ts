@@ -1381,7 +1381,7 @@ export interface SeedanceSubmitRequest {
   /** 'doubao-seedance-2-0-260128' | 'doubao-seedance-2-0-fast-260128' | 'doubao-seedance-2.0-mini' */
   model: string;
   prompt: string;
-  /** 时长(秒) 4..15 */
+  /** 时长(秒)：Seedance 2.0 为 4..15；Seedance 2.5 为 4..30 或 -1 自动时长 */
   duration?: number;
   /** 比例 16:9|9:16|1:1|4:3|3:4|21:9|9:21|adaptive */
   ratio?: string;
