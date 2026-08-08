@@ -1,0 +1,82 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "FLUX 3 海外视频编辑（贞贞的平价AI小屋）",
+  "nodes": [
+    {
+      "id": "flux-3-video-global-v2v-video",
+      "type": "upload",
+      "position": {
+        "x": 0,
+        "y": 40
+      },
+      "data": {
+        "label": "上传输入 MP4（恰好 1 个）",
+        "uploadType": "video",
+        "lockedUploadType": "video"
+      }
+    },
+    {
+      "id": "flux-3-video-global-v2v",
+      "type": "video",
+      "position": {
+        "x": 440,
+        "y": 40
+      },
+      "data": {
+        "label": "FLUX 3 海外视频编辑",
+        "mainId": "flux-3-video",
+        "model": "flux-3-video-global-v2v",
+        "videoBuiltinSource": "seedance-nz",
+        "ratio": "auto",
+        "duration": 5,
+        "resolution": "hd",
+        "localPrompt": "保持主体身份与动作连续，按要求修改画面",
+        "flux3Draft": false,
+        "flux3AudioMode": "api_default",
+        "flux3SafetyTolerance": "api_default",
+        "flux3DraftCache": "",
+        "reuseResult": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "flux-3-video-global-v2v-flux-3-video-global-v2v-video-edge",
+      "source": "flux-3-video-global-v2v-video",
+      "target": "flux-3-video-global-v2v"
+    }
+  ],
+  "nodeCount": 2,
+  "edgeCount": 1,
+  "nodeTypes": [
+    "upload",
+    "video"
+  ],
+  "topologyPreview": {
+    "nodes": [
+      {
+        "id": "flux-3-video-global-v2v-video",
+        "type": "upload",
+        "label": "上传输入 MP4（恰好 1 个）",
+        "x": 50,
+        "y": 90
+      },
+      {
+        "id": "flux-3-video-global-v2v",
+        "type": "video",
+        "label": "FLUX 3 海外视频编辑",
+        "x": 490,
+        "y": 90
+      }
+    ],
+    "edges": [
+      {
+        "id": "flux-3-video-global-v2v-flux-3-video-global-v2v-video-edge",
+        "source": "flux-3-video-global-v2v-video",
+        "target": "flux-3-video-global-v2v"
+      }
+    ]
+  },
+  "savedAt": "2026-08-08T08:00:00.000Z"
+}

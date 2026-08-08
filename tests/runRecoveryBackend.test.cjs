@@ -85,6 +85,11 @@ test('recovery descriptors map only allowlisted kinds to fixed loopback routes',
     url: 'http://127.0.0.1:18766/api/proxy/video/hailuo/status/hailuo%2Ftask',
     options: { method: 'GET' },
   });
+  const flux3 = normalizeRunRecoveryDescriptor({ kind: 'flux3', taskId: 'flux/task', model: 'flux-3-video-global-t2v' });
+  assert.deepEqual(recoveryRequest('http://127.0.0.1:18766', flux3), {
+    url: 'http://127.0.0.1:18766/api/proxy/video/flux3/status/flux%2Ftask',
+    options: { method: 'GET' },
+  });
   const kling = normalizeRunRecoveryDescriptor({ kind: 'kling', taskId: 'kling/task', model: 'kling-o3-pro-edit' });
   assert.deepEqual(recoveryRequest('http://127.0.0.1:18766', kling), {
     url: 'http://127.0.0.1:18766/api/proxy/video/kling/status/kling%2Ftask',

@@ -1,0 +1,45 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "Hailuo H3 海外文生视频（贞贞的平价AI小屋）",
+  "nodes": [
+    {
+      "id": "hailuo-h3-global-t2v",
+      "type": "video",
+      "position": {
+        "x": 0,
+        "y": 40
+      },
+      "data": {
+        "label": "Hailuo H3 海外文生视频",
+        "mainId": "hailuo-2.3",
+        "model": "hailuo-h3-global-t2v",
+        "videoBuiltinSource": "seedance-nz",
+        "ratio": "16:9",
+        "duration": 5,
+        "resolution": "2K",
+        "localPrompt": "电影感镜头缓慢推进，主体自然运动，画面稳定连贯",
+        "reuseResult": false
+      }
+    }
+  ],
+  "edges": [],
+  "nodeCount": 1,
+  "edgeCount": 0,
+  "nodeTypes": [
+    "video"
+  ],
+  "topologyPreview": {
+    "nodes": [
+      {
+        "id": "hailuo-h3-global-t2v",
+        "type": "video",
+        "label": "Hailuo H3 海外文生视频",
+        "x": 50,
+        "y": 90
+      }
+    ],
+    "edges": []
+  },
+  "savedAt": "2026-08-08T08:00:00.000Z"
+}

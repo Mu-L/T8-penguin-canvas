@@ -36,6 +36,7 @@ test('video built-in sources keep workshop and budget-house catalogs independent
       'wan-2.7-spicy',
       'happyhorse-1.1',
       'hailuo-2.3',
+      'flux-3-video',
       'vidu-q3',
       'kling-v3.0',
       'zhenzhen-upscaler',
@@ -55,6 +56,17 @@ test('video built-in sources keep workshop and budget-house catalogs independent
     'hailuo-h3-t2v',
     'hailuo-h3-i2v',
     'hailuo-h3-multi',
+    'hailuo-h3-global-t2v',
+    'hailuo-h3-global-i2v',
+    'hailuo-h3-global-multi',
+    'flux-3-video-t2v',
+    'flux-3-video-i2v',
+    'flux-3-video-v2v',
+    'flux-3-video-draft-enhance',
+    'flux-3-video-global-t2v',
+    'flux-3-video-global-i2v',
+    'flux-3-video-global-v2v',
+    'flux-3-video-global-draft-enhance',
     'vidu-q3-turbo-t2v',
     'kling-v3.0-std-t2v',
     'zhenzhen-upscaler',
@@ -77,6 +89,8 @@ test('old video canvases infer the correct built-in source from their saved mode
   assert.equal(inferVideoBuiltinSource('hailuo-h3-t2v'), 'seedance-nz');
   assert.equal(inferVideoBuiltinSource('hailuo-h3-i2v'), 'seedance-nz');
   assert.equal(inferVideoBuiltinSource('hailuo-h3-multi'), 'seedance-nz');
+  assert.equal(inferVideoBuiltinSource('hailuo-h3-global-multi'), 'seedance-nz');
+  assert.equal(inferVideoBuiltinSource('flux-3-video-global-v2v'), 'seedance-nz');
   assert.equal(inferVideoBuiltinSource('hailuo-2.3'), 'seedance-nz');
   assert.equal(inferVideoBuiltinSource('unknown-video-model'), null);
 });

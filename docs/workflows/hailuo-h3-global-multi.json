@@ -1,0 +1,140 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "Hailuo H3 海外多模态参考视频（贞贞的平价AI小屋）",
+  "nodes": [
+    {
+      "id": "hailuo-h3-global-multi-image",
+      "type": "upload",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "上传参考图（最多 9 张）",
+        "uploadType": "image",
+        "lockedUploadType": "image"
+      }
+    },
+    {
+      "id": "hailuo-h3-global-multi-video",
+      "type": "upload",
+      "position": {
+        "x": 0,
+        "y": 210
+      },
+      "data": {
+        "label": "上传参考视频（最多 3 个）",
+        "uploadType": "video",
+        "lockedUploadType": "video"
+      }
+    },
+    {
+      "id": "hailuo-h3-global-multi-audio",
+      "type": "upload",
+      "position": {
+        "x": 0,
+        "y": 420
+      },
+      "data": {
+        "label": "上传参考音频（最多 3 个）",
+        "uploadType": "audio",
+        "lockedUploadType": "audio"
+      }
+    },
+    {
+      "id": "hailuo-h3-global-multi",
+      "type": "video",
+      "position": {
+        "x": 440,
+        "y": 170
+      },
+      "data": {
+        "label": "Hailuo H3 海外多模态参考视频",
+        "mainId": "hailuo-2.3",
+        "model": "hailuo-h3-global-multi",
+        "videoBuiltinSource": "seedance-nz",
+        "ratio": "16:9",
+        "duration": 5,
+        "resolution": "2K",
+        "localPrompt": "使用 @Image 1 保持主体，参考 @Video 1 的运镜并跟随 @Audio 1 的节拍",
+        "reuseResult": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "hailuo-h3-global-multi-hailuo-h3-global-multi-image-edge",
+      "source": "hailuo-h3-global-multi-image",
+      "target": "hailuo-h3-global-multi"
+    },
+    {
+      "id": "hailuo-h3-global-multi-hailuo-h3-global-multi-video-edge",
+      "source": "hailuo-h3-global-multi-video",
+      "target": "hailuo-h3-global-multi"
+    },
+    {
+      "id": "hailuo-h3-global-multi-hailuo-h3-global-multi-audio-edge",
+      "source": "hailuo-h3-global-multi-audio",
+      "target": "hailuo-h3-global-multi"
+    }
+  ],
+  "nodeCount": 4,
+  "edgeCount": 3,
+  "nodeTypes": [
+    "upload",
+    "upload",
+    "upload",
+    "video"
+  ],
+  "topologyPreview": {
+    "nodes": [
+      {
+        "id": "hailuo-h3-global-multi-image",
+        "type": "upload",
+        "label": "上传参考图（最多 9 张）",
+        "x": 50,
+        "y": 50
+      },
+      {
+        "id": "hailuo-h3-global-multi-video",
+        "type": "upload",
+        "label": "上传参考视频（最多 3 个）",
+        "x": 50,
+        "y": 260
+      },
+      {
+        "id": "hailuo-h3-global-multi-audio",
+        "type": "upload",
+        "label": "上传参考音频（最多 3 个）",
+        "x": 50,
+        "y": 470
+      },
+      {
+        "id": "hailuo-h3-global-multi",
+        "type": "video",
+        "label": "Hailuo H3 海外多模态参考视频",
+        "x": 490,
+        "y": 220
+      }
+    ],
+    "edges": [
+      {
+        "id": "hailuo-h3-global-multi-hailuo-h3-global-multi-image-edge",
+        "source": "hailuo-h3-global-multi-image",
+        "target": "hailuo-h3-global-multi"
+      },
+      {
+        "id": "hailuo-h3-global-multi-hailuo-h3-global-multi-video-edge",
+        "source": "hailuo-h3-global-multi-video",
+        "target": "hailuo-h3-global-multi"
+      },
+      {
+        "id": "hailuo-h3-global-multi-hailuo-h3-global-multi-audio-edge",
+        "source": "hailuo-h3-global-multi-audio",
+        "target": "hailuo-h3-global-multi"
+      }
+    ]
+  },
+  "savedAt": "2026-08-08T08:00:00.000Z"
+}

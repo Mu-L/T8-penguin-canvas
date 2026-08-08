@@ -3650,6 +3650,87 @@ router.get('/video/hailuo/status/:tid', async (req, res) => {
   }
 });
 
+router.post('/video/flux3/submit', async (req, res) => {
+  const settings = loadRawSettings();
+  const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) {
+    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI小屋 API Key”' });
+  }
+  try {
+    const result = await seedanceNz.submitFlux3Task(req.body || {}, apiKey, { signal: req.t8AbortSignal });
+    rememberTaskKey(result.taskId, apiKey, {
+      provider: 'flux3-nz',
+      model: result.model,
+      taskType: result.taskType,
+    });
+    return res.json({
+      success: true,
+      data: {
+        taskId: result.taskId,
+        taskProvider: seedanceNz.PROVIDER_ID,
+        model: result.model,
+        taskType: result.taskType,
+        ...seedanceNzTrace(result),
+      },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    proxyRouteError('proxy/video/flux3/submit 错误', error, [apiKey]);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: proxyPublicError(error, 'FLUX 3 Video 请求失败', [apiKey]),
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+router.get('/video/flux3/status/:tid', async (req, res) => {
+  const settings = loadRawSettings();
+  const remembered = recallTaskMeta(req.params.tid, 'flux3-nz');
+  const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI小屋 API Key' });
+  try {
+    const result = await seedanceNz.queryTask(req.params.tid, apiKey, { signal: req.t8AbortSignal });
+    const materialized = await materializeRemoteTaskOutput({
+      status: result.status,
+      remoteUrl: result.videoUrl,
+      kind: 'video',
+      materializationKey: `flux3-nz:${req.params.tid}`,
+      providerFetchImpl: seedanceNz.fetchRemote,
+      signal: req.t8AbortSignal,
+    });
+    const responseData = {
+      status: result.status,
+      progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
+      videoUrl: materialized.url,
+      draftCache: safeDiagnosticText(result.draftCache || '', 262144, [apiKey]),
+      failReason: result.status === 'failed'
+        ? safeDiagnosticText(result.failReason || 'FLUX 3 Video 任务失败', 240, [apiKey])
+        : '',
+      taskProvider: seedanceNz.PROVIDER_ID,
+      model: remembered?.model || '',
+      taskType: remembered?.taskType || '',
+      ...seedanceNzTrace(result),
+    };
+    if (materialized.failure) {
+      return sendCompletedRemoteOutputFailure(res, materialized.failure, responseData, {
+        defaultCode: 'flux3_output_unusable',
+        defaultMessage: 'FLUX 3 Video 结果无法保存。',
+      });
+    }
+    return res.json({ success: true, data: responseData });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    proxyRouteError('proxy/video/flux3/status 错误', error, [apiKey]);
+    if (sendTaskResultQueryRecovery(res, error, { taskId: req.params.tid })) return;
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: proxyPublicError(error, 'FLUX 3 Video 查询失败', [apiKey]),
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
 router.post('/video/kling/submit', async (req, res) => {
   const settings = loadRawSettings();
   const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();

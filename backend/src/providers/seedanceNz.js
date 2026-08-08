@@ -222,10 +222,16 @@ const HAILUO23_MAX_ASPECT_RATIO = 5 / 2;
 const HAILUO_H3_T2V_MODEL = 'hailuo-h3-t2v';
 const HAILUO_H3_I2V_MODEL = 'hailuo-h3-i2v';
 const HAILUO_H3_MULTI_MODEL = 'hailuo-h3-multi';
+const HAILUO_H3_GLOBAL_T2V_MODEL = 'hailuo-h3-global-t2v';
+const HAILUO_H3_GLOBAL_I2V_MODEL = 'hailuo-h3-global-i2v';
+const HAILUO_H3_GLOBAL_MULTI_MODEL = 'hailuo-h3-global-multi';
+const HAILUO_H3_T2V_MODELS = new Set([HAILUO_H3_T2V_MODEL, HAILUO_H3_GLOBAL_T2V_MODEL]);
+const HAILUO_H3_I2V_MODELS = new Set([HAILUO_H3_I2V_MODEL, HAILUO_H3_GLOBAL_I2V_MODEL]);
+const HAILUO_H3_MULTI_MODELS = new Set([HAILUO_H3_MULTI_MODEL, HAILUO_H3_GLOBAL_MULTI_MODEL]);
 const HAILUO_H3_MODELS = new Set([
-  HAILUO_H3_T2V_MODEL,
-  HAILUO_H3_I2V_MODEL,
-  HAILUO_H3_MULTI_MODEL,
+  ...HAILUO_H3_T2V_MODELS,
+  ...HAILUO_H3_I2V_MODELS,
+  ...HAILUO_H3_MULTI_MODELS,
 ]);
 const MINIMAX_H3_OW_T2V_MODEL = 'minimax-h3-ow-t2v';
 const MINIMAX_H3_OW_R2V_MODEL = 'minimax-h3-ow-r2v';
@@ -242,11 +248,30 @@ const MINIMAX_H3_OW_RATIOS = new Set([
 ]);
 const HAILUO_MODELS = new Set([...HAILUO23_MODELS, ...HAILUO_H3_MODELS, ...MINIMAX_H3_OW_MODELS]);
 const HAILUO_H3_SECONDS = new Set(Array.from({ length: 11 }, (_, index) => String(index + 5)));
-const HAILUO_H3_RESOLUTION = '2K';
+const HAILUO_H3_RESOLUTIONS = new Set(['768P', '2K']);
 const HAILUO_H3_PROMPT_MAX_LENGTH = 20480;
 const HAILUO_H3_MAX_REFERENCE_IMAGES = 9;
 const HAILUO_H3_MAX_REFERENCE_VIDEOS = 3;
 const HAILUO_H3_MAX_REFERENCE_AUDIOS = 3;
+const FLUX3_T2V_MODELS = new Set(['flux-3-video-t2v', 'flux-3-video-global-t2v']);
+const FLUX3_I2V_MODELS = new Set(['flux-3-video-i2v', 'flux-3-video-global-i2v']);
+const FLUX3_V2V_MODELS = new Set(['flux-3-video-v2v', 'flux-3-video-global-v2v']);
+const FLUX3_DRAFT_ENHANCE_MODELS = new Set([
+  'flux-3-video-draft-enhance',
+  'flux-3-video-global-draft-enhance',
+]);
+const FLUX3_VIDEO_MODELS = new Set([
+  ...FLUX3_T2V_MODELS,
+  ...FLUX3_I2V_MODELS,
+  ...FLUX3_V2V_MODELS,
+  ...FLUX3_DRAFT_ENHANCE_MODELS,
+]);
+const FLUX3_SECONDS = new Set(Array.from({ length: 16 }, (_, index) => String(index + 5)));
+const FLUX3_RESOLUTIONS = new Set(['hd', 'fhd']);
+const FLUX3_RATIOS = new Set(['auto', '21:9', '2:1', '16:9', '4:3', '1:1', '3:4', '9:16']);
+const FLUX3_MAX_REFERENCE_IMAGES = 10;
+const FLUX3_PROMPT_MAX_LENGTH = 20480;
+const FLUX3_DRAFT_CACHE_MAX_LENGTH = 262144;
 const VIDU_Q3_T2V_MODELS = new Set([
   'vidu-q3-pro-t2v',
   'vidu-q3-turbo-t2v',
@@ -2814,22 +2839,22 @@ async function buildHailuoPayload(request, apiKey, options = {}) {
     if (prompt.length > HAILUO_H3_PROMPT_MAX_LENGTH) {
       throw new Error(`Hailuo H3 提示词不能超过 ${HAILUO_H3_PROMPT_MAX_LENGTH} 字符`);
     }
-    const taskType = model === HAILUO_H3_T2V_MODEL
+    const taskType = HAILUO_H3_T2V_MODELS.has(model)
       ? 't2v'
-      : model === HAILUO_H3_I2V_MODEL ? 'i2v' : 'multi';
+      : HAILUO_H3_I2V_MODELS.has(model) ? 'i2v' : 'multi';
     if (taskType !== 'i2v' && !prompt) {
       throw new Error(`Hailuo H3 ${taskType === 'multi' ? '多模态参考' : '文生视频'}必须填写提示词`);
     }
 
     const seconds = String(request.duration ?? request.seconds ?? '5').trim();
     if (!HAILUO_H3_SECONDS.has(seconds)) throw new Error('Hailuo H3 时长只支持 5-15 秒');
-    const requestedResolution = String(request.resolution || HAILUO_H3_RESOLUTION).trim().toUpperCase();
-    if (requestedResolution !== HAILUO_H3_RESOLUTION) throw new Error('Hailuo H3 分辨率固定为 2K');
+    const requestedResolution = String(request.resolution || '2K').trim().toUpperCase();
+    if (!HAILUO_H3_RESOLUTIONS.has(requestedResolution)) throw new Error('Hailuo H3 分辨率只支持 768P 或 2K');
 
     const payload = {
       model,
       seconds,
-      metadata: { resolution: HAILUO_H3_RESOLUTION },
+      metadata: { resolution: requestedResolution },
     };
     if (taskType === 't2v') {
       payload.metadata.ratio = normalizeRatio(request.ratio || '16:9');
@@ -2941,6 +2966,95 @@ async function buildHailuoPayload(request, apiKey, options = {}) {
   });
   payload.images = [imageUrl];
   if (prompt) payload.prompt = prompt;
+  return { payload, model, taskType };
+}
+
+function flux3TaskType(model) {
+  if (FLUX3_T2V_MODELS.has(model)) return 't2v';
+  if (FLUX3_I2V_MODELS.has(model)) return 'i2v';
+  if (FLUX3_V2V_MODELS.has(model)) return 'v2v';
+  if (FLUX3_DRAFT_ENHANCE_MODELS.has(model)) return 'draft-enhance';
+  return null;
+}
+
+async function buildFlux3Payload(request, apiKey, options = {}) {
+  const model = String(request.model || '').trim();
+  const taskType = flux3TaskType(model);
+  if (!taskType || !FLUX3_VIDEO_MODELS.has(model)) throw new Error(`未知 FLUX 3 Video 模型：${model || '(空)'}`);
+
+  const prompt = String(request.prompt || '').trim();
+  if (prompt.length > FLUX3_PROMPT_MAX_LENGTH) throw new Error(`FLUX 3 提示词不能超过 ${FLUX3_PROMPT_MAX_LENGTH} 字符`);
+  if (taskType !== 'draft-enhance' && !prompt) throw new Error('FLUX 3 文生、图生和视频编辑必须填写提示词');
+
+  const seconds = String(request.duration ?? request.seconds ?? '5').trim();
+  if (!FLUX3_SECONDS.has(seconds)) throw new Error('FLUX 3 时长只支持 5-20 秒');
+  const resolution = String(request.resolution || 'hd').trim().toLowerCase();
+  if (!FLUX3_RESOLUTIONS.has(resolution)) throw new Error('FLUX 3 分辨率只支持 hd 或 fhd');
+  const ratio = String(request.ratio || 'auto').trim();
+  if (!FLUX3_RATIOS.has(ratio)) throw new Error(`FLUX 3 不支持比例 ${ratio}`);
+
+  const imageSources = normalizeList(request.images || request.refImages);
+  const videoSources = normalizeList(request.videos || request.videoUrls || request.video_url || request.videoUrl);
+  if (taskType === 't2v' || taskType === 'draft-enhance') {
+    if (imageSources.length || videoSources.length) throw new Error(`FLUX 3 ${taskType === 't2v' ? '文生视频' : '草稿增强'}不接受参考素材`);
+  }
+  if (taskType === 'i2v' && videoSources.length) throw new Error('FLUX 3 图生视频不接受视频素材');
+  if (taskType === 'v2v' && imageSources.length) throw new Error('FLUX 3 视频编辑不接受图片素材');
+
+  const metadata = { resolution, ratio };
+  const payload = { model, seconds, metadata };
+
+  if (taskType === 'draft-enhance') {
+    const draftCache = String(request.draft_cache || request.draftCache || '').trim();
+    if (!draftCache) throw new Error('FLUX 3 草稿增强必须提供 draft_cache');
+    if (draftCache.length > FLUX3_DRAFT_CACHE_MAX_LENGTH) throw new Error('FLUX 3 draft_cache 超过允许长度');
+    metadata.draft_cache = draftCache;
+  } else {
+    payload.prompt = prompt;
+    if (request.draft === true) metadata.draft = true;
+  }
+
+  const audioMode = String(request.audioMode || request.audio_mode || '').trim().toLowerCase();
+  if (request.generate_audio === true || request.generateAudio === true || audioMode === 'enabled') {
+    metadata.generate_audio = true;
+  } else if (request.generate_audio === false || request.generateAudio === false || audioMode === 'disabled') {
+    metadata.generate_audio = false;
+  } else if (audioMode && audioMode !== 'api_default') {
+    throw new Error(`FLUX 3 不支持音频模式 ${audioMode}`);
+  }
+
+  const rawSafety = request.safety_tolerance ?? request.safetyTolerance;
+  if (rawSafety !== undefined && rawSafety !== null && String(rawSafety).trim() !== '' && String(rawSafety) !== 'api_default') {
+    const safetyTolerance = Number(rawSafety);
+    if (!Number.isInteger(safetyTolerance) || safetyTolerance < 0 || safetyTolerance > 4) {
+      throw new Error('FLUX 3 safety_tolerance 只支持 0-4');
+    }
+    metadata.safety_tolerance = safetyTolerance;
+  }
+
+  if (taskType === 'i2v') {
+    if (imageSources.length < 1 || imageSources.length > FLUX3_MAX_REFERENCE_IMAGES) {
+      throw new Error(`FLUX 3 图生视频必须提供 1-${FLUX3_MAX_REFERENCE_IMAGES} 张关键帧图片`);
+    }
+    payload.images = [];
+    for (const source of imageSources) {
+      payload.images.push(await uploadMedia(source, 'image', apiKey, {
+        ...options,
+        maxBytes: 30 * 1024 * 1024,
+        allowedMimes: ['image/jpeg', 'image/png', 'image/webp'],
+        cacheVariant: 'flux3-i2v-image-v1',
+      }));
+    }
+  } else if (taskType === 'v2v') {
+    if (videoSources.length !== 1) throw new Error('FLUX 3 视频编辑必须且只能提供 1 个 MP4 视频');
+    metadata.video_url = await uploadMedia(videoSources[0], 'video', apiKey, {
+      ...options,
+      maxBytes: 50 * 1024 * 1024,
+      allowedMimes: ['video/mp4'],
+      cacheVariant: 'flux3-v2v-video-v1',
+    });
+  }
+
   return { payload, model, taskType };
 }
 
@@ -3863,6 +3977,25 @@ async function queryImageTask(taskId, apiKey, options = {}) {
   };
 }
 
+async function submitFlux3Task(request, apiKey, options = {}) {
+  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
+  const fetchImpl = getFetchImpl(options);
+  const baseUrl = cleanBaseUrl(options.baseUrl);
+  const built = await buildFlux3Payload(request, apiKey, options);
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/videos`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(built.payload),
+  }, options, 'seedance.nz FLUX 3 Video 任务提交');
+  const data = await responseJson(response, 'seedance.nz FLUX 3 Video 任务提交');
+  if (!response.ok) throw createUpstreamError(data, response);
+  const taskId = requiredTaskId(data?.id || data?.task_id || data?.data?.id, 'seedance.nz FLUX 3 Video 任务提交', response);
+  return { taskId, model: built.model, taskType: built.taskType, ...safeProviderTrace(response, data, { pollCount: 0 }) };
+}
+
 async function submitTask(request, apiKey, options = {}) {
   if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
   const fetchImpl = getFetchImpl(options);
@@ -3907,6 +4040,9 @@ async function queryTask(taskId, apiKey, options = {}) {
     videoUrl: status === 'succeeded'
       ? String(metadata?.url || data?.url || data?.data?.url || '').trim() || null
       : null,
+    draftCache: status === 'succeeded'
+      ? String(metadata?.draft_cache || data?.draft_cache || data?.data?.draft_cache || '').trim() || null
+      : null,
     failReason: status === 'failed' ? 'Seedance 任务失败' : null,
     ...safeProviderTrace(response, data),
   };
@@ -3925,11 +4061,26 @@ module.exports = {
   HAILUO23_SECONDS,
   HAILUO23_T2V_MODELS,
   HAILUO_H3_I2V_MODEL,
+  HAILUO_H3_GLOBAL_I2V_MODEL,
+  HAILUO_H3_GLOBAL_MULTI_MODEL,
+  HAILUO_H3_GLOBAL_T2V_MODEL,
+  HAILUO_H3_I2V_MODELS,
   HAILUO_H3_MODELS,
   HAILUO_H3_MULTI_MODEL,
+  HAILUO_H3_MULTI_MODELS,
+  HAILUO_H3_RESOLUTIONS,
   HAILUO_H3_SECONDS,
   HAILUO_H3_T2V_MODEL,
+  HAILUO_H3_T2V_MODELS,
   HAILUO_MODELS,
+  FLUX3_DRAFT_ENHANCE_MODELS,
+  FLUX3_I2V_MODELS,
+  FLUX3_RATIOS,
+  FLUX3_RESOLUTIONS,
+  FLUX3_SECONDS,
+  FLUX3_T2V_MODELS,
+  FLUX3_V2V_MODELS,
+  FLUX3_VIDEO_MODELS,
   MINIMAX_H3_OW_I2V_MODEL,
   MINIMAX_H3_OW_MODELS,
   MINIMAX_H3_OW_R2V_MODEL,
@@ -4013,6 +4164,7 @@ module.exports = {
   buildAudioPayload,
   buildSunoMusicPayload,
   buildHailuoPayload,
+  buildFlux3Payload,
   buildKlingPayload,
   buildUpscalerPayload,
   buildViduPayload,
@@ -4041,6 +4193,7 @@ module.exports = {
   submitAudioTask,
   submitSunoMusicTask,
   submitHailuoTask,
+  submitFlux3Task,
   submitKlingTask,
   submitUpscalerTask,
   submitViduTask,

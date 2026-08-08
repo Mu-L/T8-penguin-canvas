@@ -1,6 +1,6 @@
 {
   "schema": "t8-creative-runtime-catalog-v1",
-  "sourceDigest": "8958a9930577e5d2d099ef88bd0b5ea4a993de3bbdcfb96b1d87331df54046f0",
+  "sourceDigest": "55a385bf11b16f5e22a3030c1f704e12dcd67ec3fd7068422099d896bc4c07c6",
   "generatedFrom": [
     "src/providers/models.ts",
     "src/config/seedance.ts",
@@ -2521,6 +2521,154 @@
       }
     },
     {
+      "id": "video:seedance-nz:hailuo-h3-global-i2v",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "hailuo-h3-global-i2v",
+      "label": "hailuo-h3-global-i2v（H3 海外首尾帧）",
+      "family": "hailuo-2.3",
+      "available": true,
+      "parameters": {
+        "label": "hailuo-h3-global-i2v（H3 海外首尾帧）",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "hailuo-2.3",
+        "available": true,
+        "nodeKind": "hailuo",
+        "ratios": [],
+        "defaultRatio": "16:9",
+        "durations": [
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15
+        ],
+        "defaultDuration": 5,
+        "resolutions": [
+          "768P",
+          "2K"
+        ],
+        "defaultResolution": "2K",
+        "supportsImages": true,
+        "supportsVideos": false,
+        "supportsAudios": false,
+        "maxReferenceImages": 2,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
+        "description": "Hailuo H3 海外图生视频；第 1 张为首帧，第 2 张可选为尾帧。"
+      }
+    },
+    {
+      "id": "video:seedance-nz:hailuo-h3-global-multi",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "hailuo-h3-global-multi",
+      "label": "hailuo-h3-global-multi（H3 海外多模态）",
+      "family": "hailuo-2.3",
+      "available": true,
+      "parameters": {
+        "label": "hailuo-h3-global-multi（H3 海外多模态）",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "hailuo-2.3",
+        "available": true,
+        "nodeKind": "hailuo",
+        "ratios": [
+          "adaptive",
+          "16:9",
+          "4:3",
+          "1:1",
+          "3:4",
+          "9:16",
+          "21:9"
+        ],
+        "defaultRatio": "16:9",
+        "durations": [
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15
+        ],
+        "defaultDuration": 5,
+        "resolutions": [
+          "768P",
+          "2K"
+        ],
+        "defaultResolution": "2K",
+        "supportsImages": true,
+        "supportsVideos": true,
+        "supportsAudios": true,
+        "maxReferenceImages": 9,
+        "maxReferenceVideos": 3,
+        "maxReferenceAudios": 3,
+        "description": "Hailuo H3 海外多模态参考；最多 9 图、3 视频、3 音频。"
+      }
+    },
+    {
+      "id": "video:seedance-nz:hailuo-h3-global-t2v",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "hailuo-h3-global-t2v",
+      "label": "hailuo-h3-global-t2v（H3 海外文生视频）",
+      "family": "hailuo-2.3",
+      "available": true,
+      "parameters": {
+        "label": "hailuo-h3-global-t2v（H3 海外文生视频）",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "hailuo-2.3",
+        "available": true,
+        "nodeKind": "hailuo",
+        "ratios": [
+          "adaptive",
+          "16:9",
+          "4:3",
+          "1:1",
+          "3:4",
+          "9:16",
+          "21:9"
+        ],
+        "defaultRatio": "16:9",
+        "durations": [
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15
+        ],
+        "defaultDuration": 5,
+        "resolutions": [
+          "768P",
+          "2K"
+        ],
+        "defaultResolution": "2K",
+        "supportsImages": false,
+        "supportsVideos": false,
+        "supportsAudios": false,
+        "maxReferenceImages": 0,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
+        "description": "Hailuo H3 海外文生视频；768P/2K，支持 5-15 秒。"
+      }
+    },
+    {
       "id": "video:seedance-nz:hailuo-h3-i2v",
       "provider": "seedance-nz",
       "platformLabel": "贞贞的平价AI小屋",
@@ -2551,6 +2699,7 @@
         ],
         "defaultDuration": 5,
         "resolutions": [
+          "768P",
           "2K"
         ],
         "defaultResolution": "2K",
@@ -2560,7 +2709,7 @@
         "maxReferenceImages": 2,
         "maxReferenceVideos": 0,
         "maxReferenceAudios": 0,
-        "description": "Hailuo H3 图生视频；第 1 张为首帧，第 2 张可选为尾帧，固定 2K。"
+        "description": "Hailuo H3 国内图生视频；第 1 张为首帧，第 2 张可选为尾帧，支持 768P/2K。"
       }
     },
     {
@@ -2602,6 +2751,7 @@
         ],
         "defaultDuration": 5,
         "resolutions": [
+          "768P",
           "2K"
         ],
         "defaultResolution": "2K",
@@ -2611,7 +2761,7 @@
         "maxReferenceImages": 9,
         "maxReferenceVideos": 3,
         "maxReferenceAudios": 3,
-        "description": "Hailuo H3 多模态参考；最多 9 图、3 视频、3 音频，固定 2K。"
+        "description": "Hailuo H3 国内多模态参考；最多 9 图、3 视频、3 音频，支持 768P/2K。"
       }
     },
     {
@@ -2653,6 +2803,7 @@
         ],
         "defaultDuration": 5,
         "resolutions": [
+          "768P",
           "2K"
         ],
         "defaultResolution": "2K",
@@ -2662,7 +2813,7 @@
         "maxReferenceImages": 0,
         "maxReferenceVideos": 0,
         "maxReferenceAudios": 0,
-        "description": "Hailuo H3 文生视频；固定 2K，支持 5-15 秒与自适应比例。"
+        "description": "Hailuo H3 国内文生视频；768P/2K，支持 5-15 秒与自适应比例。"
       }
     },
     {
@@ -5366,6 +5517,470 @@
       }
     },
     {
+      "id": "video:zhenzhen:flux-3-video-draft-enhance",
+      "provider": "zhenzhen",
+      "platformLabel": "贞贞的AI工坊",
+      "model": "flux-3-video-draft-enhance",
+      "label": "flux-3-video-draft-enhance（草稿增强）",
+      "family": "flux-3-video",
+      "available": true,
+      "parameters": {
+        "label": "flux-3-video-draft-enhance（草稿增强）",
+        "platformLabel": "贞贞的AI工坊",
+        "family": "flux-3-video",
+        "available": true,
+        "nodeKind": "flux3",
+        "ratios": [
+          "auto",
+          "21:9",
+          "2:1",
+          "16:9",
+          "4:3",
+          "1:1",
+          "3:4",
+          "9:16"
+        ],
+        "defaultRatio": "auto",
+        "durations": [
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "defaultDuration": 5,
+        "resolutions": [
+          "hd",
+          "fhd"
+        ],
+        "defaultResolution": "hd",
+        "supportsImages": false,
+        "supportsVideos": false,
+        "supportsAudios": false,
+        "maxReferenceImages": 0,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
+        "description": "使用同线路已完成 Draft 任务返回的 draft_cache。"
+      }
+    },
+    {
+      "id": "video:zhenzhen:flux-3-video-global-draft-enhance",
+      "provider": "zhenzhen",
+      "platformLabel": "贞贞的AI工坊",
+      "model": "flux-3-video-global-draft-enhance",
+      "label": "flux-3-video-global-draft-enhance（草稿增强）",
+      "family": "flux-3-video",
+      "available": true,
+      "parameters": {
+        "label": "flux-3-video-global-draft-enhance（草稿增强）",
+        "platformLabel": "贞贞的AI工坊",
+        "family": "flux-3-video",
+        "available": true,
+        "nodeKind": "flux3",
+        "ratios": [
+          "auto",
+          "21:9",
+          "2:1",
+          "16:9",
+          "4:3",
+          "1:1",
+          "3:4",
+          "9:16"
+        ],
+        "defaultRatio": "auto",
+        "durations": [
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "defaultDuration": 5,
+        "resolutions": [
+          "hd",
+          "fhd"
+        ],
+        "defaultResolution": "hd",
+        "supportsImages": false,
+        "supportsVideos": false,
+        "supportsAudios": false,
+        "maxReferenceImages": 0,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
+        "description": "使用同线路已完成 Draft 任务返回的 draft_cache。"
+      }
+    },
+    {
+      "id": "video:zhenzhen:flux-3-video-global-i2v",
+      "provider": "zhenzhen",
+      "platformLabel": "贞贞的AI工坊",
+      "model": "flux-3-video-global-i2v",
+      "label": "flux-3-video-global-i2v（关键帧图生）",
+      "family": "flux-3-video",
+      "available": true,
+      "parameters": {
+        "label": "flux-3-video-global-i2v（关键帧图生）",
+        "platformLabel": "贞贞的AI工坊",
+        "family": "flux-3-video",
+        "available": true,
+        "nodeKind": "flux3",
+        "ratios": [
+          "auto",
+          "21:9",
+          "2:1",
+          "16:9",
+          "4:3",
+          "1:1",
+          "3:4",
+          "9:16"
+        ],
+        "defaultRatio": "auto",
+        "durations": [
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "defaultDuration": 5,
+        "resolutions": [
+          "hd",
+          "fhd"
+        ],
+        "defaultResolution": "hd",
+        "supportsImages": true,
+        "supportsVideos": false,
+        "supportsAudios": false,
+        "maxReferenceImages": 10,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
+        "description": "提示词 + 1-10 张排序关键帧图片。"
+      }
+    },
+    {
+      "id": "video:zhenzhen:flux-3-video-global-t2v",
+      "provider": "zhenzhen",
+      "platformLabel": "贞贞的AI工坊",
+      "model": "flux-3-video-global-t2v",
+      "label": "flux-3-video-global-t2v（文生视频）",
+      "family": "flux-3-video",
+      "available": true,
+      "parameters": {
+        "label": "flux-3-video-global-t2v（文生视频）",
+        "platformLabel": "贞贞的AI工坊",
+        "family": "flux-3-video",
+        "available": true,
+        "nodeKind": "flux3",
+        "ratios": [
+          "auto",
+          "21:9",
+          "2:1",
+          "16:9",
+          "4:3",
+          "1:1",
+          "3:4",
+          "9:16"
+        ],
+        "defaultRatio": "auto",
+        "durations": [
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "defaultDuration": 5,
+        "resolutions": [
+          "hd",
+          "fhd"
+        ],
+        "defaultResolution": "hd",
+        "supportsImages": false,
+        "supportsVideos": false,
+        "supportsAudios": false,
+        "maxReferenceImages": 0,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
+        "description": "仅提示词；可开启 Draft 以返回后续增强所需缓存。"
+      }
+    },
+    {
+      "id": "video:zhenzhen:flux-3-video-global-v2v",
+      "provider": "zhenzhen",
+      "platformLabel": "贞贞的AI工坊",
+      "model": "flux-3-video-global-v2v",
+      "label": "flux-3-video-global-v2v（视频编辑）",
+      "family": "flux-3-video",
+      "available": true,
+      "parameters": {
+        "label": "flux-3-video-global-v2v（视频编辑）",
+        "platformLabel": "贞贞的AI工坊",
+        "family": "flux-3-video",
+        "available": true,
+        "nodeKind": "flux3",
+        "ratios": [
+          "auto",
+          "21:9",
+          "2:1",
+          "16:9",
+          "4:3",
+          "1:1",
+          "3:4",
+          "9:16"
+        ],
+        "defaultRatio": "auto",
+        "durations": [
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "defaultDuration": 5,
+        "resolutions": [
+          "hd",
+          "fhd"
+        ],
+        "defaultResolution": "hd",
+        "supportsImages": false,
+        "supportsVideos": true,
+        "supportsAudios": false,
+        "maxReferenceImages": 0,
+        "maxReferenceVideos": 1,
+        "maxReferenceAudios": 0,
+        "description": "提示词 + 1 个 MP4 输入视频。"
+      }
+    },
+    {
+      "id": "video:zhenzhen:flux-3-video-i2v",
+      "provider": "zhenzhen",
+      "platformLabel": "贞贞的AI工坊",
+      "model": "flux-3-video-i2v",
+      "label": "flux-3-video-i2v（关键帧图生）",
+      "family": "flux-3-video",
+      "available": true,
+      "parameters": {
+        "label": "flux-3-video-i2v（关键帧图生）",
+        "platformLabel": "贞贞的AI工坊",
+        "family": "flux-3-video",
+        "available": true,
+        "nodeKind": "flux3",
+        "ratios": [
+          "auto",
+          "21:9",
+          "2:1",
+          "16:9",
+          "4:3",
+          "1:1",
+          "3:4",
+          "9:16"
+        ],
+        "defaultRatio": "auto",
+        "durations": [
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "defaultDuration": 5,
+        "resolutions": [
+          "hd",
+          "fhd"
+        ],
+        "defaultResolution": "hd",
+        "supportsImages": true,
+        "supportsVideos": false,
+        "supportsAudios": false,
+        "maxReferenceImages": 10,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
+        "description": "提示词 + 1-10 张排序关键帧图片。"
+      }
+    },
+    {
+      "id": "video:zhenzhen:flux-3-video-t2v",
+      "provider": "zhenzhen",
+      "platformLabel": "贞贞的AI工坊",
+      "model": "flux-3-video-t2v",
+      "label": "flux-3-video-t2v（文生视频）",
+      "family": "flux-3-video",
+      "available": true,
+      "parameters": {
+        "label": "flux-3-video-t2v（文生视频）",
+        "platformLabel": "贞贞的AI工坊",
+        "family": "flux-3-video",
+        "available": true,
+        "nodeKind": "flux3",
+        "ratios": [
+          "auto",
+          "21:9",
+          "2:1",
+          "16:9",
+          "4:3",
+          "1:1",
+          "3:4",
+          "9:16"
+        ],
+        "defaultRatio": "auto",
+        "durations": [
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "defaultDuration": 5,
+        "resolutions": [
+          "hd",
+          "fhd"
+        ],
+        "defaultResolution": "hd",
+        "supportsImages": false,
+        "supportsVideos": false,
+        "supportsAudios": false,
+        "maxReferenceImages": 0,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
+        "description": "仅提示词；可开启 Draft 以返回后续增强所需缓存。"
+      }
+    },
+    {
+      "id": "video:zhenzhen:flux-3-video-v2v",
+      "provider": "zhenzhen",
+      "platformLabel": "贞贞的AI工坊",
+      "model": "flux-3-video-v2v",
+      "label": "flux-3-video-v2v（视频编辑）",
+      "family": "flux-3-video",
+      "available": true,
+      "parameters": {
+        "label": "flux-3-video-v2v（视频编辑）",
+        "platformLabel": "贞贞的AI工坊",
+        "family": "flux-3-video",
+        "available": true,
+        "nodeKind": "flux3",
+        "ratios": [
+          "auto",
+          "21:9",
+          "2:1",
+          "16:9",
+          "4:3",
+          "1:1",
+          "3:4",
+          "9:16"
+        ],
+        "defaultRatio": "auto",
+        "durations": [
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "defaultDuration": 5,
+        "resolutions": [
+          "hd",
+          "fhd"
+        ],
+        "defaultResolution": "hd",
+        "supportsImages": false,
+        "supportsVideos": true,
+        "supportsAudios": false,
+        "maxReferenceImages": 0,
+        "maxReferenceVideos": 1,
+        "maxReferenceAudios": 0,
+        "description": "提示词 + 1 个 MP4 输入视频。"
+      }
+    },
+    {
       "id": "video:zhenzhen:grok-1.5-video-10s",
       "provider": "zhenzhen",
       "platformLabel": "贞贞的AI工坊",
@@ -7007,7 +7622,7 @@
   "counts": {
     "llm": 29,
     "image": 44,
-    "video": 97,
+    "video": 108,
     "audio": 8,
     "actions": 47
   }

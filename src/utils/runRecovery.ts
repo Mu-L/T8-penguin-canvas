@@ -5,6 +5,7 @@ export type RunRecoveryKind =
   | 'wan'
   | 'happyhorse'
   | 'hailuo'
+  | 'flux3'
   | 'kling'
   | 'upscaler'
   | 'vidu'
@@ -31,7 +32,7 @@ export interface RunRecoveryDescriptor {
   maxPolls?: number;
 }
 const RECOVERY_KINDS = new Set<RunRecoveryKind>([
-  'runninghub', 'seedance', 'seedream-nz', 'wan', 'happyhorse', 'hailuo', 'kling', 'upscaler', 'vidu', 'seed-audio', 'suno',
+  'runninghub', 'seedance', 'seedream-nz', 'wan', 'happyhorse', 'hailuo', 'flux3', 'kling', 'upscaler', 'vidu', 'seed-audio', 'suno',
   'image', 'mj', 'video', 'image-fal', 'video-fal',
 ]);
 
@@ -95,6 +96,7 @@ export function inferRunRecoveryDescriptor(payload: Record<string, unknown>): Ru
     if (lowerModel.startsWith('wan-')) return { version: 1, kind: 'wan', taskId, model, pollIntervalMs, maxPolls };
     if (lowerModel.startsWith('happyhorse-')) return { version: 1, kind: 'happyhorse', taskId, model, pollIntervalMs, maxPolls };
     if (lowerModel.startsWith('hailuo-')) return { version: 1, kind: 'hailuo', taskId, model, pollIntervalMs, maxPolls };
+    if (lowerModel.startsWith('flux-3-video-')) return { version: 1, kind: 'flux3', taskId, model, pollIntervalMs, maxPolls };
     if (lowerModel.startsWith('kling-')) return { version: 1, kind: 'kling', taskId, model, pollIntervalMs, maxPolls };
     if (lowerModel === 'zhenzhen-upscaler') return { version: 1, kind: 'upscaler', taskId, model, pollIntervalMs, maxPolls };
     if (lowerModel.startsWith('vidu-')) return { version: 1, kind: 'vidu', taskId, model, pollIntervalMs, maxPolls };

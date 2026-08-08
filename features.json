@@ -1,7 +1,87 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.8.4",
-  "lastUpdated": "2026-08-08-v2.8.4-released",
+  "version": "2.8.5",
+  "lastUpdated": "2026-08-08-v2.8.5-release-authorized",
+  "flux3VideoAndHailuoH3Global": {
+    "status": "release-ready-v2.8.5-live-partially-blocked-by-provider-quota",
+    "date": "2026-08-08",
+    "releaseIncluded": true,
+    "provider": "seedance-nz",
+    "officialDocs": "https://api.seedance.nz/docs/llms.txt",
+    "officialDocsSnapshot": {
+      "checkedAt": "2026-08-08",
+      "lastModified": "Fri, 07 Aug 2026 22:00:18 GMT",
+      "etag": "W/\"6a765572-9d445\"",
+      "sha256": "c0bf2f908de13bbd7e0718da1c6550a48720254b13cd6541ccd5534a7e5d316b"
+    },
+    "referenceImplementation": "F:/AI-T8-video-onekey/ComfyUI/custom_nodes/ComfyUI_Seedance@c821eeb34a19a812ba3821a1a8a8681df547567c",
+    "videoTabs": ["hailuo-2.3", "flux-3-video"],
+    "hailuoModels": [
+      "hailuo-h3-global-t2v",
+      "hailuo-h3-global-i2v",
+      "hailuo-h3-global-multi"
+    ],
+    "flux3Models": [
+      "flux-3-video-t2v",
+      "flux-3-video-i2v",
+      "flux-3-video-v2v",
+      "flux-3-video-draft-enhance",
+      "flux-3-video-global-t2v",
+      "flux-3-video-global-i2v",
+      "flux-3-video-global-v2v",
+      "flux-3-video-global-draft-enhance"
+    ],
+    "contract": {
+      "endpoint": "POST /v1/videos + GET /v1/videos/{task_id}",
+      "hailuo": "5-15 秒、768P/2K；T2V 使用 prompt+ratio，I2V 使用 1-2 张首尾帧，Multi 最多 9 图/3 视频/3 音频。",
+      "flux3": "5-20 秒、HD/FHD、auto/21:9/2:1/16:9/4:3/1:1/3:4/9:16。",
+      "flux3Modes": "T2V 只用 prompt；I2V 使用 prompt+1-10 图；V2V 使用 prompt+单个 MP4；Draft Enhance 使用同线路真实 draft_cache 且不接受 prompt/素材。",
+      "optionalFields": "metadata.draft、generate_audio、safety_tolerance 仅在用户显式设置时提交。",
+      "compatibility": "默认视频模型、默认渠道、旧 Hailuo/Seedance、旧画布显式参数均不迁移不回退；Flux3 使用独立 submit/status/runRecovery kind。"
+    },
+    "workflows": [
+      "docs/workflows/hailuo-h3-global-t2v.json",
+      "docs/workflows/hailuo-h3-global-i2v.json",
+      "docs/workflows/hailuo-h3-global-multi.json",
+      "docs/workflows/flux-3-video-t2v.json",
+      "docs/workflows/flux-3-video-i2v.json",
+      "docs/workflows/flux-3-video-v2v.json",
+      "docs/workflows/flux-3-video-draft-enhance.json",
+      "docs/workflows/flux-3-video-global-t2v.json",
+      "docs/workflows/flux-3-video-global-i2v.json",
+      "docs/workflows/flux-3-video-global-v2v.json",
+      "docs/workflows/flux-3-video-global-draft-enhance.json"
+    ],
+    "verification": {
+      "offline": [
+        "Node 定向与相邻回归 89/89，Electron runRecovery 回归 9/9。",
+        "TypeScript、public-check、RH toolbox、能力同步（31 actions / 236 runtime / 76/76 / 0 public gaps）通过。",
+        "2862 模块生产构建与 git diff --check 通过。"
+      ],
+      "live": {
+        "status": "7/11 succeeded; remaining 4 not submitted due insufficient_user_quota",
+        "passedModels": [
+          "hailuo-h3-global-t2v",
+          "hailuo-h3-global-i2v",
+          "hailuo-h3-global-multi",
+          "flux-3-video-t2v",
+          "flux-3-video-i2v",
+          "flux-3-video-v2v",
+          "flux-3-video-draft-enhance"
+        ],
+        "blockedModels": [
+          "flux-3-video-global-t2v",
+          "flux-3-video-global-i2v",
+          "flux-3-video-global-v2v",
+          "flux-3-video-global-draft-enhance"
+        ],
+        "evidence": "7 个结果均完成真实提交、轮询、本地下载、SHA-256 和 ffprobe H.264 解码；国内 T2V 返回非空 draft_cache 并被国内 Draft Enhance 成功消费。",
+        "blocker": "第一条 Flux3 Global T2V 在任务接受前返回 insufficient_user_quota：余额约 ¥0.29，需预扣 ¥3.50；未产生任务，补足额度后从该模型继续。",
+        "sanitizedReport": "output/flux3-hailuo-live-20260808/report.json",
+        "security": "API Key 只注入一次性进程环境；报告不含 Key、taskId、签名 URL 或原始响应。"
+      }
+    }
+  },
   "seedance25": {
     "status": "released-v2.8.4",
     "date": "2026-08-08",
@@ -350,43 +430,43 @@
     ]
   },
   "release": {
-    "status": "released-v2.8.4",
-    "version": "2.8.4",
+    "status": "release-authorized-v2.8.5",
+    "version": "2.8.5",
     "date": "2026-08-08",
-    "publishedAt": "2026-08-07T21:28:29Z",
-    "tag": "v2.8.4",
-    "latest": true,
-    "sourceCommit": "249e36285ea608686bc3a5975d1f5e887697f2ae",
-    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.8.4",
+    "publishedAt": null,
+    "tag": "v2.8.5",
+    "latest": false,
+    "sourceCommit": null,
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.8.5",
     "artifacts": {
       "installer": {
-        "name": "T8-PenguinCanvas-Setup-2.8.4.exe",
-        "size": 1238238783,
-        "sha256": "349a34fab69ce0f1906fee96ebb85a3288d24d25b35be963efaa452d53a888df"
+        "name": "T8-PenguinCanvas-Setup-2.8.5.exe",
+        "size": null,
+        "sha256": null
       },
       "blockmap": {
-        "name": "T8-PenguinCanvas-Setup-2.8.4.exe.blockmap",
-        "size": 1291109,
-        "sha256": "e7526a6da08a54acead4701e146a3787d2f3d1764908d0ad21dac13e72519e8f"
+        "name": "T8-PenguinCanvas-Setup-2.8.5.exe.blockmap",
+        "size": null,
+        "sha256": null
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": 362,
-        "sha256": "b06bae762c886aa83be6a0e7f96fadfcb1a2e016f6145363fee78783d10de5a9"
+        "size": null,
+        "sha256": null
       }
     },
     "verification": [
-      "v2.8.4 发布范围固定为独立 Seedance 2.5 节点、视频节点 Seedance 2.5 TAB、六个国内/Global Standard T2V/I2V/Multi 精确模型、六份无密钥工作流，以及官方文档要求的请求形状、素材数量、MIME、字节和真实时长预检；不回退 v2.8.3 或更早版本的节点、模型、工作流、协议和网络能力。",
-      "发布前通过 Seedance 2.5 相邻合同 101/101、延期证据门 4/4、TypeScript、public-check、31 actions / 225 runtime / 76/76 能力同步、2862 模块公开生产构建，以及真实本地 2.2 秒中文文件名 MP4/WAV FFprobe 物理预检。",
-      "2026-08-07 的六模型真实 6/6 提交、轮询、下载和 ffprobe 证据继续只证明端到端模型可达性；本次官方文档刷新没有新建 Provider 付费任务，也不会自动重放不明确的付费写请求。",
-      "固定提交 249e36285ea608686bc3a5975d1f5e887697f2ae 上的唯一正式流程完成 4431 模块私有生产构建、私有后端加密、去水印与 ParseHub 双运行时归档、Electron 原生重建、NSIS、post-build、provenance、sealed recovery、GitHub digest/size、发布前及独立发布后完整远端回下载、固定 Tag、非草稿/非预发布、Latest 和 recovery 清理核验。",
-      "用户已明确授权先发布、后补反馈用户安装环境、完整渠道质量矩阵、协作多端与安装升级证据；协作证据门只允许完全缺失的清单按 owner-approved-post-release-v2.8.4 延期，不能把延期标记为已通过。"
+      "v2.8.5 发布范围固定为 Hailuo H3 Global 三模型、Flux3 国内/Global 八模型、独立 Flux3 提交/状态/恢复链路、11 份无密钥工作流、能力目录和验证脚本；不回退 v2.8.4 或更早版本的节点、模型、工作流、协议和网络能力。",
+      "发布前 Node 定向与相邻回归 89/89、Electron runRecovery 9/9、TypeScript、public-check、RH toolbox、31 actions / 236 runtime / 76/76 / 0 public gaps 能力同步与 2862 模块公开生产构建通过。",
+      "真实 Provider 完成 7/11：Hailuo Global 三模型与 Flux3 国内 T2V/I2V/V2V/Draft Enhance 均完成提交、轮询、本地下载、SHA-256 和 FFprobe H.264 解码；其余四个 Flux3 Global 模型因测试账户 insufficient_user_quota 未被接受，不冒充通过。",
+      "Electron/NSIS、私有构建、自动更新三资产、固定 source commit、Tag、Latest、远端回下载与摘要在唯一 dist:release 流程完成后回写，未执行前保持空值。",
+      "用户已明确授权先发布、后补反馈用户安装环境、完整渠道质量矩阵、协作多端与安装升级证据；协作证据门只允许完全缺失的清单按 owner-approved-post-release-v2.8.5 延期，不能把延期标记为已通过。"
     ]
   },
   "versionSequencePolicy": {
     "status": "active",
     "date": "2026-07-30",
-    "currentVersion": "2.8.4",
+    "currentVersion": "2.8.5",
     "rules": [
       "版本号每一段只使用 0-9；v2.6.9 的下一正式版本固定为 v2.7.0。",
       "禁止创建、打包、推送、打 tag、发布或写入自动更新元数据为 v2.6.10。",
@@ -403,6 +483,7 @@
       "v2.8.1 的下一正式版本固定为 v2.8.2。",
       "v2.8.2 的下一正式版本固定为 v2.8.3。",
       "v2.8.3 的下一正式版本固定为 v2.8.4。",
+      "v2.8.4 的下一正式版本固定为 v2.8.5。",
       "后续改版本前必须同步核对 package.json、package-lock.json、README、features.json、项目 SKILL.md、Release notes、自动更新元数据和 Git tag。"
     ]
   },
@@ -6705,11 +6786,11 @@
       "T8_ENABLE_LOCAL_PRIVATE": "开发环境和普通本机构建可选；0=关闭本机 local-private/extensions 私有扩展。正式 dist:release 固定为 1，不能被父环境降级。GitHub/clean clone 因为没有 local-private 目录，不包含充值实现。",
       "T8_DISABLE_LOCAL_EXTENSIONS": "开发环境可选；1=关闭本地扩展。正式 dist:release 固定为 0，确保本机私有 sidecar 参与加密打包与后置校验。"
     },
-    "version": "2.8.4",
-    "semverVersion": "2.8.4",
+    "version": "2.8.5",
+    "semverVersion": "2.8.5",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.4 已正式发布，范围为 Seedance 2.5 独立节点、视频 TAB、六模型、六工作流及素材安全预检。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.8.4 已从固定 source commit 249e36285ea608686bc3a5975d1f5e887697f2ae 的唯一 dist:release 流程生成并发布：安装包 1,238,238,783 bytes / SHA-256 349a34fab69ce0f1906fee96ebb85a3288d24d25b35be963efaa452d53a888df；blockmap 1,291,109 bytes / SHA-256 e7526a6da08a54acead4701e146a3787d2f3d1764908d0ad21dac13e72519e8f；latest.yml 362 bytes / SHA-256 b06bae762c886aa83be6a0e7f96fadfcb1a2e016f6145363fee78783d10de5a9。4431 模块私有生产构建、私有后端加密、去水印与 ParseHub 双运行时归档、Electron 原生重建、NSIS、post-build、provenance、sealed recovery、GitHub digest/size、发布前及独立发布后完整远端回下载、Tag/target 与 Latest 均通过，recovery 已清除。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.5 已获明确发布授权，范围为 Hailuo H3 Global、Flux3、11 份工作流及独立恢复链路。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.8.5 将从唯一固定 source commit 的 dist:release 流程生成 NSIS、blockmap 与 latest.yml；构建、摘要、provenance、sealed recovery、GitHub 远端回下载、Tag/target、Latest 和 recovery 清理全部真实通过后再回写最终产物事实。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",

@@ -1155,6 +1155,9 @@ export type HailuoModel =
   | 'hailuo-h3-t2v'
   | 'hailuo-h3-i2v'
   | 'hailuo-h3-multi'
+  | 'hailuo-h3-global-t2v'
+  | 'hailuo-h3-global-i2v'
+  | 'hailuo-h3-global-multi'
   | 'minimax-h3-ow-t2v'
   | 'minimax-h3-ow-r2v'
   | 'minimax-h3-ow-i2v';
@@ -1167,7 +1170,7 @@ export interface HailuoSubmitRequest {
   prompt?: string;
   duration: HailuoDuration;
   ratio: string;
-  resolution: '480p' | '720p' | '768p' | '1080p' | '2K';
+  resolution: '480p' | '720p' | '768p' | '768P' | '1080p' | '2K';
   images?: string[];
   videos?: string[];
   audios?: string[];
@@ -1550,6 +1553,59 @@ export function buildWhisperTranscribeRequestBody(req: WhisperTranscribeRequest)
     model: req.model || 'whisper-1',
     response_format: req.responseFormat || 'json',
   };
+}
+
+export type Flux3VideoModel =
+  | 'flux-3-video-t2v'
+  | 'flux-3-video-i2v'
+  | 'flux-3-video-v2v'
+  | 'flux-3-video-draft-enhance'
+  | 'flux-3-video-global-t2v'
+  | 'flux-3-video-global-i2v'
+  | 'flux-3-video-global-v2v'
+  | 'flux-3-video-global-draft-enhance';
+
+export interface Flux3SubmitRequest {
+  model: Flux3VideoModel;
+  prompt?: string;
+  duration: number;
+  ratio: 'auto' | '21:9' | '2:1' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16';
+  resolution: 'hd' | 'fhd';
+  images?: string[];
+  videos?: string[];
+  draft?: boolean;
+  draftCache?: string;
+  audioMode?: 'api_default' | 'enabled' | 'disabled';
+  safetyTolerance?: 'api_default' | 0 | 1 | 2 | 3 | 4;
+}
+
+export async function submitFlux3(req: Flux3SubmitRequest, transport: ProviderSubmissionTransport = {}): Promise<{
+  taskId: string;
+  taskProvider: 'seedance-nz';
+  model: string;
+  taskType: 't2v' | 'i2v' | 'v2v' | 'draft-enhance';
+} & ProviderTransportTrace> {
+  const r = await fetch('/api/proxy/video/flux3/submit', {
+    method: 'POST',
+    headers: providerSubmissionHeaders(transport),
+    body: JSON.stringify(req),
+    signal: transport.signal,
+  });
+  const data = await safeJsonResponse(r, 'FLUX 3 Video 提交');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
+}
+
+export interface Flux3QueryResult extends HappyHorseQueryResult {
+  draftCache?: string | null;
+  taskType?: 't2v' | 'i2v' | 'v2v' | 'draft-enhance';
+}
+
+export async function queryFlux3(taskId: string, transport: ProviderSubmissionTransport = {}): Promise<Flux3QueryResult> {
+  const r = await fetch(`/api/proxy/video/flux3/status/${encodeURIComponent(taskId)}`, { signal: transport.signal });
+  const data = await safeJsonResponse(r, 'FLUX 3 Video 查询');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
 }
 
 export async function transcribeWhisper(

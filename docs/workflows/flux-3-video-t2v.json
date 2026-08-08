@@ -1,0 +1,49 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "FLUX 3 国内文生视频（贞贞的平价AI小屋）",
+  "nodes": [
+    {
+      "id": "flux-3-video-t2v",
+      "type": "video",
+      "position": {
+        "x": 0,
+        "y": 40
+      },
+      "data": {
+        "label": "FLUX 3 国内文生视频",
+        "mainId": "flux-3-video",
+        "model": "flux-3-video-t2v",
+        "videoBuiltinSource": "seedance-nz",
+        "ratio": "auto",
+        "duration": 5,
+        "resolution": "hd",
+        "localPrompt": "电影感极简摄影棚内，纸雕主体缓慢旋转，镜头平稳推进",
+        "flux3Draft": false,
+        "flux3AudioMode": "api_default",
+        "flux3SafetyTolerance": "api_default",
+        "flux3DraftCache": "",
+        "reuseResult": false
+      }
+    }
+  ],
+  "edges": [],
+  "nodeCount": 1,
+  "edgeCount": 0,
+  "nodeTypes": [
+    "video"
+  ],
+  "topologyPreview": {
+    "nodes": [
+      {
+        "id": "flux-3-video-t2v",
+        "type": "video",
+        "label": "FLUX 3 国内文生视频",
+        "x": 50,
+        "y": 90
+      }
+    ],
+    "edges": []
+  },
+  "savedAt": "2026-08-08T08:00:00.000Z"
+}

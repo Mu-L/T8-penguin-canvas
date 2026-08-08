@@ -35,6 +35,8 @@ import {
   queryHappyHorse,
   submitHailuo,
   queryHailuo,
+  submitFlux3,
+  queryFlux3,
   submitKling,
   queryKling,
   submitUpscaler,
@@ -53,6 +55,7 @@ import {
   type VideoFalSubmitRequest,
   type HailuoModel,
   type HailuoDuration,
+  type Flux3VideoModel,
   type KlingModel,
   type UpscalerResolution,
   type ViduQ3Model,
@@ -108,6 +111,7 @@ import {
  *   - Sora2    (kind=sora)      — Zhenzhen API + FAL 双渠道 / Base64 参考图(≤1)
  *   - HappyHorse(kind=happyhorse)— api.seedance.nz 文生/图生/参考图生视频(≤9 图)
  *   - Hailuo   (kind=hailuo)    — api.seedance.nz Hailuo 2.3 / H3 + MiniMax H3 OW
+ *   - Flux3    (kind=flux3)     — api.seedance.nz FLUX 3 国内/海外 T2V/I2V/V2V/Draft Enhance
  *   - Seedance 2.5(kind=seedance25)— api.seedance.nz 六个 Standard 文生/图生/多模态模型
  *   - Vidu     (kind=vidu)      — api.seedance.nz Vidu Q3 文生/图生/首尾帧/参考/短剧成片(≤14 图)
  *   - Kling    (kind=kling)     — api.seedance.nz Kling 文生/图生/首尾帧/参考/视频编辑
@@ -233,6 +237,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   const activeModelOption = builtinApiModelOptions.find((option) => option.value === apiModel);
   const isHappyHorse = !isExternalSelected && modelDef.kind === 'happyhorse';
   const isHailuo = !isExternalSelected && modelDef.kind === 'hailuo';
+  const isFlux3 = !isExternalSelected && modelDef.kind === 'flux3';
   const isSeedance25 = !isExternalSelected && modelDef.kind === 'seedance25';
   const isKling = !isExternalSelected && modelDef.kind === 'kling';
   const isUpscaler = !isExternalSelected && modelDef.kind === 'upscaler';
@@ -251,6 +256,9 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   const hailuoMode = apiModel.endsWith('-multi')
     ? 'multi'
     : apiModel.endsWith('-r2v') ? 'r2v' : apiModel.includes('-i2v') ? 'i2v' : 't2v';
+  const flux3Mode = apiModel.endsWith('-draft-enhance')
+    ? 'draft-enhance'
+    : apiModel.endsWith('-v2v') ? 'v2v' : apiModel.endsWith('-i2v') ? 'i2v' : 't2v';
   const seedance25Mode = apiModel.endsWith('-multi') ? 'multi' : apiModel.endsWith('-i2v') ? 'i2v' : 't2v';
   const klingMode = apiModel.endsWith('-edit')
     ? 'edit'
@@ -300,6 +308,17 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     : isHailuoH3
       ? Math.max(5, Math.min(15, Number(duration) || 5)) as HailuoDuration
     : resolution === '1080p' ? 6 : Number(duration) === 10 ? 10 : 6;
+  const flux3Duration = Math.max(5, Math.min(20, Number(duration) || 5));
+  const flux3Resolution: 'hd' | 'fhd' = resolution === 'fhd' ? 'fhd' : 'hd';
+  const flux3Draft = d?.flux3Draft === true;
+  const flux3AudioMode: 'api_default' | 'enabled' | 'disabled' = ['enabled', 'disabled'].includes(d?.flux3AudioMode)
+    ? d.flux3AudioMode
+    : 'api_default';
+  const flux3SafetyTolerance: 'api_default' | 0 | 1 | 2 | 3 | 4 = [0, 1, 2, 3, 4].includes(Number(d?.flux3SafetyTolerance))
+    ? Number(d.flux3SafetyTolerance) as 0 | 1 | 2 | 3 | 4
+    : 'api_default';
+  const flux3DraftCache = typeof d?.flux3DraftCache === 'string' ? d.flux3DraftCache : '';
+  const flux3DraftCacheResult = typeof d?.flux3DraftCacheResult === 'string' ? d.flux3DraftCacheResult : '';
   const klingDuration: 5 | 10 = Number(duration) === 10 ? 10 : 5;
   const klingNegativePrompt: string = typeof d?.klingNegativePrompt === 'string' ? d.klingNegativePrompt : '';
   const viduDuration = viduMode === 'short-play'
@@ -498,6 +517,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       ? viduMode === 't2v' ? 0 : viduMode === 'i2v' ? 1 : viduMode === 'start-end' ? 2 : viduMode === 'r2v' ? 9 : 14
       : isSeedance25
       ? seedance25Mode === 't2v' ? 0 : seedance25Mode === 'i2v' ? 2 : SEEDANCE25_MULTI_MAX_IMAGES
+      : isFlux3
+      ? flux3Mode === 'i2v' ? 10 : 0
       : isHailuo
       ? isMinimaxH3Ow
         ? hailuoMode === 't2v' ? 0 : 1
@@ -533,8 +554,10 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     ? 1
     : isSeedance25 && seedance25Mode === 'multi'
     ? SEEDANCE25_MULTI_MAX_VIDEOS
+    : isFlux3 && flux3Mode === 'v2v'
+    ? 1
     : isHailuoH3 && hailuoMode === 'multi'
-    ? SEEDANCE25_MULTI_MAX_AUDIOS
+    ? 3
     : isApimartOmni
     ? 1
     : isJimengSeedanceSelected ? JIMENG_SEEDANCE_LIMITS.videos : 0;
@@ -551,7 +574,9 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     ],
     [orderedImages, orderedVideos, orderedAudios, localRefMaterials, maxMentionRefs, maxMentionVideos, maxMentionAudios],
   );
-  const supportsActiveMaterials = isSeedance25
+  const supportsActiveMaterials = isFlux3
+    ? flux3Mode === 'i2v' || flux3Mode === 'v2v'
+    : isSeedance25
     ? seedance25Mode !== 't2v'
     : Boolean(modelDef.supportImages || modelDef.supportVideos);
 
@@ -567,10 +592,14 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         ? ['text', 'video']
       : isSeedance25 && seedance25Mode === 'multi'
         ? ['text', 'image', 'video', 'audio']
+      : isFlux3 && flux3Mode === 'v2v'
+        ? ['text', 'video']
+      : isFlux3 && flux3Mode === 'i2v'
+        ? ['text', 'image']
       : isHailuoH3 && hailuoMode === 'multi'
         ? ['text', 'image', 'video', 'audio']
         : ['text', 'image']),
-    [modelDef.kind, isJimengSeedanceSelected, isApimartOmni, isUpscaler, isKling, klingMode, isSeedance25, seedance25Mode, isHailuoH3, hailuoMode],
+    [modelDef.kind, isJimengSeedanceSelected, isApimartOmni, isUpscaler, isKling, klingMode, isSeedance25, seedance25Mode, isFlux3, flux3Mode, isHailuoH3, hailuoMode],
   );
 
   // 收集上游 prompt + 参考图/视频/音频 (按用户拖拽顺序), 合并本地拖入素材
@@ -646,6 +675,9 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       ...(nextModel === 'grok-imagine-video-1.5' ? { gkfMode: 'image_to_video' } : {}),
       ...(isGrokVideo15NewModel(nextModel) ? { ratio: '16:9', resolution: '' } : {}),
       ...(nextModel.startsWith('vidu-q3-') ? { viduSeed: -1 } : {}),
+      ...(nextModel.startsWith('flux-3-video-')
+        ? { ratio: 'auto', duration: 5, resolution: 'hd', flux3Draft: false, flux3AudioMode: 'api_default', flux3SafetyTolerance: 'api_default' }
+        : {}),
     });
   };
 
@@ -677,6 +709,9 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       ...(nextModel === 'grok-imagine-video-1.5' ? { gkfMode: 'image_to_video' } : {}),
       ...(isGrokVideo15NewModel(nextModel) ? { ratio: '16:9', size: '1280x720', resolution: '' } : {}),
       ...(nextModel.startsWith('vidu-q3-') ? { viduSeed: -1 } : {}),
+      ...(nextModel.startsWith('flux-3-video-')
+        ? { ratio: 'auto', duration: 5, resolution: 'hd', flux3Draft: false, flux3AudioMode: 'api_default', flux3SafetyTolerance: 'api_default' }
+        : {}),
     });
   };
 
@@ -716,6 +751,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             ? await queryWan(tid)
             : isSeedance25
               ? await querySeedance(tid, 'seedance-nz')
+            : isFlux3
+              ? await queryFlux3(tid)
             : isHailuo
               ? await queryHailuo(tid)
             : isKling
@@ -736,7 +773,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             model: apiModel,
             taskId: tid,
             recovery: {
-              kind: isWan ? 'wan' : isSeedance25 ? 'seedance' : isHailuo ? 'hailuo' : isKling ? 'kling' : isUpscaler ? 'upscaler' : isVidu ? 'vidu' : isHappyHorse ? 'happyhorse' : isApimartBudgetVideo ? 'seedance' : 'video',
+              kind: isWan ? 'wan' : isSeedance25 ? 'seedance' : isFlux3 ? 'flux3' : isHailuo ? 'hailuo' : isKling ? 'kling' : isUpscaler ? 'upscaler' : isVidu ? 'vidu' : isHappyHorse ? 'happyhorse' : isApimartBudgetVideo ? 'seedance' : 'video',
               taskId: tid, model: apiModel, pollIntervalMs: POLL_INT, maxPolls: MAX,
             },
             requestId: r.requestId,
@@ -766,6 +803,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
               );
             }
           } else if (['SUCCESS', 'SUCCEEDED', 'COMPLETED'].includes(normalizedStatus) && r.videoUrl) {
+            const completedDraftCache = isFlux3 ? String((r as any).draftCache || '').trim() : '';
             pollRejectRef.current = null;
             stopPoll();
             update({
@@ -780,6 +818,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
               upstreamHttpStatus: r.upstreamHttpStatus,
               usage: r.usage,
               pollCount: elapsed,
+              ...(isFlux3 ? { flux3DraftCacheResult: completedDraftCache || null } : {}),
             });
             await reporter?.providerResponse({
               provider: isSeedanceNzVideo ? 'seedance-nz' : 'zhenzhen',
@@ -975,6 +1014,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       && !(isHappyHorse && happyHorseMode !== 't2v')
       && !(isHailuo && hailuoMode === 'i2v')
       && !(isSeedance25 && seedance25Mode === 'i2v')
+      && !(isFlux3 && flux3Mode === 'draft-enhance')
       && !(isKling && klingMode === 'i2v')
       && !(isVidu && !['t2v', 'short-play'].includes(viduMode))
       && !(isApimartOmni && (imageUrls.length > 0 || videoUrls.length > 0))
@@ -1034,6 +1074,44 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       }
       if (total > SEEDANCE25_MULTI_MAX_TOTAL) {
         setError(`Seedance 2.5 多模态参考素材合计最多 ${SEEDANCE25_MULTI_MAX_TOTAL} 个`);
+        return;
+      }
+    }
+    if (isFlux3 && flux3Mode === 't2v' && (imageUrls.length || videoUrls.length || audioUrls.length)) {
+      setError('FLUX 3 文生视频只接受提示词，请断开图片、视频和音频素材');
+      logBus.error('生成中止: FLUX 3 文生视频混入参考素材', src);
+      return;
+    }
+    if (isFlux3 && flux3Mode === 'i2v') {
+      if (imageUrls.length < 1 || imageUrls.length > 10) {
+        setError('FLUX 3 图生视频必须提供 1-10 张排序关键帧图片');
+        logBus.error('生成中止: FLUX 3 图生视频关键帧数量不合法', src);
+        return;
+      }
+      if (videoUrls.length || audioUrls.length) {
+        setError('FLUX 3 图生视频不接受视频或音频素材');
+        return;
+      }
+    }
+    if (isFlux3 && flux3Mode === 'v2v') {
+      if (videoUrls.length !== 1) {
+        setError('FLUX 3 视频编辑必须且只能提供 1 个 MP4 视频');
+        logBus.error('生成中止: FLUX 3 视频编辑输入视频数量不合法', src);
+        return;
+      }
+      if (imageUrls.length || audioUrls.length) {
+        setError('FLUX 3 视频编辑不接受图片或音频素材');
+        return;
+      }
+    }
+    if (isFlux3 && flux3Mode === 'draft-enhance') {
+      if (!flux3DraftCache.trim()) {
+        setError('FLUX 3 草稿增强必须填写同线路已完成 Draft 任务返回的 draft_cache');
+        logBus.error('生成中止: FLUX 3 草稿增强缺少 draft_cache', src);
+        return;
+      }
+      if (imageUrls.length || videoUrls.length || audioUrls.length) {
+        setError('FLUX 3 草稿增强只使用 draft_cache，不接受参考素材');
         return;
       }
     }
@@ -1316,6 +1394,51 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         return;
       }
 
+      if (isFlux3) {
+        const fluxImages = flux3Mode === 'i2v' ? imageUrls.slice(0, 10) : [];
+        const fluxVideos = flux3Mode === 'v2v' ? videoUrls.slice(0, 1) : [];
+        logBus.info(
+          `提交 FLUX 3: ${apiModel} · ${flux3Duration}s · ${flux3Resolution} · ${ratio} · 图${fluxImages.length}/视${fluxVideos.length} · draft=${flux3Draft}`,
+          src,
+        );
+        const result = await submitFlux3({
+          model: apiModel as Flux3VideoModel,
+          prompt: flux3Mode === 'draft-enhance' ? undefined : finalPrompt,
+          duration: flux3Duration,
+          ratio: ratio as 'auto' | '21:9' | '2:1' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16',
+          resolution: flux3Resolution,
+          images: fluxImages.length ? fluxImages : undefined,
+          videos: fluxVideos.length ? fluxVideos : undefined,
+          draft: flux3Mode === 'draft-enhance' ? false : flux3Draft,
+          draftCache: flux3Mode === 'draft-enhance' ? flux3DraftCache.trim() : undefined,
+          audioMode: flux3AudioMode,
+          safetyTolerance: flux3SafetyTolerance,
+        }, { submissionKey: reporter?.providerSubmissionKey });
+        if (!isCurrentGenerationRun(runId)) return;
+        await reporter?.providerSubmitted({
+          provider: traceProvider,
+          model: traceModel,
+          upstreamTaskId: result.taskId,
+          requestId: result.requestId,
+          transportHttpStatus: result.transportHttpStatus,
+          upstreamHttpStatus: result.upstreamHttpStatus,
+          usage: result.usage,
+          httpStatusSource: 'local-backend',
+        });
+        update({
+          status: 'polling',
+          taskId: result.taskId,
+          lastPrompt: finalPrompt,
+          progress: '0%',
+          provider: 'seedance-nz',
+          apiModel,
+          flux3DraftCacheResult: null,
+        });
+        logBus.info('FLUX 3 Video 任务已提交，开始轮询', src);
+        await startPolling(result.taskId, runId, reporter);
+        return;
+      }
+
       if (isWan) {
         const firstImage = imageUrls[0];
         logBus.info(
@@ -1358,7 +1481,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         const hailuoAudios = isHailuoH3 && hailuoMode === 'multi' ? audioUrls.slice(0, 3) : [];
         const hailuoResolution = isMinimaxH3Ow
           ? resolution === '720p' ? '720p' : '480p'
-          : isHailuoH3 ? '2K' : resolution === '1080p' ? '1080p' : '768p';
+          : isHailuoH3 ? resolution === '768P' ? '768P' : '2K' : resolution === '1080p' ? '1080p' : '768p';
         const hailuoLabel = isMinimaxH3Ow ? 'MiniMax H3 OW' : isHailuoH3 ? 'Hailuo H3' : 'Hailuo 2.3';
         logBus.info(
           `提交 ${hailuoLabel}: ${apiModel} · ${hailuoDuration}s · ${hailuoResolution} · ${ratio} · 图${hailuoImages.length}/视${hailuoVideos.length}/音${hailuoAudios.length}`,
@@ -1799,9 +1922,9 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             : (modelDef.maxRefImages || 7) + 4;
       if (cur.length >= cap) return;
       update({ localRefImages: [...cur, payload.url] });
-    } else if (payload.kind === 'video' && payload.url && (isJimengSeedanceSelected || isApimartOmni || isUpscaler || (isKling && klingMode === 'edit'))) {
+    } else if (payload.kind === 'video' && payload.url && (isJimengSeedanceSelected || isApimartOmni || isUpscaler || (isFlux3 && flux3Mode === 'v2v') || (isKling && klingMode === 'edit'))) {
       const cur = Array.isArray(d?.localRefVideos) ? d.localRefVideos : [];
-      const cap = isUpscaler || isApimartOmni || (isKling && klingMode === 'edit') ? 1 : JIMENG_SEEDANCE_LIMITS.videos;
+      const cap = isUpscaler || isApimartOmni || (isFlux3 && flux3Mode === 'v2v') || (isKling && klingMode === 'edit') ? 1 : JIMENG_SEEDANCE_LIMITS.videos;
       if (cur.indexOf(payload.url) !== -1 || cur.length >= cap) return;
       update({ localRefVideos: [...cur, payload.url] });
     } else if (payload.kind === 'audio' && payload.url && isJimengSeedanceSelected) {
@@ -1819,6 +1942,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       : isApimartOmni ? ['image', 'video', 'text']
       : isApimartV31Lite ? ['text']
       : isUpscaler ? ['video']
+      : isFlux3 ? flux3Mode === 'v2v' ? ['video', 'text'] : flux3Mode === 'i2v' ? ['image', 'text'] : ['text']
       : isKling && klingMode === 'edit' ? ['video', 'text'] : ['image', 'text'],
     onDrop: handleDrop,
   });
@@ -1831,6 +1955,12 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     ? `上游素材 · 首帧图 ${Math.min(refsCount, 1)}/1`
     : isUpscaler
     ? `上游素材 · 输入 MP4 ${Math.min(videoRefsCount, 1)}/1`
+    : isFlux3
+    ? flux3Mode === 't2v' || flux3Mode === 'draft-enhance'
+      ? '上游素材 · 当前模式不使用参考素材'
+      : flux3Mode === 'i2v'
+        ? `上游素材 · 关键帧图片 ${Math.min(refsCount, 10)}/10`
+        : `上游素材 · 输入 MP4 ${Math.min(videoRefsCount, 1)}/1`
     : isKling
     ? klingMode === 't2v'
       ? '上游素材 · 当前模型不使用参考素材'
@@ -2037,6 +2167,9 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
                        : {}),
                    ...(nextModel.startsWith('seedance-2.5-')
                      ? { ratio: nextModel.endsWith('-i2v') ? 'adaptive' : '16:9', duration: SEEDANCE25_DEFAULT_DURATION, resolution: SEEDANCE25_DEFAULT_RESOLUTION, generateAudio: true, returnLastFrame: false }
+                     : {}),
+                   ...(nextModel.startsWith('flux-3-video-')
+                     ? { ratio: 'auto', duration: 5, resolution: 'hd', flux3Draft: false, flux3AudioMode: 'api_default', flux3SafetyTolerance: 'api_default' }
                      : {}),
                    ...(nextModel.endsWith('-short-play')
                      ? { ratio: '9:16', duration: 8, resolution: '1080p' }
@@ -2325,6 +2458,93 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           </div>
         )}
 
+        {isFlux3 && (
+          <div className="rounded border border-amber-300/20 bg-amber-400/[0.06] p-2 space-y-2">
+            <div className="text-[10px] leading-relaxed text-white/60">
+              {flux3Mode === 't2v'
+                ? '文生视频只提交提示词；开启 Draft 后，完成任务会返回可继续增强的 draft_cache。'
+                : flux3Mode === 'i2v'
+                  ? '按画布素材顺序提交 1-10 张关键帧图片和提示词。'
+                  : flux3Mode === 'v2v'
+                    ? '提交 1 个 MP4 输入视频和编辑提示词。'
+                    : '草稿增强只使用同线路已完成 Draft 任务返回的 draft_cache。'}
+              <div className="mt-1 text-white/35">贞贞的平价AI小屋 · 5-20 秒 · HD/FHD · 国内/海外线路不可混用缓存</div>
+            </div>
+            {flux3Mode !== 'draft-enhance' && (
+              <label className="flex items-center gap-1.5 text-[10px] text-white/65 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={flux3Draft}
+                  onChange={(e) => update({ flux3Draft: e.target.checked })}
+                  className="accent-amber-400"
+                />
+                Draft 草稿模式（完成后返回增强缓存）
+              </label>
+            )}
+            <div className="grid grid-cols-2 gap-1.5">
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">生成音频</label>
+                <select
+                  value={flux3AudioMode}
+                  onChange={(e) => update({ flux3AudioMode: e.target.value })}
+                  className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-amber-300/40"
+                >
+                  <option value="api_default" className="bg-zinc-900">API 默认</option>
+                  <option value="enabled" className="bg-zinc-900">开启</option>
+                  <option value="disabled" className="bg-zinc-900">关闭</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">安全容忍度</label>
+                <select
+                  value={String(flux3SafetyTolerance)}
+                  onChange={(e) => update({ flux3SafetyTolerance: e.target.value === 'api_default' ? 'api_default' : Number(e.target.value) })}
+                  className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-amber-300/40"
+                >
+                  <option value="api_default" className="bg-zinc-900">API 默认</option>
+                  {[0, 1, 2, 3, 4].map((item) => <option key={item} value={item} className="bg-zinc-900">{item}{item === 0 ? '（最严）' : item === 4 ? '（最宽）' : ''}</option>)}
+                </select>
+              </div>
+            </div>
+            {flux3Mode === 'draft-enhance' && (
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">draft_cache（必填）</label>
+                <textarea
+                  value={flux3DraftCache}
+                  onChange={(e) => update({ flux3DraftCache: e.target.value })}
+                  placeholder="粘贴同线路 Draft 完成任务返回的缓存"
+                  className="w-full h-16 resize-y rounded bg-white/5 border border-white/10 px-2 py-1 text-[10px] text-white outline-none focus:border-amber-300/40 placeholder:text-white/25"
+                />
+              </div>
+            )}
+            {flux3DraftCacheResult && (
+              <div className="rounded border border-emerald-300/20 bg-emerald-400/[0.06] p-1.5 space-y-1.5">
+                <div className="text-[10px] text-emerald-100/80">本次任务已返回 Draft 增强缓存</div>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => navigator.clipboard?.writeText(flux3DraftCacheResult)}
+                    className="flex-1 rounded border border-emerald-300/20 px-2 py-1 text-[10px] text-emerald-100 hover:bg-emerald-300/10"
+                  >
+                    复制缓存
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => update({
+                      model: apiModel.includes('-global-') ? 'flux-3-video-global-draft-enhance' : 'flux-3-video-draft-enhance',
+                      flux3DraftCache: flux3DraftCacheResult,
+                      flux3Draft: false,
+                    })}
+                    className="flex-1 rounded border border-amber-300/25 px-2 py-1 text-[10px] text-amber-100 hover:bg-amber-300/10"
+                  >
+                    继续草稿增强
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {isHailuo && (
           <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.06] px-2 py-1.5 text-[10px] leading-relaxed text-white/55">
             {isMinimaxH3Ow
@@ -2346,7 +2566,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
               {isMinimaxH3Ow
                 ? '贞贞的平价AI小屋 API · 5 / 10 / 15 秒 · 480p / 720p'
                 : isHailuoH3
-                  ? '贞贞的平价AI小屋 API · 按次计费 · 5-15 秒 · 固定 2K'
+                  ? '贞贞的平价AI小屋 API · 按次计费 · 5-15 秒 · 768P / 2K'
                 : '贞贞的平价AI小屋 API · 按次计费 · 6 / 10 秒 · 768p / 1080p（1080p 仅 6 秒）'}
             </div>
             {!isHailuoH3 && hailuoMode === 'i2v' && (
@@ -2583,10 +2803,10 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
               <select
                 value={isMinimaxH3Ow
                   ? resolution === '720p' ? '720p' : '480p'
-                  : isHailuoH3 ? '2K' : resolution === '1080p' ? '1080p' : '768p'}
+                  : isHailuoH3 ? resolution === '768P' ? '768P' : '2K' : resolution === '1080p' ? '1080p' : '768p'}
                 onChange={(e) => {
                   if (isHailuoH3) {
-                    update({ resolution: '2K' });
+                    update({ resolution: e.target.value === '768P' ? '768P' : '2K' });
                     return;
                   }
                   if (isMinimaxH3Ow) {
@@ -2596,7 +2816,6 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
                   const nextResolution = e.target.value === '1080p' ? '1080p' : '768p';
                   update({ resolution: nextResolution, ...(nextResolution === '1080p' ? { duration: 6 } : {}) });
                 }}
-                disabled={isHailuoH3}
                 className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-cyan-300/40"
               >
                 {resolutionOptions.map((item) => (
@@ -2862,7 +3081,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         )}
 
         {/* Seed(非FAL) */}
-        {showGenericVideoControls && !isHappyHorse && !isKling && !isUpscaler && !isWan && !isApimartBudgetVideo && (
+        {showGenericVideoControls && !isHappyHorse && !isFlux3 && !isKling && !isUpscaler && !isWan && !isApimartBudgetVideo && (
         <div>
           <label className="text-[10px] text-white/50 block mb-1">Seed (0=随机)</label>
           <input

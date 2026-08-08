@@ -422,7 +422,7 @@ export const NBPRO_FAL_RESOLUTIONS = ['1K', '2K', '4K'];
 
 // ========== 视频 ==========
 // kind 决定上游 payload 协议(后端会根据 model 名自动识别,前端主要用于控制参数 UI 列表)
-export type VideoKind = 'veo' | 'grok' | 'sora' | 'seedance' | 'seedance25' | 'happyhorse' | 'hailuo' | 'kling' | 'vidu' | 'upscaler' | 'wan';
+export type VideoKind = 'veo' | 'grok' | 'sora' | 'seedance' | 'seedance25' | 'happyhorse' | 'hailuo' | 'flux3' | 'kling' | 'vidu' | 'upscaler' | 'wan';
 
 // ---- Video FAL 渠道注册表 (1:1 对齐 gpt-image-2-web runVeo3Fal / runGrokFal / runSora2Fal) ----
 export interface VideoFalEndpointDef {
@@ -599,6 +599,24 @@ export const SEEDANCE25_VIDEO_MODELS = [
   'seedance-2.5-standard-multi',
   'seedance-2.5-standard-t2v',
 ] as const;
+export const HAILUO_H3_GLOBAL_VIDEO_MODELS = [
+  'hailuo-h3-global-t2v',
+  'hailuo-h3-global-i2v',
+  'hailuo-h3-global-multi',
+] as const;
+export const FLUX3_VIDEO_MODELS = [
+  'flux-3-video-t2v',
+  'flux-3-video-i2v',
+  'flux-3-video-v2v',
+  'flux-3-video-draft-enhance',
+  'flux-3-video-global-t2v',
+  'flux-3-video-global-i2v',
+  'flux-3-video-global-v2v',
+  'flux-3-video-global-draft-enhance',
+] as const;
+export const FLUX3_VIDEO_RATIOS = ['auto', '21:9', '2:1', '16:9', '4:3', '1:1', '3:4', '9:16'] as const;
+export const FLUX3_VIDEO_DURATIONS = Array.from({ length: 16 }, (_, index) => index + 5);
+export const FLUX3_VIDEO_RESOLUTIONS = ['hd', 'fhd'] as const;
 const SEEDANCE25_RATIOS = ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'];
 const SEEDANCE25_DURATIONS = [-1, ...Array.from({ length: 27 }, (_, index) => index + 4)];
 const SEEDANCE25_RESOLUTIONS = ['480p', '720p', '1080p', '2k', '4k'];
@@ -748,12 +766,12 @@ export const VIDEO_MODELS: VideoModelDef[] = [
       {
         value: 'hailuo-h3-t2v',
         label: 'hailuo-h3-t2v（H3 文生视频）',
-        description: 'Hailuo H3 文生视频；固定 2K，支持 5-15 秒与自适应比例。',
+        description: 'Hailuo H3 国内文生视频；768P/2K，支持 5-15 秒与自适应比例。',
         ratios: ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
         defaultRatio: '16:9',
         durations: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
         defaultDuration: 5,
-        resolutions: ['2K'],
+        resolutions: ['768P', '2K'],
         defaultResolution: '2K',
         supportImages: false,
         supportVideos: false,
@@ -765,12 +783,12 @@ export const VIDEO_MODELS: VideoModelDef[] = [
       {
         value: 'hailuo-h3-i2v',
         label: 'hailuo-h3-i2v（H3 首尾帧图生视频）',
-        description: 'Hailuo H3 图生视频；第 1 张为首帧，第 2 张可选为尾帧，固定 2K。',
+        description: 'Hailuo H3 国内图生视频；第 1 张为首帧，第 2 张可选为尾帧，支持 768P/2K。',
         ratios: [],
         defaultRatio: '16:9',
         durations: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
         defaultDuration: 5,
-        resolutions: ['2K'],
+        resolutions: ['768P', '2K'],
         defaultResolution: '2K',
         supportImages: true,
         supportVideos: false,
@@ -782,12 +800,12 @@ export const VIDEO_MODELS: VideoModelDef[] = [
       {
         value: 'hailuo-h3-multi',
         label: 'hailuo-h3-multi（H3 多模态参考）',
-        description: 'Hailuo H3 多模态参考；最多 9 图、3 视频、3 音频，固定 2K。',
+        description: 'Hailuo H3 国内多模态参考；最多 9 图、3 视频、3 音频，支持 768P/2K。',
         ratios: ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
         defaultRatio: '16:9',
         durations: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
         defaultDuration: 5,
-        resolutions: ['2K'],
+        resolutions: ['768P', '2K'],
         defaultResolution: '2K',
         supportImages: true,
         supportVideos: true,
@@ -796,6 +814,30 @@ export const VIDEO_MODELS: VideoModelDef[] = [
         maxRefVideos: 3,
         maxRefAudios: 3,
       },
+      ...HAILUO_H3_GLOBAL_VIDEO_MODELS.map((value) => {
+        const mode = value.endsWith('-t2v') ? 't2v' : value.endsWith('-i2v') ? 'i2v' : 'multi';
+        return {
+          value,
+          label: `${value}${mode === 't2v' ? '（H3 海外文生视频）' : mode === 'i2v' ? '（H3 海外首尾帧）' : '（H3 海外多模态）'}`,
+          description: mode === 't2v'
+            ? 'Hailuo H3 海外文生视频；768P/2K，支持 5-15 秒。'
+            : mode === 'i2v'
+              ? 'Hailuo H3 海外图生视频；第 1 张为首帧，第 2 张可选为尾帧。'
+              : 'Hailuo H3 海外多模态参考；最多 9 图、3 视频、3 音频。',
+          ratios: mode === 'i2v' ? [] : ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
+          defaultRatio: '16:9',
+          durations: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+          defaultDuration: 5,
+          resolutions: ['768P', '2K'],
+          defaultResolution: '2K',
+          supportImages: mode !== 't2v',
+          supportVideos: mode === 'multi',
+          supportAudios: mode === 'multi',
+          maxRefImages: mode === 't2v' ? 0 : mode === 'i2v' ? 2 : 9,
+          maxRefVideos: mode === 'multi' ? 3 : 0,
+          maxRefAudios: mode === 'multi' ? 3 : 0,
+        };
+      }),
       {
         value: 'minimax-h3-ow-t2v',
         label: 'minimax-h3-ow-t2v（MiniMax H3 OW 文生视频）',
@@ -856,6 +898,51 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     defaultResolution: '768p',
     supportImages: true,
     maxRefImages: 1,
+  },
+  {
+    id: 'flux-3-video',
+    label: 'Flux3',
+    kind: 'flux3',
+    provider: 'zhenzhen',
+    builtinSource: 'seedance-nz',
+    description: 'FLUX 3 Video · 国内/海外文生、关键帧图生、视频编辑与草稿增强',
+    apiModelOptions: FLUX3_VIDEO_MODELS.map((value) => {
+      const mode = value.endsWith('-draft-enhance')
+        ? 'draft-enhance'
+        : value.endsWith('-v2v') ? 'v2v' : value.endsWith('-i2v') ? 'i2v' : 't2v';
+      return {
+        value,
+        label: `${value}${mode === 't2v' ? '（文生视频）' : mode === 'i2v' ? '（关键帧图生）' : mode === 'v2v' ? '（视频编辑）' : '（草稿增强）'}`,
+        description: mode === 't2v'
+          ? '仅提示词；可开启 Draft 以返回后续增强所需缓存。'
+          : mode === 'i2v'
+            ? '提示词 + 1-10 张排序关键帧图片。'
+            : mode === 'v2v'
+              ? '提示词 + 1 个 MP4 输入视频。'
+              : '使用同线路已完成 Draft 任务返回的 draft_cache。',
+        ratios: [...FLUX3_VIDEO_RATIOS],
+        defaultRatio: 'auto',
+        durations: FLUX3_VIDEO_DURATIONS,
+        defaultDuration: 5,
+        resolutions: [...FLUX3_VIDEO_RESOLUTIONS],
+        defaultResolution: 'hd',
+        supportImages: mode === 'i2v',
+        supportVideos: mode === 'v2v',
+        supportAudios: false,
+        maxRefImages: mode === 'i2v' ? 10 : 0,
+        maxRefVideos: mode === 'v2v' ? 1 : 0,
+        maxRefAudios: 0,
+      };
+    }),
+    ratios: [...FLUX3_VIDEO_RATIOS],
+    defaultRatio: 'auto',
+    durations: FLUX3_VIDEO_DURATIONS,
+    defaultDuration: 5,
+    resolutions: [...FLUX3_VIDEO_RESOLUTIONS],
+    defaultResolution: 'hd',
+    supportImages: true,
+    supportVideos: true,
+    maxRefImages: 10,
   },
   {
     id: 'vidu-q3',

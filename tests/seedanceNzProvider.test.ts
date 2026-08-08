@@ -1281,7 +1281,7 @@ test('seedance.nz Hailuo H3 rejects invalid duration, resolution and missing or 
     seedanceNz.buildHailuoPayload({
       model: 'hailuo-h3-t2v', prompt: 'Valid prompt', duration: 5, resolution: '1080p', ratio: '16:9',
     }, 'test-key'),
-    /固定为 2K/,
+    /只支持 768P 或 2K/,
   );
   await assert.rejects(
     seedanceNz.buildHailuoPayload({
