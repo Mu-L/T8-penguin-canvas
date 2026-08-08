@@ -1,9 +1,9 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.8.5",
-  "lastUpdated": "2026-08-08-v2.8.5-release-authorized",
+  "lastUpdated": "2026-08-08-v2.8.5-released",
   "flux3VideoAndHailuoH3Global": {
-    "status": "release-ready-v2.8.5-live-partially-blocked-by-provider-quota",
+    "status": "released-v2.8.5-live-partially-blocked-by-provider-quota",
     "date": "2026-08-08",
     "releaseIncluded": true,
     "provider": "seedance-nz",
@@ -430,36 +430,37 @@
     ]
   },
   "release": {
-    "status": "release-authorized-v2.8.5",
+    "status": "released-v2.8.5",
     "version": "2.8.5",
     "date": "2026-08-08",
-    "publishedAt": null,
+    "publishedAt": "2026-08-08T09:10:05Z",
     "tag": "v2.8.5",
-    "latest": false,
-    "sourceCommit": null,
+    "latest": true,
+    "sourceCommit": "bbe4500407a45b66c8407180ffc142dcd1d4b962",
     "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.8.5",
     "artifacts": {
       "installer": {
         "name": "T8-PenguinCanvas-Setup-2.8.5.exe",
-        "size": null,
-        "sha256": null
+        "size": 1317585429,
+        "sha256": "e47b6b2ccf99d772f0b5e2be02e8e055d5c49cbcf866e72b54b79abaf011a3d2"
       },
       "blockmap": {
         "name": "T8-PenguinCanvas-Setup-2.8.5.exe.blockmap",
-        "size": null,
-        "sha256": null
+        "size": 1373164,
+        "sha256": "d4eb018cb972595d0acdce002547de414e256c455ff5e2990d41b716af7534f5"
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": null,
-        "sha256": null
+        "size": 362,
+        "sha256": "9b31c8a4fe3021ca19a38779d3737332431049deb47c42952a2548bf3700afd6"
       }
     },
     "verification": [
       "v2.8.5 发布范围固定为 Hailuo H3 Global 三模型、Flux3 国内/Global 八模型、独立 Flux3 提交/状态/恢复链路、11 份无密钥工作流、能力目录和验证脚本；不回退 v2.8.4 或更早版本的节点、模型、工作流、协议和网络能力。",
       "发布前 Node 定向与相邻回归 89/89、Electron runRecovery 9/9、TypeScript、public-check、RH toolbox、31 actions / 236 runtime / 76/76 / 0 public gaps 能力同步与 2862 模块公开生产构建通过。",
       "真实 Provider 完成 7/11：Hailuo Global 三模型与 Flux3 国内 T2V/I2V/V2V/Draft Enhance 均完成提交、轮询、本地下载、SHA-256 和 FFprobe H.264 解码；其余四个 Flux3 Global 模型因测试账户 insufficient_user_quota 未被接受，不冒充通过。",
-      "Electron/NSIS、私有构建、自动更新三资产、固定 source commit、Tag、Latest、远端回下载与摘要在唯一 dist:release 流程完成后回写，未执行前保持空值。",
+      "固定 source commit bbe4500407a45b66c8407180ffc142dcd1d4b962 在独立 release 工作树完成 4431 模块私有生产构建、4 个本机私有后端文件加密、双运行时归档、Electron 原生模块重建、NSIS、post-build、provenance 与 sealed recovery。",
+      "GitHub 草稿阶段三项自动更新资产完成完整远端回下载与封存摘要/GitHub digest 核对；发布后固定 Tag/target、非草稿非预发布状态、Latest、三资产精确集合和元数据再次通过，recovery 已清理。",
       "用户已明确授权先发布、后补反馈用户安装环境、完整渠道质量矩阵、协作多端与安装升级证据；协作证据门只允许完全缺失的清单按 owner-approved-post-release-v2.8.5 延期，不能把延期标记为已通过。"
     ]
   },
@@ -6789,8 +6790,8 @@
     "version": "2.8.5",
     "semverVersion": "2.8.5",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.5 已获明确发布授权，范围为 Hailuo H3 Global、Flux3、11 份工作流及独立恢复链路。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.8.5 将从唯一固定 source commit 的 dist:release 流程生成 NSIS、blockmap 与 latest.yml；构建、摘要、provenance、sealed recovery、GitHub 远端回下载、Tag/target、Latest 和 recovery 清理全部真实通过后再回写最终产物事实。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.5 已从固定 source commit bbe4500407a45b66c8407180ffc142dcd1d4b962 正式发布，范围为 Hailuo H3 Global、Flux3、11 份工作流及独立恢复链路。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.8.5 已通过唯一 dist:release 流程生成并发布 NSIS、blockmap 与 latest.yml；私有构建、摘要、provenance、sealed recovery、GitHub 草稿阶段三资产完整回下载、发布后 Tag/target、Latest 和 recovery 清理全部通过。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
