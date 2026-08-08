@@ -1,7 +1,72 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.8.5",
-  "lastUpdated": "2026-08-08-v2.8.5-released",
+  "version": "2.8.6",
+  "lastUpdated": "2026-08-09-v2.8.6-release-authorized",
+  "completedOutputDownloadRecovery": {
+    "status": "release-authorized-v2.8.6-offline-verified",
+    "date": "2026-08-09",
+    "releaseIncluded": true,
+    "scope": [
+      "所有图像节点已完成任务的远程结果落盘",
+      "所有视频节点已完成任务的远程结果落盘",
+      "音频、Suno 附件与 RunningHub 共用可信结果下载链路"
+    ],
+    "rootCause": "旧图片物化把 Chromium 系统网络、DNS 固定直连回退和三次重试压在同一个 25 秒总预算内，首条代理/TUN/慢首包路径可耗尽后续恢复窗口；图片、视频、音频还共用 0/3000/3000ms 的慢重试节奏。",
+    "recoveryContract": {
+      "sameTaskOnly": "只重复 GET 结果查询与下载，始终保留原 taskId；不重放 Provider 生成 POST，不重复生成或扣费。",
+      "routeFailover": "Chromium 系统代理/TUN/VPN 路径发生连接超时、停滞、连接中断或 HTTP 408/425/429/5xx 时，立即切换到独立 DNS 固定的新连接；回退路径拥有独立有界时间，不再被前一路耗尽。",
+      "fastRetry": "同一物化请求使用 0/500/1500ms 三轮下载恢复；全部失败后返回 materializing，并以 1000ms 建议继续查询同一任务。",
+      "budgets": "物化调度窗口由 25 秒放宽为 5 分钟，单路径尝试最多 2 分钟，连接建立 8 秒快速切路，连续无数据 30 秒才判定停滞；可用环境变量在 15 分钟/5 分钟/2 分钟上限内调整。",
+      "integrity": "部分文件回退前清空暂存内容；SSRF/内网拦截、重定向敏感头剥离、实际字节上限、媒体魔数和落盘校验保持不变。"
+    },
+    "verification": [
+      "可信下载故障注入 16/16：系统路径连接超时后独立回退、系统 HTTP 503 换路、部分视频停滞后清空并完整落盘均通过；用户取消与 HTTP 404 不触发回退。",
+      "生产状态路由 3/3：图片前两次 CDN HTTP 503、第三次成功；视频、音频与 RunningHub 在 TUN Fake-IP/独立 DNS 恢复中保留原任务并稳定落盘；停滞查询只返回同任务 materializing。",
+      "Electron 系统网络桥 14/14、前端长轮询/停止/materializing 24/24、物化原子落盘 3/3、中文 Windows 路径 Electron 回归 1/1 通过。",
+      "TypeScript、2862-module Vite 生产构建、31-action/238-runtime/76-of-76 能力同步、RH Toolbox、public-check、JSON 与 diff 检查通过；未调用付费 Provider，未打包、提交、推送或发布。"
+    ]
+  },
+  "seedreamLayerDecomposition": {
+    "status": "release-authorized-v2.8.6-live-verified",
+    "date": "2026-08-09",
+    "releaseIncluded": true,
+    "provider": "seedance-nz",
+    "officialDocs": "https://api.seedance.nz/docs/llms.txt",
+    "officialDocsSnapshot": {
+      "checkedAt": "2026-08-09",
+      "lastModified": "Sat, 08 Aug 2026 18:46:26 GMT",
+      "etag": "W/\"6a777982-9d6e9\"",
+      "bytes": 644841,
+      "sha256": "aa4af95a5bc7ff30035cf8bfc4c3d9a582c335f102adb7dd6b8214395d3f3bc0"
+    },
+    "referenceImplementation": "F:/AI-T8-video-onekey/ComfyUI/custom_nodes/ComfyUI_Seedance@4bb3131fbe3c157c4d87d52b2a54a2b5e28263c9",
+    "imageTab": "seedream-layer-decomposition",
+    "model": "seedream-v5-pro-layer-decomposition",
+    "contract": {
+      "endpoint": "POST /v1/image/generations + GET /v1/image/generations/{task_id}",
+      "input": "必须且只能输入 1 张 JPG/JPEG/PNG/WEBP 图片，Provider 上传前限制为不超过 30MB；提示词可选且最多 2000 字符。",
+      "resolution": ["auto", "1k", "1.5k", "2k"],
+      "outputFormat": ["png", "jpeg"],
+      "output": "官方文档形状 content.image_urls 与真实 Provider 形状 data.upstream.response.results[] 均按原始顺序完整读取；标量 result_url/image_url 只作为数组缺失时的兼容兜底。",
+      "materialization": "底图与最多 16 个图层逐项使用 taskId+输出序号稳定落盘；重复远程 URL 仍保留为独立输出槽，任一下载或解码失败都不能把任务报告为完成。",
+      "compatibility": "新增独立图像 TAB，不改变原 Seedream、Qwen Image、默认图像模型、默认渠道或旧画布显式字段。"
+    },
+    "workflow": "docs/workflows/seedream-v5-pro-layer-decomposition.json",
+    "verification": {
+      "offline": [
+        "Provider 精确请求、文档 image_urls、真实 upstream.results、重复 URL、生产逐项落盘、前端目录与工作流定向/相邻回归 89/89 通过。",
+        "TypeScript 与 2,862-module Vite 生产构建通过；public-check、RH Toolbox、工作流节点/边计数与无密钥检查通过。",
+        "能力目录同步通过：31 actions、238 runtime entries、76/76 nodes accounted、0 public gaps。"
+      ],
+      "live": {
+        "status": "passed-7-of-7",
+        "evidence": "一次已接受任务在 50% 时遇到一次只读查询 HTTP 500；验证器只恢复同一任务而未重提。成功响应实际包含 7 个 results，已按顺序下载并由 Sharp 解码 7/7：1 张 1024x1024 RGB PNG 底图和 6 张带 alpha 的 PNG 图层。",
+        "visualInspection": "7 张真实输出均已逐张查看，背景、平台与各独立几何主体被拆为可辨识图层。",
+        "sanitizedReport": "output/seedream-layer-live-20260809/report.json",
+        "security": "API Key 只注入一次性进程环境；成功后私有 task 状态已删除；脱敏报告不含 Key、taskId、签名 URL 或原始响应。"
+      }
+    }
+  },
   "flux3VideoAndHailuoH3Global": {
     "status": "released-v2.8.5-live-partially-blocked-by-provider-quota",
     "date": "2026-08-08",
@@ -430,44 +495,43 @@
     ]
   },
   "release": {
-    "status": "released-v2.8.5",
-    "version": "2.8.5",
-    "date": "2026-08-08",
-    "publishedAt": "2026-08-08T09:10:05Z",
-    "tag": "v2.8.5",
-    "latest": true,
-    "sourceCommit": "bbe4500407a45b66c8407180ffc142dcd1d4b962",
-    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.8.5",
+    "status": "release-authorized-v2.8.6",
+    "version": "2.8.6",
+    "date": "2026-08-09",
+    "publishedAt": null,
+    "tag": "v2.8.6",
+    "latest": false,
+    "sourceCommit": null,
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.8.6",
     "artifacts": {
       "installer": {
-        "name": "T8-PenguinCanvas-Setup-2.8.5.exe",
-        "size": 1317585429,
-        "sha256": "e47b6b2ccf99d772f0b5e2be02e8e055d5c49cbcf866e72b54b79abaf011a3d2"
+        "name": "T8-PenguinCanvas-Setup-2.8.6.exe",
+        "size": null,
+        "sha256": null
       },
       "blockmap": {
-        "name": "T8-PenguinCanvas-Setup-2.8.5.exe.blockmap",
-        "size": 1373164,
-        "sha256": "d4eb018cb972595d0acdce002547de414e256c455ff5e2990d41b716af7534f5"
+        "name": "T8-PenguinCanvas-Setup-2.8.6.exe.blockmap",
+        "size": null,
+        "sha256": null
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": 362,
-        "sha256": "9b31c8a4fe3021ca19a38779d3737332431049deb47c42952a2548bf3700afd6"
+        "size": null,
+        "sha256": null
       }
     },
     "verification": [
-      "v2.8.5 发布范围固定为 Hailuo H3 Global 三模型、Flux3 国内/Global 八模型、独立 Flux3 提交/状态/恢复链路、11 份无密钥工作流、能力目录和验证脚本；不回退 v2.8.4 或更早版本的节点、模型、工作流、协议和网络能力。",
-      "发布前 Node 定向与相邻回归 89/89、Electron runRecovery 9/9、TypeScript、public-check、RH toolbox、31 actions / 236 runtime / 76/76 / 0 public gaps 能力同步与 2862 模块公开生产构建通过。",
-      "真实 Provider 完成 7/11：Hailuo Global 三模型与 Flux3 国内 T2V/I2V/V2V/Draft Enhance 均完成提交、轮询、本地下载、SHA-256 和 FFprobe H.264 解码；其余四个 Flux3 Global 模型因测试账户 insufficient_user_quota 未被接受，不冒充通过。",
-      "固定 source commit bbe4500407a45b66c8407180ffc142dcd1d4b962 在独立 release 工作树完成 4431 模块私有生产构建、4 个本机私有后端文件加密、双运行时归档、Electron 原生模块重建、NSIS、post-build、provenance 与 sealed recovery。",
-      "GitHub 草稿阶段三项自动更新资产完成完整远端回下载与封存摘要/GitHub digest 核对；发布后固定 Tag/target、非草稿非预发布状态、Latest、三资产精确集合和元数据再次通过，recovery 已清理。",
-      "用户已明确授权先发布、后补反馈用户安装环境、完整渠道质量矩阵、协作多端与安装升级证据；协作证据门只允许完全缺失的清单按 owner-approved-post-release-v2.8.5 延期，不能把延期标记为已通过。"
+      "v2.8.6 发布范围固定为 Seedream V5 Pro Layer Decomposition、单图层分解工作流、完整多图层有序落盘，以及图像/视频/音频/RunningHub 已完成结果的同任务快速重试与独立安全回源；不回退 v2.8.5 或更早版本的节点、模型、工作流、协议和网络能力。",
+      "发布前 Seedream 定向与相邻回归 89/89、下载故障注入 16/16、Electron 系统网络桥 14/14、状态路由 3/3、前端恢复 24/24、原子落盘 3/3、中文路径 Electron 1/1、TypeScript、public-check、RH toolbox、31 actions / 238 runtime / 76/76 / 0 public gaps 能力同步与 2862 模块公开生产构建通过。",
+      "真实 Provider 已验证 Seedream 分层 7/7 返回图：一次已接受任务在只读查询 HTTP 500 后仅续查原 taskId，最终完整下载 1 张底图与 6 张带 alpha 图层；下载恢复加固未发起新的付费 Provider 任务。",
+      "Electron/NSIS、私有构建、自动更新三资产、固定 source commit、Tag、Latest、远端回下载与摘要在唯一 dist:release 流程完成后回写，未执行前保持空值。",
+      "用户已明确授权先发布、后补反馈用户安装环境、剩余渠道质量矩阵、协作多端与安装升级证据；协作证据门只允许完全缺失的清单按 owner-approved-post-release-v2.8.6 延期，不能把延期标记为已通过。"
     ]
   },
   "versionSequencePolicy": {
     "status": "active",
     "date": "2026-07-30",
-    "currentVersion": "2.8.5",
+    "currentVersion": "2.8.6",
     "rules": [
       "版本号每一段只使用 0-9；v2.6.9 的下一正式版本固定为 v2.7.0。",
       "禁止创建、打包、推送、打 tag、发布或写入自动更新元数据为 v2.6.10。",
@@ -485,6 +549,7 @@
       "v2.8.2 的下一正式版本固定为 v2.8.3。",
       "v2.8.3 的下一正式版本固定为 v2.8.4。",
       "v2.8.4 的下一正式版本固定为 v2.8.5。",
+      "v2.8.5 的下一正式版本固定为 v2.8.6。",
       "后续改版本前必须同步核对 package.json、package-lock.json、README、features.json、项目 SKILL.md、Release notes、自动更新元数据和 Git tag。"
     ]
   },
@@ -6787,11 +6852,11 @@
       "T8_ENABLE_LOCAL_PRIVATE": "开发环境和普通本机构建可选；0=关闭本机 local-private/extensions 私有扩展。正式 dist:release 固定为 1，不能被父环境降级。GitHub/clean clone 因为没有 local-private 目录，不包含充值实现。",
       "T8_DISABLE_LOCAL_EXTENSIONS": "开发环境可选；1=关闭本地扩展。正式 dist:release 固定为 0，确保本机私有 sidecar 参与加密打包与后置校验。"
     },
-    "version": "2.8.5",
-    "semverVersion": "2.8.5",
+    "version": "2.8.6",
+    "semverVersion": "2.8.6",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.5 已从固定 source commit bbe4500407a45b66c8407180ffc142dcd1d4b962 正式发布，范围为 Hailuo H3 Global、Flux3、11 份工作流及独立恢复链路。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.8.5 已通过唯一 dist:release 流程生成并发布 NSIS、blockmap 与 latest.yml；私有构建、摘要、provenance、sealed recovery、GitHub 草稿阶段三资产完整回下载、发布后 Tag/target、Latest 和 recovery 清理全部通过。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.6 发布候选范围固定为 Seedream V5 Pro 分层与全渠道已完成结果下载恢复加固。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.8.6 只允许由固定并已推送的 source commit 在独立 release 工作树执行唯一 dist:release 流程；正式 NSIS、blockmap、latest.yml、摘要、Tag/target、Latest 与远端回下载事实待真实流程收敛后回填。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",

@@ -825,6 +825,110 @@ test('seedance.nz image query preserves every returned image URL for multi-outpu
   ]);
 });
 
+test('seedance.nz builds the exact Seedream layer-decomposition payload from one source image', async () => {
+  seedanceNz.resetCachesForTests();
+  const uploads: Array<{ url: string; init?: RequestInit }> = [];
+  const built = await seedanceNz.buildSeedreamLayerDecompositionPayload({
+    model: 'seedream-v5-pro-layer-decomposition',
+    images: [TINY_PNG_A],
+    prompt: '',
+    resolution: '1.5k',
+    output_format: 'png',
+    n: 99,
+    ratio: '16:9',
+  }, 'test-key', {
+    uploadIntervalMs: 0,
+    fetchImpl: async (url: string, init?: RequestInit) => {
+      uploads.push({ url, init });
+      return jsonResponse({ url: 'https://cdn.example.com/seedream-layer-source.png' });
+    },
+  });
+
+  assert.equal(uploads.length, 1);
+  assert.deepEqual(built, {
+    model: 'seedream-v5-pro-layer-decomposition',
+    taskType: 'layer-decomposition',
+    payload: {
+      model: 'seedream-v5-pro-layer-decomposition',
+      images: ['https://cdn.example.com/seedream-layer-source.png'],
+      metadata: { resolution: '1.5k', output_format: 'png' },
+    },
+  });
+  await assert.rejects(
+    seedanceNz.buildSeedreamLayerDecompositionPayload({
+      model: 'seedream-v5-pro-layer-decomposition', images: [],
+    }, 'test-key'),
+    /必须且只能提供 1 张源图/,
+  );
+  await assert.rejects(
+    seedanceNz.buildSeedreamLayerDecompositionPayload({
+      model: 'seedream-v5-pro-layer-decomposition', images: [TINY_PNG_A, TINY_PNG_B],
+    }, 'test-key'),
+    /必须且只能提供 1 张源图/,
+  );
+});
+
+test('seedance.nz preserves the documented Seedream layer array order and duplicate entries', async () => {
+  const queried = await seedanceNz.queryImageTask('seedream-layer-task', 'test-key', {
+    baseUrl: 'https://api.seedance.nz',
+    fetchImpl: async () => jsonResponse({
+      data: {
+        status: 'SUCCESS',
+        result_url: 'https://cdn.example.com/scalar-must-not-replace-array.png',
+        data: {
+          content: {
+            image_url: 'https://cdn.example.com/base.png',
+            image_urls: [
+              'https://cdn.example.com/base.png',
+              'https://cdn.example.com/layer-1.png',
+              'https://cdn.example.com/layer-1.png',
+              'https://cdn.example.com/layer-2.png',
+            ],
+          },
+        },
+      },
+    }),
+  });
+  assert.deepEqual(queried.imageUrls, [
+    'https://cdn.example.com/base.png',
+    'https://cdn.example.com/layer-1.png',
+    'https://cdn.example.com/layer-1.png',
+    'https://cdn.example.com/layer-2.png',
+  ]);
+  assert.equal(queried.imageUrl, 'https://cdn.example.com/base.png');
+});
+
+test('seedance.nz preserves every layer from the live Provider upstream.results response shape', async () => {
+  const queried = await seedanceNz.queryImageTask('seedream-layer-live-shape', 'test-key', {
+    baseUrl: 'https://api.seedance.nz',
+    fetchImpl: async () => jsonResponse({
+      data: {
+        status: 'SUCCESS',
+        result_url: 'https://cdn.example.com/compatibility-result.png',
+        data: {
+          content: { video_url: 'https://cdn.example.com/compatibility-result.png' },
+          upstream: {
+            response: {
+              results: [
+                { outputType: 'url', url: 'https://cdn.example.com/base.png' },
+                { outputType: 'url', url: 'https://cdn.example.com/layer-1.png' },
+                { outputType: 'url', url: 'https://cdn.example.com/layer-1.png' },
+                { outputType: 'url', url: 'https://cdn.example.com/layer-2.png' },
+              ],
+            },
+          },
+        },
+      },
+    }),
+  });
+  assert.deepEqual(queried.imageUrls, [
+    'https://cdn.example.com/base.png',
+    'https://cdn.example.com/layer-1.png',
+    'https://cdn.example.com/layer-1.png',
+    'https://cdn.example.com/layer-2.png',
+  ]);
+});
+
 test('seedance.nz builds all three Happy Horse payload modes without mixing Seedance fields', async () => {
   seedanceNz.resetCachesForTests();
   let uploadIndex = 0;

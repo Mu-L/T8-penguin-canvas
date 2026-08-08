@@ -10,13 +10,13 @@ https://www.runninghub.cn/?inviteCode=rh-v1121
 My favorite girl Go YounJung
 # 🐧 贞贞的无限画布（企鹅共创版） · T8-penguin-canvas
 
-> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.8.5
+> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.8.6
 >
 > GitHub：<https://github.com/T8mars/T8-penguin-canvas>
 
 一个面向 AI 创作的 **节点式画布**：拖拽节点、连线编排、生成图像 / 视频 / 音频、调用 LLM、串接 RunningHub 工作流，叠加批量执行、智能对齐、打组、主题模板与终端日志。Web 浏览器和桌面端均可使用。
 
-![status](https://img.shields.io/badge/version-v2.8.5-brightgreen) ![node](https://img.shields.io/badge/node-76-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
+![status](https://img.shields.io/badge/version-v2.8.6-brightgreen) ![node](https://img.shields.io/badge/node-76-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
 
 ---
 
@@ -36,6 +36,7 @@ My favorite girl Go YounJung
 ## ✨ 功能亮点
 
 - 🎨 **76 个节点**，覆盖文本 / 图像 / 视频 / 音频 / LLM / RunningHub / ComfyUI / 3D / 工具 / 辅助 / 工具箱 / 输出预览 / 上传素材 / 素材集 / 批量打标 / 随机路由 / Story 全自动制片 / 剧本大师 / MiniMax H3 / Seedance 2.0 提示词增强器 / Seedance 2.5 / 白模预演 / MV 音乐大师
+- 🧩 **v2.8.6 Seedream 分层与下载恢复版**：图像节点新增 Seedream 分层 TAB，接入 `seedream-v5-pro-layer-decomposition`，完整保存底图和全部返回图层；同时放宽图像、视频、音频及 RunningHub 已完成结果的下载恢复窗口，采用 0/500/1500ms 快速重试，并在系统代理、TUN、VPN、慢首包或 CDN 暂时错误时切换独立安全回源。恢复只查询和下载原任务，不会重放生成请求或重复扣费。
 - 🎞️ **v2.8.5 Hailuo H3 Global / Flux3 视频版**：既有 Hailuo TAB 新增 Global T2V、I2V、Multi，并统一支持 5–15 秒与 768P/2K；新增 Flux3 TAB，收录国内/Global 的 T2V、I2V、V2V、Draft Enhance 八个精确模型，支持 5–20 秒、HD/FHD、最多 10 张关键帧、单个 MP4 视频编辑与真实草稿缓存增强。11 份工作流不保存密钥，默认视频模型、旧 Hailuo/Seedance 与已保存画布参数不变。
 - 🎬 **v2.8.4 Seedance 2.5 标准模型版**：新增独立 SD2.5 节点，并在视频节点加入 Seedance 2.5 TAB，收录国内/Global 的 Standard T2V、I2V、Multi 六个精确模型；新建节点按最新官方文档默认 5 秒/720p，支持 4–30 秒或智能时长、首尾帧及最多 30 图/10 视频/10 音频/总计 50 个多模态素材。图片 MIME/30MB、音视频 MIME/50MB、单段 2–30 秒及音视频合计 30 秒均在付费提交前校验，旧 Seedance 2.0、默认视频模型与已保存画布参数不变。
 - 🎵 **v2.8.3 MV 音乐大师版**：上传歌曲、人设图、风格图和歌词后，以 5.000–14.990 秒完整句式分段，分批生成视觉圣经、图像提示词和视频提示词；分镜图与分段视频均支持逐段审阅、采纳和重生成，最终按版本化 EDL 合成并只保留一条完整原曲音轨。默认 LLM 仍为贞贞的平价AI小屋 `bytedance/doubao-seed-2.1-pro`，Provider、模型、素材摘要、停止/恢复和交付回执均失败关闭，不会静默切换渠道或自动重放不明确的付费提交。

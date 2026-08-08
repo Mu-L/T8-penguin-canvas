@@ -11,9 +11,10 @@ export type ProviderType = 'zhenzhen' | 'llm-direct' | 'runninghub';
 //  - 'banana-ratio': nano-banana 协议,使用 aspect_ratio + image_size(1K/2K/4K) + image[]
 //  - 'grok-image'  : Grok Image 协议,JSON /generations,参考图默认 base64 dataURL
 //  - 'seedream-v5' : Seedream V5 Pro 协议,JSON /generations,size 为像素串,image[] 可选
+//  - 'seedream-layer': Seedream V5 Pro 分层协议,单图输入,返回底图 + 有序图层列表
 //  - 'qwen-image-3.0': Qwen Image 3.0 协议,auto / 比例+分辨率 / 自定义 W*H 三种互斥尺寸模式
 //  - 'mj'          : Midjourney 协议,走专属 /api/proxy/mj/* 路由(speed_map + sref/oref)
-export type ImageParamKind = 'gpt-size' | 'banana-ratio' | 'grok-image' | 'seedream-v5' | 'qwen-image-3.0' | 'mj';
+export type ImageParamKind = 'gpt-size' | 'banana-ratio' | 'grok-image' | 'seedream-v5' | 'seedream-layer' | 'qwen-image-3.0' | 'mj';
 
 export interface ImageModelDef {
   id: string;             // 节点内部 id(如 'gpt-image-2')
@@ -130,6 +131,8 @@ export const QWEN_IMAGE_30_MODELS = [
 ] as const;
 export type QwenImage30Model = typeof QWEN_IMAGE_30_MODELS[number];
 export const QWEN_IMAGE_30_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
+export const SEEDREAM_LAYER_DECOMPOSITION_MODEL = 'seedream-v5-pro-layer-decomposition';
+export const SEEDREAM_LAYER_RESOLUTIONS = ['auto', '1k', '1.5k', '2k'] as const;
 
 export function isQwenImage30Model(apiModel: string | undefined | null): apiModel is QwenImage30Model {
   return (QWEN_IMAGE_30_MODELS as readonly string[]).includes(String(apiModel || '').trim());
@@ -256,6 +259,25 @@ export const IMAGE_MODELS: ImageModelDef[] = [
     supportsReference: true,
     maxReferenceImages: 10,
     description: 'Seedream V5 Pro · 文生图/多图编辑',
+  },
+  {
+    id: 'seedream-layer-decomposition',
+    apiModel: SEEDREAM_LAYER_DECOMPOSITION_MODEL,
+    label: 'Seedream V5 Pro 分层',
+    tabLabel: 'Seedream分层',
+    provider: 'zhenzhen',
+    paramKind: 'seedream-layer',
+    capabilities: ['i2i', 'edit'],
+    apiModelOptions: [
+      { value: SEEDREAM_LAYER_DECOMPOSITION_MODEL, label: SEEDREAM_LAYER_DECOMPOSITION_MODEL },
+    ],
+    aspectRatios: [],
+    defaultAspectRatio: '',
+    sizes: [],
+    defaultSize: '',
+    supportsReference: true,
+    maxReferenceImages: 1,
+    description: 'Seedream V5 Pro 图层拆分 · 单图输入，完整返回底图与最多 16 个图层',
   },
   {
     id: 'qwen-image-3.0',

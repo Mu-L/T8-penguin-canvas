@@ -121,6 +121,11 @@ const QWEN_IMAGE_30_RATIOS = new Set([
 const QWEN_IMAGE_30_PROMPT_MIN_LENGTH = 5;
 const QWEN_IMAGE_30_PROMPT_MAX_LENGTH = 2000;
 const QWEN_IMAGE_30_MAX_REFERENCE_IMAGES = 3;
+const SEEDREAM_LAYER_DECOMPOSITION_MODEL = 'seedream-v5-pro-layer-decomposition';
+const SEEDREAM_LAYER_RESOLUTIONS = new Set(['auto', '1k', '1.5k', '2k']);
+const SEEDREAM_LAYER_OUTPUT_FORMATS = new Set(['jpeg', 'png']);
+const SEEDREAM_LAYER_PROMPT_MAX_LENGTH = 2000;
+const SEEDREAM_LAYER_SOURCE_MAX_BYTES = 30 * 1024 * 1024;
 const ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL = 'zhenzhen-video-g-omni-flash';
 const ZHENZHEN_VIDEO_GK_V15_MODEL = 'zhenzhen-video-gk-v15';
 const ZHENZHEN_VIDEO_V31_FAST_MODEL = 'zhenzhen-video-v31-fast';
@@ -155,6 +160,7 @@ const IMAGE_MODELS = new Set([
   ...ZHENZHEN_IMAGE_G2_MODELS,
   ...ZHENZHEN_APIMART_IMAGE_MODELS,
   ...QWEN_IMAGE_30_MODELS,
+  SEEDREAM_LAYER_DECOMPOSITION_MODEL,
 ]);
 const IMAGE_RESOLUTIONS = new Set(['1k', '2k']);
 const IMAGE_OUTPUT_FORMATS = new Set(['jpeg', 'png']);
@@ -2615,6 +2621,9 @@ async function buildZhenzhenImageG2Payload(request, apiKey, options = {}) {
 
 async function buildImagePayload(request, apiKey, options = {}) {
   const requestedModel = String(request.model || '').trim().toLowerCase();
+  if (requestedModel === SEEDREAM_LAYER_DECOMPOSITION_MODEL) {
+    return buildSeedreamLayerDecompositionPayload(request, apiKey, options);
+  }
   if (QWEN_IMAGE_30_MODELS.has(requestedModel)) {
     return buildQwenImage30Payload(request, apiKey, options);
   }
@@ -2658,6 +2667,40 @@ async function buildImagePayload(request, apiKey, options = {}) {
     }
   }
   return { payload, model, taskType: refs.length ? 'i2i' : 't2i' };
+}
+
+async function buildSeedreamLayerDecompositionPayload(request, apiKey, options = {}) {
+  const model = String(request.model || '').trim().toLowerCase();
+  if (model !== SEEDREAM_LAYER_DECOMPOSITION_MODEL) {
+    throw new Error(`未知 Seedream 分层模型：${model || '(空)'}`);
+  }
+  const refs = normalizeList(request.images || request.refImages);
+  if (refs.length !== 1) throw new Error('Seedream 分层必须且只能提供 1 张源图');
+  const prompt = String(request.prompt || '').trim();
+  if (prompt.length > SEEDREAM_LAYER_PROMPT_MAX_LENGTH) {
+    throw new Error(`Seedream 分层提示词最多 ${SEEDREAM_LAYER_PROMPT_MAX_LENGTH} 字符`);
+  }
+  const resolution = String(request.resolution || 'auto').trim().toLowerCase();
+  if (!SEEDREAM_LAYER_RESOLUTIONS.has(resolution)) {
+    throw new Error('Seedream 分层分辨率只支持 auto、1k、1.5k 或 2k');
+  }
+  const outputFormat = String(request.output_format || request.outputFormat || 'png').trim().toLowerCase();
+  if (!SEEDREAM_LAYER_OUTPUT_FORMATS.has(outputFormat)) {
+    throw new Error('Seedream 分层输出格式只支持 png 或 jpeg');
+  }
+  const sourceUrl = await uploadMedia(refs[0], 'image', apiKey, {
+    ...options,
+    maxBytes: SEEDREAM_LAYER_SOURCE_MAX_BYTES,
+    allowedMimes: ['image/jpeg', 'image/png', 'image/webp'],
+    cacheVariant: 'seedream-v5-pro-layer-decomposition-source-v1',
+  });
+  const payload = {
+    model: SEEDREAM_LAYER_DECOMPOSITION_MODEL,
+    images: [sourceUrl],
+    metadata: { resolution, output_format: outputFormat },
+  };
+  if (prompt) payload.prompt = prompt;
+  return { payload, model, taskType: 'layer-decomposition' };
 }
 
 function normalizeQwenImage30CustomSize(value) {
@@ -3929,12 +3972,20 @@ function imageTaskResultUrls(record, nested) {
       add(value[key]);
     }
   };
+  const documentedLayerUrls = nested?.content?.image_urls ?? nested?.content?.imageUrls;
+  if (Array.isArray(documentedLayerUrls)) {
+    add(documentedLayerUrls);
+    if (urls.length) return urls;
+  }
+  const providerLayerResults = nested?.upstream?.response?.results;
+  if (Array.isArray(providerLayerResults)) {
+    add(providerLayerResults);
+    if (urls.length) return urls;
+  }
   for (const value of [
     record?.result_urls,
     record?.resultUrls,
     record?.images,
-    nested?.content?.image_urls,
-    nested?.content?.imageUrls,
     nested?.content?.images,
     record?.result_url,
     record?.resultUrl,
@@ -4108,6 +4159,8 @@ module.exports = {
   IMAGE_MODEL_PAIRS,
   IMAGE_MODELS,
   IMAGE_RESOLUTIONS,
+  SEEDREAM_LAYER_DECOMPOSITION_MODEL,
+  SEEDREAM_LAYER_RESOLUTIONS,
   QWEN_IMAGE_30_I2I_MODELS,
   QWEN_IMAGE_30_MODELS,
   QWEN_IMAGE_30_RATIOS,
@@ -4175,6 +4228,7 @@ module.exports = {
   buildApimartImagePayload,
   buildApimartVideoPayload,
   buildImagePayload,
+  buildSeedreamLayerDecompositionPayload,
   buildQwenImage30Payload,
   buildMidjourneyPayload,
   buildZhenzhenImageG2Payload,

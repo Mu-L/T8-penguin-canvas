@@ -325,7 +325,7 @@ test('Seedream NZ selector distinguishes domestic and Dola overseas model famili
   assert.match(node, /Dola Seedream 5\.0 Pro（海外模型）/);
   assert.match(node, /dola-seedream-5\.0-pro-t2i/);
   assert.match(node, /dola-seedream-5\.0-pro-i2i/);
-  assert.match(node, /modelFamily: isZhenzhenBudgetImageSelected \|\| isQwenImageTab \? undefined : seedreamNzModelFamily/);
+  assert.match(node, /modelFamily: isZhenzhenBudgetImageSelected \|\| isQwenImageTab \|\| isSeedreamLayerTab \? undefined : seedreamNzModelFamily/);
   assert.match(generation, /modelFamily\?: 'domestic' \| 'overseas'/);
   assert.match(provider, /dola-seedream-5\.0-pro-t2i/);
   assert.match(provider, /dola-seedream-5\.0-pro-i2i/);

@@ -60,20 +60,29 @@ test('Seedream NZ proxy uses the independent SD2 key and stores completed output
   seedanceNz.submitImageTask = async (request: any, apiKey: string) => {
     submittedRequest = request;
     submittedKey = apiKey;
+    const isLayer = request.model === 'seedream-v5-pro-layer-decomposition';
     return {
-      taskId: 'seedream-nz-task-1',
+      taskId: isLayer ? 'seedream-layer-task-1' : 'seedream-nz-task-1',
       model: request.model || (request.images?.length ? 'seedream-v5-pro-i2i' : 'seedream-v5-pro-t2i'),
-      taskType: request.model?.endsWith('-i2i') || request.images?.length ? 'i2i' : 't2i',
+      taskType: isLayer ? 'layer-decomposition' : request.model?.endsWith('-i2i') || request.images?.length ? 'i2i' : 't2i',
       raw: { status: 'queued' },
     };
   };
-  seedanceNz.queryImageTask = async () => ({
-    status: 'succeeded',
-    progress: '100%',
-    imageUrl: mediaUrl,
-    imageUrls: [mediaUrl, secondMediaUrl],
-    raw: { data: { status: 'SUCCESS' } },
-  });
+  seedanceNz.queryImageTask = async (taskId: string) => taskId === 'seedream-layer-task-1'
+    ? {
+        status: 'succeeded',
+        progress: '100%',
+        imageUrl: mediaUrl,
+        imageUrls: [mediaUrl, mediaUrl, secondMediaUrl],
+        raw: { data: { status: 'SUCCESS' } },
+      }
+    : {
+        status: 'succeeded',
+        progress: '100%',
+        imageUrl: mediaUrl,
+        imageUrls: [mediaUrl, secondMediaUrl],
+        raw: { data: { status: 'SUCCESS' } },
+      };
   t.after(() => Object.assign(seedanceNz, originals));
 
   const proxyRouter = require('../backend/src/routes/proxy.js');
@@ -140,4 +149,32 @@ test('Seedream NZ proxy uses the independent SD2 key and stores completed output
   }
   assert.equal(mediaDownloads, 2);
   assert.deepEqual(safeLookupHosts, ['media.test', 'media.test']);
+
+  const layerSubmit = await fetch(`${base}/api/proxy/image/seedance-nz/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'seedream-v5-pro-layer-decomposition',
+      prompt: '',
+      images: ['/files/input/layer-source.png'],
+      resolution: 'auto',
+      output_format: 'png',
+    }),
+  }).then((response) => response.json());
+  assert.equal(layerSubmit.success, true);
+  assert.equal(layerSubmit.data.taskId, 'seedream-layer-task-1');
+  assert.equal(submittedRequest.model, 'seedream-v5-pro-layer-decomposition');
+
+  const layerStatus = await fetch(`${base}/api/proxy/image/seedance-nz/status/seedream-layer-task-1`)
+    .then((response) => response.json());
+  assert.equal(layerStatus.success, true);
+  assert.equal(layerStatus.data.status, 'completed');
+  assert.equal(layerStatus.data.outputCount, 3);
+  assert.equal(layerStatus.data.urls.length, 3);
+  assert.equal(new Set(layerStatus.data.urls).size, 3);
+  for (const localUrl of layerStatus.data.urls) {
+    assert.equal(fs.existsSync(path.join(config.OUTPUT_DIR, path.basename(localUrl))), true);
+  }
+  assert.equal(mediaDownloads, 5);
+  assert.deepEqual(safeLookupHosts, ['media.test', 'media.test', 'media.test', 'media.test', 'media.test']);
 });

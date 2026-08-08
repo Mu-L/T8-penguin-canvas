@@ -725,7 +725,13 @@ async function fetchProxyRemoteMedia(url, options = {}) {
   const remote = await safeRemoteMediaFetch(url, proxySafeRemoteOptions({
     maxBytes: maximum,
     deadlineMs,
+    trustedProviderFallbackDeadlineMs: Number(options.trustedProviderFallbackDeadlineMs) > 0
+      ? Number(options.trustedProviderFallbackDeadlineMs)
+      : undefined,
     trustedProviderOutput: options.trustedProviderOutput === true,
+    connectTimeoutMs: Number(options.connectTimeoutMs) > 0
+      ? Number(options.connectTimeoutMs)
+      : undefined,
     idleTimeoutMs,
     maxRedirects: 4,
     accept: options.accept || 'image/*,video/*,audio/*,application/octet-stream;q=0.5',
@@ -1859,25 +1865,85 @@ async function saveRemoteImage(url, _providerFetchImpl, materializationKey = '')
   return result.url || null;
 }
 
-const IMAGE_OUTPUT_RETRY_DELAYS_MS = Object.freeze([0, 3_000, 3_000]);
-// A completed Provider task must not monopolize one status request for minutes.
-// The frontend can safely retry the same task ID, so keep each image
-// materialization round short and return a recoverable 202 with the real cause.
-const IMAGE_OUTPUT_MATERIALIZATION_DEADLINE_MS = boundedProxyInteger(
-  process.env.T8_IMAGE_OUTPUT_MATERIALIZATION_DEADLINE_MS,
-  25_000,
-  1_000,
-  90_000,
-);
-// Three seconds is the retry cadence, not a live CDN transfer timeout. Slow
-// proxy, TUN and IPv6 paths may legitimately pause between response chunks.
-const IMAGE_OUTPUT_MATERIALIZATION_IDLE_TIMEOUT_MS = boundedProxyInteger(
-  process.env.T8_IMAGE_OUTPUT_MATERIALIZATION_IDLE_TIMEOUT_MS,
+const REMOTE_OUTPUT_RETRY_DELAYS_MS = Object.freeze([0, 500, 1_500]);
+// Result materialization is a read-only continuation of an already-completed
+// Provider task.  A slow proxy/TUN/CDN path must not lose the result merely
+// because the former image-only 25 second budget expired.  The total budget
+// schedules retries; an already-open recovery transfer is allowed to finish
+// its own bounded attempt instead of being cut off at the outer boundary.
+const REMOTE_OUTPUT_MATERIALIZATION_DEADLINE_MS = boundedProxyInteger(
+  process.env.T8_REMOTE_OUTPUT_MATERIALIZATION_DEADLINE_MS
+    || process.env.T8_IMAGE_OUTPUT_MATERIALIZATION_DEADLINE_MS,
+  5 * 60_000,
   15_000,
+  15 * 60_000,
+);
+const REMOTE_OUTPUT_ATTEMPT_DEADLINE_MS = boundedProxyInteger(
+  process.env.T8_REMOTE_OUTPUT_ATTEMPT_DEADLINE_MS,
+  2 * 60_000,
+  5_000,
+  5 * 60_000,
+);
+// Chunk idle time is intentionally looser than the old image-only 15 seconds,
+// while connection establishment fails over quickly to a fresh route.
+const REMOTE_OUTPUT_IDLE_TIMEOUT_MS = boundedProxyInteger(
+  process.env.T8_REMOTE_OUTPUT_IDLE_TIMEOUT_MS
+    || process.env.T8_IMAGE_OUTPUT_MATERIALIZATION_IDLE_TIMEOUT_MS,
+  30_000,
   1_000,
+  2 * 60_000,
+);
+const REMOTE_OUTPUT_CONNECT_TIMEOUT_MS = boundedProxyInteger(
+  process.env.T8_REMOTE_OUTPUT_CONNECT_TIMEOUT_MS,
+  8_000,
+  500,
   30_000,
 );
-const REMOTE_OUTPUT_RETRY_AFTER_MS = 3_000;
+const REMOTE_OUTPUT_RETRY_AFTER_MS = 1_000;
+
+function remoteOutputRetryDelays() {
+  const testDelays = proxySafeRemoteTestOptions?.remoteOutputRetryDelaysMs;
+  if (!Array.isArray(testDelays) || !testDelays.length) return REMOTE_OUTPUT_RETRY_DELAYS_MS;
+  return testDelays
+    .map((value) => Math.max(0, Math.min(30_000, Math.trunc(Number(value)) || 0)))
+    .slice(0, 8);
+}
+
+function remoteOutputDeadlineAt() {
+  const override = Number(proxySafeRemoteTestOptions?.remoteOutputMaterializationDeadlineMs);
+  const budget = Number.isFinite(override) && override > 0
+    ? Math.max(10, Math.min(15 * 60_000, Math.trunc(override)))
+    : REMOTE_OUTPUT_MATERIALIZATION_DEADLINE_MS;
+  return Date.now() + budget;
+}
+
+function remoteOutputTransferWindow(deadlineAt, label = '生成结果') {
+  const remainingMs = deadlineAt - Date.now();
+  if (remainingMs <= 0) {
+    throw Object.assign(new Error(`${label}下载超过本轮恢复时间`), { code: 'fetch_timeout' });
+  }
+  const configuredAttempt = Number(proxySafeRemoteTestOptions?.remoteOutputAttemptDeadlineMs);
+  const attemptBudget = Number.isFinite(configuredAttempt) && configuredAttempt > 0
+    ? Math.max(10, Math.min(5 * 60_000, Math.trunc(configuredAttempt)))
+    : REMOTE_OUTPUT_ATTEMPT_DEADLINE_MS;
+  const deadlineMs = Math.max(1, Math.min(attemptBudget, remainingMs));
+  const configuredIdle = Number(proxySafeRemoteTestOptions?.remoteOutputIdleTimeoutMs);
+  const idleBudget = Number.isFinite(configuredIdle) && configuredIdle > 0
+    ? Math.max(10, Math.min(2 * 60_000, Math.trunc(configuredIdle)))
+    : REMOTE_OUTPUT_IDLE_TIMEOUT_MS;
+  const configuredConnect = Number(proxySafeRemoteTestOptions?.remoteOutputConnectTimeoutMs);
+  const connectBudget = Number.isFinite(configuredConnect) && configuredConnect > 0
+    ? Math.max(10, Math.min(30_000, Math.trunc(configuredConnect)))
+    : REMOTE_OUTPUT_CONNECT_TIMEOUT_MS;
+  return {
+    deadlineMs,
+    // Chromium/system networking and DNS-pinned recovery are different paths.
+    // The second path receives a fresh budget so the first cannot starve it.
+    trustedProviderFallbackDeadlineMs: deadlineMs,
+    idleTimeoutMs: Math.max(1, Math.min(idleBudget, deadlineMs)),
+    connectTimeoutMs: Math.max(1, Math.min(connectBudget, deadlineMs)),
+  };
+}
 
 const REMOTE_OUTPUT_KIND_LABELS = Object.freeze({
   image: { noun: '图片', object: '图片', code: 'image' },
@@ -1930,7 +1996,10 @@ function remoteOutputDownloadFailure(error, kind = 'media') {
       retryAfterMs: REMOTE_OUTPUT_RETRY_AFTER_MS,
     };
   }
-  if (['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'remote_response_aborted'].includes(code)) {
+  if ([
+    'system_network_fetch_failed', 'connect_timeout', 'remote_response_aborted',
+    'ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH',
+  ].includes(code)) {
     return {
       code: `${label.code}_download_network_failed`,
       message: `${label.noun}已经生成，但本机与结果服务器的连接被拒绝或中断。应用会刷新连接并保留原任务自动重试。`,
@@ -1999,28 +2068,24 @@ function retryableImageOutputError(error) {
 
 async function saveRemoteImageDetailed(url, _providerFetchImpl, materializationKey = '', signal) {
   let lastError = null;
-  const deadlineAt = Date.now() + IMAGE_OUTPUT_MATERIALIZATION_DEADLINE_MS;
-  for (let attempt = 0; attempt < IMAGE_OUTPUT_RETRY_DELAYS_MS.length; attempt += 1) {
-    const delay = IMAGE_OUTPUT_RETRY_DELAYS_MS[attempt];
+  const deadlineAt = remoteOutputDeadlineAt();
+  const retryDelays = remoteOutputRetryDelays();
+  for (let attempt = 0; attempt < retryDelays.length; attempt += 1) {
+    const delay = retryDelays[attempt];
     if (delay > 0) {
       if (Date.now() + delay >= deadlineAt) {
-        lastError = Object.assign(new Error('图片结果下载超过单轮等待时间'), { code: 'fetch_timeout' });
+        lastError = Object.assign(new Error('图片结果下载超过本轮恢复时间'), { code: 'fetch_timeout' });
         break;
       }
       await proxyAbortableDelay(delay, signal);
     }
-    const remainingMs = deadlineAt - Date.now();
-    if (remainingMs <= 0) {
-      lastError = Object.assign(new Error('图片结果下载超过单轮等待时间'), { code: 'fetch_timeout' });
-      break;
-    }
     try {
+      const transferWindow = remoteOutputTransferWindow(deadlineAt, '图片结果');
       const remote = await fetchProxyRemoteMedia(url, {
         allowedKinds: ['image'],
         trustedProviderOutput: true,
         maxBytes: PROXY_IMAGE_REFERENCE_MAX_BYTES,
-        deadlineMs: remainingMs,
-        idleTimeoutMs: Math.min(IMAGE_OUTPUT_MATERIALIZATION_IDLE_TIMEOUT_MS, remainingMs),
+        ...transferWindow,
         accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif,image/bmp,image/tiff;q=0.9',
         signal,
       });
@@ -2059,14 +2124,24 @@ async function saveRemoteAudio(url, materializationKey = '') {
 
 async function saveRemoteAudioDetailed(url, materializationKey = '', signal) {
   let lastError = null;
-  for (let attempt = 0; attempt < IMAGE_OUTPUT_RETRY_DELAYS_MS.length; attempt += 1) {
-    const delay = IMAGE_OUTPUT_RETRY_DELAYS_MS[attempt];
-    if (delay > 0) await proxyAbortableDelay(delay, signal);
+  const deadlineAt = remoteOutputDeadlineAt();
+  const retryDelays = remoteOutputRetryDelays();
+  for (let attempt = 0; attempt < retryDelays.length; attempt += 1) {
+    const delay = retryDelays[attempt];
+    if (delay > 0) {
+      if (Date.now() + delay >= deadlineAt) {
+        lastError = Object.assign(new Error('音频结果下载超过本轮恢复时间'), { code: 'fetch_timeout' });
+        break;
+      }
+      await proxyAbortableDelay(delay, signal);
+    }
     try {
+      const transferWindow = remoteOutputTransferWindow(deadlineAt, '音频结果');
       const remote = await fetchProxyRemoteMedia(url, {
         allowedKinds: ['audio'],
         trustedProviderOutput: true,
         maxBytes: PROXY_AUDIO_REFERENCE_MAX_BYTES,
+        ...transferWindow,
         accept: 'audio/mpeg,audio/mp4,audio/wav,audio/ogg,audio/flac;q=0.9',
         signal,
       });
@@ -2641,7 +2716,7 @@ function completedImageOutputError(materialized) {
     status: recoverable ? 202 : 502,
     imageOutputFailure: true,
     recoverable,
-    retryAfterMs: recoverable ? Math.max(2_000, Number(reason.retryAfterMs) || REMOTE_OUTPUT_RETRY_AFTER_MS) : 0,
+    retryAfterMs: recoverable ? Math.max(500, Number(reason.retryAfterMs) || REMOTE_OUTPUT_RETRY_AFTER_MS) : 0,
   });
 }
 
@@ -2688,7 +2763,7 @@ function completedRemoteOutputError(materialized, kind = 'media') {
     status: recoverable ? 202 : 502,
     remoteOutputFailure: true,
     recoverable,
-    retryAfterMs: recoverable ? Math.max(2_000, Number(reason.retryAfterMs) || REMOTE_OUTPUT_RETRY_AFTER_MS) : 0,
+    retryAfterMs: recoverable ? Math.max(500, Number(reason.retryAfterMs) || REMOTE_OUTPUT_RETRY_AFTER_MS) : 0,
   });
 }
 
@@ -2754,15 +2829,17 @@ async function materializeRemoteTaskOutput({
 
 async function saveRemoteSunoFileDetailed(url, materializationKey = '') {
   let lastError = null;
-  for (let attempt = 0; attempt < IMAGE_OUTPUT_RETRY_DELAYS_MS.length; attempt += 1) {
-    const delay = IMAGE_OUTPUT_RETRY_DELAYS_MS[attempt];
+  const deadlineAt = remoteOutputDeadlineAt();
+  const retryDelays = remoteOutputRetryDelays();
+  for (let attempt = 0; attempt < retryDelays.length; attempt += 1) {
+    const delay = retryDelays[attempt];
     if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
     try {
+      const transferWindow = remoteOutputTransferWindow(deadlineAt, 'Suno 结果');
       const remote = await safeRemoteMediaFetch(url, proxySafeRemoteOptions({
         maxBytes: PROXY_AUDIO_REFERENCE_MAX_BYTES,
         trustedProviderOutput: true,
-        deadlineMs: PROXY_REMOTE_DEADLINE_MS,
-        idleTimeoutMs: PROXY_REMOTE_IDLE_TIMEOUT_MS,
+        ...transferWindow,
         maxRedirects: 4,
         accept: 'audio/midi,audio/x-midi,application/x-midi,application/octet-stream;q=0.8',
         userAgent: 'T8-PenguinCanvas-Suno-File/1.0',
@@ -3176,11 +3253,14 @@ router.get('/image/seedance-nz/status/:tid', async (req, res) => {
   try {
     const result = await seedanceNz.queryImageTask(req.params.tid, apiKey, { signal: req.t8AbortSignal });
     if (result.status === 'succeeded') {
-      const remoteImageUrls = [...new Set(
-        (Array.isArray(result.imageUrls) && result.imageUrls.length ? result.imageUrls : [result.imageUrl])
-          .map((value) => String(value || '').trim())
-          .filter(Boolean),
-      )];
+      const listedImageUrls = (Array.isArray(result.imageUrls) && result.imageUrls.length
+        ? result.imageUrls
+        : [result.imageUrl])
+        .map((value) => String(value || '').trim())
+        .filter(Boolean);
+      // queryImageTask has already normalized scalar fallbacks. Preserve the Provider's
+      // canonical array exactly here so a repeated URL still represents a distinct output slot.
+      const remoteImageUrls = listedImageUrls;
       if (!remoteImageUrls.length) {
         const failure = completedImageOutputError({ itemCount: 0, failures: [] });
         return sendCompletedImageOutputFailure(res, failure, seedanceNzTrace(result));
@@ -3210,6 +3290,7 @@ router.get('/image/seedance-nz/status/:tid', async (req, res) => {
           status: 'completed',
           progress: '100%',
           urls,
+          outputCount: urls.length,
           ...seedanceNzTrace(result),
         },
       });
@@ -5763,14 +5844,24 @@ async function saveRemoteVideoDetailed(url, _providerFetchImpl, materializationK
 
   const materialize = (async () => {
     let lastError = null;
-    for (let attempt = 0; attempt < IMAGE_OUTPUT_RETRY_DELAYS_MS.length; attempt += 1) {
-      const delay = IMAGE_OUTPUT_RETRY_DELAYS_MS[attempt];
-      if (delay > 0) await proxyAbortableDelay(delay, signal);
+    const deadlineAt = remoteOutputDeadlineAt();
+    const retryDelays = remoteOutputRetryDelays();
+    for (let attempt = 0; attempt < retryDelays.length; attempt += 1) {
+      const delay = retryDelays[attempt];
+      if (delay > 0) {
+        if (Date.now() + delay >= deadlineAt) {
+          lastError = Object.assign(new Error('视频结果下载超过本轮恢复时间'), { code: 'fetch_timeout' });
+          break;
+        }
+        await proxyAbortableDelay(delay, signal);
+      }
       try {
+        const transferWindow = remoteOutputTransferWindow(deadlineAt, '视频结果');
         const remote = await fetchProxyRemoteMedia(url, {
           allowedKinds: ['video'],
           trustedProviderOutput: true,
           maxBytes: PROXY_MEDIA_REFERENCE_MAX_BYTES,
+          ...transferWindow,
           accept: 'video/mp4,video/webm,video/quicktime,video/x-matroska;q=0.9',
           signal,
         });
@@ -8138,6 +8229,7 @@ module.exports._test = Object.freeze({
   resetFalTaskRegistryMemoryForTests,
   resetProviderDispatcherForTests,
   resetVideoMaterializationCacheForTests,
+  remoteOutputDownloadFailure,
   resolveBuiltInLlmProvider,
   resolveMountedFileReference,
   readResourceImageRefBuffer,

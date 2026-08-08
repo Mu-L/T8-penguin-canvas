@@ -1007,6 +1007,10 @@ function systemFetchFallbackAllowed(error) {
   if (error?.name === 'AbortError' || error?.code === 'request_aborted') return false;
   const code = String(error?.code || '').toUpperCase();
   const causeCode = String(error?.causeCode || error?.cause?.code || '').toUpperCase();
+  const status = Number(error?.status || 0);
+  if (code === 'REMOTE_HTTP_ERROR') {
+    return status === 408 || status === 425 || status === 429 || status >= 500;
+  }
   return new Set([
     'SYSTEM_NETWORK_FETCH_FAILED',
     'CONNECT_TIMEOUT',
@@ -1031,6 +1035,24 @@ function systemFetchFallbackAllowed(error) {
     'ESOCKETTIMEDOUT',
     'UND_ERR_CONNECT_TIMEOUT',
   ]).has(causeCode);
+}
+
+function trustedProviderFallbackState(options, primaryState) {
+  const fallbackDeadlineMs = Number(options.trustedProviderFallbackDeadlineMs);
+  if (!Number.isFinite(fallbackDeadlineMs) || fallbackDeadlineMs <= 0) {
+    remainingDeadlineMs(primaryState);
+    return primaryState;
+  }
+  // A trusted completed-result download may first follow Chromium's system
+  // proxy/TUN route and then recover through the independently DNS-pinned
+  // transport.  Giving the recovery route its own explicit budget prevents a
+  // stalled system route from consuming the fallback before it can even open.
+  // This option is deliberately opt-in so ordinary remote fetch callers keep
+  // the historical single absolute deadline.
+  return createTransferState({
+    ...options,
+    deadlineMs: fallbackDeadlineMs,
+  });
 }
 
 function systemFetchNetworkError(error) {
@@ -1385,16 +1407,17 @@ async function fetchTrustedProviderOutput(inputUrl, options, state, initialRedir
 async function safeRemoteMediaFetch(inputUrl, options = {}, redirectCount = 0) {
   const normalizedOptions = { ...options, _protocols: allowedProtocols(options.protocols) };
   const state = createTransferState(normalizedOptions);
+  let activeState = state;
   if (normalizedOptions.trustedProviderOutput === true && hasSystemFetchBridge()) {
     try {
       return await fetchTrustedProviderOutput(inputUrl, normalizedOptions, state, redirectCount);
     } catch (error) {
       if (!systemFetchFallbackAllowed(error)) throw error;
-      remainingDeadlineMs(state);
+      activeState = trustedProviderFallbackState(normalizedOptions, state);
     }
   }
-  const opened = await openSafeRemoteResponse(inputUrl, normalizedOptions, state, redirectCount);
-  const buffer = await consumeResponseBuffer(opened.response, state);
+  const opened = await openSafeRemoteResponse(inputUrl, normalizedOptions, activeState, redirectCount);
+  const buffer = await consumeResponseBuffer(opened.response, activeState);
   return {
     buffer,
     contentType: String(opened.response.headers['content-type'] || ''),
@@ -1584,6 +1607,7 @@ async function writeWholeChunk(handle, chunk, position = null) {
  *   maxBytes, maxRedirects, deadlineMs (absolute transfer budget), idleTimeoutMs
  *   accept, userAgent, headers, lookupImpl
  *   trustedProviderOutput: true prefers Electron/Chromium system networking
+ *   trustedProviderFallbackDeadlineMs: optional independent DNS-pinned recovery budget
  *
  * The target is opened with wx/0600 and is removed on every unsuccessful exit.
  * Resolves to { contentType, finalUrl, status, byteSize } without buffering the body.
@@ -1593,6 +1617,7 @@ async function safeRemoteMediaDownload(inputUrl, targetPath, options = {}) {
   // Validate URL/protocol/userinfo before reserving a filesystem target.
   parseRemoteUrl(inputUrl, normalizedOptions);
   const state = createTransferState(normalizedOptions);
+  let activeState = state;
   throwIfTransferAborted(state);
   const target = await openExclusiveDownloadTarget(targetPath);
   let response = null;
@@ -1614,17 +1639,17 @@ async function safeRemoteMediaDownload(inputUrl, targetPath, options = {}) {
         return downloaded;
       } catch (error) {
         if (!systemFetchFallbackAllowed(error)) throw error;
-        remainingDeadlineMs(state);
+        activeState = trustedProviderFallbackState(normalizedOptions, state);
         // System-network chunks use explicit positions, so truncation leaves
         // the descriptor ready for a clean DNS-pinned fallback from byte 0.
         await target.handle.truncate(0);
       }
     }
-    const opened = await openSafeRemoteResponse(inputUrl, normalizedOptions, state);
+    const opened = await openSafeRemoteResponse(inputUrl, normalizedOptions, activeState);
     response = opened.response;
-    const byteSize = await consumeResponse(response, state, (chunk) => writeWholeChunk(target.handle, chunk));
+    const byteSize = await consumeResponse(response, activeState, (chunk) => writeWholeChunk(target.handle, chunk));
     await target.handle.sync();
-    throwIfTransferAborted(state);
+    throwIfTransferAborted(activeState);
     await target.handle.close();
     closed = true;
     return {

@@ -336,7 +336,7 @@ test('B3 Provider fetch supports a longer model-specific deadline without changi
   }
 });
 
-test('B3 Provider requests preserve native system networking first and replay writes only with one stable idempotency key', async () => {
+test('B3 Provider requests preserve native system networking and never infer paid-write replay from an idempotency key alone', async () => {
   const originalFetch = global.fetch;
   let calls = 0;
   const readDispatchers = [];
@@ -383,20 +383,26 @@ test('B3 Provider requests preserve native system networking first and replay wr
       }
       return new Response('accepted', { status: 202 });
     };
-    const recoveredWrite = await runWithProviderSubmission(
-      'attempt-image-tun-0001',
-      () => proxyRouter._test.fetchProviderResponse(
-        'https://provider.example/generate',
-        { method: 'POST', body: '{"prompt":"safe"}' },
-        'Provider submit',
+    await assert.rejects(
+      runWithProviderSubmission(
+        'attempt-image-tun-0001',
+        () => proxyRouter._test.fetchProviderResponse(
+          'https://provider.example/generate',
+          { method: 'POST', body: '{"prompt":"safe"}' },
+          'Provider submit',
+        ),
       ),
+      (error) => {
+        assert.equal(error?.code, 'provider_network_unavailable');
+        assert.equal(error?.retryAttempted, false);
+        return true;
+      },
     );
-    assert.equal(recoveredWrite.status, 202);
-    assert.equal(calls, 2, 'a generation POST with a stable submission identity retries once on a fresh connection');
+    assert.equal(calls, 1, 'a stable identity is carried upstream but does not by itself authorize replaying a paid write');
     assert.deepEqual(
       writeKeys,
-      ['attempt-image-tun-0001', 'attempt-image-tun-0001'],
-      'the recovery attempt must carry exactly the same upstream idempotency key',
+      ['attempt-image-tun-0001'],
+      'the one authorized paid submission carries its stable upstream idempotency key',
     );
 
     calls = 0;
@@ -1931,15 +1937,13 @@ test('B3 LLM JSON and SSE paths bound Provider bodies and expose only normalized
         requestBody,
         { 'x-t8-provider-submission': 'llm-node-run-attempt-0001' },
       );
-      assert.equal(recovered.status, 200, recovered.text);
-      assert.equal(recovered.data.data.requestId, 'llm-recovered-request');
-      assert.equal(recoveryCalls, 2);
+      assert.equal(recovered.status, 503, recovered.text);
+      assert.equal(recoveryCalls, 1, 'an LLM generation write is not replayed merely because it has a stable identity');
       assert.equal(recoveryDispatchers[0], undefined);
-      assert.ok(recoveryDispatchers[1], 'the retry must use a fresh system-DNS connection');
       assert.deepEqual(
         recoveryKeys,
-        ['llm-node-run-attempt-0001', 'llm-node-run-attempt-0001'],
-        'LLM recovery must retain one stable submission identity',
+        ['llm-node-run-attempt-0001'],
+        'the sole LLM submission carries its stable identity without authorizing an implicit retry',
       );
 
       global.fetch = async () => new Response(
@@ -2006,6 +2010,18 @@ test('B3 completed task response stalls remain recoverable without resubmitting 
       proxyRouter._test.setProxySafeRemoteTestOptions(null);
     }
   });
+});
+
+test('B3 exhausted output connection timeouts remain recoverable on the same task', () => {
+  for (const code of ['connect_timeout', 'system_network_fetch_failed']) {
+    const failure = proxyRouter._test.remoteOutputDownloadFailure(
+      Object.assign(new Error('provider output route unavailable'), { code }),
+      'image',
+    );
+    assert.equal(failure.code, 'image_download_network_failed');
+    assert.equal(failure.recoverable, true);
+    assert.equal(failure.retryAfterMs, 1_000);
+  }
 });
 
 test('B3 Zhenzhen image routes bound Provider JSON and expose only normalized results', async () => {
@@ -2144,11 +2160,16 @@ test('B3 completed image tasks retry transient downloads and expose actionable s
         data: { data: [{ url: localOutput }] },
       }), { status: 200, headers: { 'content-type': 'application/json' } });
 
+      const retryStartedAt = Date.now();
       const recovered = await requestGet(appServer, '/api/proxy/image/status/retry-image-task?model=gpt-image-2');
       assert.equal(recovered.status, 200, recovered.text);
       assert.equal(recovered.data?.data?.status, 'completed');
       assert.match(recovered.data?.data?.urls?.[0] || '', /^\/files\/output\/img_task_/);
       assert.equal(outputRequests, 3, 'transient output download must retry before failing the completed task');
+      assert.ok(
+        Date.now() - retryStartedAt < 5_000,
+        'completed output must use short in-request retry delays instead of two fixed three-second waits',
+      );
       assert.equal(fs.readdirSync(outputDir).filter((name) => name.startsWith('img_task_') && !name.endsWith('.complete.json')).length, 1);
 
       global.fetch = async () => new Response(JSON.stringify({

@@ -339,6 +339,145 @@ test('trusted Provider bridge network failure falls back to the DNS-pinned trans
   }
 });
 
+test('trusted Provider output gives a timed-out Chromium route an independent pinned recovery budget', { concurrency: false }, async () => {
+  let bridgeCalls = 0;
+  let serverCalls = 0;
+  const bridge = systemFetchBridge(async (_input, init = {}) => {
+    bridgeCalls += 1;
+    return new Promise((resolve, reject) => {
+      const rejectAbort = () => reject(Object.assign(new Error('Chromium route aborted'), {
+        name: 'AbortError',
+        code: 'ERR_ABORTED',
+      }));
+      init.signal?.addEventListener('abort', rejectAbort, { once: true });
+      if (init.signal?.aborted) rejectAbort();
+    });
+  });
+  const server = await listen((_request, response) => {
+    serverCalls += 1;
+    response.writeHead(200, {
+      'content-length': '16',
+      'content-type': 'image/png',
+    });
+    response.end('fresh-route-data');
+  });
+
+  try {
+    const port = server.address().port;
+    const startedAt = Date.now();
+    await withGlobalFetch(bridge, async () => {
+      const result = await safeRemoteMediaFetch(`http://fallback.test:${port}/provider-result`, {
+        trustedProviderOutput: true,
+        trustedProviderFallbackDeadlineMs: 1_000,
+        allowPrivateForTests: allowLocalTestHost,
+        lookupImpl: loopbackLookup,
+        connectTimeoutMs: 20,
+        deadlineMs: 20,
+        idleTimeoutMs: 20,
+      });
+      assert.equal(result.buffer.toString(), 'fresh-route-data');
+    });
+    assert.equal(bridgeCalls, 1);
+    assert.equal(serverCalls, 1);
+    assert.ok(Date.now() - startedAt < 1_000, 'recovery must start immediately instead of waiting for a later task poll');
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test('trusted Provider output switches routes on transient Chromium HTTP failures', { concurrency: false }, async () => {
+  let bridgeCalls = 0;
+  let serverCalls = 0;
+  const bridge = systemFetchBridge(async () => {
+    bridgeCalls += 1;
+    return new Response('temporary unavailable', {
+      status: 503,
+      headers: { 'content-type': 'text/plain' },
+    });
+  });
+  const server = await listen((_request, response) => {
+    serverCalls += 1;
+    response.writeHead(200, {
+      'content-length': '15',
+      'content-type': 'video/mp4',
+    });
+    response.end('fallback-result');
+  });
+
+  try {
+    const port = server.address().port;
+    await withGlobalFetch(bridge, async () => {
+      const result = await safeRemoteMediaFetch(`http://fallback.test:${port}/provider-result`, {
+        trustedProviderOutput: true,
+        trustedProviderFallbackDeadlineMs: 1_000,
+        allowPrivateForTests: allowLocalTestHost,
+        lookupImpl: loopbackLookup,
+        deadlineMs: 1_000,
+      });
+      assert.equal(result.buffer.toString(), 'fallback-result');
+    });
+    assert.equal(bridgeCalls, 1);
+    assert.equal(serverCalls, 1);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test('trusted Provider output never falls back after caller cancellation or a non-retryable HTTP response', { concurrency: false }, async () => {
+  let serverCalls = 0;
+  const server = await listen((_request, response) => {
+    serverCalls += 1;
+    response.writeHead(200, { 'content-type': 'image/png' });
+    response.end('must-not-be-read');
+  });
+
+  try {
+    const port = server.address().port;
+    const controller = new AbortController();
+    const abortingBridge = systemFetchBridge(async (_input, init = {}) => new Promise((resolve, reject) => {
+      const rejectAbort = () => reject(Object.assign(new Error('cancelled'), {
+        name: 'AbortError',
+        code: 'ERR_ABORTED',
+      }));
+      init.signal?.addEventListener('abort', rejectAbort, { once: true });
+      if (init.signal?.aborted) rejectAbort();
+    }));
+    const aborted = withGlobalFetch(abortingBridge, async () => {
+      setTimeout(() => controller.abort(), 10);
+      await assert.rejects(
+        safeRemoteMediaFetch(`http://fallback.test:${port}/cancelled`, {
+          trustedProviderOutput: true,
+          trustedProviderFallbackDeadlineMs: 1_000,
+          allowPrivateForTests: allowLocalTestHost,
+          lookupImpl: loopbackLookup,
+          deadlineMs: 1_000,
+          signal: controller.signal,
+        }),
+        (error) => error?.code === 'request_aborted',
+      );
+    });
+    await aborted;
+    assert.equal(serverCalls, 0, 'caller cancellation must not start a recovery request');
+
+    const notFoundBridge = systemFetchBridge(async () => new Response('missing', { status: 404 }));
+    await withGlobalFetch(notFoundBridge, async () => {
+      await assert.rejects(
+        safeRemoteMediaFetch(`http://fallback.test:${port}/missing`, {
+          trustedProviderOutput: true,
+          trustedProviderFallbackDeadlineMs: 1_000,
+          allowPrivateForTests: allowLocalTestHost,
+          lookupImpl: loopbackLookup,
+          deadlineMs: 1_000,
+        }),
+        (error) => error?.code === 'remote_http_error' && error?.status === 404,
+      );
+    });
+    assert.equal(serverCalls, 0, 'non-retryable HTTP failures must not bypass the original response through another route');
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test('trusted Provider output allows proxy-side DNS when Chromium resolution is unavailable', { concurrency: false }, async () => {
   let bridgeCalls = 0;
   const bridge = systemFetchBridge(async () => {
@@ -471,6 +610,58 @@ test('trusted streaming download discards partial system data before pinned fall
       );
       assert.equal(result.byteSize, 15);
       assert.equal(result.contentType, 'video/mp4');
+    });
+    assert.equal(fs.readFileSync(targetPath, 'utf8'), 'fallback-result');
+    assert.equal(bridgeCalls, 1);
+    assert.equal(serverCalls, 1);
+  } finally {
+    await closeServer(server);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('trusted streaming download keeps a fresh fallback budget after a stalled partial system response', { concurrency: false }, async () => {
+  let bridgeCalls = 0;
+  let serverCalls = 0;
+  const bridge = systemFetchBridge(async () => {
+    bridgeCalls += 1;
+    let pulls = 0;
+    return new Response(new ReadableStream({
+      pull(controller) {
+        if (pulls++ === 0) controller.enqueue(new TextEncoder().encode('partial-system-data'));
+      },
+    }), {
+      status: 200,
+      headers: { 'content-type': 'video/mp4' },
+    });
+  });
+  const server = await listen((_request, response) => {
+    serverCalls += 1;
+    response.writeHead(200, {
+      'content-length': '15',
+      'content-type': 'video/mp4',
+    });
+    response.end('fallback-result');
+  });
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 't8-trusted-stall-recovery-'));
+  const targetPath = path.join(tmpDir, 'provider-result.mp4');
+
+  try {
+    const port = server.address().port;
+    await withGlobalFetch(bridge, async () => {
+      const result = await safeRemoteMediaDownload(
+        `http://fallback.test:${port}/provider-result`,
+        targetPath,
+        {
+          trustedProviderOutput: true,
+          trustedProviderFallbackDeadlineMs: 1_000,
+          allowPrivateForTests: allowLocalTestHost,
+          lookupImpl: loopbackLookup,
+          deadlineMs: 25,
+          idleTimeoutMs: 10,
+        },
+      );
+      assert.equal(result.byteSize, 15);
     });
     assert.equal(fs.readFileSync(targetPath, 'utf8'), 'fallback-result');
     assert.equal(bridgeCalls, 1);

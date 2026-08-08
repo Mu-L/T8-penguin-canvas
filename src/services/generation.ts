@@ -101,7 +101,7 @@ async function safeJsonResponse(response: Response, label: string): Promise<any>
 export interface GenerateImageRequest {
   model: string;          // 节点 id (gpt-image-2 / nano-banana-2 / nano-banana-pro / grok-image / seedream-v5-pro)
   apiModel?: string;       // 上游真实模型名(优先使用)
-  paramKind?: 'gpt-size' | 'banana-ratio' | 'grok-image' | 'seedream-v5' | 'qwen-image-3.0' | 'mj';
+  paramKind?: 'gpt-size' | 'banana-ratio' | 'grok-image' | 'seedream-v5' | 'seedream-layer' | 'qwen-image-3.0' | 'mj';
   prompt: string;
   n?: number;
   // 主参数(双协议通用):
@@ -330,9 +330,10 @@ export interface SeedreamNzSubmitRequest {
     | 'qwen-image-3.0-global-t2i'
     | 'qwen-image-3.0-global-i2i'
     | 'qwen-image-3.0-global-pro-t2i'
-    | 'qwen-image-3.0-global-pro-i2i';
+    | 'qwen-image-3.0-global-pro-i2i'
+    | 'seedream-v5-pro-layer-decomposition';
   modelFamily?: 'domestic' | 'overseas';
-  resolution?: '0.5k' | '1k' | '2k' | '4k';
+  resolution?: 'auto' | '0.5k' | '1k' | '1.5k' | '2k' | '4k';
   ratio?: 'adaptive' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16' | '21:9' | '2:3' | '3:2' | '4:5' | '5:4';
   size?: string;
   n?: number;
