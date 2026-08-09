@@ -154,7 +154,7 @@ test('Electron injects a persistent host authority only into exact main-window m
   assert.doesNotMatch(preload, /collaboration-management-token|T8_COLLAB_MANAGEMENT_TOKEN|managementAuthority/i);
 
   assert.match(vite, /command === 'serve' \? ensureManagementAuthority\(\) : ''/);
-  assert.match(vite, /'\/api\/collaboration': collaborationManagementProxy\(managementToken\)/);
+  assert.match(vite, /'\/api\/collaboration': collaborationManagementProxy\(managementToken, backendTarget\)/);
   assert.match(vite, /proxyRequest\.setHeader\(MANAGEMENT_AUTHORITY_HEADER, token\)/);
   assert.match(ignore, /^\/\.t8-collaboration-management-authority\.json$/m);
 });
@@ -189,7 +189,7 @@ test('Electron package locks canvas Agent bytecode and shared node schema to sou
 
   assert.equal(schema.schema, 't8-canvas-node-schema-v1');
   assert.equal(schema.version, 1);
-  assert.equal(schema.types.length, 72);
+  assert.equal(schema.types.length, 76);
   for (const source of requiredSources) assert.ok(encrypt.includes(`source: '${source}'`), source);
   for (const output of requiredOutputs) {
     assert.ok(encrypt.includes(`output: '${output}'`), output);
@@ -923,7 +923,7 @@ test('Electron release verifies packaged media and offline runtime sidecars', ()
   assert.match(postBuild, /function verifyPackagedRuntimeArchive\(/);
   assert.match(postBuild, /minimumArchiveBytes: 500_000_000/);
   assert.match(postBuild, /entry\.sourceSha256/);
-  assert.match(postBuild, /spawnSync\(path7za, \['t'/);
+  assert.match(postBuild, /spawnSync\(\s*path7za,\s*\['t', '-mmt=2'/);
   assert.match(postBuild, /packaged runtime archive is missing required entries/);
   assert.match(postBuild, /archive SHA-256, CRC and required entries verified/);
   assert.match(postBuild, /if \(archiveStrict\) \{[\s\S]*verifyPackagedRuntimeArchive\([\s\S]*verifyDirectAiWatermarkRuntime\(runtimeRoot\)/);

@@ -253,9 +253,10 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   const happyHorseMode = apiModel.endsWith('-i2v') ? 'i2v' : apiModel.endsWith('-r2v') ? 'r2v' : 't2v';
   const isHailuoH3 = isHailuo && apiModel.startsWith('hailuo-h3-');
   const isMinimaxH3Ow = isHailuo && apiModel.startsWith('minimax-h3-ow-');
+  const isMinimaxH3OwFast = isMinimaxH3Ow && apiModel.endsWith('-fast');
   const hailuoMode = apiModel.endsWith('-multi')
     ? 'multi'
-    : apiModel.endsWith('-r2v') ? 'r2v' : apiModel.includes('-i2v') ? 'i2v' : 't2v';
+    : apiModel.includes('-r2v') ? 'r2v' : apiModel.includes('-i2v') ? 'i2v' : 't2v';
   const flux3Mode = apiModel.endsWith('-draft-enhance')
     ? 'draft-enhance'
     : apiModel.endsWith('-v2v') ? 'v2v' : apiModel.endsWith('-i2v') ? 'i2v' : 't2v';
@@ -521,7 +522,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       ? flux3Mode === 'i2v' ? 10 : 0
       : isHailuo
       ? isMinimaxH3Ow
-        ? hailuoMode === 't2v' ? 0 : 1
+        ? hailuoMode === 't2v' ? 0 : isMinimaxH3OwFast && hailuoMode === 'r2v' ? 9 : 1
         : isHailuoH3
         ? hailuoMode === 't2v' ? 0 : hailuoMode === 'i2v' ? 2 : 9
         : hailuoMode === 't2v' ? 0 : 1
@@ -1115,9 +1116,22 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         return;
       }
     }
-    if (isMinimaxH3Ow && hailuoMode === 'r2v' && imageUrls.length === 0) {
-      setError('MiniMax H3 OW 参考生视频必须连接或拖入 1 张参考图');
-      logBus.error('生成中止: MiniMax H3 OW 参考生视频缺少参考图', src);
+    if (isMinimaxH3Ow && hailuoMode === 'r2v') {
+      const maxImages = isMinimaxH3OwFast ? 9 : 1;
+      if (imageUrls.length < 1 || imageUrls.length > maxImages) {
+        setError(`MiniMax H3 OW 参考生视频必须连接或拖入 1-${maxImages} 张参考图`);
+        logBus.error('生成中止: MiniMax H3 OW 参考生视频图片数量不合法', src);
+        return;
+      }
+    }
+    if (isMinimaxH3OwFast && hailuoMode === 'i2v' && imageUrls.length !== 1) {
+      setError('MiniMax H3 OW Fast 图生视频必须且只能连接或拖入 1 张首帧图');
+      logBus.error('生成中止: MiniMax H3 OW Fast 图生视频首帧数量不合法', src);
+      return;
+    }
+    if (isMinimaxH3OwFast && (videoUrls.length > 0 || audioUrls.length > 0)) {
+      setError('MiniMax H3 OW Fast 只接受图片参考，不接受视频或音频素材');
+      logBus.error('生成中止: MiniMax H3 OW Fast 混入视频或音频素材', src);
       return;
     }
     if (
@@ -1475,7 +1489,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
 
       if (isHailuo) {
         const hailuoImages = hailuoMode === 'i2v' || hailuoMode === 'r2v'
-          ? imageUrls.slice(0, isHailuoH3 ? 2 : 1)
+          ? imageUrls.slice(0, isHailuoH3 ? 2 : isMinimaxH3OwFast && hailuoMode === 'r2v' ? 9 : 1)
           : hailuoMode === 'multi' ? imageUrls.slice(0, 9) : [];
         const hailuoVideos = isHailuoH3 && hailuoMode === 'multi' ? videoUrls.slice(0, 3) : [];
         const hailuoAudios = isHailuoH3 && hailuoMode === 'multi' ? audioUrls.slice(0, 3) : [];
@@ -2159,7 +2173,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
                      ? { ratio: '16:9', duration: 8, resolution: '720p' }
                      : {}),
                    ...(nextModel.startsWith('hailuo-h3-')
-                     ? { ratio: '16:9', duration: 5, resolution: '2K' }
+                     ? { ratio: '16:9', duration: 5, resolution: '768P' }
                      : nextModel.startsWith('minimax-h3-ow-')
                        ? { ratio: '16:9', duration: 5, resolution: '480p' }
                      : nextModel.startsWith('hailuo-2.3-')
@@ -2551,8 +2565,12 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
               ? hailuoMode === 't2v'
                 ? 'MiniMax H3 OW 文生视频必须填写提示词，不发送参考图。'
                 : hailuoMode === 'r2v'
-                  ? 'MiniMax H3 OW 参考生视频必须填写提示词，并使用排序后的第 1 张参考图。'
-                  : 'MiniMax H3 OW 图生视频必须使用排序后的第 1 张首帧图，提示词可选。'
+                  ? isMinimaxH3OwFast
+                    ? 'MiniMax H3 OW Fast 参考生视频必须填写提示词，并按排序使用 1-9 张参考图。'
+                    : 'MiniMax H3 OW 参考生视频必须填写提示词，并使用排序后的第 1 张参考图。'
+                  : isMinimaxH3OwFast
+                    ? 'MiniMax H3 OW Fast 图生视频必须且只能使用排序后的第 1 张首帧图，提示词可选。'
+                    : 'MiniMax H3 OW 图生视频必须使用排序后的第 1 张首帧图，提示词可选。'
               : isHailuoH3
               ? hailuoMode === 't2v'
                 ? 'H3 文生视频必须填写提示词，不发送参考素材；比例会随请求提交。'

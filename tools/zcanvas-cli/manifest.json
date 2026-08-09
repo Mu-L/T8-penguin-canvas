@@ -7,7 +7,7 @@
   "responseSchema": "t8-agent-control-response-v1",
   "canvasPatchProtocol": "t8-canvas-patch-v1",
   "nodeSchemaDigest": "d7bd79b48f1f4216c990ff8b53a05a0f73d4105b57e429bf4696f14c018f89b0",
-  "providerCatalogDigest": "9a3f9b68e04d89d0e2f2376fac8e4dd62f28a7f84b592acfbdbfd932ead4f6df",
+  "providerCatalogDigest": "dfc8e310c51ba3bc3f8db17b92d036dc9119cd6e1a2d6080d3f2fc7dbdbba824",
   "minimumDesktopVersion": "2.6.4",
   "commandCatalog": "commandCatalog.json",
   "creativeCapabilityManifest": "creativeCapabilityManifest.json",

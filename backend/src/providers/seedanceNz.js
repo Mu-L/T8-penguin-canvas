@@ -242,10 +242,26 @@ const HAILUO_H3_MODELS = new Set([
 const MINIMAX_H3_OW_T2V_MODEL = 'minimax-h3-ow-t2v';
 const MINIMAX_H3_OW_R2V_MODEL = 'minimax-h3-ow-r2v';
 const MINIMAX_H3_OW_I2V_MODEL = 'minimax-h3-ow-i2v';
+const MINIMAX_H3_OW_FAST_I2V_MODEL = 'minimax-h3-ow-i2v-fast';
+const MINIMAX_H3_OW_FAST_R2V_MODEL = 'minimax-h3-ow-r2v-fast';
+const MINIMAX_H3_OW_R2V_MODELS = new Set([
+  MINIMAX_H3_OW_R2V_MODEL,
+  MINIMAX_H3_OW_FAST_R2V_MODEL,
+]);
+const MINIMAX_H3_OW_I2V_MODELS = new Set([
+  MINIMAX_H3_OW_I2V_MODEL,
+  MINIMAX_H3_OW_FAST_I2V_MODEL,
+]);
+const MINIMAX_H3_OW_FAST_MODELS = new Set([
+  MINIMAX_H3_OW_FAST_I2V_MODEL,
+  MINIMAX_H3_OW_FAST_R2V_MODEL,
+]);
 const MINIMAX_H3_OW_MODELS = new Set([
   MINIMAX_H3_OW_T2V_MODEL,
   MINIMAX_H3_OW_R2V_MODEL,
   MINIMAX_H3_OW_I2V_MODEL,
+  MINIMAX_H3_OW_FAST_I2V_MODEL,
+  MINIMAX_H3_OW_FAST_R2V_MODEL,
 ]);
 const MINIMAX_H3_OW_SECONDS = new Set(['5', '10', '15']);
 const MINIMAX_H3_OW_RESOLUTIONS = new Set(['480p', '720p']);
@@ -2848,7 +2864,8 @@ async function buildHailuoPayload(request, apiKey, options = {}) {
     const prompt = String(request.prompt || '').trim();
     const taskType = model === MINIMAX_H3_OW_T2V_MODEL
       ? 't2v'
-      : model === MINIMAX_H3_OW_R2V_MODEL ? 'r2v' : 'i2v';
+      : MINIMAX_H3_OW_R2V_MODELS.has(model) ? 'r2v' : 'i2v';
+    const isFast = MINIMAX_H3_OW_FAST_MODELS.has(model);
     if ((taskType === 't2v' || taskType === 'r2v') && !prompt) {
       throw new Error('MiniMax H3 OW 文生视频与参考生视频必须填写提示词');
     }
@@ -2866,13 +2883,28 @@ async function buildHailuoPayload(request, apiKey, options = {}) {
     if (prompt) payload.prompt = prompt;
     if (taskType !== 't2v') {
       const imageSources = normalizeList(request.images || request.refImages);
-      if (imageSources.length === 0) throw new Error('MiniMax H3 OW 图生与参考生视频必须提供 1 张图片');
-      payload.images = [await uploadMedia(imageSources[0], 'image', apiKey, {
-        ...options,
-        maxBytes: IMAGE_REFERENCE_MAX_BYTES,
-        allowedMimes: ['image/jpeg', 'image/png', 'image/webp'],
-        cacheVariant: 'minimax-h3-ow-image-v1',
-      })];
+      if (taskType === 'i2v' && imageSources.length !== 1) {
+        throw new Error('MiniMax H3 OW 图生视频必须且只能提供 1 张首帧图');
+      }
+      const maxImages = isFast && taskType === 'r2v' ? 9 : 1;
+      if (taskType === 'r2v' && (imageSources.length < 1 || imageSources.length > maxImages)) {
+        throw new Error(`MiniMax H3 OW 参考生视频必须提供 1-${maxImages} 张参考图`);
+      }
+      if (isFast && (
+        normalizeList(request.videos || request.videoUrls || request.video_url).length > 0
+        || normalizeList(request.audios || request.audioUrls || request.audio_url).length > 0
+      )) {
+        throw new Error('MiniMax H3 OW Fast 只接受图片参考，不接受视频或音频素材');
+      }
+      payload.images = [];
+      for (const source of imageSources) {
+        payload.images.push(await uploadMedia(source, 'image', apiKey, {
+          ...options,
+          maxBytes: IMAGE_REFERENCE_MAX_BYTES,
+          allowedMimes: ['image/jpeg', 'image/png', 'image/webp'],
+          cacheVariant: isFast ? 'minimax-h3-ow-fast-image-v1' : 'minimax-h3-ow-image-v1',
+        }));
+      }
     }
     return { payload, model, taskType };
   }
@@ -2891,7 +2923,7 @@ async function buildHailuoPayload(request, apiKey, options = {}) {
 
     const seconds = String(request.duration ?? request.seconds ?? '5').trim();
     if (!HAILUO_H3_SECONDS.has(seconds)) throw new Error('Hailuo H3 时长只支持 5-15 秒');
-    const requestedResolution = String(request.resolution || '2K').trim().toUpperCase();
+    const requestedResolution = String(request.resolution || '768P').trim().toUpperCase();
     if (!HAILUO_H3_RESOLUTIONS.has(requestedResolution)) throw new Error('Hailuo H3 分辨率只支持 768P 或 2K');
 
     const payload = {
@@ -4133,8 +4165,13 @@ module.exports = {
   FLUX3_V2V_MODELS,
   FLUX3_VIDEO_MODELS,
   MINIMAX_H3_OW_I2V_MODEL,
+  MINIMAX_H3_OW_I2V_MODELS,
+  MINIMAX_H3_OW_FAST_I2V_MODEL,
+  MINIMAX_H3_OW_FAST_MODELS,
+  MINIMAX_H3_OW_FAST_R2V_MODEL,
   MINIMAX_H3_OW_MODELS,
   MINIMAX_H3_OW_R2V_MODEL,
+  MINIMAX_H3_OW_R2V_MODELS,
   MINIMAX_H3_OW_RESOLUTIONS,
   MINIMAX_H3_OW_SECONDS,
   MINIMAX_H3_OW_T2V_MODEL,

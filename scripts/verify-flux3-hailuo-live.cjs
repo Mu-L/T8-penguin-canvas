@@ -25,6 +25,11 @@ const liveResults = [];
 let lastProviderRejection = null;
 
 const catalogModels = [
+  'minimax-h3-ow-i2v-fast',
+  'minimax-h3-ow-r2v-fast',
+  'hailuo-h3-t2v',
+  'hailuo-h3-i2v',
+  'hailuo-h3-multi',
   'hailuo-h3-global-t2v',
   'hailuo-h3-global-i2v',
   'hailuo-h3-global-multi',
@@ -122,7 +127,8 @@ function isFlux(model) {
 function taskTypeFor(model) {
   if (model.endsWith('-draft-enhance')) return 'draft-enhance';
   if (model.endsWith('-multi')) return 'multi';
-  if (model.endsWith('-i2v')) return 'i2v';
+  if (model.includes('-r2v')) return 'r2v';
+  if (model.includes('-i2v')) return 'i2v';
   if (model.endsWith('-v2v')) return 'v2v';
   return 't2v';
 }
@@ -133,11 +139,21 @@ function draftSourceModel(model) {
 
 function requestFor(model, fixtures, state) {
   if (!isFlux(model)) {
-    const common = { model, duration: 5, resolution: '768P' };
-    if (model.endsWith('-i2v')) {
+    const isMinimaxFast = model.startsWith('minimax-h3-ow-') && model.endsWith('-fast');
+    const common = { model, duration: 5, resolution: isMinimaxFast ? '480p' : '768P' };
+    if (model.includes('-i2v')) {
       return {
         ...common,
+        ...(isMinimaxFast ? { ratio: '16:9' } : {}),
         prompt: 'The geometric paper sculpture gently rotates while the camera slowly pushes in; preserve identity and composition.',
+        images: [fixtures.image],
+      };
+    }
+    if (model.includes('-r2v')) {
+      return {
+        ...common,
+        ratio: '16:9',
+        prompt: 'Preserve the reference sculpture identity and materials while the camera slowly pushes in.',
         images: [fixtures.image],
       };
     }
@@ -315,8 +331,8 @@ function writeSanitizedReport(ok, status, blocker = null) {
     provider: 'seedance-nz',
     officialDocs: {
       url: 'https://api.seedance.nz/docs/llms.txt',
-      sha256: 'c0bf2f908de13bbd7e0718da1c6550a48720254b13cd6541ccd5534a7e5d316b',
-      lastModified: 'Fri, 07 Aug 2026 22:00:18 GMT',
+      sha256: '7db04e5be7ec671b00774937cd0484ab7ce50c737b908f0358b3a6b2ef0560ce',
+      lastModified: 'Sat, 08 Aug 2026 22:43:40 GMT',
     },
     taskCount: liveResults.length,
     catalogTaskCount: catalogModels.length,

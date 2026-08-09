@@ -179,6 +179,8 @@ test('video node exposes Hailuo 2.3 and H3 as one isolated budget-house family',
     'hailuo-h3-global-t2v',
     'hailuo-h3-global-i2v',
     'hailuo-h3-global-multi',
+    'minimax-h3-ow-i2v-fast',
+    'minimax-h3-ow-r2v-fast',
   ]) {
     assert.match(models, new RegExp(model.replaceAll('.', '\\.')));
   }

@@ -1297,6 +1297,14 @@ test('seedance.nz Hailuo 2.3 validates model limits and submits through /v1/vide
 
 test('seedance.nz builds the documented Hailuo H3 t2v, first/last-frame i2v and multimodal payloads', async () => {
   seedanceNz.resetCachesForTests();
+  const default768p = await seedanceNz.buildHailuoPayload({
+    model: 'hailuo-h3-t2v',
+    prompt: 'A paper kite crosses a clear sky',
+    duration: 5,
+    ratio: '16:9',
+  }, 'test-key');
+  assert.equal(default768p.payload.metadata.resolution, '768P');
+
   const t2v = await seedanceNz.buildHailuoPayload({
     model: 'hailuo-h3-t2v',
     prompt: 'A warm paper lantern floats through a quiet night market',
@@ -1507,11 +1515,13 @@ test('seedance.nz image query preserves the documented upstream failure reason w
   assert.deepEqual(result.imageUrls, []);
 });
 
-test('seedance.nz builds MiniMax H3 OW t2v, r2v and i2v exactly as documented', async () => {
+test('seedance.nz builds all documented MiniMax H3 OW standard and Fast payloads', async () => {
   assert.deepEqual([...seedanceNz.MINIMAX_H3_OW_MODELS], [
     'minimax-h3-ow-t2v',
     'minimax-h3-ow-r2v',
     'minimax-h3-ow-i2v',
+    'minimax-h3-ow-i2v-fast',
+    'minimax-h3-ow-r2v-fast',
   ]);
   const t2v = await seedanceNz.buildHailuoPayload({
     model: 'minimax-h3-ow-t2v',
@@ -1539,7 +1549,7 @@ test('seedance.nz builds MiniMax H3 OW t2v, r2v and i2v exactly as documented', 
       duration: 15,
       resolution: '720p',
       ratio: '9:16',
-      images: [TINY_PNG_A, TINY_PNG_B],
+      images: [TINY_PNG_A],
     }, 'test-key', {
       uploadIntervalMs: 0,
       fetchImpl: async () => jsonResponse({ url: 'https://cdn.example.com/minimax-reference.png' }),
@@ -1548,6 +1558,53 @@ test('seedance.nz builds MiniMax H3 OW t2v, r2v and i2v exactly as documented', 
     assert.deepEqual(built.payload.images, ['https://cdn.example.com/minimax-reference.png']);
     assert.deepEqual(built.payload.metadata, { resolution: '720p', ratio: '9:16' });
   }
+
+  seedanceNz.resetCachesForTests();
+  let uploadIndex = 0;
+  const fastR2v = await seedanceNz.buildHailuoPayload({
+    model: 'minimax-h3-ow-r2v-fast',
+    prompt: 'preserve all ordered reference identities',
+    duration: 10,
+    resolution: '480p',
+    ratio: '21:9',
+    images: [TINY_PNG_A, TINY_PNG_B, `${TINY_PNG_A}A`],
+  }, 'test-key', {
+    uploadIntervalMs: 0,
+    fetchImpl: async () => {
+      uploadIndex += 1;
+      return jsonResponse({ url: `https://cdn.example.com/minimax-fast-${uploadIndex}.png` });
+    },
+  });
+  assert.deepEqual(fastR2v, {
+    model: 'minimax-h3-ow-r2v-fast',
+    taskType: 'r2v',
+    payload: {
+      model: 'minimax-h3-ow-r2v-fast',
+      prompt: 'preserve all ordered reference identities',
+      seconds: '10',
+      metadata: { resolution: '480p', ratio: '21:9' },
+      images: [
+        'https://cdn.example.com/minimax-fast-1.png',
+        'https://cdn.example.com/minimax-fast-2.png',
+        'https://cdn.example.com/minimax-fast-3.png',
+      ],
+    },
+  });
+
+  seedanceNz.resetCachesForTests();
+  const fastI2v = await seedanceNz.buildHailuoPayload({
+    model: 'minimax-h3-ow-i2v-fast',
+    duration: 5,
+    resolution: '720p',
+    ratio: '16:9',
+    images: [TINY_PNG_A],
+  }, 'test-key', {
+    uploadIntervalMs: 0,
+    fetchImpl: async () => jsonResponse({ url: 'https://cdn.example.com/minimax-fast-first.png' }),
+  });
+  assert.equal(fastI2v.taskType, 'i2v');
+  assert.equal(Object.hasOwn(fastI2v.payload, 'prompt'), false);
+  assert.deepEqual(fastI2v.payload.images, ['https://cdn.example.com/minimax-fast-first.png']);
 });
 
 test('seedance.nz validates MiniMax H3 OW prompt, image, seconds, resolution and ratio', async () => {
@@ -1559,7 +1616,27 @@ test('seedance.nz validates MiniMax H3 OW prompt, image, seconds, resolution and
     seedanceNz.buildHailuoPayload({
       model: 'minimax-h3-ow-i2v', duration: 5, resolution: '480p', ratio: '16:9', images: [],
     }, 'test-key'),
-    /必须提供 1 张图片/,
+    /必须且只能提供 1 张首帧图/,
+  );
+  await assert.rejects(
+    seedanceNz.buildHailuoPayload({
+      model: 'minimax-h3-ow-i2v-fast', duration: 5, resolution: '480p', ratio: '16:9', images: [TINY_PNG_A, TINY_PNG_B],
+    }, 'test-key'),
+    /必须且只能提供 1 张首帧图/,
+  );
+  await assert.rejects(
+    seedanceNz.buildHailuoPayload({
+      model: 'minimax-h3-ow-r2v-fast', prompt: 'valid prompt', duration: 5, resolution: '480p', ratio: '16:9',
+      images: Array.from({ length: 10 }, () => TINY_PNG_A),
+    }, 'test-key'),
+    /必须提供 1-9 张参考图/,
+  );
+  await assert.rejects(
+    seedanceNz.buildHailuoPayload({
+      model: 'minimax-h3-ow-r2v-fast', prompt: 'valid prompt', duration: 5, resolution: '480p', ratio: '16:9',
+      images: [TINY_PNG_A], videos: ['data:video/mp4;base64,AAAA'],
+    }, 'test-key'),
+    /不接受视频或音频素材/,
   );
   await assert.rejects(
     seedanceNz.buildHailuoPayload({

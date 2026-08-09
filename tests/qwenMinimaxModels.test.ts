@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   IMAGE_MODELS,
+  MINIMAX_H3_OW_VIDEO_MODELS,
   QWEN_IMAGE_30_MODELS,
   QWEN_IMAGE_30_RATIOS,
   VIDEO_MODELS,
@@ -29,6 +30,8 @@ const MINIMAX_MODELS = [
   'minimax-h3-ow-t2v',
   'minimax-h3-ow-r2v',
   'minimax-h3-ow-i2v',
+  'minimax-h3-ow-i2v-fast',
+  'minimax-h3-ow-r2v-fast',
 ] as const;
 
 test('Qwen Image tab exposes the exact documented 8-model catalog and controls', () => {
@@ -56,6 +59,7 @@ test('Hailuo tab contains the exact MiniMax H3 OW catalog with model-specific op
   assert.ok(hailuo);
   const options = videoModelOptionsForSource(hailuo, 'seedance-nz');
   const minimax = options.filter((item) => item.value.startsWith('minimax-h3-ow-'));
+  assert.deepEqual(MINIMAX_H3_OW_VIDEO_MODELS, MINIMAX_MODELS);
   assert.deepEqual(minimax.map((item) => item.value), MINIMAX_MODELS);
   for (const option of minimax) {
     assert.deepEqual(option.durations, [5, 10, 15]);
@@ -65,21 +69,25 @@ test('Hailuo tab contains the exact MiniMax H3 OW catalog with model-specific op
   assert.equal(minimax.find((item) => item.value.endsWith('-t2v'))?.maxRefImages, 0);
   assert.equal(minimax.find((item) => item.value.endsWith('-r2v'))?.maxRefImages, 1);
   assert.equal(minimax.find((item) => item.value.endsWith('-i2v'))?.maxRefImages, 1);
+  assert.equal(minimax.find((item) => item.value === 'minimax-h3-ow-r2v-fast')?.maxRefImages, 9);
+  assert.equal(minimax.find((item) => item.value === 'minimax-h3-ow-i2v-fast')?.maxRefImages, 1);
 
   const ui = source('src/components/nodes/VideoNode.tsx');
   assert.match(ui, /const isMinimaxH3Ow/);
   assert.match(ui, /hailuoMode === 'r2v'/);
+  assert.match(ui, /isMinimaxH3OwFast && hailuoMode === 'r2v' \? 9 : 1/);
+  assert.match(ui, /Fast 图生视频必须且只能连接或拖入 1 张首帧图/);
   assert.match(ui, /resolution === '720p' \? '720p' : '480p'/);
 });
 
-test('all 11 model workflows are saved, key-free and provide reference upload nodes where required', () => {
+test('all 13 model workflows are saved, key-free and provide reference upload nodes where required', () => {
   for (const model of [...QWEN_MODELS, ...MINIMAX_MODELS]) {
     const doc = workflow(model);
     assert.equal(doc.schema, 't8-workflow-fragment');
     assert.equal(JSON.stringify(doc).includes('sk-'), false);
     const generation = doc.nodes.find((node: any) => node.data?.apiModel === model || node.data?.model === model);
     assert.ok(generation, `${model} workflow must contain its generation node`);
-    const needsImage = model.endsWith('-i2i') || model.endsWith('-i2v') || model.endsWith('-r2v');
+    const needsImage = model.endsWith('-i2i') || model.includes('-i2v') || model.includes('-r2v');
     const incomingImage = doc.edges.some((edge: any) => edge.target === generation.id
       && doc.nodes.some((node: any) => node.id === edge.source && node.type === 'upload' && node.data?.uploadType === 'image'));
     assert.equal(incomingImage, needsImage, `${model} reference upload contract`);

@@ -1,7 +1,7 @@
 {
   "schema": "t8-workflow-fragment",
   "version": 1,
-  "title": "Hailuo H3 多模态参考（平价AI小屋）",
+  "title": "Hailuo H3 多模态参考（平价AI小屋 · 768P）",
   "nodes": [
     {
       "id": "hailuo-h3-multi",
@@ -17,7 +17,7 @@
         "videoBuiltinSource": "seedance-nz",
         "ratio": "16:9",
         "duration": 5,
-        "resolution": "2K",
+        "resolution": "768P",
         "localPrompt": "说明图片、视频和音频参考素材在成片中的作用",
         "reuseResult": false
       }
@@ -41,5 +41,5 @@
     ],
     "edges": []
   },
-  "savedAt": "2026-07-31T00:00:00.000Z"
+  "savedAt": "2026-08-09T00:00:00.000Z"
 }
