@@ -1,9 +1,9 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.8.7",
-  "lastUpdated": "2026-08-09-v2.8.7-release-authorized",
+  "lastUpdated": "2026-08-09-v2.8.7-released",
   "hailuoH3RefreshAndMinimaxFast": {
-    "status": "release-authorized-v2.8.7-offline-verified-live-partially-blocked-by-provider",
+    "status": "released-v2.8.7-offline-verified-live-partially-blocked-by-provider",
     "date": "2026-08-09",
     "releaseIncluded": true,
     "provider": "seedance-nz",
@@ -553,36 +553,37 @@
     ]
   },
   "release": {
-    "status": "release-authorized-v2.8.7",
+    "status": "released-v2.8.7",
     "version": "2.8.7",
     "date": "2026-08-09",
-    "publishedAt": null,
+    "publishedAt": "2026-08-09T06:07:20Z",
     "tag": "v2.8.7",
-    "latest": false,
-    "sourceCommit": null,
+    "latest": true,
+    "sourceCommit": "fd537fa5ea2fc5feb56d20264606d7e2e153fdc2",
     "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.8.7",
     "artifacts": {
       "installer": {
         "name": "T8-PenguinCanvas-Setup-2.8.7.exe",
-        "size": null,
-        "sha256": null
+        "size": 1317595130,
+        "sha256": "680fdc7e2f48e7519f27bf8033938ed37d6923630bfea2f8a920634b038d235a"
       },
       "blockmap": {
         "name": "T8-PenguinCanvas-Setup-2.8.7.exe.blockmap",
-        "size": null,
-        "sha256": null
+        "size": 1372744,
+        "sha256": "bf341dbfe0c781d39ec22b7b68911c71b3333e9750f73ae88f4fac6c77cfaff2"
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": null,
-        "sha256": null
+        "size": 362,
+        "sha256": "77a66cef07b4cdd947e63c1bfb1d249d66634c8fb4541cc7f34ffebea8769292"
       }
     },
     "verification": [
       "v2.8.7 发布范围固定为 Hailuo TAB 的 minimax-h3-ow-i2v-fast / minimax-h3-ow-r2v-fast、新增两份 Fast 工作流，以及国内 hailuo-h3-t2v/i2v/multi 的 768P/2K 刷新与三份工作流更新；不回退 v2.8.6 或更早版本的节点、默认值、已保存显式参数、模型、工作流、协议和网络能力。",
-      "发布前模型目录、前端边界、Provider 精确请求、非法素材、来源恢复、MV/Flux3 相邻能力和 Qwen/MiniMax 工作流回归 120/120、TypeScript、public-check、RH toolbox、31 actions / 240 runtime / 76/76 / 0 public gaps 能力同步与生产构建已经通过，固定提交前仍须再次执行发布门禁。",
+      "发布前模型目录、前端边界、Provider 精确请求、非法素材、来源恢复、MV/Flux3 相邻能力和 Qwen/MiniMax 工作流开发回归 120/120；固定提交后的定向功能 85/85、Electron/自动更新合同 23/23、延期证据门 4/4、TypeScript、public-check、RH toolbox、31 actions / 240 runtime / 76/76 / 0 public gaps 能力同步与五份工作流 JSON/无密钥检查通过。",
       "真实 Provider 已验证 Fast R2V 480p/5 秒同一任务完成、下载并由 ffprobe 解码为 H.264 864x480、5.166667 秒；Fast I2V 返回无 taskId 的 HTTP 502 后未重放；国内 H3 T2V 因余额约 ¥4.30 低于预扣约 ¥10.97 在创建任务前失败，H3 I2V/Multi 未提交，不能声称通过。",
-      "Electron/NSIS、私有构建、自动更新三资产、固定 source commit、Tag、Latest、远端回下载与摘要在唯一 dist:release 流程完成后回写，未执行前保持空值。",
+      "唯一 dist:release 流程从 origin/main 固定提交 fd537fa5ea2fc5feb56d20264606d7e2e153fdc2 完成 2877 模块私有生产构建、后端与本机私有 sidecar 加密、双运行时归档、Electron 原生重建、NSIS、post-build、provenance、sealed recovery、GitHub 草稿阶段元数据和完整三资产回下载、固定 Tag/target、非草稿/非预发布、Latest 与 recovery 清理。",
+      "独立 npm run release:verify -- v2.8.7 再次完整下载远端安装包、blockmap 与 latest.yml，并以实际字节、GitHub digest/size、latest.yml 版本/path/sha512/size 和 Latest 状态复验通过。",
       "用户已明确授权先发布、后补反馈用户安装环境、Fast I2V 与额度阻断的国内 H3 剩余渠道质量、协作多端及安装升级证据；协作证据门只允许完全缺失的清单按 owner-approved-post-release-v2.8.7 延期，不能把延期标记为已通过。"
     ]
   },
@@ -6914,8 +6915,8 @@
     "version": "2.8.7",
     "semverVersion": "2.8.7",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.7 已授权发布 Hailuo H3 / MiniMax H3 OW Fast 刷新，正式资产与发布事实只在固定源码提交的唯一发布链收敛后回填。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.8.7 的 Electron/NSIS 自动更新资产尚未生成；必须从已推送 origin/main 的固定源码提交，在 T8-penguin-canvas-release-v2.8.7 / codex/release-v2.8.7 的唯一 dist:release 流程中完成本机私有 sidecar、加密后端、双运行时归档、原生重建、NSIS、post-build、provenance、sealed recovery、GitHub 三资产完整回下载、固定 Tag/target、Latest 与 recovery 清理后才可回填。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.7 已正式发布 Hailuo H3 / MiniMax H3 OW Fast 刷新。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.8.7 已由固定源码提交 fd537fa5ea2fc5feb56d20264606d7e2e153fdc2 在独立 release 工作树生成一套最终 NSIS 自动更新资产：安装包 1317595130 bytes / SHA-256 680fdc7e2f48e7519f27bf8033938ed37d6923630bfea2f8a920634b038d235a，blockmap 1372744 bytes / SHA-256 bf341dbfe0c781d39ec22b7b68911c71b3333e9750f73ae88f4fac6c77cfaff2，latest.yml 362 bytes / SHA-256 77a66cef07b4cdd947e63c1bfb1d249d66634c8fb4541cc7f34ffebea8769292；Tag/target、非草稿/非预发布、Latest、草稿阶段及独立发布后远端完整回下载与 recovery 清理均已验证。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
