@@ -20,7 +20,9 @@ import {
   ZHENZHEN_IMAGE_NB_PRO_MODEL,
   ZHENZHEN_IMAGE_NB_EXTREME_RATIOS,
   ZHENZHEN_IMAGE_NB_STANDARD_RATIOS,
+  DOLA_SEEDREAM_LAYER_DECOMPOSITION_MODEL,
   SEEDREAM_LAYER_DECOMPOSITION_MODEL,
+  SEEDREAM_LAYER_DECOMPOSITION_MODELS,
   SEEDREAM_LAYER_RESOLUTIONS,
   gptImage2ZhenzhenVariantSize,
   isFalModel,
@@ -227,26 +229,42 @@ test('Seedream layer decomposition is an isolated single-image tab with ordered 
   assert.equal(layer.apiModel, SEEDREAM_LAYER_DECOMPOSITION_MODEL);
   assert.equal(layer.paramKind, 'seedream-layer');
   assert.equal(layer.maxReferenceImages, 1);
+  assert.deepEqual(SEEDREAM_LAYER_DECOMPOSITION_MODELS, [
+    SEEDREAM_LAYER_DECOMPOSITION_MODEL,
+    DOLA_SEEDREAM_LAYER_DECOMPOSITION_MODEL,
+  ]);
+  assert.deepEqual(
+    layer.apiModelOptions.map((option) => option.value),
+    [...SEEDREAM_LAYER_DECOMPOSITION_MODELS],
+  );
+  assert.equal(layer.apiModelOptions[0]?.value, SEEDREAM_LAYER_DECOMPOSITION_MODEL);
   assert.deepEqual(SEEDREAM_LAYER_RESOLUTIONS, ['auto', '1k', '1.5k', '2k']);
   assert.match(imageNodeSource, /Seedream 分层必须且只能连接或上传 1 张源图/);
   assert.match(imageNodeSource, /提示词可留空，最多 2000 字符/);
-  assert.match(imageNodeSource, /底图与全部图层（最多 16 层，共最多 17 张）/);
+  assert.match(imageNodeSource, /国内 Seedream 与海外 Dola 共用同一参数；国内模型保持默认/);
+  assert.match(imageNodeSource, /不排序、不去重、不截断/);
   assert.match(imageNodeSource, /imageUrls: query\.urls/);
   assert.match(proxySource, /const remoteImageUrls = listedImageUrls/);
   assert.match(proxySource, /outputCount: urls\.length/);
 
-  const workflow = JSON.parse(fs.readFileSync(
-    new URL('../docs/workflows/seedream-v5-pro-layer-decomposition.json', import.meta.url),
-    'utf8',
-  ));
-  assert.equal(workflow.schema, 't8-workflow-fragment');
-  assert.equal(JSON.stringify(workflow).includes('sk-'), false);
-  const generation = workflow.nodes.find((node: any) => node.data?.apiModel === SEEDREAM_LAYER_DECOMPOSITION_MODEL);
-  assert.ok(generation);
-  assert.equal(generation.data.seedreamLayerResolution, 'auto');
-  assert.equal(generation.data.seedreamOutputFormat, 'png');
-  assert.equal(workflow.edges.some((edge: any) => edge.target === generation.id
-    && workflow.nodes.some((node: any) => node.id === edge.source && node.type === 'upload')), true);
-  assert.equal(workflow.edges.some((edge: any) => edge.source === generation.id
-    && workflow.nodes.some((node: any) => node.id === edge.target && node.type === 'output')), true);
+  const workflows = [
+    ['seedream-v5-pro-layer-decomposition.json', SEEDREAM_LAYER_DECOMPOSITION_MODEL],
+    ['dola-seedream-5.0-pro-layer-decomposition.json', DOLA_SEEDREAM_LAYER_DECOMPOSITION_MODEL],
+  ] as const;
+  for (const [filename, expectedModel] of workflows) {
+    const workflow = JSON.parse(fs.readFileSync(
+      new URL(`../docs/workflows/${filename}`, import.meta.url),
+      'utf8',
+    ));
+    assert.equal(workflow.schema, 't8-workflow-fragment');
+    assert.equal(JSON.stringify(workflow).includes('sk-'), false);
+    const generation = workflow.nodes.find((node: any) => node.data?.apiModel === expectedModel);
+    assert.ok(generation);
+    assert.equal(generation.data.seedreamLayerResolution, 'auto');
+    assert.equal(generation.data.seedreamOutputFormat, 'png');
+    assert.equal(workflow.edges.some((edge: any) => edge.target === generation.id
+      && workflow.nodes.some((node: any) => node.id === edge.source && node.type === 'upload')), true);
+    assert.equal(workflow.edges.some((edge: any) => edge.source === generation.id
+      && workflow.nodes.some((node: any) => node.id === edge.target && node.type === 'output')), true);
+  }
 });

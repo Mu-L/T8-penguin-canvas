@@ -854,6 +854,31 @@ test('seedance.nz builds the exact Seedream layer-decomposition payload from one
       metadata: { resolution: '1.5k', output_format: 'png' },
     },
   });
+  const dolaBuilt = await seedanceNz.buildSeedreamLayerDecompositionPayload({
+    model: 'dola-seedream-5.0-pro-layer-decomposition',
+    images: [TINY_PNG_A],
+    prompt: '',
+    resolution: 'auto',
+    output_format: 'png',
+  }, 'test-key', {
+    uploadIntervalMs: 0,
+    fetchImpl: async () => jsonResponse({ url: 'https://cdn.example.com/dola-layer-source.png' }),
+  });
+  assert.deepEqual(dolaBuilt, {
+    model: 'dola-seedream-5.0-pro-layer-decomposition',
+    taskType: 'layer-decomposition',
+    payload: {
+      model: 'dola-seedream-5.0-pro-layer-decomposition',
+      images: ['https://cdn.example.com/dola-layer-source.png'],
+      metadata: { resolution: 'auto', output_format: 'png' },
+    },
+  });
+  await assert.rejects(
+    seedanceNz.buildSeedreamLayerDecompositionPayload({
+      model: 'not-a-layer-model', images: [TINY_PNG_A],
+    }, 'test-key'),
+    /未知 Seedream 分层模型/,
+  );
   await assert.rejects(
     seedanceNz.buildSeedreamLayerDecompositionPayload({
       model: 'seedream-v5-pro-layer-decomposition', images: [],

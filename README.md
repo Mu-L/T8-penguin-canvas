@@ -10,13 +10,13 @@ https://www.runninghub.cn/?inviteCode=rh-v1121
 My favorite girl Go YounJung
 # 🐧 贞贞的无限画布（企鹅共创版） · T8-penguin-canvas
 
-> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.8.8
+> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.8.9
 >
 > GitHub：<https://github.com/T8mars/T8-penguin-canvas>
 
 一个面向 AI 创作的 **节点式画布**：拖拽节点、连线编排、生成图像 / 视频 / 音频、调用 LLM、串接 RunningHub 工作流，叠加批量执行、智能对齐、打组、主题模板与终端日志。Web 浏览器和桌面端均可使用。
 
-![status](https://img.shields.io/badge/version-v2.8.8-brightgreen) ![node](https://img.shields.io/badge/node-77-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
+![status](https://img.shields.io/badge/version-v2.8.9-brightgreen) ![node](https://img.shields.io/badge/node-77-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
 
 ---
 
@@ -36,6 +36,7 @@ My favorite girl Go YounJung
 ## ✨ 功能亮点
 
 - 🎨 **77 个节点**，覆盖文本 / 图像 / 视频 / 音频 / LLM / RunningHub / ComfyUI / 3D / 工具 / 辅助 / 工具箱 / 输出预览 / 上传素材 / 素材集 / 批量打标 / 随机路由 / Story 全自动制片 / 剧本大师 / MiniMax H3 / Seedance 2.0 提示词增强器 / MiniMax H3 官方提示词增强器 / Seedance 2.5 / 白模预演 / MV 音乐大师
+- 🧩 **v2.8.9 Dola Seedream 5.0 Pro 分层版**：既有 Seedream 分层 TAB 新增 `dola-seedream-5.0-pro-layer-decomposition`，原国内模型继续默认；单张素材可返回一张底图和数量可变的有序透明图层，画布会完整保留、逐张下载和解码，不排序、不去重、不截断。配套无密钥工作流已保存；一次真实任务返回的 7/7 张图片已全部下载并逐张核验。
 - ✨ **v2.8.8 MiniMax H3 官方提示词增强版**：新增独立节点，精确接入 `minmax-h3-context-ir-text`、`minmax-h3-context-ir-image` 与 `minmax-h3-context-ir-multimodal`。文本模式只接收提示词并要求固定比例；图像模式按顺序接收 1–2 张首尾帧且不发送比例；多模态模式最多支持 9 图、3 视频、3 音频。三份无密钥工作流、付费提交前双端边界和同任务恢复已配套完成，默认渠道、默认模型及旧画布保持不变。
 - 🎞️ **v2.8.7 Hailuo H3 / MiniMax H3 OW Fast 更新版**：既有 Hailuo TAB 新增 `minimax-h3-ow-i2v-fast` 与 `minimax-h3-ow-r2v-fast`，支持 5/10/15 秒、480p/720p 与八种比例；Fast I2V 使用单张首帧图，Fast R2V 按顺序接收 1–9 张参考图。国内 `hailuo-h3-t2v/i2v/multi` 保留 768P/2K，并把新建选择与缺省请求更新为 768P；旧画布显式保存的 2K 不迁移，默认视频模型与渠道不变。
 - 🧩 **v2.8.6 Seedream 分层与下载恢复版**：图像节点新增 Seedream 分层 TAB，接入 `seedream-v5-pro-layer-decomposition`，完整保存底图和全部返回图层；同时放宽图像、视频、音频及 RunningHub 已完成结果的下载恢复窗口，采用 0/500/1500ms 快速重试，并在系统代理、TUN、VPN、慢首包或 CDN 暂时错误时切换独立安全回源。恢复只查询和下载原任务，不会重放生成请求或重复扣费。

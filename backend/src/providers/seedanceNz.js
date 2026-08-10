@@ -122,6 +122,11 @@ const QWEN_IMAGE_30_PROMPT_MIN_LENGTH = 5;
 const QWEN_IMAGE_30_PROMPT_MAX_LENGTH = 2000;
 const QWEN_IMAGE_30_MAX_REFERENCE_IMAGES = 3;
 const SEEDREAM_LAYER_DECOMPOSITION_MODEL = 'seedream-v5-pro-layer-decomposition';
+const DOLA_SEEDREAM_LAYER_DECOMPOSITION_MODEL = 'dola-seedream-5.0-pro-layer-decomposition';
+const SEEDREAM_LAYER_DECOMPOSITION_MODELS = new Set([
+  SEEDREAM_LAYER_DECOMPOSITION_MODEL,
+  DOLA_SEEDREAM_LAYER_DECOMPOSITION_MODEL,
+]);
 const SEEDREAM_LAYER_RESOLUTIONS = new Set(['auto', '1k', '1.5k', '2k']);
 const SEEDREAM_LAYER_OUTPUT_FORMATS = new Set(['jpeg', 'png']);
 const SEEDREAM_LAYER_PROMPT_MAX_LENGTH = 2000;
@@ -160,7 +165,7 @@ const IMAGE_MODELS = new Set([
   ...ZHENZHEN_IMAGE_G2_MODELS,
   ...ZHENZHEN_APIMART_IMAGE_MODELS,
   ...QWEN_IMAGE_30_MODELS,
-  SEEDREAM_LAYER_DECOMPOSITION_MODEL,
+  ...SEEDREAM_LAYER_DECOMPOSITION_MODELS,
 ]);
 const IMAGE_RESOLUTIONS = new Set(['1k', '2k']);
 const IMAGE_OUTPUT_FORMATS = new Set(['jpeg', 'png']);
@@ -2658,7 +2663,7 @@ async function buildZhenzhenImageG2Payload(request, apiKey, options = {}) {
 
 async function buildImagePayload(request, apiKey, options = {}) {
   const requestedModel = String(request.model || '').trim().toLowerCase();
-  if (requestedModel === SEEDREAM_LAYER_DECOMPOSITION_MODEL) {
+  if (SEEDREAM_LAYER_DECOMPOSITION_MODELS.has(requestedModel)) {
     return buildSeedreamLayerDecompositionPayload(request, apiKey, options);
   }
   if (QWEN_IMAGE_30_MODELS.has(requestedModel)) {
@@ -2708,7 +2713,7 @@ async function buildImagePayload(request, apiKey, options = {}) {
 
 async function buildSeedreamLayerDecompositionPayload(request, apiKey, options = {}) {
   const model = String(request.model || '').trim().toLowerCase();
-  if (model !== SEEDREAM_LAYER_DECOMPOSITION_MODEL) {
+  if (!SEEDREAM_LAYER_DECOMPOSITION_MODELS.has(model)) {
     throw new Error(`未知 Seedream 分层模型：${model || '(空)'}`);
   }
   const refs = normalizeList(request.images || request.refImages);
@@ -2729,10 +2734,10 @@ async function buildSeedreamLayerDecompositionPayload(request, apiKey, options =
     ...options,
     maxBytes: SEEDREAM_LAYER_SOURCE_MAX_BYTES,
     allowedMimes: ['image/jpeg', 'image/png', 'image/webp'],
-    cacheVariant: 'seedream-v5-pro-layer-decomposition-source-v1',
+    cacheVariant: `${model}-source-v1`,
   });
   const payload = {
-    model: SEEDREAM_LAYER_DECOMPOSITION_MODEL,
+    model,
     images: [sourceUrl],
     metadata: { resolution, output_format: outputFormat },
   };
@@ -4414,6 +4419,8 @@ module.exports = {
   IMAGE_MODELS,
   IMAGE_RESOLUTIONS,
   SEEDREAM_LAYER_DECOMPOSITION_MODEL,
+  DOLA_SEEDREAM_LAYER_DECOMPOSITION_MODEL,
+  SEEDREAM_LAYER_DECOMPOSITION_MODELS,
   SEEDREAM_LAYER_RESOLUTIONS,
   QWEN_IMAGE_30_I2I_MODELS,
   QWEN_IMAGE_30_MODELS,

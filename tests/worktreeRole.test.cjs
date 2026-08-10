@@ -155,6 +155,7 @@ test('root development commands fail closed through the role gate and use the El
   assert.equal(scripts['worktree:core'], 'node scripts/worktree-role.cjs core');
   assert.equal(scripts['worktree:release'], 'node scripts/worktree-role.cjs release');
   assert.equal(scripts['worktree:integration-audit'], 'node scripts/audit-worktree-integration.cjs');
-  assert.match(scripts['dev:backend'], /ELECTRON_RUN_AS_NODE=1 electron backend\/src\/server\.js/);
+  assert.match(scripts['dev:backend'], /ELECTRON_RUN_AS_NODE=1 electron\b/);
+  assert.match(scripts['dev:backend'], /backend\/src\/server\.js$/);
   assert.doesNotMatch(scripts.dev, /cd backend|npm start/);
 });

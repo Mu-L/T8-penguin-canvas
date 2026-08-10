@@ -10,14 +10,14 @@ test('RunningHub local upload conversion accepts both input and output file URLs
   const proxy = read('../backend/src/routes/proxy.js');
   const runninghub = read('../src/components/nodes/RunningHubNode.tsx');
 
-  assert.match(proxy, /url\.startsWith\('\/files\/output\/'\)/);
-  assert.match(proxy, /url\.startsWith\('\/files\/input\/'\)/);
-  assert.match(proxy, /const local = readMountedFileReference\(url, \[/);
+  assert.match(proxy, /normalized\.startsWith\('\/files\/output\/'\)/);
+  assert.match(proxy, /normalized\.startsWith\('\/files\/input\/'\)/);
+  assert.match(proxy, /const local = readMountedFileReference\(normalized, \[/);
   assert.match(proxy, /\{ prefixes: \['\/files\/output\/', '\/output\/'\], root: config\.OUTPUT_DIR \}/);
   assert.match(proxy, /\{ prefixes: \['\/files\/input\/', '\/input\/'\], root: config\.INPUT_DIR \}/);
   assert.match(proxy, /本地素材不存在、超限或越出允许目录/);
-  assert.match(runninghub, /v\.startsWith\('\/files\/output\/'\)/);
-  assert.match(runninghub, /v\.startsWith\('\/files\/input\/'\)/);
+  assert.match(runninghub, /import \{ isProviderUploadMediaReference \}/);
+  assert.match(runninghub, /isProviderUploadMediaReference\(v\)/);
 });
 
 test('material context menu lets saved prompt templates choose or create categories', () => {

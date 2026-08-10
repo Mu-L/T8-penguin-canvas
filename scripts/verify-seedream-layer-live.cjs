@@ -11,9 +11,25 @@ if (!apiKey) {
   process.exit(2);
 }
 
-const MODEL = 'seedream-v5-pro-layer-decomposition';
+const SUPPORTED_MODELS = new Set([
+  'seedream-v5-pro-layer-decomposition',
+  'dola-seedream-5.0-pro-layer-decomposition',
+]);
+const MODEL = String(process.env.SEEDREAM_LAYER_MODEL || 'seedream-v5-pro-layer-decomposition').trim();
+if (!SUPPORTED_MODELS.has(MODEL)) {
+  console.error('SEEDREAM_LAYER_MODEL is not a documented layer-decomposition model');
+  process.exit(2);
+}
+const requestedResolution = String(process.env.SEEDREAM_LAYER_RESOLUTION || '1k').trim().toLowerCase();
+if (!new Set(['auto', '1k', '1.5k', '2k']).has(requestedResolution)) {
+  console.error('SEEDREAM_LAYER_RESOLUTION must be auto, 1k, 1.5k, or 2k');
+  process.exit(2);
+}
 const root = path.resolve(__dirname, '..');
-const runName = String(process.env.SEEDREAM_LAYER_LIVE_RUN || 'seedream-layer-live-20260809').trim();
+const defaultRunName = MODEL.startsWith('dola-')
+  ? 'dola-seedream-layer-live-20260811'
+  : 'seedream-layer-live-20260809';
+const runName = String(process.env.SEEDREAM_LAYER_LIVE_RUN || defaultRunName).trim();
 const outputDir = path.join(root, 'output', runName);
 const reportFile = path.join(outputDir, 'report.json');
 const privateStateFile = path.join(outputDir, 'state.private.json');
@@ -61,7 +77,7 @@ async function acceptedTask(referenceImage) {
     model: MODEL,
     images: [referenceImage],
     prompt: 'Separate the background, platform, yellow circle, navy object, red triangle, and small white circle into clean editable layers.',
-    resolution: '1k',
+    resolution: requestedResolution,
     output_format: 'png',
   }, apiKey);
   savePrivateState({ model: MODEL, taskId: submitted.taskId, acceptedAt: new Date().toISOString() });
@@ -135,7 +151,7 @@ async function main() {
       provider: 'seedance-nz',
       model: MODEL,
       officialDocs: 'https://api.seedance.nz/docs/llms.txt',
-      requestedResolution: '1k',
+      requestedResolution,
       requestedOutputFormat: 'png',
       providerOutputCount: urls.length,
       downloadedOutputCount: outputs.length,

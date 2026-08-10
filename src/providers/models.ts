@@ -132,6 +132,12 @@ export const QWEN_IMAGE_30_MODELS = [
 export type QwenImage30Model = typeof QWEN_IMAGE_30_MODELS[number];
 export const QWEN_IMAGE_30_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 export const SEEDREAM_LAYER_DECOMPOSITION_MODEL = 'seedream-v5-pro-layer-decomposition';
+export const DOLA_SEEDREAM_LAYER_DECOMPOSITION_MODEL = 'dola-seedream-5.0-pro-layer-decomposition';
+export const SEEDREAM_LAYER_DECOMPOSITION_MODELS = [
+  SEEDREAM_LAYER_DECOMPOSITION_MODEL,
+  DOLA_SEEDREAM_LAYER_DECOMPOSITION_MODEL,
+] as const;
+export type SeedreamLayerDecompositionModel = typeof SEEDREAM_LAYER_DECOMPOSITION_MODELS[number];
 export const SEEDREAM_LAYER_RESOLUTIONS = ['auto', '1k', '1.5k', '2k'] as const;
 
 export function isQwenImage30Model(apiModel: string | undefined | null): apiModel is QwenImage30Model {
@@ -268,16 +274,14 @@ export const IMAGE_MODELS: ImageModelDef[] = [
     provider: 'zhenzhen',
     paramKind: 'seedream-layer',
     capabilities: ['i2i', 'edit'],
-    apiModelOptions: [
-      { value: SEEDREAM_LAYER_DECOMPOSITION_MODEL, label: SEEDREAM_LAYER_DECOMPOSITION_MODEL },
-    ],
+    apiModelOptions: SEEDREAM_LAYER_DECOMPOSITION_MODELS.map((value) => ({ value, label: value })),
     aspectRatios: [],
     defaultAspectRatio: '',
     sizes: [],
     defaultSize: '',
     supportsReference: true,
     maxReferenceImages: 1,
-    description: 'Seedream V5 Pro 图层拆分 · 单图输入，完整返回底图与最多 16 个图层',
+    description: 'Seedream / Dola Seedream V5 Pro 图层拆分 · 单图输入，完整返回底图与全部有序图层',
   },
   {
     id: 'qwen-image-3.0',

@@ -1,6 +1,6 @@
 {
   "schema": "t8-creative-runtime-catalog-v1",
-  "sourceDigest": "c810e1ac3d6adb7d10486064c08ede0bfa2e05d546df5444526c3a1b1b2d2a8c",
+  "sourceDigest": "a399f5689b00ef540602f3bc9856383d266ce1b202bdeae89119f3d18dc18ef3",
   "generatedFrom": [
     "src/providers/models.ts",
     "src/config/seedance.ts",
@@ -736,6 +736,30 @@
       }
     },
     {
+      "id": "image:seedance-nz:dola-seedream-5.0-pro-layer-decomposition",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "dola-seedream-5.0-pro-layer-decomposition",
+      "label": "dola-seedream-5.0-pro-layer-decomposition",
+      "family": "seedream-v5-pro",
+      "available": true,
+      "parameters": {
+        "label": "dola-seedream-5.0-pro-layer-decomposition",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "seedream-v5-pro",
+        "available": true,
+        "tabLabel": "Seedream",
+        "capabilities": [
+          "t2i",
+          "i2i",
+          "edit"
+        ],
+        "parameterKind": "seedream-v5",
+        "supportsReference": true,
+        "description": "贞贞的平价AI小屋图像模型"
+      }
+    },
+    {
       "id": "image:seedance-nz:dola-seedream-5.0-pro-t2i",
       "provider": "seedance-nz",
       "platformLabel": "贞贞的平价AI小屋",
@@ -1215,6 +1239,34 @@
         "supportsReference": true,
         "maxReferenceImages": 14,
         "description": "贞贞的平价AI小屋图像模型"
+      }
+    },
+    {
+      "id": "image:zhenzhen:dola-seedream-5.0-pro-layer-decomposition",
+      "provider": "zhenzhen",
+      "platformLabel": "贞贞的AI工坊",
+      "model": "dola-seedream-5.0-pro-layer-decomposition",
+      "label": "dola-seedream-5.0-pro-layer-decomposition",
+      "family": "seedream-layer-decomposition",
+      "available": true,
+      "parameters": {
+        "label": "dola-seedream-5.0-pro-layer-decomposition",
+        "platformLabel": "贞贞的AI工坊",
+        "family": "seedream-layer-decomposition",
+        "available": true,
+        "tabLabel": "Seedream分层",
+        "capabilities": [
+          "i2i",
+          "edit"
+        ],
+        "parameterKind": "seedream-layer",
+        "aspectRatios": [],
+        "defaultAspectRatio": "",
+        "sizes": [],
+        "defaultSize": "",
+        "supportsReference": true,
+        "maxReferenceImages": 1,
+        "description": "Seedream / Dola Seedream V5 Pro 图层拆分 · 单图输入，完整返回底图与全部有序图层"
       }
     },
     {
@@ -2160,7 +2212,7 @@
         "defaultSize": "",
         "supportsReference": true,
         "maxReferenceImages": 1,
-        "description": "Seedream V5 Pro 图层拆分 · 单图输入，完整返回底图与最多 16 个图层"
+        "description": "Seedream / Dola Seedream V5 Pro 图层拆分 · 单图输入，完整返回底图与全部有序图层"
       }
     }
   ],
@@ -7827,7 +7879,7 @@
   ],
   "counts": {
     "llm": 32,
-    "image": 46,
+    "image": 48,
     "video": 110,
     "audio": 8,
     "actions": 47

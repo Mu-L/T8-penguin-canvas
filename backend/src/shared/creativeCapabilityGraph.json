@@ -17,14 +17,14 @@
     "creativeCapabilityManifest": "5c56b3b64d483ae6e6da5268f25c059f2a3fcc2c13e3c3d64d39b10e1e56402b",
     "canvasNodeSchema": "8b5244b1c088bb8b46e0a9f69a919c50f205e3857a75a3949cbba96ab3be8bc7",
     "canvasNodeSchemaFile": "8b7102f465ef34cd9475ede302b4e4195384ab15456f2bb8e3346bc07c035e45",
-    "runtimeCatalogSources": "c810e1ac3d6adb7d10486064c08ede0bfa2e05d546df5444526c3a1b1b2d2a8c",
-    "runtimeCatalogArtifact": "1ee6c8735797955ad4d2c204bb0199b8adb6e3852917edff20a0fd50c186dce9",
+    "runtimeCatalogSources": "a399f5689b00ef540602f3bc9856383d266ce1b202bdeae89119f3d18dc18ef3",
+    "runtimeCatalogArtifact": "a3b0d4f3277e74352e081a7c3037bad06681b47af6c7c1058ca95922505418e8",
     "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
     "capabilityGraphCompiler": "1a611d7e91dcf523e0536a92e9adb6ba2d884689a65fa10274bcda3a05ef9840",
     "coverageReceiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7",
     "canonicalTextDigestCompiler": "b0afcf28a257fbbd8f391edc117348f8f2ede1b4a039ae91bce25a8d563ac0cf"
   },
-  "aggregateDigest": "c54931effd8ab4e877ee4aa835a66a9f41cd30761a40da220c5912cad1c3ac89",
+  "aggregateDigest": "292eab5d1315ef73793f234739f97d658e2572c77945bbefadbf076add18277c",
   "principles": {
     "oneSentenceStart": true,
     "directCanvasMutation": false,
@@ -48,18 +48,18 @@
     "accountedNodes": 77,
     "unexplainedNodes": 0,
     "fullyOperableNodes": 18,
-    "runtimeEntries": 243,
+    "runtimeEntries": 245,
     "runtimeByKind": {
       "llm": 32,
-      "image": 46,
+      "image": 48,
       "video": 110,
       "audio": 8,
       "actions": 47
     },
     "runtimeByProvider": {
       "grok-oauth": 2,
-      "seedance-nz": 169,
-      "zhenzhen": 65,
+      "seedance-nz": 170,
+      "zhenzhen": 66,
       "fal": 7
     },
     "operations": 152,
@@ -6372,7 +6372,7 @@
   ],
   "runtime": {
     "schema": "t8-creative-runtime-catalog-v1",
-    "sourceDigest": "c810e1ac3d6adb7d10486064c08ede0bfa2e05d546df5444526c3a1b1b2d2a8c",
+    "sourceDigest": "a399f5689b00ef540602f3bc9856383d266ce1b202bdeae89119f3d18dc18ef3",
     "platforms": [
       {
         "id": "zhenzhen",
@@ -7288,6 +7288,26 @@
         }
       },
       {
+        "id": "image:seedance-nz:dola-seedream-5.0-pro-layer-decomposition",
+        "kind": "image",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "dola-seedream-5.0-pro-layer-decomposition",
+        "label": "dola-seedream-5.0-pro-layer-decomposition",
+        "family": "seedream-v5-pro",
+        "available": true,
+        "catalogSection": "image",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
         "id": "image:seedance-nz:dola-seedream-5.0-pro-t2i",
         "kind": "image",
         "provider": "seedance-nz",
@@ -7969,6 +7989,26 @@
         "model": "zhenzhen-image-nb-pro",
         "label": "zhenzhen-image-nb-pro",
         "family": "nano-banana-pro",
+        "available": true,
+        "catalogSection": "image",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "image:zhenzhen:dola-seedream-5.0-pro-layer-decomposition",
+        "kind": "image",
+        "provider": "zhenzhen",
+        "platformLabel": "贞贞的AI工坊",
+        "model": "dola-seedream-5.0-pro-layer-decomposition",
+        "label": "dola-seedream-5.0-pro-layer-decomposition",
+        "family": "seedream-layer-decomposition",
         "available": true,
         "catalogSection": "image",
         "compatibility": {
@@ -11553,6 +11593,7 @@
       "image:fal:nano-banana-2-fal",
       "image:fal:nano-banana-pro-fal",
       "image:seedance-nz:dola-seedream-5.0-pro-i2i",
+      "image:seedance-nz:dola-seedream-5.0-pro-layer-decomposition",
       "image:seedance-nz:dola-seedream-5.0-pro-t2i",
       "image:seedance-nz:midjourney-blend",
       "image:seedance-nz:midjourney-edits",
@@ -11587,6 +11628,7 @@
       "image:seedance-nz:zhenzhen-image-nb-2",
       "image:seedance-nz:zhenzhen-image-nb-2-lite",
       "image:seedance-nz:zhenzhen-image-nb-pro",
+      "image:zhenzhen:dola-seedream-5.0-pro-layer-decomposition",
       "image:zhenzhen:gemini-3-pro-image",
       "image:zhenzhen:gemini-3.1-flash-image",
       "image:zhenzhen:gemini-3.1-flash-lite-image",
@@ -11760,7 +11802,7 @@
     "sourceDigests": {
       "capabilityManifest": "5c56b3b64d483ae6e6da5268f25c059f2a3fcc2c13e3c3d64d39b10e1e56402b",
       "nodeSchema": "8b5244b1c088bb8b46e0a9f69a919c50f205e3857a75a3949cbba96ab3be8bc7",
-      "runtimeCatalog": "c810e1ac3d6adb7d10486064c08ede0bfa2e05d546df5444526c3a1b1b2d2a8c",
+      "runtimeCatalog": "a399f5689b00ef540602f3bc9856383d266ce1b202bdeae89119f3d18dc18ef3",
       "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
       "receiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7"
     },
@@ -11772,7 +11814,7 @@
       },
       "runtime": {
         "llm": 32,
-        "image": 46,
+        "image": 48,
         "video": 110,
         "audio": 8,
         "actions": 47
@@ -11789,6 +11831,6 @@
       "missingCompatibilityEdges": []
     },
     "complete": true,
-    "digest": "ea8d6021e0689f1a7af70729658ada34dc873e9e6e71bb7d17c648ba985471d9"
+    "digest": "6e96e62f5f14fc84a041e6a01f90e41e108d044c2afbb09e5c523807ac5560d2"
   }
 }

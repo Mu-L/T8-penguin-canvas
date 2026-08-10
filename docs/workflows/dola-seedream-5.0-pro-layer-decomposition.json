@@ -1,0 +1,108 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "Dola Seedream 5.0 Pro 海外分层 · 完整底图与图层输出",
+  "nodes": [
+    {
+      "id": "dola-seedream-layer-source",
+      "type": "upload",
+      "position": {
+        "x": 0,
+        "y": 80
+      },
+      "data": {
+        "label": "上传 1 张待分层图片",
+        "uploadType": "image",
+        "lockedUploadType": "image"
+      }
+    },
+    {
+      "id": "dola-seedream-layer-generation",
+      "type": "image",
+      "position": {
+        "x": 420,
+        "y": 80
+      },
+      "data": {
+        "label": "Dola Seedream 5.0 Pro 海外分层",
+        "model": "seedream-layer-decomposition",
+        "apiModel": "dola-seedream-5.0-pro-layer-decomposition",
+        "imageBuiltinSource": "seedance-nz",
+        "seedreamLayerResolution": "auto",
+        "seedreamOutputFormat": "png",
+        "prompt": "按主体、前景、背景与独立可编辑元素进行清晰分层",
+        "referenceImages": [],
+        "imageOnlyOutput": true,
+        "reuseResult": false
+      }
+    },
+    {
+      "id": "dola-seedream-layer-output",
+      "type": "output",
+      "position": {
+        "x": 840,
+        "y": 80
+      },
+      "data": {
+        "label": "全部分层图片（底图在前）"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "dola-seedream-layer-source-edge",
+      "source": "dola-seedream-layer-source",
+      "target": "dola-seedream-layer-generation"
+    },
+    {
+      "id": "dola-seedream-layer-output-edge",
+      "source": "dola-seedream-layer-generation",
+      "target": "dola-seedream-layer-output"
+    }
+  ],
+  "nodeCount": 3,
+  "edgeCount": 2,
+  "nodeTypes": [
+    "upload",
+    "image",
+    "output"
+  ],
+  "topologyPreview": {
+    "nodes": [
+      {
+        "id": "dola-seedream-layer-source",
+        "type": "upload",
+        "label": "上传 1 张待分层图片",
+        "x": 50,
+        "y": 130
+      },
+      {
+        "id": "dola-seedream-layer-generation",
+        "type": "image",
+        "label": "Dola Seedream 5.0 Pro 海外分层",
+        "x": 470,
+        "y": 130
+      },
+      {
+        "id": "dola-seedream-layer-output",
+        "type": "output",
+        "label": "全部分层图片（底图在前）",
+        "x": 890,
+        "y": 130
+      }
+    ],
+    "edges": [
+      {
+        "id": "dola-seedream-layer-source-edge",
+        "source": "dola-seedream-layer-source",
+        "target": "dola-seedream-layer-generation"
+      },
+      {
+        "id": "dola-seedream-layer-output-edge",
+        "source": "dola-seedream-layer-generation",
+        "target": "dola-seedream-layer-output"
+      }
+    ]
+  },
+  "savedAt": "2026-08-11T00:00:00.000Z"
+}

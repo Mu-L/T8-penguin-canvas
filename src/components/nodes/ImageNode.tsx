@@ -1634,7 +1634,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
               ? allRefs.slice(0, 1)
               : allRefs;
         const expectedModel = isSeedreamLayerTab
-          ? SEEDREAM_LAYER_DECOMPOSITION_MODEL
+          ? apiModel
           : isQwenImageTab
           ? apiModel
           : isZhenzhenBudgetImageSelected
@@ -1678,7 +1678,9 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           prompt: finalPrompt,
           images: providerRefs,
           model: isSeedreamLayerTab
-            ? SEEDREAM_LAYER_DECOMPOSITION_MODEL
+            ? apiModel as
+              | 'seedream-v5-pro-layer-decomposition'
+              | 'dola-seedream-5.0-pro-layer-decomposition'
             : isQwenImageTab
             ? apiModel as
               | 'qwen-image-3.0-t2i'
@@ -2728,9 +2730,10 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
 
         {isSeedreamLayerTab && !isExternalSelected && (
           <div className="rounded border border-cyan-400/25 bg-cyan-500/5 px-2 py-1.5 text-[10px] leading-4 text-cyan-100/80">
-            <div>贞贞的平价AI小屋 · {SEEDREAM_LAYER_DECOMPOSITION_MODEL}</div>
+            <div>贞贞的平价AI小屋 · {apiModel}</div>
             <div>必须且只能输入 1 张图；提示词可留空，最多 2000 字符。</div>
-            <div>完成后按官方顺序保存底图与全部图层（最多 16 层，共最多 17 张），不会只取第一张。</div>
+            <div>国内 Seedream 与海外 Dola 共用同一参数；国内模型保持默认。</div>
+            <div>完成后按官方顺序保存底图与全部图层，不排序、不去重、不截断，不会只取第一张。</div>
             {!zhenzhenSd2ApiKey && <div className="text-amber-300">尚未配置“贞贞的平价AI小屋 API Key”</div>}
           </div>
         )}
