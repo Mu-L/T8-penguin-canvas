@@ -1,7 +1,7 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.8.9",
-  "lastUpdated": "2026-08-11-v2.8.9-release-authorized",
+  "lastUpdated": "2026-08-11-v2.8.9-released",
   "minimaxH3OfficialPromptEnhancer": {
     "status": "released-v2.8.8-live-verified",
     "date": "2026-08-11",
@@ -135,7 +135,7 @@
     ]
   },
   "seedreamLayerDecomposition": {
-    "status": "release-authorized-v2.8.9-live-verified",
+    "status": "released-v2.8.9-live-verified",
     "date": "2026-08-11",
     "releaseIncluded": true,
     "dolaReleaseIncluded": true,
@@ -618,36 +618,39 @@
     ]
   },
   "release": {
-    "status": "release-authorized-v2.8.9",
+    "status": "released-postrelease-evidence-pending",
     "version": "2.8.9",
     "date": "2026-08-11",
-    "publishedAt": null,
+    "publishedAt": "2026-08-10T19:54:02Z",
     "tag": "v2.8.9",
-    "latest": false,
-    "sourceCommit": null,
+    "latest": true,
+    "isDraft": false,
+    "isPrerelease": false,
+    "sourceCommit": "4cf9e77fcdbe4dcd63bc8d21bf0c7a306665f9c0",
     "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.8.9",
     "artifacts": {
       "installer": {
         "name": "T8-PenguinCanvas-Setup-2.8.9.exe",
-        "size": null,
-        "sha256": null
+        "size": 1317607280,
+        "sha256": "b362b2c647dfc74dd64bca6979eef853723329908d16fb138a429cbabcb319dd",
+        "sha512": "CYhbSfNMbDu2gBPOK/u25y/44eiHuTzdSRhoS+67eJGrN04HQF0B88yh2T76FHZLWECNSaDHXXBMfnQ2hf0+PQ=="
       },
       "blockmap": {
         "name": "T8-PenguinCanvas-Setup-2.8.9.exe.blockmap",
-        "size": null,
-        "sha256": null
+        "size": 1372712,
+        "sha256": "a9fcf011034295815125eba0a96b3d9d05e9bbb233c76176923c4af59b993ed2"
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": null,
-        "sha256": null
+        "size": 362,
+        "sha256": "829334c153eeb3fc28f9e8351fd992f338f15c826759b3c9a419bc4778ea6c0e"
       }
     },
     "verification": [
       "v2.8.9 发布范围固定为在既有 Seedream 分层 TAB 新增 dola-seedream-5.0-pro-layer-decomposition、无密钥工作流及对应 Provider/代理/全部有序输出/能力目录接线；不回退 v2.8.8 或更早版本的节点、国内默认模型、默认渠道、已保存字段、工作流、协议和网络能力。",
-      "开发阶段双模型目录、Provider 精确请求、前端选择、代理路由、完整输出与双工作流专项回归 71/71，相邻 Provider/RunIntent/下载/素材回归 181/181，TypeScript、Node 语法、2863 模块生产构建、public-check、RH Toolbox、JSON 和 31 actions / 245 runtime / 77/77 / 0 public gaps 能力同步已通过；固定提交前仍须再次执行正式发布门禁。",
+      "开发阶段双模型目录、Provider 精确请求、前端选择、代理路由、完整输出与双工作流专项回归 71/71，相邻 Provider/RunIntent/下载/素材回归 181/181；固定源码发布相邻回归 248/248，并通过 TypeScript、Node 语法、公开生产构建、public-check、RH Toolbox、JSON 和 31 actions / 245 runtime / 77/77 / 0 public gaps 能力同步。",
       "Dola 模型只以一次性进程凭据真实提交一次并轮询至 succeeded，返回的 7/7 张 PNG 已全部按原顺序下载、Sharp 解码和逐张查看；此证据验证协议、动态多图遍历和结果链路。",
-      "Electron/NSIS、私有构建、三项自动更新资产、固定 source commit、Tag、Latest、远端完整回下载与摘要必须在已推送 origin/main 的固定源码提交上，通过 T8-penguin-canvas-release-v2.8.9 / codex/release-v2.8.9 的唯一 dist:release 流程收敛；完成前保持空值。",
+      "固定 source commit 4cf9e77fcdbe4dcd63bc8d21bf0c7a306665f9c0 已先快进推送 origin/main；T8-penguin-canvas-release-v2.8.9 / codex/release-v2.8.9 的唯一 dist:release 流程通过本机私有 sidecar、后端加密、双运行时归档、Electron 原生重建、NSIS、post-build、provenance、sealed recovery、草稿所有权、发布前完整回下载、固定 Tag/target、非草稿/非预发布、Latest 与 recovery 清理。发布后独立完整下载再次按实际字节和 GitHub digest 通过。",
       "用户已明确授权先发布、后补反馈用户安装环境、协作多端及安装升级证据；协作证据门只允许完全缺失的清单按 owner-approved-post-release-v2.8.9 延期，不能把延期标记为已通过，任何技术门禁失败均不可延期。"
     ]
   },
@@ -6981,8 +6984,8 @@
     "version": "2.8.9",
     "semverVersion": "2.8.9",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.9 已授权发布 Dola Seedream 5.0 Pro 分层模型，正式资产与发布事实只在固定源码提交的唯一发布链收敛后回填。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.8.9 的 Electron/NSIS 自动更新资产尚未生成；必须从已推送 origin/main 的固定源码提交，在 T8-penguin-canvas-release-v2.8.9 / codex/release-v2.8.9 的唯一 dist:release 流程中完成本机私有 sidecar、加密后端、双运行时归档、原生重建、NSIS、post-build、provenance、sealed recovery、GitHub 三资产完整回下载、固定 Tag/target、Latest 与 recovery 清理后才可回填。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.9 已通过固定源码提交的唯一发布链正式发布 Dola Seedream 5.0 Pro 分层模型，并成为 GitHub Latest。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.8.9 Electron/NSIS 自动更新版已发布：https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.8.9。固定提交 4cf9e77fcdbe4dcd63bc8d21bf0c7a306665f9c0 的唯一 dist:release 流程完成本机私有 sidecar、加密后端、双运行时归档、原生重建、NSIS、post-build、provenance、sealed recovery、发布前完整回下载、固定 Tag/target、Latest 与 recovery 清理；发布后独立完整下载再次通过。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
