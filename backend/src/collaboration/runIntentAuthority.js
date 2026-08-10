@@ -6,6 +6,11 @@ const MAX_CANVAS_NODES = 20_000;
 const MAX_CANVAS_EDGES = 20_000;
 const MAX_REQUESTED_NODE_IDS = 2_000;
 const SEEDANCE_NZ_LLM_MODEL_SET = new Set(seedanceNzLlmModels);
+const MINMAX_H3_CONTEXT_IR_MODEL_SET = new Set([
+  'minmax-h3-context-ir-text',
+  'minmax-h3-context-ir-image',
+  'minmax-h3-context-ir-multimodal',
+]);
 
 const EXECUTABLE_NODE_TYPES = new Set(
   (Array.isArray(canvasNodeSchema.types) ? canvasNodeSchema.types : [])
@@ -421,6 +426,18 @@ function providerDeclarationForNode(node, context = {}) {
       throw authorityError('intent_execution_model_unresolved', 'Grok OAuth Agent 模式无效，无法证明实际模型', [node.id]);
     }
     return { provider: 'grok-oauth', model };
+  }
+
+  if (type === 'minimax-h3-official-prompt-enhancer') {
+    const model = boundedString(data.model) || 'minmax-h3-context-ir-text';
+    if (!MINMAX_H3_CONTEXT_IR_MODEL_SET.has(model)) {
+      throw authorityError(
+        'intent_execution_model_unresolved',
+        'MiniMax H3 官方提示词增强器模型不在官方 Context IR 列表中',
+        [node.id],
+      );
+    }
+    return { provider: 'seedance-nz', model };
   }
 
   if (type === 'minimax-h3-prompt-enhancer' || type === 'seedance20-prompt-enhancer') {

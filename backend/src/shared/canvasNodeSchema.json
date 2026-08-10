@@ -594,6 +594,27 @@
         }
       ]
     },
+    "minimax-h3-official-prompt-enhancer": {
+      "resolver": "static",
+      "inputs": [
+        {
+          "id": null,
+          "kinds": ["text", "image", "video", "audio"],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ],
+      "outputs": [
+        {
+          "id": null,
+          "kinds": ["text"],
+          "required": false,
+          "minConnections": 0,
+          "maxConnections": null
+        }
+      ]
+    },
     "seedance20-prompt-enhancer": {
       "resolver": "static",
       "inputs": [
@@ -2902,6 +2923,61 @@
           "dynamic": false,
           "inputs": [
             { "id": null, "kinds": ["text", "image", "video"], "required": false, "minConnections": 0, "maxConnections": null }
+          ],
+          "outputs": [
+            { "id": null, "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": null }
+          ]
+        }
+      }
+    },
+    {
+      "type": "minimax-h3-official-prompt-enhancer",
+      "label": "MiniMax H3官方提示词增强器",
+      "category": "inspiration",
+      "description": "通过 MiniMax H3 Context IR 官方异步模型，按纯文本、首尾帧或图/视频/音频多模态上下文增强视频提示词；固定使用贞贞的平价AI小屋",
+      "icon": "Sparkles",
+      "color": "emerald",
+      "ports": {
+        "inputs": ["text", "image", "video", "audio"],
+        "outputs": ["text"]
+      },
+      "executable": true,
+      "generatable": true,
+      "generation": {
+        "allowedDataFields": {
+          "userPrompt": { "type": "string", "maxLength": 7000 },
+          "model": {
+            "type": "string",
+            "enum": [
+              "minmax-h3-context-ir-text",
+              "minmax-h3-context-ir-image",
+              "minmax-h3-context-ir-multimodal"
+            ]
+          },
+          "duration": { "type": "integer", "minimum": 4, "maximum": 15 },
+          "ratio": {
+            "type": "string",
+            "enum": ["api_default", "adaptive", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"]
+          }
+        },
+        "defaults": {
+          "userPrompt": "",
+          "model": "minmax-h3-context-ir-text",
+          "duration": 4,
+          "ratio": "16:9",
+          "taskProvider": "seedance-nz",
+          "status": "idle",
+          "error": "",
+          "progress": "",
+          "taskId": "",
+          "resultText": "",
+          "enhancedPrompt": "",
+          "prompt": ""
+        },
+        "connectionPorts": {
+          "dynamic": false,
+          "inputs": [
+            { "id": null, "kinds": ["text", "image", "video", "audio"], "required": false, "minConnections": 0, "maxConnections": null }
           ],
           "outputs": [
             { "id": null, "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": null }

@@ -229,8 +229,8 @@ test('remote execution is frozen from the authoritative SQLite revision, never t
 test('unknown Run-create responses resume only the pre-generated exact Run ID and otherwise release or expire the lease', () => {
   const run = callbackSource(canvasSource, 'Canvas.tsx', 'runNodesByOrder');
 
-  assert.match(run, /const proposedRunId = runIntentLease[\s\S]*globalThis\.crypto\?\.randomUUID/);
-  assert.match(run, /\.\.\.\(proposedRunId \? \{ id: proposedRunId \} : \{\}\)/);
+  assert.match(run, /const proposedRunId = `run-\$\{typeof globalThis\.crypto\?\.randomUUID/);
+  assert.match(run, /api\.createProjectRun\(\{[\s\S]*id: proposedRunId,/);
   assert.match(run, /if \(current\.runId === proposedRunId\)[\s\S]*api\.getProjectRun\(proposedRunId\)/);
   assert.match(run, /if \(current\.runId\) return null/,
     'a Run claimed by any other ID must never be resumed');

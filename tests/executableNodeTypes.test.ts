@@ -12,8 +12,8 @@ test('shared executable node list covers nested-only and canvas-only execution t
   }
 });
 
-test('shared executable node list has 53 explicitly audited production types', () => {
-  assert.equal(EXECUTABLE_NODE_TYPES.size, 53);
+test('shared executable node list has 58 explicitly audited production types', () => {
+  assert.equal(EXECUTABLE_NODE_TYPES.size, 58);
 });
 
 test('shared executable node list excludes passive output nodes', () => {

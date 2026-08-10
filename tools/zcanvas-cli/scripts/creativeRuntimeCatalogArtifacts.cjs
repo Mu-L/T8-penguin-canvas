@@ -179,6 +179,24 @@ function buildRuntimeCatalog() {
   for (const model of seedanceNzLlmModels) {
     llm.push(modelEntry('llm', 'seedance-nz', model, model, 'llm'));
   }
+  for (const model of seedanceNz.MINMAX_H3_CONTEXT_IR_MODELS || []) {
+    llm.push(modelEntry(
+      'llm',
+      'seedance-nz',
+      model,
+      model,
+      'minimax-h3-context-ir',
+      {
+        asynchronous: true,
+        outputKind: 'text',
+        inputKinds: model === seedanceNz.MINMAX_H3_CONTEXT_IR_TEXT_MODEL
+          ? ['text']
+          : model === seedanceNz.MINMAX_H3_CONTEXT_IR_IMAGE_MODEL
+            ? ['text', 'image']
+            : ['text', 'image', 'video', 'audio'],
+      },
+    ));
+  }
 
   const image = [];
   for (const family of models.IMAGE_MODELS || []) {

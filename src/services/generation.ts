@@ -1467,6 +1467,66 @@ export async function querySeedance(
   return data.data;
 }
 
+export type MinimaxH3ContextIrModel =
+  | 'minmax-h3-context-ir-text'
+  | 'minmax-h3-context-ir-image'
+  | 'minmax-h3-context-ir-multimodal';
+
+export interface MinimaxH3ContextIrSubmitRequest {
+  model: MinimaxH3ContextIrModel;
+  prompt: string;
+  duration: number;
+  ratio?: string;
+  images?: string[];
+  videos?: string[];
+  audios?: string[];
+}
+
+export interface MinimaxH3ContextIrSubmitResult extends ProviderTransportTrace {
+  taskId: string;
+  taskProvider: 'seedance-nz';
+  model: MinimaxH3ContextIrModel;
+  taskType: 'text' | 'image' | 'multimodal';
+}
+
+export interface MinimaxH3ContextIrQueryResult extends ProviderTransportTrace {
+  status: 'pending' | 'running' | 'succeeded' | 'failed';
+  progress?: string;
+  resultText?: string;
+  failReason?: string;
+  taskProvider?: 'seedance-nz';
+  model?: MinimaxH3ContextIrModel;
+  taskType?: 'text' | 'image' | 'multimodal';
+}
+
+export async function submitMinimaxH3ContextIr(
+  request: MinimaxH3ContextIrSubmitRequest,
+  transport: ProviderSubmissionTransport = {},
+): Promise<MinimaxH3ContextIrSubmitResult> {
+  const response = await fetch('/api/proxy/minimax-h3-context-ir/submit', {
+    method: 'POST',
+    headers: providerSubmissionHeaders(transport),
+    body: JSON.stringify(request),
+    signal: transport.signal,
+  });
+  const data = await safeJsonResponse(response, 'MiniMax H3 官方提示词增强提交');
+  if (!response.ok || !data.success) throw providerResponseError(response, data);
+  return withProviderTransportTrace(data.data, response);
+}
+
+export async function queryMinimaxH3ContextIr(
+  taskId: string,
+  transport: ProviderSubmissionTransport = {},
+): Promise<MinimaxH3ContextIrQueryResult> {
+  const response = await fetch(
+    `/api/proxy/minimax-h3-context-ir/status/${encodeURIComponent(taskId)}`,
+    { signal: transport.signal },
+  );
+  const data = await safeJsonResponse(response, 'MiniMax H3 官方提示词增强查询');
+  if (!response.ok || !data.success) throw providerResponseError(response, data);
+  return withProviderTransportTrace(data.data, response);
+}
+
 // ========================================================================
 // 音频 Suno(异步)
 // 完全对齐主项目 gpt-image-2-web 的 runSuno / runSunoCover / runSunoExtend

@@ -3731,6 +3731,81 @@ router.get('/video/hailuo/status/:tid', async (req, res) => {
   }
 });
 
+router.post('/minimax-h3-context-ir/submit', async (req, res) => {
+  const settings = loadRawSettings();
+  const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) {
+    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI小屋 API Key”' });
+  }
+  try {
+    const result = await seedanceNz.submitMinimaxH3ContextIrTask(
+      req.body || {},
+      apiKey,
+      { signal: req.t8AbortSignal },
+    );
+    rememberTaskKey(result.taskId, apiKey, {
+      provider: 'minmax-h3-context-ir-nz',
+      model: result.model,
+      taskType: result.taskType,
+    });
+    return res.json({
+      success: true,
+      data: {
+        taskId: result.taskId,
+        taskProvider: seedanceNz.PROVIDER_ID,
+        model: result.model,
+        taskType: result.taskType,
+        ...seedanceNzTrace(result),
+      },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    proxyRouteError('proxy/minimax-h3-context-ir/submit 错误', error, [apiKey]);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: proxyPublicError(error, 'MiniMax H3 官方提示词增强请求失败', [apiKey]),
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+router.get('/minimax-h3-context-ir/status/:tid', async (req, res) => {
+  const settings = loadRawSettings();
+  const remembered = recallTaskMeta(req.params.tid, 'minmax-h3-context-ir-nz');
+  const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI小屋 API Key' });
+  try {
+    const result = await seedanceNz.queryMinimaxH3ContextIrTask(
+      req.params.tid,
+      apiKey,
+      { signal: req.t8AbortSignal },
+    );
+    return res.json({
+      success: true,
+      data: {
+        status: result.status,
+        progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
+        resultText: result.resultText || '',
+        failReason: result.status === 'failed'
+          ? safeDiagnosticText(result.failReason || 'MiniMax H3 Context IR 任务失败', 240, [apiKey])
+          : '',
+        taskProvider: seedanceNz.PROVIDER_ID,
+        model: remembered?.model || '',
+        taskType: remembered?.taskType || '',
+        ...seedanceNzTrace(result),
+      },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    proxyRouteError('proxy/minimax-h3-context-ir/status 错误', error, [apiKey]);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: proxyPublicError(error, 'MiniMax H3 官方提示词增强查询失败', [apiKey]),
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
 router.post('/video/flux3/submit', async (req, res) => {
   const settings = loadRawSettings();
   const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();

@@ -1,7 +1,7 @@
 {
   "name": "t8-penguin-canvas",
   "private": false,
-  "version": "2.8.7",
+  "version": "2.8.8",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "T8-penguin-canvas — AI 节点画布工作流工具（Web + Electron 桌面端）",
@@ -48,6 +48,7 @@
     "verify:seedance25:live": "node scripts/verify-seedance25-live.cjs",
     "verify:flux3-hailuo:live": "node scripts/verify-flux3-hailuo-live.cjs",
     "verify:hailuo-refresh:live": "cross-env FLUX3_HAILUO_VERIFY_MODELS=hailuo-h3-t2v,hailuo-h3-i2v,hailuo-h3-multi,minimax-h3-ow-i2v-fast,minimax-h3-ow-r2v-fast FLUX3_HAILUO_LIVE_RUN=hailuo-refresh-live-20260809 node scripts/verify-flux3-hailuo-live.cjs",
+    "verify:minimax-h3-context-ir:live": "node scripts/verify-minimax-h3-context-ir-live.cjs",
     "workflows:hailuo-refresh": "node scripts/generate-hailuo-refresh-workflows.cjs",
     "verify:seedream-layer:live": "node scripts/verify-seedream-layer-live.cjs",
     "verify:mv-music-master:live": "tsx scripts/verify-mv-music-master-live.ts",

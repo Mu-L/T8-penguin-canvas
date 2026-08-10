@@ -239,6 +239,27 @@ const HAILUO_H3_MODELS = new Set([
   ...HAILUO_H3_I2V_MODELS,
   ...HAILUO_H3_MULTI_MODELS,
 ]);
+const MINMAX_H3_CONTEXT_IR_TEXT_MODEL = 'minmax-h3-context-ir-text';
+const MINMAX_H3_CONTEXT_IR_IMAGE_MODEL = 'minmax-h3-context-ir-image';
+const MINMAX_H3_CONTEXT_IR_MULTIMODAL_MODEL = 'minmax-h3-context-ir-multimodal';
+const MINMAX_H3_CONTEXT_IR_MODELS = new Set([
+  MINMAX_H3_CONTEXT_IR_TEXT_MODEL,
+  MINMAX_H3_CONTEXT_IR_IMAGE_MODEL,
+  MINMAX_H3_CONTEXT_IR_MULTIMODAL_MODEL,
+]);
+const MINMAX_H3_CONTEXT_IR_SECONDS = new Set(
+  Array.from({ length: 12 }, (_, index) => String(index + 4)),
+);
+const MINMAX_H3_CONTEXT_IR_TEXT_RATIOS = new Set([
+  '21:9', '16:9', '4:3', '1:1', '3:4', '9:16',
+]);
+const MINMAX_H3_CONTEXT_IR_MULTIMODAL_RATIOS = new Set([
+  'adaptive', ...MINMAX_H3_CONTEXT_IR_TEXT_RATIOS,
+]);
+const MINMAX_H3_CONTEXT_IR_PROMPT_MAX_LENGTH = 7000;
+const MINMAX_H3_CONTEXT_IR_MAX_IMAGES = 9;
+const MINMAX_H3_CONTEXT_IR_MAX_VIDEOS = 3;
+const MINMAX_H3_CONTEXT_IR_MAX_AUDIOS = 3;
 const MINIMAX_H3_OW_T2V_MODEL = 'minimax-h3-ow-t2v';
 const MINIMAX_H3_OW_R2V_MODEL = 'minimax-h3-ow-r2v';
 const MINIMAX_H3_OW_I2V_MODEL = 'minimax-h3-ow-i2v';
@@ -2856,6 +2877,116 @@ async function validateHailuoFirstImage(buffer) {
   }
 }
 
+async function buildMinimaxH3ContextIrPayload(request, apiKey, options = {}) {
+  const model = String(request.model || '').trim();
+  if (!MINMAX_H3_CONTEXT_IR_MODELS.has(model)) {
+    throw new Error(`未知 MiniMax H3 Context IR 模型：${model || '(空)'}`);
+  }
+
+  const prompt = String(request.prompt || '').trim();
+  if (!prompt) throw new Error('MiniMax H3 Context IR 必须填写提示词');
+  if (prompt.length > MINMAX_H3_CONTEXT_IR_PROMPT_MAX_LENGTH) {
+    throw new Error(`MiniMax H3 Context IR 提示词不能超过 ${MINMAX_H3_CONTEXT_IR_PROMPT_MAX_LENGTH} 字符`);
+  }
+
+  const seconds = String(request.duration ?? request.seconds ?? '4').trim();
+  if (!MINMAX_H3_CONTEXT_IR_SECONDS.has(seconds)) {
+    throw new Error('MiniMax H3 Context IR 时长只支持 4-15 秒');
+  }
+
+  const imageSources = normalizeList(request.images || request.refImages);
+  const videoSources = normalizeList(request.videos || request.videoUrls || request.video_url);
+  const audioSources = normalizeList(request.audios || request.audioUrls || request.audio_url);
+  const payload = { model, prompt, seconds };
+
+  if (model === MINMAX_H3_CONTEXT_IR_TEXT_MODEL) {
+    if (imageSources.length || videoSources.length || audioSources.length) {
+      throw new Error('MiniMax H3 Context IR Text 只接受文本，不接受参考素材');
+    }
+    const ratio = String(request.ratio || '16:9').trim();
+    if (!MINMAX_H3_CONTEXT_IR_TEXT_RATIOS.has(ratio)) {
+      throw new Error('MiniMax H3 Context IR Text 比例只支持 21:9、16:9、4:3、1:1、3:4 或 9:16');
+    }
+    payload.metadata = { ratio };
+    return { payload, model, taskType: 'text' };
+  }
+
+  if (model === MINMAX_H3_CONTEXT_IR_IMAGE_MODEL) {
+    if (imageSources.length < 1 || imageSources.length > 2) {
+      throw new Error('MiniMax H3 Context IR Image 必须提供 1-2 张首帧/尾帧图片');
+    }
+    if (videoSources.length || audioSources.length) {
+      throw new Error('MiniMax H3 Context IR Image 不接受视频或音频素材');
+    }
+    payload.images = [];
+    for (const source of imageSources) {
+      payload.images.push(await uploadMedia(source, 'image', apiKey, {
+        ...options,
+        maxBytes: 30 * 1024 * 1024,
+        allowedMimes: ['image/jpeg', 'image/png', 'image/webp'],
+        cacheVariant: 'minmax-h3-context-ir-image-v1',
+      }));
+    }
+    return { payload, model, taskType: 'image' };
+  }
+
+  if (!imageSources.length && !videoSources.length && !audioSources.length) {
+    throw new Error('MiniMax H3 Context IR Multimodal 至少需要 1 个图片、视频或音频素材');
+  }
+  if (imageSources.length > MINMAX_H3_CONTEXT_IR_MAX_IMAGES) {
+    throw new Error(`MiniMax H3 Context IR Multimodal 最多支持 ${MINMAX_H3_CONTEXT_IR_MAX_IMAGES} 张图片`);
+  }
+  if (videoSources.length > MINMAX_H3_CONTEXT_IR_MAX_VIDEOS) {
+    throw new Error(`MiniMax H3 Context IR Multimodal 最多支持 ${MINMAX_H3_CONTEXT_IR_MAX_VIDEOS} 个视频`);
+  }
+  if (audioSources.length > MINMAX_H3_CONTEXT_IR_MAX_AUDIOS) {
+    throw new Error(`MiniMax H3 Context IR Multimodal 最多支持 ${MINMAX_H3_CONTEXT_IR_MAX_AUDIOS} 个音频`);
+  }
+
+  const ratio = String(request.ratio || 'api_default').trim();
+  if (ratio !== 'api_default' && !MINMAX_H3_CONTEXT_IR_MULTIMODAL_RATIOS.has(ratio)) {
+    throw new Error('MiniMax H3 Context IR Multimodal 比例不受支持');
+  }
+  const metadata = {};
+  if (ratio !== 'api_default') metadata.ratio = ratio;
+
+  if (imageSources.length) {
+    payload.images = [];
+    for (const source of imageSources) {
+      payload.images.push(await uploadMedia(source, 'image', apiKey, {
+        ...options,
+        maxBytes: 30 * 1024 * 1024,
+        allowedMimes: ['image/jpeg', 'image/png', 'image/webp'],
+        cacheVariant: 'minmax-h3-context-ir-multimodal-image-v1',
+      }));
+    }
+  }
+  if (videoSources.length) {
+    metadata.video_urls = [];
+    for (const source of videoSources) {
+      metadata.video_urls.push(await uploadMedia(source, 'video', apiKey, {
+        ...options,
+        maxBytes: 50 * 1024 * 1024,
+        allowedMimes: ['video/mp4', 'video/x-msvideo', 'video/quicktime', 'video/x-matroska'],
+        cacheVariant: 'minmax-h3-context-ir-multimodal-video-v1',
+      }));
+    }
+  }
+  if (audioSources.length) {
+    metadata.audio_url = [];
+    for (const source of audioSources) {
+      metadata.audio_url.push(await uploadMedia(source, 'audio', apiKey, {
+        ...options,
+        maxBytes: 50 * 1024 * 1024,
+        allowedMimes: ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/flac'],
+        cacheVariant: 'minmax-h3-context-ir-multimodal-audio-v1',
+      }));
+    }
+  }
+  if (Object.keys(metadata).length) payload.metadata = metadata;
+  return { payload, model, taskType: 'multimodal' };
+}
+
 async function buildHailuoPayload(request, apiKey, options = {}) {
   const model = String(request.model || '').trim();
   if (!HAILUO_MODELS.has(model)) throw new Error(`未知 Hailuo 模型：${model || '(空)'}`);
@@ -4060,6 +4191,82 @@ async function queryImageTask(taskId, apiKey, options = {}) {
   };
 }
 
+async function submitMinimaxH3ContextIrTask(request, apiKey, options = {}) {
+  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
+  const fetchImpl = getFetchImpl(options);
+  const baseUrl = cleanBaseUrl(options.baseUrl);
+  const built = await buildMinimaxH3ContextIrPayload(request, apiKey, options);
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/video/generations`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(built.payload),
+  }, options, 'seedance.nz MiniMax H3 Context IR 任务提交');
+  const data = await responseJson(response, 'seedance.nz MiniMax H3 Context IR 任务提交');
+  if (!response.ok) throw createUpstreamError(data, response);
+  const taskId = requiredTaskId(
+    data?.task_id || data?.id || data?.data?.task_id || data?.data?.id,
+    'seedance.nz MiniMax H3 Context IR 任务提交',
+    response,
+  );
+  return {
+    taskId,
+    model: built.model,
+    taskType: built.taskType,
+    ...safeProviderTrace(response, data, { pollCount: 0 }),
+  };
+}
+
+function normalizeMinimaxH3ContextIrStatus(value) {
+  const status = String(value || '').trim().toUpperCase();
+  if (['SUCCESS', 'SUCCEEDED', 'COMPLETED'].includes(status)) return 'succeeded';
+  if (['FAILURE', 'FAILED', 'CANCELED', 'CANCELLED'].includes(status)) return 'failed';
+  if (['IN_PROGRESS', 'PROCESSING', 'RUNNING'].includes(status)) return 'running';
+  return 'pending';
+}
+
+async function queryMinimaxH3ContextIrTask(taskId, apiKey, options = {}) {
+  if (!String(apiKey || '').trim()) throw new Error('缺少贞贞的平价AI小屋 API Key');
+  const safeTaskId = requiredTaskId(taskId, 'seedance.nz MiniMax H3 Context IR 任务查询');
+  const fetchImpl = getFetchImpl(options);
+  const baseUrl = cleanBaseUrl(options.baseUrl);
+  const response = await fetchProviderResponse(
+    fetchImpl,
+    `${baseUrl}/v1/video/generations/${encodeURIComponent(safeTaskId)}`,
+    { headers: { Authorization: `Bearer ${apiKey}` } },
+    options,
+    'seedance.nz MiniMax H3 Context IR 任务查询',
+  );
+  const data = await responseJson(response, 'seedance.nz MiniMax H3 Context IR 任务查询');
+  if (!response.ok) throw createUpstreamError(data, response);
+  const record = data?.data && typeof data.data === 'object' ? data.data : data;
+  const status = normalizeMinimaxH3ContextIrStatus(record?.status || data?.status);
+  const resultText = status === 'succeeded'
+    ? String(record?.result_text || data?.result_text || '').trim()
+    : '';
+  if (status === 'succeeded' && !resultText) {
+    throw invalidResponseError('seedance.nz MiniMax H3 Context IR 任务完成但缺少 result_text', response);
+  }
+  const failReason = status === 'failed'
+    ? String(
+      record?.fail_reason
+      || record?.failReason
+      || record?.error?.message
+      || data?.message
+      || 'MiniMax H3 Context IR 任务失败',
+    ).trim() || 'MiniMax H3 Context IR 任务失败'
+    : null;
+  return {
+    status,
+    progress: safeProgress(record?.progress ?? data?.progress),
+    resultText,
+    failReason,
+    ...safeProviderTrace(response, data),
+  };
+}
+
 async function submitFlux3Task(request, apiKey, options = {}) {
   if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
   const fetchImpl = getFetchImpl(options);
@@ -4156,6 +4363,16 @@ module.exports = {
   HAILUO_H3_T2V_MODEL,
   HAILUO_H3_T2V_MODELS,
   HAILUO_MODELS,
+  MINMAX_H3_CONTEXT_IR_IMAGE_MODEL,
+  MINMAX_H3_CONTEXT_IR_MAX_AUDIOS,
+  MINMAX_H3_CONTEXT_IR_MAX_IMAGES,
+  MINMAX_H3_CONTEXT_IR_MAX_VIDEOS,
+  MINMAX_H3_CONTEXT_IR_MODELS,
+  MINMAX_H3_CONTEXT_IR_MULTIMODAL_MODEL,
+  MINMAX_H3_CONTEXT_IR_MULTIMODAL_RATIOS,
+  MINMAX_H3_CONTEXT_IR_SECONDS,
+  MINMAX_H3_CONTEXT_IR_TEXT_MODEL,
+  MINMAX_H3_CONTEXT_IR_TEXT_RATIOS,
   FLUX3_DRAFT_ENHANCE_MODELS,
   FLUX3_I2V_MODELS,
   FLUX3_RATIOS,
@@ -4254,6 +4471,7 @@ module.exports = {
   buildAudioPayload,
   buildSunoMusicPayload,
   buildHailuoPayload,
+  buildMinimaxH3ContextIrPayload,
   buildFlux3Payload,
   buildKlingPayload,
   buildUpscalerPayload,
@@ -4274,6 +4492,7 @@ module.exports = {
   normalizePromptMentions,
   normalizeResolution,
   queryImageTask,
+  queryMinimaxH3ContextIrTask,
   queryMidjourneyTask,
   queryAudioTask,
   querySunoMusicTask,
@@ -4290,6 +4509,7 @@ module.exports = {
   submitViduTask,
   submitHappyHorseTask,
   submitImageTask,
+  submitMinimaxH3ContextIrTask,
   submitMidjourneyAction,
   submitTask,
   submitWanTask,

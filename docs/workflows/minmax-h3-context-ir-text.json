@@ -1,0 +1,48 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "MiniMax H3 官方 Context IR 纯文本提示词增强",
+  "nodes": [
+    {
+      "id": "minmax-h3-context-ir-text-node",
+      "type": "minimax-h3-official-prompt-enhancer",
+      "position": { "x": 40, "y": 40 },
+      "data": {
+        "label": "MiniMax H3 官方纯文本提示词增强",
+        "userPrompt": "清晨花园里，一位穿浅色风衣的女性沿石径缓慢前行，镜头平稳跟随，柔和电影光线",
+        "model": "minmax-h3-context-ir-text",
+        "duration": 4,
+        "ratio": "16:9",
+        "taskProvider": "seedance-nz",
+        "status": "idle",
+        "resultText": ""
+      }
+    },
+    {
+      "id": "minmax-h3-context-ir-text-output",
+      "type": "output",
+      "position": { "x": 500, "y": 40 },
+      "data": { "label": "增强后的提示词", "outputType": "text" }
+    }
+  ],
+  "edges": [
+    {
+      "id": "minmax-h3-context-ir-text-output-edge",
+      "source": "minmax-h3-context-ir-text-node",
+      "target": "minmax-h3-context-ir-text-output"
+    }
+  ],
+  "nodeCount": 2,
+  "edgeCount": 1,
+  "nodeTypes": ["minimax-h3-official-prompt-enhancer", "output"],
+  "topologyPreview": {
+    "nodes": [
+      { "id": "minmax-h3-context-ir-text-node", "type": "minimax-h3-official-prompt-enhancer", "label": "MiniMax H3 官方纯文本提示词增强", "x": 90, "y": 90 },
+      { "id": "minmax-h3-context-ir-text-output", "type": "output", "label": "增强后的提示词", "x": 550, "y": 90 }
+    ],
+    "edges": [
+      { "id": "minmax-h3-context-ir-text-output-edge", "source": "minmax-h3-context-ir-text-node", "target": "minmax-h3-context-ir-text-output" }
+    ]
+  },
+  "savedAt": "2026-08-11T00:00:00.000Z"
+}

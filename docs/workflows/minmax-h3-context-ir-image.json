@@ -1,0 +1,53 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "MiniMax H3 官方 Context IR 首尾帧提示词增强",
+  "nodes": [
+    {
+      "id": "minmax-h3-context-ir-image-upload",
+      "type": "upload",
+      "position": { "x": 0, "y": 40 },
+      "data": { "label": "上传首帧图（可再连接尾帧图）", "uploadType": "image", "lockedUploadType": "image" }
+    },
+    {
+      "id": "minmax-h3-context-ir-image-node",
+      "type": "minimax-h3-official-prompt-enhancer",
+      "position": { "x": 390, "y": 40 },
+      "data": {
+        "label": "MiniMax H3 官方首尾帧提示词增强",
+        "userPrompt": "保持主体外观与场景构图，增加自然动作和连贯的电影镜头运动",
+        "model": "minmax-h3-context-ir-image",
+        "duration": 4,
+        "ratio": "16:9",
+        "taskProvider": "seedance-nz",
+        "status": "idle",
+        "resultText": ""
+      }
+    },
+    {
+      "id": "minmax-h3-context-ir-image-output",
+      "type": "output",
+      "position": { "x": 850, "y": 40 },
+      "data": { "label": "增强后的提示词", "outputType": "text" }
+    }
+  ],
+  "edges": [
+    { "id": "minmax-h3-context-ir-image-input-edge", "source": "minmax-h3-context-ir-image-upload", "target": "minmax-h3-context-ir-image-node" },
+    { "id": "minmax-h3-context-ir-image-output-edge", "source": "minmax-h3-context-ir-image-node", "target": "minmax-h3-context-ir-image-output" }
+  ],
+  "nodeCount": 3,
+  "edgeCount": 2,
+  "nodeTypes": ["upload", "minimax-h3-official-prompt-enhancer", "output"],
+  "topologyPreview": {
+    "nodes": [
+      { "id": "minmax-h3-context-ir-image-upload", "type": "upload", "label": "上传首帧图（可再连接尾帧图）", "x": 50, "y": 90 },
+      { "id": "minmax-h3-context-ir-image-node", "type": "minimax-h3-official-prompt-enhancer", "label": "MiniMax H3 官方首尾帧提示词增强", "x": 440, "y": 90 },
+      { "id": "minmax-h3-context-ir-image-output", "type": "output", "label": "增强后的提示词", "x": 900, "y": 90 }
+    ],
+    "edges": [
+      { "id": "minmax-h3-context-ir-image-input-edge", "source": "minmax-h3-context-ir-image-upload", "target": "minmax-h3-context-ir-image-node" },
+      { "id": "minmax-h3-context-ir-image-output-edge", "source": "minmax-h3-context-ir-image-node", "target": "minmax-h3-context-ir-image-output" }
+    ]
+  },
+  "savedAt": "2026-08-11T00:00:00.000Z"
+}

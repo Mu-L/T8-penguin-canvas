@@ -1,0 +1,71 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "MiniMax H3 官方 Context IR 多模态提示词增强",
+  "nodes": [
+    {
+      "id": "minmax-h3-context-ir-multimodal-image",
+      "type": "upload",
+      "position": { "x": 0, "y": 0 },
+      "data": { "label": "上传参考图", "uploadType": "image", "lockedUploadType": "image" }
+    },
+    {
+      "id": "minmax-h3-context-ir-multimodal-video",
+      "type": "upload",
+      "position": { "x": 0, "y": 190 },
+      "data": { "label": "上传参考视频", "uploadType": "video", "lockedUploadType": "video" }
+    },
+    {
+      "id": "minmax-h3-context-ir-multimodal-audio",
+      "type": "upload",
+      "position": { "x": 0, "y": 380 },
+      "data": { "label": "上传参考音频", "uploadType": "audio", "lockedUploadType": "audio" }
+    },
+    {
+      "id": "minmax-h3-context-ir-multimodal-node",
+      "type": "minimax-h3-official-prompt-enhancer",
+      "position": { "x": 390, "y": 130 },
+      "data": {
+        "label": "MiniMax H3 官方多模态提示词增强",
+        "userPrompt": "结合图片中的主体、视频中的镜头运动和音频节奏，生成连贯且可执行的视频提示词",
+        "model": "minmax-h3-context-ir-multimodal",
+        "duration": 4,
+        "ratio": "adaptive",
+        "taskProvider": "seedance-nz",
+        "status": "idle",
+        "resultText": ""
+      }
+    },
+    {
+      "id": "minmax-h3-context-ir-multimodal-output",
+      "type": "output",
+      "position": { "x": 850, "y": 130 },
+      "data": { "label": "增强后的提示词", "outputType": "text" }
+    }
+  ],
+  "edges": [
+    { "id": "minmax-h3-context-ir-multimodal-image-edge", "source": "minmax-h3-context-ir-multimodal-image", "target": "minmax-h3-context-ir-multimodal-node" },
+    { "id": "minmax-h3-context-ir-multimodal-video-edge", "source": "minmax-h3-context-ir-multimodal-video", "target": "minmax-h3-context-ir-multimodal-node" },
+    { "id": "minmax-h3-context-ir-multimodal-audio-edge", "source": "minmax-h3-context-ir-multimodal-audio", "target": "minmax-h3-context-ir-multimodal-node" },
+    { "id": "minmax-h3-context-ir-multimodal-output-edge", "source": "minmax-h3-context-ir-multimodal-node", "target": "minmax-h3-context-ir-multimodal-output" }
+  ],
+  "nodeCount": 5,
+  "edgeCount": 4,
+  "nodeTypes": ["upload", "minimax-h3-official-prompt-enhancer", "output"],
+  "topologyPreview": {
+    "nodes": [
+      { "id": "minmax-h3-context-ir-multimodal-image", "type": "upload", "label": "上传参考图", "x": 50, "y": 50 },
+      { "id": "minmax-h3-context-ir-multimodal-video", "type": "upload", "label": "上传参考视频", "x": 50, "y": 240 },
+      { "id": "minmax-h3-context-ir-multimodal-audio", "type": "upload", "label": "上传参考音频", "x": 50, "y": 430 },
+      { "id": "minmax-h3-context-ir-multimodal-node", "type": "minimax-h3-official-prompt-enhancer", "label": "MiniMax H3 官方多模态提示词增强", "x": 440, "y": 180 },
+      { "id": "minmax-h3-context-ir-multimodal-output", "type": "output", "label": "增强后的提示词", "x": 900, "y": 180 }
+    ],
+    "edges": [
+      { "id": "minmax-h3-context-ir-multimodal-image-edge", "source": "minmax-h3-context-ir-multimodal-image", "target": "minmax-h3-context-ir-multimodal-node" },
+      { "id": "minmax-h3-context-ir-multimodal-video-edge", "source": "minmax-h3-context-ir-multimodal-video", "target": "minmax-h3-context-ir-multimodal-node" },
+      { "id": "minmax-h3-context-ir-multimodal-audio-edge", "source": "minmax-h3-context-ir-multimodal-audio", "target": "minmax-h3-context-ir-multimodal-node" },
+      { "id": "minmax-h3-context-ir-multimodal-output-edge", "source": "minmax-h3-context-ir-multimodal-node", "target": "minmax-h3-context-ir-multimodal-output" }
+    ]
+  },
+  "savedAt": "2026-08-11T00:00:00.000Z"
+}

@@ -1,6 +1,6 @@
 {
   "schema": "t8-creative-runtime-catalog-v1",
-  "sourceDigest": "81169504490bc454d552ef8d76db4544f80fc344ff7f9de580462a4f2b77a5c3",
+  "sourceDigest": "c810e1ac3d6adb7d10486064c08ede0bfa2e05d546df5444526c3a1b1b2d2a8c",
   "generatedFrom": [
     "src/providers/models.ts",
     "src/config/seedance.ts",
@@ -254,6 +254,70 @@
         "platformLabel": "贞贞的平价AI小屋",
         "family": "llm",
         "available": true
+      }
+    },
+    {
+      "id": "llm:seedance-nz:minmax-h3-context-ir-image",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "minmax-h3-context-ir-image",
+      "label": "minmax-h3-context-ir-image",
+      "family": "minimax-h3-context-ir",
+      "available": true,
+      "parameters": {
+        "label": "minmax-h3-context-ir-image",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "minimax-h3-context-ir",
+        "available": true,
+        "asynchronous": true,
+        "outputKind": "text",
+        "inputKinds": [
+          "text",
+          "image"
+        ]
+      }
+    },
+    {
+      "id": "llm:seedance-nz:minmax-h3-context-ir-multimodal",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "minmax-h3-context-ir-multimodal",
+      "label": "minmax-h3-context-ir-multimodal",
+      "family": "minimax-h3-context-ir",
+      "available": true,
+      "parameters": {
+        "label": "minmax-h3-context-ir-multimodal",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "minimax-h3-context-ir",
+        "available": true,
+        "asynchronous": true,
+        "outputKind": "text",
+        "inputKinds": [
+          "text",
+          "image",
+          "video",
+          "audio"
+        ]
+      }
+    },
+    {
+      "id": "llm:seedance-nz:minmax-h3-context-ir-text",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "minmax-h3-context-ir-text",
+      "label": "minmax-h3-context-ir-text",
+      "family": "minimax-h3-context-ir",
+      "available": true,
+      "parameters": {
+        "label": "minmax-h3-context-ir-text",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "minimax-h3-context-ir",
+        "available": true,
+        "asynchronous": true,
+        "outputKind": "text",
+        "inputKinds": [
+          "text"
+        ]
       }
     },
     {
@@ -7762,7 +7826,7 @@
     }
   ],
   "counts": {
-    "llm": 29,
+    "llm": 32,
     "image": 46,
     "video": 110,
     "audio": 8,

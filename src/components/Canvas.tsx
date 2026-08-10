@@ -1334,6 +1334,7 @@ const DirectorStoryboardNode = lazyCanvasNode(() => import('./nodes/DirectorStor
 const StoryNode = lazyCanvasNode(() => import('./nodes/StoryNode'), 'StoryNode');
 const ScriptMasterNode = lazyCanvasNode(() => import('./nodes/ScriptMasterNode'), 'ScriptMasterNode');
 const MiniMaxH3PromptEnhancerNode = lazyCanvasNode(() => import('./nodes/MiniMaxH3PromptEnhancerNode'), 'MiniMaxH3PromptEnhancerNode');
+const MinimaxH3OfficialPromptEnhancerNode = lazyCanvasNode(() => import('./nodes/MinimaxH3OfficialPromptEnhancerNode'), 'MinimaxH3OfficialPromptEnhancerNode');
 const Seedance20PromptEnhancerNode = lazyCanvasNode(() => import('./nodes/Seedance20PromptEnhancerNode'), 'Seedance20PromptEnhancerNode');
 const MvMusicMasterNode = lazyCanvasNode(() => import('./nodes/MvMusicMasterNode'), 'MvMusicMasterNode');
 const AudioNode = lazyCanvasNode(() => import('./nodes/AudioNode'), 'AudioNode');
@@ -1415,6 +1416,7 @@ const SPECIFIC_NODES: Record<string, any> = {
   story: StoryNode,
   'script-master': ScriptMasterNode,
   'minimax-h3-prompt-enhancer': MiniMaxH3PromptEnhancerNode,
+  'minimax-h3-official-prompt-enhancer': MinimaxH3OfficialPromptEnhancerNode,
   'seedance20-prompt-enhancer': Seedance20PromptEnhancerNode,
   'mv-music-master': MvMusicMasterNode,
   audio: AudioNode,
@@ -1960,6 +1962,20 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     providerModel: 'bytedance/doubao-seed-2.1-pro',
     status: 'idle',
     error: '',
+    enhancedPrompt: '',
+    prompt: '',
+  },
+  'minimax-h3-official-prompt-enhancer': {
+    userPrompt: '',
+    model: 'minmax-h3-context-ir-text',
+    duration: 4,
+    ratio: '16:9',
+    status: 'idle',
+    error: '',
+    progress: '',
+    taskId: '',
+    taskProvider: 'seedance-nz',
+    resultText: '',
     enhancedPrompt: '',
     prompt: '',
   },

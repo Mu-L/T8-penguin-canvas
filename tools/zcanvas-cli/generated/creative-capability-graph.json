@@ -14,17 +14,17 @@
     "coverageReceiptCompiler": "tools/zcanvas-cli/src/capabilityCoverage.cjs"
   },
   "sourceDigests": {
-    "creativeCapabilityManifest": "87a3ee522a952d87c38b533e5b2d1e77720fca619556d3776969e3510deb8a07",
-    "canvasNodeSchema": "d7bd79b48f1f4216c990ff8b53a05a0f73d4105b57e429bf4696f14c018f89b0",
-    "canvasNodeSchemaFile": "32e85b2f9e8ec4d740afadeece7e0823c6e7e4f379556a15fbdccb17495027da",
-    "runtimeCatalogSources": "81169504490bc454d552ef8d76db4544f80fc344ff7f9de580462a4f2b77a5c3",
-    "runtimeCatalogArtifact": "dfc8e310c51ba3bc3f8db17b92d036dc9119cd6e1a2d6080d3f2fc7dbdbba824",
+    "creativeCapabilityManifest": "5c56b3b64d483ae6e6da5268f25c059f2a3fcc2c13e3c3d64d39b10e1e56402b",
+    "canvasNodeSchema": "8b5244b1c088bb8b46e0a9f69a919c50f205e3857a75a3949cbba96ab3be8bc7",
+    "canvasNodeSchemaFile": "8b7102f465ef34cd9475ede302b4e4195384ab15456f2bb8e3346bc07c035e45",
+    "runtimeCatalogSources": "c810e1ac3d6adb7d10486064c08ede0bfa2e05d546df5444526c3a1b1b2d2a8c",
+    "runtimeCatalogArtifact": "1ee6c8735797955ad4d2c204bb0199b8adb6e3852917edff20a0fd50c186dce9",
     "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
     "capabilityGraphCompiler": "1a611d7e91dcf523e0536a92e9adb6ba2d884689a65fa10274bcda3a05ef9840",
     "coverageReceiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7",
     "canonicalTextDigestCompiler": "b0afcf28a257fbbd8f391edc117348f8f2ede1b4a039ae91bce25a8d563ac0cf"
   },
-  "aggregateDigest": "cda71422d459493f879f050d16cead1e583acb1ae547fae99e72203695fb883a",
+  "aggregateDigest": "c54931effd8ab4e877ee4aa835a66a9f41cd30761a40da220c5912cad1c3ac89",
   "principles": {
     "oneSentenceStart": true,
     "directCanvasMutation": false,
@@ -36,21 +36,21 @@
   "counts": {
     "capabilities": 31,
     "handlers": 31,
-    "nodes": 76,
-    "executableNodes": 57,
-    "generatableNodes": 10,
-    "referencedNodes": 67,
+    "nodes": 77,
+    "executableNodes": 58,
+    "generatableNodes": 11,
+    "referencedNodes": 68,
     "unreferencedNodes": 9,
-    "directCapabilityNodes": 67,
+    "directCapabilityNodes": 68,
     "internalCompatNodes": 1,
     "semanticSupersededNodes": 8,
     "publicCapabilityGapNodes": 0,
-    "accountedNodes": 76,
+    "accountedNodes": 77,
     "unexplainedNodes": 0,
-    "fullyOperableNodes": 17,
-    "runtimeEntries": 240,
+    "fullyOperableNodes": 18,
+    "runtimeEntries": 243,
     "runtimeByKind": {
-      "llm": 29,
+      "llm": 32,
       "image": 46,
       "video": 110,
       "audio": 8,
@@ -58,7 +58,7 @@
     },
     "runtimeByProvider": {
       "grok-oauth": 2,
-      "seedance-nz": 166,
+      "seedance-nz": 169,
       "zhenzhen": 65,
       "fal": 7
     },
@@ -331,6 +331,7 @@
       "nodeTypes": [
         "llm",
         "minimax-h3-prompt-enhancer",
+        "minimax-h3-official-prompt-enhancer",
         "seedance20-prompt-enhancer",
         "output"
       ],
@@ -517,6 +518,7 @@
         "audio",
         "llm",
         "minimax-h3-prompt-enhancer",
+        "minimax-h3-official-prompt-enhancer",
         "seedance20-prompt-enhancer",
         "mv-music-master",
         "runninghub",
@@ -3789,6 +3791,56 @@
       }
     },
     {
+      "type": "minimax-h3-official-prompt-enhancer",
+      "label": "MiniMax H3官方提示词增强器",
+      "description": "通过 MiniMax H3 Context IR 官方异步模型，按纯文本、首尾帧或图/视频/音频多模态上下文增强视频提示词；固定使用贞贞的平价AI小屋",
+      "category": "inspiration",
+      "hidden": false,
+      "executable": true,
+      "generatable": true,
+      "agentExposure": "direct-capability",
+      "coverageReason": "registered-capability-reference",
+      "accounting": {
+        "status": "direct-capability",
+        "reasonCode": "registered-capability-reference",
+        "semanticCapabilityIds": [
+          "canvas.node-add",
+          "create.script"
+        ],
+        "evidence": [
+          "tools/zcanvas-cli/creativeCapabilityManifest.json"
+        ]
+      },
+      "inputs": [
+        "text",
+        "image",
+        "video",
+        "audio"
+      ],
+      "outputs": [
+        "text"
+      ],
+      "capabilityIds": [
+        "canvas.node-add",
+        "create.script"
+      ],
+      "handlerIds": [
+        "creative-action:graph.node-add",
+        "creative-plan:create.script"
+      ],
+      "coverage": {
+        "understand": true,
+        "plan": true,
+        "preview": true,
+        "apply": true,
+        "run": true,
+        "verify": true,
+        "resume": false,
+        "rollback": true,
+        "recover": true
+      }
+    },
+    {
       "type": "seedance20-prompt-enhancer",
       "label": "Seedance 2.0提示词增强器",
       "description": "按 Seedance 2.0 官方方法增强生成、首尾帧、多参考、视频编辑、延长与轨道补齐提示词，支持完整图片/视频理解与所有扩展 LLM 渠道",
@@ -6320,7 +6372,7 @@
   ],
   "runtime": {
     "schema": "t8-creative-runtime-catalog-v1",
-    "sourceDigest": "81169504490bc454d552ef8d76db4544f80fc344ff7f9de580462a4f2b77a5c3",
+    "sourceDigest": "c810e1ac3d6adb7d10486064c08ede0bfa2e05d546df5444526c3a1b1b2d2a8c",
     "platforms": [
       {
         "id": "zhenzhen",
@@ -8657,6 +8709,66 @@
         "model": "minimax/minimax-m2.7",
         "label": "minimax/minimax-m2.7",
         "family": "llm",
+        "available": true,
+        "catalogSection": "llm",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "llm:seedance-nz:minmax-h3-context-ir-image",
+        "kind": "llm",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "minmax-h3-context-ir-image",
+        "label": "minmax-h3-context-ir-image",
+        "family": "minimax-h3-context-ir",
+        "available": true,
+        "catalogSection": "llm",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "llm:seedance-nz:minmax-h3-context-ir-multimodal",
+        "kind": "llm",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "minmax-h3-context-ir-multimodal",
+        "label": "minmax-h3-context-ir-multimodal",
+        "family": "minimax-h3-context-ir",
+        "available": true,
+        "catalogSection": "llm",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "llm:seedance-nz:minmax-h3-context-ir-text",
+        "kind": "llm",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "minmax-h3-context-ir-text",
+        "label": "minmax-h3-context-ir-text",
+        "family": "minimax-h3-context-ir",
         "available": true,
         "catalogSection": "llm",
         "compatibility": {
@@ -11512,6 +11624,9 @@
       "llm:seedance-nz:glm-5.2",
       "llm:seedance-nz:glm-5v-turbo",
       "llm:seedance-nz:minimax/minimax-m2.7",
+      "llm:seedance-nz:minmax-h3-context-ir-image",
+      "llm:seedance-nz:minmax-h3-context-ir-multimodal",
+      "llm:seedance-nz:minmax-h3-context-ir-text",
       "llm:seedance-nz:qwen/qwen3.6-flash",
       "llm:seedance-nz:qwen/qwen3.6-max-preview",
       "llm:seedance-nz:qwen/qwen3.6-plus",
@@ -11643,20 +11758,20 @@
   "coverageReceipt": {
     "schema": "t8-creative-capability-coverage-receipt-v1",
     "sourceDigests": {
-      "capabilityManifest": "87a3ee522a952d87c38b533e5b2d1e77720fca619556d3776969e3510deb8a07",
-      "nodeSchema": "d7bd79b48f1f4216c990ff8b53a05a0f73d4105b57e429bf4696f14c018f89b0",
-      "runtimeCatalog": "81169504490bc454d552ef8d76db4544f80fc344ff7f9de580462a4f2b77a5c3",
+      "capabilityManifest": "5c56b3b64d483ae6e6da5268f25c059f2a3fcc2c13e3c3d64d39b10e1e56402b",
+      "nodeSchema": "8b5244b1c088bb8b46e0a9f69a919c50f205e3857a75a3949cbba96ab3be8bc7",
+      "runtimeCatalog": "c810e1ac3d6adb7d10486064c08ede0bfa2e05d546df5444526c3a1b1b2d2a8c",
       "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
       "receiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7"
     },
     "inventory": {
       "nodes": {
-        "total": 76,
-        "executable": 57,
-        "generatable": 10
+        "total": 77,
+        "executable": 58,
+        "generatable": 11
       },
       "runtime": {
-        "llm": 29,
+        "llm": 32,
         "image": 46,
         "video": 110,
         "audio": 8,
@@ -11674,6 +11789,6 @@
       "missingCompatibilityEdges": []
     },
     "complete": true,
-    "digest": "db38ddd631ca4c6ce02eb0e318d286fe48420b1ac857934932711237247d3689"
+    "digest": "ea8d6021e0689f1a7af70729658ada34dc873e9e6e71bb7d17c648ba985471d9"
   }
 }

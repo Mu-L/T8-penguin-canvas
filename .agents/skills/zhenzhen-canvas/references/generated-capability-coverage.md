@@ -3,22 +3,22 @@
 > Machine-generated from the real Canvas Node Schema, creative capability manifest,
 > runtime model/action catalog, and handler bindings. Do not edit by hand.
 
-- Aggregate SHA-256: `cda71422d459493f879f050d16cead1e583acb1ae547fae99e72203695fb883a`
+- Aggregate SHA-256: `c54931effd8ab4e877ee4aa835a66a9f41cd30761a40da220c5912cad1c3ac89`
 - Capabilities / handlers: **31 / 31**
-- Canvas nodes: **76**
-- Referenced / unreferenced nodes: **67 / 9**
-- Accounted / unexplained nodes: **76 / 0**
-- Direct capability nodes: **67**
+- Canvas nodes: **77**
+- Referenced / unreferenced nodes: **68 / 9**
+- Accounted / unexplained nodes: **77 / 0**
+- Direct capability nodes: **68**
 - Internal compatibility nodes: **1**
 - Semantically superseded nodes: **8**
 - Public capability gaps: **0**
-- Fully operable nodes: **17**
-- Runtime model/action entries: **240**
-- Dynamic node inventory (total / executable / generatable): **76 / 57 / 10**
-- Dynamic runtime inventory (LLM / image / video / audio / actions): **29 / 46 / 110 / 8 / 47**
+- Fully operable nodes: **18**
+- Runtime model/action entries: **243**
+- Dynamic node inventory (total / executable / generatable): **77 / 58 / 11**
+- Dynamic runtime inventory (LLM / image / video / audio / actions): **32 / 46 / 110 / 8 / 47**
 - Operation risk contracts: **152** (L0 91, L1 44, L2 17, L3 0)
 - Unknown node references: **0**
-- Coverage receipt: `t8-creative-capability-coverage-receipt-v1` / `db38ddd631ca4c6ce02eb0e318d286fe48420b1ac857934932711237247d3689`
+- Coverage receipt: `t8-creative-capability-coverage-receipt-v1` / `ea8d6021e0689f1a7af70729658ada34dc873e9e6e71bb7d17c648ba985471d9`
 
 “Understand” means the node exists in the authoritative schema. Other columns are true only
 when at least one registered high-level capability explicitly advertises that operation.
@@ -45,6 +45,7 @@ when at least one registered high-level capability explicitly advertises that op
 | `audio` 音频 | core | direct-capability | yes | yes | `canvas.node-add`, `create.audio` | yes | yes | yes | yes | yes | yes |
 | `llm` LLM | core | direct-capability | yes | yes | `canvas.node-add`, `create.script` | yes | yes | yes | yes | yes | yes |
 | `minimax-h3-prompt-enhancer` MiniMax H3提示词增强器 | inspiration | direct-capability | yes | yes | `canvas.node-add`, `create.script` | yes | yes | yes | yes | yes | yes |
+| `minimax-h3-official-prompt-enhancer` MiniMax H3官方提示词增强器 | inspiration | direct-capability | yes | yes | `canvas.node-add`, `create.script` | yes | yes | yes | yes | yes | yes |
 | `seedance20-prompt-enhancer` Seedance 2.0提示词增强器 | inspiration | direct-capability | yes | yes | `canvas.node-add`, `create.script` | yes | yes | yes | yes | yes | yes |
 | `mv-music-master` MV 音乐大师 | core | direct-capability | yes | yes | `canvas.node-add` | yes | yes | yes | — | yes | yes |
 | `runninghub` RunningHub | rh | direct-capability | yes | — | `canvas.node-add` | yes | yes | yes | — | yes | yes |
@@ -107,7 +108,7 @@ when at least one registered high-level capability explicitly advertises that op
 Catalog presence only means “known”. Every runtime entry is generated fail-closed and must
 receive installed / credential / region readiness at request time before it is executable.
 
-- llm: **29**
+- llm: **32**
 - image: **46**
 - video: **110**
 - audio: **8**

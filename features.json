@@ -1,7 +1,57 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.8.7",
-  "lastUpdated": "2026-08-09-v2.8.7-released",
+  "version": "2.8.8",
+  "lastUpdated": "2026-08-11-v2.8.8-release-authorized",
+  "minimaxH3OfficialPromptEnhancer": {
+    "status": "release-authorized-v2.8.8-live-verified",
+    "date": "2026-08-11",
+    "releaseIncluded": true,
+    "provider": "seedance-nz",
+    "nodeType": "minimax-h3-official-prompt-enhancer",
+    "officialDocs": "https://api.seedance.nz/docs/llms.txt",
+    "officialDocsSnapshot": {
+      "lastModified": "Sun, 09 Aug 2026 23:40:34 GMT",
+      "bytes": 645722,
+      "sha256": "97926f8eea2a0a1c92bef88fe57e7e855419544ddc6589584749b89b8e22b37d"
+    },
+    "referenceImplementation": "F:/AI-T8-video-onekey/ComfyUI/custom_nodes/ComfyUI_Seedance@06fbe1e4c8b8b8f5bbac4121185da1c301962ed6",
+    "models": [
+      "minmax-h3-context-ir-image",
+      "minmax-h3-context-ir-multimodal",
+      "minmax-h3-context-ir-text"
+    ],
+    "contract": {
+      "endpoint": "POST /v1/video/generations + GET /v1/video/generations/{id}",
+      "output": "result_text",
+      "common": "提示词 1-7000 字符，时长 4-15 秒；模型白名单、输入数量和比例在付费提交前由前后端双重校验。",
+      "text": "只接受文本；必须使用固定比例 21:9/16:9/4:3/1:1/3:4/9:16。",
+      "image": "必须输入 1-2 张有序首尾帧图片；不发送比例，不接受视频或音频。",
+      "multimodal": "至少一项素材；最多 9 图、3 视频、3 音频；比例可省略、adaptive 或固定比例。",
+      "compatibility": "使用贞贞的平价AI小屋既有凭据与渠道，不改变画布已有默认模型、默认渠道或历史节点。"
+    },
+    "workflows": [
+      "docs/workflows/minmax-h3-context-ir-text.json",
+      "docs/workflows/minmax-h3-context-ir-image.json",
+      "docs/workflows/minmax-h3-context-ir-multimodal.json"
+    ],
+    "verification": {
+      "offline": [
+        "节点、Provider、代理路由、凭据隔离、端口、RunIntent、三份工作流与能力清单聚焦回归 50/50 通过。",
+        "相邻 seedance.nz Provider、Hailuo、Flux3、运行追踪与权限回归 79/79 通过。",
+        "TypeScript、Node 语法、2863 模块生产构建、public-check、RH Toolbox、feature-sync（31 actions / 243 runtime entries / 77/77 nodes / 0 public gaps）和 JSON 校验通过。"
+      ],
+      "live": {
+        "status": "3-of-3-passed",
+        "evidence": "三个模型均真实提交一次并轮询至 succeeded，分别取得 1897、4443、2320 字符的非空 result_text。",
+        "sanitizedReport": "output/minimax-h3-context-ir-live-20260811/report.json",
+        "security": "API Key 只进入一次性验证进程环境；源码、工作流、配置和脱敏报告不保存 Key、taskId、签名 URL 或原始 Provider 响应。"
+      }
+    },
+    "boundaries": [
+      "真实联调验证 Provider 协议和非空输出，不替代人工提示词质量评审。",
+      "v2.8.8 已获先发布后补证据授权；正式 Electron、自动更新资产、固定源码提交、Tag、Latest 和远端回下载仍须通过唯一发布链完成。"
+    ]
+  },
   "hailuoH3RefreshAndMinimaxFast": {
     "status": "released-v2.8.7-offline-verified-live-partially-blocked-by-provider",
     "date": "2026-08-09",
@@ -553,44 +603,43 @@
     ]
   },
   "release": {
-    "status": "released-v2.8.7",
-    "version": "2.8.7",
-    "date": "2026-08-09",
-    "publishedAt": "2026-08-09T06:07:20Z",
-    "tag": "v2.8.7",
-    "latest": true,
-    "sourceCommit": "fd537fa5ea2fc5feb56d20264606d7e2e153fdc2",
-    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.8.7",
+    "status": "release-authorized-v2.8.8",
+    "version": "2.8.8",
+    "date": "2026-08-11",
+    "publishedAt": null,
+    "tag": "v2.8.8",
+    "latest": false,
+    "sourceCommit": null,
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.8.8",
     "artifacts": {
       "installer": {
-        "name": "T8-PenguinCanvas-Setup-2.8.7.exe",
-        "size": 1317595130,
-        "sha256": "680fdc7e2f48e7519f27bf8033938ed37d6923630bfea2f8a920634b038d235a"
+        "name": "T8-PenguinCanvas-Setup-2.8.8.exe",
+        "size": null,
+        "sha256": null
       },
       "blockmap": {
-        "name": "T8-PenguinCanvas-Setup-2.8.7.exe.blockmap",
-        "size": 1372744,
-        "sha256": "bf341dbfe0c781d39ec22b7b68911c71b3333e9750f73ae88f4fac6c77cfaff2"
+        "name": "T8-PenguinCanvas-Setup-2.8.8.exe.blockmap",
+        "size": null,
+        "sha256": null
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": 362,
-        "sha256": "77a66cef07b4cdd947e63c1bfb1d249d66634c8fb4541cc7f34ffebea8769292"
+        "size": null,
+        "sha256": null
       }
     },
     "verification": [
-      "v2.8.7 发布范围固定为 Hailuo TAB 的 minimax-h3-ow-i2v-fast / minimax-h3-ow-r2v-fast、新增两份 Fast 工作流，以及国内 hailuo-h3-t2v/i2v/multi 的 768P/2K 刷新与三份工作流更新；不回退 v2.8.6 或更早版本的节点、默认值、已保存显式参数、模型、工作流、协议和网络能力。",
-      "发布前模型目录、前端边界、Provider 精确请求、非法素材、来源恢复、MV/Flux3 相邻能力和 Qwen/MiniMax 工作流开发回归 120/120；固定提交后的定向功能 85/85、Electron/自动更新合同 23/23、延期证据门 4/4、TypeScript、public-check、RH toolbox、31 actions / 240 runtime / 76/76 / 0 public gaps 能力同步与五份工作流 JSON/无密钥检查通过。",
-      "真实 Provider 已验证 Fast R2V 480p/5 秒同一任务完成、下载并由 ffprobe 解码为 H.264 864x480、5.166667 秒；Fast I2V 返回无 taskId 的 HTTP 502 后未重放；国内 H3 T2V 因余额约 ¥4.30 低于预扣约 ¥10.97 在创建任务前失败，H3 I2V/Multi 未提交，不能声称通过。",
-      "唯一 dist:release 流程从 origin/main 固定提交 fd537fa5ea2fc5feb56d20264606d7e2e153fdc2 完成 2877 模块私有生产构建、后端与本机私有 sidecar 加密、双运行时归档、Electron 原生重建、NSIS、post-build、provenance、sealed recovery、GitHub 草稿阶段元数据和完整三资产回下载、固定 Tag/target、非草稿/非预发布、Latest 与 recovery 清理。",
-      "独立 npm run release:verify -- v2.8.7 再次完整下载远端安装包、blockmap 与 latest.yml，并以实际字节、GitHub digest/size、latest.yml 版本/path/sha512/size 和 Latest 状态复验通过。",
-      "用户已明确授权先发布、后补反馈用户安装环境、Fast I2V 与额度阻断的国内 H3 剩余渠道质量、协作多端及安装升级证据；协作证据门只允许完全缺失的清单按 owner-approved-post-release-v2.8.7 延期，不能把延期标记为已通过。"
+      "v2.8.8 发布范围固定为新增独立 minimax-h3-official-prompt-enhancer 节点、三个精确 Context IR 模型、三份无密钥工作流及对应 Provider/代理/运行恢复/能力目录接线；不回退 v2.8.7 或更早版本的节点、默认渠道、默认模型、已保存字段、工作流、协议和网络能力。",
+      "开发阶段节点、Provider、代理路由、凭据隔离、连接端口、RunIntent、三份工作流和能力目录回归 50/50，相邻 Provider/权限/运行追踪回归 79/79，TypeScript、Node 语法、2863 模块生产构建、public-check、RH Toolbox、JSON 和 31 actions / 243 runtime / 77/77 / 0 public gaps 能力同步已通过；固定提交前仍须再次执行正式发布门禁。",
+      "三个 Context IR 模型均以一次性进程凭据真实提交一次并轮询至 succeeded，分别取得 1897、4443、2320 字符的非空 result_text；此证据验证协议和结果链路，不替代人工提示词质量评审。",
+      "Electron/NSIS、私有构建、三项自动更新资产、固定 source commit、Tag、Latest、远端完整回下载与摘要必须在已推送 origin/main 的固定源码提交上，通过 T8-penguin-canvas-release-v2.8.8 / codex/release-v2.8.8 的唯一 dist:release 流程收敛；完成前保持空值。",
+      "用户已明确授权先发布、后补反馈用户安装环境、协作多端及安装升级证据；协作证据门只允许完全缺失的清单按 owner-approved-post-release-v2.8.8 延期，不能把延期标记为已通过，任何技术门禁失败均不可延期。"
     ]
   },
   "versionSequencePolicy": {
     "status": "active",
     "date": "2026-07-30",
-    "currentVersion": "2.8.7",
+    "currentVersion": "2.8.8",
     "rules": [
       "版本号每一段只使用 0-9；v2.6.9 的下一正式版本固定为 v2.7.0。",
       "禁止创建、打包、推送、打 tag、发布或写入自动更新元数据为 v2.6.10。",
@@ -610,6 +659,7 @@
       "v2.8.4 的下一正式版本固定为 v2.8.5。",
       "v2.8.5 的下一正式版本固定为 v2.8.6。",
       "v2.8.6 的下一正式版本固定为 v2.8.7。",
+      "v2.8.7 的下一正式版本固定为 v2.8.8。",
       "后续改版本前必须同步核对 package.json、package-lock.json、README、features.json、项目 SKILL.md、Release notes、自动更新元数据和 Git tag。"
     ]
   },
@@ -6912,11 +6962,11 @@
       "T8_ENABLE_LOCAL_PRIVATE": "开发环境和普通本机构建可选；0=关闭本机 local-private/extensions 私有扩展。正式 dist:release 固定为 1，不能被父环境降级。GitHub/clean clone 因为没有 local-private 目录，不包含充值实现。",
       "T8_DISABLE_LOCAL_EXTENSIONS": "开发环境可选；1=关闭本地扩展。正式 dist:release 固定为 0，确保本机私有 sidecar 参与加密打包与后置校验。"
     },
-    "version": "2.8.7",
-    "semverVersion": "2.8.7",
+    "version": "2.8.8",
+    "semverVersion": "2.8.8",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.7 已正式发布 Hailuo H3 / MiniMax H3 OW Fast 刷新。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.8.7 已由固定源码提交 fd537fa5ea2fc5feb56d20264606d7e2e153fdc2 在独立 release 工作树生成一套最终 NSIS 自动更新资产：安装包 1317595130 bytes / SHA-256 680fdc7e2f48e7519f27bf8033938ed37d6923630bfea2f8a920634b038d235a，blockmap 1372744 bytes / SHA-256 bf341dbfe0c781d39ec22b7b68911c71b3333e9750f73ae88f4fac6c77cfaff2，latest.yml 362 bytes / SHA-256 77a66cef07b4cdd947e63c1bfb1d249d66634c8fb4541cc7f34ffebea8769292；Tag/target、非草稿/非预发布、Latest、草稿阶段及独立发布后远端完整回下载与 recovery 清理均已验证。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.8.8 已授权发布 MiniMax H3 官方提示词增强器，正式资产与发布事实只在固定源码提交的唯一发布链收敛后回填。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.8.8 的 Electron/NSIS 自动更新资产尚未生成；必须从已推送 origin/main 的固定源码提交，在 T8-penguin-canvas-release-v2.8.8 / codex/release-v2.8.8 的唯一 dist:release 流程中完成本机私有 sidecar、加密后端、双运行时归档、原生重建、NSIS、post-build、provenance、sealed recovery、GitHub 三资产完整回下载、固定 Tag/target、Latest 与 recovery 清理后才可回填。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
