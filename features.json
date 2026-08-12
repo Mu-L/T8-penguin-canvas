@@ -1,9 +1,9 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.9.0",
-  "lastUpdated": "2026-08-12-v2.9.0-release-authorized",
+  "lastUpdated": "2026-08-12-v2.9.0-released",
   "latestImageAudioModelExpansion": {
-    "status": "release-authorized-v2.9.0-live-verified",
+    "status": "released-v2.9.0-live-verified",
     "date": "2026-08-12",
     "releaseIncluded": true,
     "provider": "seedance-nz",
@@ -52,7 +52,7 @@
       "docs/workflows/mureka-v9-bgm.json"
     ],
     "verification": {
-      "offline": "新增模型合同、UI 接线、全部工作流、Mureka 有序多结果与既有 seedance.nz 前后端回归 83/83 通过。",
+      "offline": "新增模型合同、UI 接线、全部工作流、Mureka 有序多结果与既有 seedance.nz 前后端回归 84/84 通过。",
       "live": {
         "status": "12-of-12-passed",
         "evidence": "12 个模型均真实提交一次并轮询至 succeeded；共下载并解码 13 个媒体结果，Mureka V9 实测 2 个有序输出无截断。",
@@ -62,7 +62,7 @@
     },
     "boundaries": [
       "真实联调证明当次渠道受理、生成、下载与媒体解码成功，不替代长期可用性、计费或主观质量评审。",
-      "v2.9.0 已获正式 Electron/NSIS 自动更新发布授权；反馈用户安装环境、协作多端及安装升级证据仅按 owner-approved-post-release-v2.9.0 后补，延期不等于通过。"
+      "v2.9.0 已完成正式 Electron/NSIS 自动更新发布；反馈用户安装环境、协作多端及安装升级证据仍仅按 owner-approved-post-release-v2.9.0 后补，延期不等于通过。"
     ]
   },
   "minimaxH3OfficialPromptEnhancer": {
@@ -681,36 +681,40 @@
     ]
   },
   "release": {
-    "status": "release-authorized-v2.9.0",
+    "status": "released-postrelease-evidence-pending",
     "version": "2.9.0",
     "date": "2026-08-12",
-    "publishedAt": null,
+    "publishedAt": "2026-08-12T07:37:09Z",
     "tag": "v2.9.0",
-    "latest": false,
-    "sourceCommit": null,
+    "latest": true,
+    "isDraft": false,
+    "isPrerelease": false,
+    "sourceCommit": "d5e351e51db66885daa0166f88506d3fd1433a8d",
     "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.0",
     "artifacts": {
       "installer": {
         "name": "T8-PenguinCanvas-Setup-2.9.0.exe",
-        "size": null,
-        "sha256": null
+        "size": 1317631265,
+        "sha256": "c0c79fb8daa50d3c2ee9bf4ed53ca5110edf7c30b6299cd647473c98d97072e7",
+        "sha512": "u1nqJkVZKrOG9yvh53BVlYML5RWGeW4wnCwRMf0M7xK1MotDq5QPxLmgSPORVgD67OoVT7TtYrbkOxDNhgQvZg=="
       },
       "blockmap": {
         "name": "T8-PenguinCanvas-Setup-2.9.0.exe.blockmap",
-        "size": null,
-        "sha256": null
+        "size": 1373368,
+        "sha256": "6051db0bd18eaa12dd12c1d21f43ab55f36c4e164914b18426a2a3a6ed7cbed2"
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": null,
-        "sha256": null
+        "size": 362,
+        "sha256": "6e9e1c34b9e97b440b7de2a6b6633df0c0f02c97c976c373e81a755ebffbbace"
       }
     },
     "verification": [
       "v2.9.0 发布范围固定为 Grok TAB 的 zhenzhen-image-gk-v2、Wan Image TAB 三模型、Qwen3-TTS/MiniMax/Mureka 三个音频 TAB 八模型、12 份无密钥工作流及 Provider/代理/完整有序输出/能力目录接线；不回退 v2.8.9 或更早版本的节点、默认模型、默认渠道、已保存字段、工作流、协议和网络能力。",
-      "开发阶段新增模型合同、UI 接线、12 份工作流、Mureka 有序多结果与既有 seedance.nz 前后端回归 84/84 通过；TypeScript、Node 语法、2863 模块生产构建、public-check、RH Toolbox、JSON 和 31 actions / 247 runtime / 77/77 / 0 public gaps 能力同步已通过；固定提交前仍须再次执行正式发布门禁。",
+      "开发阶段新增模型合同、UI 接线、12 份工作流、Mureka 有序多结果与既有 seedance.nz 前后端回归 84/84 通过；固定源码发布阶段 84/84 与 Electron/Release/Evidence 29/29 通过，并通过 TypeScript、Node 语法、2878 模块私有生产构建、public-check、RH Toolbox、JSON 和 31 actions / 247 runtime / 77/77 / 0 public gaps 能力同步。",
       "12 个模型均以一次性进程凭据真实提交一次并轮询至 succeeded，共下载并解码 13 个媒体结果；Mureka V9 实测两个有序输出完整保留。该证据验证当次 Provider 协议、完整输出遍历、下载与媒体解码链路。",
-      "Electron/NSIS、私有构建、三项自动更新资产、固定 source commit、Tag、Latest、远端完整回下载与摘要必须在已推送 origin/main 的固定源码提交上，通过 T8-penguin-canvas-release-v2.9.0 / codex/release-v2.9.0 的唯一 dist:release 流程收敛；完成前保持空值。",
+      "唯一正式 dist:release 从已推送 origin/main 的固定提交 d5e351e51db66885daa0166f88506d3fd1433a8d 执行，完成本机私有 sidecar、155 个公开后端与 4 个本机私有后端文件加密、两份与已封存来源逐字节同源的运行时归档、Electron 原生重建、NSIS、post-build、provenance 与 sealed recovery；运行时归档重建工具首次异常后只复用了来源摘要完全相同且已验证的既有归档，没有改变产品源码或正式产物。",
+      "GitHub 草稿中的安装包、blockmap 与 latest.yml 先经摘要/大小核对，并在禁用受本机 Anaconda 证书覆盖和 HTTP/2 后完成发布前实际字节全量回下载；随后发布为非草稿、非预发布的 Latest，Tag、Release target 与发布时 origin/main 均精确指向固定源码提交。发布后独立 release:verify 再从公开 Release 全量下载三项资产并按实际字节与 GitHub digest 验证通过，sealed recovery 已清除。",
       "用户已明确授权先发布、后补反馈用户安装环境、协作多端及安装升级证据；协作证据门只允许完全缺失的清单按 owner-approved-post-release-v2.9.0 延期，不能把延期标记为已通过，任何技术门禁失败均不可延期。"
     ]
   },
@@ -7045,8 +7049,8 @@
     "version": "2.9.0",
     "semverVersion": "2.9.0",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.9.0 已授权发布平价 AI 小屋图像与音频模型扩展，正式资产与发布事实只在固定源码提交的唯一发布链收敛后回填。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.9.0 的 Electron/NSIS 自动更新资产尚未生成；必须从已推送 origin/main 的固定源码提交，在 T8-penguin-canvas-release-v2.9.0 / codex/release-v2.9.0 的唯一 dist:release 流程中完成本机私有 sidecar、加密后端、双运行时归档、原生重建、NSIS、post-build、provenance、sealed recovery、GitHub 三资产完整回下载、固定 Tag/target、Latest 与 recovery 清理后才可回填。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.9.0 已从固定源码提交正式发布平价 AI 小屋图像与音频模型扩展，并通过发布前与独立发布后两次 GitHub 三资产完整回下载验证。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.9.0 已从固定源码提交 d5e351e51db66885daa0166f88506d3fd1433a8d 在 T8-penguin-canvas-release-v2.9.0 / codex/release-v2.9.0 的唯一 dist:release 流程完成本机私有 sidecar、加密后端、双运行时归档、原生重建、NSIS、post-build、provenance、sealed recovery、GitHub 三资产完整回下载、固定 Tag/target、Latest 与 recovery 清理；安装包为 T8-PenguinCanvas-Setup-2.9.0.exe，大小 1,317,631,265 bytes，SHA-256 c0c79fb8daa50d3c2ee9bf4ed53ca5110edf7c30b6299cd647473c98d97072e7。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
