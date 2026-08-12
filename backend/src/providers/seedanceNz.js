@@ -75,6 +75,7 @@ const ZHENZHEN_IMAGE_G2_MODELS = new Set([
   ZHENZHEN_IMAGE_G2_I2I_MODEL,
 ]);
 const ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL = 'zhenzhen-image-g-v2-lowprice';
+const ZHENZHEN_IMAGE_GK_V2_MODEL = 'zhenzhen-image-gk-v2';
 const ZHENZHEN_IMAGE_GK_V15_MODEL = 'zhenzhen-image-gk-v15';
 const ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL = 'zhenzhen-image-gk-v15-edit';
 const ZHENZHEN_IMAGE_NB_2_LITE_MODEL = 'zhenzhen-image-nb-2-lite';
@@ -87,6 +88,7 @@ const ZHENZHEN_IMAGE_NB_MODELS = new Set([
 ]);
 const ZHENZHEN_APIMART_IMAGE_MODELS = new Set([
   ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
+  ZHENZHEN_IMAGE_GK_V2_MODEL,
   ZHENZHEN_IMAGE_GK_V15_MODEL,
   ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL,
   ...ZHENZHEN_IMAGE_NB_MODELS,
@@ -121,6 +123,17 @@ const QWEN_IMAGE_30_RATIOS = new Set([
 const QWEN_IMAGE_30_PROMPT_MIN_LENGTH = 5;
 const QWEN_IMAGE_30_PROMPT_MAX_LENGTH = 2000;
 const QWEN_IMAGE_30_MAX_REFERENCE_IMAGES = 3;
+const WAN27_GLOBAL_T2I_MODEL = 'wan-2.7-global-t2i';
+const WAN27_GLOBAL_I2I_MODEL = 'wan-2.7-global-i2i';
+const WAN27_GLOBAL_I2I_PRO_MODEL = 'wan-2.7-global-i2i-pro';
+const WAN27_GLOBAL_I2I_MODELS = new Set([WAN27_GLOBAL_I2I_MODEL, WAN27_GLOBAL_I2I_PRO_MODEL]);
+const WAN27_GLOBAL_IMAGE_MODELS = new Set([
+  WAN27_GLOBAL_T2I_MODEL,
+  ...WAN27_GLOBAL_I2I_MODELS,
+]);
+const WAN27_GLOBAL_T2I_PROMPT_MAX_LENGTH = 5000;
+const WAN27_GLOBAL_I2I_PROMPT_MAX_LENGTH = 2048;
+const WAN27_GLOBAL_MAX_REFERENCE_IMAGES = 9;
 const SEEDREAM_LAYER_DECOMPOSITION_MODEL = 'seedream-v5-pro-layer-decomposition';
 const DOLA_SEEDREAM_LAYER_DECOMPOSITION_MODEL = 'dola-seedream-5.0-pro-layer-decomposition';
 const SEEDREAM_LAYER_DECOMPOSITION_MODELS = new Set([
@@ -165,6 +178,7 @@ const IMAGE_MODELS = new Set([
   ...ZHENZHEN_IMAGE_G2_MODELS,
   ...ZHENZHEN_APIMART_IMAGE_MODELS,
   ...QWEN_IMAGE_30_MODELS,
+  ...WAN27_GLOBAL_IMAGE_MODELS,
   ...SEEDREAM_LAYER_DECOMPOSITION_MODELS,
 ]);
 const IMAGE_RESOLUTIONS = new Set(['1k', '2k']);
@@ -363,6 +377,37 @@ const VIDU_Q3_MAX_SHORT_PLAY_ASSETS = 14;
 const SEED_AUDIO_MODEL = 'doubao-seed-audio-1.0';
 const SEED_AUDIO_FORMATS = new Set(['wav', 'mp3', 'pcm', 'ogg_opus']);
 const SEED_AUDIO_SAMPLE_RATES = new Set(['8000', '16000', '24000', '32000', '44100']);
+const QWEN3_TTS_FLASH_MODEL = 'qwen3-tts-flash';
+const QWEN3_TTS_INSTRUCT_FLASH_MODEL = 'qwen3-tts-instruct-flash';
+const QWEN3_TTS_MODELS = new Set([QWEN3_TTS_FLASH_MODEL, QWEN3_TTS_INSTRUCT_FLASH_MODEL]);
+const QWEN3_TTS_LANGUAGE_TYPES = new Set([
+  'Chinese', 'English', 'Japanese', 'Korean', 'German',
+  'French', 'Russian', 'Portuguese', 'Spanish', 'Italian',
+]);
+const MINIMAX_MUSIC_MODEL = 'minimax-music-2.6';
+const MINIMAX_SPEECH_HD_MODEL = 'minimax-speech-2.8-hd';
+const MINIMAX_SPEECH_TURBO_MODEL = 'minimax-speech-2.8-turbo';
+const MINIMAX_VOICE_CLONE_MODEL = 'minimax-voice-clone';
+const MINIMAX_SPEECH_MODELS = new Set([MINIMAX_SPEECH_HD_MODEL, MINIMAX_SPEECH_TURBO_MODEL]);
+const MINIMAX_AUDIO_MODELS = new Set([
+  MINIMAX_MUSIC_MODEL,
+  ...MINIMAX_SPEECH_MODELS,
+  MINIMAX_VOICE_CLONE_MODEL,
+]);
+const MINIMAX_AUDIO_FORMATS = new Set(['mp3', 'wav', 'flac']);
+const MINIMAX_SAMPLE_RATES = new Set(['16000', '24000', '32000', '44100']);
+const MINIMAX_BITRATES = new Set(['32000', '64000', '128000', '256000']);
+const MINIMAX_LANGUAGE_BOOSTS = new Set([
+  'auto', 'Chinese', 'Chinese,Yue', 'English', 'Japanese', 'Korean',
+  'French', 'German', 'Spanish', 'Portuguese', 'Russian',
+]);
+const MUREKA_BGM_MODELS = new Set(['mureka-v8-bgm', 'mureka-v9-bgm']);
+const SEEDANCE_NZ_AUDIO_MODELS = new Set([
+  SEED_AUDIO_MODEL,
+  ...QWEN3_TTS_MODELS,
+  ...MINIMAX_AUDIO_MODELS,
+  ...MUREKA_BGM_MODELS,
+]);
 const SUNO_VERSIONS = Object.freeze(['v3.5', 'v4', 'v4.5', 'v4.5+', 'v4.5-all', 'v5', 'v5.5']);
 const SUNO_INSPO_VERSIONS = Object.freeze(['v4', 'v4.5', 'v4.5+', 'v4.5-all', 'v5', 'v5.5']);
 const SUNO_REPLACE_VERSIONS = Object.freeze(['v4', 'v4.5+', 'v5', 'v5.5']);
@@ -2468,6 +2513,9 @@ async function buildApimartImagePayload(request, apiKey, options = {}) {
     throw new Error(`未知 APIMart 图像模型：${model || '(空)'}`);
   }
   const prompt = normalizeApimartPrompt(request.prompt, model);
+  if (model === ZHENZHEN_IMAGE_GK_V2_MODEL && prompt.length > 20000) {
+    throw new Error(`${model} 提示词最多 20000 字符`);
+  }
   const refs = normalizeList(request.images || request.refImages);
   const n = normalizePositiveInteger(request.n, 1, 1, 10, 'APIMart 图片生成数量 n ');
   const payload = { model, prompt, n };
@@ -2528,6 +2576,53 @@ async function buildApimartImagePayload(request, apiKey, options = {}) {
   }
   if (refs.length) throw new Error(`${model} 是文生图模型，不接受参考图；需要编辑图片请使用 ${ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL}`);
   return { payload, model, taskType: 't2i' };
+}
+
+async function buildWan27GlobalImagePayload(request, apiKey, options = {}) {
+  const model = String(request.model || '').trim().toLowerCase();
+  if (!WAN27_GLOBAL_IMAGE_MODELS.has(model)) {
+    throw new Error(`未知 Wan 2.7 Global 图像模型：${model || '(空)'}`);
+  }
+  const prompt = String(request.prompt || '').trim();
+  if (!prompt) throw new Error(`${model} 必须填写提示词`);
+  const refs = normalizeList(request.images || request.refImages);
+
+  if (model === WAN27_GLOBAL_T2I_MODEL) {
+    if (prompt.length > WAN27_GLOBAL_T2I_PROMPT_MAX_LENGTH) {
+      throw new Error(`${model} 提示词最多 ${WAN27_GLOBAL_T2I_PROMPT_MAX_LENGTH} 字符`);
+    }
+    if (refs.length) throw new Error(`${model} 是文生图模型，不接受参考图`);
+    const width = normalizePositiveInteger(request.width, 1024, 512, 4096, `${model} 宽度 `);
+    const height = normalizePositiveInteger(request.height, 1024, 512, 4096, `${model} 高度 `);
+    const thinkingMode = request.thinking_mode === undefined && request.thinkingMode === undefined
+      ? true
+      : Boolean(request.thinking_mode ?? request.thinkingMode);
+    return {
+      payload: {
+        model,
+        prompt,
+        metadata: { width, height, thinking_mode: thinkingMode },
+      },
+      model,
+      taskType: 't2i',
+    };
+  }
+
+  if (prompt.length > WAN27_GLOBAL_I2I_PROMPT_MAX_LENGTH) {
+    throw new Error(`${model} 提示词最多 ${WAN27_GLOBAL_I2I_PROMPT_MAX_LENGTH} 字符`);
+  }
+  if (refs.length < 1 || refs.length > WAN27_GLOBAL_MAX_REFERENCE_IMAGES) {
+    throw new Error(`${model} 必须提供 1-${WAN27_GLOBAL_MAX_REFERENCE_IMAGES} 张参考图`);
+  }
+  const images = [];
+  for (const source of refs) {
+    images.push(await uploadMedia(source, 'image', apiKey, {
+      ...options,
+      maxBytes: IMAGE_REFERENCE_MAX_BYTES,
+      allowedMimes: ['image/jpeg', 'image/png', 'image/webp'],
+    }));
+  }
+  return { payload: { model, prompt, images }, model, taskType: 'i2i' };
 }
 
 async function buildApimartVideoPayload(request, apiKey, options = {}) {
@@ -2668,6 +2763,9 @@ async function buildImagePayload(request, apiKey, options = {}) {
   }
   if (QWEN_IMAGE_30_MODELS.has(requestedModel)) {
     return buildQwenImage30Payload(request, apiKey, options);
+  }
+  if (WAN27_GLOBAL_IMAGE_MODELS.has(requestedModel)) {
+    return buildWan27GlobalImagePayload(request, apiKey, options);
   }
   if (ZHENZHEN_APIMART_IMAGE_MODELS.has(requestedModel)) {
     return buildApimartImagePayload(request, apiKey, options);
@@ -3900,9 +3998,141 @@ async function querySunoMusicTask(taskId, apiKey, options = {}) {
   };
 }
 
+function normalizeAudioBoolean(value, fallback = false) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1') return true;
+  if (normalized === 'false' || normalized === '0') return false;
+  return Boolean(value);
+}
+
+function normalizeBoundedNumber(value, fallback, min, max, label) {
+  const parsed = value === undefined || value === null || value === '' ? fallback : Number(value);
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+    throw new Error(`${label}必须在 ${min}-${max} 之间`);
+  }
+  return parsed;
+}
+
+function validMinimaxCustomVoiceId(value) {
+  const text = String(value || '').trim();
+  return text.length >= 8
+    && text.length <= 256
+    && /^\p{L}[\p{L}\p{N}_-]*[\p{L}\p{N}]$/u.test(text);
+}
+
 async function buildAudioPayload(request, apiKey, options = {}) {
-  const model = String(request.model || SEED_AUDIO_MODEL).trim();
-  if (model !== SEED_AUDIO_MODEL) throw new Error(`未知 Seed Audio 模型：${model}`);
+  const model = String(request.model || SEED_AUDIO_MODEL).trim().toLowerCase();
+  if (!SEEDANCE_NZ_AUDIO_MODELS.has(model)) throw new Error(`未知 seedance.nz 音频模型：${model}`);
+
+  if (QWEN3_TTS_MODELS.has(model)) {
+    const prompt = String(request.prompt || '').trim();
+    const voice = String(request.voice || '').trim();
+    const languageType = String(request.languageType || request.language_type || 'Chinese').trim();
+    if (!prompt) throw new Error(`${model} 必须填写合成文本`);
+    if (!voice) throw new Error(`${model} 必须填写音色 ID`);
+    if (!QWEN3_TTS_LANGUAGE_TYPES.has(languageType)) throw new Error(`${model} 不支持语言 ${languageType || '(空)'}`);
+    const metadata = { voice, language_type: languageType };
+    const instructions = String(request.instructions || '').trim();
+    if (model === QWEN3_TTS_INSTRUCT_FLASH_MODEL && instructions) {
+      metadata.instructions = instructions;
+      metadata.optimize_instructions = normalizeAudioBoolean(
+        request.optimizeInstructions ?? request.optimize_instructions,
+        true,
+      );
+    }
+    return { payload: { model, prompt, metadata }, model };
+  }
+
+  if (MINIMAX_AUDIO_MODELS.has(model)) {
+    const prompt = String(request.prompt || '').trim();
+    if (!prompt) throw new Error(`${model} 必须填写提示词或朗读文本`);
+    let metadata;
+    if (model === MINIMAX_MUSIC_MODEL) {
+      const isInstrumental = normalizeAudioBoolean(request.isInstrumental ?? request.is_instrumental, true);
+      const lyricsOptimizer = normalizeAudioBoolean(request.lyricsOptimizer ?? request.lyrics_optimizer, false);
+      const outputFormat = String(request.outputFormat || request.output_format || 'mp3').trim().toLowerCase();
+      const sampleRate = String(request.sampleRate || request.sample_rate || '32000').trim();
+      const bitrate = String(request.bitrate || '128000').trim();
+      if (!MINIMAX_AUDIO_FORMATS.has(outputFormat)) throw new Error(`${model} 不支持格式 ${outputFormat}`);
+      if (!MINIMAX_SAMPLE_RATES.has(sampleRate)) throw new Error(`${model} 不支持采样率 ${sampleRate}`);
+      if (!MINIMAX_BITRATES.has(bitrate)) throw new Error(`${model} 不支持码率 ${bitrate}`);
+      const lyrics = String(request.lyrics || '').trim();
+      if (!isInstrumental && !lyrics && !lyricsOptimizer) {
+        throw new Error(`${model} 非纯音乐模式必须填写歌词或启用歌词生成`);
+      }
+      metadata = {
+        is_instrumental: isInstrumental,
+        lyrics_optimizer: lyricsOptimizer,
+        format: outputFormat,
+        sample_rate: sampleRate,
+        bitrate,
+      };
+      if (!isInstrumental && lyrics) metadata.lyrics = lyrics;
+    } else if (MINIMAX_SPEECH_MODELS.has(model)) {
+      const voiceId = String(request.voiceId || request.voice_id || '').trim();
+      if (!voiceId) throw new Error(`${model} 必须填写 voice_id`);
+      const languageBoost = String(request.languageBoost || request.language_boost || 'auto').trim();
+      const outputFormat = String(request.outputFormat || request.output_format || 'mp3').trim().toLowerCase();
+      const sampleRate = String(request.sampleRate || request.sample_rate || '32000').trim();
+      const bitrate = String(request.bitrate || '128000').trim();
+      if (!MINIMAX_LANGUAGE_BOOSTS.has(languageBoost)) throw new Error(`${model} 不支持语言增强 ${languageBoost}`);
+      if (!MINIMAX_AUDIO_FORMATS.has(outputFormat)) throw new Error(`${model} 不支持格式 ${outputFormat}`);
+      if (!MINIMAX_SAMPLE_RATES.has(sampleRate)) throw new Error(`${model} 不支持采样率 ${sampleRate}`);
+      if (!MINIMAX_BITRATES.has(bitrate)) throw new Error(`${model} 不支持码率 ${bitrate}`);
+      metadata = {
+        voice_id: voiceId,
+        speed: normalizeBoundedNumber(request.speed, 1, 0.5, 2, `${model} 语速`),
+        vol: normalizeBoundedNumber(request.volume ?? request.vol, 1, 0.000001, 10, `${model} 音量`),
+        pitch: normalizeBoundedInteger(request.pitch, `${model} 音高`, -12, 12, 0),
+        language_boost: languageBoost,
+        format: outputFormat,
+        sample_rate: sampleRate,
+        bitrate,
+        channel: normalizeBoundedInteger(request.channel, `${model} 声道`, 1, 2, 1),
+      };
+    } else {
+      const audioSources = normalizeList(request.audioUrls || request.audios || request.referenceAudios);
+      if (audioSources.length !== 1) throw new Error(`${model} 必须且只能提供 1 段 10 秒至 5 分钟的参考音频`);
+      const customVoiceId = String(request.customVoiceId || request.custom_voice_id || '').trim();
+      if (!validMinimaxCustomVoiceId(customVoiceId)) {
+        throw new Error(`${model} custom_voice_id 必须为 8-256 位字母/数字/-/_，以字母开头且不能以 -/_ 结尾`);
+      }
+      const cloneTargetModel = String(
+        request.cloneTargetModel || request.clone_target_model || MINIMAX_SPEECH_HD_MODEL,
+      ).trim().toLowerCase();
+      if (!MINIMAX_SPEECH_MODELS.has(cloneTargetModel)) throw new Error(`${model} 不支持目标语音模型 ${cloneTargetModel}`);
+      metadata = {
+        audio_url: await uploadMedia(audioSources[0], 'audio', apiKey, options),
+        custom_voice_id: customVoiceId,
+        model: cloneTargetModel,
+        need_noise_reduction: normalizeAudioBoolean(request.needNoiseReduction ?? request.need_noise_reduction, false),
+        need_volume_normalization: normalizeAudioBoolean(
+          request.needVolumeNormalization ?? request.need_volume_normalization,
+          false,
+        ),
+      };
+    }
+    return { payload: { model, prompt, metadata }, model };
+  }
+
+  if (MUREKA_BGM_MODELS.has(model)) {
+    const prompt = String(request.prompt || '').trim();
+    const instrumentalId = String(request.instrumentalId || request.instrumental_id || '').trim();
+    if (Boolean(prompt) === Boolean(instrumentalId)) {
+      throw new Error(`${model} 的 prompt 与 instrumental_id 必须且只能填写一个`);
+    }
+    const metadata = {
+      n: normalizePositiveInteger(request.n, 1, 1, 3, `${model} 生成数量 n `),
+      stream: false,
+    };
+    const payload = { model, metadata };
+    if (prompt) payload.prompt = prompt;
+    else metadata.instrumental_id = instrumentalId;
+    return { payload, model };
+  }
+
   const prompt = String(request.prompt || '').trim();
   if (prompt.length < 5 || prompt.length > 2048) {
     throw new Error('Seed Audio 提示词长度必须为 5-2048 字符');
@@ -3976,14 +4206,58 @@ async function queryAudioTask(taskId, apiKey, options = {}) {
   const status = normalizeImageTaskStatus(record?.status || data?.status);
   const nested = record?.data && typeof record.data === 'object' ? record.data : {};
   const content = nested?.content && typeof nested.content === 'object' ? nested.content : {};
-  const audioUrl = status === 'succeeded'
-    ? String(record?.result_url || record?.resultUrl || content?.audio_url || content?.url || '').trim()
+  const audioUrls = [];
+  if (status === 'succeeded' && Array.isArray(content?.audio_urls)) {
+    for (const value of content.audio_urls) {
+      const url = String(value || '').trim();
+      if (url) audioUrls.push(url);
+    }
+  }
+  if (status === 'succeeded' && audioUrls.length === 0) {
+    const primary = String(
+      record?.result_url
+      || record?.resultUrl
+      || content?.audio_url
+      || content?.audioUrl
+      || content?.url
+      || '',
+    ).trim();
+    if (primary) audioUrls.push(primary);
+  }
+  const resultText = status === 'succeeded'
+    ? String(
+      content?.voice_id
+      || content?.custom_voice_id
+      || content?.result_text
+      || content?.text
+      || nested?.voice_id
+      || nested?.custom_voice_id
+      || nested?.result_text
+      || nested?.text
+      || record?.voice_id
+      || record?.custom_voice_id
+      || record?.result_text
+      || record?.text
+      || '',
+    ).trim()
     : '';
+  const failReason = status === 'failed'
+    ? String(
+      record?.fail_reason
+      || record?.failReason
+      || nested?.error?.message
+      || nested?.message
+      || data?.message
+      || '音频任务失败',
+    ).trim() || '音频任务失败'
+    : null;
   return {
     status,
     progress: safeProgress(record?.progress ?? data?.progress),
-    audioUrl: audioUrl || null,
-    failReason: status === 'failed' ? 'Seed Audio 任务失败' : null,
+    audioUrl: audioUrls[0] || null,
+    audioUrls,
+    resultText,
+    failReason,
     ...safeProviderTrace(response, data),
   };
 }
@@ -4427,6 +4701,11 @@ module.exports = {
   QWEN_IMAGE_30_RATIOS,
   QWEN_IMAGE_30_RESOLUTIONS,
   QWEN_IMAGE_30_T2I_MODELS,
+  WAN27_GLOBAL_T2I_MODEL,
+  WAN27_GLOBAL_I2I_MODEL,
+  WAN27_GLOBAL_I2I_PRO_MODEL,
+  WAN27_GLOBAL_I2I_MODELS,
+  WAN27_GLOBAL_IMAGE_MODELS,
   MIDJOURNEY_ACTION_SPECS,
   MIDJOURNEY_ANIMATE_MODES,
   MIDJOURNEY_BATCH_SIZES,
@@ -4444,6 +4723,7 @@ module.exports = {
   ZHENZHEN_APIMART_IMAGE_MODELS,
   ZHENZHEN_APIMART_VIDEO_MODELS,
   ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
+  ZHENZHEN_IMAGE_GK_V2_MODEL,
   ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL,
   ZHENZHEN_IMAGE_GK_V15_MODEL,
   ZHENZHEN_IMAGE_NB_2_LITE_MODEL,
@@ -4469,6 +4749,22 @@ module.exports = {
   SEED_AUDIO_FORMATS,
   SEED_AUDIO_MODEL,
   SEED_AUDIO_SAMPLE_RATES,
+  QWEN3_TTS_FLASH_MODEL,
+  QWEN3_TTS_INSTRUCT_FLASH_MODEL,
+  QWEN3_TTS_MODELS,
+  QWEN3_TTS_LANGUAGE_TYPES,
+  MINIMAX_MUSIC_MODEL,
+  MINIMAX_SPEECH_HD_MODEL,
+  MINIMAX_SPEECH_TURBO_MODEL,
+  MINIMAX_VOICE_CLONE_MODEL,
+  MINIMAX_SPEECH_MODELS,
+  MINIMAX_AUDIO_MODELS,
+  MINIMAX_AUDIO_FORMATS,
+  MINIMAX_SAMPLE_RATES,
+  MINIMAX_BITRATES,
+  MINIMAX_LANGUAGE_BOOSTS,
+  MUREKA_BGM_MODELS,
+  SEEDANCE_NZ_AUDIO_MODELS,
   SUNO_ACTION_SPECS,
   SUNO_VERSIONS,
   WHISPER_MODEL,
@@ -4492,6 +4788,7 @@ module.exports = {
   buildImagePayload,
   buildSeedreamLayerDecompositionPayload,
   buildQwenImage30Payload,
+  buildWan27GlobalImagePayload,
   buildMidjourneyPayload,
   buildZhenzhenImageG2Payload,
   deriveTaskType,

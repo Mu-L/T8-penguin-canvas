@@ -73,8 +73,8 @@ test('all interval-based generation polling never overlaps a slow status request
   assert.equal((videoNode.match(/let pollInFlight = false;/g) || []).length, 2);
   assert.equal((videoNode.match(/if \(pollInFlight\) return;/g) || []).length, 2);
   assert.equal((videoNode.match(/pollInFlight = false;/g) || []).length, 4);
-  assert.equal((audioNode.match(/let pollInFlight = false;/g) || []).length, 3);
-  assert.equal((audioNode.match(/if \(pollInFlight\) return;/g) || []).length, 3);
+  assert.equal((audioNode.match(/let pollInFlight = false;/g) || []).length, 4);
+  assert.equal((audioNode.match(/if \(pollInFlight\) return;/g) || []).length, 4);
   assert.match(runningHubNode, /let pollInFlight = false;[\s\S]*?if \(pollInFlight\) return;/);
   assert.match(rhToolsNode, /let pollInFlight = false;[\s\S]*?if \(pollInFlight\) return;/);
 });
@@ -327,7 +327,7 @@ test('Seedream NZ selector distinguishes domestic and Dola overseas model famili
   assert.match(node, /Dola Seedream 5\.0 Pro（海外模型）/);
   assert.match(node, /dola-seedream-5\.0-pro-t2i/);
   assert.match(node, /dola-seedream-5\.0-pro-i2i/);
-  assert.match(node, /modelFamily: isZhenzhenBudgetImageSelected \|\| isQwenImageTab \|\| isSeedreamLayerTab \? undefined : seedreamNzModelFamily/);
+  assert.match(node, /modelFamily: isZhenzhenBudgetImageSelected \|\| isQwenImageTab \|\| isSeedreamLayerTab \|\| isWanImageTab \? undefined : seedreamNzModelFamily/);
   assert.match(generation, /modelFamily\?: 'domestic' \| 'overseas'/);
   assert.match(provider, /dola-seedream-5\.0-pro-t2i/);
   assert.match(provider, /dola-seedream-5\.0-pro-i2i/);
@@ -354,7 +354,7 @@ test('audio node exposes Seed Audio without replacing Suno and supports image/au
     outputs: ['audio', 'text', 'video'],
     executable: true,
   });
-  assert.match(apiSettings, /Happy Horse、Hailuo、Kling、Vidu、Upscaler、Seedream、Zhenzhen Image G-2 与 Seed Audio/);
+  assert.match(apiSettings, /Seedream\/Qwen\/Wan\/Grok 图像，以及 Seed Audio、Qwen3-TTS、MiniMax、Mureka 音频/);
 });
 
 test('APIMart image, video and Whisper models are wired to the budget provider without replacing existing tabs', () => {
@@ -442,5 +442,6 @@ test('proxy keeps Happy Horse and Seed Audio on the domestic key and stores outp
   assert.match(proxy, /seedanceNz\.submitAudioTask/);
   assert.match(proxy, /settings\?\.zhenzhenSd2ApiKey/);
   assert.match(proxy, /materializeRemoteTaskOutput\(\{[\s\S]*?remoteUrl: result\.videoUrl,[\s\S]*?kind: 'video',[\s\S]*?materializationKey: `happyhorse-nz:\$\{req\.params\.tid\}`,[\s\S]*?providerFetchImpl: seedanceNz\.fetchRemote/);
-  assert.match(proxy, /materializeRemoteTaskOutput\(\{[\s\S]*?remoteUrl: result\.audioUrl,[\s\S]*?kind: 'audio',[\s\S]*?materializationKey: `seed-audio-nz:\$\{req\.params\.tid\}:0`/);
+  assert.match(proxy, /materializeSeedanceNzAudioResults\(result, req\.params\.tid\)/);
+  assert.match(proxy, /remoteUrls\[index\][\s\S]*?kind: 'audio',[\s\S]*?materializationKey: `seed-audio-nz:\$\{taskId\}:\$\{index\}`/);
 });

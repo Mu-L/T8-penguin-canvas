@@ -1,0 +1,12 @@
+{
+  "schema": "t8-workflow-fragment", "version": 1, "title": "MiniMax · minimax-voice-clone",
+  "nodes": [
+    { "id": "minimax-clone-upload", "type": "upload", "position": { "x": 0, "y": 40 }, "data": { "label": "上传 10 秒至 5 分钟参考音频", "uploadType": "audio", "lockedUploadType": "audio" } },
+    { "id": "minimax-clone", "type": "audio", "position": { "x": 420, "y": 40 }, "data": { "label": "MiniMax Voice Clone", "audioProviderMode": "minimax", "apiModel": "minimax-voice-clone", "minimaxAudioModel": "minimax-voice-clone", "minimaxCustomVoiceId": "CanvasVoice01", "minimaxCloneTargetModel": "minimax-speech-2.8-hd", "minimaxNoiseReduction": false, "minimaxVolumeNormalization": false, "prompt": "创建可复用音色", "reuseResult": false } },
+    { "id": "minimax-clone-output", "type": "output", "position": { "x": 840, "y": 40 }, "data": { "label": "克隆音色 ID", "outputType": "text" } }
+  ],
+  "edges": [{ "id": "minimax-clone-in", "source": "minimax-clone-upload", "target": "minimax-clone" }, { "id": "minimax-clone-out", "source": "minimax-clone", "target": "minimax-clone-output" }],
+  "nodeCount": 3, "edgeCount": 2, "nodeTypes": ["upload", "audio", "output"],
+  "topologyPreview": { "nodes": [{ "id": "minimax-clone-upload", "type": "upload", "label": "上传参考音频", "x": 8, "y": 50 }, { "id": "minimax-clone", "type": "audio", "label": "MiniMax Voice Clone", "x": 50, "y": 50 }, { "id": "minimax-clone-output", "type": "output", "label": "克隆音色 ID", "x": 92, "y": 50 }], "edges": [{ "source": "minimax-clone-upload", "target": "minimax-clone" }, { "source": "minimax-clone", "target": "minimax-clone-output" }] },
+  "savedAt": "2026-08-12T00:00:00.000Z"
+}

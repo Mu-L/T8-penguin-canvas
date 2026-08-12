@@ -1,0 +1,11 @@
+{
+  "schema": "t8-workflow-fragment", "version": 1, "title": "MiniMax · minimax-speech-2.8-turbo",
+  "nodes": [
+    { "id": "minimax-speech-turbo", "type": "audio", "position": { "x": 40, "y": 40 }, "data": { "label": "MiniMax Speech 2.8 Turbo", "audioProviderMode": "minimax", "apiModel": "minimax-speech-2.8-turbo", "minimaxAudioModel": "minimax-speech-2.8-turbo", "minimaxVoiceId": "Wise_Woman", "minimaxSpeed": 1, "minimaxVolume": 1, "minimaxPitch": 0, "minimaxLanguageBoost": "auto", "minimaxOutputFormat": "mp3", "minimaxSampleRate": "32000", "minimaxBitrate": "128000", "minimaxChannel": 1, "prompt": "快速生成一段自然流畅的中文旁白。", "reuseResult": false } },
+    { "id": "minimax-speech-turbo-output", "type": "output", "position": { "x": 500, "y": 40 }, "data": { "label": "Turbo 语音", "outputType": "audio" } }
+  ],
+  "edges": [{ "id": "minimax-speech-turbo-edge", "source": "minimax-speech-turbo", "target": "minimax-speech-turbo-output" }],
+  "nodeCount": 2, "edgeCount": 1, "nodeTypes": ["audio", "output"],
+  "topologyPreview": { "nodes": [{ "id": "minimax-speech-turbo", "type": "audio", "label": "MiniMax Speech Turbo", "x": 8, "y": 50 }, { "id": "minimax-speech-turbo-output", "type": "output", "label": "Turbo 语音", "x": 92, "y": 50 }], "edges": [{ "source": "minimax-speech-turbo", "target": "minimax-speech-turbo-output" }] },
+  "savedAt": "2026-08-12T00:00:00.000Z"
+}

@@ -4328,11 +4328,40 @@ router.post('/audio/seed-audio/submit', async (req, res) => {
     proxyRouteError('proxy/audio/seed-audio/submit 错误', error, [apiKey]);
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
-      error: proxyPublicError(error, 'Seed Audio 请求失败', [apiKey]),
+      error: proxyPublicError(error, '平价AI小屋音频请求失败', [apiKey]),
       ...seedanceNzTrace(error),
     });
   }
 });
+
+async function materializeSeedanceNzAudioResults(result, taskId) {
+  const status = String(result?.status || '').trim().toLowerCase();
+  if (!['succeeded', 'success', 'completed'].includes(status)) {
+    return { audioUrls: [], failures: [] };
+  }
+  const remoteUrls = (Array.isArray(result?.audioUrls) && result.audioUrls.length
+    ? result.audioUrls
+    : [result?.audioUrl])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  if (remoteUrls.length === 0) {
+    if (String(result?.resultText || '').trim()) return { audioUrls: [], failures: [] };
+    return { audioUrls: [], failures: [completedRemoteOutputError({ itemCount: 0 }, 'audio')] };
+  }
+  const audioUrls = [];
+  const failures = [];
+  for (let index = 0; index < remoteUrls.length; index += 1) {
+    const materialized = await materializeRemoteTaskOutput({
+      status: result.status,
+      remoteUrl: remoteUrls[index],
+      kind: 'audio',
+      materializationKey: `seed-audio-nz:${taskId}:${index}`,
+    });
+    if (materialized.url) audioUrls.push(materialized.url);
+    if (materialized.failure) failures.push(materialized.failure);
+  }
+  return { audioUrls, failures };
+}
 
 router.get('/audio/seed-audio/status/:tid', async (req, res) => {
   const settings = loadRawSettings();
@@ -4341,26 +4370,29 @@ router.get('/audio/seed-audio/status/:tid', async (req, res) => {
   if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI小屋 API Key' });
   try {
     const result = await seedanceNz.queryAudioTask(req.params.tid, apiKey);
-    const materialized = await materializeRemoteTaskOutput({
-      status: result.status,
-      remoteUrl: result.audioUrl,
-      kind: 'audio',
-      materializationKey: `seed-audio-nz:${req.params.tid}:0`,
-    });
+    const materialized = await materializeSeedanceNzAudioResults(result, req.params.tid);
     const responseData = {
       status: result.status,
       progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
-      audioUrl: materialized.url,
+      audioUrl: materialized.audioUrls[0] || '',
+      audioUrls: materialized.audioUrls,
+      resultText: safeDiagnosticText(result.resultText || '', 100_000, [apiKey]),
+      tracks: materialized.audioUrls.map((audioUrl, index) => ({
+        id: `${req.params.tid}:${index}`,
+        clipId: req.params.tid,
+        audioUrl,
+        title: `${remembered?.model || '音频'} #${index + 1}`,
+      })),
       failReason: result.status === 'failed'
-        ? safeDiagnosticText(result.failReason || 'Seed Audio 任务失败', 240, [apiKey])
+        ? safeDiagnosticText(result.failReason || '音频任务失败', 240, [apiKey])
         : '',
       model: remembered?.model || '',
       ...seedanceNzTrace(result),
     };
-    if (materialized.failure) {
-      return sendCompletedRemoteOutputFailure(res, materialized.failure, responseData, {
+    if (materialized.failures.length) {
+      return sendCompletedRemoteOutputFailure(res, materialized.failures[0], responseData, {
         defaultCode: 'seed_audio_output_unusable',
-        defaultMessage: 'Seed Audio 结果无法保存。',
+        defaultMessage: '音频结果无法完整保存。',
       });
     }
     return res.json({
@@ -4373,7 +4405,7 @@ router.get('/audio/seed-audio/status/:tid', async (req, res) => {
     if (sendTaskResultQueryRecovery(res, error, { taskId: req.params.tid })) return;
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
-      error: proxyPublicError(error, 'Seed Audio 查询失败', [apiKey]),
+      error: proxyPublicError(error, '平价AI小屋音频查询失败', [apiKey]),
       ...seedanceNzTrace(error),
     });
   }

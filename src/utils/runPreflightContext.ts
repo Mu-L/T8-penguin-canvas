@@ -401,7 +401,10 @@ function builtInCredentialNotice(node: Node, settings: ApiSettings): RunPrefligh
   }
 
   if (node.type === 'audio') {
-    if (data.audioProviderMode === 'seed-audio') {
+    if (
+      ['seed-audio', 'whisper', 'qwen3-tts', 'minimax', 'mureka'].includes(String(data.audioProviderMode || ''))
+      || (data.audioProviderMode === 'suno' && data.sunoPlatform === 'seedance-nz')
+    ) {
       return configuredSecret(settings.zhenzhenSd2ApiKey)
         ? null
         : capabilityNotice(node, 'provider.seedance-nz-credential-missing', missingDomesticCredentialMessage());

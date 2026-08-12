@@ -64,7 +64,7 @@ interface KeySpec {
 
 const COMMON_KEYS: KeySpec[] = [
   { field: 'zhenzhenApiKey', label: '贞贞的AI工坊（海外） API Key', desc: '· 通用后备 · 用于图像/视频/音频生成', bullet: 'bg-amber-400' },
-  { field: 'zhenzhenSd2ApiKey', label: '贞贞的平价AI小屋 API Key', desc: '· 主力 API · 用于平价小屋 LLM、Seedance 2.0、Happy Horse、Hailuo、Kling、Vidu、Upscaler、Seedream、Zhenzhen Image G-2 与 Seed Audio', bullet: 'bg-lime-400' },
+  { field: 'zhenzhenSd2ApiKey', label: '贞贞的平价AI小屋 API Key', desc: '· 主力 API · 用于平价小屋 LLM、视频、Seedream/Qwen/Wan/Grok 图像，以及 Seed Audio、Qwen3-TTS、MiniMax、Mureka 音频', bullet: 'bg-lime-400' },
   { field: 'rhApiKey', label: 'RH APIKEY国内', desc: '· runninghub.cn 国内站应用', bullet: 'bg-cyan-400' },
   { field: 'rhIntlApiKey', label: 'RH APIKEY海外', desc: '· runninghub.ai 海外站应用', bullet: 'bg-blue-400' },
   { field: 'llmApiKey', label: 'LLM 独立 API Key', desc: '· 额度隔离 · 用于 LLM/Vision', bullet: 'bg-emerald-400' },

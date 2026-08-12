@@ -101,7 +101,7 @@ async function safeJsonResponse(response: Response, label: string): Promise<any>
 export interface GenerateImageRequest {
   model: string;          // 节点 id (gpt-image-2 / nano-banana-2 / nano-banana-pro / grok-image / seedream-v5-pro)
   apiModel?: string;       // 上游真实模型名(优先使用)
-  paramKind?: 'gpt-size' | 'banana-ratio' | 'grok-image' | 'seedream-v5' | 'seedream-layer' | 'qwen-image-3.0' | 'mj';
+  paramKind?: 'gpt-size' | 'banana-ratio' | 'grok-image' | 'seedream-v5' | 'seedream-layer' | 'qwen-image-3.0' | 'wan-image' | 'mj';
   prompt: string;
   n?: number;
   // 主参数(双协议通用):
@@ -318,6 +318,7 @@ export interface SeedreamNzSubmitRequest {
     | 'zhenzhen-image-g2-t2i'
     | 'zhenzhen-image-g2-i2i'
     | 'zhenzhen-image-g-v2-lowprice'
+    | 'zhenzhen-image-gk-v2'
     | 'zhenzhen-image-gk-v15'
     | 'zhenzhen-image-gk-v15-edit'
     | 'zhenzhen-image-nb-2-lite'
@@ -331,6 +332,9 @@ export interface SeedreamNzSubmitRequest {
     | 'qwen-image-3.0-global-i2i'
     | 'qwen-image-3.0-global-pro-t2i'
     | 'qwen-image-3.0-global-pro-i2i'
+    | 'wan-2.7-global-t2i'
+    | 'wan-2.7-global-i2i'
+    | 'wan-2.7-global-i2i-pro'
     | 'seedream-v5-pro-layer-decomposition'
     | 'dola-seedream-5.0-pro-layer-decomposition';
   modelFamily?: 'domestic' | 'overseas';
@@ -343,6 +347,9 @@ export interface SeedreamNzSubmitRequest {
   prompt_extend?: boolean;
   sizing_mode?: 'auto' | 'ratio' | 'custom_size';
   seed?: number;
+  width?: number;
+  height?: number;
+  thinking_mode?: boolean;
 }
 
 export async function submitSeedreamNz(
@@ -1533,7 +1540,7 @@ export async function queryMinimaxH3ContextIr(
 // 完全对齐主项目 gpt-image-2-web 的 runSuno / runSunoCover / runSunoExtend
 // ========================================================================
 export type AudioMode = 'generate' | 'cover' | 'extend';
-export type AudioProviderMode = 'suno' | 'seed-audio' | 'whisper';
+export type AudioProviderMode = 'suno' | 'seed-audio' | 'whisper' | 'qwen3-tts' | 'minimax' | 'mureka';
 export type SunoPlatform = 'zhenzhen' | 'seedance-nz';
 export type WhisperResponseFormat = 'json' | 'verbose_json' | 'srt' | 'text' | 'vtt';
 
@@ -1838,18 +1845,102 @@ export interface SeedAudioSubmitRequest {
   audioUrls?: string[];
 }
 
-export async function submitSeedAudio(req: SeedAudioSubmitRequest, transport: ProviderSubmissionTransport = {}): Promise<{
-  taskId: string;
-  model: string;
-} & ProviderTransportTrace> {
+export type SeedanceNzAudioModel =
+  | 'doubao-seed-audio-1.0'
+  | 'qwen3-tts-flash'
+  | 'qwen3-tts-instruct-flash'
+  | 'minimax-music-2.6'
+  | 'minimax-speech-2.8-hd'
+  | 'minimax-speech-2.8-turbo'
+  | 'minimax-voice-clone'
+  | 'mureka-v8-bgm'
+  | 'mureka-v9-bgm';
+
+export interface SeedanceNzAudioSubmitRequest {
+  model: SeedanceNzAudioModel;
+  prompt?: string;
+  speaker?: string;
+  outputFormat?: 'wav' | 'mp3' | 'pcm' | 'ogg_opus' | 'flac';
+  sampleRate?: '8000' | '16000' | '24000' | '32000' | '44100';
+  speechRate?: number;
+  loudnessRate?: number;
+  pitchRate?: number;
+  images?: string[];
+  audioUrls?: string[];
+  voice?: string;
+  languageType?: string;
+  instructions?: string;
+  optimizeInstructions?: boolean;
+  lyrics?: string;
+  isInstrumental?: boolean;
+  lyricsOptimizer?: boolean;
+  voiceId?: string;
+  speed?: number;
+  volume?: number;
+  pitch?: number;
+  languageBoost?: string;
+  bitrate?: '32000' | '64000' | '128000' | '256000';
+  channel?: 1 | 2;
+  customVoiceId?: string;
+  cloneTargetModel?: 'minimax-speech-2.8-hd' | 'minimax-speech-2.8-turbo';
+  needNoiseReduction?: boolean;
+  needVolumeNormalization?: boolean;
+  instrumentalId?: string;
+  n?: number;
+}
+
+export interface SeedanceNzAudioTrack {
+  id?: string;
+  clipId?: string;
+  audioUrl: string;
+  title?: string;
+}
+
+export interface SeedanceNzAudioQueryResult extends ProviderTransportTrace {
+  status: 'pending' | 'running' | 'materializing' | 'succeeded' | 'failed' | string;
+  progress?: string | number;
+  audioUrl?: string | null;
+  audioUrls?: string[];
+  tracks?: SeedanceNzAudioTrack[];
+  resultText?: string;
+  model?: string;
+  failReason?: string | null;
+  error?: string;
+  code?: string;
+  recoverable?: boolean;
+  retryAfterMs?: number;
+}
+
+export async function submitSeedanceNzAudio(
+  req: SeedanceNzAudioSubmitRequest,
+  transport: ProviderSubmissionTransport = {},
+): Promise<{ taskId: string; model: string } & ProviderTransportTrace> {
   const r = await fetch('/api/proxy/audio/seed-audio/submit', {
     method: 'POST',
     headers: providerSubmissionHeaders(transport),
     body: JSON.stringify(req),
+    signal: transport.signal,
   });
-  const data = await r.json();
+  const data = await safeJsonResponse(r, '贞贞的平价AI小屋音频任务提交');
   if (!r.ok || !data.success) throw providerResponseError(r, data);
   return withProviderTransportTrace(data.data, r);
+}
+
+export async function querySeedanceNzAudio(
+  taskId: string,
+  transport: ProviderSubmissionTransport = {},
+): Promise<SeedanceNzAudioQueryResult> {
+  const r = await fetch(`/api/proxy/audio/seed-audio/status/${encodeURIComponent(taskId)}`, { signal: transport.signal });
+  const data = await safeJsonResponse(r, '贞贞的平价AI小屋音频任务查询');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
+}
+
+export async function submitSeedAudio(req: SeedAudioSubmitRequest, transport: ProviderSubmissionTransport = {}): Promise<{
+  taskId: string;
+  model: string;
+} & ProviderTransportTrace> {
+  return submitSeedanceNzAudio(req, transport);
 }
 
 export interface SeedAudioQueryResult extends ProviderTransportTrace {
@@ -1865,10 +1956,7 @@ export interface SeedAudioQueryResult extends ProviderTransportTrace {
 }
 
 export async function querySeedAudio(taskId: string): Promise<SeedAudioQueryResult> {
-  const r = await fetch(`/api/proxy/audio/seed-audio/status/${encodeURIComponent(taskId)}`);
-  const data = await r.json();
-  if (!r.ok || !data.success) throw providerResponseError(r, data);
-  return withProviderTransportTrace(data.data, r);
+  return querySeedanceNzAudio(taskId);
 }
 
 /**

@@ -153,7 +153,12 @@ function buildRuntimeCatalog() {
   const midjourney = loadTypeScriptModule(MIDJOURNEY_SOURCE);
   const seedanceNz = require(SEEDANCE_NZ_PROVIDER_SOURCE);
   const seedanceNzLlmModels = JSON.parse(fs.readFileSync(SEEDANCE_NZ_LLM_SOURCE, 'utf8'));
-  const budgetImageModels = new Set((models.ZHENZHEN_BUDGET_IMAGE_MODELS || []).map(String));
+  const budgetImageModels = new Set([
+    ...(models.ZHENZHEN_BUDGET_IMAGE_MODELS || []),
+    ...(models.QWEN_IMAGE_30_MODELS || []),
+    ...(models.SEEDREAM_LAYER_DECOMPOSITION_MODELS || []),
+    ...(models.WAN27_GLOBAL_IMAGE_MODELS || []),
+  ].map(String));
   const budgetVideoModels = new Set([
     ...(seedanceNz.ZHENZHEN_APIMART_VIDEO_MODELS || []),
   ].map(String));
@@ -227,7 +232,13 @@ function buildRuntimeCatalog() {
   for (const rawModel of seedanceNz.IMAGE_MODELS || []) {
     const model = String(rawModel || '').trim();
     if (!model) continue;
-    const family = seedanceNz.ZHENZHEN_IMAGE_G2_MODELS?.has(model)
+    const family = seedanceNz.QWEN_IMAGE_30_MODELS?.has(model)
+      ? 'qwen-image-3.0'
+      : seedanceNz.SEEDREAM_LAYER_DECOMPOSITION_MODELS?.has(model)
+        ? 'seedream-layer-decomposition'
+        : seedanceNz.WAN27_GLOBAL_IMAGE_MODELS?.has(model)
+          ? 'wan-image'
+      : seedanceNz.ZHENZHEN_IMAGE_G2_MODELS?.has(model)
       || model === seedanceNz.ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL
       ? 'gpt-image-2'
       : model === seedanceNz.ZHENZHEN_IMAGE_NB_PRO_MODEL
@@ -235,17 +246,25 @@ function buildRuntimeCatalog() {
         : model === seedanceNz.ZHENZHEN_IMAGE_NB_2_MODEL
           || model === seedanceNz.ZHENZHEN_IMAGE_NB_2_LITE_MODEL
           ? 'nano-banana-2'
-      : model === seedanceNz.ZHENZHEN_IMAGE_GK_V15_MODEL
+      : model === seedanceNz.ZHENZHEN_IMAGE_GK_V2_MODEL
+        || model === seedanceNz.ZHENZHEN_IMAGE_GK_V15_MODEL
         || model === seedanceNz.ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL
         ? 'grok-image'
         : 'seedream-v5-pro';
-    const maxReferenceImages = model.endsWith('-t2i')
+    const maxReferenceImages = family === 'seedream-layer-decomposition'
+      ? 1
+      : family === 'qwen-image-3.0'
+        ? (model.endsWith('-i2i') ? 3 : 0)
+        : family === 'wan-image'
+          ? (model === seedanceNz.WAN27_GLOBAL_T2I_MODEL ? 0 : 9)
+      : model.endsWith('-t2i')
       ? 0
       : model.endsWith('-i2i')
         ? 10
         : family === 'nano-banana-2' || family === 'nano-banana-pro'
           ? 14
-          : model === seedanceNz.ZHENZHEN_IMAGE_GK_V15_MODEL
+            : model === seedanceNz.ZHENZHEN_IMAGE_GK_V2_MODEL
+              || model === seedanceNz.ZHENZHEN_IMAGE_GK_V15_MODEL
             ? 0
             : model === seedanceNz.ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL
               ? 1
@@ -259,13 +278,29 @@ function buildRuntimeCatalog() {
       {
         tabLabel: family === 'grok-image'
           ? 'Grok'
+          : family === 'wan-image'
+            ? 'Wan Image'
+            : family === 'qwen-image-3.0'
+              ? 'Qwen Image'
+              : family === 'seedream-layer-decomposition'
+                ? 'Seedream分层'
           : family === 'nano-banana-2'
             ? '香蕉2'
             : family === 'nano-banana-pro'
               ? '香蕉Pro'
               : family === 'seedream-v5-pro' ? 'Seedream' : 'GPT2',
-        capabilities: maxReferenceImages === 0 ? ['t2i'] : ['t2i', 'i2i', 'edit'],
-        parameterKind: family === 'seedream-v5-pro' ? 'seedream-v5' : 'seedance-nz-image',
+        capabilities: family === 'seedream-layer-decomposition'
+          ? ['i2i', 'edit']
+          : maxReferenceImages === 0 ? ['t2i'] : ['t2i', 'i2i', 'edit'],
+        parameterKind: family === 'seedream-v5-pro'
+          ? 'seedream-v5'
+          : family === 'qwen-image-3.0'
+            ? 'qwen-image-3.0'
+            : family === 'seedream-layer-decomposition'
+              ? 'seedream-layer'
+              : family === 'wan-image'
+                ? 'wan-image'
+                : 'seedance-nz-image',
         supportsReference: maxReferenceImages !== 0,
         maxReferenceImages,
         description: '贞贞的平价AI小屋图像模型',
@@ -333,6 +368,18 @@ function buildRuntimeCatalog() {
     modelEntry('audio', 'grok-oauth', 'xai-tts', 'Grok TTS', 'grok-oauth'),
     modelEntry('audio', 'grok-oauth', 'xai-stt', 'Grok STT', 'grok-oauth'),
   );
+  for (const model of seedanceNz.QWEN3_TTS_MODELS || []) {
+    audio.push(modelEntry('audio', 'seedance-nz', model, model, 'qwen3-tts'));
+  }
+  for (const model of seedanceNz.MINIMAX_AUDIO_MODELS || []) {
+    audio.push(modelEntry('audio', 'seedance-nz', model, model, 'minimax'));
+  }
+  for (const model of seedanceNz.MUREKA_BGM_MODELS || []) {
+    audio.push(modelEntry('audio', 'seedance-nz', model, model, 'mureka', {
+      orderedMultiOutput: true,
+      maxOutputs: 3,
+    }));
+  }
 
   const actions = [];
   for (const item of models.SUNO_NZ_ACTIONS || []) {

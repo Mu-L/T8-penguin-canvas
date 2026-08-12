@@ -1,0 +1,12 @@
+{
+  "schema": "t8-workflow-fragment", "version": 1, "title": "Wan Image · wan-2.7-global-i2i-pro",
+  "nodes": [
+    { "id": "wan-pro-upload", "type": "upload", "position": { "x": 0, "y": 40 }, "data": { "label": "上传 1-9 张参考图", "uploadType": "image", "lockedUploadType": "image" } },
+    { "id": "wan-pro", "type": "image", "position": { "x": 420, "y": 40 }, "data": { "label": "Wan 2.7 Global Pro 图像编辑", "model": "wan-image", "apiModel": "wan-2.7-global-i2i-pro", "imageBuiltinSource": "seedance-nz", "prompt": "高精度保留主体细节，重构为杂志级视觉风格", "referenceImages": [], "imageOnlyOutput": true, "reuseResult": false } },
+    { "id": "wan-pro-output", "type": "output", "position": { "x": 840, "y": 40 }, "data": { "label": "Pro 编辑结果", "outputType": "image" } }
+  ],
+  "edges": [{ "id": "wan-pro-in", "source": "wan-pro-upload", "target": "wan-pro" }, { "id": "wan-pro-out", "source": "wan-pro", "target": "wan-pro-output" }],
+  "nodeCount": 3, "edgeCount": 2, "nodeTypes": ["upload", "image", "output"],
+  "topologyPreview": { "nodes": [{ "id": "wan-pro-upload", "type": "upload", "label": "上传参考图", "x": 8, "y": 50 }, { "id": "wan-pro", "type": "image", "label": "Wan 2.7 Pro 编辑", "x": 50, "y": 50 }, { "id": "wan-pro-output", "type": "output", "label": "Pro 编辑结果", "x": 92, "y": 50 }], "edges": [{ "source": "wan-pro-upload", "target": "wan-pro" }, { "source": "wan-pro", "target": "wan-pro-output" }] },
+  "savedAt": "2026-08-12T00:00:00.000Z"
+}

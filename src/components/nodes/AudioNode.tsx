@@ -8,6 +8,8 @@ import {
   querySunoNz,
   submitSeedAudio,
   querySeedAudio,
+  submitSeedanceNzAudio,
+  querySeedanceNzAudio,
   transcribeWhisper,
   buildWhisperTranscriptEvidence,
   uploadAudioForSuno,
@@ -16,6 +18,7 @@ import {
   type AudioProviderMode,
   type SunoPlatform,
   type SunoNzTaskResult,
+  type SeedanceNzAudioQueryResult,
   type WhisperResponseFormat,
 } from '../../services/generation';
 import {
@@ -24,6 +27,20 @@ import {
   DEFAULT_SUNO_NZ_OPERATION,
   SUNO_NZ_ACTIONS,
   getSunoNzActionDef,
+  QWEN3_TTS_MODELS,
+  QWEN3_TTS_FLASH_MODEL,
+  QWEN3_TTS_INSTRUCT_FLASH_MODEL,
+  QWEN3_TTS_LANGUAGE_TYPES,
+  MINIMAX_AUDIO_MODELS,
+  MINIMAX_MUSIC_MODEL,
+  MINIMAX_SPEECH_HD_MODEL,
+  MINIMAX_SPEECH_TURBO_MODEL,
+  MINIMAX_VOICE_CLONE_MODEL,
+  MINIMAX_AUDIO_FORMATS,
+  MINIMAX_SAMPLE_RATES,
+  MINIMAX_BITRATES,
+  MINIMAX_LANGUAGE_BOOSTS,
+  MUREKA_BGM_MODELS,
   type SunoNzOperation,
 } from '../../providers/models';
 import { useUpdateNodeData } from './useUpdateNodeData';
@@ -105,11 +122,15 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
 
   const d = data as any;
   const providerParams = (d?.providerParams && typeof d.providerParams === 'object') ? d.providerParams : {};
-  const audioProviderMode: AudioProviderMode = ['seed-audio', 'whisper'].includes(d?.audioProviderMode)
+  const audioProviderMode: AudioProviderMode = ['seed-audio', 'whisper', 'qwen3-tts', 'minimax', 'mureka'].includes(d?.audioProviderMode)
     ? d.audioProviderMode
     : 'suno';
   const isSeedAudio = audioProviderMode === 'seed-audio';
   const isWhisper = audioProviderMode === 'whisper';
+  const isQwen3Tts = audioProviderMode === 'qwen3-tts';
+  const isMinimaxAudio = audioProviderMode === 'minimax';
+  const isMureka = audioProviderMode === 'mureka';
+  const isSeedanceNzAudio = isQwen3Tts || isMinimaxAudio || isMureka;
   const isSuno = audioProviderMode === 'suno';
   const sunoPlatform: SunoPlatform = d?.sunoPlatform === 'seedance-nz' ? 'seedance-nz' : 'zhenzhen';
   const isSunoNz = isSuno && sunoPlatform === 'seedance-nz';
@@ -147,6 +168,52 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
   const seedAudioSpeechRate: number = Number.isInteger(d?.seedAudioSpeechRate) ? d.seedAudioSpeechRate : 0;
   const seedAudioLoudnessRate: number = Number.isInteger(d?.seedAudioLoudnessRate) ? d.seedAudioLoudnessRate : 0;
   const seedAudioPitchRate: number = Number.isInteger(d?.seedAudioPitchRate) ? d.seedAudioPitchRate : 0;
+  const qwenTtsModel = (QWEN3_TTS_MODELS as readonly string[]).includes(d?.qwenTtsModel)
+    ? d.qwenTtsModel
+    : QWEN3_TTS_FLASH_MODEL;
+  const qwenTtsVoice: string = String(d?.qwenTtsVoice || 'Cherry');
+  const qwenTtsLanguage: string = (QWEN3_TTS_LANGUAGE_TYPES as readonly string[]).includes(d?.qwenTtsLanguage)
+    ? d.qwenTtsLanguage
+    : 'Chinese';
+  const qwenTtsInstructions: string = String(d?.qwenTtsInstructions || '');
+  const qwenTtsOptimizeInstructions: boolean = d?.qwenTtsOptimizeInstructions !== false;
+  const minimaxAudioModel = (MINIMAX_AUDIO_MODELS as readonly string[]).includes(d?.minimaxAudioModel)
+    ? d.minimaxAudioModel
+    : MINIMAX_SPEECH_TURBO_MODEL;
+  const minimaxLyrics: string = String(d?.minimaxLyrics || '');
+  const minimaxInstrumental: boolean = d?.minimaxInstrumental !== false;
+  const minimaxLyricsOptimizer: boolean = d?.minimaxLyricsOptimizer === true;
+  const minimaxVoiceId: string = String(d?.minimaxVoiceId || 'Wise_Woman');
+  const minimaxSpeed: number = Math.min(2, Math.max(0.5, Number(d?.minimaxSpeed) || 1));
+  const minimaxVolume: number = Math.min(10, Math.max(0.1, Number(d?.minimaxVolume) || 1));
+  const minimaxPitch: number = Math.min(12, Math.max(-12, Number.isInteger(d?.minimaxPitch) ? d.minimaxPitch : 0));
+  const minimaxLanguageBoost: string = (MINIMAX_LANGUAGE_BOOSTS as readonly string[]).includes(d?.minimaxLanguageBoost)
+    ? d.minimaxLanguageBoost
+    : 'auto';
+  const minimaxOutputFormat: 'mp3' | 'wav' | 'flac' = (MINIMAX_AUDIO_FORMATS as readonly string[]).includes(d?.minimaxOutputFormat)
+    ? d.minimaxOutputFormat
+    : 'mp3';
+  const minimaxSampleRate: '16000' | '24000' | '32000' | '44100' = (MINIMAX_SAMPLE_RATES as readonly string[]).includes(String(d?.minimaxSampleRate))
+    ? String(d.minimaxSampleRate) as any
+    : '32000';
+  const minimaxBitrate: '32000' | '64000' | '128000' | '256000' = (MINIMAX_BITRATES as readonly string[]).includes(String(d?.minimaxBitrate))
+    ? String(d.minimaxBitrate) as any
+    : '128000';
+  const minimaxChannel: 1 | 2 = Number(d?.minimaxChannel) === 2 ? 2 : 1;
+  const minimaxCustomVoiceId: string = String(d?.minimaxCustomVoiceId || 'SeedanceVoice01');
+  const minimaxCloneTargetModel: 'minimax-speech-2.8-hd' | 'minimax-speech-2.8-turbo' = d?.minimaxCloneTargetModel === MINIMAX_SPEECH_TURBO_MODEL
+    ? MINIMAX_SPEECH_TURBO_MODEL
+    : MINIMAX_SPEECH_HD_MODEL;
+  const minimaxNoiseReduction: boolean = d?.minimaxNoiseReduction === true;
+  const minimaxVolumeNormalization: boolean = d?.minimaxVolumeNormalization === true;
+  const isMinimaxMusic = minimaxAudioModel === MINIMAX_MUSIC_MODEL;
+  const isMinimaxClone = minimaxAudioModel === MINIMAX_VOICE_CLONE_MODEL;
+  const murekaModel = (MUREKA_BGM_MODELS as readonly string[]).includes(d?.murekaModel)
+    ? d.murekaModel
+    : MUREKA_BGM_MODELS[0];
+  const murekaInstrumentalId: string = String(d?.murekaInstrumentalId || '');
+  const murekaCount: number = Math.min(3, Math.max(1, Number(d?.murekaCount) || 1));
+  const seedanceNzAudioResultText: string = typeof d?.seedanceNzAudioResultText === 'string' ? d.seedanceNzAudioResultText : '';
   const whisperResponseFormat: WhisperResponseFormat = ['json', 'verbose_json', 'srt', 'text', 'vtt'].includes(d?.whisperResponseFormat)
     ? d.whisperResponseFormat
     : 'json';
@@ -230,16 +297,20 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
   const mentionMaterials = useMemo(
     () => isSeedAudio
       ? [...orderedImages.slice(0, 1), ...orderedAudios.slice(0, 3), ...localRefAudioMaterials]
+      : isMinimaxClone
+        ? [...orderedAudios.slice(0, 1), ...localRefAudioMaterials]
       : [...orderedAudios, ...localRefAudioMaterials],
-    [isSeedAudio, orderedImages, orderedAudios, localRefAudioMaterials],
+    [isSeedAudio, isMinimaxClone, orderedImages, orderedAudios, localRefAudioMaterials],
   );
   
   // 分组动态跟随模式: generate 只要文本, cover/extend 需要参考音频
   const previewGroups = useMemo<ReadonlyArray<'text' | 'image' | 'video' | 'audio'>>(
     () => isSeedAudio
       ? ['text', 'image', 'audio']
+      : isMinimaxClone ? ['text', 'audio']
+      : isSeedanceNzAudio ? ['text']
       : isWhisper ? ['video', 'audio'] : isSunoNz ? ['text', 'audio'] : (mode === 'generate' ? ['text'] : ['text', 'audio']),
-    [isSeedAudio, isWhisper, isSunoNz, mode],
+    [isSeedAudio, isMinimaxClone, isSeedanceNzAudio, isWhisper, isSunoNz, mode],
   );
   
   // Whisper 可直接转写 MP4；其余音频能力仍只消费音频素材。
@@ -247,7 +318,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     const prompt = orderedTexts.map((t) => t.url).filter((s) => !!s).join('\n').trim();
     const audioUrl = orderedAudios[0]?.url || (isWhisper ? orderedVideos[0]?.url : '') || localRefAudio || '';
     const imageUrls = [...orderedImages.map((item) => item.url), localRefImage].filter(Boolean).slice(0, 1);
-    const maxAudios = isSunoNz ? 4 : 3;
+    const maxAudios = isMinimaxClone ? 1 : isSunoNz ? 4 : 3;
     const audioUrls = [...orderedAudios.map((item) => item.url), localRefAudio].filter((value, index, values) => !!value && values.indexOf(value) === index).slice(0, maxAudios);
     return { prompt, audioUrl, imageUrls, audioUrls };
   };
@@ -281,11 +352,15 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     if (!f) return;
     setError(null);
     try {
-      if (isSeedAudio || isWhisper || isSunoNz) {
+      if (isSeedAudio || isWhisper || isSunoNz || isMinimaxClone) {
         setUploading(true);
         const uploaded = await uploadLocalFile(f);
         update({ localRefAudio: uploaded.url, uploadedClipId: '', uploadedFilename: f.name });
-        const targetLabel = isWhisper ? 'Whisper 待转写素材' : isSeedAudio ? 'Seed Audio 参考音频' : 'Suno 参考音频';
+        const targetLabel = isWhisper
+          ? 'Whisper 待转写素材'
+          : isSeedAudio
+            ? 'Seed Audio 参考音频'
+            : isMinimaxClone ? 'MiniMax 声音克隆参考音频' : 'Suno 参考音频';
         logBus.success(`${targetLabel}已加入: ${f.name}`, src);
       } else {
         await uploadFile(f);
@@ -508,6 +583,120 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     });
   };
 
+  const finishSeedanceNzAudioResult = async (
+    result: SeedanceNzAudioQueryResult,
+    modelName: string,
+    tid: string,
+    reporter?: RunNodeLifecycleReporter,
+    pollCount = 0,
+  ) => {
+    const resultTracks = Array.isArray(result.tracks) && result.tracks.length
+      ? result.tracks
+      : (Array.isArray(result.audioUrls) ? result.audioUrls : [])
+        .filter(Boolean)
+        .map((audioUrl, index) => ({ id: `${tid}:${index}`, clipId: tid, audioUrl, title: `${modelName} #${index + 1}` }));
+    const resultText = String(result.resultText || '').trim();
+    update({
+      status: 'success',
+      tracks: resultTracks,
+      audioUrl: resultTracks[0]?.audioUrl || result.audioUrl || '',
+      audioUrl_1: resultTracks[1]?.audioUrl || '',
+      audioUrls: resultTracks.map((track) => track.audioUrl),
+      progress: '100%',
+      provider: 'seedance-nz',
+      model: modelName,
+      apiModel: modelName,
+      taskId: tid,
+      seedanceNzAudioResultText: resultText,
+      text: resultText,
+      texts: resultText ? [resultText] : [],
+      requestId: result.requestId,
+      transportHttpStatus: result.transportHttpStatus,
+      upstreamHttpStatus: result.upstreamHttpStatus,
+      usage: result.usage,
+      pollCount,
+    });
+    await reporter?.providerResponse({
+      provider: 'seedance-nz',
+      model: modelName,
+      upstreamTaskId: tid,
+      requestId: result.requestId,
+      transportHttpStatus: result.transportHttpStatus,
+      upstreamHttpStatus: result.upstreamHttpStatus,
+      usage: result.usage,
+      pollCount,
+      status: 'succeeded',
+      httpStatusSource: 'local-backend',
+    });
+    logBus.success(`${modelName} 完成 · 音频${resultTracks.length}${resultText ? ' / 文本1' : ''}`, src);
+    taskCompletionSound.notifyComplete(id, 'audio');
+  };
+
+  const startSeedanceNzAudioPolling = (
+    tid: string,
+    modelName: string,
+    reporter?: RunNodeLifecycleReporter,
+  ): Promise<void> => {
+    stopPoll();
+    return new Promise<void>((resolve, reject) => {
+      let elapsed = 0;
+      let pollInFlight = false;
+      pollTimer.current = window.setInterval(async () => {
+        if (pollInFlight) return;
+        elapsed += 1;
+        if (elapsed > SUNO_MAX_POLL) {
+          stopPoll();
+          const message = `${modelName} 轮询超时 (60min)，任务 ID 已保留，可稍后继续查询`;
+          setError(message);
+          update({ status: 'error', error: message });
+          reject(new Error(message));
+          return;
+        }
+        pollInFlight = true;
+        try {
+          const result = await querySeedanceNzAudio(tid);
+          const normalizedStatus = String(result.status || '').trim().toLowerCase();
+          await reporter?.polling({
+            provider: 'seedance-nz',
+            model: modelName,
+            taskId: tid,
+            requestId: result.requestId,
+            transportHttpStatus: result.transportHttpStatus,
+            upstreamHttpStatus: result.upstreamHttpStatus,
+            usage: result.usage,
+            httpStatusSource: 'local-backend',
+            pollCount: elapsed,
+            pollLimit: SUNO_MAX_POLL,
+            status: normalizedStatus,
+            progress: result.progress,
+          });
+          if (normalizedStatus === 'materializing') {
+            update({ status: 'polling', progress: '100% · 正在下载全部结果' });
+          } else if (normalizedStatus === 'succeeded') {
+            const hasAudio = Boolean(result.audioUrl) || Boolean(result.audioUrls?.length) || Boolean(result.tracks?.length);
+            const hasText = Boolean(String(result.resultText || '').trim());
+            if (!hasAudio && !hasText) throw new Error(`${modelName} 任务成功但没有返回音频或文本结果`);
+            stopPoll();
+            await finishSeedanceNzAudioResult(result, modelName, tid, reporter, elapsed);
+            resolve();
+          } else if (normalizedStatus === 'failed') {
+            stopPoll();
+            const message = result.failReason || result.error || `${modelName} 任务失败`;
+            setError(message);
+            update({ status: 'error', error: message });
+            reject(new Error(message));
+          } else {
+            update({ status: 'polling', progress: String(result.progress || `#${elapsed}`) });
+          }
+        } catch (pollError: any) {
+          logBus.warn(`${modelName} 轮询出错: ${pollError?.message || pollError}`, src);
+        } finally {
+          pollInFlight = false;
+        }
+      }, 4000);
+    });
+  };
+
   const finishSunoNzResult = async (
     result: SunoNzTaskResult,
     reporter?: RunNodeLifecycleReporter,
@@ -629,7 +818,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     const resolvedLocalPrompt = resolveMediaMentions(localPrompt, promptMentions, mentionMaterials);
     const finalPrompt = (upstream.prompt || resolvedLocalPrompt || '').trim();
     const sunoNzNeedsPrompt = sunoNzAction.requiredFields.includes('prompt');
-    if (!isWhisper && !isSunoNz && !finalPrompt) {
+    if (!isWhisper && !isSunoNz && !(isMureka && murekaInstrumentalId.trim()) && !finalPrompt) {
       setError(isSeedAudio ? '请填写音频提示词' : '请填写歌词 / 提示词');
       return;
     }
@@ -641,8 +830,19 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
       setError('Seed Audio 提示词长度必须为 5-2048 字符');
       return;
     }
-    const traceProvider = isSeedAudio || isWhisper || isSunoNz ? 'seedance-nz' : 'suno';
-    const traceModel = isWhisper ? 'whisper-1' : isSeedAudio ? 'doubao-seed-audio-1.0' : isSunoNz ? sunoNzOperation : version;
+    const latestAudioModel = isQwen3Tts
+      ? qwenTtsModel
+      : isMinimaxAudio
+        ? minimaxAudioModel
+        : isMureka ? murekaModel : '';
+    const traceProvider = isSeedAudio || isWhisper || isSunoNz || isSeedanceNzAudio ? 'seedance-nz' : 'suno';
+    const traceModel = isWhisper
+      ? 'whisper-1'
+      : isSeedAudio
+        ? 'doubao-seed-audio-1.0'
+        : isSeedanceNzAudio
+          ? latestAudioModel
+          : isSunoNz ? sunoNzOperation : version;
     await reporter?.providerRequest({ provider: traceProvider, model: traceModel });
     taskCompletionSound.primeAudio();
     update({
@@ -656,7 +856,9 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
       fileUrls: [],
       sunoVideoUrls: [],
       sunoFileUrls: [],
-      ...(isWhisper || isSunoNz ? { transcript: '', sunoResultText: '', text: '', texts: [] } : {}),
+      ...(isWhisper || isSunoNz || isSeedanceNzAudio
+        ? { transcript: '', sunoResultText: '', seedanceNzAudioResultText: '', text: '', texts: [] }
+        : {}),
       ...(isWhisper ? {
         transcriptEvidenceText: '',
         transcriptSegments: [],
@@ -742,6 +944,78 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
         update({ status: 'polling', taskId: result.taskId, lastPrompt: finalPrompt, progress: '0%' });
         logBus.info(`Seed Audio 任务 ${result.taskId} 已提交，开始轮询`, src);
         await startSeedAudioPolling(result.taskId, reporter);
+        return;
+      }
+      if (isSeedanceNzAudio) {
+        if (isQwen3Tts && !qwenTtsVoice.trim()) throw new Error('Qwen3-TTS 必须填写音色 ID');
+        if (isMinimaxMusic && !minimaxInstrumental && !minimaxLyrics.trim() && !minimaxLyricsOptimizer) {
+          throw new Error('MiniMax Music 非纯音乐模式必须填写歌词或启用歌词生成');
+        }
+        if (isMinimaxClone && upstream.audioUrls.length !== 1) {
+          throw new Error('MiniMax 声音克隆必须且只能连接、拖入或导入 1 段 10 秒至 5 分钟的参考音频');
+        }
+        if (isMureka && Boolean(finalPrompt) === Boolean(murekaInstrumentalId.trim())) {
+          throw new Error('Mureka 的 Prompt 与 instrumental_id 必须且只能填写一个');
+        }
+        const request = isQwen3Tts
+          ? {
+              model: qwenTtsModel,
+              prompt: finalPrompt,
+              voice: qwenTtsVoice.trim(),
+              languageType: qwenTtsLanguage,
+              instructions: qwenTtsModel === QWEN3_TTS_INSTRUCT_FLASH_MODEL ? qwenTtsInstructions.trim() : undefined,
+              optimizeInstructions: qwenTtsOptimizeInstructions,
+            }
+          : isMinimaxAudio
+            ? {
+                model: minimaxAudioModel,
+                prompt: finalPrompt,
+                lyrics: isMinimaxMusic ? minimaxLyrics.trim() : undefined,
+                isInstrumental: isMinimaxMusic ? minimaxInstrumental : undefined,
+                lyricsOptimizer: isMinimaxMusic ? minimaxLyricsOptimizer : undefined,
+                voiceId: !isMinimaxMusic && !isMinimaxClone ? minimaxVoiceId.trim() : undefined,
+                speed: minimaxSpeed,
+                volume: minimaxVolume,
+                pitch: minimaxPitch,
+                languageBoost: minimaxLanguageBoost,
+                outputFormat: minimaxOutputFormat,
+                sampleRate: minimaxSampleRate,
+                bitrate: minimaxBitrate,
+                channel: minimaxChannel,
+                customVoiceId: isMinimaxClone ? minimaxCustomVoiceId.trim() : undefined,
+                cloneTargetModel: isMinimaxClone ? minimaxCloneTargetModel : undefined,
+                needNoiseReduction: isMinimaxClone ? minimaxNoiseReduction : undefined,
+                needVolumeNormalization: isMinimaxClone ? minimaxVolumeNormalization : undefined,
+                audioUrls: isMinimaxClone ? upstream.audioUrls.slice(0, 1) : undefined,
+              }
+            : {
+                model: murekaModel,
+                prompt: finalPrompt || undefined,
+                instrumentalId: murekaInstrumentalId.trim() || undefined,
+                n: murekaCount,
+              };
+        logBus.info(`提交平价AI小屋音频: ${latestAudioModel}`, src);
+        const result = await submitSeedanceNzAudio(request, { submissionKey: reporter?.providerSubmissionKey });
+        await reporter?.providerSubmitted({
+          provider: 'seedance-nz',
+          model: latestAudioModel,
+          upstreamTaskId: result.taskId,
+          requestId: result.requestId,
+          transportHttpStatus: result.transportHttpStatus,
+          upstreamHttpStatus: result.upstreamHttpStatus,
+          usage: result.usage,
+          httpStatusSource: 'local-backend',
+        });
+        update({
+          status: 'polling',
+          taskId: result.taskId,
+          lastPrompt: finalPrompt,
+          progress: '0%',
+          provider: 'seedance-nz',
+          model: latestAudioModel,
+          apiModel: latestAudioModel,
+        });
+        await startSeedanceNzAudioPolling(result.taskId, latestAudioModel, reporter);
         return;
       }
       if (isSunoNz) {
@@ -937,6 +1211,8 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
       ? ['image', 'audio', 'text']
       : isWhisper
         ? ['video', 'audio', 'text']
+        : isMinimaxClone
+          ? ['audio', 'text']
         : ['audio', 'text'],
     onDrop: handleDrop,
   });
@@ -961,7 +1237,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
       }}
     >
       <Handle type="target" position={Position.Left} style={{ background: audioColor, border: 0 }} />
-      {isWhisper || (isSunoNz && sunoNzAction.resultFamily === 'text') ? (
+      {isWhisper || isMinimaxClone || (isSunoNz && sunoNzAction.resultFamily === 'text') ? (
         <Handle type="source" id="text" position={Position.Right} style={{ background: textColor, border: 0 }} />
       ) : isSunoNz && sunoNzAction.resultFamily === 'video' ? (
         <Handle type="source" id="video" position={Position.Right} style={{ background: videoColor, border: 0 }} />
@@ -983,12 +1259,20 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           <Music size={13} />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold text-white">音频 · {isWhisper ? 'Whisper' : isSeedAudio ? 'Seed Audio' : 'Suno'}</div>
+          <div className="text-sm font-semibold text-white">音频 · {
+            isWhisper ? 'Whisper'
+              : isSeedAudio ? 'Seed Audio'
+                : isQwen3Tts ? 'Qwen3-TTS'
+                  : isMinimaxAudio ? 'MiniMax'
+                    : isMureka ? 'Mureka' : 'Suno'
+          }</div>
           <div className="text-[10px] text-white/40 truncate">
             {isWhisper
               ? 'whisper-1 · 贞贞的平价AI小屋'
               : isSeedAudio
                 ? 'doubao-seed-audio-1.0 · 贞贞的平价AI小屋'
+                : isSeedanceNzAudio
+                  ? `${isQwen3Tts ? qwenTtsModel : isMinimaxAudio ? minimaxAudioModel : murekaModel} · 贞贞的平价AI小屋`
                 : isSunoNz
                   ? `${sunoNzOperation} · 贞贞的平价AI小屋`
                   : `${version} · ${MODES.find((m) => m.id === mode)?.label}`}
@@ -1002,6 +1286,9 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
             { value: 'suno', label: 'Suno' },
             { value: 'seed-audio', label: 'Seed Audio' },
             { value: 'whisper', label: 'Whisper' },
+            { value: 'qwen3-tts', label: 'Qwen3-TTS' },
+            { value: 'minimax', label: 'MiniMax' },
+            { value: 'mureka', label: 'Mureka' },
           ] as const).map((item) => (
             <button
               key={item.value}
@@ -1111,16 +1398,144 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           </div>
         )}
 
+        {isQwen3Tts && (
+          <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.05] p-2 space-y-2">
+            <div>
+              <label className="text-[10px] text-white/50 block mb-1">Qwen3-TTS 模型</label>
+              <select value={qwenTtsModel} onChange={(e) => update({ qwenTtsModel: e.target.value })} className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none">
+                {QWEN3_TTS_MODELS.map((item) => <option key={item} value={item} className="bg-zinc-900">{item}</option>)}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">音色 ID</label>
+                <input value={qwenTtsVoice} onChange={(e) => update({ qwenTtsVoice: e.target.value })} placeholder="Cherry" className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none" />
+              </div>
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">语言</label>
+                <select value={qwenTtsLanguage} onChange={(e) => update({ qwenTtsLanguage: e.target.value })} className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none">
+                  {QWEN3_TTS_LANGUAGE_TYPES.map((item) => <option key={item} value={item} className="bg-zinc-900">{item}</option>)}
+                </select>
+              </div>
+            </div>
+            {qwenTtsModel === QWEN3_TTS_INSTRUCT_FLASH_MODEL && (
+              <div className="space-y-1">
+                <label className="text-[10px] text-white/50 block">表达指令（中文或英文，可选）</label>
+                <textarea value={qwenTtsInstructions} onChange={(e) => update({ qwenTtsInstructions: e.target.value })} placeholder="例如：温柔、自然、语速稍慢" className="h-14 w-full resize-none rounded bg-white/5 border border-white/10 px-2 py-1 text-[11px] text-white outline-none" />
+                <label className="flex items-center gap-2 text-[10px] text-white/60">
+                  <input type="checkbox" checked={qwenTtsOptimizeInstructions} onChange={(e) => update({ qwenTtsOptimizeInstructions: e.target.checked })} className="accent-cyan-400" />
+                  由上游优化非空表达指令
+                </label>
+              </div>
+            )}
+          </div>
+        )}
+
+        {isMinimaxAudio && (
+          <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.05] p-2 space-y-2">
+            <div>
+              <label className="text-[10px] text-white/50 block mb-1">MiniMax 模型</label>
+              <select value={minimaxAudioModel} onChange={(e) => update({ minimaxAudioModel: e.target.value })} className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none">
+                {MINIMAX_AUDIO_MODELS.map((item) => <option key={item} value={item} className="bg-zinc-900">{item}</option>)}
+              </select>
+            </div>
+            {isMinimaxMusic && (
+              <>
+                <div className="grid grid-cols-2 gap-2 text-[10px] text-white/65">
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={minimaxInstrumental} onChange={(e) => update({ minimaxInstrumental: e.target.checked })} className="accent-cyan-400" />纯音乐</label>
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={minimaxLyricsOptimizer} onChange={(e) => update({ minimaxLyricsOptimizer: e.target.checked })} className="accent-cyan-400" />自动生成/优化歌词</label>
+                </div>
+                {!minimaxInstrumental && (
+                  <div>
+                    <label className="text-[10px] text-white/50 block mb-1">歌词</label>
+                    <textarea value={minimaxLyrics} onChange={(e) => update({ minimaxLyrics: e.target.value })} placeholder="可包含 [Verse] / [Chorus] 等结构标签" className="h-20 w-full resize-none rounded bg-white/5 border border-white/10 px-2 py-1 text-[11px] text-white outline-none" />
+                  </div>
+                )}
+              </>
+            )}
+            {!isMinimaxMusic && !isMinimaxClone && (
+              <>
+                <div>
+                  <label className="text-[10px] text-white/50 block mb-1">音色 ID</label>
+                  <input value={minimaxVoiceId} onChange={(e) => update({ minimaxVoiceId: e.target.value })} placeholder="Wise_Woman" className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none" />
+                </div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <label className="text-[10px] text-white/50">语速<input type="number" min={0.5} max={2} step={0.05} value={minimaxSpeed} onChange={(e) => update({ minimaxSpeed: Number(e.target.value) || 1 })} className="mt-1 w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white" /></label>
+                  <label className="text-[10px] text-white/50">音量<input type="number" min={0.1} max={10} step={0.1} value={minimaxVolume} onChange={(e) => update({ minimaxVolume: Number(e.target.value) || 1 })} className="mt-1 w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white" /></label>
+                  <label className="text-[10px] text-white/50">音高<input type="number" min={-12} max={12} step={1} value={minimaxPitch} onChange={(e) => update({ minimaxPitch: Number(e.target.value) || 0 })} className="mt-1 w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white" /></label>
+                </div>
+                <div>
+                  <label className="text-[10px] text-white/50 block mb-1">语言增强</label>
+                  <select value={minimaxLanguageBoost} onChange={(e) => update({ minimaxLanguageBoost: e.target.value })} className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white">
+                    {MINIMAX_LANGUAGE_BOOSTS.map((item) => <option key={item} value={item} className="bg-zinc-900">{item}</option>)}
+                  </select>
+                </div>
+              </>
+            )}
+            {isMinimaxClone && (
+              <>
+                <div>
+                  <label className="text-[10px] text-white/50 block mb-1">自定义音色 ID（8–256 位）</label>
+                  <input value={minimaxCustomVoiceId} onChange={(e) => update({ minimaxCustomVoiceId: e.target.value })} placeholder="SeedanceVoice01" className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-white/50 block mb-1">目标语音模型</label>
+                  <select value={minimaxCloneTargetModel} onChange={(e) => update({ minimaxCloneTargetModel: e.target.value })} className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white">
+                    <option value={MINIMAX_SPEECH_HD_MODEL} className="bg-zinc-900">{MINIMAX_SPEECH_HD_MODEL}</option>
+                    <option value={MINIMAX_SPEECH_TURBO_MODEL} className="bg-zinc-900">{MINIMAX_SPEECH_TURBO_MODEL}</option>
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[10px] text-white/65">
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={minimaxNoiseReduction} onChange={(e) => update({ minimaxNoiseReduction: e.target.checked })} className="accent-cyan-400" />参考音降噪</label>
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={minimaxVolumeNormalization} onChange={(e) => update({ minimaxVolumeNormalization: e.target.checked })} className="accent-cyan-400" />音量归一化</label>
+                </div>
+                <div className="text-[10px] leading-relaxed text-white/40">必须提供 1 段 10 秒至 5 分钟参考音频；成功后输出音色 ID 文本。</div>
+              </>
+            )}
+            {!isMinimaxClone && (
+              <div className="grid grid-cols-3 gap-1.5">
+                <label className="text-[10px] text-white/50">格式<select value={minimaxOutputFormat} onChange={(e) => update({ minimaxOutputFormat: e.target.value })} className="mt-1 w-full rounded bg-white/5 border border-white/10 px-1 py-1 text-[10px] text-white">{MINIMAX_AUDIO_FORMATS.map((item) => <option key={item} value={item} className="bg-zinc-900">{item}</option>)}</select></label>
+                <label className="text-[10px] text-white/50">采样率<select value={minimaxSampleRate} onChange={(e) => update({ minimaxSampleRate: e.target.value })} className="mt-1 w-full rounded bg-white/5 border border-white/10 px-1 py-1 text-[10px] text-white">{MINIMAX_SAMPLE_RATES.map((item) => <option key={item} value={item} className="bg-zinc-900">{item}</option>)}</select></label>
+                <label className="text-[10px] text-white/50">码率<select value={minimaxBitrate} onChange={(e) => update({ minimaxBitrate: e.target.value })} className="mt-1 w-full rounded bg-white/5 border border-white/10 px-1 py-1 text-[10px] text-white">{MINIMAX_BITRATES.map((item) => <option key={item} value={item} className="bg-zinc-900">{item}</option>)}</select></label>
+              </div>
+            )}
+          </div>
+        )}
+
+        {isMureka && (
+          <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.05] p-2 space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">Mureka 模型</label>
+                <select value={murekaModel} onChange={(e) => update({ murekaModel: e.target.value })} className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-[10px] text-white">
+                  {MUREKA_BGM_MODELS.map((item) => <option key={item} value={item} className="bg-zinc-900">{item}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">生成数量</label>
+                <select value={murekaCount} onChange={(e) => update({ murekaCount: Number(e.target.value) })} className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white">
+                  {[1, 2, 3].map((item) => <option key={item} value={item} className="bg-zinc-900">{item}</option>)}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="text-[10px] text-white/50 block mb-1">instrumental_id（与 Prompt 二选一）</label>
+              <input value={murekaInstrumentalId} onChange={(e) => update({ murekaInstrumentalId: e.target.value })} placeholder="留空则使用下面的 Prompt" className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none" />
+            </div>
+            <div className="text-[10px] leading-relaxed text-white/40">返回 1–3 个有序 BGM 结果；画布会按上游顺序逐个保存，不截断。</div>
+          </div>
+        )}
+
         <LocalNodeAddonSlot
           nodeId={id}
           nodeType="audio"
           data={d}
           update={update}
           context={{
-            providerSource: isSeedAudio || isWhisper || isSunoNz ? 'seedance-nz' : 'zhenzhen',
-            model: isWhisper ? 'whisper-1' : isSeedAudio ? 'doubao-seed-audio-1.0' : isSunoNz ? sunoNzOperation : version,
-            apiModel: isWhisper ? 'whisper-1' : isSeedAudio ? 'doubao-seed-audio-1.0' : isSunoNz ? sunoNzOperation : `suno-${version}`,
-            providerKind: isWhisper ? 'whisper' : isSeedAudio ? 'seed-audio' : 'suno',
+            providerSource: isSeedAudio || isWhisper || isSunoNz || isSeedanceNzAudio ? 'seedance-nz' : 'zhenzhen',
+            model: isWhisper ? 'whisper-1' : isSeedAudio ? 'doubao-seed-audio-1.0' : isQwen3Tts ? qwenTtsModel : isMinimaxAudio ? minimaxAudioModel : isMureka ? murekaModel : isSunoNz ? sunoNzOperation : version,
+            apiModel: isWhisper ? 'whisper-1' : isSeedAudio ? 'doubao-seed-audio-1.0' : isQwen3Tts ? qwenTtsModel : isMinimaxAudio ? minimaxAudioModel : isMureka ? murekaModel : isSunoNz ? sunoNzOperation : `suno-${version}`,
+            providerKind: isWhisper ? 'whisper' : isSeedAudio ? 'seed-audio' : isQwen3Tts ? 'qwen3-tts' : isMinimaxAudio ? 'minimax' : isMureka ? 'mureka' : 'suno',
           }}
         />
 
@@ -1186,14 +1601,26 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
         )}
         {!isWhisper && (!isSunoNz || sunoNzAction.requiredFields.includes('prompt')) && (
         <div>
-          <label className="text-[10px] text-white/50 block mb-1">{isSeedAudio ? '音频提示词' : sunoNzOperation === 'suno-lyrics' ? '歌词主题 / 要求' : '歌词 / 提示词'}</label>
+          <label className="text-[10px] text-white/50 block mb-1">{
+            isSeedAudio ? '音频提示词'
+              : isQwen3Tts ? '需要合成的文本'
+                : isMinimaxMusic ? '音乐风格 / 内容描述'
+                  : isMinimaxClone ? '克隆任务说明 / 试听文本'
+                    : isMinimaxAudio ? '需要朗读的文本'
+                      : isMureka ? 'BGM 描述（与 instrumental_id 二选一）'
+                        : sunoNzOperation === 'suno-lyrics' ? '歌词主题 / 要求' : '歌词 / 提示词'
+          }</label>
           <MentionPromptInput
             title="音频歌词 / 提示词"
             value={localPrompt}
             mentions={promptMentions}
             materials={mentionMaterials}
             onChange={(value, mentions) => update({ prompt: value, promptMentions: mentions })}
-            placeholder={isSeedAudio ? '例如：雨夜城市街道，轻柔雨声与远处车流，无人声' : '[Verse]...'}
+            placeholder={isSeedAudio
+              ? '例如：雨夜城市街道，轻柔雨声与远处车流，无人声'
+              : isQwen3Tts || (isMinimaxAudio && !isMinimaxMusic)
+                ? '输入需要合成的语音文本'
+                : isMureka ? '例如：温暖、轻盈的原声吉他背景音乐' : '[Verse]...'}
             isDark={isDark}
             isPixel={isPixel}
             promptTemplateKind="video"
@@ -1356,12 +1783,16 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
             ? '待转写素材 · 音频 / MP4'
             : isSeedAudio
               ? '上游素材 · Seed Audio 参考'
+              : isMinimaxClone
+                ? '上游素材 · MiniMax 克隆参考音频'
+                : isSeedanceNzAudio
+                  ? '上游素材 · 文本提示'
               : isSunoNz
                 ? '上游素材 · 文本 / 最多 4 段音频'
                 : mode === 'generate' ? '上游素材 · 歌词提示' : '上游素材 · 参考音频'}
         />
 
-        {(isSeedAudio || isWhisper || showSunoNzAudioImport) && (localRefImage || localRefAudio) && (
+        {(isSeedAudio || isWhisper || isMinimaxClone || showSunoNzAudioImport) && (localRefImage || localRefAudio) && (
           <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.05] p-2 space-y-1">
             <div className="flex items-center justify-between gap-2 text-[10px] text-cyan-100/75">
               <span>本地参考素材</span>
@@ -1372,7 +1803,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           </div>
         )}
 
-        {(isSeedAudio || isWhisper || showSunoNzAudioImport) && (
+        {(isSeedAudio || isWhisper || isMinimaxClone || showSunoNzAudioImport) && (
           <div className="flex gap-1.5">
             <input
               ref={fileInputRef}
@@ -1383,7 +1814,11 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
             />
             <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading} className="flex-1 flex items-center justify-center gap-1 rounded bg-white/5 py-1 text-[10px] text-cyan-100 hover:bg-white/10 disabled:opacity-50">
               {uploading ? <Loader2 size={10} className="animate-spin" /> : <Upload size={10} />}
-              {uploading ? '导入中…' : isWhisper ? '导入待转写音频 / MP4' : isSunoNz ? '导入 Suno 参考音频（至少 6 秒）' : '导入参考音频'}
+              {uploading
+                ? '导入中…'
+                : isWhisper ? '导入待转写音频 / MP4'
+                  : isMinimaxClone ? '导入克隆参考音频（10 秒–5 分钟）'
+                    : isSunoNz ? '导入 Suno 参考音频（至少 6 秒）' : '导入参考音频'}
             </button>
           </div>
         )}
@@ -1475,6 +1910,8 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           checked={d?.reuseResult === true}
           hasResult={isWhisper
             ? transcript.trim().length > 0
+            : isSeedanceNzAudio
+              ? hasReusableGenerationResult('audio', d) || seedanceNzAudioResultText.trim().length > 0
             : isSunoNz
               ? hasReusableGenerationResult('audio', d) || !!sunoResultText || sunoVideoUrls.length > 0 || sunoFileUrls.length > 0
               : hasReusableGenerationResult('audio', d)}
@@ -1487,7 +1924,11 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
             onClick={() => requestCanvasNodeRun(id)}
             className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded bg-violet-500/20 hover:bg-violet-500/30 text-violet-200 text-xs font-medium transition-colors"
           >
-            <Sparkles size={12} /> {isWhisper ? '开始转写' : isSunoNz ? `执行 ${sunoNzAction.label}` : '生成音频'}
+            <Sparkles size={12} /> {isWhisper
+              ? '开始转写'
+              : isSunoNz ? `执行 ${sunoNzAction.label}`
+                : isMinimaxClone ? '创建克隆音色'
+                  : '生成音频'}
           </button>
         ) : (
           <button
@@ -1517,6 +1958,13 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.05] px-2 py-1.5">
             <div className="mb-1 text-[10px] font-semibold text-cyan-100/80">{sunoNzAction.label}结果</div>
             <div className="max-h-36 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-white/75">{sunoResultText}</div>
+          </div>
+        )}
+
+        {isSeedanceNzAudio && seedanceNzAudioResultText && (
+          <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.05] px-2 py-1.5">
+            <div className="mb-1 text-[10px] font-semibold text-cyan-100/80">文本结果</div>
+            <div className="max-h-36 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-white/75">{seedanceNzAudioResultText}</div>
           </div>
         )}
 

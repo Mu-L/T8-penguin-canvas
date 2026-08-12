@@ -1,0 +1,12 @@
+{
+  "schema": "t8-workflow-fragment", "version": 1, "title": "Wan Image · wan-2.7-global-i2i",
+  "nodes": [
+    { "id": "wan-i2i-upload", "type": "upload", "position": { "x": 0, "y": 40 }, "data": { "label": "上传 1-9 张参考图", "uploadType": "image", "lockedUploadType": "image" } },
+    { "id": "wan-i2i", "type": "image", "position": { "x": 420, "y": 40 }, "data": { "label": "Wan 2.7 Global 图像编辑", "model": "wan-image", "apiModel": "wan-2.7-global-i2i", "imageBuiltinSource": "seedance-nz", "prompt": "保留主体身份与轮廓，改为电影级柔光场景", "referenceImages": [], "imageOnlyOutput": true, "reuseResult": false } },
+    { "id": "wan-i2i-output", "type": "output", "position": { "x": 840, "y": 40 }, "data": { "label": "编辑结果", "outputType": "image" } }
+  ],
+  "edges": [{ "id": "wan-i2i-in", "source": "wan-i2i-upload", "target": "wan-i2i" }, { "id": "wan-i2i-out", "source": "wan-i2i", "target": "wan-i2i-output" }],
+  "nodeCount": 3, "edgeCount": 2, "nodeTypes": ["upload", "image", "output"],
+  "topologyPreview": { "nodes": [{ "id": "wan-i2i-upload", "type": "upload", "label": "上传参考图", "x": 8, "y": 50 }, { "id": "wan-i2i", "type": "image", "label": "Wan 2.7 编辑", "x": 50, "y": 50 }, { "id": "wan-i2i-output", "type": "output", "label": "编辑结果", "x": 92, "y": 50 }], "edges": [{ "source": "wan-i2i-upload", "target": "wan-i2i" }, { "source": "wan-i2i", "target": "wan-i2i-output" }] },
+  "savedAt": "2026-08-12T00:00:00.000Z"
+}

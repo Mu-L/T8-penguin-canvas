@@ -2735,7 +2735,7 @@
       "type": "audio",
       "label": "音频",
       "category": "core",
-      "description": "Suno / Seed Audio 生成与 Whisper 语音转文字",
+      "description": "Suno、Seed Audio、Qwen3-TTS、MiniMax、Mureka 音频生成与 Whisper 语音转文字",
       "icon": "Music",
       "color": "violet",
       "ports": {
@@ -2757,8 +2757,44 @@
         "allowedDataFields": {
           "audioProviderMode": {
             "type": "string",
-            "enum": ["suno", "seed-audio", "whisper"]
+            "enum": ["suno", "seed-audio", "whisper", "qwen3-tts", "minimax", "mureka"]
           },
+          "qwenTtsModel": {
+            "type": "string",
+            "enum": ["qwen3-tts-flash", "qwen3-tts-instruct-flash"]
+          },
+          "qwenTtsVoice": { "type": "string" },
+          "qwenTtsLanguage": {
+            "type": "string",
+            "enum": ["Chinese", "English", "Japanese", "Korean", "German", "French", "Russian", "Portuguese", "Spanish", "Italian"]
+          },
+          "qwenTtsInstructions": { "type": "string" },
+          "qwenTtsOptimizeInstructions": { "type": "boolean" },
+          "minimaxAudioModel": {
+            "type": "string",
+            "enum": ["minimax-music-2.6", "minimax-speech-2.8-hd", "minimax-speech-2.8-turbo", "minimax-voice-clone"]
+          },
+          "minimaxLyrics": { "type": "string" },
+          "minimaxInstrumental": { "type": "boolean" },
+          "minimaxLyricsOptimizer": { "type": "boolean" },
+          "minimaxVoiceId": { "type": "string" },
+          "minimaxSpeed": { "type": "number", "minimum": 0.5, "maximum": 2 },
+          "minimaxVolume": { "type": "number", "minimum": 0.1, "maximum": 10 },
+          "minimaxPitch": { "type": "integer", "minimum": -12, "maximum": 12 },
+          "minimaxLanguageBoost": { "type": "string" },
+          "minimaxOutputFormat": { "type": "string", "enum": ["mp3", "wav", "flac"] },
+          "minimaxSampleRate": { "type": "string", "enum": ["16000", "24000", "32000", "44100"] },
+          "minimaxBitrate": { "type": "string", "enum": ["32000", "64000", "128000", "256000"] },
+          "minimaxChannel": { "type": "integer", "enum": [1, 2] },
+          "minimaxCustomVoiceId": { "type": "string" },
+          "minimaxCloneTargetModel": { "type": "string", "enum": ["minimax-speech-2.8-hd", "minimax-speech-2.8-turbo"] },
+          "minimaxNoiseReduction": { "type": "boolean" },
+          "minimaxVolumeNormalization": { "type": "boolean" },
+          "murekaModel": { "type": "string", "enum": ["mureka-v8-bgm", "mureka-v9-bgm"] },
+          "murekaInstrumentalId": { "type": "string" },
+          "murekaCount": { "type": "integer", "minimum": 1, "maximum": 3 },
+          "prompt": { "type": "string" },
+          "referenceAudios": { "type": "array", "items": { "type": "string" }, "maxItems": 1 },
           "whisperResponseFormat": {
             "type": "string",
             "enum": ["json", "verbose_json", "srt", "text", "vtt"]
@@ -2769,6 +2805,18 @@
         },
         "defaults": {
           "audioProviderMode": "suno",
+          "qwenTtsModel": "qwen3-tts-flash",
+          "qwenTtsVoice": "Cherry",
+          "qwenTtsLanguage": "Chinese",
+          "qwenTtsOptimizeInstructions": true,
+          "minimaxAudioModel": "minimax-speech-2.8-turbo",
+          "minimaxInstrumental": true,
+          "minimaxOutputFormat": "mp3",
+          "minimaxSampleRate": "32000",
+          "minimaxBitrate": "128000",
+          "minimaxChannel": 1,
+          "murekaModel": "mureka-v8-bgm",
+          "murekaCount": 1,
           "whisperResponseFormat": "json",
           "reuseResult": false
         },

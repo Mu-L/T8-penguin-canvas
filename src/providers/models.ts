@@ -13,8 +13,9 @@ export type ProviderType = 'zhenzhen' | 'llm-direct' | 'runninghub';
 //  - 'seedream-v5' : Seedream V5 Pro 协议,JSON /generations,size 为像素串,image[] 可选
 //  - 'seedream-layer': Seedream V5 Pro 分层协议,单图输入,返回底图 + 有序图层列表
 //  - 'qwen-image-3.0': Qwen Image 3.0 协议,auto / 比例+分辨率 / 自定义 W*H 三种互斥尺寸模式
+//  - 'wan-image'   : Wan 2.7 Global 图像协议,T2I 使用宽高/思考模式,I2I 使用 1-9 张参考图
 //  - 'mj'          : Midjourney 协议,走专属 /api/proxy/mj/* 路由(speed_map + sref/oref)
-export type ImageParamKind = 'gpt-size' | 'banana-ratio' | 'grok-image' | 'seedream-v5' | 'seedream-layer' | 'qwen-image-3.0' | 'mj';
+export type ImageParamKind = 'gpt-size' | 'banana-ratio' | 'grok-image' | 'seedream-v5' | 'seedream-layer' | 'qwen-image-3.0' | 'wan-image' | 'mj';
 
 export interface ImageModelDef {
   id: string;             // 节点内部 id(如 'gpt-image-2')
@@ -57,6 +58,7 @@ export const ZHENZHEN_IMAGE_G2_I2I_MODEL = 'zhenzhen-image-g2-i2i';
 export const ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL = 'zhenzhen-image-g-v2-lowprice';
 export const ZHENZHEN_IMAGE_GK_V15_MODEL = 'zhenzhen-image-gk-v15';
 export const ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL = 'zhenzhen-image-gk-v15-edit';
+export const ZHENZHEN_IMAGE_GK_V2_MODEL = 'zhenzhen-image-gk-v2';
 export const ZHENZHEN_IMAGE_NB_2_LITE_MODEL = 'zhenzhen-image-nb-2-lite';
 export const ZHENZHEN_IMAGE_NB_2_MODEL = 'zhenzhen-image-nb-2';
 export const ZHENZHEN_IMAGE_NB_PRO_MODEL = 'zhenzhen-image-nb-pro';
@@ -70,6 +72,7 @@ export const ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS = [
   { value: ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL, label: ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL },
 ] as const;
 export const ZHENZHEN_BUDGET_GROK_MODEL_OPTIONS = [
+  { value: ZHENZHEN_IMAGE_GK_V2_MODEL, label: ZHENZHEN_IMAGE_GK_V2_MODEL },
   { value: ZHENZHEN_IMAGE_GK_V15_MODEL, label: ZHENZHEN_IMAGE_GK_V15_MODEL },
   { value: ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL, label: ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL },
 ] as const;
@@ -83,6 +86,7 @@ export const ZHENZHEN_BUDGET_BANANA_PRO_MODEL_OPTIONS = [
 export const ZHENZHEN_IMAGE_G2_MODEL_OPTIONS = ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS.slice(0, 2);
 export const ZHENZHEN_APIMART_IMAGE_MODELS = [
   ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
+  ZHENZHEN_IMAGE_GK_V2_MODEL,
   ZHENZHEN_IMAGE_GK_V15_MODEL,
   ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL,
   ZHENZHEN_IMAGE_NB_2_LITE_MODEL,
@@ -95,6 +99,7 @@ export const ZHENZHEN_BUDGET_IMAGE_MODELS = [
 ] as const;
 export const ZHENZHEN_IMAGE_G2_RATIOS = ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'];
 export const ZHENZHEN_IMAGE_GK_V15_RATIOS = ['1:1', '16:9', '9:16', '3:2', '2:3'];
+export const ZHENZHEN_IMAGE_GK_V2_RATIOS = ['1:1', '16:9', '9:16', '3:2', '2:3'];
 export const ZHENZHEN_IMAGE_NB_STANDARD_RATIOS = [
   '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9',
 ];
@@ -146,6 +151,21 @@ export function isQwenImage30Model(apiModel: string | undefined | null): apiMode
 
 export function isQwenImage30I2IModel(apiModel: string | undefined | null): boolean {
   return (QWEN_IMAGE_30_I2I_MODELS as readonly string[]).includes(String(apiModel || '').trim());
+}
+
+export const WAN27_GLOBAL_T2I_MODEL = 'wan-2.7-global-t2i';
+export const WAN27_GLOBAL_I2I_MODEL = 'wan-2.7-global-i2i';
+export const WAN27_GLOBAL_I2I_PRO_MODEL = 'wan-2.7-global-i2i-pro';
+export const WAN27_GLOBAL_IMAGE_MODELS = [
+  WAN27_GLOBAL_T2I_MODEL,
+  WAN27_GLOBAL_I2I_MODEL,
+  WAN27_GLOBAL_I2I_PRO_MODEL,
+] as const;
+export const WAN27_GLOBAL_I2I_MODELS = [WAN27_GLOBAL_I2I_MODEL, WAN27_GLOBAL_I2I_PRO_MODEL] as const;
+export type Wan27GlobalImageModel = typeof WAN27_GLOBAL_IMAGE_MODELS[number];
+
+export function isWan27GlobalI2IModel(apiModel: string | undefined | null): boolean {
+  return (WAN27_GLOBAL_I2I_MODELS as readonly string[]).includes(String(apiModel || '').trim());
 }
 
 export function isZhenzhenApimartImageModel(apiModel: string | undefined | null): boolean {
@@ -299,6 +319,23 @@ export const IMAGE_MODELS: ImageModelDef[] = [
     supportsReference: true,
     maxReferenceImages: 3,
     description: 'Qwen Image 3.0 / Pro · 国内与 Global 文生图、图像编辑',
+  },
+  {
+    id: 'wan-image',
+    apiModel: WAN27_GLOBAL_T2I_MODEL,
+    label: 'Wan Image 2.7 Global',
+    tabLabel: 'Wan Image',
+    provider: 'zhenzhen',
+    paramKind: 'wan-image',
+    capabilities: ['t2i', 'i2i', 'edit'],
+    apiModelOptions: WAN27_GLOBAL_IMAGE_MODELS.map((value) => ({ value, label: value })),
+    aspectRatios: [],
+    defaultAspectRatio: '',
+    sizes: [],
+    defaultSize: '',
+    supportsReference: true,
+    maxReferenceImages: 9,
+    description: 'Wan 2.7 Global · 文生图与 1–9 图编辑',
   },
   // ========================================================================
   // Midjourney — 完全对齐 gpt-image-2-web/index.html runMJ L4437~L4694
@@ -1391,6 +1428,40 @@ export const LLM_MODELS: LlmModelDef[] = [
   { id: 'kimi-k3', label: 'kimi-k3', provider: 'llm-direct' },
   { id: 'gpt-image-2-all', label: 'GPT Image 2 All (图文)', provider: 'llm-direct', vision: true, imageOutput: true, nonStreaming: true, description: '可自动调用图像生成' },
 ];
+
+export const QWEN3_TTS_FLASH_MODEL = 'qwen3-tts-flash';
+export const QWEN3_TTS_INSTRUCT_FLASH_MODEL = 'qwen3-tts-instruct-flash';
+export const QWEN3_TTS_MODELS = [QWEN3_TTS_FLASH_MODEL, QWEN3_TTS_INSTRUCT_FLASH_MODEL] as const;
+export const QWEN3_TTS_LANGUAGE_TYPES = [
+  'Chinese', 'English', 'Japanese', 'Korean', 'German',
+  'French', 'Russian', 'Portuguese', 'Spanish', 'Italian',
+] as const;
+
+export const MINIMAX_MUSIC_MODEL = 'minimax-music-2.6';
+export const MINIMAX_SPEECH_HD_MODEL = 'minimax-speech-2.8-hd';
+export const MINIMAX_SPEECH_TURBO_MODEL = 'minimax-speech-2.8-turbo';
+export const MINIMAX_VOICE_CLONE_MODEL = 'minimax-voice-clone';
+export const MINIMAX_AUDIO_MODELS = [
+  MINIMAX_MUSIC_MODEL,
+  MINIMAX_SPEECH_HD_MODEL,
+  MINIMAX_SPEECH_TURBO_MODEL,
+  MINIMAX_VOICE_CLONE_MODEL,
+] as const;
+export const MINIMAX_SPEECH_MODELS = [MINIMAX_SPEECH_HD_MODEL, MINIMAX_SPEECH_TURBO_MODEL] as const;
+export const MINIMAX_AUDIO_FORMATS = ['mp3', 'wav', 'flac'] as const;
+export const MINIMAX_SAMPLE_RATES = ['16000', '24000', '32000', '44100'] as const;
+export const MINIMAX_BITRATES = ['32000', '64000', '128000', '256000'] as const;
+export const MINIMAX_LANGUAGE_BOOSTS = [
+  'auto', 'Chinese', 'Chinese,Yue', 'English', 'Japanese', 'Korean',
+  'French', 'German', 'Spanish', 'Portuguese', 'Russian',
+] as const;
+
+export const MUREKA_BGM_MODELS = ['mureka-v8-bgm', 'mureka-v9-bgm'] as const;
+export const SEEDANCE_NZ_AUDIO_MODELS = [
+  ...QWEN3_TTS_MODELS,
+  ...MINIMAX_AUDIO_MODELS,
+  ...MUREKA_BGM_MODELS,
+] as const;
 
 export const DEFAULT_LLM_MODEL = 'gemini-3.5-flash';
 export const CUSTOM_LLM_MODEL_VALUE = '__custom__';

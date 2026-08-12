@@ -1,0 +1,11 @@
+{
+  "schema": "t8-workflow-fragment", "version": 1, "title": "Wan Image · wan-2.7-global-t2i",
+  "nodes": [
+    { "id": "wan-t2i", "type": "image", "position": { "x": 40, "y": 40 }, "data": { "label": "Wan 2.7 Global 文生图", "model": "wan-image", "apiModel": "wan-2.7-global-t2i", "imageBuiltinSource": "seedance-nz", "wanImageWidth": 1536, "wanImageHeight": 1024, "wanImageThinkingMode": true, "prompt": "高质感电影静帧，清晰主体，层次丰富的自然光", "referenceImages": [], "imageOnlyOutput": true, "reuseResult": false } },
+    { "id": "wan-t2i-output", "type": "output", "position": { "x": 500, "y": 40 }, "data": { "label": "生成图片", "outputType": "image" } }
+  ],
+  "edges": [{ "id": "wan-t2i-edge", "source": "wan-t2i", "target": "wan-t2i-output" }],
+  "nodeCount": 2, "edgeCount": 1, "nodeTypes": ["image", "output"],
+  "topologyPreview": { "nodes": [{ "id": "wan-t2i", "type": "image", "label": "Wan 2.7 Global 文生图", "x": 8, "y": 50 }, { "id": "wan-t2i-output", "type": "output", "label": "生成图片", "x": 92, "y": 50 }], "edges": [{ "source": "wan-t2i", "target": "wan-t2i-output" }] },
+  "savedAt": "2026-08-12T00:00:00.000Z"
+}

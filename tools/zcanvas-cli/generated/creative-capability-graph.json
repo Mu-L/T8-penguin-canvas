@@ -15,16 +15,16 @@
   },
   "sourceDigests": {
     "creativeCapabilityManifest": "5c56b3b64d483ae6e6da5268f25c059f2a3fcc2c13e3c3d64d39b10e1e56402b",
-    "canvasNodeSchema": "8b5244b1c088bb8b46e0a9f69a919c50f205e3857a75a3949cbba96ab3be8bc7",
-    "canvasNodeSchemaFile": "8b7102f465ef34cd9475ede302b4e4195384ab15456f2bb8e3346bc07c035e45",
-    "runtimeCatalogSources": "a399f5689b00ef540602f3bc9856383d266ce1b202bdeae89119f3d18dc18ef3",
-    "runtimeCatalogArtifact": "a3b0d4f3277e74352e081a7c3037bad06681b47af6c7c1058ca95922505418e8",
+    "canvasNodeSchema": "3d76c2debc7687d67a54eea884287aa0b973e3f4bf01dab9984e01b240961bfc",
+    "canvasNodeSchemaFile": "7b34c456f72907fd1d0d84563d380af5f195835f2be7b17adb054db4e614f375",
+    "runtimeCatalogSources": "2e1f97eab8c163826ea18b396b384569caf69ab4214c1937a7d437fd14d73042",
+    "runtimeCatalogArtifact": "0653e5ab9dc7399cd5015cf7272eb2f2b1d913398d244789b996bdf0d46c9170",
     "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
     "capabilityGraphCompiler": "1a611d7e91dcf523e0536a92e9adb6ba2d884689a65fa10274bcda3a05ef9840",
     "coverageReceiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7",
     "canonicalTextDigestCompiler": "b0afcf28a257fbbd8f391edc117348f8f2ede1b4a039ae91bce25a8d563ac0cf"
   },
-  "aggregateDigest": "292eab5d1315ef73793f234739f97d658e2572c77945bbefadbf076add18277c",
+  "aggregateDigest": "8312515c920e29b3e69a6e01610293b76f5f591d3d57d2a91a40d2723c69059d",
   "principles": {
     "oneSentenceStart": true,
     "directCanvasMutation": false,
@@ -48,18 +48,18 @@
     "accountedNodes": 77,
     "unexplainedNodes": 0,
     "fullyOperableNodes": 18,
-    "runtimeEntries": 245,
+    "runtimeEntries": 247,
     "runtimeByKind": {
       "llm": 32,
-      "image": 48,
+      "image": 42,
       "video": 110,
-      "audio": 8,
+      "audio": 16,
       "actions": 47
     },
     "runtimeByProvider": {
       "grok-oauth": 2,
-      "seedance-nz": 170,
-      "zhenzhen": 66,
+      "seedance-nz": 182,
+      "zhenzhen": 56,
       "fal": 7
     },
     "operations": 152,
@@ -3643,7 +3643,7 @@
     {
       "type": "audio",
       "label": "音频",
-      "description": "Suno / Seed Audio 生成与 Whisper 语音转文字",
+      "description": "Suno、Seed Audio、Qwen3-TTS、MiniMax、Mureka 音频生成与 Whisper 语音转文字",
       "category": "core",
       "hidden": false,
       "executable": true,
@@ -6372,7 +6372,7 @@
   ],
   "runtime": {
     "schema": "t8-creative-runtime-catalog-v1",
-    "sourceDigest": "a399f5689b00ef540602f3bc9856383d266ce1b202bdeae89119f3d18dc18ef3",
+    "sourceDigest": "2e1f97eab8c163826ea18b396b384569caf69ab4214c1937a7d437fd14d73042",
     "platforms": [
       {
         "id": "zhenzhen",
@@ -6444,6 +6444,166 @@
         "model": "doubao-seed-audio-1.0",
         "label": "doubao-seed-audio-1.0",
         "family": "seed-audio",
+        "available": true,
+        "catalogSection": "audio",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "audio:seedance-nz:minimax-music-2.6",
+        "kind": "audio",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "minimax-music-2.6",
+        "label": "minimax-music-2.6",
+        "family": "minimax",
+        "available": true,
+        "catalogSection": "audio",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "audio:seedance-nz:minimax-speech-2.8-hd",
+        "kind": "audio",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "minimax-speech-2.8-hd",
+        "label": "minimax-speech-2.8-hd",
+        "family": "minimax",
+        "available": true,
+        "catalogSection": "audio",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "audio:seedance-nz:minimax-speech-2.8-turbo",
+        "kind": "audio",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "minimax-speech-2.8-turbo",
+        "label": "minimax-speech-2.8-turbo",
+        "family": "minimax",
+        "available": true,
+        "catalogSection": "audio",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "audio:seedance-nz:minimax-voice-clone",
+        "kind": "audio",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "minimax-voice-clone",
+        "label": "minimax-voice-clone",
+        "family": "minimax",
+        "available": true,
+        "catalogSection": "audio",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "audio:seedance-nz:mureka-v8-bgm",
+        "kind": "audio",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "mureka-v8-bgm",
+        "label": "mureka-v8-bgm",
+        "family": "mureka",
+        "available": true,
+        "catalogSection": "audio",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "audio:seedance-nz:mureka-v9-bgm",
+        "kind": "audio",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "mureka-v9-bgm",
+        "label": "mureka-v9-bgm",
+        "family": "mureka",
+        "available": true,
+        "catalogSection": "audio",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "audio:seedance-nz:qwen3-tts-flash",
+        "kind": "audio",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "qwen3-tts-flash",
+        "label": "qwen3-tts-flash",
+        "family": "qwen3-tts",
+        "available": true,
+        "catalogSection": "audio",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "audio:seedance-nz:qwen3-tts-instruct-flash",
+        "kind": "audio",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "qwen3-tts-instruct-flash",
+        "label": "qwen3-tts-instruct-flash",
+        "family": "qwen3-tts",
         "available": true,
         "catalogSection": "audio",
         "compatibility": {
@@ -7294,7 +7454,7 @@
         "platformLabel": "贞贞的平价AI小屋",
         "model": "dola-seedream-5.0-pro-layer-decomposition",
         "label": "dola-seedream-5.0-pro-layer-decomposition",
-        "family": "seedream-v5-pro",
+        "family": "seedream-layer-decomposition",
         "available": true,
         "catalogSection": "image",
         "compatibility": {
@@ -7628,7 +7788,7 @@
         "platformLabel": "贞贞的平价AI小屋",
         "model": "qwen-image-3.0-global-i2i",
         "label": "qwen-image-3.0-global-i2i",
-        "family": "seedream-v5-pro",
+        "family": "qwen-image-3.0",
         "available": true,
         "catalogSection": "image",
         "compatibility": {
@@ -7648,7 +7808,7 @@
         "platformLabel": "贞贞的平价AI小屋",
         "model": "qwen-image-3.0-global-pro-i2i",
         "label": "qwen-image-3.0-global-pro-i2i",
-        "family": "seedream-v5-pro",
+        "family": "qwen-image-3.0",
         "available": true,
         "catalogSection": "image",
         "compatibility": {
@@ -7668,7 +7828,7 @@
         "platformLabel": "贞贞的平价AI小屋",
         "model": "qwen-image-3.0-global-pro-t2i",
         "label": "qwen-image-3.0-global-pro-t2i",
-        "family": "seedream-v5-pro",
+        "family": "qwen-image-3.0",
         "available": true,
         "catalogSection": "image",
         "compatibility": {
@@ -7688,7 +7848,7 @@
         "platformLabel": "贞贞的平价AI小屋",
         "model": "qwen-image-3.0-global-t2i",
         "label": "qwen-image-3.0-global-t2i",
-        "family": "seedream-v5-pro",
+        "family": "qwen-image-3.0",
         "available": true,
         "catalogSection": "image",
         "compatibility": {
@@ -7708,7 +7868,7 @@
         "platformLabel": "贞贞的平价AI小屋",
         "model": "qwen-image-3.0-i2i",
         "label": "qwen-image-3.0-i2i",
-        "family": "seedream-v5-pro",
+        "family": "qwen-image-3.0",
         "available": true,
         "catalogSection": "image",
         "compatibility": {
@@ -7728,7 +7888,7 @@
         "platformLabel": "贞贞的平价AI小屋",
         "model": "qwen-image-3.0-pro-i2i",
         "label": "qwen-image-3.0-pro-i2i",
-        "family": "seedream-v5-pro",
+        "family": "qwen-image-3.0",
         "available": true,
         "catalogSection": "image",
         "compatibility": {
@@ -7748,7 +7908,7 @@
         "platformLabel": "贞贞的平价AI小屋",
         "model": "qwen-image-3.0-pro-t2i",
         "label": "qwen-image-3.0-pro-t2i",
-        "family": "seedream-v5-pro",
+        "family": "qwen-image-3.0",
         "available": true,
         "catalogSection": "image",
         "compatibility": {
@@ -7768,7 +7928,7 @@
         "platformLabel": "贞贞的平价AI小屋",
         "model": "qwen-image-3.0-t2i",
         "label": "qwen-image-3.0-t2i",
-        "family": "seedream-v5-pro",
+        "family": "qwen-image-3.0",
         "available": true,
         "catalogSection": "image",
         "compatibility": {
@@ -7808,7 +7968,7 @@
         "platformLabel": "贞贞的平价AI小屋",
         "model": "seedream-v5-pro-layer-decomposition",
         "label": "seedream-v5-pro-layer-decomposition",
-        "family": "seedream-v5-pro",
+        "family": "seedream-layer-decomposition",
         "available": true,
         "catalogSection": "image",
         "compatibility": {
@@ -7829,6 +7989,66 @@
         "model": "seedream-v5-pro-t2i",
         "label": "seedream-v5-pro-t2i",
         "family": "seedream-v5-pro",
+        "available": true,
+        "catalogSection": "image",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "image:seedance-nz:wan-2.7-global-i2i",
+        "kind": "image",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "wan-2.7-global-i2i",
+        "label": "wan-2.7-global-i2i",
+        "family": "wan-image",
+        "available": true,
+        "catalogSection": "image",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "image:seedance-nz:wan-2.7-global-i2i-pro",
+        "kind": "image",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "wan-2.7-global-i2i-pro",
+        "label": "wan-2.7-global-i2i-pro",
+        "family": "wan-image",
+        "available": true,
+        "catalogSection": "image",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "image:seedance-nz:wan-2.7-global-t2i",
+        "kind": "image",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "wan-2.7-global-t2i",
+        "label": "wan-2.7-global-t2i",
+        "family": "wan-image",
         "available": true,
         "catalogSection": "image",
         "compatibility": {
@@ -7942,6 +8162,26 @@
         }
       },
       {
+        "id": "image:seedance-nz:zhenzhen-image-gk-v2",
+        "kind": "image",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "zhenzhen-image-gk-v2",
+        "label": "zhenzhen-image-gk-v2",
+        "family": "grok-image",
+        "available": true,
+        "catalogSection": "image",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
         "id": "image:seedance-nz:zhenzhen-image-nb-2",
         "kind": "image",
         "provider": "seedance-nz",
@@ -7989,26 +8229,6 @@
         "model": "zhenzhen-image-nb-pro",
         "label": "zhenzhen-image-nb-pro",
         "family": "nano-banana-pro",
-        "available": true,
-        "catalogSection": "image",
-        "compatibility": {
-          "known": true,
-          "installed": true,
-          "credentialReady": null,
-          "regionReady": true,
-          "executable": false,
-          "available": true,
-          "requiresRuntimeCheck": true
-        }
-      },
-      {
-        "id": "image:zhenzhen:dola-seedream-5.0-pro-layer-decomposition",
-        "kind": "image",
-        "provider": "zhenzhen",
-        "platformLabel": "贞贞的AI工坊",
-        "model": "dola-seedream-5.0-pro-layer-decomposition",
-        "label": "dola-seedream-5.0-pro-layer-decomposition",
-        "family": "seedream-layer-decomposition",
         "available": true,
         "catalogSection": "image",
         "compatibility": {
@@ -8262,166 +8482,6 @@
         }
       },
       {
-        "id": "image:zhenzhen:qwen-image-3.0-global-i2i",
-        "kind": "image",
-        "provider": "zhenzhen",
-        "platformLabel": "贞贞的AI工坊",
-        "model": "qwen-image-3.0-global-i2i",
-        "label": "qwen-image-3.0-global-i2i",
-        "family": "qwen-image-3.0",
-        "available": true,
-        "catalogSection": "image",
-        "compatibility": {
-          "known": true,
-          "installed": true,
-          "credentialReady": null,
-          "regionReady": true,
-          "executable": false,
-          "available": true,
-          "requiresRuntimeCheck": true
-        }
-      },
-      {
-        "id": "image:zhenzhen:qwen-image-3.0-global-pro-i2i",
-        "kind": "image",
-        "provider": "zhenzhen",
-        "platformLabel": "贞贞的AI工坊",
-        "model": "qwen-image-3.0-global-pro-i2i",
-        "label": "qwen-image-3.0-global-pro-i2i",
-        "family": "qwen-image-3.0",
-        "available": true,
-        "catalogSection": "image",
-        "compatibility": {
-          "known": true,
-          "installed": true,
-          "credentialReady": null,
-          "regionReady": true,
-          "executable": false,
-          "available": true,
-          "requiresRuntimeCheck": true
-        }
-      },
-      {
-        "id": "image:zhenzhen:qwen-image-3.0-global-pro-t2i",
-        "kind": "image",
-        "provider": "zhenzhen",
-        "platformLabel": "贞贞的AI工坊",
-        "model": "qwen-image-3.0-global-pro-t2i",
-        "label": "qwen-image-3.0-global-pro-t2i",
-        "family": "qwen-image-3.0",
-        "available": true,
-        "catalogSection": "image",
-        "compatibility": {
-          "known": true,
-          "installed": true,
-          "credentialReady": null,
-          "regionReady": true,
-          "executable": false,
-          "available": true,
-          "requiresRuntimeCheck": true
-        }
-      },
-      {
-        "id": "image:zhenzhen:qwen-image-3.0-global-t2i",
-        "kind": "image",
-        "provider": "zhenzhen",
-        "platformLabel": "贞贞的AI工坊",
-        "model": "qwen-image-3.0-global-t2i",
-        "label": "qwen-image-3.0-global-t2i",
-        "family": "qwen-image-3.0",
-        "available": true,
-        "catalogSection": "image",
-        "compatibility": {
-          "known": true,
-          "installed": true,
-          "credentialReady": null,
-          "regionReady": true,
-          "executable": false,
-          "available": true,
-          "requiresRuntimeCheck": true
-        }
-      },
-      {
-        "id": "image:zhenzhen:qwen-image-3.0-i2i",
-        "kind": "image",
-        "provider": "zhenzhen",
-        "platformLabel": "贞贞的AI工坊",
-        "model": "qwen-image-3.0-i2i",
-        "label": "qwen-image-3.0-i2i",
-        "family": "qwen-image-3.0",
-        "available": true,
-        "catalogSection": "image",
-        "compatibility": {
-          "known": true,
-          "installed": true,
-          "credentialReady": null,
-          "regionReady": true,
-          "executable": false,
-          "available": true,
-          "requiresRuntimeCheck": true
-        }
-      },
-      {
-        "id": "image:zhenzhen:qwen-image-3.0-pro-i2i",
-        "kind": "image",
-        "provider": "zhenzhen",
-        "platformLabel": "贞贞的AI工坊",
-        "model": "qwen-image-3.0-pro-i2i",
-        "label": "qwen-image-3.0-pro-i2i",
-        "family": "qwen-image-3.0",
-        "available": true,
-        "catalogSection": "image",
-        "compatibility": {
-          "known": true,
-          "installed": true,
-          "credentialReady": null,
-          "regionReady": true,
-          "executable": false,
-          "available": true,
-          "requiresRuntimeCheck": true
-        }
-      },
-      {
-        "id": "image:zhenzhen:qwen-image-3.0-pro-t2i",
-        "kind": "image",
-        "provider": "zhenzhen",
-        "platformLabel": "贞贞的AI工坊",
-        "model": "qwen-image-3.0-pro-t2i",
-        "label": "qwen-image-3.0-pro-t2i",
-        "family": "qwen-image-3.0",
-        "available": true,
-        "catalogSection": "image",
-        "compatibility": {
-          "known": true,
-          "installed": true,
-          "credentialReady": null,
-          "regionReady": true,
-          "executable": false,
-          "available": true,
-          "requiresRuntimeCheck": true
-        }
-      },
-      {
-        "id": "image:zhenzhen:qwen-image-3.0-t2i",
-        "kind": "image",
-        "provider": "zhenzhen",
-        "platformLabel": "贞贞的AI工坊",
-        "model": "qwen-image-3.0-t2i",
-        "label": "qwen-image-3.0-t2i",
-        "family": "qwen-image-3.0",
-        "available": true,
-        "catalogSection": "image",
-        "compatibility": {
-          "known": true,
-          "installed": true,
-          "credentialReady": null,
-          "regionReady": true,
-          "executable": false,
-          "available": true,
-          "requiresRuntimeCheck": true
-        }
-      },
-      {
         "id": "image:zhenzhen:seedream-v5-pro",
         "kind": "image",
         "provider": "zhenzhen",
@@ -8429,26 +8489,6 @@
         "model": "seedream-v5-pro",
         "label": "seedream-v5-pro",
         "family": "seedream-v5-pro",
-        "available": true,
-        "catalogSection": "image",
-        "compatibility": {
-          "known": true,
-          "installed": true,
-          "credentialReady": null,
-          "regionReady": true,
-          "executable": false,
-          "available": true,
-          "requiresRuntimeCheck": true
-        }
-      },
-      {
-        "id": "image:zhenzhen:seedream-v5-pro-layer-decomposition",
-        "kind": "image",
-        "provider": "zhenzhen",
-        "platformLabel": "贞贞的AI工坊",
-        "model": "seedream-v5-pro-layer-decomposition",
-        "label": "seedream-v5-pro-layer-decomposition",
-        "family": "seedream-layer-decomposition",
         "available": true,
         "catalogSection": "image",
         "compatibility": {
@@ -11553,6 +11593,14 @@
       "audio:grok-oauth:xai-stt",
       "audio:grok-oauth:xai-tts",
       "audio:seedance-nz:doubao-seed-audio-1.0",
+      "audio:seedance-nz:minimax-music-2.6",
+      "audio:seedance-nz:minimax-speech-2.8-hd",
+      "audio:seedance-nz:minimax-speech-2.8-turbo",
+      "audio:seedance-nz:minimax-voice-clone",
+      "audio:seedance-nz:mureka-v8-bgm",
+      "audio:seedance-nz:mureka-v9-bgm",
+      "audio:seedance-nz:qwen3-tts-flash",
+      "audio:seedance-nz:qwen3-tts-instruct-flash",
       "audio:seedance-nz:suno",
       "audio:seedance-nz:suno-add-instrumental",
       "audio:seedance-nz:suno-add-stem",
@@ -11620,15 +11668,18 @@
       "image:seedance-nz:seedream-v5-pro-i2i",
       "image:seedance-nz:seedream-v5-pro-layer-decomposition",
       "image:seedance-nz:seedream-v5-pro-t2i",
+      "image:seedance-nz:wan-2.7-global-i2i",
+      "image:seedance-nz:wan-2.7-global-i2i-pro",
+      "image:seedance-nz:wan-2.7-global-t2i",
       "image:seedance-nz:zhenzhen-image-g-v2-lowprice",
       "image:seedance-nz:zhenzhen-image-g2-i2i",
       "image:seedance-nz:zhenzhen-image-g2-t2i",
       "image:seedance-nz:zhenzhen-image-gk-v15",
       "image:seedance-nz:zhenzhen-image-gk-v15-edit",
+      "image:seedance-nz:zhenzhen-image-gk-v2",
       "image:seedance-nz:zhenzhen-image-nb-2",
       "image:seedance-nz:zhenzhen-image-nb-2-lite",
       "image:seedance-nz:zhenzhen-image-nb-pro",
-      "image:zhenzhen:dola-seedream-5.0-pro-layer-decomposition",
       "image:zhenzhen:gemini-3-pro-image",
       "image:zhenzhen:gemini-3.1-flash-image",
       "image:zhenzhen:gemini-3.1-flash-lite-image",
@@ -11641,16 +11692,7 @@
       "image:zhenzhen:nano-banana-pro",
       "image:zhenzhen:nano-banana-pro-2k",
       "image:zhenzhen:nano-banana-pro-4k",
-      "image:zhenzhen:qwen-image-3.0-global-i2i",
-      "image:zhenzhen:qwen-image-3.0-global-pro-i2i",
-      "image:zhenzhen:qwen-image-3.0-global-pro-t2i",
-      "image:zhenzhen:qwen-image-3.0-global-t2i",
-      "image:zhenzhen:qwen-image-3.0-i2i",
-      "image:zhenzhen:qwen-image-3.0-pro-i2i",
-      "image:zhenzhen:qwen-image-3.0-pro-t2i",
-      "image:zhenzhen:qwen-image-3.0-t2i",
       "image:zhenzhen:seedream-v5-pro",
-      "image:zhenzhen:seedream-v5-pro-layer-decomposition",
       "llm:seedance-nz:bytedance/doubao-seed-2.0-code",
       "llm:seedance-nz:bytedance/doubao-seed-2.0-lite",
       "llm:seedance-nz:bytedance/doubao-seed-2.0-mini",
@@ -11801,8 +11843,8 @@
     "schema": "t8-creative-capability-coverage-receipt-v1",
     "sourceDigests": {
       "capabilityManifest": "5c56b3b64d483ae6e6da5268f25c059f2a3fcc2c13e3c3d64d39b10e1e56402b",
-      "nodeSchema": "8b5244b1c088bb8b46e0a9f69a919c50f205e3857a75a3949cbba96ab3be8bc7",
-      "runtimeCatalog": "a399f5689b00ef540602f3bc9856383d266ce1b202bdeae89119f3d18dc18ef3",
+      "nodeSchema": "3d76c2debc7687d67a54eea884287aa0b973e3f4bf01dab9984e01b240961bfc",
+      "runtimeCatalog": "2e1f97eab8c163826ea18b396b384569caf69ab4214c1937a7d437fd14d73042",
       "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
       "receiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7"
     },
@@ -11814,9 +11856,9 @@
       },
       "runtime": {
         "llm": 32,
-        "image": 48,
+        "image": 42,
         "video": 110,
-        "audio": 8,
+        "audio": 16,
         "actions": 47
       },
       "capabilities": 31,
@@ -11831,6 +11873,6 @@
       "missingCompatibilityEdges": []
     },
     "complete": true,
-    "digest": "6e96e62f5f14fc84a041e6a01f90e41e108d044c2afbb09e5c523807ac5560d2"
+    "digest": "da052fb3b10b9588b4b3b61969b694918651b2500f13aa51bebbb0db2961b4bb"
   }
 }

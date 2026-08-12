@@ -1,6 +1,6 @@
 {
   "schema": "t8-creative-runtime-catalog-v1",
-  "sourceDigest": "a399f5689b00ef540602f3bc9856383d266ce1b202bdeae89119f3d18dc18ef3",
+  "sourceDigest": "2e1f97eab8c163826ea18b396b384569caf69ab4214c1937a7d437fd14d73042",
   "generatedFrom": [
     "src/providers/models.ts",
     "src/config/seedance.ts",
@@ -741,21 +741,21 @@
       "platformLabel": "贞贞的平价AI小屋",
       "model": "dola-seedream-5.0-pro-layer-decomposition",
       "label": "dola-seedream-5.0-pro-layer-decomposition",
-      "family": "seedream-v5-pro",
+      "family": "seedream-layer-decomposition",
       "available": true,
       "parameters": {
         "label": "dola-seedream-5.0-pro-layer-decomposition",
         "platformLabel": "贞贞的平价AI小屋",
-        "family": "seedream-v5-pro",
+        "family": "seedream-layer-decomposition",
         "available": true,
-        "tabLabel": "Seedream",
+        "tabLabel": "Seedream分层",
         "capabilities": [
-          "t2i",
           "i2i",
           "edit"
         ],
-        "parameterKind": "seedream-v5",
+        "parameterKind": "seedream-layer",
         "supportsReference": true,
+        "maxReferenceImages": 1,
         "description": "贞贞的平价AI小屋图像模型"
       }
     },
@@ -788,22 +788,22 @@
       "platformLabel": "贞贞的平价AI小屋",
       "model": "qwen-image-3.0-global-i2i",
       "label": "qwen-image-3.0-global-i2i",
-      "family": "seedream-v5-pro",
+      "family": "qwen-image-3.0",
       "available": true,
       "parameters": {
         "label": "qwen-image-3.0-global-i2i",
         "platformLabel": "贞贞的平价AI小屋",
-        "family": "seedream-v5-pro",
+        "family": "qwen-image-3.0",
         "available": true,
-        "tabLabel": "Seedream",
+        "tabLabel": "Qwen Image",
         "capabilities": [
           "t2i",
           "i2i",
           "edit"
         ],
-        "parameterKind": "seedream-v5",
+        "parameterKind": "qwen-image-3.0",
         "supportsReference": true,
-        "maxReferenceImages": 10,
+        "maxReferenceImages": 3,
         "description": "贞贞的平价AI小屋图像模型"
       }
     },
@@ -813,22 +813,22 @@
       "platformLabel": "贞贞的平价AI小屋",
       "model": "qwen-image-3.0-global-pro-i2i",
       "label": "qwen-image-3.0-global-pro-i2i",
-      "family": "seedream-v5-pro",
+      "family": "qwen-image-3.0",
       "available": true,
       "parameters": {
         "label": "qwen-image-3.0-global-pro-i2i",
         "platformLabel": "贞贞的平价AI小屋",
-        "family": "seedream-v5-pro",
+        "family": "qwen-image-3.0",
         "available": true,
-        "tabLabel": "Seedream",
+        "tabLabel": "Qwen Image",
         "capabilities": [
           "t2i",
           "i2i",
           "edit"
         ],
-        "parameterKind": "seedream-v5",
+        "parameterKind": "qwen-image-3.0",
         "supportsReference": true,
-        "maxReferenceImages": 10,
+        "maxReferenceImages": 3,
         "description": "贞贞的平价AI小屋图像模型"
       }
     },
@@ -838,18 +838,18 @@
       "platformLabel": "贞贞的平价AI小屋",
       "model": "qwen-image-3.0-global-pro-t2i",
       "label": "qwen-image-3.0-global-pro-t2i",
-      "family": "seedream-v5-pro",
+      "family": "qwen-image-3.0",
       "available": true,
       "parameters": {
         "label": "qwen-image-3.0-global-pro-t2i",
         "platformLabel": "贞贞的平价AI小屋",
-        "family": "seedream-v5-pro",
+        "family": "qwen-image-3.0",
         "available": true,
-        "tabLabel": "Seedream",
+        "tabLabel": "Qwen Image",
         "capabilities": [
           "t2i"
         ],
-        "parameterKind": "seedream-v5",
+        "parameterKind": "qwen-image-3.0",
         "supportsReference": false,
         "maxReferenceImages": 0,
         "description": "贞贞的平价AI小屋图像模型"
@@ -861,18 +861,18 @@
       "platformLabel": "贞贞的平价AI小屋",
       "model": "qwen-image-3.0-global-t2i",
       "label": "qwen-image-3.0-global-t2i",
-      "family": "seedream-v5-pro",
+      "family": "qwen-image-3.0",
       "available": true,
       "parameters": {
         "label": "qwen-image-3.0-global-t2i",
         "platformLabel": "贞贞的平价AI小屋",
-        "family": "seedream-v5-pro",
+        "family": "qwen-image-3.0",
         "available": true,
-        "tabLabel": "Seedream",
+        "tabLabel": "Qwen Image",
         "capabilities": [
           "t2i"
         ],
-        "parameterKind": "seedream-v5",
+        "parameterKind": "qwen-image-3.0",
         "supportsReference": false,
         "maxReferenceImages": 0,
         "description": "贞贞的平价AI小屋图像模型"
@@ -884,22 +884,22 @@
       "platformLabel": "贞贞的平价AI小屋",
       "model": "qwen-image-3.0-i2i",
       "label": "qwen-image-3.0-i2i",
-      "family": "seedream-v5-pro",
+      "family": "qwen-image-3.0",
       "available": true,
       "parameters": {
         "label": "qwen-image-3.0-i2i",
         "platformLabel": "贞贞的平价AI小屋",
-        "family": "seedream-v5-pro",
+        "family": "qwen-image-3.0",
         "available": true,
-        "tabLabel": "Seedream",
+        "tabLabel": "Qwen Image",
         "capabilities": [
           "t2i",
           "i2i",
           "edit"
         ],
-        "parameterKind": "seedream-v5",
+        "parameterKind": "qwen-image-3.0",
         "supportsReference": true,
-        "maxReferenceImages": 10,
+        "maxReferenceImages": 3,
         "description": "贞贞的平价AI小屋图像模型"
       }
     },
@@ -909,22 +909,22 @@
       "platformLabel": "贞贞的平价AI小屋",
       "model": "qwen-image-3.0-pro-i2i",
       "label": "qwen-image-3.0-pro-i2i",
-      "family": "seedream-v5-pro",
+      "family": "qwen-image-3.0",
       "available": true,
       "parameters": {
         "label": "qwen-image-3.0-pro-i2i",
         "platformLabel": "贞贞的平价AI小屋",
-        "family": "seedream-v5-pro",
+        "family": "qwen-image-3.0",
         "available": true,
-        "tabLabel": "Seedream",
+        "tabLabel": "Qwen Image",
         "capabilities": [
           "t2i",
           "i2i",
           "edit"
         ],
-        "parameterKind": "seedream-v5",
+        "parameterKind": "qwen-image-3.0",
         "supportsReference": true,
-        "maxReferenceImages": 10,
+        "maxReferenceImages": 3,
         "description": "贞贞的平价AI小屋图像模型"
       }
     },
@@ -934,18 +934,18 @@
       "platformLabel": "贞贞的平价AI小屋",
       "model": "qwen-image-3.0-pro-t2i",
       "label": "qwen-image-3.0-pro-t2i",
-      "family": "seedream-v5-pro",
+      "family": "qwen-image-3.0",
       "available": true,
       "parameters": {
         "label": "qwen-image-3.0-pro-t2i",
         "platformLabel": "贞贞的平价AI小屋",
-        "family": "seedream-v5-pro",
+        "family": "qwen-image-3.0",
         "available": true,
-        "tabLabel": "Seedream",
+        "tabLabel": "Qwen Image",
         "capabilities": [
           "t2i"
         ],
-        "parameterKind": "seedream-v5",
+        "parameterKind": "qwen-image-3.0",
         "supportsReference": false,
         "maxReferenceImages": 0,
         "description": "贞贞的平价AI小屋图像模型"
@@ -957,18 +957,18 @@
       "platformLabel": "贞贞的平价AI小屋",
       "model": "qwen-image-3.0-t2i",
       "label": "qwen-image-3.0-t2i",
-      "family": "seedream-v5-pro",
+      "family": "qwen-image-3.0",
       "available": true,
       "parameters": {
         "label": "qwen-image-3.0-t2i",
         "platformLabel": "贞贞的平价AI小屋",
-        "family": "seedream-v5-pro",
+        "family": "qwen-image-3.0",
         "available": true,
-        "tabLabel": "Seedream",
+        "tabLabel": "Qwen Image",
         "capabilities": [
           "t2i"
         ],
-        "parameterKind": "seedream-v5",
+        "parameterKind": "qwen-image-3.0",
         "supportsReference": false,
         "maxReferenceImages": 0,
         "description": "贞贞的平价AI小屋图像模型"
@@ -1005,21 +1005,21 @@
       "platformLabel": "贞贞的平价AI小屋",
       "model": "seedream-v5-pro-layer-decomposition",
       "label": "seedream-v5-pro-layer-decomposition",
-      "family": "seedream-v5-pro",
+      "family": "seedream-layer-decomposition",
       "available": true,
       "parameters": {
         "label": "seedream-v5-pro-layer-decomposition",
         "platformLabel": "贞贞的平价AI小屋",
-        "family": "seedream-v5-pro",
+        "family": "seedream-layer-decomposition",
         "available": true,
-        "tabLabel": "Seedream",
+        "tabLabel": "Seedream分层",
         "capabilities": [
-          "t2i",
           "i2i",
           "edit"
         ],
-        "parameterKind": "seedream-v5",
+        "parameterKind": "seedream-layer",
         "supportsReference": true,
+        "maxReferenceImages": 1,
         "description": "贞贞的平价AI小屋图像模型"
       }
     },
@@ -1041,6 +1041,79 @@
           "t2i"
         ],
         "parameterKind": "seedream-v5",
+        "supportsReference": false,
+        "maxReferenceImages": 0,
+        "description": "贞贞的平价AI小屋图像模型"
+      }
+    },
+    {
+      "id": "image:seedance-nz:wan-2.7-global-i2i",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "wan-2.7-global-i2i",
+      "label": "wan-2.7-global-i2i",
+      "family": "wan-image",
+      "available": true,
+      "parameters": {
+        "label": "wan-2.7-global-i2i",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "wan-image",
+        "available": true,
+        "tabLabel": "Wan Image",
+        "capabilities": [
+          "t2i",
+          "i2i",
+          "edit"
+        ],
+        "parameterKind": "wan-image",
+        "supportsReference": true,
+        "maxReferenceImages": 9,
+        "description": "贞贞的平价AI小屋图像模型"
+      }
+    },
+    {
+      "id": "image:seedance-nz:wan-2.7-global-i2i-pro",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "wan-2.7-global-i2i-pro",
+      "label": "wan-2.7-global-i2i-pro",
+      "family": "wan-image",
+      "available": true,
+      "parameters": {
+        "label": "wan-2.7-global-i2i-pro",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "wan-image",
+        "available": true,
+        "tabLabel": "Wan Image",
+        "capabilities": [
+          "t2i",
+          "i2i",
+          "edit"
+        ],
+        "parameterKind": "wan-image",
+        "supportsReference": true,
+        "maxReferenceImages": 9,
+        "description": "贞贞的平价AI小屋图像模型"
+      }
+    },
+    {
+      "id": "image:seedance-nz:wan-2.7-global-t2i",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "wan-2.7-global-t2i",
+      "label": "wan-2.7-global-t2i",
+      "family": "wan-image",
+      "available": true,
+      "parameters": {
+        "label": "wan-2.7-global-t2i",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "wan-image",
+        "available": true,
+        "tabLabel": "Wan Image",
+        "capabilities": [
+          "t2i"
+        ],
+        "parameterKind": "wan-image",
         "supportsReference": false,
         "maxReferenceImages": 0,
         "description": "贞贞的平价AI小屋图像模型"
@@ -1167,6 +1240,29 @@
       }
     },
     {
+      "id": "image:seedance-nz:zhenzhen-image-gk-v2",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "zhenzhen-image-gk-v2",
+      "label": "zhenzhen-image-gk-v2",
+      "family": "grok-image",
+      "available": true,
+      "parameters": {
+        "label": "zhenzhen-image-gk-v2",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "grok-image",
+        "available": true,
+        "tabLabel": "Grok",
+        "capabilities": [
+          "t2i"
+        ],
+        "parameterKind": "seedance-nz-image",
+        "supportsReference": false,
+        "maxReferenceImages": 0,
+        "description": "贞贞的平价AI小屋图像模型"
+      }
+    },
+    {
       "id": "image:seedance-nz:zhenzhen-image-nb-2",
       "provider": "seedance-nz",
       "platformLabel": "贞贞的平价AI小屋",
@@ -1239,34 +1335,6 @@
         "supportsReference": true,
         "maxReferenceImages": 14,
         "description": "贞贞的平价AI小屋图像模型"
-      }
-    },
-    {
-      "id": "image:zhenzhen:dola-seedream-5.0-pro-layer-decomposition",
-      "provider": "zhenzhen",
-      "platformLabel": "贞贞的AI工坊",
-      "model": "dola-seedream-5.0-pro-layer-decomposition",
-      "label": "dola-seedream-5.0-pro-layer-decomposition",
-      "family": "seedream-layer-decomposition",
-      "available": true,
-      "parameters": {
-        "label": "dola-seedream-5.0-pro-layer-decomposition",
-        "platformLabel": "贞贞的AI工坊",
-        "family": "seedream-layer-decomposition",
-        "available": true,
-        "tabLabel": "Seedream分层",
-        "capabilities": [
-          "i2i",
-          "edit"
-        ],
-        "parameterKind": "seedream-layer",
-        "aspectRatios": [],
-        "defaultAspectRatio": "",
-        "sizes": [],
-        "defaultSize": "",
-        "supportsReference": true,
-        "maxReferenceImages": 1,
-        "description": "Seedream / Dola Seedream V5 Pro 图层拆分 · 单图输入，完整返回底图与全部有序图层"
       }
     },
     {
@@ -1824,334 +1892,6 @@
       }
     },
     {
-      "id": "image:zhenzhen:qwen-image-3.0-global-i2i",
-      "provider": "zhenzhen",
-      "platformLabel": "贞贞的AI工坊",
-      "model": "qwen-image-3.0-global-i2i",
-      "label": "qwen-image-3.0-global-i2i",
-      "family": "qwen-image-3.0",
-      "available": true,
-      "parameters": {
-        "label": "qwen-image-3.0-global-i2i",
-        "platformLabel": "贞贞的AI工坊",
-        "family": "qwen-image-3.0",
-        "available": true,
-        "tabLabel": "Qwen Image",
-        "capabilities": [
-          "t2i",
-          "i2i",
-          "edit",
-          "text-render"
-        ],
-        "parameterKind": "qwen-image-3.0",
-        "aspectRatios": [
-          "1:1",
-          "2:3",
-          "3:2",
-          "3:4",
-          "4:3",
-          "4:5",
-          "5:4",
-          "9:16",
-          "16:9",
-          "21:9"
-        ],
-        "defaultAspectRatio": "1:1",
-        "sizes": [],
-        "defaultSize": "",
-        "supportsReference": true,
-        "maxReferenceImages": 3,
-        "description": "Qwen Image 3.0 / Pro · 国内与 Global 文生图、图像编辑"
-      }
-    },
-    {
-      "id": "image:zhenzhen:qwen-image-3.0-global-pro-i2i",
-      "provider": "zhenzhen",
-      "platformLabel": "贞贞的AI工坊",
-      "model": "qwen-image-3.0-global-pro-i2i",
-      "label": "qwen-image-3.0-global-pro-i2i",
-      "family": "qwen-image-3.0",
-      "available": true,
-      "parameters": {
-        "label": "qwen-image-3.0-global-pro-i2i",
-        "platformLabel": "贞贞的AI工坊",
-        "family": "qwen-image-3.0",
-        "available": true,
-        "tabLabel": "Qwen Image",
-        "capabilities": [
-          "t2i",
-          "i2i",
-          "edit",
-          "text-render"
-        ],
-        "parameterKind": "qwen-image-3.0",
-        "aspectRatios": [
-          "1:1",
-          "2:3",
-          "3:2",
-          "3:4",
-          "4:3",
-          "4:5",
-          "5:4",
-          "9:16",
-          "16:9",
-          "21:9"
-        ],
-        "defaultAspectRatio": "1:1",
-        "sizes": [],
-        "defaultSize": "",
-        "supportsReference": true,
-        "maxReferenceImages": 3,
-        "description": "Qwen Image 3.0 / Pro · 国内与 Global 文生图、图像编辑"
-      }
-    },
-    {
-      "id": "image:zhenzhen:qwen-image-3.0-global-pro-t2i",
-      "provider": "zhenzhen",
-      "platformLabel": "贞贞的AI工坊",
-      "model": "qwen-image-3.0-global-pro-t2i",
-      "label": "qwen-image-3.0-global-pro-t2i",
-      "family": "qwen-image-3.0",
-      "available": true,
-      "parameters": {
-        "label": "qwen-image-3.0-global-pro-t2i",
-        "platformLabel": "贞贞的AI工坊",
-        "family": "qwen-image-3.0",
-        "available": true,
-        "tabLabel": "Qwen Image",
-        "capabilities": [
-          "t2i",
-          "i2i",
-          "edit",
-          "text-render"
-        ],
-        "parameterKind": "qwen-image-3.0",
-        "aspectRatios": [
-          "1:1",
-          "2:3",
-          "3:2",
-          "3:4",
-          "4:3",
-          "4:5",
-          "5:4",
-          "9:16",
-          "16:9",
-          "21:9"
-        ],
-        "defaultAspectRatio": "1:1",
-        "sizes": [],
-        "defaultSize": "",
-        "supportsReference": true,
-        "maxReferenceImages": 3,
-        "description": "Qwen Image 3.0 / Pro · 国内与 Global 文生图、图像编辑"
-      }
-    },
-    {
-      "id": "image:zhenzhen:qwen-image-3.0-global-t2i",
-      "provider": "zhenzhen",
-      "platformLabel": "贞贞的AI工坊",
-      "model": "qwen-image-3.0-global-t2i",
-      "label": "qwen-image-3.0-global-t2i",
-      "family": "qwen-image-3.0",
-      "available": true,
-      "parameters": {
-        "label": "qwen-image-3.0-global-t2i",
-        "platformLabel": "贞贞的AI工坊",
-        "family": "qwen-image-3.0",
-        "available": true,
-        "tabLabel": "Qwen Image",
-        "capabilities": [
-          "t2i",
-          "i2i",
-          "edit",
-          "text-render"
-        ],
-        "parameterKind": "qwen-image-3.0",
-        "aspectRatios": [
-          "1:1",
-          "2:3",
-          "3:2",
-          "3:4",
-          "4:3",
-          "4:5",
-          "5:4",
-          "9:16",
-          "16:9",
-          "21:9"
-        ],
-        "defaultAspectRatio": "1:1",
-        "sizes": [],
-        "defaultSize": "",
-        "supportsReference": true,
-        "maxReferenceImages": 3,
-        "description": "Qwen Image 3.0 / Pro · 国内与 Global 文生图、图像编辑"
-      }
-    },
-    {
-      "id": "image:zhenzhen:qwen-image-3.0-i2i",
-      "provider": "zhenzhen",
-      "platformLabel": "贞贞的AI工坊",
-      "model": "qwen-image-3.0-i2i",
-      "label": "qwen-image-3.0-i2i",
-      "family": "qwen-image-3.0",
-      "available": true,
-      "parameters": {
-        "label": "qwen-image-3.0-i2i",
-        "platformLabel": "贞贞的AI工坊",
-        "family": "qwen-image-3.0",
-        "available": true,
-        "tabLabel": "Qwen Image",
-        "capabilities": [
-          "t2i",
-          "i2i",
-          "edit",
-          "text-render"
-        ],
-        "parameterKind": "qwen-image-3.0",
-        "aspectRatios": [
-          "1:1",
-          "2:3",
-          "3:2",
-          "3:4",
-          "4:3",
-          "4:5",
-          "5:4",
-          "9:16",
-          "16:9",
-          "21:9"
-        ],
-        "defaultAspectRatio": "1:1",
-        "sizes": [],
-        "defaultSize": "",
-        "supportsReference": true,
-        "maxReferenceImages": 3,
-        "description": "Qwen Image 3.0 / Pro · 国内与 Global 文生图、图像编辑"
-      }
-    },
-    {
-      "id": "image:zhenzhen:qwen-image-3.0-pro-i2i",
-      "provider": "zhenzhen",
-      "platformLabel": "贞贞的AI工坊",
-      "model": "qwen-image-3.0-pro-i2i",
-      "label": "qwen-image-3.0-pro-i2i",
-      "family": "qwen-image-3.0",
-      "available": true,
-      "parameters": {
-        "label": "qwen-image-3.0-pro-i2i",
-        "platformLabel": "贞贞的AI工坊",
-        "family": "qwen-image-3.0",
-        "available": true,
-        "tabLabel": "Qwen Image",
-        "capabilities": [
-          "t2i",
-          "i2i",
-          "edit",
-          "text-render"
-        ],
-        "parameterKind": "qwen-image-3.0",
-        "aspectRatios": [
-          "1:1",
-          "2:3",
-          "3:2",
-          "3:4",
-          "4:3",
-          "4:5",
-          "5:4",
-          "9:16",
-          "16:9",
-          "21:9"
-        ],
-        "defaultAspectRatio": "1:1",
-        "sizes": [],
-        "defaultSize": "",
-        "supportsReference": true,
-        "maxReferenceImages": 3,
-        "description": "Qwen Image 3.0 / Pro · 国内与 Global 文生图、图像编辑"
-      }
-    },
-    {
-      "id": "image:zhenzhen:qwen-image-3.0-pro-t2i",
-      "provider": "zhenzhen",
-      "platformLabel": "贞贞的AI工坊",
-      "model": "qwen-image-3.0-pro-t2i",
-      "label": "qwen-image-3.0-pro-t2i",
-      "family": "qwen-image-3.0",
-      "available": true,
-      "parameters": {
-        "label": "qwen-image-3.0-pro-t2i",
-        "platformLabel": "贞贞的AI工坊",
-        "family": "qwen-image-3.0",
-        "available": true,
-        "tabLabel": "Qwen Image",
-        "capabilities": [
-          "t2i",
-          "i2i",
-          "edit",
-          "text-render"
-        ],
-        "parameterKind": "qwen-image-3.0",
-        "aspectRatios": [
-          "1:1",
-          "2:3",
-          "3:2",
-          "3:4",
-          "4:3",
-          "4:5",
-          "5:4",
-          "9:16",
-          "16:9",
-          "21:9"
-        ],
-        "defaultAspectRatio": "1:1",
-        "sizes": [],
-        "defaultSize": "",
-        "supportsReference": true,
-        "maxReferenceImages": 3,
-        "description": "Qwen Image 3.0 / Pro · 国内与 Global 文生图、图像编辑"
-      }
-    },
-    {
-      "id": "image:zhenzhen:qwen-image-3.0-t2i",
-      "provider": "zhenzhen",
-      "platformLabel": "贞贞的AI工坊",
-      "model": "qwen-image-3.0-t2i",
-      "label": "qwen-image-3.0-t2i",
-      "family": "qwen-image-3.0",
-      "available": true,
-      "parameters": {
-        "label": "qwen-image-3.0-t2i",
-        "platformLabel": "贞贞的AI工坊",
-        "family": "qwen-image-3.0",
-        "available": true,
-        "tabLabel": "Qwen Image",
-        "capabilities": [
-          "t2i",
-          "i2i",
-          "edit",
-          "text-render"
-        ],
-        "parameterKind": "qwen-image-3.0",
-        "aspectRatios": [
-          "1:1",
-          "2:3",
-          "3:2",
-          "3:4",
-          "4:3",
-          "4:5",
-          "5:4",
-          "9:16",
-          "16:9",
-          "21:9"
-        ],
-        "defaultAspectRatio": "1:1",
-        "sizes": [],
-        "defaultSize": "",
-        "supportsReference": true,
-        "maxReferenceImages": 3,
-        "description": "Qwen Image 3.0 / Pro · 国内与 Global 文生图、图像编辑"
-      }
-    },
-    {
       "id": "image:zhenzhen:seedream-v5-pro",
       "provider": "zhenzhen",
       "platformLabel": "贞贞的AI工坊",
@@ -2185,34 +1925,6 @@
         "supportsReference": true,
         "maxReferenceImages": 10,
         "description": "Seedream V5 Pro · 文生图/多图编辑"
-      }
-    },
-    {
-      "id": "image:zhenzhen:seedream-v5-pro-layer-decomposition",
-      "provider": "zhenzhen",
-      "platformLabel": "贞贞的AI工坊",
-      "model": "seedream-v5-pro-layer-decomposition",
-      "label": "seedream-v5-pro-layer-decomposition",
-      "family": "seedream-layer-decomposition",
-      "available": true,
-      "parameters": {
-        "label": "seedream-v5-pro-layer-decomposition",
-        "platformLabel": "贞贞的AI工坊",
-        "family": "seedream-layer-decomposition",
-        "available": true,
-        "tabLabel": "Seedream分层",
-        "capabilities": [
-          "i2i",
-          "edit"
-        ],
-        "parameterKind": "seedream-layer",
-        "aspectRatios": [],
-        "defaultAspectRatio": "",
-        "sizes": [],
-        "defaultSize": "",
-        "supportsReference": true,
-        "maxReferenceImages": 1,
-        "description": "Seedream / Dola Seedream V5 Pro 图层拆分 · 单图输入，完整返回底图与全部有序图层"
       }
     }
   ],
@@ -6933,6 +6645,130 @@
       }
     },
     {
+      "id": "audio:seedance-nz:minimax-music-2.6",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "minimax-music-2.6",
+      "label": "minimax-music-2.6",
+      "family": "minimax",
+      "available": true,
+      "parameters": {
+        "label": "minimax-music-2.6",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "minimax",
+        "available": true
+      }
+    },
+    {
+      "id": "audio:seedance-nz:minimax-speech-2.8-hd",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "minimax-speech-2.8-hd",
+      "label": "minimax-speech-2.8-hd",
+      "family": "minimax",
+      "available": true,
+      "parameters": {
+        "label": "minimax-speech-2.8-hd",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "minimax",
+        "available": true
+      }
+    },
+    {
+      "id": "audio:seedance-nz:minimax-speech-2.8-turbo",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "minimax-speech-2.8-turbo",
+      "label": "minimax-speech-2.8-turbo",
+      "family": "minimax",
+      "available": true,
+      "parameters": {
+        "label": "minimax-speech-2.8-turbo",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "minimax",
+        "available": true
+      }
+    },
+    {
+      "id": "audio:seedance-nz:minimax-voice-clone",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "minimax-voice-clone",
+      "label": "minimax-voice-clone",
+      "family": "minimax",
+      "available": true,
+      "parameters": {
+        "label": "minimax-voice-clone",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "minimax",
+        "available": true
+      }
+    },
+    {
+      "id": "audio:seedance-nz:mureka-v8-bgm",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "mureka-v8-bgm",
+      "label": "mureka-v8-bgm",
+      "family": "mureka",
+      "available": true,
+      "parameters": {
+        "label": "mureka-v8-bgm",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "mureka",
+        "available": true,
+        "orderedMultiOutput": true,
+        "maxOutputs": 3
+      }
+    },
+    {
+      "id": "audio:seedance-nz:mureka-v9-bgm",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "mureka-v9-bgm",
+      "label": "mureka-v9-bgm",
+      "family": "mureka",
+      "available": true,
+      "parameters": {
+        "label": "mureka-v9-bgm",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "mureka",
+        "available": true,
+        "orderedMultiOutput": true,
+        "maxOutputs": 3
+      }
+    },
+    {
+      "id": "audio:seedance-nz:qwen3-tts-flash",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "qwen3-tts-flash",
+      "label": "qwen3-tts-flash",
+      "family": "qwen3-tts",
+      "available": true,
+      "parameters": {
+        "label": "qwen3-tts-flash",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "qwen3-tts",
+        "available": true
+      }
+    },
+    {
+      "id": "audio:seedance-nz:qwen3-tts-instruct-flash",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "qwen3-tts-instruct-flash",
+      "label": "qwen3-tts-instruct-flash",
+      "family": "qwen3-tts",
+      "available": true,
+      "parameters": {
+        "label": "qwen3-tts-instruct-flash",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "qwen3-tts",
+        "available": true
+      }
+    },
+    {
       "id": "audio:seedance-nz:suno",
       "provider": "seedance-nz",
       "platformLabel": "贞贞的平价AI小屋",
@@ -7879,9 +7715,9 @@
   ],
   "counts": {
     "llm": 32,
-    "image": 48,
+    "image": 42,
     "video": 110,
-    "audio": 8,
+    "audio": 16,
     "actions": 47
   }
 }

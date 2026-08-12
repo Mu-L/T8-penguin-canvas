@@ -403,13 +403,21 @@ function providerDeclarationForNode(node, context = {}) {
   }
 
   if (type === 'audio') {
-    const seedAudio = data.audioProviderMode === 'seed-audio';
-    return seedAudio
-      ? { provider: 'seedance-nz', model: 'doubao-seed-audio-1.0' }
-      : {
-          provider: 'suno',
-          model: boundedString(data.version) || DEFAULT_SUNO_VERSION,
-        };
+    const mode = boundedString(data.audioProviderMode, 40) || 'suno';
+    const seedanceNzModels = {
+      'seed-audio': 'doubao-seed-audio-1.0',
+      whisper: 'whisper-1',
+      'qwen3-tts': boundedString(data.qwenTtsModel) || 'qwen3-tts-flash',
+      minimax: boundedString(data.minimaxAudioModel) || 'minimax-speech-2.8-turbo',
+      mureka: boundedString(data.murekaModel) || 'mureka-v8-bgm',
+    };
+    if (seedanceNzModels[mode]) return { provider: 'seedance-nz', model: seedanceNzModels[mode] };
+    return {
+      provider: data.sunoPlatform === 'seedance-nz' ? 'seedance-nz' : 'suno',
+      model: data.sunoPlatform === 'seedance-nz'
+        ? boundedString(data.sunoNzOperation) || 'suno-generation'
+        : boundedString(data.version) || DEFAULT_SUNO_VERSION,
+    };
   }
 
   if (type === 'grok-oauth-agent') {
