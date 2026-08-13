@@ -1,9 +1,9 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.9.1",
-  "lastUpdated": "2026-08-14-v2.9.1-release-authorized",
+  "lastUpdated": "2026-08-14-v2.9.1-released",
   "minimaxH3OwFastExpansion": {
-    "status": "release-authorized-v2.9.1-live-verified",
+    "status": "released-v2.9.1-live-verified",
     "date": "2026-08-14",
     "releaseIncluded": true,
     "provider": "seedance-nz",
@@ -42,7 +42,7 @@
     },
     "boundaries": [
       "真实联调证明当次渠道受理、生成、下载与媒体解码成功，不替代长期可用性、计费或主观质量评审。",
-      "v2.9.1 已获正式 Electron/NSIS 自动更新发布授权；反馈用户安装环境、协作多端及安装升级证据仅按 owner-approved-post-release-v2.9.1 后补，延期不等于通过。"
+      "v2.9.1 已完成正式 Electron/NSIS 自动更新发布；反馈用户安装环境、协作多端及安装升级证据仍仅按 owner-approved-post-release-v2.9.1 后补，延期不等于通过。"
     ]
   },
   "latestImageAudioModelExpansion": {
@@ -724,36 +724,40 @@
     ]
   },
   "release": {
-    "status": "release-authorized-v2.9.1",
+    "status": "released-postrelease-evidence-pending",
     "version": "2.9.1",
     "date": "2026-08-14",
-    "publishedAt": null,
+    "publishedAt": "2026-08-13T19:51:35Z",
     "tag": "v2.9.1",
-    "latest": false,
-    "sourceCommit": null,
+    "latest": true,
+    "isDraft": false,
+    "isPrerelease": false,
+    "sourceCommit": "b7e0807dab3bea3944feeed2c7f7896d610c46da",
     "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.1",
     "artifacts": {
       "installer": {
         "name": "T8-PenguinCanvas-Setup-2.9.1.exe",
-        "size": null,
-        "sha256": null
+        "size": 1364794815,
+        "sha256": "354a186710ca7bfef1274f5837b6e17747cff3e980e8eae0e7fc9b0da66a1591",
+        "sha512": "DN9BJZqxtuCChBkVeCkpZOoYmagftUrkwzEKhKkwFUi2koA7Zmf+laMSKrpgDSYcXW4+gv0cBxTQoL8P5YKoZw=="
       },
       "blockmap": {
         "name": "T8-PenguinCanvas-Setup-2.9.1.exe.blockmap",
-        "size": null,
-        "sha256": null
+        "size": 1422590,
+        "sha256": "132b83ef6eb1600065d953f3de1c913a9639373c83cf7a0e4199d4ff23866aff"
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": null,
-        "sha256": null
+        "size": 362,
+        "sha256": "df12efffb63c20032e98f1db697183b1c3155a509d31b9a992162df51a962ced"
       }
     },
     "verification": [
       "v2.9.1 发布范围固定为 Hailuo TAB 的 minimax-h3-ow-ref2va-audio-drive-fast、minimax-h3-ow-fl2va-audio-drive-fast、minimax-h3-ow-t2v-fast、三份无密钥工作流及 Provider/代理/能力目录接线；不回退 v2.9.0 或更早版本的节点、默认模型、默认渠道、已保存字段、工作流、协议和网络能力。",
-      "开发阶段模型目录、动态素材 UI、前后端付费前约束、音频 URL 映射、三份工作流及相邻 seedance.nz 回归 85/85 通过；TypeScript、2863 模块生产构建、public-check、RH Toolbox、JSON 和 31 actions / 250 runtime entries / 77/77 / 0 public gaps 能力同步已通过；固定提交前仍须再次执行正式发布门禁。",
+      "模型目录、动态素材 UI、前后端付费前约束、音频 URL 映射、三份工作流及相邻 seedance.nz 回归 85/85 通过；Evidence/Capability 14/14、Electron/自动更新合同 23/23、相邻打包 24/24、TypeScript、public-check、RH Toolbox、JSON 和 31 actions / 250 runtime entries / 77/77 / 0 public gaps 能力同步通过；正式私有构建完成 2878 个模块。",
       "三个模型均以一次性进程凭据各真实提交一次并轮询至 succeeded；三个 MP4 全部下载、SHA-256 绑定、经 ffprobe 验证，并由 FFmpeg 完整逐帧解码至结尾。该证据验证当次 Provider 协议、下载与媒体解码链路。",
-      "Electron/NSIS、私有构建、三项自动更新资产、固定 source commit、Tag、Latest、远端完整回下载与摘要必须在已推送 origin/main 的固定源码提交上，通过 T8-penguin-canvas-release-v2.9.1 / codex/release-v2.9.1 的唯一 dist:release 流程收敛；完成前保持空值。",
+      "正式 dist:release 首次执行在 post-build 前因既有 remove-ai-watermarks-runtime.zip CRC 校验失败而中止，未生成 provenance、未上传 Release；随后从同一固定源码重建 ZIP64 归档，并以摘要核验的官方 7-Zip 26.02 通过完整 CRC，在同一未封口 recovery 记录下重新生成最终唯一资产集。该中止未被延期或记为通过。",
+      "最终流程通过本机私有 sidecar、后端加密、双运行时归档、Electron 原生重建、NSIS、post-build、provenance、sealed recovery、草稿所有权、发布前完整回下载、固定 Tag/target、非草稿/非预发布、Latest 与 recovery 清理；独立发布后验证再次完整下载三项公开资产，并按实际字节、SHA-256 与 GitHub digest 通过。",
       "用户已明确授权先发布、后补反馈用户安装环境、协作多端及安装升级证据；协作证据门只允许完全缺失的清单按 owner-approved-post-release-v2.9.1 延期，不能把延期标记为已通过，任何技术门禁失败均不可延期。"
     ]
   },
@@ -7089,8 +7093,8 @@
     "version": "2.9.1",
     "semverVersion": "2.9.1",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.9.1 已授权发布 MiniMax H3 OW Fast 音频驱动扩展，正式资产与发布事实只在固定源码提交的唯一发布链收敛后回填。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.9.1 的 Electron/NSIS 自动更新资产尚未生成；必须从已推送 origin/main 的固定源码提交，在 T8-penguin-canvas-release-v2.9.1 / codex/release-v2.9.1 的唯一 dist:release 流程中完成本机私有 sidecar、加密后端、双运行时归档、原生重建、NSIS、post-build、provenance、sealed recovery、GitHub 三资产完整回下载、固定 Tag/target、Latest 与 recovery 清理后才可回填。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.9.1 已从固定源码提交 b7e0807dab3bea3944feeed2c7f7896d610c46da 完成 MiniMax H3 OW Fast 音频驱动扩展的正式 Electron/NSIS 自动更新发布，三项公开资产经发布前与独立发布后完整下载核验。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.9.1 正式安装包 T8-PenguinCanvas-Setup-2.9.1.exe 为 1,364,794,815 bytes / SHA-256 354a186710ca7bfef1274f5837b6e17747cff3e980e8eae0e7fc9b0da66a1591；blockmap 为 1,422,590 bytes / SHA-256 132b83ef6eb1600065d953f3de1c913a9639373c83cf7a0e4199d4ff23866aff；latest.yml 为 362 bytes / SHA-256 df12efffb63c20032e98f1db697183b1c3155a509d31b9a992162df51a962ced。固定 Tag/target、Latest、发布前和独立发布后完整回下载、provenance、sealed recovery 与 recovery 清理均通过。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
