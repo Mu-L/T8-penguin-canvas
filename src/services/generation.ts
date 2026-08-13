@@ -1171,7 +1171,10 @@ export type HailuoModel =
   | 'minimax-h3-ow-r2v'
   | 'minimax-h3-ow-i2v'
   | 'minimax-h3-ow-i2v-fast'
-  | 'minimax-h3-ow-r2v-fast';
+  | 'minimax-h3-ow-r2v-fast'
+  | 'minimax-h3-ow-ref2va-audio-drive-fast'
+  | 'minimax-h3-ow-fl2va-audio-drive-fast'
+  | 'minimax-h3-ow-t2v-fast';
 
 export type Hailuo23Model = Extract<HailuoModel, `hailuo-2.3-${string}`>;
 export type HailuoDuration = 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15;

@@ -1,0 +1,109 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "MiniMax H3 OW Fast 参考图音频驱动（平价AI小屋）",
+  "nodes": [
+    {
+      "id": "minimax-h3-ow-ref2va-audio-drive-fast-image",
+      "type": "upload",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "label": "上传参考图（必须且只能 1 张）",
+        "uploadType": "image",
+        "lockedUploadType": "image"
+      }
+    },
+    {
+      "id": "minimax-h3-ow-ref2va-audio-drive-fast-audio",
+      "type": "upload",
+      "position": {
+        "x": 0,
+        "y": 220
+      },
+      "data": {
+        "label": "上传驱动音频（必须且只能 1 段）",
+        "uploadType": "audio",
+        "lockedUploadType": "audio"
+      }
+    },
+    {
+      "id": "minimax-h3-ow-ref2va-audio-drive-fast",
+      "type": "video",
+      "position": {
+        "x": 420,
+        "y": 40
+      },
+      "data": {
+        "label": "MiniMax H3 OW Fast 参考图音频驱动",
+        "mainId": "hailuo-2.3",
+        "model": "minimax-h3-ow-ref2va-audio-drive-fast",
+        "videoBuiltinSource": "seedance-nz",
+        "ratio": "16:9",
+        "duration": 5,
+        "resolution": "480p",
+        "localPrompt": "保持参考主体一致，并由音频驱动自然、有表现力的动作",
+        "reuseResult": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "minimax-h3-ow-ref2va-audio-drive-fast-image-edge",
+      "source": "minimax-h3-ow-ref2va-audio-drive-fast-image",
+      "target": "minimax-h3-ow-ref2va-audio-drive-fast"
+    },
+    {
+      "id": "minimax-h3-ow-ref2va-audio-drive-fast-audio-edge",
+      "source": "minimax-h3-ow-ref2va-audio-drive-fast-audio",
+      "target": "minimax-h3-ow-ref2va-audio-drive-fast"
+    }
+  ],
+  "nodeCount": 3,
+  "edgeCount": 2,
+  "nodeTypes": [
+    "upload",
+    "upload",
+    "video"
+  ],
+  "topologyPreview": {
+    "nodes": [
+      {
+        "id": "minimax-h3-ow-ref2va-audio-drive-fast-image",
+        "type": "upload",
+        "label": "上传参考图（必须且只能 1 张）",
+        "x": 50,
+        "y": 50
+      },
+      {
+        "id": "minimax-h3-ow-ref2va-audio-drive-fast-audio",
+        "type": "upload",
+        "label": "上传驱动音频（必须且只能 1 段）",
+        "x": 50,
+        "y": 270
+      },
+      {
+        "id": "minimax-h3-ow-ref2va-audio-drive-fast",
+        "type": "video",
+        "label": "MiniMax H3 OW Fast 参考图音频驱动",
+        "x": 470,
+        "y": 90
+      }
+    ],
+    "edges": [
+      {
+        "id": "minimax-h3-ow-ref2va-audio-drive-fast-image-edge",
+        "source": "minimax-h3-ow-ref2va-audio-drive-fast-image",
+        "target": "minimax-h3-ow-ref2va-audio-drive-fast"
+      },
+      {
+        "id": "minimax-h3-ow-ref2va-audio-drive-fast-audio-edge",
+        "source": "minimax-h3-ow-ref2va-audio-drive-fast-audio",
+        "target": "minimax-h3-ow-ref2va-audio-drive-fast"
+      }
+    ]
+  },
+  "savedAt": "2026-08-14T00:00:00.000Z"
+}

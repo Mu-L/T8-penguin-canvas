@@ -203,7 +203,7 @@ test('capability graph validates real node types and fails closed on drift', () 
   const runtimeCatalog = buildRuntimeCatalog();
   const graph = buildCapabilityGraph({ manifest, manifestDigest: digest, runtimeCatalog });
   assert.equal(graph.counts.nodes, 77);
-  assert.equal(graph.counts.runtimeEntries, 245);
+  assert.equal(graph.counts.runtimeEntries, 250);
   assert.equal(
     graph.counts.operations,
     graph.capabilities.reduce((sum, capability) => sum + capability.operations.length, 0),
@@ -396,9 +396,9 @@ test('dynamic coverage receipt proves node, runtime, handler, risk, verification
   assert.deepEqual(receipt.inventory.nodes, { total: 77, executable: 58, generatable: 11 });
   assert.deepEqual(receipt.inventory.runtime, {
     llm: 32,
-    image: 48,
-    video: 110,
-    audio: 8,
+    image: 42,
+    video: 113,
+    audio: 16,
     actions: 47,
   });
   assert.equal(receipt.inventory.capabilities, graph.capabilities.length);
@@ -420,7 +420,7 @@ test('dynamic coverage receipt proves node, runtime, handler, risk, verification
     true,
   );
   assert.equal(
-    markdown.includes('Dynamic runtime inventory (LLM / image / video / audio / actions): **32 / 48 / 110 / 8 / 47**'),
+    markdown.includes('Dynamic runtime inventory (LLM / image / video / audio / actions): **32 / 42 / 113 / 16 / 47**'),
     true,
   );
 

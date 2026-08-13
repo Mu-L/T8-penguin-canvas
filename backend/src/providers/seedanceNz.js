@@ -284,6 +284,17 @@ const MINIMAX_H3_OW_R2V_MODEL = 'minimax-h3-ow-r2v';
 const MINIMAX_H3_OW_I2V_MODEL = 'minimax-h3-ow-i2v';
 const MINIMAX_H3_OW_FAST_I2V_MODEL = 'minimax-h3-ow-i2v-fast';
 const MINIMAX_H3_OW_FAST_R2V_MODEL = 'minimax-h3-ow-r2v-fast';
+const MINIMAX_H3_OW_FAST_REF2VA_AUDIO_MODEL = 'minimax-h3-ow-ref2va-audio-drive-fast';
+const MINIMAX_H3_OW_FAST_FL2VA_AUDIO_MODEL = 'minimax-h3-ow-fl2va-audio-drive-fast';
+const MINIMAX_H3_OW_FAST_T2V_MODEL = 'minimax-h3-ow-t2v-fast';
+const MINIMAX_H3_OW_T2V_MODELS = new Set([
+  MINIMAX_H3_OW_T2V_MODEL,
+  MINIMAX_H3_OW_FAST_T2V_MODEL,
+]);
+const MINIMAX_H3_OW_AUDIO_DRIVE_MODELS = new Set([
+  MINIMAX_H3_OW_FAST_REF2VA_AUDIO_MODEL,
+  MINIMAX_H3_OW_FAST_FL2VA_AUDIO_MODEL,
+]);
 const MINIMAX_H3_OW_R2V_MODELS = new Set([
   MINIMAX_H3_OW_R2V_MODEL,
   MINIMAX_H3_OW_FAST_R2V_MODEL,
@@ -295,6 +306,9 @@ const MINIMAX_H3_OW_I2V_MODELS = new Set([
 const MINIMAX_H3_OW_FAST_MODELS = new Set([
   MINIMAX_H3_OW_FAST_I2V_MODEL,
   MINIMAX_H3_OW_FAST_R2V_MODEL,
+  MINIMAX_H3_OW_FAST_REF2VA_AUDIO_MODEL,
+  MINIMAX_H3_OW_FAST_FL2VA_AUDIO_MODEL,
+  MINIMAX_H3_OW_FAST_T2V_MODEL,
 ]);
 const MINIMAX_H3_OW_MODELS = new Set([
   MINIMAX_H3_OW_T2V_MODEL,
@@ -302,6 +316,9 @@ const MINIMAX_H3_OW_MODELS = new Set([
   MINIMAX_H3_OW_I2V_MODEL,
   MINIMAX_H3_OW_FAST_I2V_MODEL,
   MINIMAX_H3_OW_FAST_R2V_MODEL,
+  MINIMAX_H3_OW_FAST_REF2VA_AUDIO_MODEL,
+  MINIMAX_H3_OW_FAST_FL2VA_AUDIO_MODEL,
+  MINIMAX_H3_OW_FAST_T2V_MODEL,
 ]);
 const MINIMAX_H3_OW_SECONDS = new Set(['5', '10', '15']);
 const MINIMAX_H3_OW_RESOLUTIONS = new Set(['480p', '720p']);
@@ -3096,9 +3113,10 @@ async function buildHailuoPayload(request, apiKey, options = {}) {
 
   if (MINIMAX_H3_OW_MODELS.has(model)) {
     const prompt = String(request.prompt || '').trim();
-    const taskType = model === MINIMAX_H3_OW_T2V_MODEL
+    const isAudioDrive = MINIMAX_H3_OW_AUDIO_DRIVE_MODELS.has(model);
+    const taskType = MINIMAX_H3_OW_T2V_MODELS.has(model)
       ? 't2v'
-      : MINIMAX_H3_OW_R2V_MODELS.has(model) ? 'r2v' : 'i2v';
+      : isAudioDrive ? 'multi' : MINIMAX_H3_OW_R2V_MODELS.has(model) ? 'r2v' : 'i2v';
     const isFast = MINIMAX_H3_OW_FAST_MODELS.has(model);
     if ((taskType === 't2v' || taskType === 'r2v') && !prompt) {
       throw new Error('MiniMax H3 OW 文生视频与参考生视频必须填写提示词');
@@ -3115,20 +3133,25 @@ async function buildHailuoPayload(request, apiKey, options = {}) {
 
     const payload = { model, seconds, metadata: { resolution, ratio } };
     if (prompt) payload.prompt = prompt;
+    const videoSources = normalizeList(request.videos || request.videoUrls || request.video_url);
+    const audioSources = normalizeList(request.audios || request.audioUrls || request.audio_url);
+    if (taskType === 't2v' && (normalizeList(request.images || request.refImages).length || videoSources.length || audioSources.length)) {
+      throw new Error('MiniMax H3 OW 文生视频不接受图片、视频或音频素材');
+    }
     if (taskType !== 't2v') {
       const imageSources = normalizeList(request.images || request.refImages);
-      if (taskType === 'i2v' && imageSources.length !== 1) {
+      if ((taskType === 'i2v' || isAudioDrive) && imageSources.length !== 1) {
         throw new Error('MiniMax H3 OW 图生视频必须且只能提供 1 张首帧图');
       }
       const maxImages = isFast && taskType === 'r2v' ? 9 : 1;
       if (taskType === 'r2v' && (imageSources.length < 1 || imageSources.length > maxImages)) {
         throw new Error(`MiniMax H3 OW 参考生视频必须提供 1-${maxImages} 张参考图`);
       }
-      if (isFast && (
-        normalizeList(request.videos || request.videoUrls || request.video_url).length > 0
-        || normalizeList(request.audios || request.audioUrls || request.audio_url).length > 0
-      )) {
+      if (videoSources.length > 0 || (!isAudioDrive && isFast && audioSources.length > 0)) {
         throw new Error('MiniMax H3 OW Fast 只接受图片参考，不接受视频或音频素材');
+      }
+      if (isAudioDrive && audioSources.length !== 1) {
+        throw new Error('MiniMax H3 OW 音频驱动必须且只能提供 1 段音频');
       }
       payload.images = [];
       for (const source of imageSources) {
@@ -3138,6 +3161,14 @@ async function buildHailuoPayload(request, apiKey, options = {}) {
           allowedMimes: ['image/jpeg', 'image/png', 'image/webp'],
           cacheVariant: isFast ? 'minimax-h3-ow-fast-image-v1' : 'minimax-h3-ow-image-v1',
         }));
+      }
+      if (isAudioDrive) {
+        payload.metadata.audio_urls = [await uploadMedia(audioSources[0], 'audio', apiKey, {
+          ...options,
+          maxBytes: 50 * 1024 * 1024,
+          allowedMimes: ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/flac'],
+          cacheVariant: 'minimax-h3-ow-fast-audio-drive-v1',
+        })];
       }
     }
     return { payload, model, taskType };
@@ -4663,14 +4694,19 @@ module.exports = {
   MINIMAX_H3_OW_I2V_MODEL,
   MINIMAX_H3_OW_I2V_MODELS,
   MINIMAX_H3_OW_FAST_I2V_MODEL,
+  MINIMAX_H3_OW_FAST_FL2VA_AUDIO_MODEL,
   MINIMAX_H3_OW_FAST_MODELS,
+  MINIMAX_H3_OW_FAST_REF2VA_AUDIO_MODEL,
   MINIMAX_H3_OW_FAST_R2V_MODEL,
+  MINIMAX_H3_OW_FAST_T2V_MODEL,
+  MINIMAX_H3_OW_AUDIO_DRIVE_MODELS,
   MINIMAX_H3_OW_MODELS,
   MINIMAX_H3_OW_R2V_MODEL,
   MINIMAX_H3_OW_R2V_MODELS,
   MINIMAX_H3_OW_RESOLUTIONS,
   MINIMAX_H3_OW_SECONDS,
   MINIMAX_H3_OW_T2V_MODEL,
+  MINIMAX_H3_OW_T2V_MODELS,
   KLING_EDIT_MODELS,
   KLING_I2V_MODELS,
   KLING_MODELS,

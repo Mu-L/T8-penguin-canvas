@@ -254,7 +254,10 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   const isHailuoH3 = isHailuo && apiModel.startsWith('hailuo-h3-');
   const isMinimaxH3Ow = isHailuo && apiModel.startsWith('minimax-h3-ow-');
   const isMinimaxH3OwFast = isMinimaxH3Ow && apiModel.endsWith('-fast');
-  const hailuoMode = apiModel.endsWith('-multi')
+  const isMinimaxH3OwAudioDrive = isMinimaxH3Ow && apiModel.includes('-audio-drive-');
+  const hailuoMode = isMinimaxH3OwAudioDrive
+    ? 'audio-drive'
+    : apiModel.endsWith('-multi')
     ? 'multi'
     : apiModel.includes('-r2v') ? 'r2v' : apiModel.includes('-i2v') ? 'i2v' : 't2v';
   const flux3Mode = apiModel.endsWith('-draft-enhance')
@@ -564,6 +567,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     : isJimengSeedanceSelected ? JIMENG_SEEDANCE_LIMITS.videos : 0;
   const maxMentionAudios = isSeedance25 && seedance25Mode === 'multi'
     ? SEEDANCE25_MULTI_MAX_AUDIOS
+    : isMinimaxH3OwAudioDrive
+    ? 1
     : isHailuoH3 && hailuoMode === 'multi'
     ? 3
     : isJimengSeedanceSelected ? JIMENG_SEEDANCE_LIMITS.audios : 0;
@@ -597,10 +602,12 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         ? ['text', 'video']
       : isFlux3 && flux3Mode === 'i2v'
         ? ['text', 'image']
+      : isMinimaxH3OwAudioDrive
+        ? ['text', 'image', 'audio']
       : isHailuoH3 && hailuoMode === 'multi'
         ? ['text', 'image', 'video', 'audio']
         : ['text', 'image']),
-    [modelDef.kind, isJimengSeedanceSelected, isApimartOmni, isUpscaler, isKling, klingMode, isSeedance25, seedance25Mode, isFlux3, flux3Mode, isHailuoH3, hailuoMode],
+    [modelDef.kind, isJimengSeedanceSelected, isApimartOmni, isUpscaler, isKling, klingMode, isSeedance25, seedance25Mode, isFlux3, flux3Mode, isMinimaxH3OwAudioDrive, isHailuoH3, hailuoMode],
   );
 
   // 收集上游 prompt + 参考图/视频/音频 (按用户拖拽顺序), 合并本地拖入素材
@@ -1014,6 +1021,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       && !isUpscaler
       && !(isHappyHorse && happyHorseMode !== 't2v')
       && !(isHailuo && hailuoMode === 'i2v')
+      && !isMinimaxH3OwAudioDrive
       && !(isSeedance25 && seedance25Mode === 'i2v')
       && !(isFlux3 && flux3Mode === 'draft-enhance')
       && !(isKling && klingMode === 'i2v')
@@ -1124,12 +1132,28 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         return;
       }
     }
+    if (isMinimaxH3Ow && hailuoMode === 't2v'
+      && (imageUrls.length > 0 || videoUrls.length > 0 || audioUrls.length > 0)) {
+      setError('MiniMax H3 OW 文生视频不接受图片、视频或音频素材');
+      logBus.error('生成中止: MiniMax H3 OW 文生视频混入参考素材', src);
+      return;
+    }
     if (isMinimaxH3OwFast && hailuoMode === 'i2v' && imageUrls.length !== 1) {
       setError('MiniMax H3 OW Fast 图生视频必须且只能连接或拖入 1 张首帧图');
       logBus.error('生成中止: MiniMax H3 OW Fast 图生视频首帧数量不合法', src);
       return;
     }
-    if (isMinimaxH3OwFast && (videoUrls.length > 0 || audioUrls.length > 0)) {
+    if (isMinimaxH3OwAudioDrive && (imageUrls.length !== 1 || audioUrls.length !== 1)) {
+      setError('MiniMax H3 OW 音频驱动必须且只能连接或拖入 1 张图片与 1 段音频');
+      logBus.error('生成中止: MiniMax H3 OW 音频驱动素材数量不合法', src);
+      return;
+    }
+    if (isMinimaxH3OwAudioDrive && videoUrls.length > 0) {
+      setError('MiniMax H3 OW 音频驱动不接受视频素材');
+      logBus.error('生成中止: MiniMax H3 OW 音频驱动混入视频素材', src);
+      return;
+    }
+    if (isMinimaxH3OwFast && !isMinimaxH3OwAudioDrive && (videoUrls.length > 0 || audioUrls.length > 0)) {
       setError('MiniMax H3 OW Fast 只接受图片参考，不接受视频或音频素材');
       logBus.error('生成中止: MiniMax H3 OW Fast 混入视频或音频素材', src);
       return;
@@ -1488,11 +1512,13 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       }
 
       if (isHailuo) {
-        const hailuoImages = hailuoMode === 'i2v' || hailuoMode === 'r2v'
+        const hailuoImages = hailuoMode === 'i2v' || hailuoMode === 'r2v' || hailuoMode === 'audio-drive'
           ? imageUrls.slice(0, isHailuoH3 ? 2 : isMinimaxH3OwFast && hailuoMode === 'r2v' ? 9 : 1)
           : hailuoMode === 'multi' ? imageUrls.slice(0, 9) : [];
         const hailuoVideos = isHailuoH3 && hailuoMode === 'multi' ? videoUrls.slice(0, 3) : [];
-        const hailuoAudios = isHailuoH3 && hailuoMode === 'multi' ? audioUrls.slice(0, 3) : [];
+        const hailuoAudios = isMinimaxH3OwAudioDrive
+          ? audioUrls.slice(0, 1)
+          : isHailuoH3 && hailuoMode === 'multi' ? audioUrls.slice(0, 3) : [];
         const hailuoResolution = isMinimaxH3Ow
           ? resolution === '720p' ? '720p' : '480p'
           : isHailuoH3 ? resolution === '768P' ? '768P' : '2K' : resolution === '1080p' ? '1080p' : '768p';
@@ -2562,8 +2588,10 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         {isHailuo && (
           <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.06] px-2 py-1.5 text-[10px] leading-relaxed text-white/55">
             {isMinimaxH3Ow
-              ? hailuoMode === 't2v'
-                ? 'MiniMax H3 OW 文生视频必须填写提示词，不发送参考图。'
+              ? hailuoMode === 'audio-drive'
+                ? 'MiniMax H3 OW 音频驱动必须且只能使用 1 张图片与 1 段音频，不接受视频；提示词可选。'
+                : hailuoMode === 't2v'
+                ? 'MiniMax H3 OW 文生视频必须填写提示词，不发送任何参考素材。'
                 : hailuoMode === 'r2v'
                   ? isMinimaxH3OwFast
                     ? 'MiniMax H3 OW Fast 参考生视频必须填写提示词，并按排序使用 1-9 张参考图。'

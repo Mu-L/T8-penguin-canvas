@@ -17,14 +17,14 @@
     "creativeCapabilityManifest": "5c56b3b64d483ae6e6da5268f25c059f2a3fcc2c13e3c3d64d39b10e1e56402b",
     "canvasNodeSchema": "3d76c2debc7687d67a54eea884287aa0b973e3f4bf01dab9984e01b240961bfc",
     "canvasNodeSchemaFile": "7b34c456f72907fd1d0d84563d380af5f195835f2be7b17adb054db4e614f375",
-    "runtimeCatalogSources": "2e1f97eab8c163826ea18b396b384569caf69ab4214c1937a7d437fd14d73042",
-    "runtimeCatalogArtifact": "0653e5ab9dc7399cd5015cf7272eb2f2b1d913398d244789b996bdf0d46c9170",
+    "runtimeCatalogSources": "3c8802635d0fd87c9b478e92085f2d71d6b363323bb71b0b48928be2718f1ba0",
+    "runtimeCatalogArtifact": "236233576d77eaa115867cb4d36528f2fea6d1a98e7048896023b5d1f3300350",
     "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
     "capabilityGraphCompiler": "1a611d7e91dcf523e0536a92e9adb6ba2d884689a65fa10274bcda3a05ef9840",
     "coverageReceiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7",
     "canonicalTextDigestCompiler": "b0afcf28a257fbbd8f391edc117348f8f2ede1b4a039ae91bce25a8d563ac0cf"
   },
-  "aggregateDigest": "8312515c920e29b3e69a6e01610293b76f5f591d3d57d2a91a40d2723c69059d",
+  "aggregateDigest": "22bb59d7396373301e8ea3d1b54faf54c92abb425e519a80eefbfccf7698d9c8",
   "principles": {
     "oneSentenceStart": true,
     "directCanvasMutation": false,
@@ -48,17 +48,17 @@
     "accountedNodes": 77,
     "unexplainedNodes": 0,
     "fullyOperableNodes": 18,
-    "runtimeEntries": 247,
+    "runtimeEntries": 250,
     "runtimeByKind": {
       "llm": 32,
       "image": 42,
-      "video": 110,
+      "video": 113,
       "audio": 16,
       "actions": 47
     },
     "runtimeByProvider": {
       "grok-oauth": 2,
-      "seedance-nz": 182,
+      "seedance-nz": 185,
       "zhenzhen": 56,
       "fal": 7
     },
@@ -6372,7 +6372,7 @@
   ],
   "runtime": {
     "schema": "t8-creative-runtime-catalog-v1",
-    "sourceDigest": "2e1f97eab8c163826ea18b396b384569caf69ab4214c1937a7d437fd14d73042",
+    "sourceDigest": "3c8802635d0fd87c9b478e92085f2d71d6b363323bb71b0b48928be2718f1ba0",
     "platforms": [
       {
         "id": "zhenzhen",
@@ -10084,6 +10084,26 @@
         }
       },
       {
+        "id": "video:seedance-nz:minimax-h3-ow-fl2va-audio-drive-fast",
+        "kind": "video",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "minimax-h3-ow-fl2va-audio-drive-fast",
+        "label": "minimax-h3-ow-fl2va-audio-drive-fast（首帧音频驱动 Fast）",
+        "family": "hailuo-2.3",
+        "available": true,
+        "catalogSection": "video",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
         "id": "video:seedance-nz:minimax-h3-ow-i2v",
         "kind": "video",
         "provider": "seedance-nz",
@@ -10164,12 +10184,52 @@
         }
       },
       {
+        "id": "video:seedance-nz:minimax-h3-ow-ref2va-audio-drive-fast",
+        "kind": "video",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "minimax-h3-ow-ref2va-audio-drive-fast",
+        "label": "minimax-h3-ow-ref2va-audio-drive-fast（参考图音频驱动 Fast）",
+        "family": "hailuo-2.3",
+        "available": true,
+        "catalogSection": "video",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
         "id": "video:seedance-nz:minimax-h3-ow-t2v",
         "kind": "video",
         "provider": "seedance-nz",
         "platformLabel": "贞贞的平价AI小屋",
         "model": "minimax-h3-ow-t2v",
         "label": "minimax-h3-ow-t2v（MiniMax H3 OW 文生视频）",
+        "family": "hailuo-2.3",
+        "available": true,
+        "catalogSection": "video",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "video:seedance-nz:minimax-h3-ow-t2v-fast",
+        "kind": "video",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "minimax-h3-ow-t2v-fast",
+        "label": "minimax-h3-ow-t2v-fast（MiniMax H3 OW Fast 文生视频）",
         "family": "hailuo-2.3",
         "available": true,
         "catalogSection": "video",
@@ -11772,11 +11832,14 @@
       "video:seedance-nz:kling-v3.0-std-t2v",
       "video:seedance-nz:midjourney-video",
       "video:seedance-nz:mini",
+      "video:seedance-nz:minimax-h3-ow-fl2va-audio-drive-fast",
       "video:seedance-nz:minimax-h3-ow-i2v",
       "video:seedance-nz:minimax-h3-ow-i2v-fast",
       "video:seedance-nz:minimax-h3-ow-r2v",
       "video:seedance-nz:minimax-h3-ow-r2v-fast",
+      "video:seedance-nz:minimax-h3-ow-ref2va-audio-drive-fast",
       "video:seedance-nz:minimax-h3-ow-t2v",
+      "video:seedance-nz:minimax-h3-ow-t2v-fast",
       "video:seedance-nz:seedance-2.5-global-standard-i2v",
       "video:seedance-nz:seedance-2.5-global-standard-multi",
       "video:seedance-nz:seedance-2.5-global-standard-t2v",
@@ -11844,7 +11907,7 @@
     "sourceDigests": {
       "capabilityManifest": "5c56b3b64d483ae6e6da5268f25c059f2a3fcc2c13e3c3d64d39b10e1e56402b",
       "nodeSchema": "3d76c2debc7687d67a54eea884287aa0b973e3f4bf01dab9984e01b240961bfc",
-      "runtimeCatalog": "2e1f97eab8c163826ea18b396b384569caf69ab4214c1937a7d437fd14d73042",
+      "runtimeCatalog": "3c8802635d0fd87c9b478e92085f2d71d6b363323bb71b0b48928be2718f1ba0",
       "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
       "receiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7"
     },
@@ -11857,7 +11920,7 @@
       "runtime": {
         "llm": 32,
         "image": 42,
-        "video": 110,
+        "video": 113,
         "audio": 16,
         "actions": 47
       },
@@ -11873,6 +11936,6 @@
       "missingCompatibilityEdges": []
     },
     "complete": true,
-    "digest": "da052fb3b10b9588b4b3b61969b694918651b2500f13aa51bebbb0db2961b4bb"
+    "digest": "aa7f4a60d90c71bcd2418fd268afbfce046b0e174ca4d2655b67c8594fdd0d55"
   }
 }

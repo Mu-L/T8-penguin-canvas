@@ -1,0 +1,45 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "MiniMax H3 OW Fast 文生视频（平价AI小屋）",
+  "nodes": [
+    {
+      "id": "minimax-h3-ow-t2v-fast",
+      "type": "video",
+      "position": {
+        "x": 420,
+        "y": 40
+      },
+      "data": {
+        "label": "MiniMax H3 OW Fast 文生视频",
+        "mainId": "hailuo-2.3",
+        "model": "minimax-h3-ow-t2v-fast",
+        "videoBuiltinSource": "seedance-nz",
+        "ratio": "16:9",
+        "duration": 5,
+        "resolution": "480p",
+        "localPrompt": "纸鸢穿过暖色夕阳，电影感镜头平滑移动",
+        "reuseResult": false
+      }
+    }
+  ],
+  "edges": [],
+  "nodeCount": 1,
+  "edgeCount": 0,
+  "nodeTypes": [
+    "video"
+  ],
+  "topologyPreview": {
+    "nodes": [
+      {
+        "id": "minimax-h3-ow-t2v-fast",
+        "type": "video",
+        "label": "MiniMax H3 OW Fast 文生视频",
+        "x": 470,
+        "y": 90
+      }
+    ],
+    "edges": []
+  },
+  "savedAt": "2026-08-14T00:00:00.000Z"
+}

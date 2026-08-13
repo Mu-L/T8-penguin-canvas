@@ -4,6 +4,8 @@
 
 ## v2.6.4 一次性先发布后补证据例外
 
+2026-08-14 用户明确授权 v2.9.1 先发布自动更新包，再补真实 F8-F10、反馈用户安装与安装升级证据。仅当清单文件完全不存在、版本精确为 `2.9.1`、发布目标是固定 40 位 SHA，且同时设置 `T8_COLLAB_RELEASE_EVIDENCE_DEFERRAL=owner-approved-post-release-v2.9.1` 时，正式发布器允许继续。该例外不会生成检查数、不会把任何项目标记为 `passed`，Release notes 与 `features.json` 必须继续写明证据待补；所有构建、测试、摘要、固定 Tag/target、自动更新资产和完整远端下载技术门禁仍必须通过。
+
 2026-08-11 用户明确授权 v2.8.8 先发布自动更新包，再补真实 F8-F10、反馈用户安装与安装升级证据。仅当清单文件完全不存在、版本精确为 `2.8.8`、发布目标是固定 40 位 SHA，且同时设置 `T8_COLLAB_RELEASE_EVIDENCE_DEFERRAL=owner-approved-post-release-v2.8.8` 时，正式发布器允许继续。该例外不会生成检查数、不会把任何项目标记为 `passed`，Release notes 与 `features.json` 必须继续写明证据待补；所有构建、测试、摘要、固定 Tag/target、自动更新资产和完整远端下载技术门禁仍必须通过。
 
 2026-07-23 用户再次明确授权 v2.6.4 先发布自动更新包，再补真实 F8-F10 环境验收。仅当清单文件完全不存在、版本精确为 `2.6.4`、发布目标是固定 40 位 SHA，且同时设置 `T8_COLLAB_RELEASE_EVIDENCE_DEFERRAL=owner-approved-post-release-v2.6.4` 时，正式发布器允许继续。该例外不会生成检查数、不会把任何项目标记为 `passed`，Release notes 与 `features.json` 必须继续写明证据待补。

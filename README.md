@@ -10,13 +10,13 @@ https://www.runninghub.cn/?inviteCode=rh-v1121
 My favorite girl Go YounJung
 # 🐧 贞贞的无限画布（企鹅共创版） · T8-penguin-canvas
 
-> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.9.0
+> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.9.1
 >
 > GitHub：<https://github.com/T8mars/T8-penguin-canvas>
 
 一个面向 AI 创作的 **节点式画布**：拖拽节点、连线编排、生成图像 / 视频 / 音频、调用 LLM、串接 RunningHub 工作流，叠加批量执行、智能对齐、打组、主题模板与终端日志。Web 浏览器和桌面端均可使用。
 
-![status](https://img.shields.io/badge/version-v2.9.0-brightgreen) ![node](https://img.shields.io/badge/node-77-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
+![status](https://img.shields.io/badge/version-v2.9.1-brightgreen) ![node](https://img.shields.io/badge/node-77-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
 
 ---
 
@@ -36,6 +36,7 @@ My favorite girl Go YounJung
 ## ✨ 功能亮点
 
 - 🎨 **77 个节点**，覆盖文本 / 图像 / 视频 / 音频 / LLM / RunningHub / ComfyUI / 3D / 工具 / 辅助 / 工具箱 / 输出预览 / 上传素材 / 素材集 / 批量打标 / 随机路由 / Story 全自动制片 / 剧本大师 / MiniMax H3 / Seedance 2.0 提示词增强器 / MiniMax H3 官方提示词增强器 / Seedance 2.5 / 白模预演 / MV 音乐大师
+- 🎬🎵 **v2.9.1 MiniMax H3 OW Fast 音频驱动扩展版**：Hailuo TAB 新增 `minimax-h3-ow-ref2va-audio-drive-fast`、`minimax-h3-ow-fl2va-audio-drive-fast` 与 `minimax-h3-ow-t2v-fast`。两个音频驱动模型严格接收 1 图 + 1 音频，T2V Fast 只接收必填提示词；三者支持 5/10/15 秒、480p/720p 与八种比例。三个模型均已各真实提交一次、成功下载并完整解码，三份配套工作流不含凭据，既有默认模型、默认渠道和旧画布保持不变。
 - 🎨🎵 **v2.9.0 平价 AI 小屋图像与音频扩展版**：图像节点新增 Grok `zhenzhen-image-gk-v2` 与 Wan Image 三模型；音频节点新增 Qwen3-TTS、MiniMax 和 Mureka 三个 TAB、八个模型。12 个模型均已真实提交并成功，13 个媒体结果全部下载解码；Mureka V9 的两个有序音频输出完整保留。12 份配套工作流不含凭据，既有默认渠道、默认模型和旧画布保持不变。
 - 🧩 **v2.8.9 Dola Seedream 5.0 Pro 分层版**：既有 Seedream 分层 TAB 新增 `dola-seedream-5.0-pro-layer-decomposition`，原国内模型继续默认；单张素材可返回一张底图和数量可变的有序透明图层，画布会完整保留、逐张下载和解码，不排序、不去重、不截断。配套无密钥工作流已保存；一次真实任务返回的 7/7 张图片已全部下载并逐张核验。
 - ✨ **v2.8.8 MiniMax H3 官方提示词增强版**：新增独立节点，精确接入 `minmax-h3-context-ir-text`、`minmax-h3-context-ir-image` 与 `minmax-h3-context-ir-multimodal`。文本模式只接收提示词并要求固定比例；图像模式按顺序接收 1–2 张首尾帧且不发送比例；多模态模式最多支持 9 图、3 视频、3 音频。三份无密钥工作流、付费提交前双端边界和同任务恢复已配套完成，默认渠道、默认模型及旧画布保持不变。

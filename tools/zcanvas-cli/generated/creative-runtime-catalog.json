@@ -1,6 +1,6 @@
 {
   "schema": "t8-creative-runtime-catalog-v1",
-  "sourceDigest": "2e1f97eab8c163826ea18b396b384569caf69ab4214c1937a7d437fd14d73042",
+  "sourceDigest": "3c8802635d0fd87c9b478e92085f2d71d6b363323bb71b0b48928be2718f1ba0",
   "generatedFrom": [
     "src/providers/models.ts",
     "src/config/seedance.ts",
@@ -3715,6 +3715,51 @@
       }
     },
     {
+      "id": "video:seedance-nz:minimax-h3-ow-fl2va-audio-drive-fast",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "minimax-h3-ow-fl2va-audio-drive-fast",
+      "label": "minimax-h3-ow-fl2va-audio-drive-fast（首帧音频驱动 Fast）",
+      "family": "hailuo-2.3",
+      "available": true,
+      "parameters": {
+        "label": "minimax-h3-ow-fl2va-audio-drive-fast（首帧音频驱动 Fast）",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "hailuo-2.3",
+        "available": true,
+        "nodeKind": "hailuo",
+        "ratios": [
+          "1:1",
+          "2:3",
+          "3:2",
+          "3:4",
+          "4:3",
+          "9:16",
+          "16:9",
+          "21:9"
+        ],
+        "defaultRatio": "16:9",
+        "durations": [
+          5,
+          10,
+          15
+        ],
+        "defaultDuration": 5,
+        "resolutions": [
+          "480p",
+          "720p"
+        ],
+        "defaultResolution": "480p",
+        "supportsImages": true,
+        "supportsVideos": false,
+        "supportsAudios": true,
+        "maxReferenceImages": 1,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 1,
+        "description": "MiniMax H3 OW 首帧音频驱动；必须且只能提供 1 张首帧图与 1 段音频，提示词可选。"
+      }
+    },
+    {
       "id": "video:seedance-nz:minimax-h3-ow-i2v",
       "provider": "seedance-nz",
       "platformLabel": "贞贞的平价AI小屋",
@@ -3895,6 +3940,51 @@
       }
     },
     {
+      "id": "video:seedance-nz:minimax-h3-ow-ref2va-audio-drive-fast",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "minimax-h3-ow-ref2va-audio-drive-fast",
+      "label": "minimax-h3-ow-ref2va-audio-drive-fast（参考图音频驱动 Fast）",
+      "family": "hailuo-2.3",
+      "available": true,
+      "parameters": {
+        "label": "minimax-h3-ow-ref2va-audio-drive-fast（参考图音频驱动 Fast）",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "hailuo-2.3",
+        "available": true,
+        "nodeKind": "hailuo",
+        "ratios": [
+          "1:1",
+          "2:3",
+          "3:2",
+          "3:4",
+          "4:3",
+          "9:16",
+          "16:9",
+          "21:9"
+        ],
+        "defaultRatio": "16:9",
+        "durations": [
+          5,
+          10,
+          15
+        ],
+        "defaultDuration": 5,
+        "resolutions": [
+          "480p",
+          "720p"
+        ],
+        "defaultResolution": "480p",
+        "supportsImages": true,
+        "supportsVideos": false,
+        "supportsAudios": true,
+        "maxReferenceImages": 1,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 1,
+        "description": "MiniMax H3 OW 参考图音频驱动；必须且只能提供 1 张参考图与 1 段音频，提示词可选。"
+      }
+    },
+    {
       "id": "video:seedance-nz:minimax-h3-ow-t2v",
       "provider": "seedance-nz",
       "platformLabel": "贞贞的平价AI小屋",
@@ -3937,6 +4027,51 @@
         "maxReferenceVideos": 0,
         "maxReferenceAudios": 0,
         "description": "MiniMax H3 OW 文生视频；5/10/15 秒，480p/720p。"
+      }
+    },
+    {
+      "id": "video:seedance-nz:minimax-h3-ow-t2v-fast",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "minimax-h3-ow-t2v-fast",
+      "label": "minimax-h3-ow-t2v-fast（MiniMax H3 OW Fast 文生视频）",
+      "family": "hailuo-2.3",
+      "available": true,
+      "parameters": {
+        "label": "minimax-h3-ow-t2v-fast（MiniMax H3 OW Fast 文生视频）",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "hailuo-2.3",
+        "available": true,
+        "nodeKind": "hailuo",
+        "ratios": [
+          "1:1",
+          "2:3",
+          "3:2",
+          "3:4",
+          "4:3",
+          "9:16",
+          "16:9",
+          "21:9"
+        ],
+        "defaultRatio": "16:9",
+        "durations": [
+          5,
+          10,
+          15
+        ],
+        "defaultDuration": 5,
+        "resolutions": [
+          "480p",
+          "720p"
+        ],
+        "defaultResolution": "480p",
+        "supportsImages": false,
+        "supportsVideos": false,
+        "supportsAudios": false,
+        "maxReferenceImages": 0,
+        "maxReferenceVideos": 0,
+        "maxReferenceAudios": 0,
+        "description": "MiniMax H3 OW Fast 文生视频；必须填写提示词，不接受参考素材。"
       }
     },
     {
@@ -7716,7 +7851,7 @@
   "counts": {
     "llm": 32,
     "image": 42,
-    "video": 110,
+    "video": 113,
     "audio": 16,
     "actions": 47
   }

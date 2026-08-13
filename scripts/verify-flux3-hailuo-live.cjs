@@ -27,6 +27,9 @@ let lastProviderRejection = null;
 const catalogModels = [
   'minimax-h3-ow-i2v-fast',
   'minimax-h3-ow-r2v-fast',
+  'minimax-h3-ow-ref2va-audio-drive-fast',
+  'minimax-h3-ow-fl2va-audio-drive-fast',
+  'minimax-h3-ow-t2v-fast',
   'hailuo-h3-t2v',
   'hailuo-h3-i2v',
   'hailuo-h3-multi',
@@ -127,6 +130,7 @@ function isFlux(model) {
 function taskTypeFor(model) {
   if (model.endsWith('-draft-enhance')) return 'draft-enhance';
   if (model.endsWith('-multi')) return 'multi';
+  if (model.includes('-audio-drive-')) return 'multi';
   if (model.includes('-r2v')) return 'r2v';
   if (model.includes('-i2v')) return 'i2v';
   if (model.endsWith('-v2v')) return 'v2v';
@@ -141,6 +145,15 @@ function requestFor(model, fixtures, state) {
   if (!isFlux(model)) {
     const isMinimaxFast = model.startsWith('minimax-h3-ow-') && model.endsWith('-fast');
     const common = { model, duration: 5, resolution: isMinimaxFast ? '480p' : '768P' };
+    if (model.includes('-audio-drive-')) {
+      return {
+        ...common,
+        ratio: '16:9',
+        prompt: 'Preserve the paper sculpture identity and drive a natural expressive performance with the connected audio.',
+        images: [fixtures.image],
+        audios: [fixtures.audio],
+      };
+    }
     if (model.includes('-i2v')) {
       return {
         ...common,
@@ -331,8 +344,8 @@ function writeSanitizedReport(ok, status, blocker = null) {
     provider: 'seedance-nz',
     officialDocs: {
       url: 'https://api.seedance.nz/docs/llms.txt',
-      sha256: '7db04e5be7ec671b00774937cd0484ab7ce50c737b908f0358b3a6b2ef0560ce',
-      lastModified: 'Sat, 08 Aug 2026 22:43:40 GMT',
+      sha256: '69cfc3bc22504b57b88119dc8d50fca52288a8ccc73a6dba72f5230b2d3b32c0',
+      lastModified: 'Thu, 13 Aug 2026 17:24:14 GMT',
     },
     taskCount: liveResults.length,
     catalogTaskCount: catalogModels.length,

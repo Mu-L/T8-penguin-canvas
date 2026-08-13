@@ -1547,6 +1547,9 @@ test('seedance.nz builds all documented MiniMax H3 OW standard and Fast payloads
     'minimax-h3-ow-i2v',
     'minimax-h3-ow-i2v-fast',
     'minimax-h3-ow-r2v-fast',
+    'minimax-h3-ow-ref2va-audio-drive-fast',
+    'minimax-h3-ow-fl2va-audio-drive-fast',
+    'minimax-h3-ow-t2v-fast',
   ]);
   const t2v = await seedanceNz.buildHailuoPayload({
     model: 'minimax-h3-ow-t2v',
@@ -1630,6 +1633,47 @@ test('seedance.nz builds all documented MiniMax H3 OW standard and Fast payloads
   assert.equal(fastI2v.taskType, 'i2v');
   assert.equal(Object.hasOwn(fastI2v.payload, 'prompt'), false);
   assert.deepEqual(fastI2v.payload.images, ['https://cdn.example.com/minimax-fast-first.png']);
+
+  const fastT2v = await seedanceNz.buildHailuoPayload({
+    model: 'minimax-h3-ow-t2v-fast',
+    prompt: 'a paper kite floats through warm sunset light',
+    duration: 5,
+    resolution: '480p',
+    ratio: '16:9',
+  }, 'test-key');
+  assert.equal(fastT2v.taskType, 't2v');
+  assert.equal(Object.hasOwn(fastT2v.payload, 'images'), false);
+
+  for (const model of [
+    'minimax-h3-ow-ref2va-audio-drive-fast',
+    'minimax-h3-ow-fl2va-audio-drive-fast',
+  ]) {
+    seedanceNz.resetCachesForTests();
+    let mediaUpload = 0;
+    const built = await seedanceNz.buildHailuoPayload({
+      model,
+      prompt: '',
+      duration: 10,
+      resolution: '720p',
+      ratio: '9:16',
+      images: [TINY_PNG_A],
+      audios: [TINY_MP3],
+    }, 'test-key', {
+      uploadIntervalMs: 0,
+      fetchImpl: async () => {
+        mediaUpload += 1;
+        return jsonResponse({ url: `https://cdn.example.com/audio-drive-${mediaUpload}` });
+      },
+    });
+    assert.equal(built.taskType, 'multi');
+    assert.equal(Object.hasOwn(built.payload, 'prompt'), false);
+    assert.deepEqual(built.payload.images, ['https://cdn.example.com/audio-drive-1']);
+    assert.deepEqual(built.payload.metadata, {
+      resolution: '720p',
+      ratio: '9:16',
+      audio_urls: ['https://cdn.example.com/audio-drive-2'],
+    });
+  }
 });
 
 test('seedance.nz validates MiniMax H3 OW prompt, image, seconds, resolution and ratio', async () => {
@@ -1662,6 +1706,20 @@ test('seedance.nz validates MiniMax H3 OW prompt, image, seconds, resolution and
       images: [TINY_PNG_A], videos: ['data:video/mp4;base64,AAAA'],
     }, 'test-key'),
     /不接受视频或音频素材/,
+  );
+  await assert.rejects(
+    seedanceNz.buildHailuoPayload({
+      model: 'minimax-h3-ow-ref2va-audio-drive-fast', duration: 5, resolution: '480p', ratio: '16:9',
+      images: [TINY_PNG_A], audios: [],
+    }, 'test-key'),
+    /必须且只能提供 1 段音频/,
+  );
+  await assert.rejects(
+    seedanceNz.buildHailuoPayload({
+      model: 'minimax-h3-ow-t2v-fast', prompt: 'valid prompt', duration: 5, resolution: '480p', ratio: '16:9',
+      images: [TINY_PNG_A],
+    }, 'test-key'),
+    /文生视频不接受图片、视频或音频素材/,
   );
   await assert.rejects(
     seedanceNz.buildHailuoPayload({

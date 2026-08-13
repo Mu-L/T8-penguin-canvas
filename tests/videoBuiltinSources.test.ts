@@ -61,6 +61,9 @@ test('video built-in sources keep workshop and budget-house catalogs independent
     'hailuo-h3-global-multi',
     'minimax-h3-ow-i2v-fast',
     'minimax-h3-ow-r2v-fast',
+    'minimax-h3-ow-ref2va-audio-drive-fast',
+    'minimax-h3-ow-fl2va-audio-drive-fast',
+    'minimax-h3-ow-t2v-fast',
     'flux-3-video-t2v',
     'flux-3-video-i2v',
     'flux-3-video-v2v',
@@ -94,6 +97,9 @@ test('old video canvases infer the correct built-in source from their saved mode
   assert.equal(inferVideoBuiltinSource('hailuo-h3-global-multi'), 'seedance-nz');
   assert.equal(inferVideoBuiltinSource('minimax-h3-ow-i2v-fast'), 'seedance-nz');
   assert.equal(inferVideoBuiltinSource('minimax-h3-ow-r2v-fast'), 'seedance-nz');
+  assert.equal(inferVideoBuiltinSource('minimax-h3-ow-ref2va-audio-drive-fast'), 'seedance-nz');
+  assert.equal(inferVideoBuiltinSource('minimax-h3-ow-fl2va-audio-drive-fast'), 'seedance-nz');
+  assert.equal(inferVideoBuiltinSource('minimax-h3-ow-t2v-fast'), 'seedance-nz');
   assert.equal(inferVideoBuiltinSource('flux-3-video-global-v2v'), 'seedance-nz');
   assert.equal(inferVideoBuiltinSource('hailuo-2.3'), 'seedance-nz');
   assert.equal(inferVideoBuiltinSource('unknown-video-model'), null);

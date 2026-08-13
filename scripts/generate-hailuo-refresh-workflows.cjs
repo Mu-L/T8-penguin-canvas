@@ -5,9 +5,10 @@ const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
 const outputDir = path.join(root, 'docs', 'workflows');
-const savedAt = '2026-08-09T00:00:00.000Z';
+const legacySavedAt = '2026-08-09T00:00:00.000Z';
+const refreshSavedAt = '2026-08-14T00:00:00.000Z';
 
-function writeWorkflow(model, title, nodes, edges) {
+function writeWorkflow(model, title, nodes, edges, savedAt = legacySavedAt) {
   const doc = {
     schema: 't8-workflow-fragment',
     version: 1,
@@ -85,4 +86,52 @@ for (const [model, label, uploadLabel, prompt] of [
   writeWorkflow(model, `${label}（平价AI小屋）`, [upload, generation], edges);
 }
 
-console.log('generated 5 Hailuo refresh workflows');
+for (const [model, label, imageLabel, prompt] of [
+  [
+    'minimax-h3-ow-ref2va-audio-drive-fast',
+    'MiniMax H3 OW Fast 参考图音频驱动',
+    '上传参考图（必须且只能 1 张）',
+    '保持参考主体一致，并由音频驱动自然、有表现力的动作',
+  ],
+  [
+    'minimax-h3-ow-fl2va-audio-drive-fast',
+    'MiniMax H3 OW Fast 首帧音频驱动',
+    '上传首帧图（必须且只能 1 张）',
+    '以首帧为起点，并由音频驱动自然、有表现力的动作',
+  ],
+]) {
+  const imageId = `${model}-image`;
+  const audioId = `${model}-audio`;
+  const image = {
+    id: imageId,
+    type: 'upload',
+    position: { x: 0, y: 0 },
+    data: { label: imageLabel, uploadType: 'image', lockedUploadType: 'image' },
+  };
+  const audio = {
+    id: audioId,
+    type: 'upload',
+    position: { x: 0, y: 220 },
+    data: { label: '上传驱动音频（必须且只能 1 段）', uploadType: 'audio', lockedUploadType: 'audio' },
+  };
+  const generation = videoNode(model, label, prompt, '480p');
+  writeWorkflow(model, `${label}（平价AI小屋）`, [image, audio, generation], [
+    { id: `${imageId}-edge`, source: imageId, target: model },
+    { id: `${audioId}-edge`, source: audioId, target: model },
+  ], refreshSavedAt);
+}
+
+writeWorkflow(
+  'minimax-h3-ow-t2v-fast',
+  'MiniMax H3 OW Fast 文生视频（平价AI小屋）',
+  [videoNode(
+    'minimax-h3-ow-t2v-fast',
+    'MiniMax H3 OW Fast 文生视频',
+    '纸鸢穿过暖色夕阳，电影感镜头平滑移动',
+    '480p',
+  )],
+  [],
+  refreshSavedAt,
+);
+
+console.log('generated 8 Hailuo refresh workflows');
