@@ -36,7 +36,7 @@ My favorite girl Go YounJung
 ## ✨ 功能亮点
 
 - 🎨 **77 个节点**，覆盖文本 / 图像 / 视频 / 音频 / LLM / RunningHub / ComfyUI / 3D / 工具 / 辅助 / 工具箱 / 输出预览 / 上传素材 / 素材集 / 批量打标 / 随机路由 / Story 全自动制片 / 剧本大师 / MiniMax H3 / Seedance 2.0 提示词增强器 / MiniMax H3 官方提示词增强器 / Seedance 2.5 / 白模预演 / MV 音乐大师
-- ⚡ **v2.9.2 画布启动与资源性能自动更新版**：Electron 先显示可操作启动壳，后端数据库与维护任务按需加载；画布目录改为 50 项游标分页和窗口化，损坏索引渐进恢复。画布 hydration、视口、主题 CSS 与媒体加载均按需执行，跨画布后台运行以 canvasId + entityUid + revision CAS 隔离，避免同 ID 节点串写或结果丢失。隔离开发态 5000 项目录冷启动 959.1ms、刷新 464.9ms、侧栏 DOM 14 行；这不是安装版或所有用户环境保证。
+- ⚡ **[v2.9.2 画布启动与资源性能自动更新版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.2)**：已发布为 GitHub Latest。Electron 先显示可操作启动壳，后端数据库与维护任务按需加载；画布目录改为 50 项游标分页和窗口化，损坏索引渐进恢复。画布 hydration、视口、主题 CSS 与媒体加载均按需执行，跨画布后台运行以 canvasId + entityUid + revision CAS 隔离，避免同 ID 节点串写或结果丢失。隔离开发态 5000 项目录冷启动 959.1ms、刷新 464.9ms、侧栏 DOM 14 行；这不是安装版或所有用户环境保证。
 - 🎬🎵 **v2.9.1 MiniMax H3 OW Fast 音频驱动扩展版**：Hailuo TAB 新增 `minimax-h3-ow-ref2va-audio-drive-fast`、`minimax-h3-ow-fl2va-audio-drive-fast` 与 `minimax-h3-ow-t2v-fast`。两个音频驱动模型严格接收 1 图 + 1 音频，T2V Fast 只接收必填提示词；三者支持 5/10/15 秒、480p/720p 与八种比例。三个模型均已各真实提交一次、成功下载并完整解码，三份配套工作流不含凭据，既有默认模型、默认渠道和旧画布保持不变。
 - 🎨🎵 **v2.9.0 平价 AI 小屋图像与音频扩展版**：图像节点新增 Grok `zhenzhen-image-gk-v2` 与 Wan Image 三模型；音频节点新增 Qwen3-TTS、MiniMax 和 Mureka 三个 TAB、八个模型。12 个模型均已真实提交并成功，13 个媒体结果全部下载解码；Mureka V9 的两个有序音频输出完整保留。12 份配套工作流不含凭据，既有默认渠道、默认模型和旧画布保持不变。
 - 🧩 **v2.8.9 Dola Seedream 5.0 Pro 分层版**：既有 Seedream 分层 TAB 新增 `dola-seedream-5.0-pro-layer-decomposition`，原国内模型继续默认；单张素材可返回一张底图和数量可变的有序透明图层，画布会完整保留、逐张下载和解码，不排序、不去重、不截断。配套无密钥工作流已保存；一次真实任务返回的 7/7 张图片已全部下载并逐张核验。

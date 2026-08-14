@@ -1,10 +1,10 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.9.2",
-  "lastUpdated": "2026-08-14-v2.9.2-release-authorized",
+  "lastUpdated": "2026-08-15-v2.9.2-released",
   "startupAndCanvasPerformanceOptimization": {
-    "status": "release-authorized-v2.9.2",
-    "date": "2026-08-14",
+    "status": "released-v2.9.2",
+    "date": "2026-08-15",
     "releaseIncluded": true,
     "contract": {
       "electronAndBackend": [
@@ -53,11 +53,41 @@
         "screenshots": 3
       }
     },
+    "release": {
+      "status": "published-stable-latest",
+      "tag": "v2.9.2",
+      "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.2",
+      "publishedAt": "2026-08-14T18:34:43Z",
+      "fixedSourceCommit": "94ce2523b6b486c86bcee63d19d68754e451cbd0",
+      "draft": false,
+      "prerelease": false,
+      "githubImmutable": false,
+      "artifactVerification": "唯一正式流程完成三资产发布前完整回下载；独立发布后验证再次下载公开三资产，并通过实际字节、SHA-256、installer SHA-512、latest.yml 结构与 GitHub digest/size 对账。",
+      "runtimeArchive": "remove-ai-watermarks-runtime ZIP64 从同一 47734 个源文件重建，并由官方系统 7-Zip 24.06 完整 CRC；bundled 7-Zip 21.07 的错误拒绝不作为技术失败冒充通过，打包后归档与验证源逐字节一致。",
+      "artifacts": [
+        {
+          "name": "T8-PenguinCanvas-Setup-2.9.2.exe",
+          "bytes": 1314962979,
+          "sha256": "2e37993266078f235dec0232c2a5ead98bfd829e86ef5a46a09f2cf926bd7724",
+          "sha512": "MvLOasmcn3DgP4KV0INPgXaQEvRBQ99klFZOoJ9bmaOV056zQ/khb0dPGYfAu0mKv/88bZ/qhjcoxnY24WYJEg=="
+        },
+        {
+          "name": "T8-PenguinCanvas-Setup-2.9.2.exe.blockmap",
+          "bytes": 1369869,
+          "sha256": "757c12dc519ead259f43ddc1e6b75a43cd8df6dc4648e0fcb5733ea436c54c08"
+        },
+        {
+          "name": "latest.yml",
+          "bytes": 362,
+          "sha256": "d9e9effa5ddd17ba4de233e92530fbfd47591497e566c00cff9c4b7c86fe3b4c"
+        }
+      ]
+    },
     "boundaries": [
       "不启用 ReactFlow onlyRenderVisibleElements，避免离屏节点卸载破坏运行 Hook；大节点内部可见内容分层仍留作后续独立优化。",
       "MV 音乐大师、VideoEdit 等依赖持续媒体或时间线语义的节点不强制迁移到通用 LazyVideo/LazyAudio；其原有播放、同步和导出语义保持不变。",
       "5000 项验证证明当前源码的隔离开发态行为，不等于 Electron 安装版、用户真实磁盘/杀软/VPN 环境或全部用户的 5-10 分钟启动反馈已经普遍解决。",
-      "正式 Electron/NSIS、固定源码提交、Git Tag、Latest、三项自动更新资产与远端完整回下载必须在 v2.9.2 唯一 dist:release 流程收敛；完成前不得写成已经发布。"
+      "v2.9.2 已从固定源码 94ce2523b6b486c86bcee63d19d68754e451cbd0 完成唯一 Electron/NSIS 自动更新发布、固定 Tag、Latest、三资产发布前与独立发布后完整回下载；反馈用户安装环境、协作多端及安装升级证据仍仅按 owner-approved-post-release-v2.9.2 后补，延期不等于通过。"
     ]
   },
   "minimaxH3OwFastExpansion": {
