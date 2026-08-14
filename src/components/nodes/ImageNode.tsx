@@ -7,6 +7,7 @@ import MaterialPreviewSection from './MaterialPreviewSection';
 import ReuseResultToggle from './ReuseResultToggle';
 import MentionPromptInput from './MentionPromptInput';
 import SmartImage from '../SmartImage';
+import LazyVideo from '../LazyVideo';
 import PromptTextarea from '../PromptTextarea';
 import { resolveMediaMentions, type MediaMention } from './mediaMentions';
 import {
@@ -3788,7 +3789,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
       )}
       {isZhenzhenBudgetMjSelected && videoUrl && !hasAutoOutput && (
         <div className="border-t border-white/10 p-2">
-          <video
+          <LazyVideo
             src={videoUrl}
             controls
             preload="metadata"

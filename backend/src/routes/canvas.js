@@ -8,6 +8,31 @@ const { mapCanvasMutationError } = require('../services/canvasPatch');
 
 const router = express.Router();
 
+const CANVAS_LIST_PAGE_DEFAULT = 50;
+const CANVAS_LIST_PAGE_MAX = 200;
+const CANVAS_LIST_RECOVERY_BATCH_SIZE = 2;
+const CANVAS_LIST_MIRROR_THROTTLE_MS = 2_000;
+
+let canvasListRuntimePath = '';
+let canvasListCache = null;
+let canvasListCacheMtimeMs = null;
+let canvasListRecoveryPromise = null;
+let canvasListRecoveryGeneration = 0;
+let canvasListRecoveryState = {
+  status: 'idle',
+  reason: null,
+  scanned: 0,
+  total: 0,
+  recovered: 0,
+  startedAt: null,
+  completedAt: null,
+};
+let pendingCanvasListMirrorTimer = null;
+const pendingCanvasListMirrorUpdates = new Map();
+let canvasListMutationEpoch = 0;
+const lastCanvasListMirrorWriteAt = new Map();
+const deletedCanvasListIds = new Set();
+
 function projectDatabase() {
   return getProjectDatabase(config);
 }
@@ -153,6 +178,90 @@ const CANVAS_DELETE_MIRROR_WARNING_MESSAGES = Object.freeze({
   }),
 });
 
+function applyCanvasListMirrorUpdate(list, canvasId, update) {
+  let item = list.find((entry) => entry.id === canvasId);
+  if (!item && update.createListItem) {
+    item = { ...update.createListItem, id: canvasId };
+    list.push(item);
+  }
+  if (!item) return false;
+  item.nodeCount = update.nodeCount;
+  if (typeof update.name === 'string' && update.name) item.name = update.name;
+  item.updatedAt = update.updatedAt;
+  if (update.revision != null) item.revision = update.revision;
+  return true;
+}
+
+function persistCanvasListMirrorUpdate(canvasId, update) {
+  pendingCanvasListMirrorUpdates.delete(canvasId);
+  const list = loadCanvasList();
+  if (!applyCanvasListMirrorUpdate(list, canvasId, update)) return;
+  canvasListCache = cloneCanvasList(list);
+  canvasListMutationEpoch += 1;
+  try {
+    saveCanvasList(list);
+    lastCanvasListMirrorWriteAt.set(canvasId, Date.now());
+  } catch (error) {
+    scheduleCanvasListMirrorUpdate(canvasId, update);
+    throw error;
+  }
+}
+
+function flushPendingCanvasListMirrorUpdates() {
+  pendingCanvasListMirrorTimer = null;
+  if (!pendingCanvasListMirrorUpdates.size) return;
+  const updates = [...pendingCanvasListMirrorUpdates.entries()];
+  pendingCanvasListMirrorUpdates.clear();
+  try {
+    const list = loadCanvasList();
+    let changed = false;
+    for (const [canvasId, update] of updates) {
+      if (deletedCanvasListIds.has(canvasId)) continue;
+      changed = applyCanvasListMirrorUpdate(list, canvasId, update) || changed;
+    }
+    if (changed) {
+      saveCanvasList(list);
+      const now = Date.now();
+      for (const [canvasId] of updates) lastCanvasListMirrorWriteAt.set(canvasId, now);
+    }
+  } catch {
+    console.warn('[canvas] deferred legacy canvas list mirror write failed');
+  }
+}
+
+function scheduleCanvasListMirrorUpdate(canvasId, update) {
+  const previous = pendingCanvasListMirrorUpdates.get(canvasId);
+  pendingCanvasListMirrorUpdates.set(canvasId, {
+    ...(previous || {}),
+    ...update,
+    createListItem: update.createListItem || previous?.createListItem,
+  });
+  if (pendingCanvasListMirrorTimer) return;
+  pendingCanvasListMirrorTimer = setTimeout(
+    flushPendingCanvasListMirrorUpdates,
+    CANVAS_LIST_MIRROR_THROTTLE_MS,
+  );
+  pendingCanvasListMirrorTimer.unref?.();
+}
+
+function writeCanvasListCompatibilityMirror(canvasId, document, options) {
+  const update = {
+    name: String(document.name || document.title || options.createListItem?.name || canvasId),
+    nodeCount: document.nodes.length,
+    updatedAt: Number(document.updatedAt) || Date.now(),
+    revision: Number(document.revision) || undefined,
+    createListItem: options.createListItem,
+  };
+  const lastWriteAt = lastCanvasListMirrorWriteAt.get(canvasId) || 0;
+  if (options.throttleListMirror
+    && lastWriteAt > 0
+    && Date.now() - lastWriteAt < CANVAS_LIST_MIRROR_THROTTLE_MS) {
+    scheduleCanvasListMirrorUpdate(canvasId, update);
+    return;
+  }
+  persistCanvasListMirrorUpdate(canvasId, update);
+}
+
 function writeCanvasCompatibilityMirrors(canvasId, document, options = {}) {
   const warnings = [];
   const messages = options.messages || CANVAS_MIRROR_WARNING_MESSAGES;
@@ -164,18 +273,7 @@ function writeCanvasCompatibilityMirrors(canvasId, document, options = {}) {
     warnings.push(messages.document);
   }
   try {
-    const list = loadCanvasList();
-    let item = list.find((entry) => entry.id === canvasId);
-    if (!item && options.createListItem) {
-      item = { ...options.createListItem, id: canvasId };
-      list.push(item);
-    }
-    if (item) {
-      item.nodeCount = document.nodes.length;
-      item.updatedAt = Number(document.updatedAt) || Date.now();
-      item.revision = Number(document.revision) || item.revision;
-      saveCanvasList(list);
-    }
+    writeCanvasListCompatibilityMirror(canvasId, document, options);
   } catch (_) {
     console.warn(`[${logLabel}] legacy canvas list mirror write failed after authoritative SQLite commit`);
     warnings.push(messages.list);
@@ -203,6 +301,10 @@ function writeAuthoritativeCanvasCompatibilityMirrors(canvasId, fallbackDocument
 
 function removeCanvasCompatibilityMirrors(canvasId) {
   const warnings = [];
+  resetCanvasListRuntimeForCurrentPath();
+  deletedCanvasListIds.add(canvasId);
+  pendingCanvasListMirrorUpdates.delete(canvasId);
+  lastCanvasListMirrorWriteAt.delete(canvasId);
   try {
     const list = loadCanvasList();
     saveCanvasList(list.filter((item) => item.id !== canvasId));
@@ -248,46 +350,249 @@ function canvasCreatedAtFromId(id, fallback) {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function recoverCanvasListFromFiles() {
-  if (!fs.existsSync(config.DATA_DIR)) return [];
-  const items = [];
-  for (const entry of fs.readdirSync(config.DATA_DIR, { withFileTypes: true })) {
-    if (!entry.isFile()) continue;
-    if (!/^canvas_canvas-[\w-]+\.json$/.test(entry.name)) continue;
-    const id = entry.name.replace(/^canvas_/, '').replace(/\.json$/, '');
-    const file = path.join(config.DATA_DIR, entry.name);
-    try {
-      const data = readJsonFile(file);
-      if (!Array.isArray(data?.nodes) || !Array.isArray(data?.edges)) continue;
-      const stat = fs.statSync(file);
-      const updatedAt = Math.max(1, Math.round(stat.mtimeMs));
-      items.push({
-        id,
-        name: id,
-        nodeCount: data.nodes.length,
-        createdAt: canvasCreatedAtFromId(id, updatedAt),
-        updatedAt,
-      });
-    } catch {
-      // Ignore corrupt canvas payloads; the list should still recover valid canvases.
+function resetCanvasListRuntimeForCurrentPath() {
+  const currentPath = path.resolve(config.CANVAS_FILE);
+  if (canvasListRuntimePath === currentPath) return currentPath;
+  canvasListRuntimePath = currentPath;
+  canvasListCache = null;
+  canvasListCacheMtimeMs = null;
+  canvasListRecoveryPromise = null;
+  canvasListRecoveryGeneration += 1;
+  canvasListMutationEpoch += 1;
+  canvasListRecoveryState = {
+    status: 'idle',
+    reason: null,
+    scanned: 0,
+    total: 0,
+    recovered: 0,
+    startedAt: null,
+    completedAt: null,
+  };
+  if (pendingCanvasListMirrorTimer) clearTimeout(pendingCanvasListMirrorTimer);
+  pendingCanvasListMirrorTimer = null;
+  pendingCanvasListMirrorUpdates.clear();
+  lastCanvasListMirrorWriteAt.clear();
+  deletedCanvasListIds.clear();
+  return currentPath;
+}
+
+function cloneCanvasList(list) {
+  return Array.isArray(list) ? list.map((item) => ({ ...item })) : [];
+}
+
+function sortCanvasListForDisplay(list) {
+  return cloneCanvasList(list).sort((left, right) => {
+    const updatedDelta = (Number(right?.updatedAt) || 0) - (Number(left?.updatedAt) || 0);
+    if (updatedDelta) return updatedDelta;
+    return String(left?.id || '').localeCompare(String(right?.id || ''));
+  });
+}
+
+function canvasListRecoverySnapshot(healthy) {
+  return {
+    status: healthy
+      ? (canvasListRecoveryState.status === 'running' ? 'running' : 'ready')
+      : canvasListRecoveryState.status,
+    reason: canvasListRecoveryState.reason,
+    scanned: canvasListRecoveryState.scanned,
+    total: canvasListRecoveryState.total,
+    recovered: canvasListRecoveryState.recovered,
+    mergeEpoch: canvasListRecoveryState.mergeEpoch ?? null,
+    committedEpoch: canvasListRecoveryState.committedEpoch ?? null,
+    startedAt: canvasListRecoveryState.startedAt,
+    completedAt: canvasListRecoveryState.completedAt,
+  };
+}
+
+function readJsonText(raw) {
+  return JSON.parse(String(raw || '').replace(/^\uFEFF/, '').replace(/\0/g, ''));
+}
+
+
+function yieldCanvasListRecovery() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+function publishCanvasListRecoveryPrefix(recovered, generation) {
+  if (generation !== canvasListRecoveryGeneration) return;
+  const merged = new Map();
+  for (const item of Array.isArray(recovered) ? recovered : []) {
+    if (item?.id && !deletedCanvasListIds.has(item.id)) merged.set(item.id, item);
+  }
+  // Mutations that landed while the scan yielded are newer than recovered
+  // legacy files and therefore win every field-level merge.
+  for (const item of Array.isArray(canvasListCache) ? canvasListCache : []) {
+    if (item?.id && !deletedCanvasListIds.has(item.id)) {
+      merged.set(item.id, { ...(merged.get(item.id) || {}), ...item });
     }
   }
-  return items.sort((a, b) => a.createdAt - b.createdAt);
+  canvasListCache = [...merged.values()];
+}
+
+async function recoverCanvasListFromFilesInBackground(context) {
+  const generation = context?.generation ?? canvasListRecoveryGeneration;
+  const dataDir = context?.dataDir || config.DATA_DIR;
+  const canvasFile = context?.canvasFile || config.CANVAS_FILE;
+  let entries = [];
+  try {
+    entries = await fs.promises.readdir(dataDir, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+  const files = entries.filter(
+    (entry) => entry.isFile() && /^canvas_canvas-[\w-]+\.json$/.test(entry.name),
+  );
+  if (generation === canvasListRecoveryGeneration) {
+    canvasListRecoveryState.total = files.length;
+  }
+
+  const recovered = [];
+  for (let offset = 0; offset < files.length; offset += CANVAS_LIST_RECOVERY_BATCH_SIZE) {
+    const batch = files.slice(offset, offset + CANVAS_LIST_RECOVERY_BATCH_SIZE);
+    const batchItems = await Promise.all(batch.map(async (entry) => {
+      const id = entry.name.replace(/^canvas_/, '').replace(/\.json$/, '');
+      if (deletedCanvasListIds.has(id)) return null;
+      const file = path.join(dataDir, entry.name);
+      try {
+        const [raw, stat] = await Promise.all([
+          fs.promises.readFile(file, 'utf-8'),
+          fs.promises.stat(file),
+        ]);
+        const data = readJsonText(raw);
+        if (!Array.isArray(data?.nodes) || !Array.isArray(data?.edges)) return null;
+        const updatedAt = Math.max(1, Math.round(Number(data.updatedAt) || stat.mtimeMs));
+        return {
+          id,
+          name: String(data.name || data.title || id),
+          nodeCount: data.nodes.length,
+          revision: Number.isSafeInteger(Number(data.revision)) ? Number(data.revision) : undefined,
+          createdAt: canvasCreatedAtFromId(id, updatedAt),
+          updatedAt,
+        };
+      } catch {
+        return null;
+      }
+    }));
+    recovered.push(...batchItems.filter(Boolean));
+    if (generation === canvasListRecoveryGeneration) {
+      canvasListRecoveryState.scanned = Math.min(files.length, offset + batch.length);
+      canvasListRecoveryState.recovered = recovered.length;
+      publishCanvasListRecoveryPrefix(recovered, generation);
+    }
+    await yieldCanvasListRecovery();
+  }
+
+  if (generation !== canvasListRecoveryGeneration || path.resolve(config.CANVAS_FILE) !== path.resolve(canvasFile)) {
+    return recovered;
+  }
+
+  // Final recovery commit is intentionally synchronous and contains no await:
+  // mutation callbacks cannot interleave between the second merge and atomic
+  // rename. The epoch records that every create/update/delete went through the
+  // same commit boundary while the asynchronous scan was running.
+  const mergeEpoch = canvasListMutationEpoch;
+  const merged = new Map();
+  for (const item of recovered) {
+    if (!deletedCanvasListIds.has(item.id)) merged.set(item.id, item);
+  }
+  for (const item of Array.isArray(canvasListCache) ? canvasListCache : []) {
+    if (item?.id && !deletedCanvasListIds.has(item.id)) {
+      merged.set(item.id, { ...(merged.get(item.id) || {}), ...item });
+    }
+  }
+  const list = [...merged.values()].sort((left, right) => {
+    const createdDelta = (Number(left?.createdAt) || 0) - (Number(right?.createdAt) || 0);
+    return createdDelta || String(left?.id || '').localeCompare(String(right?.id || ''));
+  });
+  saveCanvasList(list);
+  canvasListRecoveryState = {
+    ...canvasListRecoveryState,
+    status: 'ready',
+    scanned: files.length,
+    total: files.length,
+    recovered: list.length,
+    mergeEpoch,
+    committedEpoch: canvasListMutationEpoch,
+    completedAt: Date.now(),
+  };
+  return list;
+}
+
+function startCanvasListRecovery(reason) {
+  const canvasFile = resetCanvasListRuntimeForCurrentPath();
+  if (canvasListRecoveryPromise) return canvasListRecoveryPromise;
+  const generation = ++canvasListRecoveryGeneration;
+  canvasListRecoveryState = {
+    status: 'running',
+    reason,
+    scanned: 0,
+    total: 0,
+    recovered: Array.isArray(canvasListCache) ? canvasListCache.length : 0,
+    startedAt: Date.now(),
+    completedAt: null,
+  };
+  const context = { generation, dataDir: config.DATA_DIR, canvasFile };
+  canvasListRecoveryPromise = recoverCanvasListFromFilesInBackground(context)
+    .catch(() => {
+      if (generation === canvasListRecoveryGeneration) {
+        canvasListRecoveryState = {
+          ...canvasListRecoveryState,
+          status: 'failed',
+          completedAt: Date.now(),
+        };
+      }
+      return [];
+    })
+    .finally(() => {
+      if (generation === canvasListRecoveryGeneration) canvasListRecoveryPromise = null;
+    });
+  return canvasListRecoveryPromise;
+}
+
+function loadCanvasListState(options = {}) {
+  const canvasFile = resetCanvasListRuntimeForCurrentPath();
+  const validateFile = options.validateFile !== false;
+  if (!validateFile && Array.isArray(canvasListCache)) {
+    return { list: cloneCanvasList(canvasListCache), healthy: true };
+  }
+
+  try {
+    const stat = fs.statSync(canvasFile);
+    if (Array.isArray(canvasListCache) && canvasListCacheMtimeMs === stat.mtimeMs) {
+      return { list: cloneCanvasList(canvasListCache), healthy: true };
+    }
+    const list = readJsonFile(canvasFile);
+    if (!Array.isArray(list)) throw new Error('canvas_list.json 不是数组');
+    canvasListCache = cloneCanvasList(list);
+    canvasListCacheMtimeMs = stat.mtimeMs;
+    return { list: cloneCanvasList(canvasListCache), healthy: true };
+  } catch (error) {
+    const reason = error?.code === 'ENOENT' ? 'missing' : 'invalid';
+    if (canvasListRecoveryState.status !== 'running') {
+      console.warn(`⚠ 画布列表${reason === 'missing' ? '缺失' : '读取失败'}，已转入后台分批恢复`);
+      startCanvasListRecovery(reason);
+    }
+    return {
+      list: cloneCanvasList(canvasListCache),
+      healthy: false,
+    };
+  }
 }
 
 function loadCanvasList() {
-  if (!fs.existsSync(config.CANVAS_FILE)) return recoverCanvasListFromFiles();
-  try {
-    const list = readJsonFile(config.CANVAS_FILE);
-    return Array.isArray(list) ? list : recoverCanvasListFromFiles();
-  } catch (e) {
-    console.warn(`⚠ 画布列表读取失败，尝试从单画布文件恢复: ${e?.message || e}`);
-    return recoverCanvasListFromFiles();
-  }
+  return loadCanvasListState().list;
 }
 
 function saveCanvasList(list) {
+  resetCanvasListRuntimeForCurrentPath();
   atomicWriteJson(config.CANVAS_FILE, list);
+  canvasListCache = cloneCanvasList(list);
+  canvasListMutationEpoch += 1;
+  try {
+    canvasListCacheMtimeMs = fs.statSync(config.CANVAS_FILE).mtimeMs;
+  } catch {
+    canvasListCacheMtimeMs = null;
+  }
 }
 
 function getCanvasFile(id) {
@@ -1063,10 +1368,212 @@ function createDefaultFarmCanvasState() {
   return sanitizeFarmCanvasState();
 }
 
+function parseCanvasListQuery(req) {
+  const query = req.query || {};
+  const paged = query.limit != null || query.cursor != null || query.activeId != null || query.q != null;
+  if (!paged) return { paged: false, limit: null, cursor: null, activeId: null };
+
+  const rawLimit = query.limit == null ? String(CANVAS_LIST_PAGE_DEFAULT) : query.limit;
+  if (Array.isArray(rawLimit) || typeof rawLimit !== 'string' || !/^[1-9]\d*$/.test(rawLimit)) {
+    return { error: 'limit 必须是 1-200 的整数' };
+  }
+  const limit = Number(rawLimit);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > CANVAS_LIST_PAGE_MAX) {
+    return { error: 'limit 必须是 1-200 的整数' };
+  }
+
+  const cursor = query.cursor == null ? null : query.cursor;
+  if (Array.isArray(cursor) || (cursor != null && (typeof cursor !== 'string' || cursor.length > 1024))) {
+    return { error: 'cursor 无效' };
+  }
+  if (cursor) {
+    try {
+      const decoded = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+      if (!Array.isArray(decoded)
+        || decoded.length !== 2
+        || !Number.isSafeInteger(Number(decoded[0]))
+        || Number(decoded[0]) < 0
+        || typeof decoded[1] !== 'string'
+        || !decoded[1]
+        || decoded[1].length > 240) {
+        return { error: 'cursor 无效' };
+      }
+    } catch {
+      return { error: 'cursor 无效' };
+    }
+  }
+
+  const rawSearchQuery = query.q == null ? '' : query.q;
+  if (Array.isArray(rawSearchQuery)
+    || typeof rawSearchQuery !== 'string'
+    || rawSearchQuery.length > 120
+    || /[\u0000-\u001f\u007f]/.test(rawSearchQuery)) {
+    return { error: 'q 必须是 120 字符以内的文本' };
+  }
+  const searchQuery = rawSearchQuery.trim();
+  const activeId = query.activeId == null ? null : query.activeId;
+  if (Array.isArray(activeId)
+    || (activeId != null && (typeof activeId !== 'string' || activeId.length > 240 || /[\u0000-\u001f\u007f]/.test(activeId)))) {
+    return { error: 'activeId 无效' };
+  }
+  return { paged: true, limit, cursor: cursor || null, activeId: activeId || null, query: searchQuery };
+}
+
+function decodeCanvasListCursor(cursor) {
+  if (!cursor) return null;
+  const decoded = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+  return { updatedAt: Number(decoded[0]), id: String(decoded[1]) };
+}
+
+function encodeCanvasListCursor(item) {
+  return Buffer.from(JSON.stringify([
+    Math.max(0, Math.trunc(Number(item?.updatedAt) || 0)),
+    String(item?.id || ''),
+  ]), 'utf8').toString('base64url');
+}
+
+function paginateCanvasList(list, options) {
+  const sorted = sortCanvasListForDisplay(list);
+  const cursor = decodeCanvasListCursor(options.cursor);
+  const start = cursor
+    ? sorted.findIndex((item) => {
+      const updatedAt = Math.max(0, Math.trunc(Number(item?.updatedAt) || 0));
+      return updatedAt < cursor.updatedAt
+        || (updatedAt === cursor.updatedAt && String(item?.id || '') > cursor.id);
+    })
+    : 0;
+  const safeStart = start < 0 ? sorted.length : start;
+  const candidates = sorted.slice(safeStart, safeStart + options.limit + 1);
+  const hasMore = candidates.length > options.limit;
+  const items = candidates.slice(0, options.limit);
+  return {
+    items,
+    hasMore,
+    nextCursor: hasMore && items.length ? encodeCanvasListCursor(items[items.length - 1]) : null,
+    total: sorted.length,
+  };
+}
+
+function filterCanvasListByQuery(list, query) {
+  const normalized = String(query || '').trim().toLocaleLowerCase();
+  if (!normalized) return list;
+  return (Array.isArray(list) ? list : []).filter((item) => (
+    String(item?.name || '').toLocaleLowerCase().includes(normalized)
+    || String(item?.id || '').toLocaleLowerCase().includes(normalized)
+  ));
+}
+
+function canvasListItemFromDocument(canvasId, document) {
+  if (!document || !Array.isArray(document.nodes) || !Array.isArray(document.edges)) return null;
+  const updatedAt = Math.max(1, Math.trunc(Number(document.updatedAt) || Date.now()));
+  return {
+    id: canvasId,
+    name: String(document.name || document.title || canvasId),
+    nodeCount: document.nodes.length,
+    revision: Number.isSafeInteger(Number(document.revision)) ? Number(document.revision) : undefined,
+    createdAt: Math.max(1, Math.trunc(Number(document.createdAt) || canvasCreatedAtFromId(canvasId, updatedAt))),
+    updatedAt,
+  };
+}
+
+function databaseCanvasListPage(options, cachedList) {
+  const database = projectDatabase();
+  if (!database || typeof database.listCanvasesPage !== 'function') {
+    return { items: [], hasMore: false, nextCursor: null, total: null };
+  }
+  const page = database.listCanvasesPage(undefined, {
+    limit: options.limit,
+    cursor: options.cursor,
+  });
+  const cachedById = new Map((Array.isArray(cachedList) ? cachedList : [])
+    .filter((item) => item?.id)
+    .map((item) => [item.id, item]));
+  return {
+    items: (Array.isArray(page?.items) ? page.items : []).map((item) => {
+      const cached = cachedById.get(item.id);
+      return cached ? { ...item, name: cached.name || item.name } : item;
+    }),
+    hasMore: Boolean(page?.hasMore),
+    nextCursor: typeof page?.nextCursor === 'string' && page.nextCursor ? page.nextCursor : null,
+    total: null,
+  };
+}
+
+function resolveRequestedCanvasListItem(activeId, list) {
+  if (!activeId) return null;
+  const cached = (Array.isArray(list) ? list : []).find((item) => item?.id === activeId);
+  if (cached) return { ...cached };
+  try {
+    return canvasListItemFromDocument(activeId, projectDatabase().getCanvas(activeId));
+  } catch {
+    return null;
+  }
+}
 // GET /api/canvas — 获取画布列表
-router.get('/', (_req, res) => {
-  const list = loadCanvasList();
-  res.json({ success: true, data: list });
+router.get('/', (req, res) => {
+  const options = parseCanvasListQuery(req);
+  if (options.error) {
+    return res.status(400).json({ success: false, code: 'canvas_list_query_invalid', error: options.error });
+  }
+
+  const state = loadCanvasListState();
+  const recoveryRunning = canvasListRecoveryState.status === 'running';
+  const catalogHealthy = state.healthy && !recoveryRunning;
+  if (!options.paged) {
+    if (catalogHealthy) return res.json({ success: true, data: state.list });
+    res.set('Retry-After', '1');
+    res.set('X-T8-Canvas-Catalog-Recovery', canvasListRecoveryState.status || 'running');
+    return res.status(503).json({
+      success: false,
+      code: 'canvas_catalog_recovering',
+      error: '画布目录正在后台恢复，请稍后重试',
+      retryable: true,
+      recovery: canvasListRecoverySnapshot(false),
+    });
+  }
+
+  let page;
+  try {
+    if (!catalogHealthy) {
+      // Keep a damaged catalog recovery off the request hot path. The renderer
+      // can render the in-memory prefix and retry from the recovery metadata.
+      const partialList = options.query
+        ? filterCanvasListByQuery(state.list, options.query)
+        : state.list;
+      page = paginateCanvasList(partialList, options);
+    } else if (options.query) {
+      page = paginateCanvasList(filterCanvasListByQuery(state.list, options.query), options);
+    } else {
+      page = paginateCanvasList(state.list, options);
+    }
+  } catch {
+    return res.status(400).json({
+      success: false,
+      code: 'canvas_list_cursor_invalid',
+      error: 'cursor 无效，请重新加载画布列表',
+    });
+  }
+
+
+  const activeItem = catalogHealthy
+    ? resolveRequestedCanvasListItem(options.activeId, state.list)
+    : (state.list.find((item) => item?.id === options.activeId) || null);
+  const recovery = canvasListRecoverySnapshot(catalogHealthy);
+  const meta = {
+    version: 1,
+    total: page.total,
+    hasMore: Boolean(page.hasMore),
+    nextCursor: page.nextCursor || null,
+    partial: !catalogHealthy,
+    searchUnavailable: Boolean(options.query && !catalogHealthy),
+    recovery,
+    ...(activeItem ? { activeItem } : {}),
+  };
+  return res.json({
+    success: true,
+    data: page.items,
+    meta,
+  });
 });
 
 // POST /api/canvas — 创建画布
@@ -1082,6 +1589,8 @@ router.post('/', (req, res) => {
   };
   // 初始化空画布数据
   const initialData = {
+    name: canvas.name,
+    nodeCount: 0,
     nodes: [],
     edges: [],
     viewport: { x: 0, y: 0, zoom: 1 },
@@ -1156,6 +1665,28 @@ router.get('/:id', (req, res) => {
   }
 });
 
+// GET /api/canvas/:id/metadata — 只读取 SQLite 权威目录元数据。
+router.get('/:id/metadata', (req, res) => {
+  try {
+    const document = projectDatabase().getCanvas(req.params.id);
+    const item = canvasListItemFromDocument(req.params.id, document);
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        code: 'canvas_metadata_not_found',
+        error: '画布不存在',
+      });
+    }
+    return res.json({ success: true, data: item });
+  } catch (error) {
+    return sendCanvasPatchError(res, error, {
+      fallbackCode: 'canvas_metadata_read_failed',
+      fallbackMessage: '画布元数据读取失败',
+      defaultStatus: 500,
+    });
+  }
+});
+
 // PUT /api/canvas/:id — 更新画布数据(防空数据覆盖)
 router.put('/:id', (req, res) => {
   const file = getCanvasFile(req.params.id);
@@ -1209,6 +1740,10 @@ router.put('/:id', (req, res) => {
   if (Object.prototype.hasOwnProperty.call(incoming || {}, 'farmCanvas')) {
     persisted.farmCanvas = sanitizeFarmCanvasState(incoming.farmCanvas);
   }
+  persisted.nodeCount = persisted.nodes.length;
+  if (!Object.prototype.hasOwnProperty.call(persisted, 'name') && authoritativeExisting?.name) {
+    persisted.name = authoritativeExisting.name;
+  }
   let document;
   try {
     if (!authoritativeExisting && fs.existsSync(file)) {
@@ -1242,6 +1777,7 @@ router.put('/:id', (req, res) => {
     req.params.id,
     document,
     database,
+    { throttleListMirror: true },
   );
   res.set('ETag', `"${persisted.revision}"`);
   return res.json({
@@ -1622,13 +2158,31 @@ router.delete('/:id', (req, res) => {
 
 // PATCH /api/canvas/:id/name — 重命名
 router.patch('/:id/name', (req, res) => {
-  const list = loadCanvasList();
-  const item = list.find((x) => x.id === req.params.id);
+  let database;
+  let item;
+  try {
+    database = projectDatabase();
+    item = database.updateCanvasCatalogMetadata(req.params.id, {
+      name: req.body?.name,
+    });
+  } catch (error) {
+    return sendCanvasPatchError(res, error, {
+      fallbackCode: 'canvas_rename_failed',
+      fallbackMessage: '画布重命名失败',
+      defaultStatus: 500,
+    });
+  }
   if (!item) return res.status(404).json({ success: false, error: '画布不存在' });
-  item.name = req.body?.name || item.name;
-  item.updatedAt = Date.now();
-  saveCanvasList(list);
-  res.json({ success: true, data: item });
+
+  const warnings = writeAuthoritativeCanvasCompatibilityMirrors(
+    req.params.id,
+    null,
+    database,
+    { createListItem: item, logLabel: 'canvas-rename' },
+  ).map((warning) => ({ ...warning, committed: true }));
+  return res.json({
+    success: true, committed: true, data: item, ...(warnings.length ? { warnings } : {}),
+  });
 });
 
 module.exports = router;

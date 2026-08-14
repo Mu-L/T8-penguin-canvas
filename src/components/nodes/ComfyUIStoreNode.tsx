@@ -34,6 +34,8 @@ import {
 } from '../../utils/materialExclusion';
 import MaterialPreviewSection from './MaterialPreviewSection';
 import SmartImage from '../SmartImage';
+import LazyAudio from '../LazyAudio';
+import LazyVideo from '../LazyVideo';
 import PromptTextarea from '../PromptTextarea';
 import ResizableCorners from './ResizableCorners';
 import { useOrderedMaterials } from './useOrderedMaterials';
@@ -701,7 +703,7 @@ const ComfyUIStoreNode = ({ id, data, selected }: NodeProps) => {
               <div className="space-y-1.5">
                 <div className="flex items-center gap-1 text-[11px] font-bold" style={{ color: sub }}><Film size={12} /> 视频 ({videoUrls.length})</div>
                 {videoUrls.slice(0, 3).map((url, index) => (
-                  <video key={`${url}-${index}`} src={url} controls preload="metadata" className="nodrag nopan nowheel w-full rounded border" style={{ borderColor: border, maxHeight: 180 }} />
+                  <LazyVideo key={`${url}-${index}`} src={url} controls preload="metadata" className="nodrag nopan nowheel w-full rounded border" style={{ borderColor: border, maxHeight: 180 }} />
                 ))}
               </div>
             )}
@@ -709,7 +711,7 @@ const ComfyUIStoreNode = ({ id, data, selected }: NodeProps) => {
               <div className="space-y-1.5">
                 <div className="flex items-center gap-1 text-[11px] font-bold" style={{ color: sub }}><Music size={12} /> 音频 ({audioUrls.length})</div>
                 {audioUrls.slice(0, 4).map((url, index) => (
-                  <audio key={`${url}-${index}`} src={url} controls preload="metadata" className="nodrag nopan nowheel w-full" />
+                  <LazyAudio key={`${url}-${index}`} src={url} controls preload="metadata" className="nodrag nopan nowheel w-full" />
                 ))}
               </div>
             )}

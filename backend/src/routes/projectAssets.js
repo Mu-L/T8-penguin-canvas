@@ -3,7 +3,11 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../config');
 const { DEFAULT_PROJECT_ID, isUuid } = require('../collaboration/protocol');
-const { getProjectDatabase } = require('../services/projectDatabase');
+const {
+  createLazyRuntime,
+  getProjectStorageRuntime,
+  sendProjectRuntimeUnavailable,
+} = require('../services/projectRuntime');
 const { getBackgroundAssetIndexer, hashFile } = require('../services/assetIndexer');
 const { getAssetPreviewPipeline } = require('../services/assetPreviewPipeline');
 const { getAssetBlobStore } = require('../services/assetBlobStore');
@@ -26,11 +30,49 @@ const {
 } = require('../services/assetPublicView');
 
 const router = express.Router();
-const database = getProjectDatabase(config);
-const previewPipeline = getAssetPreviewPipeline(config, database);
-const indexer = getBackgroundAssetIndexer(config, database, previewPipeline);
-const semanticPipeline = getAssetSemanticPipeline(config, database);
-const blobStore = getAssetBlobStore(config);
+let database = null;
+let previewPipeline = null;
+let indexer = null;
+let semanticPipeline = null;
+let blobStore = null;
+
+const projectAssetsRuntime = createLazyRuntime(() => {
+  const nextDatabase = getProjectStorageRuntime(config).database;
+  const nextPreviewPipeline = getAssetPreviewPipeline(config, nextDatabase);
+  const nextIndexer = getBackgroundAssetIndexer(config, nextDatabase, nextPreviewPipeline);
+  const nextSemanticPipeline = getAssetSemanticPipeline(config, nextDatabase);
+  const nextBlobStore = getAssetBlobStore(config);
+  return {
+    database: nextDatabase,
+    previewPipeline: nextPreviewPipeline,
+    indexer: nextIndexer,
+    semanticPipeline: nextSemanticPipeline,
+    blobStore: nextBlobStore,
+  };
+});
+
+function getProjectAssetsRuntime() {
+  const runtime = projectAssetsRuntime.get();
+  database = runtime.database;
+  previewPipeline = runtime.previewPipeline;
+  indexer = runtime.indexer;
+  semanticPipeline = runtime.semanticPipeline;
+  blobStore = runtime.blobStore;
+  return runtime;
+}
+
+function peekProjectAssetsRuntime() {
+  return projectAssetsRuntime.peek();
+}
+
+router.use((_req, res, next) => {
+  try {
+    getProjectAssetsRuntime();
+    next();
+  } catch (error) {
+    sendProjectRuntimeUnavailable(res, error);
+  }
+});
 
 function isLoopbackRequest(req) {
   const address = String(req.socket?.remoteAddress || '').toLowerCase();
@@ -1615,8 +1657,12 @@ router.get('/:assetId', (req, res) => {
 });
 
 module.exports = router;
-module.exports.indexer = indexer;
-module.exports.previewPipeline = previewPipeline;
-module.exports.semanticPipeline = semanticPipeline;
+module.exports.getRuntime = getProjectAssetsRuntime;
+module.exports.peekRuntime = peekProjectAssetsRuntime;
+Object.defineProperties(module.exports, {
+  indexer: { enumerable: true, get: () => peekProjectAssetsRuntime()?.indexer || null },
+  previewPipeline: { enumerable: true, get: () => peekProjectAssetsRuntime()?.previewPipeline || null },
+  semanticPipeline: { enumerable: true, get: () => peekProjectAssetsRuntime()?.semanticPipeline || null },
+});
 module.exports.isLoopbackRequest = isLoopbackRequest;
 module.exports.isTrustedSemanticRequest = isTrustedSemanticRequest;

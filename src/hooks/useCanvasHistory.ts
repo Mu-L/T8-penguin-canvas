@@ -18,6 +18,10 @@ export interface CanvasHistoryState {
   present: CanvasSnapshot | null;
   future: CanvasSnapshot[];
 }
+export interface CanvasHistoryResetOptions {
+  deferClone?: boolean;
+}
+
 
 export const CANVAS_HISTORY_LIMIT = 50;
 
@@ -57,10 +61,14 @@ function historyLimit(limit: number) {
   return Math.max(1, Math.trunc(Number(limit) || CANVAS_HISTORY_LIMIT));
 }
 
-export function createCanvasHistoryState(initial?: CanvasSnapshot): CanvasHistoryState {
+export function createCanvasHistoryState(
+  initial?: CanvasSnapshot,
+  options: CanvasHistoryResetOptions = {},
+): CanvasHistoryState {
+  const sanitized = initial ? sanitizeCanvasHistorySnapshot(initial) : null;
   return {
     past: [],
-    present: initial ? clone(sanitizeCanvasHistorySnapshot(initial)) : null,
+    present: sanitized ? (options.deferClone ? sanitized : clone(sanitized)) : null,
     future: [],
   };
 }
@@ -125,8 +133,8 @@ export function useCanvasHistory(
   const restoringRef = useRef(false);
   const [, setVersion] = useState(0);
 
-  const reset = useCallback((init?: CanvasSnapshot) => {
-    historyRef.current = createCanvasHistoryState(init);
+  const reset = useCallback((init?: CanvasSnapshot, options?: CanvasHistoryResetOptions) => {
+    historyRef.current = createCanvasHistoryState(init, options);
     setVersion((v) => v + 1);
   }, []);
 

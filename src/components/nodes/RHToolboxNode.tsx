@@ -27,7 +27,8 @@ import { runRhToolboxTool, getRhToolboxManifest, type RunRhToolboxProgress } fro
 import { getRhToolboxPersistentManifest } from '../../services/api';
 import { useThemeStore } from '../../stores/theme';
 import { logBus } from '../../stores/logs';
-import { useRunBusStore } from '../../stores/runBus';
+import { createCanvasNodeExecutionKey, useRunBusStore } from '../../stores/runBus';
+import { useCanvasStore } from '../../stores/canvas';
 import {
   RH_TOOLBOX_ALL_CATEGORY_ID,
   RH_TOOLBOX_CAPABILITY_LABELS,
@@ -64,6 +65,7 @@ import MentionPromptInput from './MentionPromptInput';
 import { resolveMediaMentions, type MediaMention } from './mediaMentions';
 import LoopingVideo from '../LoopingVideo';
 import SmartImage from '../SmartImage';
+import LazyAudio from '../LazyAudio';
 import ResizableCorners from './ResizableCorners';
 
 const handleStyle: CSSProperties = {
@@ -177,6 +179,8 @@ const RHToolboxNode = ({ id, data, selected }: NodeProps) => {
   const cancelInFlightRef = useRef(false);
   const [cancelling, setCancelling] = useState(false);
   const isBusy = remoteBusy || cancelling;
+  const originCanvasIdRef = useRef(useCanvasStore.getState().activeId);
+  const executionNodeId = createCanvasNodeExecutionKey(originCanvasIdRef.current, id);
   const runCancelSeq = useRunBusStore((s) => s.cancelSeq);
   const runCancelTargets = useRunBusStore((s) => s.cancelTargets);
   const lastRunCancelSeqRef = useRef(runCancelSeq);
@@ -799,11 +803,11 @@ const RHToolboxNode = ({ id, data, selected }: NodeProps) => {
   useEffect(() => {
     if (runCancelSeq === lastRunCancelSeqRef.current) return;
     lastRunCancelSeqRef.current = runCancelSeq;
-    if (!runCancelTargets.includes(id)) return;
+    if (!runCancelTargets.includes(executionNodeId)) return;
     if (!isBusy && !d.taskId && !activeTaskIdRef.current) return;
     handleStop();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runCancelSeq, runCancelTargets, id, isBusy, d.taskId]);
+  }, [runCancelSeq, runCancelTargets, executionNodeId, isBusy, d.taskId]);
 
   useRunTrigger(id, async (reporter) => {
     if (isBusy) return;
@@ -1282,7 +1286,7 @@ const RHToolboxNode = ({ id, data, selected }: NodeProps) => {
             <div className="space-y-2 pt-2" style={{ borderTop: `1px solid ${border}` }}>
               {imageUrls.map((url, index) => <SmartImage key={`${url}-${index}`} src={url} alt="RH工具箱输出" className="w-full rounded object-contain" thumbSize={720} />)}
               {videoUrls.map((url, index) => <LoopingVideo key={`${url}-${index}`} src={url} controls className="w-full rounded" />)}
-              {audioUrls.map((url, index) => <audio key={`${url}-${index}`} src={url} controls className="w-full h-8" />)}
+              {audioUrls.map((url, index) => <LazyAudio key={`${url}-${index}`} src={url} controls className="w-full h-8" />)}
               {outputText && <div className="rounded p-2 text-[11px] whitespace-pre-wrap" style={{ background: surface, border: `1px solid ${border}`, color: text }}>{outputText}</div>}
             </div>
           )}

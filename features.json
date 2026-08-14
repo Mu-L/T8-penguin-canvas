@@ -1,7 +1,65 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.9.1",
-  "lastUpdated": "2026-08-14-v2.9.1-released",
+  "version": "2.9.2",
+  "lastUpdated": "2026-08-14-v2.9.2-release-authorized",
+  "startupAndCanvasPerformanceOptimization": {
+    "status": "release-authorized-v2.9.2",
+    "date": "2026-08-14",
+    "releaseIncluded": true,
+    "contract": {
+      "electronAndBackend": [
+        "Electron 先创建隐藏启动壳，前端 ready-to-show 后显示；15 秒 reveal deadline 提供重新加载画布和打开本地后端的可操作兜底。",
+        "导入 backend/src/server.js 以及访问 /api/status 不实例化项目数据库或协作 Gateway；数据库备份、语义模型刷新、运行恢复与 Figma Bridge 延后到前端交互或首次真实存储访问之后。",
+        "延迟工作受 shutdown fence 约束；备份、storage-ready hook、Figma 与已经启动的后台工作可取消、可等待，不允许关停后再启动子进程或数据库工作。"
+      ],
+      "canvasCatalog": [
+        "首屏请求 50 项，游标分页最多 200 项，并单独返回持久 activeId 对应项；侧栏使用 42px 行高、224px 视口、overscan 4 的绝对定位窗口化，5000 项目录也只挂载约 14 行 DOM。",
+        "canvas_list.json 缺失或损坏时按小批次渐进扫描并原子恢复；分页请求只返回已恢复的内存前缀和 recovery 元数据，不在请求热路径回退到全库/全文件扫描。",
+        "保存后通过 /api/canvas/:id/metadata 定点刷新单个目录项；重命名先提交 SQLite 权威元数据，兼容镜像写失败以 committed=true warning 返回，不把已经成功的重命名误报为失败。"
+      ],
+      "canvasHydrationAndViewport": [
+        "画布数据只做一次 canonical hydration；GET 失败或超时时显示可重试只读状态、保留既有内存图、零 PUT，只有取得安全整数 revision 后才恢复写权限。",
+        "视口按画布写入 t8-canvas-viewport-v1，LRU 上限 100；本地视口优先，旧默认视口只 fit 一次，移动结束只写本地缓存，快速 A/B 切换前冲刷待保存编辑。"
+      ],
+      "themesAndMedia": [
+        "主题 CSS 按需分包并双缓冲应用；加载失败回退 tech 并保留失败/重试状态，不留下半主题。自定义主题只缓存当前模板、上限 128 KiB，并在后台 SWR 刷新。",
+        "图片、视频、音频共用单例 IntersectionObserver 和 4/1/1 加载并发；离屏媒体不抢占首屏，首击播放由 pendingPlay 保留用户意图。"
+      ],
+      "crossCanvasRuns": [
+        "A/B 画布即使具有相同 nodeId，后台运行仍以 canvasId + entityUid 绑定原始实体；node.patch 使用 revision CAS，409 重新读取并确认同一实体后最多重试一次。",
+        "后台完成结果进入有界 committed mailbox，原画布重新挂载后按 revision 合并；已删除实体或同 ID 重建不会被旧结果复活，快速切换也先保存当前编辑。"
+      ]
+    },
+    "verification": {
+      "frontend": "前端性能、画布 GET 失败保护、视口、主题、媒体和跨画布后台运行专项 65/65 通过；最终受影响前端聚合矩阵 88/88、独立安全矩阵 59/59 通过，安全复审未发现残余 P0/P1。",
+      "backendAndCatalog": "后端启动、画布目录、延迟运行时、Figma 生命周期和安全关停专项 44/44 通过。",
+      "databaseMethodClassification": "数据库方法分类 460/460 均已归类且无遗漏；该证据只证明分类清单完整，不宣称全库 writer policy 已完全合规。",
+      "gates": [
+        "npm run type-check",
+        "npm run build",
+        "npm run worktree:check",
+        "npm run worktree:development",
+        "npm run feature-sync:check",
+        "git diff --check"
+      ],
+      "developmentBrowser": {
+        "environment": "隔离数据根 + fresh Chrome headless/CDP，1440x900，5000 项画布目录；内置 Browser 因 Windows ACL helper 失败，使用项目同款 CDP Chrome 后备。",
+        "coldInteractiveMs": 959.1,
+        "externalColdMs": 1019,
+        "reloadInteractiveMs": 464.9,
+        "catalog": "初始加载 50 项，滚动加载至 100 项；实际 DOM 始终 14 行。",
+        "errors": "应用网络错误 0、HTTP 错误 0、console error 0、pageerror 0、页面横向溢出 0。",
+        "report": ".tmp/startup-ui-qa/ui-qa-report.json",
+        "screenshots": 3
+      }
+    },
+    "boundaries": [
+      "不启用 ReactFlow onlyRenderVisibleElements，避免离屏节点卸载破坏运行 Hook；大节点内部可见内容分层仍留作后续独立优化。",
+      "MV 音乐大师、VideoEdit 等依赖持续媒体或时间线语义的节点不强制迁移到通用 LazyVideo/LazyAudio；其原有播放、同步和导出语义保持不变。",
+      "5000 项验证证明当前源码的隔离开发态行为，不等于 Electron 安装版、用户真实磁盘/杀软/VPN 环境或全部用户的 5-10 分钟启动反馈已经普遍解决。",
+      "正式 Electron/NSIS、固定源码提交、Git Tag、Latest、三项自动更新资产与远端完整回下载必须在 v2.9.2 唯一 dist:release 流程收敛；完成前不得写成已经发布。"
+    ]
+  },
   "minimaxH3OwFastExpansion": {
     "status": "released-v2.9.1-live-verified",
     "date": "2026-08-14",
@@ -264,8 +322,16 @@
     "contract": {
       "endpoint": "POST /v1/image/generations + GET /v1/image/generations/{task_id}",
       "input": "必须且只能输入 1 张 JPG/JPEG/PNG/WEBP 图片，Provider 上传前限制为不超过 30MB；提示词可选且最多 2000 字符。",
-      "resolution": ["auto", "1k", "1.5k", "2k"],
-      "outputFormat": ["png", "jpeg"],
+      "resolution": [
+        "auto",
+        "1k",
+        "1.5k",
+        "2k"
+      ],
+      "outputFormat": [
+        "png",
+        "jpeg"
+      ],
       "output": "官方文档形状 content.image_urls 与真实 Provider 形状 data.upstream.response.results[] 均按原始顺序完整读取；标量 result_url/image_url 只作为数组缺失时的兼容兜底。",
       "materialization": "Provider 返回的底图与全部有序图层逐项使用 taskId+输出序号稳定落盘；不排序、不去重、不截断，重复远程 URL 仍保留为独立输出槽，任一下载或解码失败都不能把任务报告为完成。",
       "compatibility": "Dola 海外模型加入既有 Seedream 分层 TAB；国内模型继续为默认值，不改变原 Seedream、Qwen Image、默认图像渠道或旧画布显式字段。"
@@ -309,7 +375,10 @@
       "sha256": "c0bf2f908de13bbd7e0718da1c6550a48720254b13cd6541ccd5534a7e5d316b"
     },
     "referenceImplementation": "F:/AI-T8-video-onekey/ComfyUI/custom_nodes/ComfyUI_Seedance@c821eeb34a19a812ba3821a1a8a8681df547567c",
-    "videoTabs": ["hailuo-2.3", "flux-3-video"],
+    "videoTabs": [
+      "hailuo-2.3",
+      "flux-3-video"
+    ],
     "hailuoModels": [
       "hailuo-h3-global-t2v",
       "hailuo-h3-global-i2v",
@@ -403,7 +472,13 @@
       "endpoint": "POST /v1/videos + GET /v1/videos/{task_id}",
       "duration": "4-30 秒，或 -1 自动时长（省略 seconds，metadata.duration=-1）",
       "defaults": "未显式设置时使用 5 秒、720p；仅影响新建节点/新工作流与缺省请求，不迁移旧画布的显式值",
-      "resolutions": ["480p", "720p", "1080p", "2k", "4k"],
+      "resolutions": [
+        "480p",
+        "720p",
+        "1080p",
+        "2k",
+        "4k"
+      ],
       "mediaFormats": "图片 JPG/JPEG/PNG/WEBP 且单张不超过 30MB；视频仅 MP4、音频 MP3/WAV，单个不超过 50MB",
       "t2v": "提示词必填，不接受参考素材",
       "i2v": "提示词可选，1-2 张图片依次为首帧/可选尾帧，不接受视频或音频",
@@ -475,14 +550,14 @@
       "每个付费候选按 requestDigest/revision 派生稳定 submissionKey，请求前保存提交意图；无 taskId 的不明确结果标记 ambiguous 并禁止批量自动重放，只有用户核对 Provider 后才能显式新建修订。",
       "父 Run STOP 传播 AbortSignal；停止后子任务进入 interrupted/recoverable，不再下载、落盘或覆盖成功状态。",
       "只有严格匹配当前 ReviewReceipt/AdoptionReceipt 的已采用资产才能进入版本化 EDL；EDL 先持久化再合成。最终合成丢弃所有生成视频音轨，只把完整原曲映射一次；后端强制零裁剪、零延迟、零淡化、音量1并回传原曲源 SHA/时长；用户实际播放后才签发绑定 EDL、合成 Attempt 和成片资产的 QCReport，确认后才生成 DeliveryReceipt 与正式 Delivery Manifest。",
-      "上游歌曲/歌词/人设/风格/运镜变化，或用户重新采纳 Bible、Prompt、图片、视频时，旧视频、分镜、清单和子流程交付输出立即撤销，禁止下游误用旧成片。"
-      ,"主歌曲、人设、风格与运镜输入必须先物化为项目资产并记录 SHA-256；每次付费提交前重新读取并校验真实字节，实际 Provider 请求体与素材摘要共同进入授权和稳定 submissionKey。"
-      ,"人工歌词时间草案只有起点、终点分别试听确认后才可参与分段；均匀草案、单边确认或缺少时间证据均失败关闭。"
-      ,"PromptPack 声明 promptLanguage=en；Critic 扫描 composition/action/camera/lighting/imagePrompt/continuityIn/continuityOut，禁止任何正向可见文字，并禁止声音字段复述歌词。H3 编译前再次做视觉、声音、脚本与英文词法证据校验。"
-      ,"H3 Multi 真实请求固定为 1 张权威人设原图 + 最多 8 张分镜 + 本段原音频，并按 Subject/Picture/Audio 角色编译 Ref2AV；H3/OW I2V 只把 1 张已审分镜声明为 0 秒首帧，OW R2V 则声明为非首尾帧参考。"
-      ,"视频审阅必须在前台、1x、无拖动地覆盖完整播放区间并记录 wall-clock/range/rate/visibility/seek 证据；重复审阅相同资产保持原 ReviewReceipt，不使已采纳回执失效。"
-      ,"内置 LLM 下拉只展示已声明并通过本节点视觉输入预检的模型；扩展 LLM 仍要求用户从渠道文档显式确认 OpenAI 兼容 image_url，任何非空失效渠道或模型都在 Provider 请求前失败关闭。"
-      ,"平价 Seedance 2.0 的 UI 选择别名与实际上游 canonical 模型同时持久化；付费批准、Provider 请求体、Attempt 和恢复账本均绑定 canonical seedance-2.0-*-multi。Seedance/H3 的提交与终态回执必须同时匹配已批准 provider、canonical model 与 taskType；任一不一致会持久化为 blocked，禁止自动恢复、物化、采用、交付或重放。首次提交三元组验证通过后会持久化为恢复证据；后端重启或 30 分钟任务映射过期导致终态字段缺失时，只允许回落到这份已验证证据，没有验证证据的旧任务继续失败关闭。视频家族、渠道、模型切换会原子写入合法分辨率，避免显示值与持久值分裂。"
+      "上游歌曲/歌词/人设/风格/运镜变化，或用户重新采纳 Bible、Prompt、图片、视频时，旧视频、分镜、清单和子流程交付输出立即撤销，禁止下游误用旧成片。",
+      "主歌曲、人设、风格与运镜输入必须先物化为项目资产并记录 SHA-256；每次付费提交前重新读取并校验真实字节，实际 Provider 请求体与素材摘要共同进入授权和稳定 submissionKey。",
+      "人工歌词时间草案只有起点、终点分别试听确认后才可参与分段；均匀草案、单边确认或缺少时间证据均失败关闭。",
+      "PromptPack 声明 promptLanguage=en；Critic 扫描 composition/action/camera/lighting/imagePrompt/continuityIn/continuityOut，禁止任何正向可见文字，并禁止声音字段复述歌词。H3 编译前再次做视觉、声音、脚本与英文词法证据校验。",
+      "H3 Multi 真实请求固定为 1 张权威人设原图 + 最多 8 张分镜 + 本段原音频，并按 Subject/Picture/Audio 角色编译 Ref2AV；H3/OW I2V 只把 1 张已审分镜声明为 0 秒首帧，OW R2V 则声明为非首尾帧参考。",
+      "视频审阅必须在前台、1x、无拖动地覆盖完整播放区间并记录 wall-clock/range/rate/visibility/seek 证据；重复审阅相同资产保持原 ReviewReceipt，不使已采纳回执失效。",
+      "内置 LLM 下拉只展示已声明并通过本节点视觉输入预检的模型；扩展 LLM 仍要求用户从渠道文档显式确认 OpenAI 兼容 image_url，任何非空失效渠道或模型都在 Provider 请求前失败关闭。",
+      "平价 Seedance 2.0 的 UI 选择别名与实际上游 canonical 模型同时持久化；付费批准、Provider 请求体、Attempt 和恢复账本均绑定 canonical seedance-2.0-*-multi。Seedance/H3 的提交与终态回执必须同时匹配已批准 provider、canonical model 与 taskType；任一不一致会持久化为 blocked，禁止自动恢复、物化、采用、交付或重放。首次提交三元组验证通过后会持久化为恢复证据；后端重启或 30 分钟任务映射过期导致终态字段缺失时，只允许回落到这份已验证证据，没有验证证据的旧任务继续失败关闭。视频家族、渠道、模型切换会原子写入合法分辨率，避免显示值与持久值分裂。"
     ],
     "providers": {
       "llm": "复用画布全部已启用 LLM Provider；默认仍为平价AI小屋 2.1。内置渠道只展示已验证视觉模型，扩展渠道保留显式视觉能力确认；失效渠道或模型不静默回退。",
@@ -724,47 +799,42 @@
     ]
   },
   "release": {
-    "status": "released-postrelease-evidence-pending",
-    "version": "2.9.1",
+    "status": "release-authorized-v2.9.2",
+    "version": "2.9.2",
     "date": "2026-08-14",
-    "publishedAt": "2026-08-13T19:51:35Z",
-    "tag": "v2.9.1",
-    "latest": true,
-    "isDraft": false,
-    "isPrerelease": false,
-    "sourceCommit": "b7e0807dab3bea3944feeed2c7f7896d610c46da",
-    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.1",
+    "publishedAt": null,
+    "tag": "v2.9.2",
+    "latest": false,
+    "sourceCommit": null,
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.2",
     "artifacts": {
       "installer": {
-        "name": "T8-PenguinCanvas-Setup-2.9.1.exe",
-        "size": 1364794815,
-        "sha256": "354a186710ca7bfef1274f5837b6e17747cff3e980e8eae0e7fc9b0da66a1591",
-        "sha512": "DN9BJZqxtuCChBkVeCkpZOoYmagftUrkwzEKhKkwFUi2koA7Zmf+laMSKrpgDSYcXW4+gv0cBxTQoL8P5YKoZw=="
+        "name": "T8-PenguinCanvas-Setup-2.9.2.exe",
+        "size": null,
+        "sha256": null
       },
       "blockmap": {
-        "name": "T8-PenguinCanvas-Setup-2.9.1.exe.blockmap",
-        "size": 1422590,
-        "sha256": "132b83ef6eb1600065d953f3de1c913a9639373c83cf7a0e4199d4ff23866aff"
+        "name": "T8-PenguinCanvas-Setup-2.9.2.exe.blockmap",
+        "size": null,
+        "sha256": null
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": 362,
-        "sha256": "df12efffb63c20032e98f1db697183b1c3155a509d31b9a992162df51a962ced"
+        "size": null,
+        "sha256": null
       }
     },
     "verification": [
-      "v2.9.1 发布范围固定为 Hailuo TAB 的 minimax-h3-ow-ref2va-audio-drive-fast、minimax-h3-ow-fl2va-audio-drive-fast、minimax-h3-ow-t2v-fast、三份无密钥工作流及 Provider/代理/能力目录接线；不回退 v2.9.0 或更早版本的节点、默认模型、默认渠道、已保存字段、工作流、协议和网络能力。",
-      "模型目录、动态素材 UI、前后端付费前约束、音频 URL 映射、三份工作流及相邻 seedance.nz 回归 85/85 通过；Evidence/Capability 14/14、Electron/自动更新合同 23/23、相邻打包 24/24、TypeScript、public-check、RH Toolbox、JSON 和 31 actions / 250 runtime entries / 77/77 / 0 public gaps 能力同步通过；正式私有构建完成 2878 个模块。",
-      "三个模型均以一次性进程凭据各真实提交一次并轮询至 succeeded；三个 MP4 全部下载、SHA-256 绑定、经 ffprobe 验证，并由 FFmpeg 完整逐帧解码至结尾。该证据验证当次 Provider 协议、下载与媒体解码链路。",
-      "正式 dist:release 首次执行在 post-build 前因既有 remove-ai-watermarks-runtime.zip CRC 校验失败而中止，未生成 provenance、未上传 Release；随后从同一固定源码重建 ZIP64 归档，并以摘要核验的官方 7-Zip 26.02 通过完整 CRC，在同一未封口 recovery 记录下重新生成最终唯一资产集。该中止未被延期或记为通过。",
-      "最终流程通过本机私有 sidecar、后端加密、双运行时归档、Electron 原生重建、NSIS、post-build、provenance、sealed recovery、草稿所有权、发布前完整回下载、固定 Tag/target、非草稿/非预发布、Latest 与 recovery 清理；独立发布后验证再次完整下载三项公开资产，并按实际字节、SHA-256 与 GitHub digest 通过。",
-      "用户已明确授权先发布、后补反馈用户安装环境、协作多端及安装升级证据；协作证据门只允许完全缺失的清单按 owner-approved-post-release-v2.9.1 延期，不能把延期标记为已通过，任何技术门禁失败均不可延期。"
+      "v2.9.2 发布范围固定为 Electron/后端启动解耦、画布目录 50 项游标分页与窗口化、损坏索引渐进恢复、单画布 canonical hydration 与视口 LRU、主题 CSS 按需双缓冲、媒体 4/1/1 共享调度，以及跨画布后台运行 canvasId + entityUid + revision CAS 安全闭环；不回退 v2.9.1 或更早版本的节点、模型、默认渠道、用户画布、工作流和 Provider 协议。",
+      "开发阶段前端聚合矩阵 88/88、独立安全矩阵 59/59、后端/目录/生命周期矩阵 44/44 通过；TypeScript、生产构建、worktree、development、feature-sync、diff-check 与数据库方法分类 460/460 完整性门禁通过。5000 项隔离开发态真实 Chrome 验证冷启动 959.1ms、刷新 464.9ms、DOM 14 行且应用网络/HTTP/console/pageerror 为 0；该数据不等于安装版或所有用户环境保证。",
+      "Electron/NSIS、私有构建、三项自动更新资产、固定 source commit、Tag、Latest、远端完整回下载与摘要必须在已推送 origin/main 的固定源码提交上，通过 T8-penguin-canvas-release-v2.9.2 / codex/release-v2.9.2 的唯一 dist:release 流程收敛；完成前保持空值。",
+      "用户已明确授权先发布、后补反馈用户安装环境、协作多端及安装升级证据；协作证据门只允许完全缺失的清单按 owner-approved-post-release-v2.9.2 延期，不能把延期标记为已通过，任何技术门禁失败均不可延期。"
     ]
   },
   "versionSequencePolicy": {
     "status": "active",
     "date": "2026-07-30",
-    "currentVersion": "2.9.1",
+    "currentVersion": "2.9.2",
     "rules": [
       "版本号每一段只使用 0-9；v2.6.9 的下一正式版本固定为 v2.7.0。",
       "禁止创建、打包、推送、打 tag、发布或写入自动更新元数据为 v2.6.10。",
@@ -788,6 +858,7 @@
       "v2.8.8 的下一正式版本固定为 v2.8.9。",
       "v2.8.9 的下一正式版本固定为 v2.9.0，禁止创建 v2.8.10。",
       "v2.9.0 的下一正式版本固定为 v2.9.1。",
+      "v2.9.1 的下一正式版本固定为 v2.9.2。",
       "后续改版本前必须同步核对 package.json、package-lock.json、README、features.json、项目 SKILL.md、Release notes、自动更新元数据和 Git tag。"
     ]
   },
@@ -7090,11 +7161,11 @@
       "T8_ENABLE_LOCAL_PRIVATE": "开发环境和普通本机构建可选；0=关闭本机 local-private/extensions 私有扩展。正式 dist:release 固定为 1，不能被父环境降级。GitHub/clean clone 因为没有 local-private 目录，不包含充值实现。",
       "T8_DISABLE_LOCAL_EXTENSIONS": "开发环境可选；1=关闭本地扩展。正式 dist:release 固定为 0，确保本机私有 sidecar 参与加密打包与后置校验。"
     },
-    "version": "2.9.1",
-    "semverVersion": "2.9.1",
+    "version": "2.9.2",
+    "semverVersion": "2.9.2",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.9.1 已从固定源码提交 b7e0807dab3bea3944feeed2c7f7896d610c46da 完成 MiniMax H3 OW Fast 音频驱动扩展的正式 Electron/NSIS 自动更新发布，三项公开资产经发布前与独立发布后完整下载核验。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
-    "installer": "v2.9.1 正式安装包 T8-PenguinCanvas-Setup-2.9.1.exe 为 1,364,794,815 bytes / SHA-256 354a186710ca7bfef1274f5837b6e17747cff3e980e8eae0e7fc9b0da66a1591；blockmap 为 1,422,590 bytes / SHA-256 132b83ef6eb1600065d953f3de1c913a9639373c83cf7a0e4199d4ff23866aff；latest.yml 为 362 bytes / SHA-256 df12efffb63c20032e98f1db697183b1c3155a509d31b9a992162df51a962ced。固定 Tag/target、Latest、发布前和独立发布后完整回下载、provenance、sealed recovery 与 recovery 清理均通过。",
+    "versionNote": "v1.3.0 起统一采用三段阶段号 x.y.z；v2.9.2 已授权从唯一固定源码提交完成画布启动、目录、媒体、主题与跨画布后台运行安全优化的正式 Electron/NSIS 自动更新发布；发布事实与三项资产摘要只能在真实流程收敛后补录。公开源码继续排除本地私有计费/支付/充值/分组令牌实现。",
+    "installer": "v2.9.2 正式安装包、blockmap 与 latest.yml 的字节数和摘要等待唯一 dist:release 流程真实生成并经发布前、发布后完整下载核验；在此之前不得填写或沿用 v2.9.1 资产事实。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
@@ -10640,9 +10711,49 @@
           "seedance-2.5-standard-multi",
           "seedance-2.5-standard-t2v"
         ],
-        "durations": [-1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30],
-        "resolutions": ["480p", "720p", "1080p", "2k", "4k"],
-        "maxRefs": { "images": 30, "videos": 10, "audios": 10, "total": 50 }
+        "durations": [
+          -1,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "resolutions": [
+          "480p",
+          "720p",
+          "1080p",
+          "2k",
+          "4k"
+        ],
+        "maxRefs": {
+          "images": 30,
+          "videos": 10,
+          "audios": 10,
+          "total": 50
+        }
       },
       {
         "id": "seedance-2.0",

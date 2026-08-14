@@ -3,15 +3,71 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const config = require('./config');
-const { startFigmaBridgeOnAppStart } = require('./utils/figmaBridge');
-const { getRunRecoveryManager } = require('./services/runRecovery');
+const {
+  startFigmaBridgeOnAppStart,
+  stopFigmaBridge,
+} = require('./utils/figmaBridge');
 const { closeProjectDatabase } = require('./services/projectDatabase');
+const {
+  cancelProjectStorageDeferredWork,
+  onProjectStorageReady,
+  getProjectStorageRuntimeStatus,
+  requestProjectStorageStartupBackup,
+  waitForProjectStorageDeferredWork,
+} = require('./services/projectRuntime');
 const { registerAgentControlInstance } = require('./services/agentControlRegistry');
 const agentControlRouter = require('./routes/agentControl');
 const canvasAgentToolsRouter = require('./routes/canvasAgentTools');
 const creatorAgentRouter = require('./routes/creatorAgent');
 
 const app = express();
+const backendStartupStartedAt = Date.now();
+const startupReadiness = {
+  phase: 'module-loading',
+  transportReady: false,
+  storageReadReady: false,
+  storageWriteReady: false,
+  frontendInteractive: false,
+  backgroundScheduled: false,
+  backgroundStarted: false,
+  backgroundReady: false,
+  backgroundFailures: 0,
+  source: null,
+  elapsedMs: 0,
+  phases: {},
+};
+
+function startupReadinessSnapshot() {
+  const storageRuntime = getProjectStorageRuntimeStatus();
+  const storageReady = storageRuntime.status === 'ready';
+  return {
+    schema: 't8-backend-startup-readiness-v1',
+    phase: startupReadiness.phase,
+    transportReady: startupReadiness.transportReady,
+    storageReadReady: storageReady,
+    storageWriteReady: storageReady,
+    storageRuntime,
+    frontendInteractive: startupReadiness.frontendInteractive,
+    backgroundScheduled: startupReadiness.backgroundScheduled,
+    backgroundStarted: startupReadiness.backgroundStarted,
+    backgroundReady: startupReadiness.backgroundReady,
+    backgroundFailures: startupReadiness.backgroundFailures,
+    source: startupReadiness.source,
+    elapsedMs: startupReadiness.elapsedMs,
+    phases: { ...startupReadiness.phases },
+  };
+}
+
+function markBackendStartupStage(phase, extra = {}) {
+  const now = Date.now();
+  const elapsedMs = Math.max(0, now - backendStartupStartedAt);
+  startupReadiness.phase = phase;
+  startupReadiness.elapsedMs = elapsedMs;
+  startupReadiness.phases[phase] = elapsedMs;
+  Object.assign(startupReadiness, extra);
+  console.log(`[startup] component=backend phase=${phase} elapsedMs=${elapsedMs}`);
+  return startupReadinessSnapshot();
+}
 
 // Node's http.Server considers a request closed as soon as its socket is
 // destroyed, but an async Express handler can keep running afterwards. Track
@@ -446,6 +502,7 @@ app.get('/api/status', (_req, res) => {
     port: config.PORT,
     instanceId: config.BACKEND_INSTANCE_ID,
     time: new Date().toISOString(),
+    readiness: startupReadinessSnapshot(),
   });
 });
 
@@ -475,13 +532,13 @@ const photoshopBridgeRouter = require('./routes/photoshopBridge');
 const feishuBitableRouter = require('./routes/feishuBitable');
 const webAssetsRouter = require('./routes/webAssets');
 const collaborationRouter = require('./routes/collaboration');
-const { getCollaborationGateway } = require('./collaboration/gateway');
+const { peekCollaborationGateway } = require('./collaboration/gateway');
 const projectRunsRouter = require('./routes/projectRuns');
 const projectAssetsRouter = require('./routes/projectAssets');
+const { peekAssetPreviewPipeline } = require('./services/assetPreviewPipeline');
 const subflowsRouter = require('./routes/subflows');
 const { registerLocalExtensions } = require('./extensions/localExtensions');
 const localHooks = require('./extensions/runtimeHooks');
-const collaborationGateway = getCollaborationGateway(config);
 
 app.use('/api/canvas', canvasRouter);
 app.use('/api/settings', settingsRouter);
@@ -512,6 +569,10 @@ app.use('/api/project-runs', projectRunsRouter);
 app.use('/api/project-assets', projectAssetsRouter);
 app.use('/api/subflows', subflowsRouter);
 registerLocalExtensions(app, { config, express, logger: console, hooks: localHooks });
+markBackendStartupStage('routes-mounted', {
+  storageReadReady: false,
+  storageWriteReady: false,
+});
 
 // ========== 前端静态资源(仅打包模式) ==========
 // 开发模式下不启用,避免与 Vite dev server 打架。
@@ -540,6 +601,27 @@ let httpServerClosePromise = null;
 let gracefulShutdownPromise = null;
 let startupRunRecoveryPromise = null;
 let startupSemanticModelRefreshPromise = null;
+let startupMaintenanceTimer = null;
+let startupMaintenanceFallbackTimer = null;
+let startupMaintenancePromise = null;
+let resolveStartupMaintenance = null;
+let deferredStorageMaintenanceUnsubscribe = null;
+let deferredStorageMaintenanceRetryTimer = null;
+let deferredStorageMaintenanceRetryAttempt = 0;
+let startupNonStorageMaintenanceSettled = false;
+let startupStorageMaintenanceSettled = false;
+let startupNonStorageMaintenanceFailures = 0;
+let startupStorageMaintenanceFailures = 0;
+
+function publishBackgroundMaintenanceReadiness() {
+  const complete = startupNonStorageMaintenanceSettled && startupStorageMaintenanceSettled;
+  return markBackendStartupStage(complete ? 'background-ready' : 'background-deferred', {
+    backgroundReady: complete,
+    backgroundFailures: startupNonStorageMaintenanceFailures + startupStorageMaintenanceFailures,
+  });
+}
+const figmaStartupAbortController = new AbortController();
+let figmaBridgeShutdownPromise = null;
 let agentControlRegistration = null;
 let serverStartOutcome = null;
 let resolveServerStart;
@@ -547,7 +629,154 @@ const serverStartPromise = new Promise((resolve) => { resolveServerStart = resol
 let serverClosedOutcome = false;
 let resolveServerClosed;
 const serverClosedPromise = new Promise((resolve) => { resolveServerClosed = resolve; });
-const runRecoveryManager = getRunRecoveryManager({});
+const STARTUP_MAINTENANCE_FALLBACK_MS = Math.max(
+  1_000,
+  Math.min(300_000, Number(process.env.T8PC_STARTUP_MAINTENANCE_FALLBACK_MS) || 30_000),
+);
+const STARTUP_MAINTENANCE_INTERACTIVE_DELAY_MS = Math.max(
+  0,
+  Math.min(10_000, Number(process.env.T8PC_STARTUP_MAINTENANCE_INTERACTIVE_DELAY_MS) || 750),
+);
+const STORAGE_MAINTENANCE_RETRY_DELAYS_MS = [1_000, 3_000, 10_000, 30_000];
+
+function retryStorageDependentMaintenance(error) {
+  startupStorageMaintenanceFailures = 1;
+  if (!shutdownStarted) publishBackgroundMaintenanceReadiness();
+  if (shutdownStarted || deferredStorageMaintenanceRetryTimer) return;
+  const attempt = deferredStorageMaintenanceRetryAttempt;
+  const delayMs = STORAGE_MAINTENANCE_RETRY_DELAYS_MS[
+    Math.min(attempt, STORAGE_MAINTENANCE_RETRY_DELAYS_MS.length - 1)
+  ];
+  deferredStorageMaintenanceRetryAttempt += 1;
+  console.warn(
+    '[backend] deferred storage maintenance initialization failed; retrying:',
+    error?.code || error?.message || 'unknown_error',
+    `in ${delayMs}ms`,
+  );
+  deferredStorageMaintenanceRetryTimer = setTimeout(() => {
+    deferredStorageMaintenanceRetryTimer = null;
+    scheduleStorageDependentMaintenance();
+  }, delayMs);
+  deferredStorageMaintenanceRetryTimer.unref?.();
+}
+function scheduleStorageDependentMaintenance() {
+  if (shutdownStarted || deferredStorageMaintenanceUnsubscribe) return;
+  deferredStorageMaintenanceUnsubscribe = onProjectStorageReady(() => {
+    deferredStorageMaintenanceUnsubscribe = null;
+    if (shutdownStarted) return { ok: false, deferred: true, shutdown: true };
+    let assets;
+    let runs;
+    try {
+      assets = projectAssetsRouter.getRuntime();
+      runs = projectRunsRouter.getRuntime();
+    } catch (error) {
+      retryStorageDependentMaintenance(error);
+      return { ok: false, deferred: true, retryable: true };
+    }
+    deferredStorageMaintenanceRetryAttempt = 0;
+    startupSemanticModelRefreshPromise = Promise.resolve()
+      .then(() => assets.semanticPipeline.refreshModelStates())
+      .catch((error) => {
+        console.warn('[asset-semantic] deferred model refresh failed:', error?.code || 'unknown_error');
+        return { ok: false, code: error?.code || 'unknown_error' };
+      });
+    startupRunRecoveryPromise = Promise.resolve()
+      .then(() => runs.recoveryManager.recoverPendingRuns())
+      .then((result) => {
+        if (result.recovered || result.failed || result.interrupted) {
+          console.log('[run-recovery] deferred result', result);
+        }
+        return result;
+      })
+      .catch((error) => {
+        console.warn('[run-recovery] deferred startup failed:', error?.message || error);
+        return { ok: false, code: error?.code || 'run_recovery_failed' };
+      });
+    return Promise.allSettled([
+      startupSemanticModelRefreshPromise,
+      startupRunRecoveryPromise,
+    ]).then((results) => {
+      startupStorageMaintenanceSettled = true;
+      startupStorageMaintenanceFailures = results.filter((result) => (
+        result.status === 'rejected'
+        || (result.status === 'fulfilled' && result.value?.ok === false
+          && result.value?.disabled !== true)
+      )).length;
+      if (!shutdownStarted) publishBackgroundMaintenanceReadiness();
+      return results;
+    });
+  });
+}
+
+
+function scheduleStartupMaintenance(source = 'fallback', delayMs = 0) {
+  if (shutdownStarted || startupReadiness.backgroundScheduled) {
+    return startupMaintenancePromise || Promise.resolve(startupReadinessSnapshot());
+  }
+  startupReadiness.backgroundScheduled = true;
+  startupReadiness.source = String(source || 'fallback');
+  markBackendStartupStage('background-scheduled');
+  if (startupMaintenanceFallbackTimer) {
+    clearTimeout(startupMaintenanceFallbackTimer);
+    startupMaintenanceFallbackTimer = null;
+  }
+  startupMaintenancePromise = new Promise((resolve) => {
+    resolveStartupMaintenance = resolve;
+    startupMaintenanceTimer = setTimeout(() => {
+      startupMaintenanceTimer = null;
+      if (shutdownStarted) {
+        resolve(startupReadinessSnapshot());
+        resolveStartupMaintenance = null;
+        return;
+      }
+      markBackendStartupStage('background-started', { backgroundStarted: true });
+      const figmaStart = startFigmaBridgeOnAppStart(console, {
+        signal: figmaStartupAbortController.signal,
+      });
+      startupSemanticModelRefreshPromise = Promise.resolve({ ok: true, deferred: true });
+      startupRunRecoveryPromise = Promise.resolve({ ok: true, deferred: true });
+      // Register intent only; the first real storage request opens DB and triggers backup.
+      scheduleStorageDependentMaintenance();
+      const startupBackup = requestProjectStorageStartupBackup();
+      Promise.allSettled([
+        figmaStart,
+        startupSemanticModelRefreshPromise,
+        startupRunRecoveryPromise,
+        startupBackup,
+      ]).then((results) => {
+        if (shutdownStarted) {
+          resolve(startupReadinessSnapshot());
+          resolveStartupMaintenance = null;
+          return;
+        }
+        const failures = results.filter((result) => (
+          result.status === 'rejected'
+          || (result.status === 'fulfilled' && result.value?.ok === false
+            && result.value?.disabled !== true)
+        )).length;
+        startupNonStorageMaintenanceSettled = true;
+        startupNonStorageMaintenanceFailures = failures;
+        publishBackgroundMaintenanceReadiness();
+        resolve(startupReadinessSnapshot());
+        resolveStartupMaintenance = null;
+      });
+    }, Math.max(0, Number(delayMs) || 0));
+    startupMaintenanceTimer.unref?.();
+  });
+  return startupMaintenancePromise;
+}
+
+function markFrontendInteractive(source = 'renderer') {
+  if (shutdownStarted) return startupReadinessSnapshot();
+  if (!startupReadiness.frontendInteractive) {
+    markBackendStartupStage('frontend-interactive', {
+      frontendInteractive: true,
+      source: String(source || 'renderer'),
+    });
+  }
+  scheduleStartupMaintenance(source, STARTUP_MAINTENANCE_INTERACTIVE_DELAY_MS);
+  return startupReadinessSnapshot();
+}
 
 function settleServerStart(state, error = null) {
   if (serverStartOutcome) return serverStartOutcome;
@@ -564,6 +793,7 @@ function settleServerClosed() {
 
 const server = app.listen(PORT, HOST, () => {
   settleServerStart('listening');
+  markBackendStartupStage('transport-listening', { transportReady: true });
   // A signal can arrive after listen() was requested but before this callback.
   // In that window startup side effects must not outlive the shutdown lifecycle.
   if (shutdownStarted) return;
@@ -580,26 +810,14 @@ const server = app.listen(PORT, HOST, () => {
   console.log(`   环境: ${config.NODE_ENV}`);
   console.log(`   数据目录: ${config.DATA_DIR}`);
   console.log(`   输出目录: ${config.OUTPUT_DIR}`);
-  console.log('   Figma Bridge: 自动启动中（如需禁用可设置 T8_FIGMA_BRIDGE_AUTOSTART=0）');
+  console.log('   Figma Bridge: 首屏就绪后后台启动（如需禁用可设置 T8_FIGMA_BRIDGE_AUTOSTART=0）');
   console.log('   按 Ctrl+C 停止服务器...');
   console.log('--------------------------------------------------');
-  startFigmaBridgeOnAppStart(console);
-  setImmediate(() => {
-    if (shutdownStarted) return;
-    startupSemanticModelRefreshPromise = Promise.resolve()
-      .then(() => projectAssetsRouter.semanticPipeline.refreshModelStates())
-      .catch((error) => {
-        console.warn('[asset-semantic] startup model refresh failed:', error?.code || 'unknown_error');
-      });
-  });
-  setImmediate(() => {
-    if (shutdownStarted) return;
-    startupRunRecoveryPromise = runRecoveryManager.recoverPendingRuns()
-      .then((result) => {
-        if (result.recovered || result.failed || result.interrupted) console.log('[run-recovery] startup result', result);
-      })
-      .catch((error) => console.warn('[run-recovery] startup failed:', error?.message || error));
-  });
+  startupMaintenanceFallbackTimer = setTimeout(() => {
+    startupMaintenanceFallbackTimer = null;
+    scheduleStartupMaintenance('transport-idle-fallback', 0);
+  }, STARTUP_MAINTENANCE_FALLBACK_MS);
+  startupMaintenanceFallbackTimer.unref?.();
 });
 server.once('error', (error) => {
   const start = settleServerStart('error', error);
@@ -622,7 +840,7 @@ function closeSemanticPipeline() {
   if (semanticPipelineClosed) return;
   semanticPipelineClosed = true;
   try {
-    projectAssetsRouter.semanticPipeline?.close?.();
+    projectAssetsRouter.peekRuntime()?.semanticPipeline?.close?.();
   } catch (error) {
     console.warn('[asset-semantic] shutdown failed:', error?.message || error);
   }
@@ -640,7 +858,8 @@ function closeProjectDatabaseLifecycle() {
 
 function shutdownPreviewPipelineLifecycle() {
   if (!previewPipelineShutdownPromise) {
-    const pipeline = projectAssetsRouter.previewPipeline;
+    const pipeline = projectAssetsRouter.peekRuntime()?.previewPipeline
+      || peekAssetPreviewPipeline();
     try {
       previewPipelineShutdownPromise = typeof pipeline?.shutdown === 'function'
         ? Promise.resolve(pipeline.shutdown())
@@ -661,6 +880,7 @@ function shutdownPreviewPipelineLifecycle() {
 
 function shutdownRunRecoveryLifecycle() {
   if (!runRecoveryShutdownPromise) {
+    const runRecoveryManager = projectRunsRouter.peekRuntime()?.recoveryManager;
     try {
       runRecoveryShutdownPromise = typeof runRecoveryManager?.shutdown === 'function'
         ? Promise.resolve(runRecoveryManager.shutdown({ timeoutMs: 5_000 }))
@@ -677,6 +897,18 @@ function shutdownRunRecoveryLifecycle() {
     });
   }
   return runRecoveryShutdownPromise;
+}
+
+function shutdownFigmaBridgeLifecycle() {
+  if (!figmaBridgeShutdownPromise) {
+    figmaStartupAbortController.abort();
+    figmaBridgeShutdownPromise = Promise.resolve(stopFigmaBridge({ timeoutMs: 2_000 }))
+      .catch((error) => {
+        console.warn('[figma-bridge] shutdown failed:', error?.message || error);
+        return { ok: false, error: error?.message || String(error) };
+      });
+  }
+  return figmaBridgeShutdownPromise;
 }
 
 function shutdownVideoOperationsLifecycle() {
@@ -699,12 +931,28 @@ function shutdownVideoOperationsLifecycle() {
   return videoOperationsShutdownPromise;
 }
 
+function collaborationGatewayNotCreatedOutcome() {
+  return {
+    running: false,
+    notCreated: true,
+    applicationRequests: {
+      drained: true,
+      activeRequests: 0,
+      pendingHandlers: 0,
+    },
+  };
+}
+
 function shutdownCollaborationGatewayLifecycle() {
+  const gateway = peekCollaborationGateway();
+  // Do not cache the no-op: an already accepted request may lazily create the
+  // singleton before HTTP drain completes, and the later shutdown pass must see it.
+  if (!gateway) return Promise.resolve(collaborationGatewayNotCreatedOutcome());
   if (!collaborationGatewayShutdownPromise) {
     try {
-      collaborationGatewayShutdownPromise = typeof collaborationGateway?.shutdown === 'function'
-        ? Promise.resolve(collaborationGateway.shutdown())
-        : Promise.resolve(collaborationGateway?.stop?.());
+      collaborationGatewayShutdownPromise = typeof gateway.shutdown === 'function'
+        ? Promise.resolve(gateway.shutdown())
+        : Promise.resolve(gateway.stop?.());
     } catch (error) {
       collaborationGatewayShutdownPromise = Promise.reject(error);
     }
@@ -715,7 +963,6 @@ function shutdownCollaborationGatewayLifecycle() {
   }
   return collaborationGatewayShutdownPromise;
 }
-
 function closeRuntimeStorageLifecycle() {
   if (!runtimeStorageClosePromise) {
     runtimeStorageClosePromise = (async () => {
@@ -728,7 +975,8 @@ function closeRuntimeStorageLifecycle() {
       await shutdownVideoOperationsLifecycle();
       await shutdownCollaborationGatewayLifecycle();
       await videoOpsRouter.waitForShutdownDrain?.();
-      await collaborationGateway.waitForApplicationRequests?.();
+      await peekCollaborationGateway()?.waitForApplicationRequests?.();
+      await waitForProjectStorageDeferredWork();
       await closeProjectDatabaseLifecycle();
     })();
   }
@@ -786,7 +1034,8 @@ function deferRuntimeStorageCloseUntilRequestsDrain() {
       await serverClosedPromise;
       await Promise.all([
         waitForApplicationRequests(),
-        collaborationGateway.waitForApplicationRequests?.(),
+        peekCollaborationGateway()?.waitForApplicationRequests?.()
+          || Promise.resolve({ drained: true, activeRequests: 0, pendingHandlers: 0 }),
         videoOpsRouter.waitForShutdownDrain?.(),
       ]);
       await closeRuntimeStorageLifecycle();
@@ -809,6 +1058,28 @@ function waitForRuntimeStorageCloseLifecycle() {
 function gracefulShutdown(signal) {
   if (shutdownStarted) return gracefulShutdownPromise || projectDatabaseClosePromise || Promise.resolve();
   shutdownStarted = true;
+  cancelProjectStorageDeferredWork();
+  figmaStartupAbortController.abort();
+  if (startupMaintenanceTimer) {
+    clearTimeout(startupMaintenanceTimer);
+    startupMaintenanceTimer = null;
+  }
+  if (startupMaintenanceFallbackTimer) {
+    clearTimeout(startupMaintenanceFallbackTimer);
+    startupMaintenanceFallbackTimer = null;
+  }
+  if (deferredStorageMaintenanceRetryTimer) {
+    clearTimeout(deferredStorageMaintenanceRetryTimer);
+    deferredStorageMaintenanceRetryTimer = null;
+  }
+  if (deferredStorageMaintenanceUnsubscribe) {
+    deferredStorageMaintenanceUnsubscribe();
+    deferredStorageMaintenanceUnsubscribe = null;
+  }
+  if (resolveStartupMaintenance) {
+    resolveStartupMaintenance(startupReadinessSnapshot());
+    resolveStartupMaintenance = null;
+  }
   try {
     agentControlRegistration?.stop?.();
   } catch (error) {
@@ -819,6 +1090,8 @@ function gracefulShutdown(signal) {
   // database itself remains open until the HTTP server has drained as well.
   const previewShutdown = shutdownPreviewPipelineLifecycle();
   previewShutdown.catch(() => {});
+  const figmaShutdown = shutdownFigmaBridgeLifecycle();
+  figmaShutdown.catch(() => {});
   const recoveryShutdown = shutdownRunRecoveryLifecycle();
   recoveryShutdown.catch(() => {});
   const videoShutdown = shutdownVideoOperationsLifecycle();
@@ -829,15 +1102,19 @@ function gracefulShutdown(signal) {
   else if (signal === 'SIGTERM') process.exitCode = 143;
   gracefulShutdownPromise = (async () => {
     const http = await closeHttpServerLifecycle();
+    await figmaShutdown;
     await recoveryShutdown;
     await previewShutdown;
     const videoOperations = await videoShutdown;
-    const collaboration = await collaborationShutdown;
+    await collaborationShutdown;
+    // A request accepted before close may have created the lazy gateway after
+    // the first shutdown pass. Recheck only after the main server is closed.
+    const collaboration = await shutdownCollaborationGatewayLifecycle();
     // A main HTTP management request can enqueue a gateway-owned cancellation
     // after the initial gateway stop outcome was captured. Recheck only after
     // the main transport lifecycle has reached its bounded outcome; when it is
     // drained, no request remains that can add another gateway task.
-    const collaborationRequests = await collaborationGateway.waitForApplicationRequests?.(0)
+    const collaborationRequests = await peekCollaborationGateway()?.waitForApplicationRequests?.(0)
       || collaboration?.applicationRequests
       || { drained: true };
     const collaborationOutcome = {
@@ -896,7 +1173,11 @@ module.exports = {
   app,
   server,
   gracefulShutdown,
+  markFrontendInteractive,
+  scheduleStartupMaintenance,
+  startupReadinessSnapshot,
   closeSemanticPipeline,
+  shutdownFigmaBridgeLifecycle,
   shutdownPreviewPipelineLifecycle,
   shutdownRunRecoveryLifecycle,
   shutdownVideoOperationsLifecycle,

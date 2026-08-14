@@ -57,6 +57,8 @@ import { useOrderedMaterials } from './useOrderedMaterials';
 import MaterialPreviewSection from './MaterialPreviewSection';
 import ReuseResultToggle from './ReuseResultToggle';
 import MentionPromptInput from './MentionPromptInput';
+import LazyAudio from '../LazyAudio';
+import LazyVideo from '../LazyVideo';
 import { resolveMediaMentions, type MediaMention } from './mediaMentions';
 import { useDragMaterialStore, type MaterialPayload } from '../../stores/dragMaterial';
 import { useMaterialDropTarget } from '../../hooks/useMaterialDropTarget';
@@ -1971,7 +1973,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
         {isSunoNz && sunoVideoUrls.length > 0 && !hasAutoOutput && (
           <div className="space-y-2">
             {sunoVideoUrls.map((url, index) => (
-              <video
+              <LazyVideo
                 key={`${url}:${index}`}
                 src={url}
                 controls
@@ -2015,7 +2017,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
                 {t.title && <span className="truncate">🎵 {t.title}</span>}
                 {t.clipId && <span className="ml-auto text-white/30">{t.clipId.slice(0, 8)}…</span>}
               </div>
-              <audio
+              <LazyAudio
                 src={t.audioUrl}
                 controls
                 className="w-full h-8"

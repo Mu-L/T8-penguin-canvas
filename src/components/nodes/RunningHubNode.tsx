@@ -15,11 +15,13 @@ import ReuseResultToggle from './ReuseResultToggle';
 import MentionPromptInput from './MentionPromptInput';
 import LoopingVideo from '../LoopingVideo';
 import SmartImage from '../SmartImage';
+import LazyAudio from '../LazyAudio';
 import PromptTextarea from '../PromptTextarea';
 import { resolveMediaMentions, type MediaMention } from './mediaMentions';
 import { useThemeStore } from '../../stores/theme';
 import { logBus } from '../../stores/logs';
-import { useRunBusStore } from '../../stores/runBus';
+import { createCanvasNodeExecutionKey, useRunBusStore } from '../../stores/runBus';
+import { useCanvasStore } from '../../stores/canvas';
 import {
   countExcludedMaterials,
   excludeMaterialId,
@@ -184,6 +186,8 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
   const cancelInFlightRef = useRef(false);
   const [cancelling, setCancelling] = useState(false);
   const pollRejectRef = useRef<((error?: Error) => void) | null>(null);
+  const originCanvasIdRef = useRef(useCanvasStore.getState().activeId);
+  const executionNodeId = createCanvasNodeExecutionKey(originCanvasIdRef.current, id);
   const runCancelSeq = useRunBusStore((s) => s.cancelSeq);
   const runCancelTargets = useRunBusStore((s) => s.cancelTargets);
   const lastRunCancelSeqRef = useRef(runCancelSeq);
@@ -892,11 +896,11 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
   useEffect(() => {
     if (runCancelSeq === lastRunCancelSeqRef.current) return;
     lastRunCancelSeqRef.current = runCancelSeq;
-    if (!runCancelTargets.includes(id)) return;
+    if (!runCancelTargets.includes(executionNodeId)) return;
     if (status !== 'submitting' && status !== 'polling' && !taskId && !activeTaskIdRef.current) return;
     handleStop();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runCancelSeq, runCancelTargets, id, status, taskId]);
+  }, [runCancelSeq, runCancelTargets, executionNodeId, status, taskId]);
 
   const isBusy = status === 'submitting' || status === 'polling' || cancelling;
   const nodeInfoList: any[] = appInfo?.nodeInfoList || [];
@@ -1261,7 +1265,7 @@ const RunningHubNode = ({ id, data, selected, type }: NodeProps) => {
               return <LoopingVideo key={i} src={u} controls className="w-full rounded" />;
             }
             if (/\.(mp3|wav|ogg)$/i.test(u)) {
-              return <audio key={i} src={u} controls className="w-full h-8" />;
+              return <LazyAudio key={i} src={u} controls className="w-full h-8" />;
             }
             return <SmartImage key={i} src={u} alt={`输出 ${i}`} className="w-full rounded object-cover" thumbSize={720} />;
           })}

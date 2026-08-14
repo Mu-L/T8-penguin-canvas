@@ -6,6 +6,7 @@ import { seedSaintSeiyaGoldClothsForHadesTest, useSaintSeiyaSanctuaryStore } fro
 import { trackAchievementEvent } from './stores/achievements';
 import { useApiKeysStore } from './stores/apiKeys';
 import { useShortcutStore } from './stores/shortcuts';
+import { stopCanvasCatalogRecoveryPolling, useCanvasStore } from './stores/canvas';
 import Sidebar from './components/Sidebar';
 import type { AddNodeFn, InsertWorkflowFn } from './components/Canvas';
 import AppUpdaterButton from './components/AppUpdaterButton';
@@ -23,7 +24,9 @@ import * as api from './services/api';
 import type { NodeType } from './types/canvas';
 import type { ResourceItem } from './services/api';
 import { applyThemeTemplate } from './theme/applyTheme';
-import { resolveThemeTemplate } from './theme/defaultTemplates';
+import { BUILT_IN_THEME_TEMPLATES, TECH_TEMPLATE_ID, resolveThemeTemplate } from './theme/defaultTemplates';
+import type { ThemeTemplate } from './theme/types';
+import { createThemeCssApplyCoordinator } from './theme/themeCssLoader';
 import { materialSetItemsToData, type MaterialSetKind, type MaterialSetItem } from './utils/materialSet';
 import { workflowManifestToFragment } from './utils/workflowResource';
 import { matchesAnyShortcut } from './utils/keyboardShortcuts';
@@ -53,6 +56,35 @@ function isShortcutTypingTarget(target: EventTarget | null): boolean {
 }
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 't8-sidebar-collapsed';
+const CUSTOM_THEME_TEMPLATE_CACHE_KEY = 't8-custom-theme-templates-cache-v1';
+const CUSTOM_THEME_TEMPLATE_CACHE_MAX_BYTES = 128 * 1024;
+const CUSTOM_THEME_TEMPLATE_CACHE_URL_MAX_CHARS = 2_048;
+
+function cachedThemeStringByteLength(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+function sanitizeCachedThemeTemplate(template: ThemeTemplate): ThemeTemplate {
+  if (!template.music) return { ...template, builtIn: false };
+  const cacheableUrl = (value?: string) => (
+    typeof value === 'string'
+    && value.length <= CUSTOM_THEME_TEMPLATE_CACHE_URL_MAX_CHARS
+    && !value.trimStart().toLowerCase().startsWith('data:')
+      ? value
+      : undefined
+  );
+  const url = cacheableUrl(template.music.url);
+  const hiddenUrl = cacheableUrl(template.music.hiddenUrl);
+  const source = !url && (template.music.source === 'upload' || template.music.source === 'url')
+    ? 'synth'
+    : template.music.source;
+  return {
+    ...template,
+    builtIn: false,
+    music: { ...template.music, source, url, hiddenUrl },
+  };
+}
+
 const ZHAOTUTU_TAGGER_TRAINER_URL = 'https://zhaotutu.xyz';
 const ZHAOTUTU_TAGGER_TRAINER_LABEL = '最好的打标和模型训练工具-图图打标及训练器：点击获取';
 const API_ACQUISITION_LINKS = [
@@ -291,17 +323,31 @@ function App() {
     style,
     templateId,
     customTemplates,
+    templatesLoaded,
     uiFontPreset,
     customUiFont,
     toggleTheme,
     loadCustomTemplates,
   } = useThemeStore();
   const { load: loadSettings } = useApiKeysStore();
+  const bootstrapCanvases = useCanvasStore((state) => state.bootstrapCanvases);
   const shortcuts = useShortcutStore((s) => s.shortcuts);
   const currentTemplate = useMemo(
     () => resolveThemeTemplate(templateId, customTemplates),
     [templateId, customTemplates],
   );
+  const [appliedThemeStyle, setAppliedThemeStyle] = useState(() =>
+    typeof document === 'undefined'
+      ? 'tech'
+      : document.documentElement.getAttribute('data-theme-visual') || 'tech',
+  );
+  const [themeCssFailure, setThemeCssFailure] = useState<{ style: string; message: string } | null>(null);
+  const [themeCssLoadAttempt, setThemeCssLoadAttempt] = useState(0);
+  const themeCssApplyCoordinatorRef = useRef<ReturnType<typeof createThemeCssApplyCoordinator> | null>(null);
+  if (!themeCssApplyCoordinatorRef.current) {
+    themeCssApplyCoordinatorRef.current = createThemeCssApplyCoordinator();
+  }
+  const themeCssApplyCoordinator = themeCssApplyCoordinatorRef.current;
   const [backendStatus, setBackendStatus] = useState<'checking' | 'ok' | 'error'>('checking');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [resourceOpen, setResourceOpen] = useState(false);
@@ -588,13 +634,42 @@ function App() {
   // 将主题状态注入 <html> 供 CSS 选择器使用
   useEffect(() => {
     const root = document.documentElement;
-    applyThemeTemplate(currentTemplate, theme);
+    const requestedStyle = currentTemplate.visuals?.style || style;
+    root.setAttribute('data-theme-css-state', 'loading');
+    root.setAttribute('data-theme-css-requested', requestedStyle);
     applyUiFontPreference(root, uiFontPreset, customUiFont);
     // 全局禁用拼写检查(节点提示词为中文/@变量语法,不需红色波浪线干扰)
     // spellcheck 属性 HTML 标准上是可继承的 → 根上设一次,所有后代 textarea/input 都生效
     root.setAttribute('spellcheck', 'false');
     document.body.setAttribute('spellcheck', 'false');
-  }, [currentTemplate, customUiFont, theme, uiFontPreset]);
+    let disposed = false;
+    void themeCssApplyCoordinator.apply(
+      requestedStyle,
+      () => {
+        if (disposed) return;
+        applyThemeTemplate(currentTemplate, theme);
+        setAppliedThemeStyle(requestedStyle);
+        setThemeCssFailure(null);
+        root.setAttribute('data-theme-css-state', 'ready');
+        root.removeAttribute('data-theme-css-fallback');
+      },
+      (error) => {
+        if (disposed) return;
+        const fallbackTemplate = resolveThemeTemplate(TECH_TEMPLATE_ID);
+        applyThemeTemplate(fallbackTemplate, theme);
+        setAppliedThemeStyle('tech');
+        root.setAttribute('data-theme-css-state', 'error');
+        root.setAttribute('data-theme-css-fallback', 'tech');
+        setThemeCssFailure({
+          style: requestedStyle,
+          message: error instanceof Error ? error.message : '未知加载错误',
+        });
+      },
+    );
+    return () => {
+      disposed = true;
+    };
+  }, [currentTemplate, customUiFont, style, theme, themeCssApplyCoordinator, themeCssLoadAttempt, uiFontPreset]);
 
   // 全局 MutationObserver: 为动态挂载的 textarea / input 自动设置 spellcheck=false
   // (Chromium 对 textarea 默认 spellcheck=true,不会从祖先继承 → 需逐个设置)
@@ -645,11 +720,104 @@ function App() {
     return () => window.clearInterval(t);
   }, []);
 
-  // 预加载 settings
+  // 目录启动不依赖 Sidebar 是否挂载：即使侧栏被持久化为收起状态，也能恢复最后画布。
+  useEffect(() => {
+    if (backendStatus === 'ok') void bootstrapCanvases();
+    return stopCanvasCatalogRecoveryPolling;
+  }, [backendStatus, bootstrapCanvases]);
+
+  // 自定义主题先从轻量缓存恢复，避免首屏扫描主题目录。
+  useEffect(() => {
+    if (templatesLoaded) return;
+    try {
+      const raw = window.localStorage.getItem(CUSTOM_THEME_TEMPLATE_CACHE_KEY);
+      if (!raw) return;
+      if (
+        raw.length > CUSTOM_THEME_TEMPLATE_CACHE_MAX_BYTES
+        || cachedThemeStringByteLength(raw) > CUSTOM_THEME_TEMPLATE_CACHE_MAX_BYTES
+      ) {
+        window.localStorage.removeItem(CUSTOM_THEME_TEMPLATE_CACHE_KEY);
+        return;
+      }
+      const parsed = JSON.parse(raw) as { templates?: unknown };
+      if (!Array.isArray(parsed.templates)) return;
+      const cachedTemplates = parsed.templates
+        .filter((item): item is ThemeTemplate => Boolean(
+          item
+          && typeof item === 'object'
+          && (item as ThemeTemplate).schema === 't8-theme-template'
+          && typeof (item as ThemeTemplate).id === 'string'
+          && (item as ThemeTemplate).id.length <= 160,
+        ))
+        .slice(0, 1)
+        .map(sanitizeCachedThemeTemplate);
+      if (cachedTemplates.length > 0) useThemeStore.setState({ customTemplates: cachedTemplates });
+    } catch {
+      window.localStorage.removeItem(CUSTOM_THEME_TEMPLATE_CACHE_KEY);
+    }
+  }, [templatesLoaded]);
+
+  useEffect(() => {
+    if (!templatesLoaded) return;
+    try {
+      const activeTemplate = customTemplates.find((template) => template.id === templateId);
+      if (!activeTemplate) {
+        window.localStorage.removeItem(CUSTOM_THEME_TEMPLATE_CACHE_KEY);
+        return;
+      }
+      const serialized = JSON.stringify({
+        version: 1,
+        templates: [sanitizeCachedThemeTemplate(activeTemplate)],
+      });
+      if (cachedThemeStringByteLength(serialized) > CUSTOM_THEME_TEMPLATE_CACHE_MAX_BYTES) {
+        window.localStorage.removeItem(CUSTOM_THEME_TEMPLATE_CACHE_KEY);
+        return;
+      }
+      window.localStorage.setItem(CUSTOM_THEME_TEMPLATE_CACHE_KEY, serialized);
+    } catch {
+      // 缓存压力不影响主题切换；主题管理器仍可从后端刷新。
+    }
+  }, [customTemplates, templateId, templatesLoaded]);
+
+  useEffect(() => {
+    if (templatesLoaded) return;
+    const activeTemplateIsUnknown = !BUILT_IN_THEME_TEMPLATES.some(
+      (template) => template.id === templateId,
+    );
+    let timer = 0;
+    let idleHandle: number | null = null;
+    const refreshWhenIdle = () => {
+      window.removeEventListener('pointerdown', refreshWhenIdle);
+      window.removeEventListener('keydown', refreshWhenIdle);
+      timer = window.setTimeout(() => {
+        const run = () => {
+          if (!useThemeStore.getState().templatesLoaded) void loadCustomTemplates();
+        };
+        const requestIdle = (window as any).requestIdleCallback as
+          | undefined
+          | ((callback: () => void, options: { timeout: number }) => number);
+        if (requestIdle) idleHandle = requestIdle(run, { timeout: 5_000 });
+        else run();
+      }, 1_000);
+    };
+    if (activeTemplateIsUnknown) {
+      refreshWhenIdle();
+    } else {
+      window.addEventListener('pointerdown', refreshWhenIdle, { once: true });
+      window.addEventListener('keydown', refreshWhenIdle, { once: true });
+    }
+    return () => {
+      window.removeEventListener('pointerdown', refreshWhenIdle);
+      window.removeEventListener('keydown', refreshWhenIdle);
+      window.clearTimeout(timer);
+      if (idleHandle != null) (window as any).cancelIdleCallback?.(idleHandle);
+    };
+  }, [loadCustomTemplates, templateId, templatesLoaded]);
+
+  // settings 不依赖目录扫描，可直接预加载。
   useEffect(() => {
     loadSettings();
-    loadCustomTemplates();
-  }, [loadSettings, loadCustomTemplates]);
+  }, [loadSettings]);
 
   // 资源库快捷键：未选中任何节点时打开 / 关闭资源库。输入框内不拦截，避免打断提示词编辑。
   useEffect(() => {
@@ -683,16 +851,16 @@ function App() {
   }, [shortcuts, toggleSidebarCollapsed]);
 
   const isDark = theme === 'dark';
-  const isPixel = style === 'pixel';
-  const isOp = currentTemplate.visuals?.style === 'op';
-  const isRh = currentTemplate.visuals?.style === 'rh';
-  const isNaruto = currentTemplate.visuals?.style === 'naruto';
-  const isEva = currentTemplate.visuals?.style === 'eva';
-  const isYyh = currentTemplate.visuals?.style === 'yyh';
-  const isSlamdunk = currentTemplate.visuals?.style === 'slamdunk';
-  const isSoccer = currentTemplate.visuals?.style === 'soccer-hero';
-  const isDragonBall = currentTemplate.visuals?.style === 'dragon-ball';
-  const isSaintSeiya = currentTemplate.visuals?.style === 'saint-seiya';
+  const isPixel = appliedThemeStyle === 'pixel';
+  const isOp = appliedThemeStyle === 'op';
+  const isRh = appliedThemeStyle === 'rh';
+  const isNaruto = appliedThemeStyle === 'naruto';
+  const isEva = appliedThemeStyle === 'eva';
+  const isYyh = appliedThemeStyle === 'yyh';
+  const isSlamdunk = appliedThemeStyle === 'slamdunk';
+  const isSoccer = appliedThemeStyle === 'soccer-hero';
+  const isDragonBall = appliedThemeStyle === 'dragon-ball';
+  const isSaintSeiya = appliedThemeStyle === 'saint-seiya';
   const shenronUnlockedAt = useDragonBallRadarStore((state) => state.shenronUnlockedAt);
   const shenronModeActive = useDragonBallRadarStore((state) => state.shenronModeActive);
   const setShenronModeActive = useDragonBallRadarStore((state) => state.setShenronModeActive);
@@ -804,6 +972,23 @@ function App() {
       } ${isOp ? 't8-app-shell--op' : ''} ${isRh ? 't8-app-shell--rh' : ''} ${isNaruto ? 't8-app-shell--naruto' : ''} ${isEva ? 't8-app-shell--eva' : ''} ${isYyh ? 't8-app-shell--yyh' : ''} ${isSlamdunk ? 't8-app-shell--slamdunk' : ''} ${isSoccer ? 't8-app-shell--soccer' : ''} ${isDragonBall ? 't8-app-shell--dragon-ball' : ''} ${isSaintSeiya ? 't8-app-shell--saint-seiya' : ''}`}
       style={{ background: 'var(--t8-bg-app)', color: 'var(--t8-text-main)' }}
     >
+      {themeCssFailure && (
+        <div
+          role="alert"
+          data-theme-css-fallback-notice="true"
+          className="fixed left-1/2 top-14 z-[250] flex -translate-x-1/2 items-center gap-3 rounded-md border border-amber-400/60 bg-zinc-950 px-3 py-2 text-xs text-amber-100 shadow-xl"
+          title={themeCssFailure.message}
+        >
+          <span>主题样式加载失败，已显示基础主题。</span>
+          <button
+            type="button"
+            className="rounded border border-amber-300/50 px-2 py-1 font-semibold hover:bg-amber-300/10"
+            onClick={() => setThemeCssLoadAttempt((attempt) => attempt + 1)}
+          >
+            重试 {themeCssFailure.style}
+          </button>
+        </div>
+      )}
       {/* 头部状态栏 */}
       <header
         className={`t8-topbar flex items-center justify-between px-4 py-2 border-b ${
@@ -2160,7 +2345,7 @@ function App() {
         </button>
         <ErrorBoundary fallbackTitle="画布渲染出错了，已被错误边界捕获">
           <Suspense fallback={<InfiniteCanvasBootLoading />}>
-            <Canvas onAddNodeRef={addNodeRef} onInsertWorkflowRef={insertWorkflowRef} />
+            <Canvas onAddNodeRef={addNodeRef} onInsertWorkflowRef={insertWorkflowRef} themeStyleOverride={appliedThemeStyle} />
           </Suspense>
         </ErrorBoundary>
       </div>

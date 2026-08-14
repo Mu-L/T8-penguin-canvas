@@ -184,6 +184,57 @@ test('409 from in-flight L save rebuilds conflict provenance from current A afte
   assert.equal(result.shouldScheduleCas, false);
 });
 
+test('background node.patch rebase survives a later stale PUT 409 and schedules compensating persistence', () => {
+  const baseNode = {
+    id: 'story-1',
+    data: { prompt: 'old prompt', status: 'running' },
+  };
+  const locallyEditedNode = {
+    id: 'story-1',
+    data: { prompt: 'edited while running', status: 'running' },
+  };
+  const authoritativeNodePatch = {
+    id: 'story-1',
+    data: { prompt: 'old prompt', status: 'completed', output: 'durable result' },
+  };
+  const merged = mergeCanvasPatchValueWithConflicts(
+    baseNode,
+    locallyEditedNode,
+    authoritativeNodePatch,
+    'nodes[story-1]',
+  );
+  assert.deepEqual(merged.conflicts, []);
+
+  const requestPending = pending({
+    snapshot: JSON.stringify(locallyEditedNode),
+    baseSnapshot: JSON.stringify(baseNode),
+    baseRevision: 1,
+  });
+  const rebasedPending = pending({
+    snapshot: JSON.stringify(merged.value),
+    baseSnapshot: JSON.stringify(authoritativeNodePatch),
+    baseRevision: 2,
+  });
+  const result = reconcileCanvasPatchAutosaveResponse({
+    outcome: 'conflict',
+    token: { generation: 1, snapshot: requestPending.snapshot, pendingIdentity: requestPending },
+    currentGeneration: 2,
+    current: rebasedPending,
+    pending: rebasedPending,
+    active: true,
+  });
+
+  const durable = JSON.parse(result.pending!.snapshot);
+  assert.equal(durable.data.prompt, 'edited while running');
+  assert.equal(durable.data.status, 'completed');
+  assert.equal(durable.data.output, 'durable result');
+  assert.equal(result.pending?.baseSnapshot, JSON.stringify(authoritativeNodePatch));
+  assert.equal(result.pending?.baseRevision, 2);
+  assert.equal(result.pending?.conflicted, false);
+  assert.deepEqual(result.pending?.conflicts, []);
+  assert.equal(result.shouldScheduleCas, true);
+});
+
 test('three-way value merge reports same-field and both delete/edit directions without dropping local intent', () => {
   const sameField = mergeCanvasPatchValueWithConflicts(
     { prompt: 'base' },

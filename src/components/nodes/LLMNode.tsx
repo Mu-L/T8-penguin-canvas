@@ -41,6 +41,7 @@ import MaterialPreviewSection from './MaterialPreviewSection';
 import { useThemeStore } from '../../stores/theme';
 import MentionPromptInput from './MentionPromptInput';
 import SmartImage from '../SmartImage';
+import LazyVideo from '../LazyVideo';
 import PromptTextarea from '../PromptTextarea';
 import { rebaseMediaMentions, resolveMediaMentions, type MediaMention } from './mediaMentions';
 import { splitText } from '../../utils/textSplit';
@@ -1427,7 +1428,7 @@ const LLMNode = ({ id, data, selected }: NodeProps) => {
             {t.videos && t.videos.length > 0 && (
               <div className="flex gap-1 flex-wrap mt-1">
                 {t.videos.map((u, j) => (
-                  <video
+                  <LazyVideo
                     key={j}
                     src={u}
                     muted

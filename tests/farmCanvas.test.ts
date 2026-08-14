@@ -1874,7 +1874,8 @@ test('farm canvas types are wired into CanvasData, Canvas persistence, import, a
   assert.match(canvas, /const setFarmCanvas = useCallback\([\s\S]{0,420}?rawSetFarmCanvas\(next\.value\)/);
   assert.match(canvas, /const authoritativeFarmCanvas = sanitizeFarmCanvasState\(data\.farmCanvas\)/);
   assert.match(canvas, /let renderedState = authoritativeState;[\s\S]{0,900}?mergeConcurrentCanvasPatchState\(existingPending\.baseSnapshot, existingPending, authoritativeState\)/);
-  assert.match(canvas, /function persistableCanvasPatchStateFromParts\([\s\S]{0,900}?snapshot: JSON\.stringify\(\{ nodes: persistNodes, edges: persistEdges, creativeDesk, farmCanvas, nextNodeSerialId \}\)/);
+  assert.match(canvas, /function canvasPatchStateFromCanonicalParts\([\s\S]{0,900}?snapshot: JSON\.stringify\(\{ nodes, edges, creativeDesk, farmCanvas, nextNodeSerialId \}\)/);
+  assert.match(canvas, /function persistableCanvasPatchStateFromParts\([\s\S]{0,900}?return canvasPatchStateFromCanonicalParts\(persistNodes, persistEdges, creativeDesk, farmCanvas, nextNodeSerialId\)/);
   assert.match(canvas, new RegExp('pay' + 'load = \\{ nodes: persistNodes, edges: persistEdges, viewport: getViewport\\(\\), nextNodeSerialId, creativeDesk, farmCanvas \\}'));
   assert.match(canvas, /farmCanvas: sanitizeFarmCanvasState\(data\.farmCanvas\)/);
   assert.match(canvas, /setFarmCanvas\(sanitizeFarmCanvasState\(source\.farmCanvas\)\)/);
@@ -1973,7 +1974,8 @@ test('farm render layer is mounted with ReactFlow coordinates and event exclusio
     ? canvas.slice(farmToolSelectionFeedbackStart, farmToolSelectionFeedbackEnd > farmToolSelectionFeedbackStart ? farmToolSelectionFeedbackEnd : undefined)
     : '';
 
-  assert.match(canvas, /import FarmCanvasLayer, \{ type FarmCanvasFloatingFeedback \} from '\.\/FarmCanvasLayer'/);
+  assert.match(canvas, /import type \{ FarmCanvasFloatingFeedback \} from '\.\/FarmCanvasLayer'/);
+  assert.match(canvas, /const FarmCanvasLayer = lazy\(\(\) => import\('\.\/FarmCanvasLayer'\)\)/);
   assert.match(canvas, /import \{ farmSoundCueForEvent, farmSoundCueForTool, playFarmActionSound, type FarmSoundCue \} from '\.\.\/utils\/farmSound'/);
   assert.match(canvas, /const \[farmCanvasEditing, setFarmCanvasEditing\] = useState\(false\)/);
   assert.match(canvas, /const \[farmStoryPanelOpen, setFarmStoryPanelOpen\] = useState/);

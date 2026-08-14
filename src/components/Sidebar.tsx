@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState, type UIEvent } from 'react';
 import * as Icons from 'lucide-react';
 import {
   Check,
@@ -16,9 +16,10 @@ import { NODE_GROUPS } from '../config/nodeRegistry';
 
 // vite.config.ts 中通过 define 注入的编译期常量（与 package.json version 同步）
 declare const __APP_VERSION__: string;
-import type { NodeMeta, NodeType } from '../types/canvas';
+import type { CanvasListItem, NodeMeta, NodeType } from '../types/canvas';
 import { useThemeStore } from '../stores/theme';
 import { useCanvasStore } from '../stores/canvas';
+import { listCanvasPage } from '../services/api';
 import { resolveThemeTemplate } from '../theme/defaultTemplates';
 const COLOR_HEX: Record<string, string> = {
   sky: '#7dd3fc',
@@ -389,6 +390,154 @@ interface SidebarProps {
   onAddNode: (type: NodeType) => void;
 }
 
+const CANVAS_ROW_HEIGHT = 42;
+const CANVAS_VIEWPORT_HEIGHT = 224;
+const CANVAS_ROW_OVERSCAN = 4;
+
+interface CanvasCatalogRowProps {
+  canvas: CanvasListItem;
+  isActive: boolean;
+  isEditing: boolean;
+  needsDeleteConfirm: boolean;
+  hasCompletionNotice: boolean;
+  editingName: string;
+  isDark: boolean;
+  isPixel: boolean;
+  onSelect: (id: string) => void;
+  onEditingNameChange: (name: string) => void;
+  onStartEdit: (id: string, name: string) => void;
+  onSubmitEdit: () => void;
+  onCancelEdit: () => void;
+  onRequestDelete: (id: string) => void;
+  onConfirmDelete: (id: string) => void;
+  onCancelDelete: () => void;
+}
+
+const CanvasCatalogRow = memo(function CanvasCatalogRow({
+  canvas,
+  isActive,
+  isEditing,
+  needsDeleteConfirm,
+  hasCompletionNotice,
+  editingName,
+  isDark,
+  isPixel,
+  onSelect,
+  onEditingNameChange,
+  onStartEdit,
+  onSubmitEdit,
+  onCancelEdit,
+  onRequestDelete,
+  onConfirmDelete,
+  onCancelDelete,
+}: CanvasCatalogRowProps) {
+  return (
+    <div
+      onClick={() => !isEditing && onSelect(canvas.id)}
+      data-canvas-completion-notice={hasCompletionNotice ? 'true' : undefined}
+      className={`t8-sidebar-canvas-row group h-full px-2 py-1 cursor-pointer text-[11px] transition-colors ${
+        isPixel
+          ? `px-row ${isActive ? 'is-active' : ''}`
+          : `rounded-md ${
+              isActive
+                ? isDark
+                  ? 'bg-white/10 text-white'
+                  : 'bg-black/10 text-zinc-900'
+                : isDark
+                  ? 'text-white/70 hover:bg-white/5'
+                  : 'text-zinc-700 hover:bg-black/5'
+            }`
+      }`}
+    >
+      {isEditing ? (
+        <input
+          autoFocus
+          value={editingName}
+          onChange={(event) => onEditingNameChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') onSubmitEdit();
+            if (event.key === 'Escape') onCancelEdit();
+          }}
+          onBlur={onSubmitEdit}
+          className={`w-full px-1.5 py-0.5 rounded text-[11px] outline-none border ${
+            isDark ? 'bg-zinc-800 border-white/20 text-white' : 'bg-white border-black/20'
+          }`}
+        />
+      ) : (
+        <div className="flex items-center gap-1.5">
+          <div className="flex-1 min-w-0">
+            <div className="t8-sidebar-canvas-title flex min-w-0 items-center gap-1">
+              <span className="truncate font-medium">{canvas.name}</span>
+              {hasCompletionNotice && (
+                <span
+                  className="t8-sidebar-canvas-update-dot"
+                  role="img"
+                  aria-label="这个画布有新生成完成，切换后自动清除"
+                  title="这个画布有新生成完成，切换后自动清除"
+                />
+              )}
+            </div>
+            <div className={`text-[10px] ${isDark ? 'text-white/30' : 'text-zinc-400'}`}>
+              {canvas.nodeCount} 个节点
+            </div>
+          </div>
+          <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity">
+            {needsDeleteConfirm ? (
+              <>
+                <button
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onConfirmDelete(canvas.id);
+                  }}
+                  className="p-0.5 rounded hover:bg-red-500/20 text-red-400"
+                  title="确认删除"
+                >
+                  <Check size={11} />
+                </button>
+                <button
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onCancelDelete();
+                  }}
+                  className={`p-0.5 rounded ${isDark ? 'hover:bg-white/10' : 'hover:bg-black/10'}`}
+                  title="取消删除"
+                >
+                  <X size={11} />
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onStartEdit(canvas.id, canvas.name);
+                  }}
+                  className={`p-0.5 rounded ${isDark ? 'hover:bg-white/10' : 'hover:bg-black/10'}`}
+                  title="重命名"
+                >
+                  <Edit2 size={10} />
+                </button>
+                <button
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onRequestDelete(canvas.id);
+                  }}
+                  className={`p-0.5 rounded ${
+                    isDark ? 'hover:bg-red-500/20 text-red-400' : 'hover:bg-red-100 text-red-600'
+                  }`}
+                  title="删除"
+                >
+                  <Trash2 size={10} />
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
 export default function Sidebar({ onAddNode }: SidebarProps) {
   const { theme, style, templateId, customTemplates } = useThemeStore();
   const currentTemplate = useMemo(
@@ -402,48 +551,145 @@ export default function Sidebar({ onAddNode }: SidebarProps) {
   const [keyword, setKeyword] = useState('');
 
   // 画布管理(整合到节点侧边栏顶部)
-  const {
-    canvases,
-    activeId,
-    loading: canvasLoading,
-    completionNoticeCanvasIds,
-    loadCanvases,
-    createCanvas,
-    deleteCanvas,
-    renameCanvas,
-    setActive,
-  } = useCanvasStore();
+  const canvases = useCanvasStore((state) => state.canvases);
+  const activeId = useCanvasStore((state) => state.activeId);
+  const canvasLoading = useCanvasStore((state) => state.loading);
+  const canvasLoadingMore = useCanvasStore((state) => state.loadingMore);
+  const canvasTotal = useCanvasStore((state) => state.total);
+  const canvasHasMore = useCanvasStore((state) => state.hasMore);
+  const canvasCatalogPartial = useCanvasStore((state) => state.catalogPartial);
+  const canvasRecovery = useCanvasStore((state) => state.recovery);
+  const completionNoticeCanvasIds = useCanvasStore((state) => state.completionNoticeCanvasIds);
+  const loadMoreCanvases = useCanvasStore((state) => state.loadMoreCanvases);
+  const createCanvas = useCanvasStore((state) => state.createCanvas);
+  const deleteCanvas = useCanvasStore((state) => state.deleteCanvas);
+  const renameCanvas = useCanvasStore((state) => state.renameCanvas);
+  const setActive = useCanvasStore((state) => state.setActive);
   const [canvasPanelOpen, setCanvasPanelOpen] = useState(true);
+  const [canvasScrollTop, setCanvasScrollTop] = useState(0);
+  const [canvasSearchDraft, setCanvasSearchDraft] = useState('');
+  const [canvasSearchQuery, setCanvasSearchQuery] = useState('');
+  const [canvasSearchLoading, setCanvasSearchLoading] = useState(false);
+  const [canvasSearchResults, setCanvasSearchResults] = useState<CanvasListItem[]>([]);
+  const [canvasSearchCursor, setCanvasSearchCursor] = useState<string | null>(null);
+  const [canvasSearchHasMore, setCanvasSearchHasMore] = useState(false);
+  const [canvasSearchUnavailable, setCanvasSearchUnavailable] = useState(false);
+  const [canvasSearchError, setCanvasSearchError] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const completionNoticeSet = useMemo(() => new Set(completionNoticeCanvasIds), [completionNoticeCanvasIds]);
+  const displayedCanvasTotal = canvasTotal ?? canvases.length;
+  const displayedCanvases = canvasSearchQuery ? canvasSearchResults : canvases;
+  const canvasVisibleRange = useMemo(() => {
+    const first = Math.max(0, Math.floor(canvasScrollTop / CANVAS_ROW_HEIGHT) - CANVAS_ROW_OVERSCAN);
+    const count = Math.ceil(CANVAS_VIEWPORT_HEIGHT / CANVAS_ROW_HEIGHT) + CANVAS_ROW_OVERSCAN * 2;
+    return { start: first, end: Math.min(displayedCanvases.length, first + count) };
+  }, [canvasScrollTop, displayedCanvases.length]);
+  const visibleCanvases = useMemo(
+    () => displayedCanvases.slice(canvasVisibleRange.start, canvasVisibleRange.end),
+    [displayedCanvases, canvasVisibleRange],
+  );
 
-  useEffect(() => {
-    loadCanvases();
-  }, [loadCanvases]);
-
-  const handleCreateCanvas = async () => {
-    const name = `画布 ${canvases.length + 1}`;
+  const handleCreateCanvas = useCallback(async () => {
+    const name = `画布 ${displayedCanvasTotal + 1}`;
     await createCanvas(name);
-  };
+  }, [createCanvas, displayedCanvasTotal]);
 
-  const startEdit = (id: string, name: string) => {
+  const startEdit = useCallback((id: string, name: string) => {
     setEditingId(id);
     setEditingName(name);
-  };
+  }, []);
 
-  const submitEdit = async () => {
+  const submitEdit = useCallback(async () => {
     if (editingId && editingName.trim()) {
       await renameCanvas(editingId, editingName.trim());
     }
     setEditingId(null);
-  };
+  }, [editingId, editingName, renameCanvas]);
 
-  const handleDeleteCanvas = async (id: string) => {
+  const handleDeleteCanvas = useCallback(async (id: string) => {
     await deleteCanvas(id);
     setConfirmDelete(null);
-  };
+  }, [deleteCanvas]);
+
+  const handleCanvasListScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+    const element = event.currentTarget;
+    setCanvasScrollTop(element.scrollTop);
+    if (!canvasSearchQuery
+      && element.scrollHeight - element.scrollTop - element.clientHeight < CANVAS_ROW_HEIGHT * 3) {
+      void loadMoreCanvases();
+    }
+  }, [canvasSearchQuery, loadMoreCanvases]);
+
+  const handleCanvasSearch = useCallback(async () => {
+    const query = canvasSearchDraft.trim();
+    setCanvasScrollTop(0);
+    if (!query) {
+      setCanvasSearchQuery('');
+      setCanvasSearchResults([]);
+      setCanvasSearchCursor(null);
+      setCanvasSearchHasMore(false);
+      setCanvasSearchUnavailable(false);
+      setCanvasSearchError('');
+      return;
+    }
+    setCanvasSearchLoading(true);
+    setCanvasSearchError('');
+    try {
+      const page = await listCanvasPage({ limit: 50, query });
+      setCanvasSearchQuery(query);
+      setCanvasSearchResults(page.items);
+      setCanvasSearchCursor(page.nextCursor);
+      setCanvasSearchHasMore(page.hasMore);
+      setCanvasSearchUnavailable(page.searchUnavailable);
+    } catch (error: any) {
+      setCanvasSearchQuery(query);
+      setCanvasSearchResults([]);
+      setCanvasSearchCursor(null);
+      setCanvasSearchHasMore(false);
+      setCanvasSearchError(error?.message || '搜索画布失败');
+    } finally {
+      setCanvasSearchLoading(false);
+    }
+  }, [canvasSearchDraft]);
+
+  const handleLoadMoreCanvasSearch = useCallback(async () => {
+    if (!canvasSearchQuery || !canvasSearchCursor || !canvasSearchHasMore || canvasSearchLoading) return;
+    setCanvasSearchLoading(true);
+    try {
+      const page = await listCanvasPage({ limit: 50, cursor: canvasSearchCursor, query: canvasSearchQuery });
+      setCanvasSearchResults((current) => {
+        const byId = new Map(current.map((canvas) => [canvas.id, canvas]));
+        for (const canvas of page.items) byId.set(canvas.id, canvas);
+        return [...byId.values()];
+      });
+      setCanvasSearchCursor(page.nextCursor);
+      setCanvasSearchHasMore(page.hasMore);
+      setCanvasSearchUnavailable(page.searchUnavailable);
+    } catch (error: any) {
+      setCanvasSearchError(error?.message || '继续搜索画布失败');
+    } finally {
+      setCanvasSearchLoading(false);
+    }
+  }, [canvasSearchCursor, canvasSearchHasMore, canvasSearchLoading, canvasSearchQuery]);
+
+  const clearCanvasSearch = useCallback(() => {
+    setCanvasSearchDraft('');
+    setCanvasSearchQuery('');
+    setCanvasSearchResults([]);
+    setCanvasSearchCursor(null);
+    setCanvasSearchHasMore(false);
+    setCanvasSearchUnavailable(false);
+    setCanvasSearchError('');
+    setCanvasScrollTop(0);
+  }, []);
+
+  const handleSelectCanvas = useCallback((id: string) => setActive(id), [setActive]);
+  const handleEditingNameChange = useCallback((name: string) => setEditingName(name), []);
+  const cancelEdit = useCallback(() => setEditingId(null), []);
+  const requestDelete = useCallback((id: string) => setConfirmDelete(id), []);
+  const cancelDelete = useCallback(() => setConfirmDelete(null), []);
 
   const toggle = (key: string) => setCollapsed((s) => ({ ...s, [key]: !s[key] }));
 
@@ -555,7 +801,7 @@ export default function Sidebar({ onAddNode }: SidebarProps) {
             {canvasPanelOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             <FolderOpen size={12} />
             <span>画布</span>
-            <span className="opacity-60 ml-1 normal-case">{canvases.length}</span>
+            <span className="opacity-60 ml-1 normal-case">{displayedCanvasTotal}</span>
           </button>
           <button
             onClick={handleCreateCanvas}
@@ -574,7 +820,38 @@ export default function Sidebar({ onAddNode }: SidebarProps) {
           </button>
         </div>
         {canvasPanelOpen && (
-          <div className="px-2 pb-2 max-h-56 overflow-y-auto space-y-0.5 scrollbar-hide">
+          <div className="px-2 pb-2">
+            <form
+              className={`mb-1 flex items-center gap-1 rounded px-1.5 py-1 ${
+                isPixel ? 'px-input' : isDark ? 'bg-white/5 text-white/60' : 'bg-black/5 text-zinc-600'
+              }`}
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleCanvasSearch();
+              }}
+            >
+              <Search size={11} className="shrink-0 opacity-60" />
+              <input
+                value={canvasSearchDraft}
+                onChange={(event) => setCanvasSearchDraft(event.target.value)}
+                placeholder="搜索全部画布，回车确认"
+                aria-label="搜索全部画布"
+                className="min-w-0 flex-1 bg-transparent text-[10px] outline-none"
+              />
+              {canvasSearchLoading && <Loader2 size={10} className="shrink-0 animate-spin" />}
+              {(canvasSearchDraft || canvasSearchQuery) && !canvasSearchLoading && (
+                <button type="button" onClick={clearCanvasSearch} title="清除画布搜索">
+                  <X size={10} />
+                </button>
+              )}
+              <button
+                type="submit"
+                disabled={canvasSearchLoading}
+                className="shrink-0 rounded px-1 py-0.5 text-[9px] hover:bg-white/10"
+              >
+                搜索
+              </button>
+            </form>
             {canvasLoading && (
               <div
                 className={`flex items-center gap-2 px-2 py-2 text-[11px] ${
@@ -584,7 +861,27 @@ export default function Sidebar({ onAddNode }: SidebarProps) {
                 <Loader2 size={12} className="animate-spin" /> 加载中...
               </div>
             )}
-            {!canvasLoading && canvases.length === 0 && (
+            {canvasCatalogPartial && canvasRecovery?.status === 'running' && (
+              <div
+                className={`px-2 pb-1 text-[10px] ${isPixel ? '' : isDark ? 'text-amber-300/70' : 'text-amber-700'}`}
+                role="status"
+              >
+                正在后台修复画布目录 {canvasRecovery.scanned}/{canvasRecovery.total || '?'}
+              </div>
+            )}
+            {canvasSearchUnavailable && canvasSearchQuery && (
+              <div className={`px-2 pb-1 text-[10px] ${isDark ? 'text-amber-300/70' : 'text-amber-700'}`}>
+                目录索引正在修复，当前搜索结果可能不完整；修复完成后可重新搜索。
+              </div>
+            )}
+            {canvasSearchError && (
+              <div className={`px-2 pb-1 text-[10px] ${isDark ? 'text-red-300/75' : 'text-red-700'}`} role="alert">
+                {canvasSearchError}
+              </div>
+            )}
+            {!canvasLoading
+              && canvases.length === 0
+              && canvasRecovery?.status !== 'running' && (
               <div
                 className={`text-center py-3 text-[11px] ${
                   isPixel ? '' : isDark ? 'text-white/40' : 'text-zinc-500'
@@ -603,129 +900,83 @@ export default function Sidebar({ onAddNode }: SidebarProps) {
                 </button>
               </div>
             )}
-            {canvases.map((c) => {
-              const isActive = c.id === activeId;
-              const isEditing = editingId === c.id;
-              const needConfirm = confirmDelete === c.id;
-              const hasCompletionNotice = !isActive && completionNoticeSet.has(c.id);
-              return (
+            {!canvasLoading && !canvasSearchLoading && !canvasSearchError && canvasSearchQuery && displayedCanvases.length === 0 && (
+              <div className={`px-2 py-2 text-center text-[10px] ${
+                isDark ? 'text-white/40' : 'text-zinc-500'
+              }`}>
+                没有匹配的画布
+              </div>
+            )}
+            {displayedCanvases.length > 0 && (
+              <div
+                onScroll={handleCanvasListScroll}
+                className="overflow-y-auto scrollbar-hide"
+                style={{ height: Math.min(CANVAS_VIEWPORT_HEIGHT, displayedCanvases.length * CANVAS_ROW_HEIGHT) }}
+                data-canvas-windowed-list="true"
+              >
                 <div
-                  key={c.id}
-                  onClick={() => !isEditing && setActive(c.id)}
-                  data-canvas-completion-notice={hasCompletionNotice ? 'true' : undefined}
-                  className={`t8-sidebar-canvas-row group px-2 py-1 cursor-pointer text-[11px] transition-colors ${
-                    isPixel
-                      ? `px-row ${isActive ? 'is-active' : ''}`
-                      : `rounded-md ${
-                          isActive
-                            ? isDark
-                              ? 'bg-white/10 text-white'
-                              : 'bg-black/10 text-zinc-900'
-                            : isDark
-                              ? 'text-white/70 hover:bg-white/5'
-                              : 'text-zinc-700 hover:bg-black/5'
-                        }`
-                  }`}
+                  className="relative"
+                  style={{ height: displayedCanvases.length * CANVAS_ROW_HEIGHT }}
                 >
-                  {isEditing ? (
-                    <input
-                      autoFocus
-                      value={editingName}
-                      onChange={(e) => setEditingName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') submitEdit();
-                        if (e.key === 'Escape') setEditingId(null);
-                      }}
-                      onBlur={submitEdit}
-                      className={`w-full px-1.5 py-0.5 rounded text-[11px] outline-none border ${
-                        isDark
-                          ? 'bg-zinc-800 border-white/20 text-white'
-                          : 'bg-white border-black/20'
-                      }`}
-                    />
-                  ) : (
-                    <div className="flex items-center gap-1.5">
-                      <div className="flex-1 min-w-0">
-                        <div className="t8-sidebar-canvas-title flex min-w-0 items-center gap-1">
-                          <span className="truncate font-medium">{c.name}</span>
-                          {hasCompletionNotice && (
-                            <span
-                              className="t8-sidebar-canvas-update-dot"
-                              role="img"
-                              aria-label="这个画布有新生成完成，切换后自动清除"
-                              title="这个画布有新生成完成，切换后自动清除"
-                            />
-                          )}
-                        </div>
-                        <div
-                          className={`text-[10px] ${
-                            isDark ? 'text-white/30' : 'text-zinc-400'
-                          }`}
-                        >
-                          {c.nodeCount} 个节点
-                        </div>
+                  {visibleCanvases.map((canvas, visibleIndex) => {
+                    const absoluteIndex = canvasVisibleRange.start + visibleIndex;
+                    const isActive = canvas.id === activeId;
+                    return (
+                      <div
+                        key={canvas.id}
+                        className="absolute left-0 right-0"
+                        style={{ top: absoluteIndex * CANVAS_ROW_HEIGHT, height: CANVAS_ROW_HEIGHT }}
+                      >
+                        <CanvasCatalogRow
+                          canvas={canvas}
+                          isActive={isActive}
+                          isEditing={editingId === canvas.id}
+                          needsDeleteConfirm={confirmDelete === canvas.id}
+                          hasCompletionNotice={!isActive && completionNoticeSet.has(canvas.id)}
+                          editingName={editingName}
+                          isDark={isDark}
+                          isPixel={isPixel}
+                          onSelect={handleSelectCanvas}
+                          onEditingNameChange={handleEditingNameChange}
+                          onStartEdit={startEdit}
+                          onSubmitEdit={submitEdit}
+                          onCancelEdit={cancelEdit}
+                          onRequestDelete={requestDelete}
+                          onConfirmDelete={handleDeleteCanvas}
+                          onCancelDelete={cancelDelete}
+                        />
                       </div>
-                      <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity">
-                        {needConfirm ? (
-                          <>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteCanvas(c.id);
-                              }}
-                              className="p-0.5 rounded hover:bg-red-500/20 text-red-400"
-                              title="确认删除"
-                            >
-                              <Check size={11} />
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setConfirmDelete(null);
-                              }}
-                              className={`p-0.5 rounded ${
-                                isDark ? 'hover:bg-white/10' : 'hover:bg-black/10'
-                              }`}
-                            >
-                              <X size={11} />
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                startEdit(c.id, c.name);
-                              }}
-                              className={`p-0.5 rounded ${
-                                isDark ? 'hover:bg-white/10' : 'hover:bg-black/10'
-                              }`}
-                              title="重命名"
-                            >
-                              <Edit2 size={10} />
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setConfirmDelete(c.id);
-                              }}
-                              className={`p-0.5 rounded ${
-                                isDark
-                                  ? 'hover:bg-red-500/20 text-red-400'
-                                  : 'hover:bg-red-100 text-red-600'
-                              }`}
-                              title="删除"
-                            >
-                              <Trash2 size={10} />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  )}
+                    );
+                  })}
                 </div>
-              );
-            })}
+              </div>
+            )}
+            {canvasHasMore && !canvasSearchQuery && (
+              <button
+                type="button"
+                onClick={() => void loadMoreCanvases()}
+                disabled={canvasLoadingMore}
+                className={`mt-1 w-full flex items-center justify-center gap-1 py-1 text-[10px] ${
+                  isPixel ? 'px-btn px-btn--sm' : isDark ? 'text-white/45 hover:text-white/70' : 'text-zinc-500 hover:text-zinc-700'
+                }`}
+              >
+                {canvasLoadingMore ? <Loader2 size={10} className="animate-spin" /> : <ChevronDown size={10} />}
+                {canvasLoadingMore ? '加载中...' : `加载更多（已载入 ${canvases.length}）`}
+              </button>
+            )}
+            {canvasSearchQuery && canvasSearchHasMore && (
+              <button
+                type="button"
+                onClick={() => void handleLoadMoreCanvasSearch()}
+                disabled={canvasSearchLoading}
+                className={`mt-1 w-full flex items-center justify-center gap-1 py-1 text-[10px] ${
+                  isPixel ? 'px-btn px-btn--sm' : isDark ? 'text-white/45 hover:text-white/70' : 'text-zinc-500 hover:text-zinc-700'
+                }`}
+              >
+                {canvasSearchLoading ? <Loader2 size={10} className="animate-spin" /> : <ChevronDown size={10} />}
+                {canvasSearchLoading ? '搜索中...' : `加载更多结果（已载入 ${canvasSearchResults.length}）`}
+              </button>
+            )}
           </div>
         )}
       </div>

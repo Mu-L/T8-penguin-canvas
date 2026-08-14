@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ImgHTMLAttributes } from 'react';
 import { previewImageUrl } from '../utils/mediaPreview';
+import { observeVisibleMediaLoad } from '../utils/mediaLoadScheduler';
 
 type SmartImageProps = ImgHTMLAttributes<HTMLImageElement> & {
   src: string;
@@ -11,40 +12,39 @@ export default function SmartImage({
   thumbSize = 360,
   loading = 'lazy',
   decoding = 'async',
+  onLoad,
   onError,
   ...props
 }: SmartImageProps) {
   const imgRef = useRef<HTMLImageElement | null>(null);
+  const releaseLoadSlotRef = useRef<(() => void) | null>(null);
   const previewSrc = useMemo(() => previewImageUrl(src, thumbSize), [src, thumbSize]);
-  const [fallback, setFallback] = useState(false);
-  const [shouldLoad, setShouldLoad] = useState(loading !== 'lazy');
+  const [loadedKey, setLoadedKey] = useState<string | null>(() => loading !== 'lazy' ? previewSrc : null);
+  const [fallbackKey, setFallbackKey] = useState<string | null>(null);
+  const shouldLoad = loading !== 'lazy' || loadedKey === previewSrc;
+  const fallback = fallbackKey === previewSrc;
 
   useEffect(() => {
-    setFallback(false);
-    setShouldLoad(loading !== 'lazy');
-  }, [previewSrc, loading]);
-
-  useEffect(() => {
-    if (shouldLoad || loading !== 'lazy') return;
-    const el = imgRef.current;
-    if (!el || typeof IntersectionObserver === 'undefined') {
-      setShouldLoad(true);
-      return;
-    }
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          setShouldLoad(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: '720px 720px' },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [previewSrc, loading, shouldLoad]);
+    if (loading !== 'lazy' || !src) return;
+    const element = imgRef.current;
+    if (!element) return;
+    const controller = observeVisibleMediaLoad(element, 'image', (release) => {
+      releaseLoadSlotRef.current?.();
+      releaseLoadSlotRef.current = release;
+      setLoadedKey(previewSrc);
+    });
+    return () => {
+      controller.cancel();
+      releaseLoadSlotRef.current?.();
+      releaseLoadSlotRef.current = null;
+    };
+  }, [loading, previewSrc, src]);
 
   const actualSrc = shouldLoad ? (fallback ? src : previewSrc) : undefined;
+  const releaseLoadSlot = () => {
+    releaseLoadSlotRef.current?.();
+    releaseLoadSlotRef.current = null;
+  };
 
   return (
     <img
@@ -55,12 +55,17 @@ export default function SmartImage({
       data-preview-src={previewSrc}
       loading={loading}
       decoding={decoding}
+      onLoad={(event) => {
+        releaseLoadSlot();
+        onLoad?.(event);
+      }}
       onError={(event) => {
         if (!actualSrc) return;
         if (!fallback && actualSrc !== src) {
-          setFallback(true);
+          setFallbackKey(previewSrc);
           return;
         }
+        releaseLoadSlot();
         onError?.(event);
       }}
     />

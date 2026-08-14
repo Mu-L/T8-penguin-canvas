@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import {
+  createCanvasNodeExecutionKey,
   getRunExecutionBinding,
   getRunNodeExecutionContext,
   isRunExecutionCancelled,
@@ -8,6 +9,7 @@ import {
   releaseRunExecutionBinding,
   useRunBusStore,
 } from '../stores/runBus';
+import { useCanvasStore } from '../stores/canvas';
 import { registerTaskCompletionSoundNode } from '../stores/taskCompletionSound';
 import {
   appendProjectRunEvent,
@@ -34,6 +36,87 @@ import {
 import type { RunNodeLifecycleReporter } from '../types/project';
 import type { RunOutputAssetCandidate, RunProviderTrace } from '../utils/runProviderTrace';
 
+export interface RunTriggerInitializationFailureDependencies {
+  appendRunEvent: typeof appendProjectRunEvent;
+  markDone: (executionNodeId: string, executionToken: string, ok: boolean, error?: string) => unknown;
+  clearActiveNodeRun: () => void;
+  releaseBinding: () => void;
+  forgetToken: () => void;
+  reportError: (message: string, error: unknown) => void;
+}
+
+export interface RunTriggerInitializationFailureInput {
+  executionNodeId: string;
+  executionToken: string;
+  nodeId: string;
+  runId: string | null;
+  error: unknown;
+}
+
+/**
+ * Last-resort containment for failures that happen before the main execution
+ * try/finally has been installed. It records run-level evidence when possible,
+ * always terminates the execution token, and never leaks a rejected Promise.
+ */
+export async function containRunTriggerInitializationFailure(
+  input: RunTriggerInitializationFailureInput,
+  dependencies: RunTriggerInitializationFailureDependencies,
+) {
+  let message = '未知初始化错误';
+  try {
+    message = input.error instanceof Error ? input.error.message : String(input.error || message);
+  } catch {
+    message = '无法读取初始化错误';
+  }
+  const report = (label: string, error: unknown) => {
+    try {
+      dependencies.reportError(label, error);
+    } catch {
+      // Error reporting itself must not revive an unhandled rejection.
+    }
+  };
+  report(`[run-center] execution listener initialization failed: ${message}`, input.error);
+
+  let evidencePersisted = false;
+  if (input.runId) {
+    try {
+      await dependencies.appendRunEvent(input.runId, {
+        type: 'node.initialization_failed',
+        payload: {
+          nodeId: input.nodeId,
+          executionToken: input.executionToken,
+          error: normalizeRunError(input.error) as unknown as Record<string, unknown>,
+        },
+      });
+      evidencePersisted = true;
+    } catch (persistenceError) {
+      report('[run-center] initialization failure evidence persistence failed', persistenceError);
+    }
+  }
+  try {
+    dependencies.markDone(
+      input.executionNodeId,
+      input.executionToken,
+      false,
+      `节点运行初始化失败：${message}`,
+    );
+  } catch (cleanupError) {
+    report('[run-center] failed to mark initialization failure', cleanupError);
+  }
+  for (const cleanup of [
+    dependencies.clearActiveNodeRun,
+    dependencies.releaseBinding,
+    dependencies.forgetToken,
+  ]) {
+    try {
+      cleanup();
+    } catch (cleanupError) {
+      report('[run-center] initialization failure cleanup failed', cleanupError);
+    }
+  }
+  return { message, evidencePersisted };
+}
+
 /**
  * 节点运行总线监听器
  * 节点在内部调用:`useRunTrigger(id, async () => { await handleGenerate(); })`
@@ -55,7 +138,9 @@ export function useRunTrigger(
   } = {},
 ) {
   const { getNodes, getEdges } = useReactFlow();
-  const executionToken = useRunBusStore((s) => s.executionTokens[nodeId] || null);
+  const originCanvasIdRef = useRef(useCanvasStore.getState().activeId);
+  const executionNodeId = createCanvasNodeExecutionKey(originCanvasIdRef.current, nodeId);
+  const executionToken = useRunBusStore((s) => s.executionTokens[executionNodeId] || null);
   const markDone = useRunBusStore((s) => s.markDone);
   const runFnRef = useRef(runFn);
   runFnRef.current = runFn;
@@ -66,16 +151,16 @@ export function useRunTrigger(
   const startedTokensRef = useRef(new Set<string>());
 
   useEffect(
-    () => registerTaskCompletionSoundNode(nodeId, completionSoundNodeType),
-    [nodeId, completionSoundNodeType],
+    () => registerTaskCompletionSoundNode(executionNodeId, completionSoundNodeType),
+    [executionNodeId, completionSoundNodeType],
   );
 
   useEffect(() => {
     if (!executionToken || startedTokensRef.current.has(executionToken)) return;
     startedTokensRef.current.add(executionToken);
     const capturedExecutionToken = executionToken;
-    (async () => {
-      const binding = getRunExecutionBinding(nodeId, capturedExecutionToken);
+    void (async () => {
+      const binding = getRunExecutionBinding(executionNodeId, capturedExecutionToken);
       const executionAbortController = new AbortController();
       const runContext = binding?.runContext || null;
       const runId = runContext?.runId || null;
@@ -256,7 +341,7 @@ export function useRunTrigger(
       });
 
       const disposition = () => resolveRunExecutionDisposition(
-        useRunBusStore.getState().executionTokens[nodeId],
+        useRunBusStore.getState().executionTokens[executionNodeId],
         capturedExecutionToken,
         isRunExecutionCancelled(capturedExecutionToken),
       );
@@ -325,7 +410,7 @@ export function useRunTrigger(
       };
 
       unregisterCancelHandler = registerRunExecutionCancelHandler(
-        nodeId,
+        executionNodeId,
         capturedExecutionToken,
         async () => {
           executionAbortController.abort(new Error('节点运行已由用户停止'));
@@ -359,7 +444,7 @@ export function useRunTrigger(
             inputSnapshot: inputSnapshot as unknown as Record<string, unknown>,
           });
           nodeRunId = nodeRun.id;
-          useRunBusStore.getState().setActiveNodeRun(nodeId, nodeRunId, capturedExecutionToken);
+          useRunBusStore.getState().setActiveNodeRun(executionNodeId, nodeRunId, capturedExecutionToken);
           const snapshot = inputSnapshot.replayable
             ? inputSnapshot.node.data
             : executionContext?.inputSnapshot || {};
@@ -411,7 +496,7 @@ export function useRunTrigger(
 
         if (disposition() !== 'active') {
           await persistTerminal('stopped', new Error('节点运行在开始前已停止或被新任务替代'));
-          markDone(nodeId, capturedExecutionToken, false, 'stopped');
+          markDone(executionNodeId, capturedExecutionToken, false, 'stopped');
           return;
         }
 
@@ -449,7 +534,7 @@ export function useRunTrigger(
         );
         if (disposition() !== 'active') {
           await persistTerminal('stopped', new Error('节点运行已停止或被新任务替代'));
-          markDone(nodeId, capturedExecutionToken, false, 'stopped');
+          markDone(executionNodeId, capturedExecutionToken, false, 'stopped');
           return;
         }
         const latestNodeData = getNodes().find((node) => node.id === nodeId)?.data as Record<string, unknown> | undefined;
@@ -483,7 +568,7 @@ export function useRunTrigger(
           }
         }
         await persistTerminal('succeeded');
-        markDone(nodeId, capturedExecutionToken, true);
+        markDone(executionNodeId, capturedExecutionToken, true);
       } catch (error: any) {
         resolvePersistenceReady();
         const stopped = disposition() !== 'active';
@@ -498,17 +583,40 @@ export function useRunTrigger(
           console.error('[run-center] terminal evidence persistence failed:', persistenceError);
         }
         markDone(
-          nodeId,
+          executionNodeId,
           capturedExecutionToken,
           false,
           stopped ? 'stopped' : completionError instanceof Error ? completionError.message : String(completionError),
         );
       } finally {
         unregisterCancelHandler();
-        useRunBusStore.getState().setActiveNodeRun(nodeId, undefined, capturedExecutionToken);
-        releaseRunExecutionBinding(nodeId, capturedExecutionToken);
+        useRunBusStore.getState().setActiveNodeRun(executionNodeId, undefined, capturedExecutionToken);
+        releaseRunExecutionBinding(executionNodeId, capturedExecutionToken);
         startedTokensRef.current.delete(capturedExecutionToken);
       }
-    })();
-  }, [executionToken, getEdges, getNodes, nodeId, markDone]);
+    })()
+      .catch(async (initializationError) => {
+        let failedRunId: string | null = null;
+        try {
+          failedRunId = getRunExecutionBinding(executionNodeId, capturedExecutionToken)?.runContext?.runId || null;
+        } catch {
+          // The containment helper still terminates the visible token below.
+        }
+        await containRunTriggerInitializationFailure({
+          executionNodeId,
+          executionToken: capturedExecutionToken,
+          nodeId,
+          runId: failedRunId,
+          error: initializationError,
+        }, {
+          appendRunEvent: appendProjectRunEvent,
+          markDone,
+          clearActiveNodeRun: () => useRunBusStore.getState().setActiveNodeRun(executionNodeId, undefined, capturedExecutionToken),
+          releaseBinding: () => releaseRunExecutionBinding(executionNodeId, capturedExecutionToken),
+          forgetToken: () => startedTokensRef.current.delete(capturedExecutionToken),
+          reportError: (message, error) => console.error(message, error),
+        });
+      })
+      .catch((containmentError) => console.error('[run-center] failed to contain listener initialization error', containmentError));
+  }, [executionNodeId, executionToken, getEdges, getNodes, nodeId, markDone]);
 }

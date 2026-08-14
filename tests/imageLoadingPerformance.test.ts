@@ -9,15 +9,18 @@ function read(path: string) {
 test('local canvas image previews use cached backend thumbnails', () => {
   const smartImage = read('../src/components/SmartImage.tsx');
   const mediaPreview = read('../src/utils/mediaPreview.ts');
+  const mediaScheduler = read('../src/utils/mediaLoadScheduler.ts');
   const filesRoute = read('../backend/src/routes/files.js');
 
   assert.match(smartImage, /previewImageUrl\(src,\s*thumbSize\)/);
   assert.match(smartImage, /loading = 'lazy'/);
   assert.match(smartImage, /decoding = 'async'/);
   assert.match(smartImage, /data-full-src=\{src\}/);
-  assert.match(smartImage, /IntersectionObserver/);
-  assert.match(smartImage, /rootMargin:\s*'720px 720px'/);
-  assert.match(smartImage, /setFallback\(true\)/);
+  assert.match(smartImage, /observeVisibleMediaLoad/);
+  assert.doesNotMatch(smartImage, /new IntersectionObserver/);
+  assert.match(mediaScheduler, /new IntersectionObserver/);
+  assert.match(mediaScheduler, /MEDIA_VISIBILITY_ROOT_MARGIN = '0px'/);
+  assert.match(smartImage, /setFallbackKey\(previewSrc\)/);
 
   assert.match(mediaPreview, /\/api\/files\/thumbnail\?size=\$\{safeSize\}&url=/);
   assert.match(mediaPreview, /LOCAL_FILE_PREFIX_RE/);
@@ -95,15 +98,39 @@ test('initial canvas boot keeps heavy nodes behind lazy boundaries', () => {
 test('canvas video previews defer real video sources until near the viewport', () => {
   const loopingVideo = read('../src/components/LoopingVideo.tsx');
   const videoPlayback = read('../src/utils/videoPlayback.ts');
+  const lazyVideo = read('../src/components/LazyVideo.tsx');
+  const mediaScheduler = read('../src/utils/mediaLoadScheduler.ts');
 
   assert.match(videoPlayback, /preload:\s*'metadata'/);
-  assert.match(loopingVideo, /IntersectionObserver/);
-  assert.match(loopingVideo, /rootMargin:\s*'720px 720px'/);
+  assert.match(loopingVideo, /forwardRef<HTMLVideoElement/);
+  assert.match(loopingVideo, /<LazyVideo/);
   assert.match(loopingVideo, /preload === undefined \? props : \{ \.\.\.props, preload \}/);
-  assert.match(loopingVideo, /compatibleVideoPreviewUrl\(src\)/);
-  assert.match(loopingVideo, /data-full-src=\{src\}/);
-  assert.match(loopingVideo, /src=\{shouldLoad \? playbackSrc : undefined\}/);
-  assert.match(loopingVideo, /data-playback-src=\{playbackSrc\}/);
+  assert.match(lazyVideo, /observeVisibleMediaLoad\(\s*element,\s*'video'/);
+  assert.doesNotMatch(lazyVideo, /new IntersectionObserver/);
+  assert.match(lazyVideo, /compatibleVideoPreviewUrl\(src\)/);
+  assert.match(lazyVideo, /data-full-src=\{src\}/);
+  assert.match(lazyVideo, /src=\{shouldLoad \? playbackSrc : undefined\}/);
+  assert.match(lazyVideo, /data-playback-src=\{playbackSrc\}/);
+  assert.match(lazyVideo, /onPointerDown\?\.\(event\)/);
+  assert.match(mediaScheduler, /video:\s*1/);
+});
+
+test('audio previews keep sources detached until visible or requested by the user', () => {
+  const lazyAudio = read('../src/components/LazyAudio.tsx');
+  const mediaScheduler = read('../src/utils/mediaLoadScheduler.ts');
+
+  assert.match(lazyAudio, /forwardRef<HTMLAudioElement/);
+  assert.match(lazyAudio, /preload = 'none'/);
+  assert.match(lazyAudio, /observeVisibleMediaLoad\(element,\s*'audio'/);
+  assert.match(lazyAudio, /src=\{shouldLoad \? src : undefined\}/);
+  assert.match(lazyAudio, /controllerRef\.current\?\.request\(\)/);
+  assert.doesNotMatch(lazyAudio, /new IntersectionObserver/);
+  assert.match(mediaScheduler, /audio:\s*1/);
+});
+
+test('startup CSS has no external Google Fonts dependency', () => {
+  const css = read('../src/styles/index.css');
+  assert.doesNotMatch(css, /fonts\.googleapis\.com|fonts\.gstatic\.com/);
 });
 
 test('local MOV previews are transcoded to H.264 MP4 while original material URLs stay unchanged', () => {
@@ -152,6 +179,7 @@ test('decorative theme edge motion degrades while the canvas is busy', () => {
   const canvas = read('../src/components/Canvas.tsx');
   const edge = read('../src/components/edges/DeletableEdge.tsx');
   const css = read('../src/styles/index.css');
+  const themeCssLoader = read('../src/theme/themeCssLoader.ts');
   const slamCss = read('../src/styles/theme-slamdunk.css');
   const soccerCss = read('../src/styles/theme-soccer.css');
   const dragonCss = read('../src/styles/theme-dragonball.css');
@@ -181,7 +209,7 @@ test('decorative theme edge motion degrades while the canvas is busy', () => {
   assert.match(slamCss, /html\[data-theme-visual="slamdunk"\] \.t8-sidebar::after \{\s*content: none;/);
   assert.match(soccerCss, /\.react-flow__edge-path\.t8-edge-theme-active/);
   assert.match(soccerCss, /\.t8-edge-yyh-red-segment\.t8-edge-theme-active/);
-  assert.match(css, /theme-dragonball\.css/);
+  assert.match(themeCssLoader, /dragonball: \(\) => import\('\.\.\/styles\/theme-dragonball\.css'\)/);
   assert.match(dragonCss, /\.react-flow__edge-path\.t8-edge-theme-active/);
   assert.match(dragonCss, /data-t8-edge-motion="reduced"/);
   assert.match(dragonCss, /\.t8-viewport-moving/);

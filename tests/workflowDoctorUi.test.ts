@@ -66,7 +66,9 @@ test('provider context passes capability facts and booleans, never raw settings 
   assert.match(workbench, /advancedProviderModelOptions\(provider, 'llm'\)/);
   assert.match(workbench, /regionCredentialConfigured: hasAdvancedProviderSecret\(provider\.apiKey\)/);
   assert.doesNotMatch(workbench, /getRawSettings/);
-  assert.match(workbench, /activeNodeIds: \[\.\.\.new Set\(\[\.\.\.liveRunningNodeIds, \.\.\.Object\.keys\(liveExecutionTokenNodeIds\)\]\)\]/);
+  assert.match(workbench, /\.map\(parseCanvasNodeExecutionKey\)/);
+  assert.match(workbench, /identity\.canvasId === null \|\| identity\.canvasId === props\.canvasId/);
+  assert.match(workbench, /activeNodeIds: liveRunningNodeIds/);
   assert.doesNotMatch(workbench, /executionToken:\s*liveExecutionToken/);
 });
 

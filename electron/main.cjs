@@ -33,6 +33,14 @@ const {
 const APP_VERSION = require('../package.json').version;
 const UPDATE_DISABLED_MESSAGE = '开发模式不会检查 GitHub Release 更新';
 const ELECTRON_BACKEND_SHUTDOWN_DEADLINE_MS = 15_000;
+const ELECTRON_STARTUP_SHELL_PAINT_DEADLINE_MS = 2_500;
+const ELECTRON_FRONTEND_LOAD_RETRY_DELAY_MS = 250;
+const ELECTRON_FRONTEND_LOAD_RETRY_ATTEMPTS = 40;
+const ELECTRON_MAIN_WINDOW_REVEAL_DEADLINE_MS = 15_000;
+const ELECTRON_MAIN_WINDOW_ERROR_PAGE_LOAD_DEADLINE_MS = 1_000;
+const MAIN_WINDOW_STARTUP_RETRY_URL = 'https://t8pc.startup.local/retry';
+const MAIN_WINDOW_STARTUP_BACKEND_URL = 'https://t8pc.startup.local/backend';
+const electronStartupStartedAt = Date.now();
 const ELECTRON_SINGLE_INSTANCE_OWNER = app.requestSingleInstanceLock();
 if (!ELECTRON_SINGLE_INSTANCE_OWNER) app.quit();
 
@@ -45,6 +53,7 @@ if (process.platform === 'win32') {
 let mainWindow = null;
 let vibeXRhLoginWindow = null;
 let logWindow = null;
+let startupShellReadyPromise = Promise.resolve();
 let backendModule = null; // 后端 Express app(同进程加载) 或 子进程句柄
 let backendProcess = null;
 let backendPort = 18766;
@@ -71,6 +80,20 @@ let updaterState = {
   packaged: false,
   updatedAt: null,
 };
+
+function markElectronStartupStage(stage, details = '') {
+  const elapsedMs = Math.max(0, Date.now() - electronStartupStartedAt);
+  const suffix = details ? ` details=${String(details).replace(/[\r\n]+/g, ' ').slice(0, 240)}` : '';
+  dbgLog(`[startup] component=electron phase=${stage} elapsedMs=${elapsedMs}${suffix}`);
+  return { stage, elapsedMs };
+}
+
+function waitForStartupShellPaint() {
+  return Promise.race([
+    startupShellReadyPromise,
+    new Promise((resolve) => setTimeout(resolve, ELECTRON_STARTUP_SHELL_PAINT_DEADLINE_MS)),
+  ]);
+}
 
 const PARSE_AUTH_PARTITION = 'persist:t8-parsehub-auth';
 const VIBEX_HOSTNAME = 'vibex.runninghub.cn';
@@ -2022,8 +2045,192 @@ function createMainWindow() {
 
   const backendUrl = `http://127.0.0.1:${backendPort}/`;
   const url = developmentFrontendUrl() || backendUrl;
-  dbgLog(`[main] loading ${url}`);
-  mainWindow.loadURL(url);
+  const pendingMainWindow = mainWindow;
+  let mainFrontendLoaded = false;
+  let mainWindowReadyToShow = false;
+  let mainWindowRevealed = false;
+  let frontendInteractiveSignaled = false;
+  let frontendLoadGeneration = 0;
+  let frontendLoadInFlight = null;
+  let lastFrontendLoadError = null;
+  let revealDeadlineTimer = null;
+
+  const clearRevealDeadline = () => {
+    if (!revealDeadlineTimer) return;
+    clearTimeout(revealDeadlineTimer);
+    revealDeadlineTimer = null;
+  };
+  const closeStartupShell = () => {
+    setTimeout(() => {
+      if (logWindow && !logWindow.isDestroyed()) logWindow.close();
+    }, 250);
+  };
+  const signalFrontendInteractive = () => {
+    if (frontendInteractiveSignaled || !mainFrontendLoaded || !mainWindowRevealed) return;
+    frontendInteractiveSignaled = true;
+    backendModule?.markFrontendInteractive?.('electron-main-window-visible');
+  };
+  const revealMainWindowWhenReady = (options = {}) => {
+    const force = options.force === true;
+    if (mainWindowRevealed) {
+      signalFrontendInteractive();
+      return;
+    }
+    if (!force && (!mainFrontendLoaded || !mainWindowReadyToShow)) return;
+    if (electronQuitRequested || pendingMainWindow.isDestroyed()) return;
+    mainWindowRevealed = true;
+    clearRevealDeadline();
+    pendingMainWindow.show();
+    markElectronStartupStage(
+      'main-window-visible',
+      options.reason || (force ? 'forced' : 'ready-to-show'),
+    );
+    signalFrontendInteractive();
+    startInitialUpdateCheck();
+    closeStartupShell();
+  };
+  const markMainFrontendLoaded = (source = 'primary') => {
+    mainFrontendLoaded = true;
+    lastFrontendLoadError = null;
+    markElectronStartupStage('main-window-loaded', source);
+    revealMainWindowWhenReady();
+    signalFrontendInteractive();
+  };
+  const escapeStartupHtml = (value) => String(value || '').replace(
+    /[&<>"']/g,
+    (character) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    })[character],
+  );
+  const showMainWindowStartupFailure = async (error, reason = 'frontend-load-failed') => {
+    if (electronQuitRequested || pendingMainWindow.isDestroyed()) return false;
+    frontendLoadGeneration += 1;
+    frontendLoadInFlight = null;
+    mainFrontendLoaded = false;
+    lastFrontendLoadError = error || lastFrontendLoadError || new Error('前端页面未在截止时间内就绪');
+    clearRevealDeadline();
+    const detail = escapeStartupHtml(normalizeError(lastFrontendLoadError)).slice(0, 800);
+    const failureHtml = '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">' +
+      '<meta name="viewport" content="width=device-width,initial-scale=1"><title>画布启动失败</title>' +
+      '<style>html,body{margin:0;min-height:100%;background:#0b0b0d;color:#eef2f4;font-family:system-ui,sans-serif}' +
+      'main{max-width:720px;margin:10vh auto;padding:36px;border:1px solid #344148;border-radius:20px;background:#12171a}' +
+      'h1{font-size:26px;margin:0 0 14px;color:#ffcf72}p{line-height:1.7;color:#b8c4c9}' +
+      'code{display:block;overflow-wrap:anywhere;padding:14px;border-radius:10px;background:#090c0e;color:#ff9aa8}' +
+      '.actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:24px}a{padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:700}' +
+      '.retry{background:#91e65c;color:#10210a}.backend{border:1px solid #5fd8f4;color:#8be7fb}</style></head><body><main>' +
+      '<h1>画布界面暂时未能载入</h1><p>本地后端已经启动，但前端页面加载或显示超时。你可以立即重试，或直接打开本地后端界面。</p>' +
+      '<code>' + detail + '</code><div class="actions"><a class="retry" href="' +
+      MAIN_WINDOW_STARTUP_RETRY_URL + '">重新加载画布</a><a class="backend" href="' +
+      MAIN_WINDOW_STARTUP_BACKEND_URL + '">打开本地后端界面</a></div></main></body></html>';
+    markElectronStartupStage('main-window-local-error', reason);
+    const failureLoad = pendingMainWindow.loadURL(
+      'data:text/html;charset=utf-8,' + encodeURIComponent(failureHtml),
+    );
+    try {
+      await settleWithinElectronDeadline(
+        failureLoad,
+        ELECTRON_MAIN_WINDOW_ERROR_PAGE_LOAD_DEADLINE_MS,
+        () => ({ timedOut: true }),
+      );
+    } catch (failureError) {
+      dbgLog('[main] local startup error page failed: ' + normalizeError(failureError));
+    }
+    if (electronQuitRequested || pendingMainWindow.isDestroyed()) return false;
+    mainWindowReadyToShow = true;
+    revealMainWindowWhenReady({ force: true, reason });
+    return true;
+  };
+
+  dbgLog('[main] loading ' + url);
+  const loadMainWindowUrl = () => mainWindow.loadURL(url);
+  const loadMainWindowWithRetry = async (targetUrl = url, options = {}) => {
+    const generation = ++frontendLoadGeneration;
+    const attempts = Math.max(
+      1,
+      Number(options.attempts)
+        || (targetUrl === backendUrl ? 4 : ELECTRON_FRONTEND_LOAD_RETRY_ATTEMPTS),
+    );
+    let lastError = null;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      if (generation !== frontendLoadGeneration) return false;
+      if (electronQuitRequested || pendingMainWindow.isDestroyed()) return false;
+      if (attempt > 1) {
+        await new Promise((resolve) => setTimeout(resolve, ELECTRON_FRONTEND_LOAD_RETRY_DELAY_MS));
+      }
+      if (generation !== frontendLoadGeneration) return false;
+      try {
+        if (targetUrl === url) await loadMainWindowUrl();
+        else await pendingMainWindow.loadURL(targetUrl);
+        if (generation !== frontendLoadGeneration) return false;
+        markMainFrontendLoaded(options.source || (targetUrl === backendUrl ? 'backend' : 'primary'));
+        if (attempt > 1) markElectronStartupStage('frontend-url-ready', 'attempt=' + attempt);
+        return true;
+      } catch (loadError) {
+        lastError = loadError;
+        lastFrontendLoadError = loadError;
+        dbgLog(
+          '[main] frontend load attempt ' + attempt + '/' + attempts +
+          ' failed: ' + normalizeError(loadError),
+        );
+      }
+    }
+    if (
+      options.allowBackendFallback !== false
+      && targetUrl === url
+      && url !== backendUrl
+      && generation === frontendLoadGeneration
+      && !electronQuitRequested
+      && !pendingMainWindow.isDestroyed()
+    ) {
+      dbgLog('[main] development frontend unavailable; falling back to packaged backend UI');
+      try {
+        await pendingMainWindow.loadURL(backendUrl);
+        if (generation !== frontendLoadGeneration) return false;
+        markMainFrontendLoaded('backend-fallback');
+        markElectronStartupStage('frontend-url-fallback-ready');
+        return true;
+      } catch (fallbackError) {
+        lastError = fallbackError;
+        lastFrontendLoadError = fallbackError;
+      }
+    }
+    throw lastError || new Error('前端页面未能加载');
+  };
+  const beginMainWindowLoad = (targetUrl = url, options = {}) => {
+    mainFrontendLoaded = false;
+    const operation = loadMainWindowWithRetry(targetUrl, options);
+    frontendLoadInFlight = operation;
+    void operation.catch((loadError) => {
+      markElectronStartupStage('frontend-url-failed', normalizeError(loadError));
+      dbgLog('[main] frontend load failed: ' + normalizeError(loadError));
+      return showMainWindowStartupFailure(
+        loadError,
+        options.reason || 'frontend-load-failed',
+      );
+    }).finally(() => {
+      if (frontendLoadInFlight === operation) frontendLoadInFlight = null;
+    });
+    return operation;
+  };
+  beginMainWindowLoad(url, { allowBackendFallback: true, source: 'initial' });
+
+  revealDeadlineTimer = setTimeout(() => {
+    revealDeadlineTimer = null;
+    if (electronQuitRequested || pendingMainWindow.isDestroyed() || mainWindowRevealed) return;
+    if (mainFrontendLoaded) {
+      mainWindowReadyToShow = true;
+      revealMainWindowWhenReady({ force: true, reason: 'ready-to-show-deadline' });
+      return;
+    }
+    void showMainWindowStartupFailure(
+      lastFrontendLoadError || new Error('前端页面未在 15 秒内载入'),
+      'frontend-reveal-deadline',
+    );
+  }, ELECTRON_MAIN_WINDOW_REVEAL_DEADLINE_MS);
 
   mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
     if (isVibeXRhLoginUrl(targetUrl)) {
@@ -2048,6 +2255,25 @@ function createMainWindow() {
   });
 
   mainWindow.webContents.on('will-navigate', (event, targetUrl) => {
+    if (targetUrl === MAIN_WINDOW_STARTUP_RETRY_URL) {
+      event.preventDefault();
+      beginMainWindowLoad(url, {
+        allowBackendFallback: true,
+        source: 'manual-retry',
+        reason: 'manual-retry-failed',
+      });
+      return;
+    }
+    if (targetUrl === MAIN_WINDOW_STARTUP_BACKEND_URL) {
+      event.preventDefault();
+      beginMainWindowLoad(backendUrl, {
+        attempts: 4,
+        allowBackendFallback: false,
+        source: 'manual-backend',
+        reason: 'manual-backend-failed',
+      });
+      return;
+    }
     if (String(targetUrl || '').startsWith(url) || String(targetUrl || '').startsWith(backendUrl)) return;
     if (!isSafeExternalUrl(targetUrl)) return;
     if (isVibeXRhLoginUrl(targetUrl)) {
@@ -2059,14 +2285,14 @@ function createMainWindow() {
     void openExternalUrl(targetUrl);
   });
 
-  const pendingMainWindow = mainWindow;
   pendingMainWindow.once('ready-to-show', () => {
-    if (electronQuitRequested || pendingMainWindow.isDestroyed()) return;
-    pendingMainWindow.show();
-    startInitialUpdateCheck();
+    mainWindowReadyToShow = true;
+    revealMainWindowWhenReady();
   });
 
   mainWindow.on('closed', () => {
+    clearRevealDeadline();
+    frontendLoadGeneration += 1;
     mainWindow = null;
   });
 
@@ -2088,26 +2314,42 @@ function createLogWindow() {
   const logHtmlPath = path.join(tmpDir, 't8pc-app-log.html');
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>启动中...</title>
 <style>html,body{margin:0;padding:0;background:#0b0b0d;color:#9be9ff;font-family:Consolas,monospace;}
-.h{padding:14px 18px;border-bottom:1px solid #222;font-size:14px;}
+.h{padding:14px 18px;border-bottom:1px solid #222;font-size:14px;display:flex;align-items:center;gap:10px;}
 .h b{color:#ffd76b;}
-#log{padding:12px 18px;white-space:pre-wrap;line-height:1.5;font-size:12px;}
+.spin{width:14px;height:14px;border-radius:50%;border:2px solid #24414a;border-top-color:#69e5ff;animation:spin 1s linear infinite;flex:none}
+#log{padding:12px 18px;white-space:pre-wrap;line-height:1.5;font-size:12px;max-height:260px;overflow:auto;}
+@keyframes spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.spin{animation:none;border-top-color:#ffd76b}}
 </style></head><body>
-<div class="h">🐧 <b>贞贞的无限画布</b>（企鹅共创版）<span style="float:right;color:#666;">v${APP_VERSION}</span></div>
-<div id="log">[启动] 正在初始化加密内核 + Express 后端...\n</div>
+<div class="h"><span class="spin" aria-hidden="true"></span>🐧 <b>贞贞的无限画布</b><span>正在安全启动</span><span style="margin-left:auto;color:#666;">v${APP_VERSION}</span></div>
+<div id="log">[启动] 本地启动壳已载入，正在验证数据库与后端服务...\n</div>
 </body></html>`;
   fs.writeFileSync(logHtmlPath, html, 'utf-8');
 
   logWindow = new BrowserWindow({
     width: 720,
     height: 360,
-    show: true,
+    show: false,
     frame: true,
     backgroundColor: '#0b0b0d',
     title: '🐧 启动中…',
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: false },
   });
   logWindow.removeMenu();
-  logWindow.loadFile(logHtmlPath);
+  const pendingLogWindow = logWindow;
+  startupShellReadyPromise = new Promise((resolve) => {
+    let settled = false;
+    const ready = (outcome) => {
+      if (settled) return;
+      settled = true;
+      if (!pendingLogWindow.isDestroyed()) pendingLogWindow.show();
+      markElectronStartupStage('startup-shell-visible', outcome);
+      resolve(outcome);
+    };
+    pendingLogWindow.once('ready-to-show', () => ready('ready-to-show'));
+    pendingLogWindow.webContents.once('did-finish-load', () => ready('did-finish-load'));
+    pendingLogWindow.loadFile(logHtmlPath).catch((error) => ready(`load-failed:${normalizeError(error)}`));
+    setTimeout(() => ready('paint-deadline'), ELECTRON_STARTUP_SHELL_PAINT_DEADLINE_MS);
+  });
   logWindow.on('closed', () => {
     logWindow = null;
   });
@@ -2240,19 +2482,21 @@ ipcMain.on('t8pc:drag-file-out', (event, payload) => {
 app.whenReady().then(async () => {
   if (!ELECTRON_SINGLE_INSTANCE_OWNER || electronQuitRequested) return;
   createLogWindow();
+  await waitForStartupShellPaint();
+  markElectronStartupStage('backend-start-requested');
   try {
     backendStartPromise = startBackend();
     await backendStartPromise;
+    markElectronStartupStage('backend-module-ready');
     if (electronQuitRequested) return;
     // 等后端真正可访问
     const backendReady = await waitForBackend(backendPort, backendInstanceId, 30);
     if (!backendReady) throw new Error(`后端未能在端口 ${backendPort} 就绪`);
+    markElectronStartupStage('backend-transport-ready');
     if (electronQuitRequested) return;
     createMainWindow();
-    setTimeout(() => {
-      if (logWindow && !logWindow.isDestroyed()) logWindow.close();
-    }, 600);
   } catch (e) {
+    markElectronStartupStage('startup-failed', normalizeError(e));
     dbgLog(`[fatal] ${e && e.stack ? e.stack : e}`);
     try {
       await shutdownBackendForElectron('STARTUP_FAILURE');

@@ -252,29 +252,81 @@ function saveSettings(settings) {
   fs.writeFileSync(config.SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf-8');
 }
 
-// v1.2.10.2/v1.3.1: 启动时确保本地保存路径存在(不存在则 mkdir -p)
-function ensureLocalSavePaths() {
-  try {
-    const s = loadSettings();
-    const paths = [
-      { label: '文件自动保存路径', value: s.fileSavePath || config.DEFAULT_LOCAL_SAVE_DIR || '' },
-      { label: '画布自动保存路径', value: s.canvasAutoSavePath || config.DEFAULT_CANVAS_AUTO_SAVE_DIR || '' },
-      { label: '资源库路径', value: s.resourceLibraryPath || config.DEFAULT_RESOURCE_LIBRARY_DIR || '' },
-      { label: '主题模板路径', value: s.themeTemplatePath || config.DEFAULT_THEME_TEMPLATE_DIR || '' },
-    ];
-    for (const item of paths) {
-      const p = String(item.value || '').trim();
-      if (!p) continue;
-      if (!fs.existsSync(p)) {
-        fs.mkdirSync(p, { recursive: true });
-        console.log(`[settings] 创建${item.label}: ${p}`);
-      }
-    }
-  } catch (e) {
-    console.warn('[settings] 创建本地保存路径失败(忽略):', e?.message || e);
-  }
+const LOCAL_SAVE_PATH_FIELDS = Object.freeze([
+  ['fileSavePath', '文件自动保存路径', config.DEFAULT_LOCAL_SAVE_DIR],
+  ['canvasAutoSavePath', '画布自动保存路径', config.DEFAULT_CANVAS_AUTO_SAVE_DIR],
+  ['resourceLibraryPath', '资源库路径', config.DEFAULT_RESOURCE_LIBRARY_DIR],
+  ['themeTemplatePath', '主题模板路径', config.DEFAULT_THEME_TEMPLATE_DIR],
+]);
+const LOCAL_SAVE_PATH_PROBE_TIMEOUT_MS = 1_500;
+
+function settlePathProbeWithin(promise, timeoutMs, field) {
+  const deadlineMs = Math.max(10, Math.min(10_000, Number(timeoutMs) || LOCAL_SAVE_PATH_PROBE_TIMEOUT_MS));
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => {
+      finish({
+        field,
+        ok: false,
+        timedOut: true,
+        code: 'path_probe_timeout',
+      });
+    }, deadlineMs);
+    Promise.resolve(promise).then(
+      () => finish({ field, ok: true, timedOut: false, code: null }),
+      (error) => finish({
+        field,
+        ok: false,
+        timedOut: false,
+        code: String(error?.code || 'path_probe_failed'),
+      }),
+    );
+  });
 }
-ensureLocalSavePaths();
+
+async function ensureLocalSavePaths(settings = loadSettings({ persistMigrations: false }), options = {}) {
+  const onlyFields = options.onlyFields instanceof Set ? options.onlyFields : null;
+  const timeoutMs = options.timeoutMs;
+  const mkdir = typeof options.mkdir === 'function'
+    ? options.mkdir : fs.promises.mkdir.bind(fs.promises);
+  const results = [];
+  for (const [field, label, fallback] of LOCAL_SAVE_PATH_FIELDS) {
+    if (onlyFields && !onlyFields.has(field)) continue;
+    const target = String(settings?.[field] || fallback || '').trim();
+    if (!target) continue;
+    const result = await settlePathProbeWithin(
+      Promise.resolve().then(() => mkdir(target, { recursive: true })),
+      timeoutMs,
+      field,
+    );
+    results.push(result);
+    if (result.ok) {
+      console.log(`[settings] 已确认${label}: ${target}`);
+    } else {
+      console.warn(`[settings] ${label}异步检查失败: ${result.code}`);
+    }
+    // A disconnected UNC/NAS path can retain a libuv worker after our public
+    // deadline. Do not fan additional probes out and exhaust the whole pool.
+    if (result.timedOut) break;
+  }
+  return results;
+}
+
+function scheduleLocalSavePathProbe(settings, fields) {
+  const onlyFields = new Set(fields);
+  if (onlyFields.size === 0) return;
+  setImmediate(() => {
+    ensureLocalSavePaths(settings, { onlyFields }).catch((error) => {
+      console.warn('[settings] 本地保存路径异步检查失败:', error?.message || error);
+    });
+  });
+}
 
 // GET /api/settings — 获取全部设置(脱敏 Key 仅返回最后4位)
 router.get('/', (_req, res) => {
@@ -397,19 +449,15 @@ router.post('/', (req, res) => {
     : normalizeCloudUploadTargets(current.cloudUploadTargets);
   merged.taskCompletionSound = normalizeTaskCompletionSoundSettings(current.taskCompletionSound);
   saveSettings(merged);
-  // v1.2.10.2/v1.3.1/v1.3.4: 保存后重新确保本地保存路径存在
-  for (const field of ['fileSavePath', 'canvasAutoSavePath', 'resourceLibraryPath', 'themeTemplatePath']) {
-    if (typeof incoming[field] !== 'string' || !incoming[field].trim()) continue;
-    try {
-      const p = incoming[field].trim();
-      if (!fs.existsSync(p)) {
-        fs.mkdirSync(p, { recursive: true });
-        console.log(`[settings] 创建${field}: ${p}`);
-      }
-    } catch (e) {
-      console.warn(`[settings] mkdir ${field} 失败:`, e?.message || e);
-    }
-  }
+  // User-selected paths may live on a sleeping removable drive or disconnected
+  // UNC/NAS share. Persist the preference first and validate it off the request
+  // and startup critical paths with a bounded, sequential probe.
+  scheduleLocalSavePathProbe(
+    merged,
+    LOCAL_SAVE_PATH_FIELDS
+      .map(([field]) => field)
+      .filter((field) => typeof incoming[field] === 'string' && incoming[field].trim()),
+  );
   res.json({ success: true });
 });
 
@@ -1054,3 +1102,5 @@ router.post('/rh-tools/import', (req, res) => {
 module.exports = router;
 module.exports.loadSettings = loadSettings;
 module.exports.saveSettings = saveSettings;
+module.exports.ensureLocalSavePaths = ensureLocalSavePaths;
+module.exports.scheduleLocalSavePathProbe = scheduleLocalSavePathProbe;

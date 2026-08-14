@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo } from 'react';
 import { Handle, Position, useNodeConnections, useNodesData, useReactFlow, type Edge, type Node, type NodeProps } from '@xyflow/react';
 import { GitBranch, Shuffle } from 'lucide-react';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
-import { matchesRunCompletion, useRunBusStore } from '../../stores/runBus';
+import { createCanvasNodeExecutionKey, matchesRunCompletion, useRunBusStore } from '../../stores/runBus';
 import { useThemeStore } from '../../stores/theme';
 import { PORT_COLOR } from '../../config/portTypes';
 import {
@@ -55,6 +55,7 @@ function waitForNodeRun(nodeId: string, runContext: RunContext | null): Promise<
   return new Promise((resolve) => {
     let done = false;
     const startCancelSeq = useRunBusStore.getState().cancelSeq;
+    const executionNodeId = createCanvasNodeExecutionKey(runContext?.canvasId, nodeId);
     let executionToken: string | null = null;
     const finish = (result: WaitResult) => {
       if (done) return;
@@ -64,17 +65,17 @@ function waitForNodeRun(nodeId: string, runContext: RunContext | null): Promise<
       resolve(result);
     };
     const unsubscribe = useRunBusStore.subscribe((state) => {
-      if (state.cancelSeq !== startCancelSeq && state.cancelTargets.includes(nodeId)) finish('cancelled');
-      else if (matchesRunCompletion(state.lastDone, nodeId, executionToken)) finish(state.lastDone.ok ? 'ok' : 'fail');
-      else if (executionToken && state.executionTokens[nodeId] !== executionToken) finish('cancelled');
+      if (state.cancelSeq !== startCancelSeq && state.cancelTargets.includes(executionNodeId)) finish('cancelled');
+      else if (matchesRunCompletion(state.lastDone, executionNodeId, executionToken)) finish(state.lastDone.ok ? 'ok' : 'fail');
+      else if (executionToken && state.executionTokens[executionNodeId] !== executionToken) finish('cancelled');
     });
     const timer = window.setTimeout(() => finish('fail'), WAIT_TIMEOUT_MS);
     const state = useRunBusStore.getState();
     executionToken = state.triggerRun(nodeId, state.mode === 'batch' ? 'batch' : 'single', runContext);
     const current = useRunBusStore.getState();
-    if (current.cancelSeq !== startCancelSeq && current.cancelTargets.includes(nodeId)) finish('cancelled');
-    else if (matchesRunCompletion(current.lastDone, nodeId, executionToken)) finish(current.lastDone.ok ? 'ok' : 'fail');
-    else if (current.executionTokens[nodeId] !== executionToken) finish('cancelled');
+    if (current.cancelSeq !== startCancelSeq && current.cancelTargets.includes(executionNodeId)) finish('cancelled');
+    else if (matchesRunCompletion(current.lastDone, executionNodeId, executionToken)) finish(current.lastDone.ok ? 'ok' : 'fail');
+    else if (current.executionTokens[executionNodeId] !== executionToken) finish('cancelled');
   });
 }
 

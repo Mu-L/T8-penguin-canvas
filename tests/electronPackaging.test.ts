@@ -163,9 +163,11 @@ test('Electron package verifies the crash-recovery service used on backend start
   const postBuild = read('../electron/_post_build.cjs');
   const server = read('../backend/src/server.js');
   assert.match(postBuild, /services['"], ['"]runRecovery\.t8c/);
-  assert.match(server, /startupRunRecoveryPromise = runRecoveryManager\.recoverPendingRuns\(\)/);
+  assert.match(server, /scheduleStorageDependentMaintenance/);
+  assert.match(server, /runs = projectRunsRouter\.getRuntime\(\)/);
+  assert.match(server, /runs\.recoveryManager\.recoverPendingRuns\(\)/);
   assert.match(server, /shutdownRunRecoveryLifecycle/);
-  assert.match(server, /\[run-recovery\] startup failed/);
+  assert.match(server, /\[run-recovery\] deferred startup failed/);
 });
 
 test('Electron package locks canvas Agent bytecode and shared node schema to source SHA-256', () => {

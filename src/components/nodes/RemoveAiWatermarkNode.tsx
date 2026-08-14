@@ -18,7 +18,8 @@ import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useHasAutoOutput } from './useHasAutoOutput';
 import SmartImage from '../SmartImage';
-import { useRunBusStore } from '../../stores/runBus';
+import { createCanvasNodeExecutionKey, useRunBusStore } from '../../stores/runBus';
+import { useCanvasStore } from '../../stores/canvas';
 
 type AiWatermarkMediaKind = Exclude<MediaKind, 'model3d'>;
 
@@ -179,8 +180,10 @@ function RemoveAiWatermarkNode({ id, data, selected }: { id: string; data: any; 
   const [localWarning, setLocalWarning] = useState('');
   const [previewSize, setPreviewSize] = useState<{ w: number; h: number } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const originCanvasIdRef = useRef(useCanvasStore.getState().activeId);
+  const executionNodeId = createCanvasNodeExecutionKey(originCanvasIdRef.current, id);
   const runBusWasRunningRef = useRef(false);
-  const isRunBusRunning = useRunBusStore((state) => state.currentRunId === id || state.runningIds.includes(id));
+  const isRunBusRunning = useRunBusStore((state) => state.currentRunId === executionNodeId || state.runningIds.includes(executionNodeId));
 
   const d = data || {};
   const mode = normalizeMode(d.aiWatermarkMode);

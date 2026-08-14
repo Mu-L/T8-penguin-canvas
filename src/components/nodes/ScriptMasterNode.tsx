@@ -138,6 +138,8 @@ import {
 } from '../../utils/videoTimeline';
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useUpstreamMaterials, type Material } from './useUpstreamMaterials';
+import LazyVideo from '../LazyVideo';
+import SmartImage from '../SmartImage';
 
 const DOMAIN_OPTIONS: Array<{ value: ScriptMasterDomain; label: string }> = [
   { value: 'unconfirmed', label: '待确认类型' },
@@ -1443,7 +1445,7 @@ const ScriptMasterNode = ({ id, data, selected }: NodeProps) => {
                  return <article key={asset.id} role="listitem" aria-posinset={assetStartIndex + visibleIndex + 1} aria-setsize={filteredAssets.length} className={`h-[116px] overflow-hidden rounded-xl border p-3 ${assetTone(asset)}`}>
                    <div className="flex gap-3">
                      <div className="grid h-16 w-20 shrink-0 place-items-center overflow-hidden rounded-lg border border-white/10 bg-black/30">
-                       {asset.mediaKind === 'image' && asset.url ? <img src={asset.url} alt={`${asset.alias} ${asset.name}`} className="h-full w-full object-cover" /> : asset.mediaKind === 'video' ? <Film size={17} aria-label="视频素材" /> : <Volume2 size={17} aria-label="音频素材" />}
+                       {asset.mediaKind === 'image' && asset.url ? <SmartImage src={asset.url} alt={`${asset.alias} ${asset.name}`} thumbSize={240} className="h-full w-full object-cover" /> : asset.mediaKind === 'video' ? <Film size={17} aria-label="视频素材" /> : <Volume2 size={17} aria-label="音频素材" />}
                     </div>
                      <div className="min-w-0 flex-1"><div className="flex items-center gap-1"><strong className="rounded bg-black/30 px-1.5 py-0.5 text-[10px]">{asset.alias}</strong><span className="truncate text-[10px] text-white/80">{asset.name}</span></div><p className="mt-1 truncate text-[9px] text-white/35">{asset.kind} · r{asset.revision} · {asset.probeStatus === 'ready' ? `可读${asset.durationFrames ? ` · ${asset.durationFrames}帧` : ''}` : asset.probeStatus === 'error' ? '探测失败' : asset.probeStatus === 'probing' ? '探测中' : '未探测'}</p></div>
                      {asset.probeStatus !== 'ready' && <button disabled={!asset.url || asset.probeStatus === 'probing'} onClick={() => void probeAssets([asset])} className="self-start text-cyan-200/60 disabled:text-white/15" aria-label={`重新探测 ${asset.alias} ${asset.name}`} title={asset.probeError || '探测媒体'}><RefreshCw size={12} className={asset.probeStatus === 'probing' ? 'animate-spin' : ''} /></button>}
@@ -1472,7 +1474,7 @@ const ScriptMasterNode = ({ id, data, selected }: NodeProps) => {
                </section>}
                {project.analysis.status === 'error' && project.analysis.lastError && <div role="alert" className="mb-3 rounded-lg border border-rose-300/25 bg-rose-300/[0.07] px-3 py-2 text-[9px] text-rose-100">{project.analysis.lastError}</div>}
                <div className="relative min-h-[260px] flex-1 overflow-hidden rounded-2xl border border-white/10 bg-black/45 shadow-2xl">
-                {previewAsset?.mediaKind === 'image' && previewAsset.url ? <img src={previewAsset.url} alt="镜头参考预览" className="absolute inset-0 h-full w-full object-contain opacity-70" /> : previewAsset?.mediaKind === 'video' && previewAsset.url ? <video src={previewAsset.url} muted controls className="absolute inset-0 h-full w-full object-contain opacity-80" /> : null}
+                {previewAsset?.mediaKind === 'image' && previewAsset.url ? <SmartImage src={previewAsset.url} alt="镜头参考预览" thumbSize={960} className="absolute inset-0 h-full w-full object-contain opacity-70" /> : previewAsset?.mediaKind === 'video' && previewAsset.url ? <LazyVideo src={previewAsset.url} muted controls className="absolute inset-0 h-full w-full object-contain opacity-80" /> : null}
                 <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/20 to-black/30" />
                 <div className="absolute inset-x-0 bottom-0 p-5">
                   <div className="mb-2 flex items-center gap-2"><span className="rounded bg-white/10 px-2 py-1 text-[9px] text-white/55">分镜模拟预览</span>{!previewAsset && <span className="text-[9px] text-white/30">尚无真实画面，不标记为成片</span>}</div>
