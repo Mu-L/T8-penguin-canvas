@@ -14,9 +14,9 @@
     "coverageReceiptCompiler": "tools/zcanvas-cli/src/capabilityCoverage.cjs"
   },
   "sourceDigests": {
-    "creativeCapabilityManifest": "5c56b3b64d483ae6e6da5268f25c059f2a3fcc2c13e3c3d64d39b10e1e56402b",
-    "canvasNodeSchema": "3d76c2debc7687d67a54eea884287aa0b973e3f4bf01dab9984e01b240961bfc",
-    "canvasNodeSchemaFile": "7b34c456f72907fd1d0d84563d380af5f195835f2be7b17adb054db4e614f375",
+    "creativeCapabilityManifest": "16c15dab6eef440bbbee2e44ccf69dfe75bba70d6a61585ca0fb717279353b1d",
+    "canvasNodeSchema": "1e54f3cb0c563d2b60290fd56c160c07760c42586c170af81ec023c99720038c",
+    "canvasNodeSchemaFile": "64b80d36e6889e1c7b18eeebe10f312cf9d27e1fbd5567179932bdd61cf798e0",
     "runtimeCatalogSources": "3c8802635d0fd87c9b478e92085f2d71d6b363323bb71b0b48928be2718f1ba0",
     "runtimeCatalogArtifact": "236233576d77eaa115867cb4d36528f2fea6d1a98e7048896023b5d1f3300350",
     "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
@@ -24,7 +24,7 @@
     "coverageReceiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7",
     "canonicalTextDigestCompiler": "b0afcf28a257fbbd8f391edc117348f8f2ede1b4a039ae91bce25a8d563ac0cf"
   },
-  "aggregateDigest": "22bb59d7396373301e8ea3d1b54faf54c92abb425e519a80eefbfccf7698d9c8",
+  "aggregateDigest": "807a3946d1422bc1f03d0347dd7f7aff8f519cc13a06f9caa130766ac6942ff0",
   "principles": {
     "oneSentenceStart": true,
     "directCanvasMutation": false,
@@ -36,18 +36,18 @@
   "counts": {
     "capabilities": 31,
     "handlers": 31,
-    "nodes": 77,
-    "executableNodes": 58,
-    "generatableNodes": 11,
-    "referencedNodes": 68,
+    "nodes": 78,
+    "executableNodes": 59,
+    "generatableNodes": 12,
+    "referencedNodes": 69,
     "unreferencedNodes": 9,
-    "directCapabilityNodes": 68,
+    "directCapabilityNodes": 69,
     "internalCompatNodes": 1,
     "semanticSupersededNodes": 8,
     "publicCapabilityGapNodes": 0,
-    "accountedNodes": 77,
+    "accountedNodes": 78,
     "unexplainedNodes": 0,
-    "fullyOperableNodes": 18,
+    "fullyOperableNodes": 19,
     "runtimeEntries": 250,
     "runtimeByKind": {
       "llm": 32,
@@ -331,6 +331,7 @@
       "nodeTypes": [
         "llm",
         "minimax-h3-prompt-enhancer",
+        "minimax-music3-prompt-enhancer",
         "minimax-h3-official-prompt-enhancer",
         "seedance20-prompt-enhancer",
         "output"
@@ -518,6 +519,7 @@
         "audio",
         "llm",
         "minimax-h3-prompt-enhancer",
+        "minimax-music3-prompt-enhancer",
         "minimax-h3-official-prompt-enhancer",
         "seedance20-prompt-enhancer",
         "mv-music-master",
@@ -3769,6 +3771,54 @@
       ],
       "outputs": [
         "text"
+      ],
+      "capabilityIds": [
+        "canvas.node-add",
+        "create.script"
+      ],
+      "handlerIds": [
+        "creative-action:graph.node-add",
+        "creative-plan:create.script"
+      ],
+      "coverage": {
+        "understand": true,
+        "plan": true,
+        "preview": true,
+        "apply": true,
+        "run": true,
+        "verify": true,
+        "resume": false,
+        "rollback": true,
+        "recover": true
+      }
+    },
+    {
+      "type": "minimax-music3-prompt-enhancer",
+      "label": "MiniMax Music提示词增强器",
+      "description": "基于 MiniMax Music 3 官方 Skill 的纯文本歌曲策划节点，支持歌词生成、逐字保留、定域润色、渐进披露模板、隐私隔离和全部扩展 LLM 渠道；不生成音频",
+      "category": "inspiration",
+      "hidden": false,
+      "executable": true,
+      "generatable": true,
+      "agentExposure": "direct-capability",
+      "coverageReason": "registered-capability-reference",
+      "accounting": {
+        "status": "direct-capability",
+        "reasonCode": "registered-capability-reference",
+        "semanticCapabilityIds": [
+          "canvas.node-add",
+          "create.script"
+        ],
+        "evidence": [
+          "tools/zcanvas-cli/creativeCapabilityManifest.json"
+        ]
+      },
+      "inputs": [
+        "text"
+      ],
+      "outputs": [
+        "text",
+        "metadata"
       ],
       "capabilityIds": [
         "canvas.node-add",
@@ -11905,17 +11955,17 @@
   "coverageReceipt": {
     "schema": "t8-creative-capability-coverage-receipt-v1",
     "sourceDigests": {
-      "capabilityManifest": "5c56b3b64d483ae6e6da5268f25c059f2a3fcc2c13e3c3d64d39b10e1e56402b",
-      "nodeSchema": "3d76c2debc7687d67a54eea884287aa0b973e3f4bf01dab9984e01b240961bfc",
+      "capabilityManifest": "16c15dab6eef440bbbee2e44ccf69dfe75bba70d6a61585ca0fb717279353b1d",
+      "nodeSchema": "1e54f3cb0c563d2b60290fd56c160c07760c42586c170af81ec023c99720038c",
       "runtimeCatalog": "3c8802635d0fd87c9b478e92085f2d71d6b363323bb71b0b48928be2718f1ba0",
       "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
       "receiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7"
     },
     "inventory": {
       "nodes": {
-        "total": 77,
-        "executable": 58,
-        "generatable": 11
+        "total": 78,
+        "executable": 59,
+        "generatable": 12
       },
       "runtime": {
         "llm": 32,
@@ -11936,6 +11986,6 @@
       "missingCompatibilityEdges": []
     },
     "complete": true,
-    "digest": "aa7f4a60d90c71bcd2418fd268afbfce046b0e174ca4d2655b67c8594fdd0d55"
+    "digest": "ab8a5fd7e920f1fbf5aff49ea3b26206c77f414bbc2c96c701ced2d3cb7d04cc"
   }
 }

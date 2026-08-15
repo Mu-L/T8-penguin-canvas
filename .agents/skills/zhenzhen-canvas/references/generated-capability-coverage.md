@@ -3,22 +3,22 @@
 > Machine-generated from the real Canvas Node Schema, creative capability manifest,
 > runtime model/action catalog, and handler bindings. Do not edit by hand.
 
-- Aggregate SHA-256: `22bb59d7396373301e8ea3d1b54faf54c92abb425e519a80eefbfccf7698d9c8`
+- Aggregate SHA-256: `807a3946d1422bc1f03d0347dd7f7aff8f519cc13a06f9caa130766ac6942ff0`
 - Capabilities / handlers: **31 / 31**
-- Canvas nodes: **77**
-- Referenced / unreferenced nodes: **68 / 9**
-- Accounted / unexplained nodes: **77 / 0**
-- Direct capability nodes: **68**
+- Canvas nodes: **78**
+- Referenced / unreferenced nodes: **69 / 9**
+- Accounted / unexplained nodes: **78 / 0**
+- Direct capability nodes: **69**
 - Internal compatibility nodes: **1**
 - Semantically superseded nodes: **8**
 - Public capability gaps: **0**
-- Fully operable nodes: **18**
+- Fully operable nodes: **19**
 - Runtime model/action entries: **250**
-- Dynamic node inventory (total / executable / generatable): **77 / 58 / 11**
+- Dynamic node inventory (total / executable / generatable): **78 / 59 / 12**
 - Dynamic runtime inventory (LLM / image / video / audio / actions): **32 / 42 / 113 / 16 / 47**
 - Operation risk contracts: **152** (L0 91, L1 44, L2 17, L3 0)
 - Unknown node references: **0**
-- Coverage receipt: `t8-creative-capability-coverage-receipt-v1` / `aa7f4a60d90c71bcd2418fd268afbfce046b0e174ca4d2655b67c8594fdd0d55`
+- Coverage receipt: `t8-creative-capability-coverage-receipt-v1` / `ab8a5fd7e920f1fbf5aff49ea3b26206c77f414bbc2c96c701ced2d3cb7d04cc`
 
 “Understand” means the node exists in the authoritative schema. Other columns are true only
 when at least one registered high-level capability explicitly advertises that operation.
@@ -45,6 +45,7 @@ when at least one registered high-level capability explicitly advertises that op
 | `audio` 音频 | core | direct-capability | yes | yes | `canvas.node-add`, `create.audio` | yes | yes | yes | yes | yes | yes |
 | `llm` LLM | core | direct-capability | yes | yes | `canvas.node-add`, `create.script` | yes | yes | yes | yes | yes | yes |
 | `minimax-h3-prompt-enhancer` MiniMax H3提示词增强器 | inspiration | direct-capability | yes | yes | `canvas.node-add`, `create.script` | yes | yes | yes | yes | yes | yes |
+| `minimax-music3-prompt-enhancer` MiniMax Music提示词增强器 | inspiration | direct-capability | yes | yes | `canvas.node-add`, `create.script` | yes | yes | yes | yes | yes | yes |
 | `minimax-h3-official-prompt-enhancer` MiniMax H3官方提示词增强器 | inspiration | direct-capability | yes | yes | `canvas.node-add`, `create.script` | yes | yes | yes | yes | yes | yes |
 | `seedance20-prompt-enhancer` Seedance 2.0提示词增强器 | inspiration | direct-capability | yes | yes | `canvas.node-add`, `create.script` | yes | yes | yes | yes | yes | yes |
 | `mv-music-master` MV 音乐大师 | core | direct-capability | yes | yes | `canvas.node-add` | yes | yes | yes | — | yes | yes |

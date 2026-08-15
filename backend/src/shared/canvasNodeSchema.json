@@ -594,6 +594,19 @@
         }
       ]
     },
+    "minimax-music3-prompt-enhancer": {
+      "resolver": "static",
+      "inputs": [
+        { "id": "music-idea", "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": 8 },
+        { "id": "lyrics", "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": 1 }
+      ],
+      "outputs": [
+        { "id": "lyrics", "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": false },
+        { "id": "music-caption", "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": true },
+        { "id": "payload", "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": false },
+        { "id": "report", "kinds": ["metadata"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": false }
+      ]
+    },
     "minimax-h3-official-prompt-enhancer": {
       "resolver": "static",
       "inputs": [
@@ -2974,6 +2987,58 @@
           ],
           "outputs": [
             { "id": null, "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": null }
+          ]
+        }
+      }
+    },
+    {
+      "type": "minimax-music3-prompt-enhancer",
+      "label": "MiniMax Music提示词增强器",
+      "category": "inspiration",
+      "description": "基于 MiniMax Music 3 官方 Skill 的纯文本歌曲策划节点，支持歌词生成、逐字保留、定域润色、渐进披露模板、隐私隔离和全部扩展 LLM 渠道；不生成音频",
+      "icon": "Music2",
+      "color": "fuchsia",
+      "ports": { "inputs": ["text"], "outputs": ["text", "metadata"] },
+      "executable": true,
+      "generatable": true,
+      "generation": {
+        "allowedDataFields": {
+          "musicIdea": { "type": "string", "maxLength": 20000 },
+          "lyrics": { "type": "string", "maxLength": 50000 },
+          "lyricsMode": { "type": "string", "enum": ["auto", "generate", "preserve", "edit", "instrumental"] },
+          "qualityMode": { "type": "string", "enum": ["fast", "official-full"] },
+          "semanticMode": { "type": "string", "enum": ["private", "manual-profile", "llm-profile"] },
+          "manualSemanticProfile": { "type": "string", "maxLength": 500 },
+          "editRequest": { "type": "string", "maxLength": 5000 },
+          "editScope": { "type": "string", "enum": ["auto", "all", "section-all", "section-nth"] },
+          "editSection": { "type": "string", "enum": ["Intro", "Verse", "Pre-Chorus", "Chorus", "Post-Chorus", "Bridge", "Instrumental", "Solo", "Outro"] },
+          "editSectionOccurrence": { "type": "integer", "minimum": 1, "maximum": 99 },
+          "structurePreset": { "type": "string", "enum": ["auto", "verse-chorus", "pop-full", "custom"] },
+          "customStructure": { "type": "string", "maxLength": 500 },
+          "language": { "type": "string", "enum": ["auto", "Chinese", "English", "Japanese", "Korean", "custom"] },
+          "customLanguage": { "type": "string", "maxLength": 100 },
+          "captionLanguage": { "type": "string", "enum": ["English", "Chinese"] },
+          "meter": { "type": "string", "enum": ["auto", "4/4", "3/4", "6/8", "custom"] },
+          "customMeter": { "type": "string", "maxLength": 50 },
+          "durationSeconds": { "type": "integer", "minimum": 0, "maximum": 300 },
+          "bpm": { "type": "integer", "minimum": 0, "maximum": 300 },
+          "keyScale": { "type": "string", "maxLength": 100 },
+          "captionWords": { "type": "integer", "minimum": 0, "maximum": 1000 },
+          "constraints": { "type": "string", "maxLength": 5000 },
+          "seed": { "type": "integer" }
+        },
+        "defaults": { "musicIdea": "", "lyrics": "", "lyricsMode": "auto", "qualityMode": "official-full", "semanticMode": "private", "manualSemanticProfile": "", "editRequest": "", "editScope": "auto", "editSection": "Verse", "editSectionOccurrence": 1, "structurePreset": "auto", "customStructure": "", "language": "auto", "customLanguage": "", "captionLanguage": "English", "meter": "auto", "customMeter": "", "durationSeconds": 0, "bpm": 0, "keyScale": "", "captionWords": 0, "constraints": "", "seed": 0, "llmApiSource": "seedance-nz", "providerSource": "zhenzhen", "providerId": "", "providerModel": "bytedance/doubao-seed-2.1-pro" },
+        "connectionPorts": {
+          "dynamic": false,
+          "inputs": [
+            { "id": "music-idea", "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": 8 },
+            { "id": "lyrics", "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": 1 }
+          ],
+          "outputs": [
+            { "id": "lyrics", "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": false },
+            { "id": "music-caption", "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": true },
+            { "id": "payload", "kinds": ["text"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": false },
+            { "id": "report", "kinds": ["metadata"], "required": false, "minConnections": 0, "maxConnections": null, "preferred": false }
           ]
         }
       }

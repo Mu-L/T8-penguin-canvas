@@ -1352,6 +1352,7 @@ const DirectorStoryboardNode = lazyCanvasNode(() => import('./nodes/DirectorStor
 const StoryNode = lazyCanvasNode(() => import('./nodes/StoryNode'), 'StoryNode');
 const ScriptMasterNode = lazyCanvasNode(() => import('./nodes/ScriptMasterNode'), 'ScriptMasterNode');
 const MiniMaxH3PromptEnhancerNode = lazyCanvasNode(() => import('./nodes/MiniMaxH3PromptEnhancerNode'), 'MiniMaxH3PromptEnhancerNode');
+const MiniMaxMusic3PromptEnhancerNode = lazyCanvasNode(() => import('./nodes/MiniMaxMusic3PromptEnhancerNode'), 'MiniMaxMusic3PromptEnhancerNode');
 const MinimaxH3OfficialPromptEnhancerNode = lazyCanvasNode(() => import('./nodes/MinimaxH3OfficialPromptEnhancerNode'), 'MinimaxH3OfficialPromptEnhancerNode');
 const Seedance20PromptEnhancerNode = lazyCanvasNode(() => import('./nodes/Seedance20PromptEnhancerNode'), 'Seedance20PromptEnhancerNode');
 const MvMusicMasterNode = lazyCanvasNode(() => import('./nodes/MvMusicMasterNode'), 'MvMusicMasterNode');
@@ -1434,6 +1435,7 @@ const SPECIFIC_NODES: Record<string, any> = {
   story: StoryNode,
   'script-master': ScriptMasterNode,
   'minimax-h3-prompt-enhancer': MiniMaxH3PromptEnhancerNode,
+  'minimax-music3-prompt-enhancer': MiniMaxMusic3PromptEnhancerNode,
   'minimax-h3-official-prompt-enhancer': MinimaxH3OfficialPromptEnhancerNode,
   'seedance20-prompt-enhancer': Seedance20PromptEnhancerNode,
   'mv-music-master': MvMusicMasterNode,
@@ -1982,6 +1984,42 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     error: '',
     enhancedPrompt: '',
     prompt: '',
+  },
+  'minimax-music3-prompt-enhancer': {
+    musicIdea: '',
+    lyrics: '',
+    lyricsMode: 'auto',
+    qualityMode: 'official-full',
+    semanticMode: 'private',
+    manualSemanticProfile: '',
+    editRequest: '',
+    editScope: 'auto',
+    editSection: 'Verse',
+    editSectionOccurrence: 1,
+    structurePreset: 'auto',
+    customStructure: '',
+    language: 'auto',
+    customLanguage: '',
+    captionLanguage: 'English',
+    meter: 'auto',
+    customMeter: '',
+    durationSeconds: 0,
+    bpm: 0,
+    keyScale: '',
+    captionWords: 0,
+    constraints: '',
+    seed: 0,
+    llmApiSource: 'seedance-nz',
+    providerSource: 'zhenzhen',
+    providerId: '',
+    providerModel: 'bytedance/doubao-seed-2.1-pro',
+    status: 'idle',
+    error: '',
+    lyricsResult: '',
+    musicCaption: '',
+    music3PayloadJson: '',
+    enhancementReportJson: '',
+    music3StageCache: {},
   },
   'minimax-h3-official-prompt-enhancer': {
     userPrompt: '',

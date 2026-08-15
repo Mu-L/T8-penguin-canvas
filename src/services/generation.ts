@@ -743,7 +743,7 @@ export interface GenerateLlmRequest {
   /** 流式开关;默认 false(非流式) */
   stream?: boolean;
   /** 后端受控请求配置；提示词增强器使用真实媒体上传并禁止自动重放付费请求。 */
-  requestProfile?: 'minimax-h3-prompt-enhancer' | 'seedance20-prompt-enhancer' | 'mv-music-master';
+  requestProfile?: 'minimax-h3-prompt-enhancer' | 'minimax-music3-prompt-enhancer' | 'seedance20-prompt-enhancer' | 'mv-music-master';
 }
 
 export interface GenerateLlmResult {
@@ -788,6 +788,8 @@ export interface GenerateExternalLlmRequest extends Omit<GenerateLlmRequest, 'st
   providerId: string;
   providerModel?: string;
   providerParams?: Record<string, any>;
+  /** 扩展 LLM 同步请求超时；由后端限界，Music 3 多阶段任务需显式放宽。 */
+  timeoutMs?: number;
 }
 
 export function buildGenerateExternalLlmRequestBody(req: GenerateExternalLlmRequest): GenerateExternalLlmRequest {

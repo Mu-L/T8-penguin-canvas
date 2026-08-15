@@ -16,6 +16,7 @@ export type NodeType =
   | 'story'
   | 'script-master'
   | 'minimax-h3-prompt-enhancer'
+  | 'minimax-music3-prompt-enhancer'
   | 'minimax-h3-official-prompt-enhancer'
   | 'seedance20-prompt-enhancer'
   | 'mv-music-master'

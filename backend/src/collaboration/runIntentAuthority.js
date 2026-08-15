@@ -448,8 +448,10 @@ function providerDeclarationForNode(node, context = {}) {
     return { provider: 'seedance-nz', model };
   }
 
-  if (type === 'minimax-h3-prompt-enhancer' || type === 'seedance20-prompt-enhancer') {
-    const enhancerLabel = type === 'seedance20-prompt-enhancer' ? 'Seedance 2.0' : 'MiniMax H3';
+  if (type === 'minimax-h3-prompt-enhancer' || type === 'minimax-music3-prompt-enhancer' || type === 'seedance20-prompt-enhancer') {
+    const enhancerLabel = type === 'seedance20-prompt-enhancer'
+      ? 'Seedance 2.0'
+      : type === 'minimax-music3-prompt-enhancer' ? 'MiniMax Music 3' : 'MiniMax H3';
     if (data.llmApiSource !== 'zhenzhen') {
       const model = boundedString(data.providerModel) || 'bytedance/doubao-seed-2.1-pro';
       if (!SEEDANCE_NZ_LLM_MODEL_SET.has(model)) {

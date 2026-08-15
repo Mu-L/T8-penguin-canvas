@@ -31,6 +31,8 @@ const CANVAS_REQUEST_COMPONENTS: ComponentAudit[] = [
   { file: 'AudioNode.tsx', types: ['audio'], requestBoundaryCalls: 1, directClickHandlers: ['handleGenerate'] },
   { file: 'LLMNode.tsx', types: ['llm'], requestBoundaryCalls: 1, directClickHandlers: ['handleSend'] },
   { file: 'MiniMaxH3PromptEnhancerNode.tsx', types: ['minimax-h3-prompt-enhancer'], requestBoundaryCalls: 1, directClickHandlers: ['runEnhancer'] },
+  { file: 'MinimaxH3OfficialPromptEnhancerNode.tsx', types: ['minimax-h3-official-prompt-enhancer'], requestBoundaryCalls: 1, directClickHandlers: [] },
+  { file: 'MiniMaxMusic3PromptEnhancerNode.tsx', types: ['minimax-music3-prompt-enhancer'], requestBoundaryCalls: 1, directClickHandlers: ['runEnhancer'] },
   { file: 'Seedance20PromptEnhancerNode.tsx', types: ['seedance20-prompt-enhancer'], requestBoundaryCalls: 1, directClickHandlers: ['runEnhancer'] },
   { file: 'MvMusicMasterNode.tsx', types: ['mv-music-master'], requestBoundaryCalls: 1, directClickHandlers: ['analyze', 'alignLyricsWithWhisper', 'generateVisualBible', 'generatePromptPacks', 'generateImages', 'generateVideos', 'composeFinalMv', 'deliverFinalMv'] },
   { file: 'RunningHubNode.tsx', types: ['runninghub', 'runninghub-wallet'], requestBoundaryCalls: 1, directClickHandlers: ['handleRun'] },
@@ -119,7 +121,7 @@ test('primary node run audit classifies every shared executable type exactly onc
   assert.equal(containsIdentifier('{handleRun}', 'handleRun'), true, 'handler audit must detect exact identifiers');
   assert.equal(containsIdentifier('{handleRunner}', 'handleRun'), false, 'handler audit must not match identifier prefixes');
   const audited = [...CANVAS_REQUEST_COMPONENTS, ...NO_NODE_PRIMARY_COMPONENTS].flatMap((entry) => entry.types);
-  assert.equal(audited.length, 57, 'shared executable audit count changed; classify every new or removed type explicitly');
+  assert.equal(audited.length, 59, 'shared executable audit count changed; classify every new or removed type explicitly');
   assert.equal(new Set(audited).size, audited.length, 'audit matrix must not classify an executable type twice');
   assert.deepEqual([...audited].sort(), [...EXECUTABLE_NODE_TYPES].sort());
 });

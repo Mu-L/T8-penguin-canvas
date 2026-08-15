@@ -6,7 +6,7 @@
   "controlProtocol": "t8-agent-control-v1",
   "responseSchema": "t8-agent-control-response-v1",
   "canvasPatchProtocol": "t8-canvas-patch-v1",
-  "nodeSchemaDigest": "3d76c2debc7687d67a54eea884287aa0b973e3f4bf01dab9984e01b240961bfc",
+  "nodeSchemaDigest": "1e54f3cb0c563d2b60290fd56c160c07760c42586c170af81ec023c99720038c",
   "providerCatalogDigest": "236233576d77eaa115867cb4d36528f2fea6d1a98e7048896023b5d1f3300350",
   "minimumDesktopVersion": "2.6.4",
   "commandCatalog": "commandCatalog.json",

@@ -5316,10 +5316,12 @@ function hasLlmVideoParts(messages) {
 }
 
 const MINIMAX_H3_REQUEST_PROFILE = 'minimax-h3-prompt-enhancer';
+const MINIMAX_MUSIC3_REQUEST_PROFILE = 'minimax-music3-prompt-enhancer';
 const SEEDANCE20_REQUEST_PROFILE = 'seedance20-prompt-enhancer';
 const MV_MUSIC_MASTER_REQUEST_PROFILE = 'mv-music-master';
 const PROMPT_ENHANCER_REQUEST_PROFILES = new Set([
   MINIMAX_H3_REQUEST_PROFILE,
+  MINIMAX_MUSIC3_REQUEST_PROFILE,
   SEEDANCE20_REQUEST_PROFILE,
   MV_MUSIC_MASTER_REQUEST_PROFILE,
 ]);
