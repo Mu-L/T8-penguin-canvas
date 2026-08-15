@@ -1,7 +1,7 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.9.3",
-  "lastUpdated": "2026-08-15-v2.9.3-release-authorized",
+  "lastUpdated": "2026-08-15-v2.9.3-released",
   "startupAndCanvasPerformanceOptimization": {
     "status": "released-v2.9.2",
     "date": "2026-08-15",
@@ -91,7 +91,7 @@
     ]
   },
   "minimaxMusic3PromptEnhancer": {
-    "status": "release-authorized-v2.9.3",
+    "status": "released-v2.9.3",
     "date": "2026-08-15",
     "releaseIncluded": true,
     "nodeType": "minimax-music3-prompt-enhancer",
@@ -125,7 +125,7 @@
     "verification": [
       "官方资源 manifest 校验 1022/1022 文件、18 个风格族索引、1000 个模板与固定树哈希一致。",
       "Music3、端口、运行入口、RunIntent 和能力图聚焦回归 42/42 通过；能力同步为 31 actions / 250 runtime entries / 78/78 nodes / 0 public gaps。",
-      "TypeScript、生产构建、Electron/NSIS、自动更新资产、固定 Tag/target、Latest 与远端完整下载仍须在固定发布源码上通过；真实用户安装与安装升级证据按 owner-approved-post-release-v2.9.3 后补，延期不等于通过。"
+      "固定源码 TypeScript、2888 模块生产构建、Electron/NSIS、后端与私有侧车加密、双运行时归档、post-build、provenance、sealed recovery、固定 Tag/target、Latest、发布前和独立发布后三资产完整回下载均通过；真实用户安装与安装升级证据按 owner-approved-post-release-v2.9.3 后补，延期不等于通过。"
     ]
   },
   "minimaxH3OwFastExpansion": {
@@ -867,35 +867,40 @@
     ]
   },
   "release": {
-    "status": "release-authorized-v2.9.3",
+    "status": "published-stable-latest",
     "version": "2.9.3",
     "date": "2026-08-15",
-    "publishedAt": null,
+    "publishedAt": "2026-08-15T04:32:51Z",
     "tag": "v2.9.3",
-    "latest": false,
-    "sourceCommit": null,
+    "latest": true,
+    "sourceCommit": "454a756e4b0f4788af76079aa0df3af6568da0a5",
+    "draft": false,
+    "prerelease": false,
+    "githubImmutable": false,
     "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.3",
     "artifacts": {
       "installer": {
         "name": "T8-PenguinCanvas-Setup-2.9.3.exe",
-        "size": null,
-        "sha256": null
+        "size": 1317061320,
+        "sha256": "e739dead29c500517ca00fa53b5e3858b495a9bf136dd90e16ce4e35ee15f07a",
+        "sha512": "5oN9dbBZ6A4CELfSMzEl+zm/ZjAh+8v25M0ARGs7n8EnXUY7lCoWKmI7JLhf+ytC8Jk/npo8A9vOcLTv7J4GsA=="
       },
       "blockmap": {
         "name": "T8-PenguinCanvas-Setup-2.9.3.exe.blockmap",
-        "size": null,
-        "sha256": null
+        "size": 1371959,
+        "sha256": "933c798fb7f60aae3ef323d5cac445efcee767a8e04ed3504467eb9bc9b157bc"
       },
       "updateManifest": {
         "name": "latest.yml",
-        "size": null,
-        "sha256": null
+        "size": 362,
+        "sha256": "5d3c1ba35d602592dc690f530356e813b538e545f17ecf3733e285d92bafa870"
       }
     },
     "verification": [
       "v2.9.3 在完整保留 v2.9.2 启动、目录、画布、主题、媒体和跨画布后台运行优化的基础上，正式加入 MiniMax Music3 提示词增强器、固定官方 Skill 资源快照、工作流、Provider/RunIntent/能力目录接线；不回退任何既有节点、模型、默认渠道、用户画布、工作流或 Provider 协议。",
-      "Music3 官方资源校验 1022/1022 文件一致；Music3、端口、运行入口、RunIntent 和能力图聚焦回归 42/42 通过，TypeScript 与其余固定源码门禁必须在发布前继续收敛。",
-      "Electron/NSIS、私有构建、三项自动更新资产、固定 source commit、Tag、Latest、远端完整回下载与摘要必须在已推送 origin/main 的固定源码提交上，通过 T8-penguin-canvas-release-v2.9.3 / codex/release-v2.9.3 的唯一 dist:release 流程收敛；完成前保持空值。",
+      "Music3 官方资源校验 1022/1022 文件一致；安装目录再次实测包含 1000 个模板、18 个索引及 SOURCE/NOTICE/manifest，Music3、端口、运行入口、RunIntent 和能力图聚焦回归 42/42 通过。",
+      "固定 source commit 454a756e4b0f4788af76079aa0df3af6568da0a5 已完成唯一 Electron/NSIS 正式流程：TypeScript、2888 模块私有构建、后端与 4 个本机私有文件加密、双运行时归档、原生模块重建、post-build、provenance、sealed recovery、固定 Tag/target 和 Latest 全部通过。",
+      "三项自动更新资产在发布前由 sealed recovery 完整回下载，发布后又独立完整下载，并与本地实际字节、SHA-256、installer SHA-512、latest.yml 结构及 GitHub digest/size 一致。",
       "用户已明确授权先发布、后补反馈用户安装环境、协作多端及安装升级证据；协作证据门只允许完全缺失的清单按 owner-approved-post-release-v2.9.3 延期，不能把延期标记为已通过，任何技术门禁失败均不可延期。"
     ]
   },
