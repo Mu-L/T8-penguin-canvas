@@ -1,6 +1,6 @@
 {
   "schema": "t8-creative-runtime-catalog-v1",
-  "sourceDigest": "3c8802635d0fd87c9b478e92085f2d71d6b363323bb71b0b48928be2718f1ba0",
+  "sourceDigest": "03aea781d7d4a19aaf055b41ce6362ccd1c09784f88bb1516690274e76b55dae",
   "generatedFrom": [
     "src/providers/models.ts",
     "src/config/seedance.ts",
@@ -390,6 +390,36 @@
       "available": true,
       "parameters": {
         "label": "qwen/qwen3.7-plus",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "llm",
+        "available": true
+      }
+    },
+    {
+      "id": "llm:seedance-nz:qwen/qwen3.8-max",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "qwen/qwen3.8-max",
+      "label": "qwen/qwen3.8-max",
+      "family": "llm",
+      "available": true,
+      "parameters": {
+        "label": "qwen/qwen3.8-max",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "llm",
+        "available": true
+      }
+    },
+    {
+      "id": "llm:seedance-nz:zhenzhen/gk-4.6",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "zhenzhen/gk-4.6",
+      "label": "zhenzhen/gk-4.6",
+      "family": "llm",
+      "available": true,
+      "parameters": {
+        "label": "zhenzhen/gk-4.6",
         "platformLabel": "贞贞的平价AI小屋",
         "family": "llm",
         "available": true
@@ -7849,7 +7879,7 @@
     }
   ],
   "counts": {
-    "llm": 32,
+    "llm": 34,
     "image": 42,
     "video": 113,
     "audio": 16,

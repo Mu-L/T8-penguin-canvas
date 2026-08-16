@@ -17,14 +17,14 @@
     "creativeCapabilityManifest": "16c15dab6eef440bbbee2e44ccf69dfe75bba70d6a61585ca0fb717279353b1d",
     "canvasNodeSchema": "1e54f3cb0c563d2b60290fd56c160c07760c42586c170af81ec023c99720038c",
     "canvasNodeSchemaFile": "64b80d36e6889e1c7b18eeebe10f312cf9d27e1fbd5567179932bdd61cf798e0",
-    "runtimeCatalogSources": "3c8802635d0fd87c9b478e92085f2d71d6b363323bb71b0b48928be2718f1ba0",
-    "runtimeCatalogArtifact": "236233576d77eaa115867cb4d36528f2fea6d1a98e7048896023b5d1f3300350",
+    "runtimeCatalogSources": "03aea781d7d4a19aaf055b41ce6362ccd1c09784f88bb1516690274e76b55dae",
+    "runtimeCatalogArtifact": "9b72459b4037efc12700a6a7741e998a49c8dd836d14dc4df1b4a77d91be48b0",
     "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
     "capabilityGraphCompiler": "1a611d7e91dcf523e0536a92e9adb6ba2d884689a65fa10274bcda3a05ef9840",
     "coverageReceiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7",
     "canonicalTextDigestCompiler": "b0afcf28a257fbbd8f391edc117348f8f2ede1b4a039ae91bce25a8d563ac0cf"
   },
-  "aggregateDigest": "807a3946d1422bc1f03d0347dd7f7aff8f519cc13a06f9caa130766ac6942ff0",
+  "aggregateDigest": "3a3d28a4eadd70ab35334fa9399b4664a0639a7db79376b416dc48f7cd96c99b",
   "principles": {
     "oneSentenceStart": true,
     "directCanvasMutation": false,
@@ -48,9 +48,9 @@
     "accountedNodes": 78,
     "unexplainedNodes": 0,
     "fullyOperableNodes": 19,
-    "runtimeEntries": 250,
+    "runtimeEntries": 252,
     "runtimeByKind": {
-      "llm": 32,
+      "llm": 34,
       "image": 42,
       "video": 113,
       "audio": 16,
@@ -58,7 +58,7 @@
     },
     "runtimeByProvider": {
       "grok-oauth": 2,
-      "seedance-nz": 185,
+      "seedance-nz": 187,
       "zhenzhen": 56,
       "fal": 7
     },
@@ -6422,7 +6422,7 @@
   ],
   "runtime": {
     "schema": "t8-creative-runtime-catalog-v1",
-    "sourceDigest": "3c8802635d0fd87c9b478e92085f2d71d6b363323bb71b0b48928be2718f1ba0",
+    "sourceDigest": "03aea781d7d4a19aaf055b41ce6362ccd1c09784f88bb1516690274e76b55dae",
     "platforms": [
       {
         "id": "zhenzhen",
@@ -8998,6 +8998,46 @@
         "platformLabel": "贞贞的平价AI小屋",
         "model": "qwen/qwen3.7-plus",
         "label": "qwen/qwen3.7-plus",
+        "family": "llm",
+        "available": true,
+        "catalogSection": "llm",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "llm:seedance-nz:qwen/qwen3.8-max",
+        "kind": "llm",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "qwen/qwen3.8-max",
+        "label": "qwen/qwen3.8-max",
+        "family": "llm",
+        "available": true,
+        "catalogSection": "llm",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "llm:seedance-nz:zhenzhen/gk-4.6",
+        "kind": "llm",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "zhenzhen/gk-4.6",
+        "label": "zhenzhen/gk-4.6",
         "family": "llm",
         "available": true,
         "catalogSection": "llm",
@@ -11826,6 +11866,8 @@
       "llm:seedance-nz:qwen/qwen3.6-plus",
       "llm:seedance-nz:qwen/qwen3.7-max",
       "llm:seedance-nz:qwen/qwen3.7-plus",
+      "llm:seedance-nz:qwen/qwen3.8-max",
+      "llm:seedance-nz:zhenzhen/gk-4.6",
       "llm:zhenzhen:gemini-3.1-flash-lite-preview",
       "llm:zhenzhen:gemini-3.1-pro-preview",
       "llm:zhenzhen:gemini-3.5-flash",
@@ -11957,7 +11999,7 @@
     "sourceDigests": {
       "capabilityManifest": "16c15dab6eef440bbbee2e44ccf69dfe75bba70d6a61585ca0fb717279353b1d",
       "nodeSchema": "1e54f3cb0c563d2b60290fd56c160c07760c42586c170af81ec023c99720038c",
-      "runtimeCatalog": "3c8802635d0fd87c9b478e92085f2d71d6b363323bb71b0b48928be2718f1ba0",
+      "runtimeCatalog": "03aea781d7d4a19aaf055b41ce6362ccd1c09784f88bb1516690274e76b55dae",
       "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
       "receiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7"
     },
@@ -11968,7 +12010,7 @@
         "generatable": 12
       },
       "runtime": {
-        "llm": 32,
+        "llm": 34,
         "image": 42,
         "video": 113,
         "audio": 16,
@@ -11986,6 +12028,6 @@
       "missingCompatibilityEdges": []
     },
     "complete": true,
-    "digest": "ab8a5fd7e920f1fbf5aff49ea3b26206c77f414bbc2c96c701ced2d3cb7d04cc"
+    "digest": "6db2354fd3c7c6288f666336303e2261169d012997d8e3f4452a331db538c66d"
   }
 }

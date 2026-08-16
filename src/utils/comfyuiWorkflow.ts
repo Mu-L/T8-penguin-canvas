@@ -40,12 +40,19 @@ export interface ComfyDetectedField extends ComfyFieldMapping {
   label: string;
 }
 
+export interface ComfyDetectedOutputNode {
+  nodeId: string;
+  classType: string;
+  nodeTitle: string;
+}
+
 export interface ComfyWorkflowAnalysis {
   fields: ComfyDetectedField[];
   imageInputCount: number;
   videoInputCount: number;
   audioInputCount: number;
   outputCount: number;
+  outputNodes: ComfyDetectedOutputNode[];
   warnings: string[];
 }
 
@@ -260,6 +267,10 @@ function isLinkedInput(value: unknown): boolean {
     && (value.length === 1 || typeof value[1] === 'number' || typeof value[1] === 'string');
 }
 
+function hasEditableField(inputs: Record<string, any>, fieldName: string): boolean {
+  return hasField(inputs, fieldName) && !isLinkedInput(inputs[fieldName]);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -418,7 +429,7 @@ function isTextLikeField(fieldName: string, node: any): boolean {
 }
 
 function nodeLooksImageInputDriven(node: any): boolean {
-  return /(loadimage|imageinput|image\s*input|input\s*image|mask|controlnet|ipadapter|openpose|depth|lineart|reference|inpaint|outpaint|canny|hed|scribble|softedge|pose|segmentation|segment|segment\s*anything|\bsam\b|sam2|vision)/i.test(textAroundNode(node));
+  return /(loadimage|imageinput|image\s*input|input\s*image|mask|controlnet|ipadapter|openpose|depth|lineart|reference|inpaint|outpaint|canny|hedpreprocessor|(?:^|[^a-z0-9])hed(?:$|[^a-z0-9])|scribble|softedge|pose|segmentation|segment|segment\s*anything|\bsam\b|sam2|vision)/i.test(textAroundNode(node));
 }
 
 function nodeLooksVideoInputDriven(node: any): boolean {
@@ -528,13 +539,14 @@ export function analyzeComfyWorkflow(workflow: unknown): ComfyWorkflowAnalysis {
   let videoInputCount = 0;
   let audioInputCount = 0;
   let outputCount = 0;
+  const outputNodes: ComfyDetectedOutputNode[] = [];
   const warnings: string[] = [];
   const entries = entriesOfWorkflow(workflow);
   const clipTextRoles = buildClipTextRoleMap(entries);
 
   if (!entries.length) {
     warnings.push('未识别到 API Workflow 节点；请确认导入的是 ComfyUI API 格式，而不是普通前端 workflow。');
-    return { fields, imageInputCount, videoInputCount, audioInputCount, outputCount, warnings };
+    return { fields, imageInputCount, videoInputCount, audioInputCount, outputCount, outputNodes, warnings };
   }
 
   for (const [nodeId, node] of entries) {
@@ -544,45 +556,45 @@ export function analyzeComfyWorkflow(workflow: unknown): ComfyWorkflowAnalysis {
     const inputKeys = Object.keys(inputs);
     const skipGenericInputs = isDisplayOnlyNode(node) || isOutputNode(classType);
 
-    if (lowClass.includes('cliptextencode') && hasField(inputs, 'text')) {
+    if (lowClass.includes('cliptextencode') && hasEditableField(inputs, 'text')) {
       const role = clipTextRoles.get(nodeId);
       const source: ComfyFieldSource = role || (isNegativePromptNode(node, promptTextSeen) ? 'negative' : 'prompt');
       pushField(fields, seen, nodeId, node, 'text', source);
       if (source === 'prompt') promptTextSeen = true;
     }
 
-    if ((lowClass.includes('loadimage') || lowClass.includes('imageinput')) && hasField(inputs, 'image')) {
+    if ((lowClass.includes('loadimage') || lowClass.includes('imageinput')) && hasEditableField(inputs, 'image')) {
       imageInputCount += 1;
       pushField(fields, seen, nodeId, node, 'image', (`image${imageInputCount}` as ComfyFieldSource));
     }
 
-    if ((lowClass.includes('loadvideo') || lowClass.includes('videoinput') || lowClass.includes('vhs')) && hasField(inputs, 'video')) {
+    if ((lowClass.includes('loadvideo') || lowClass.includes('videoinput') || lowClass.includes('vhs')) && hasEditableField(inputs, 'video')) {
       videoInputCount += 1;
       pushField(fields, seen, nodeId, node, 'video', (`video${videoInputCount}` as ComfyFieldSource));
     }
 
-    if ((lowClass.includes('loadaudio') || lowClass.includes('audioinput')) && hasField(inputs, 'audio')) {
+    if ((lowClass.includes('loadaudio') || lowClass.includes('audioinput')) && hasEditableField(inputs, 'audio')) {
       audioInputCount += 1;
       pushField(fields, seen, nodeId, node, 'audio', (`audio${audioInputCount}` as ComfyFieldSource));
     }
 
     if (lowClass.includes('emptylatent') || lowClass.includes('latentimage')) {
-      if (hasField(inputs, 'width')) pushField(fields, seen, nodeId, node, 'width', 'width');
-      if (hasField(inputs, 'height')) pushField(fields, seen, nodeId, node, 'height', 'height');
-      if (hasField(inputs, 'batch_size')) pushField(fields, seen, nodeId, node, 'batch_size', 'batch_size');
+      if (hasEditableField(inputs, 'width')) pushField(fields, seen, nodeId, node, 'width', 'width');
+      if (hasEditableField(inputs, 'height')) pushField(fields, seen, nodeId, node, 'height', 'height');
+      if (hasEditableField(inputs, 'batch_size')) pushField(fields, seen, nodeId, node, 'batch_size', 'batch_size');
     }
 
     if (lowClass.includes('ksampler') || lowClass.includes('sampler')) {
       for (const key of ['seed', 'noise_seed']) {
-        if (hasField(inputs, key)) pushField(fields, seen, nodeId, node, key, 'seed');
+        if (hasEditableField(inputs, key)) pushField(fields, seen, nodeId, node, key, 'seed');
       }
       for (const key of ['steps', 'cfg', 'sampler_name', 'scheduler', 'denoise'] as const) {
-        if (hasField(inputs, key)) pushField(fields, seen, nodeId, node, key, key);
+        if (hasEditableField(inputs, key)) pushField(fields, seen, nodeId, node, key, key);
       }
     }
 
     for (const key of ['model_name', 'ckpt_name', 'clip_name', 'vae_name', 'lora_name', 'unet_name', 'control_net_name', 'clip_vision_name', 'style_model_name', 'upscale_model', 'strength_model', 'strength_clip'] as const) {
-      if (hasField(inputs, key)) pushField(fields, seen, nodeId, node, key, key);
+      if (hasEditableField(inputs, key)) pushField(fields, seen, nodeId, node, key, key);
     }
 
     for (const key of inputKeys) {
@@ -618,7 +630,10 @@ export function analyzeComfyWorkflow(workflow: unknown): ComfyWorkflowAnalysis {
       pushField(fields, seen, nodeId, node, key, normalizeInputKey(key));
     }
 
-    if (isOutputNode(classType)) outputCount += 1;
+    if (isOutputNode(classType)) {
+      outputCount += 1;
+      outputNodes.push({ nodeId, classType, nodeTitle: nodeTitle(nodeId, node) });
+    }
 
     if (!lowClass && inputKeys.length > 0) {
       warnings.push(`#${nodeId} 缺少 class_type，可能不是标准 API Workflow 节点。`);
@@ -632,7 +647,7 @@ export function analyzeComfyWorkflow(workflow: unknown): ComfyWorkflowAnalysis {
     warnings.push('检测到图像输入节点，但没有生成图片映射。');
   }
 
-  return { fields, imageInputCount, videoInputCount, audioInputCount, outputCount, warnings };
+  return { fields, imageInputCount, videoInputCount, audioInputCount, outputCount, outputNodes, warnings };
 }
 
 export function buildComfyWorkflowImportChecklist(

@@ -51,6 +51,7 @@ const handleStyle: CSSProperties = {
 
 function parseInputValue(kind: string, value: any) {
   if (kind === 'number') {
+    if (value === '' || value === null || value === undefined) return '';
     const n = Number(value);
     return Number.isFinite(n) ? n : '';
   }
@@ -660,17 +661,35 @@ const ComfyUIStoreNode = ({ id, data, selected }: NodeProps) => {
                       ))}
                     </select>
                   ) : (
-                    <input
-                      type={param.kind === 'number' ? 'number' : 'text'}
-                      min={param.min}
-                      max={param.max}
-                      step={param.step}
-                      value={parseInputValue(param.kind, paramValues[param.key])}
-                      onChange={(e) => setParam(param.key, param.kind === 'number' ? e.target.value : e.target.value)}
-                      className={inputCls}
-                      style={inputStyle}
-                      placeholder={param.placeholder}
-                    />
+                    <div className="flex items-center gap-1">
+                      <input
+                        type={param.kind === 'number' ? 'number' : 'text'}
+                        min={param.min}
+                        max={param.max}
+                        step={param.step}
+                        value={parseInputValue(param.kind, paramValues[param.key])}
+                        onChange={(e) => setParam(param.key, e.target.value)}
+                        className={`${inputCls} min-w-0 flex-1`}
+                        style={inputStyle}
+                        placeholder={param.placeholder}
+                      />
+                      {param.kind === 'number' && /^(?:seed|noise_seed)(?:__.*)?$/i.test(String(param.fieldName || param.source || '')) && (
+                        <button
+                          type="button"
+                          className={`${buttonCls} shrink-0 px-2`}
+                          style={inputStyle}
+                          title={paramValues[param.key] === '' || paramValues[param.key] === null || paramValues[param.key] === undefined
+                            ? '当前为每次运行随机 Seed；点击生成固定 Seed'
+                            : '切换为每次运行随机 Seed'}
+                          onClick={() => {
+                            const randomMode = paramValues[param.key] === '' || paramValues[param.key] === null || paramValues[param.key] === undefined;
+                            setParam(param.key, randomMode ? Math.floor(Math.random() * 2147483647) : '');
+                          }}
+                        >
+                          🎲 {paramValues[param.key] === '' || paramValues[param.key] === null || paramValues[param.key] === undefined ? '随机' : '固定'}
+                        </button>
+                      )}
+                    </div>
                   )}
                 </label>
               ))}

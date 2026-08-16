@@ -2738,17 +2738,38 @@ async function snapshotVideoFrame(clip, time = 0, options = {}, job = makeJob('s
     const output = path.join(config.OUTPUT_DIR, filename);
     job.message = '抽取当前帧';
     job.progress = 55;
-    const args = [
-      '-y',
-      '-ss', safeTime.toFixed(3),
-      '-i', source,
-      '-frames:v', '1',
-    ];
-    if (format === 'jpg') {
-      args.push('-q:v', '3');
+    const seekTimes = [...new Set([
+      safeTime,
+      Math.max(0, safeTime - 0.15),
+      Math.max(0, safeTime - 0.4),
+      Math.max(0, safeTime - 1),
+      0,
+    ].map((value) => Number(value.toFixed(3))))];
+    let extractedTime = safeTime;
+    let extracted = false;
+    for (let index = 0; index < seekTimes.length; index += 1) {
+      const candidateTime = seekTimes[index];
+      await fsp.rm(output, { force: true }).catch(() => {});
+      if (index > 0) job.message = `尾帧未产出，回退到 ${candidateTime.toFixed(3)} 秒重试`;
+      const args = [
+        '-y',
+        '-ss', candidateTime.toFixed(3),
+        '-i', source,
+        '-frames:v', '1',
+      ];
+      if (format === 'jpg') args.push('-q:v', '3');
+      args.push(output);
+      await runFfmpeg(args, job, { timeoutMs: 90_000 });
+      const outputStat = await fsp.stat(output).catch(() => null);
+      if (outputStat?.isFile() && outputStat.size > 0) {
+        extracted = true;
+        extractedTime = candidateTime;
+        break;
+      }
     }
-    args.push(output);
-    await runFfmpeg(args, job, { timeoutMs: 90_000 });
+    if (!extracted) {
+      throw new Error('FFmpeg 未能在请求时间或回退时间点产出视频帧');
+    }
     const imageProbe = await probeFile(output, job).catch(() => ({}));
     const stat = fs.statSync(output);
     const result = {
@@ -2758,7 +2779,7 @@ async function snapshotVideoFrame(clip, time = 0, options = {}, job = makeJob('s
       fileName: filename,
       size: stat.size,
       mime,
-      time: Number(safeTime.toFixed(3)),
+      time: Number(extractedTime.toFixed(3)),
       sourceLabel: String(options?.sourceLabel || clip.name || clip.sourceLabel || '视频截图'),
       sourceName: String(clip.name || ''),
       sourceUrl: clip.url,

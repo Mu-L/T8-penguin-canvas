@@ -174,6 +174,7 @@ export interface AdvancedProviderConfig {
       workflowJson?: Record<string, any>;
       fields?: Array<{ nodeId: string; fieldName: string; source?: string; value?: any; options?: Array<string | number> }>;
       excludeRules?: string[];
+      outputNodeIds?: string[];
     }>;
   };
   jimengConfig?: {

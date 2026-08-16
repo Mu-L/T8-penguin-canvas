@@ -1,7 +1,101 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.9.3",
-  "lastUpdated": "2026-08-15-v2.9.3-released",
+  "version": "2.9.4",
+  "lastUpdated": "2026-08-16-v2.9.4-release-authorized",
+  "githubIssueFixesV294": {
+    "status": "release-authorized-v2.9.4",
+    "date": "2026-08-16",
+    "releaseIncluded": true,
+    "issues": [
+      12,
+      20,
+      21,
+      22,
+      23
+    ],
+    "fixes": [
+      "ParseHub 或挂载目录中不同子目录的同名 0.mp4/0.png 不再相互覆盖；保存名加入受控来源路径片段，同时继续执行路径、扩展名和落盘边界校验。",
+      "FFmpeg 7 在视频结尾按时间截帧返回 exit 0 但没有文件时，会在同一次只读任务内依次尝试安全回退时间并要求输出非空，不重新提交生成任务。",
+      "ComfyUI 工作流识别不再把 scheduler 等普通字段误判为 HED 图像输入；HED 只匹配独立字段或明确的 HEDPreprocessor。",
+      "ComfyUI 应用制作器支持明确选择一个或多个输出节点；后端只收集白名单节点输出，未保存白名单的旧应用继续兼容收集全部输出。Seed 数字字段支持随机/固定切换。",
+      "ComfyUI 自动识别只改写可编辑参数，宽高、Seed、文本、媒体、采样器和模型等已经由节点连线提供的输入保持原连接，不被默认值覆盖。"
+    ],
+    "verification": [
+      "ComfyUI Provider 与应用清单专项 33/33 通过，覆盖 HED 边界、输出节点白名单、随机 Seed 以及已连线尺寸和 Seed 保留。",
+      "文件保存边界 7/7 通过，覆盖不同嵌套目录同名媒体独立落盘；FFmpeg 真实运行时结尾截帧回退专项通过。",
+      "TypeScript、Node 语法、能力同步、生产构建与发布工作树门禁通过后才允许进入 Electron/NSIS 正式流程。"
+    ],
+    "boundaries": [
+      "#24 的更深层大画布性能模式和 #25 的完整英文界面不在本次解决范围，保持开放，不以部分工作冒充完成。",
+      "未选择 outputNodeIds 的旧 ComfyUI 应用保持原有收集全部输出语义；不会静默迁移旧画布或删除现有输出。"
+    ]
+  },
+  "zhenzhenBudgetLlmGk46Qwen38": {
+    "status": "release-authorized-v2.9.4-live-verified",
+    "date": "2026-08-15",
+    "releaseIncluded": true,
+    "provider": "seedance-nz",
+    "platform": "贞贞的平价AI小屋",
+    "surface": "LLM / Vision 节点",
+    "models": [
+      "zhenzhen/gk-4.6",
+      "qwen/qwen3.8-max"
+    ],
+    "officialDocs": "https://api.seedance.nz/docs/llms.txt",
+    "contract": [
+      "两个模型进入平价AI小屋的单一权威 LLM allowlist，由 LLM / Vision 下拉框、后端模型校验、RunIntent 与生成能力目录共同消费，不维护相互漂移的重复列表。",
+      "zhenzhen/gk-4.6 按官方合同支持文本与视觉输入；qwen/qwen3.8-max 按官方 OpenAI Chat Completions 文本对话合同接入。节点只按用户显式选择提交，不静默改写模型 ID。",
+      "LLM / Vision 默认仍为 bytedance/doubao-seed-2.0-mini；MiniMax H3、Seedance 2.0 与 MiniMax Music3 提示词增强器的 bytedance/doubao-seed-2.1-pro 默认值保持不变，旧画布显式模型不迁移。"
+    ],
+    "liveVerification": {
+      "endpoint": "POST https://api.seedance.nz/v1/chat/completions",
+      "request": "每个模型分别执行 stream=false 与 stream=true；max_tokens=16、temperature=0，覆盖节点默认 SSE 与非流式路径。",
+      "results": [
+        {
+          "model": "zhenzhen/gk-4.6",
+          "httpStatus": 200,
+          "responseModelMatched": true,
+          "contentPresent": true,
+          "finishReason": "stop",
+          "elapsedMs": 4335
+        },
+        {
+          "model": "qwen/qwen3.8-max",
+          "httpStatus": 200,
+          "responseModelMatched": true,
+          "contentPresent": true,
+          "finishReason": "stop",
+          "elapsedMs": 4376
+        }
+      ],
+      "streamResults": [
+        {
+          "model": "zhenzhen/gk-4.6",
+          "httpStatus": 200,
+          "contentType": "text/event-stream",
+          "deltaPresent": true,
+          "donePresent": true,
+          "elapsedMs": 4150
+        },
+        {
+          "model": "qwen/qwen3.8-max",
+          "httpStatus": 200,
+          "contentType": "text/event-stream",
+          "deltaPresent": true,
+          "donePresent": true,
+          "elapsedMs": 4339
+        }
+      ],
+      "secretHandling": "测试 Key 仅进入一次性进程变量；未写入源码、设置、能力清单、测试、报告或 Git，响应正文与 requestId 不落盘。",
+      "sanitizedReport": "output/zhenzhen-llm-gk46-qwen38-live-20260815/report.json"
+    },
+    "verification": [
+      "平价小屋 LLM allowlist 精确锁定为 22 项，新增模型解析、后端 allowlist、RunIntent、JSON/SSE 来源保持和凭据预检均有回归覆盖。",
+      "生成能力目录同步为 31 actions / 252 runtime entries / 78/78 nodes / 0 public gaps。",
+      "两个模型的非流式与 SSE 流式真实请求共 4/4 通过；LLM、能力图、模型选择与 MiniMax Music3 相邻矩阵 36/36 通过；TypeScript、feature-sync:check 与 2888 模块生产构建通过。",
+      "已纳入 v2.9.4 固定源码发布范围；Electron/NSIS、自动更新三资产、Tag、Latest 与远端完整回下载仍以正式发布流程结果为准。"
+    ]
+  },
   "startupAndCanvasPerformanceOptimization": {
     "status": "released-v2.9.2",
     "date": "2026-08-15",
@@ -907,7 +1001,7 @@
   "versionSequencePolicy": {
     "status": "active",
     "date": "2026-07-30",
-    "currentVersion": "2.9.3",
+    "currentVersion": "2.9.4",
     "rules": [
       "版本号每一段只使用 0-9；v2.6.9 的下一正式版本固定为 v2.7.0。",
       "禁止创建、打包、推送、打 tag、发布或写入自动更新元数据为 v2.6.10。",
@@ -933,6 +1027,7 @@
       "v2.9.0 的下一正式版本固定为 v2.9.1。",
       "v2.9.1 的下一正式版本固定为 v2.9.2。",
       "v2.9.2 的下一正式版本固定为 v2.9.3。",
+      "v2.9.3 的下一正式版本固定为 v2.9.4。",
       "后续改版本前必须同步核对 package.json、package-lock.json、README、features.json、项目 SKILL.md、Release notes、自动更新元数据和 Git tag。"
     ]
   },

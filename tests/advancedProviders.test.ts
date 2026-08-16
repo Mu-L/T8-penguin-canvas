@@ -378,6 +378,7 @@ test('normalizeAdvancedProviders preserves ComfyUI workflow json and exposed fie
               { nodeId: '3', fieldName: 'legacy', value: 'legacy fixed' },
             ],
             excludeRules: ['seed', 'class:KSampler', '#86.batch_size'],
+            outputNodeIds: ['925', '913:122', '925', ''],
           },
         ],
       },
@@ -393,4 +394,5 @@ test('normalizeAdvancedProviders preserves ComfyUI workflow json and exposed fie
     { nodeId: '3', fieldName: 'legacy', source: 'fixed', value: 'legacy fixed' },
   ]);
   assert.deepEqual(workflow?.excludeRules, ['seed', 'class:KSampler', '#86.batch_size']);
+  assert.deepEqual(workflow?.outputNodeIds, ['925', '913:122']);
 });

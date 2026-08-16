@@ -899,6 +899,15 @@ function parseMountedFileUrl(value) {
   };
 }
 
+function mountedSourceSaveName(segments) {
+  const cleanSegments = Array.isArray(segments) ? segments.filter(Boolean) : [];
+  if (cleanSegments.length <= 1) return cleanSegments[0] || '';
+  const leaf = cleanSegments.at(-1);
+  const extension = path.extname(leaf);
+  const leafStem = path.basename(leaf, extension);
+  return `${[...cleanSegments.slice(0, -1), leafStem].join('_')}${extension}`;
+}
+
 async function ensureSafeSaveDirectory(rawSavePath) {
   const raw = String(rawSavePath || '').trim();
   if (!raw || raw.includes('\0') || !path.isAbsolute(raw)) {
@@ -986,7 +995,9 @@ async function openMountedLocalSource(value, maxBytes) {
     return {
       handle,
       stat,
-      sourceName: parsed.segments.at(-1),
+      // Preserve mounted path context so ParseHub outputs such as
+      // parsehub/<title>/0.mp4 do not all collapse to the same 0.mp4 target.
+      sourceName: mountedSourceSaveName(parsed.segments),
     };
   } catch (error) {
     if (handle) {

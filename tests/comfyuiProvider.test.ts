@@ -103,6 +103,20 @@ function minimalOutputWorkflow() {
   };
 }
 
+test('ComfyUI analyzer does not treat scheduler image sequence fields as media inputs', () => {
+  const analysis = analyzeComfyWorkflow({
+    '913:8': {
+      class_type: 'FlowMatchEulerDiscreteScheduler (Custom)',
+      inputs: { base_image_seq_len: 512, max_image_seq_len: 2048, steps: 10 },
+    },
+    '925': { class_type: 'SaveImage', inputs: { images: ['900', 0] }, _meta: { title: 'Final image' } },
+  });
+
+  assert.equal(analysis.imageInputCount, 0);
+  assert.equal(analysis.outputCount, 1);
+  assert.deepEqual(analysis.outputNodes, [{ nodeId: '925', classType: 'SaveImage', nodeTitle: 'Final image' }]);
+});
+
 async function runComfyOutputFixture(outputs: Record<string, any>) {
   const provider = {
     id: 'comfyui',
@@ -168,6 +182,100 @@ test('ComfyUI reports all mixed output kinds and rejects a completed empty workf
   assert.equal(empty.ok, false);
   assert.equal(empty.code, 'empty_output');
   assert.match(empty.error, /没有返回图片、视频、音频或文本/);
+});
+
+test('ComfyUI output whitelist collects only selected workflow nodes', async () => {
+  const raw = {
+    selected: {
+      outputs: {
+        '925': { images: [{ filename: 'final.png', type: 'output' }] },
+        '913:122': { images: [{ filename: 'preview.png', type: 'temp' }] },
+      },
+    },
+  };
+  const all = comfyui.collectComfyOutputs(raw, 'selected', 'http://127.0.0.1:8188');
+  const selected = comfyui.collectComfyOutputs(raw, 'selected', 'http://127.0.0.1:8188', ['925']);
+
+  assert.equal(all.imageUrls.length, 2);
+  assert.equal(selected.imageUrls.length, 1);
+  assert.match(selected.imageUrls[0], /filename=final\.png/);
+});
+
+test('ComfyUI generation applies the workflow output-node whitelist end to end', async () => {
+  const provider = {
+    id: 'comfyui',
+    protocol: 'comfyui',
+    baseUrl: 'http://127.0.0.1:8188',
+    enabled: true,
+    comfyuiConfig: {
+      workflows: [{
+        id: 'selected-output-workflow',
+        name: 'Selected output workflow',
+        workflowJson: minimalOutputWorkflow(),
+        outputNodeIds: ['925'],
+      }],
+    },
+  };
+  const result = await comfyui.generateImage(provider, { providerModel: 'selected-output-workflow' }, {
+    pollIntervalMs: 1,
+    fetchImpl: async (url: string) => {
+      if (String(url).endsWith('/prompt')) return jsonResponse({ prompt_id: 'selected-output-pid' });
+      return jsonResponse({
+        'selected-output-pid': {
+          outputs: {
+            '925': { images: [{ filename: 'final.png', type: 'output' }] },
+            '913:122': { images: [{ filename: 'preview.png', type: 'temp' }] },
+          },
+        },
+      });
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.imageUrls.length, 1);
+  assert.match(result.imageUrls[0], /filename=final\.png/);
+});
+
+test('ComfyUI heuristic patch preserves linked width height and seed inputs', async () => {
+  const calls: any[] = [];
+  const provider = {
+    id: 'comfyui',
+    protocol: 'comfyui',
+    baseUrl: 'http://127.0.0.1:8188',
+    enabled: true,
+    comfyuiConfig: {
+      workflows: [{
+        id: 'linked-values',
+        name: 'Linked values',
+        workflowJson: {
+          '1': { class_type: 'GetImageSize+', inputs: { image: ['0', 0] } },
+          '2': { class_type: 'ImageResize+', inputs: { width: ['1', 0], height: ['1', 1], image: ['0', 0] } },
+          '3': { class_type: 'KSampler', inputs: { seed: ['4', 0], steps: 20 } },
+          '9': { class_type: 'SaveImage', inputs: { images: ['2', 0] } },
+        },
+      }],
+    },
+  };
+
+  const result = await comfyui.generateImage(provider, {
+    providerModel: 'linked-values',
+    size: '1024x768',
+    providerParams: { seed: 999 },
+  }, {
+    pollIntervalMs: 1,
+    fetchImpl: async (url: string, init: any = {}) => {
+      if (String(url).endsWith('/prompt')) {
+        calls.push(JSON.parse(init.body));
+        return jsonResponse({ prompt_id: 'linked-pid' });
+      }
+      return jsonResponse({ 'linked-pid': { outputs: { '9': { images: [{ filename: 'linked.png', type: 'output' }] } } } });
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls[0].prompt['2'].inputs.width, ['1', 0]);
+  assert.deepEqual(calls[0].prompt['2'].inputs.height, ['1', 1]);
+  assert.deepEqual(calls[0].prompt['3'].inputs.seed, ['4', 0]);
 });
 
 test('ComfyUI testProvider rejects remote base url by default', async () => {

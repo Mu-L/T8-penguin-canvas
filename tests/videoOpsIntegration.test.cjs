@@ -1710,6 +1710,42 @@ test('videoOps snapshots a real video frame into an output image', async () => {
   }
 });
 
+test('videoOps retries earlier timestamps when ffmpeg reports success without a tail-frame file', async () => {
+  fs.mkdirSync(config.INPUT_DIR, { recursive: true });
+  fs.mkdirSync(config.OUTPUT_DIR, { recursive: true });
+
+  const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const clip = path.join(config.INPUT_DIR, `video_edit_tail_snapshot_${stamp}.mp4`);
+  runFfmpeg([
+    '-y',
+    '-f', 'lavfi', '-i', 'testsrc=size=180x100:rate=12:duration=0.8',
+    '-c:v', 'libx264',
+    '-pix_fmt', 'yuv420p',
+    clip,
+  ]);
+
+  let outputFile = '';
+  try {
+    const probe = await videoOpsRouter._test.probeFile(clip, null);
+    const result = await videoOpsRouter._test.snapshotVideoFrame(
+      { url: `/files/input/${path.basename(clip)}` },
+      999,
+      { format: 'png', sourceLabel: '尾帧回退测试' },
+    );
+
+    assert.ok(result.time >= 0 && result.time <= probe.duration);
+    assert.equal(result.sourceLabel, '尾帧回退测试');
+    outputFile = path.join(config.OUTPUT_DIR, path.basename(result.imageUrl));
+    assert.ok(fs.existsSync(outputFile));
+    assert.ok(fs.statSync(outputFile).size > 100);
+  } finally {
+    try { fs.unlinkSync(clip); } catch (_) {}
+    if (outputFile) {
+      try { fs.unlinkSync(outputFile); } catch (_) {}
+    }
+  }
+});
+
 test('videoOps creates filmstrip frames and waveform peaks for timeline trimming previews', async () => {
   fs.mkdirSync(config.INPUT_DIR, { recursive: true });
   fs.mkdirSync(config.THUMBNAILS_DIR, { recursive: true });

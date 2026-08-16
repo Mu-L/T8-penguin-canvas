@@ -60,6 +60,7 @@ export async function runComfyuiApp(options: RunComfyuiAppOptions): Promise<RunC
           name: app.title,
           workflowJson: app.workflowJson,
           fields: app.fields,
+          ...(app.outputNodeIds?.length ? { outputNodeIds: app.outputNodeIds } : {}),
         },
       ],
     },

@@ -300,6 +300,10 @@ function hasWorkflowField(inputs, key) {
   return Object.prototype.hasOwnProperty.call(inputs || {}, key);
 }
 
+function hasEditableWorkflowField(inputs, key) {
+  return hasWorkflowField(inputs, key) && !isLinkedWorkflowInput(inputs[key]);
+}
+
 function isLinkedWorkflowInput(value) {
   return Array.isArray(value)
     && value.length >= 1
@@ -346,7 +350,7 @@ function isTextWorkflowField(fieldName, node) {
 }
 
 function nodeLooksImageWorkflowInputDriven(node) {
-  return /(loadimage|imageinput|image\s*input|input\s*image|mask|controlnet|ipadapter|openpose|depth|lineart|reference|inpaint|outpaint|canny|hed|scribble|softedge|pose|segmentation|segment|segment\s*anything|\bsam\b|sam2|vision)/i.test(workflowNodeText(node));
+  return /(loadimage|imageinput|image\s*input|input\s*image|mask|controlnet|ipadapter|openpose|depth|lineart|reference|inpaint|outpaint|canny|hedpreprocessor|(?:^|[^a-z0-9])hed(?:$|[^a-z0-9])|scribble|softedge|pose|segmentation|segment|segment\s*anything|\bsam\b|sam2|vision)/i.test(workflowNodeText(node));
 }
 
 function nodeLooksVideoWorkflowInputDriven(node) {
@@ -477,39 +481,39 @@ function inferWorkflowFields(prompt) {
     const inputs = node.inputs;
     const inputKeys = Object.keys(inputs);
     const skipGenericInputs = isDisplayOnlyWorkflowNode(node) || isOutputWorkflowNode(classType);
-    if (classType.includes('cliptextencode') && hasWorkflowField(inputs, 'text')) {
+    if (classType.includes('cliptextencode') && hasEditableWorkflowField(inputs, 'text')) {
       const role = clipTextRoles.get(String(nodeId));
       const isNegative = role ? role === 'negative' : (/negative|neg|反向|负向|不要|排除/.test(title) || promptSeen);
       push(nodeId, 'text', isNegative ? 'negative' : 'prompt');
       if (!isNegative) promptSeen = true;
     }
-    if ((classType.includes('loadimage') || classType.includes('imageinput')) && hasWorkflowField(inputs, 'image')) {
+    if ((classType.includes('loadimage') || classType.includes('imageinput')) && hasEditableWorkflowField(inputs, 'image')) {
       imageIndex += 1;
       push(nodeId, 'image', `image${imageIndex}`);
     }
-    if ((classType.includes('loadvideo') || classType.includes('videoinput') || classType.includes('vhs')) && hasWorkflowField(inputs, 'video')) {
+    if ((classType.includes('loadvideo') || classType.includes('videoinput') || classType.includes('vhs')) && hasEditableWorkflowField(inputs, 'video')) {
       videoIndex += 1;
       push(nodeId, 'video', `video${videoIndex}`);
     }
-    if ((classType.includes('loadaudio') || classType.includes('audioinput')) && hasWorkflowField(inputs, 'audio')) {
+    if ((classType.includes('loadaudio') || classType.includes('audioinput')) && hasEditableWorkflowField(inputs, 'audio')) {
       audioIndex += 1;
       push(nodeId, 'audio', `audio${audioIndex}`);
     }
     if (classType.includes('emptylatent') || classType.includes('latentimage')) {
-      if (hasWorkflowField(inputs, 'width')) push(nodeId, 'width', 'width');
-      if (hasWorkflowField(inputs, 'height')) push(nodeId, 'height', 'height');
-      if (hasWorkflowField(inputs, 'batch_size')) push(nodeId, 'batch_size', 'batch_size');
+      if (hasEditableWorkflowField(inputs, 'width')) push(nodeId, 'width', 'width');
+      if (hasEditableWorkflowField(inputs, 'height')) push(nodeId, 'height', 'height');
+      if (hasEditableWorkflowField(inputs, 'batch_size')) push(nodeId, 'batch_size', 'batch_size');
     }
     if (classType.includes('ksampler') || classType.includes('sampler')) {
       for (const key of ['seed', 'noise_seed']) {
-        if (hasWorkflowField(inputs, key)) push(nodeId, key, 'seed');
+        if (hasEditableWorkflowField(inputs, key)) push(nodeId, key, 'seed');
       }
       for (const key of ['steps', 'cfg', 'sampler_name', 'scheduler', 'denoise']) {
-        if (hasWorkflowField(inputs, key)) push(nodeId, key, key);
+        if (hasEditableWorkflowField(inputs, key)) push(nodeId, key, key);
       }
     }
     for (const key of ['model_name', 'ckpt_name', 'clip_name', 'vae_name', 'lora_name', 'unet_name', 'control_net_name', 'clip_vision_name', 'style_model_name', 'upscale_model', 'strength_model', 'strength_clip']) {
-      if (hasWorkflowField(inputs, key)) push(nodeId, key, key);
+      if (hasEditableWorkflowField(inputs, key)) push(nodeId, key, key);
     }
     for (const key of inputKeys) {
       if (skipGenericInputs) continue;
@@ -727,6 +731,9 @@ function patchByHeuristics(prompt, input, size, skips = {}) {
     }
     for (const key of Object.keys(node.inputs)) {
       const low = key.toLowerCase();
+      // ComfyUI encodes an upstream connection as [nodeId, outputSlot].
+      // Heuristic defaults must never replace an existing graph edge.
+      if (Array.isArray(node.inputs[key])) continue;
       if (!skips.width && low === 'width') node.inputs[key] = size.width;
       if (!skips.height && low === 'height') node.inputs[key] = size.height;
       if (!skips.seed && (low === 'seed' || low === 'noise_seed') && Number.isFinite(seedValue)) node.inputs[key] = seedValue;
@@ -782,13 +789,14 @@ function comfyOutputMediaKind(item, fallback = 'image') {
   return fallback;
 }
 
-function collectComfyOutputs(raw, promptId, baseUrl) {
+function collectComfyOutputs(raw, promptId, baseUrl, outputNodeIds = []) {
   const source = raw?.[promptId] || raw?.data?.[promptId] || raw?.data || raw;
   const outputs = source?.outputs || source?.output || {};
   const imageUrls = [];
   const videoUrls = [];
   const audioUrls = [];
   const texts = [];
+  const allowedNodeIds = new Set(Array.isArray(outputNodeIds) ? outputNodeIds.map((nodeId) => String(nodeId)) : []);
   const pushMedia = (item, fallback) => {
     const url = viewUrl(baseUrl, item, 'output');
     if (!url) return;
@@ -796,7 +804,8 @@ function collectComfyOutputs(raw, promptId, baseUrl) {
     const target = kind === 'video' ? videoUrls : kind === 'audio' ? audioUrls : imageUrls;
     if (!target.includes(url)) target.push(url);
   };
-  for (const output of Object.values(outputs || {})) {
+  for (const [nodeId, output] of Object.entries(outputs || {})) {
+    if (allowedNodeIds.size && !allowedNodeIds.has(String(nodeId))) continue;
     if (!output || typeof output !== 'object') continue;
     for (const item of outputItems(output.images)) pushMedia(item, 'image');
     for (const item of outputItems(output.videos)) pushMedia(item, 'video');
@@ -855,7 +864,7 @@ async function pollHistory(baseUrl, promptId, options = {}) {
       Object.assign(error, trace);
       throw error;
     }
-    const outputs = collectComfyOutputs(raw, promptId, baseUrl);
+    const outputs = collectComfyOutputs(raw, promptId, baseUrl, options.outputNodeIds);
     if (outputs.imageUrls.length || outputs.videoUrls.length || outputs.audioUrls.length || outputs.text) {
       return { raw, ...outputs, ...trace };
     }
@@ -919,7 +928,10 @@ async function generateImage(provider, input = {}, options = {}) {
     if (!promptId) {
       return { ok: false, code: 'missing_prompt_id', providerId: provider.id, protocol: 'comfyui', model: workflow.id || workflow.name, error: 'ComfyUI 未返回 prompt_id。', raw, ...trace };
     }
-    const polled = await pollHistory(baseUrl, promptId, options);
+    const polled = await pollHistory(baseUrl, promptId, {
+      ...options,
+      outputNodeIds: workflow.outputNodeIds,
+    });
     trace = mergeProviderTrace(trace, polled);
     const outputKinds = outputKindsForResult(polled);
     if (!outputKinds.length) {
