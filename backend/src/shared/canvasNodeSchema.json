@@ -2689,7 +2689,7 @@
     },
     {
       "type": "fashvsr-video-upscale",
-      "label": "FashVSR 视频超分",
+      "label": "FlashVSR 视频超分",
       "category": "core",
       "description": "贞贞的平价AI小屋：单个 480P、3-15 秒视频超分",
       "icon": "ScanLine",
@@ -2702,11 +2702,11 @@
       "generatable": false,
       "generation": {
         "allowedDataFields": {
-          "model": { "type": "string", "enum": ["FashVSR_video_upscale"] },
+          "model": { "type": "string", "enum": ["FlashVSR_video_upscale", "FashVSR_video_upscale"] },
           "reuseResult": { "type": "boolean" }
         },
         "defaults": {
-          "model": "FashVSR_video_upscale",
+          "model": "FlashVSR_video_upscale",
           "reuseResult": false
         }
       }

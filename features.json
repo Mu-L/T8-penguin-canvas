@@ -1,7 +1,45 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.9.5",
-  "lastUpdated": "2026-08-18-v2.9.5-released",
+  "version": "2.9.6",
+  "lastUpdated": "2026-08-18-v2.9.6-release-ready",
+  "flashVsrModelNameCorrection": {
+    "status": "release-ready-v2.9.6-live-verified",
+    "date": "2026-08-18",
+    "releaseIncluded": true,
+    "provider": "seedance-nz",
+    "platform": "贞贞的平价AI小屋",
+    "nodeType": "fashvsr-video-upscale",
+    "displayName": "FlashVSR 视频超分",
+    "currentModel": "FlashVSR_video_upscale",
+    "legacyModelAliases": [
+      "FashVSR_video_upscale"
+    ],
+    "compatibility": [
+      "新节点、模型目录、默认值与无密钥工作流只展示 FlashVSR_video_upscale。",
+      "v2.9.5 已保存画布中的 FashVSR_video_upscale 继续被 schema 和请求层接受，但提交前统一规范化为 FlashVSR_video_upscale。",
+      "内部节点 type、恢复 kind、API route 与 task identity 保持 fashvsr 兼容标识，避免历史画布和进行中任务失效。"
+    ],
+    "liveVerification": {
+      "submittedThisRun": true,
+      "completed": true,
+      "downloaded": true,
+      "fullDecodePassed": true,
+      "verifiedAt": "2026-08-18T12:54:15.064Z",
+      "input": "854x480, H.264, 3.208008s, 472060 bytes",
+      "output": "1920x1024, H.264, 3.208333s, 1004338 bytes",
+      "outputSha256": "5cb14e96c5002c3a417b11acdae159ae235dee8e46ae7d7f8574d129c2778472",
+      "secretFree": true
+    },
+    "verification": [
+      "新拼写 FlashVSR_video_upscale 使用同一平价 AI 小屋渠道真实提交一次并成功；结果完成下载、FFprobe 与全量解码。",
+      "FlashVSR、Seedance 2.5、视频来源与能力清单聚焦回归、TypeScript、Node/JSON 语法和 feature-sync 必须在固定源码发布前通过。",
+      "能力同步保持 31 actions / 253 runtime entries / 79/79 nodes / 0 public gaps；MiniMax Music3 安装资源继续按 1,022 文件、18 个索引、1,000 个模板保护。"
+    ],
+    "boundaries": [
+      "官方 llms.txt 在核对时仍显示旧拼写；本次新拼写以真实 Provider 成功任务为运行证据，不冒充文档页面已同步。",
+      "反馈用户安装、多设备协作与安装升级证据按 owner-approved-post-release-v2.9.6 后补；延期不等于通过，技术门禁不可延期。"
+    ]
+  },
   "fashVsrAndSeedance25Native1080p": {
     "status": "released-v2.9.5-live-verified",
     "date": "2026-08-18",
@@ -12,15 +50,18 @@
     "officialDocs": "https://api.seedance.nz/docs/llms.txt",
     "newNode": {
       "type": "fashvsr-video-upscale",
-      "label": "FashVSR 视频超分",
-      "model": "FashVSR_video_upscale",
+      "label": "FlashVSR 视频超分",
+      "model": "FlashVSR_video_upscale",
       "contract": [
         "只接受一个视频输入；本地与远程素材都先受控读取、校验并上传，不接受多视频。",
         "付费提交前用 FFprobe 验证输入高度为 480 像素、时长 3-15 秒；最大 50MB，支持 MP4/MOV/AVI/MKV。",
         "请求固定为 POST /v1/video/generations，body 只含 model 与 metadata.video_url；不发送 prompt、seconds、resolution 或 metadata.content。",
         "查询固定为 GET /v1/video/generations/{task_id}；成功结果必须下载到本地、验证并持久化后才标记节点成功。"
       ],
-      "workflow": "docs/workflows/fashvsr-video-upscale.json"
+      "workflow": "docs/workflows/fashvsr-video-upscale.json",
+      "legacyModelAliases": [
+        "FashVSR_video_upscale"
+      ]
     },
     "seedance25": {
       "models": [
@@ -31,7 +72,14 @@
         "seedance-2.5-standard-multi",
         "seedance-2.5-standard-t2v"
       ],
-      "resolutions": ["480p", "720p", "1080p", "2k", "4k", "native1080p"],
+      "resolutions": [
+        "480p",
+        "720p",
+        "1080p",
+        "2k",
+        "4k",
+        "native1080p"
+      ],
       "native4kSupported": false,
       "liveTest": "not-run-by-owner-cost-boundary",
       "savedWorkflows": 6
@@ -1052,48 +1100,29 @@
     ]
   },
   "release": {
-    "status": "published-stable-latest",
-    "version": "2.9.5",
+    "status": "release-authorized-not-yet-published",
+    "version": "2.9.6",
     "date": "2026-08-18",
-    "publishedAt": "2026-08-18T06:03:06Z",
-    "tag": "v2.9.5",
-    "latest": true,
-    "sourceCommit": "969682d425e66fb50f3452ece139aa1959e005e1",
+    "publishedAt": null,
+    "tag": "v2.9.6",
+    "latest": false,
+    "sourceCommit": null,
     "draft": false,
     "prerelease": false,
     "githubImmutable": false,
-    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.5",
-    "artifacts": {
-      "installer": {
-        "name": "T8-PenguinCanvas-Setup-2.9.5.exe",
-        "size": 1354124051,
-        "sha256": "e4990b34d24fd6806fd492ff1fd2026c123614f5f5af28c10d47e4dfe1b957cb",
-        "sha512": "xevCQOPzTWjBgikQn31VNqMHrBmASpbXZ5/WRgWsMZRb/7zqsG6Omb9AVTK41zlvrgijspmz+Eg0xQ/QO04nPA=="
-      },
-      "blockmap": {
-        "name": "T8-PenguinCanvas-Setup-2.9.5.exe.blockmap",
-        "size": 1413024,
-        "sha256": "9696aedbab25d8e0824226b46c1a3142e219d7d0bc237986b73cac268d0dfed6"
-      },
-      "updateManifest": {
-        "name": "latest.yml",
-        "size": 362,
-        "sha256": "afa845f034fae4a5464f7bfe33fc6d12e0be51d3eb4885b325fd53573781eb99"
-      }
-    },
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.6",
+    "artifacts": null,
     "verification": [
-      "v2.9.5 新增 FashVSR 视频超分节点并按官方合同真实跑通一次，Seedance 2.5 国内/Global 六模型新增 native1080p；既有默认渠道、默认模型、旧画布与工作流不回退。",
-      "MiniMax Music3 已随 v2.9.3 正式发布，v2.9.5 安装包继续完整包含其节点、工作流、官方固定 Skill 快照、1022 个上游文件、18 个索引、1000 个模板及规范化树 SHA-256 d836359b48a4bc3381f8d9eb370ff90dd82cb5ad9aa4e3ba0ed80da2c25b2553。",
-      "固定 source commit 969682d425e66fb50f3452ece139aa1959e005e1 已完成唯一 Electron/NSIS 正式流程：TypeScript、2904 模块私有构建、157 个后端源与 4 个本机私有文件加密、双运行时归档、Electron 原生模块重建、post-build、provenance、sealed recovery、固定 Tag/target 和 Latest 全部通过。",
-      "三项自动更新资产已完成发布前与独立发布后的完整回下载，并与本地实际字节、SHA-256、installer SHA-512 及 GitHub digest/size 一致；正式 Release 为非草稿、非预发布并成为 GitHub Latest。",
-      "为避免本机 7-Zip 高并发导致系统不稳定，最终正式打包进程使用单核亲和性、BelowNormal 优先级与 ELECTRON_BUILDER_COMPRESSION_LEVEL=0；仅降低构建资源占用，所有安装内容、post-build 与远端资产校验保持不变。",
-      "用户已明确授权先发布、后补反馈用户安装环境、协作多端及安装升级证据；协作证据门只允许完全缺失的清单按 owner-approved-post-release-v2.9.5 延期，不能把延期标记为已通过，任何技术门禁失败均不可延期。"
+      "FlashVSR_video_upscale 已真实提交一次并完成下载、FFprobe 与全量解码；旧 FashVSR_video_upscale 只作为历史画布兼容输入。",
+      "MiniMax Music3 已随 v2.9.3 正式发布，v2.9.6 候选继续完整包含其节点、工作流、官方固定 Skill 快照、1,022 个上游文件、18 个索引和 1,000 个模板。",
+      "正式 Electron/NSIS、私有扩展、加密、运行时、provenance、sealed recovery、固定 Tag/target、三资产完整回下载和 Latest 门禁仍须全部通过。",
+      "用户明确授权先发布、后补反馈用户安装环境、协作多端及安装升级证据；仅允许 owner-approved-post-release-v2.9.6 精确延期，延期不等于通过。"
     ]
   },
   "versionSequencePolicy": {
     "status": "active",
     "date": "2026-07-30",
-    "currentVersion": "2.9.5",
+    "currentVersion": "2.9.6",
     "rules": [
       "版本号每一段只使用 0-9；v2.6.9 的下一正式版本固定为 v2.7.0。",
       "禁止创建、打包、推送、打 tag、发布或写入自动更新元数据为 v2.6.10。",
@@ -1121,6 +1150,7 @@
       "v2.9.2 的下一正式版本固定为 v2.9.3。",
       "v2.9.3 的下一正式版本固定为 v2.9.4。",
       "v2.9.4 的下一正式版本固定为 v2.9.5。",
+      "v2.9.5 的下一正式版本固定为 v2.9.6。",
       "后续改版本前必须同步核对 package.json、package-lock.json、README、features.json、项目 SKILL.md、Release notes、自动更新元数据和 Git tag。"
     ]
   },

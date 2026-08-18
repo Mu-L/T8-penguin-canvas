@@ -80,7 +80,7 @@ async function main() {
   ensureInput();
   const inputProbe = summarizeProbe(probe(inputPath));
   if (inputProbe.height !== 480 || inputProbe.durationSeconds < 3 || inputProbe.durationSeconds > 15) {
-    throw new Error('generated input does not satisfy FashVSR contract');
+    throw new Error('generated input does not satisfy FlashVSR contract');
   }
 
   let state = readState();
@@ -102,15 +102,15 @@ async function main() {
   const startedAt = Date.now();
   while (Date.now() - startedAt < 30 * 60 * 1000) {
     const result = await provider.queryFashVsrTask(state.taskId, apiKey);
-    if (result.status === 'failed') throw new Error(result.failReason || 'FashVSR task failed');
+    if (result.status === 'failed') throw new Error(result.failReason || 'FlashVSR task failed');
     if (result.status === 'succeeded') {
-      if (!result.videoUrl) throw new Error('FashVSR completed without video URL');
+      if (!result.videoUrl) throw new Error('FlashVSR completed without video URL');
       completed = result;
       break;
     }
     await sleep(5000);
   }
-  if (!completed) throw new Error('FashVSR live verification timed out');
+  if (!completed) throw new Error('FlashVSR live verification timed out');
 
   const bytes = await download(completed.videoUrl);
   const outputProbe = summarizeProbe(probe(outputPath));

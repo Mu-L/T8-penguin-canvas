@@ -1196,9 +1196,9 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     }
     if (isUpscaler && videoUrls.length !== 1) {
       setError(isFashVsr
-        ? 'FashVSR 必须连接或拖入且只能保留 1 个 480P、3-15 秒视频'
+        ? 'FlashVSR 必须连接或拖入且只能保留 1 个 480P、3-15 秒视频'
         : 'Zhenzhen Upscaler 必须连接或拖入且只能保留 1 个 MP4 视频');
-      logBus.error(`生成中止: ${isFashVsr ? 'FashVSR' : 'Zhenzhen Upscaler'} 输入视频数量必须为 1`, src);
+      logBus.error(`生成中止: ${isFashVsr ? 'FlashVSR' : 'Zhenzhen Upscaler'} 输入视频数量必须为 1`, src);
       return;
     }
     if (isViduUpstreamUnavailable) {
@@ -1601,7 +1601,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
 
       if (isUpscaler) {
         if (isFashVsr) {
-          logBus.info('提交 FashVSR: 单个 480P、3-15 秒视频', src);
+          logBus.info('提交 FlashVSR: 单个 480P、3-15 秒视频', src);
           const result = await submitFashVsr({
             model: FASHVSR_VIDEO_UPSCALE_MODEL,
             videos: [videoUrls[0]],
@@ -1618,7 +1618,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             httpStatusSource: 'local-backend',
           });
           update({ status: 'polling', taskId: result.taskId, lastPrompt: '', progress: '0%' });
-          logBus.info('FashVSR 任务已提交，开始轮询', src);
+          logBus.info('FlashVSR 任务已提交，开始轮询', src);
           await startPolling(result.taskId, runId, reporter);
           return;
         }
@@ -2075,7 +2075,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           <VideoIcon size={13} />
         </div>
         <div className="flex-1">
-          <div className="text-sm font-semibold text-white">{isFashVsrVariant ? 'FashVSR 视频超分' : '视频'}</div>
+          <div className="text-sm font-semibold text-white">{isFashVsrVariant ? 'FlashVSR 视频超分' : '视频'}</div>
           <div className="text-[10px] text-white/40">
             {isExternalSelected && providerSelection.provider
               ? `${providerSelection.provider.label || providerSelection.provider.id} · ${externalProviderModel || '未选模型'}`
@@ -2670,7 +2670,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
               : '连接或拖入恰好 1 个 MP4 视频，选择目标分辨率后执行高清化；无需 Prompt，时长由输入视频读取。'}
             <div className="mt-1 text-white/35">
               {isFashVsr
-                ? '贞贞的平价AI小屋 API · FashVSR_video_upscale · 固定 ¥1/次'
+                ? '贞贞的平价AI小屋 API · FlashVSR_video_upscale · 固定 ¥1/次'
                 : '贞贞的平价AI小屋 API · 目标 720p / 1080p / 2k / 4k · 输入最长约 10 分钟'}
             </div>
           </div>

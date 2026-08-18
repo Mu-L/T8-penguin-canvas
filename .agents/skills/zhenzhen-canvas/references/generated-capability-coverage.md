@@ -3,7 +3,7 @@
 > Machine-generated from the real Canvas Node Schema, creative capability manifest,
 > runtime model/action catalog, and handler bindings. Do not edit by hand.
 
-- Aggregate SHA-256: `c3359862980a0fef9e30aae48d998c184c49d01104aa8adc98af200122bb4bcb`
+- Aggregate SHA-256: `ce8e142813d4014bbde48c684bb5fe113d2a306c286fc460912d51ceb836e89b`
 - Capabilities / handlers: **31 / 31**
 - Canvas nodes: **79**
 - Referenced / unreferenced nodes: **70 / 9**
@@ -18,7 +18,7 @@
 - Dynamic runtime inventory (LLM / image / video / audio / actions): **34 / 42 / 114 / 16 / 47**
 - Operation risk contracts: **152** (L0 91, L1 44, L2 17, L3 0)
 - Unknown node references: **0**
-- Coverage receipt: `t8-creative-capability-coverage-receipt-v1` / `671b6f1305e729a76f5844937794de354dcd56e35f455f1cf998785f6d058f10`
+- Coverage receipt: `t8-creative-capability-coverage-receipt-v1` / `f62214d8fe64bcfd04c6ee32a25b4c274719bb72880127bcc8c9e3ec7164ecba`
 
 “Understand” means the node exists in the authoritative schema. Other columns are true only
 when at least one registered high-level capability explicitly advertises that operation.
@@ -39,7 +39,7 @@ when at least one registered high-level capability explicitly advertises that op
 | `video-edit` 视频剪辑 | core | direct-capability | — | — | `canvas.node-add`, `delivery.package`, `video-edit.compose` | yes | yes | yes | yes | yes | yes |
 | `seedance` SD2.0 | core | direct-capability | yes | — | `canvas.node-add`, `create.video`, `edit.video` | yes | yes | yes | yes | yes | yes |
 | `seedance25` SD2.5 | core | direct-capability | yes | — | `canvas.node-add`, `create.video` | yes | yes | yes | yes | yes | yes |
-| `fashvsr-video-upscale` FashVSR 视频超分 | core | direct-capability | yes | — | `canvas.node-add` | yes | yes | yes | — | yes | yes |
+| `fashvsr-video-upscale` FlashVSR 视频超分 | core | direct-capability | yes | — | `canvas.node-add` | yes | yes | yes | — | yes | yes |
 | `director-storyboard` 导演分镜台 | core | direct-capability | yes | — | `canvas.node-add`, `director.materialize`, `video-edit.compose` | yes | yes | yes | yes | yes | yes |
 | `story` Story 全自动制片 | core | direct-capability | yes | — | `canvas.node-add`, `create.story`, `director.materialize`, `story.adopt-preview`, `story.analyze`, `story.bind-asset`, `story.compile`, `story.import`, `story.plan-previews`, `video-edit.compose` | yes | yes | yes | yes | yes | yes |
 | `script-master` 剧本大师 | core | direct-capability | — | — | `canvas.node-add` | yes | yes | yes | — | yes | yes |

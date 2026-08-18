@@ -4074,7 +4074,7 @@ router.post('/video/fashvsr/submit', async (req, res) => {
     proxyRouteError('proxy/video/fashvsr/submit 错误', error, [apiKey]);
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
-      error: proxyPublicError(error, 'FashVSR 视频超分请求失败', [apiKey]),
+      error: proxyPublicError(error, 'FlashVSR 视频超分请求失败', [apiKey]),
       ...seedanceNzTrace(error),
     });
   }
@@ -4099,7 +4099,7 @@ router.get('/video/fashvsr/status/:tid', async (req, res) => {
       progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
       videoUrl: materialized.url,
       failReason: result.status === 'failed'
-        ? safeDiagnosticText(result.failReason || 'FashVSR 视频超分任务失败', 240, [apiKey])
+        ? safeDiagnosticText(result.failReason || 'FlashVSR 视频超分任务失败', 240, [apiKey])
         : '',
       model: remembered?.model || seedanceNz.FASHVSR_VIDEO_UPSCALE_MODEL,
       taskType: remembered?.taskType || 'upscale',
@@ -4108,7 +4108,7 @@ router.get('/video/fashvsr/status/:tid', async (req, res) => {
     if (materialized.failure) {
       return sendCompletedRemoteOutputFailure(res, materialized.failure, responseData, {
         defaultCode: 'fashvsr_output_unusable',
-        defaultMessage: 'FashVSR 视频结果无法保存。',
+        defaultMessage: 'FlashVSR 视频结果无法保存。',
       });
     }
     return res.json({ success: true, data: responseData });
@@ -4118,7 +4118,7 @@ router.get('/video/fashvsr/status/:tid', async (req, res) => {
     if (sendTaskResultQueryRecovery(res, error, { taskId: req.params.tid })) return;
     return res.status(status >= 400 && status < 600 ? status : 500).json({
       success: false,
-      error: proxyPublicError(error, 'FashVSR 视频超分查询失败', [apiKey]),
+      error: proxyPublicError(error, 'FlashVSR 视频超分查询失败', [apiKey]),
       ...seedanceNzTrace(error),
     });
   }

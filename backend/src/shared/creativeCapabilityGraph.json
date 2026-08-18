@@ -15,16 +15,16 @@
   },
   "sourceDigests": {
     "creativeCapabilityManifest": "16c15dab6eef440bbbee2e44ccf69dfe75bba70d6a61585ca0fb717279353b1d",
-    "canvasNodeSchema": "aef355a3038e5a13d672f3721dd0d130f35f3f6366d1bf0d7a3db9bc16189a03",
-    "canvasNodeSchemaFile": "0108bc673588f895c00bee1eeb20ec6bb6b3ee0960bdd6953848295177c310ae",
-    "runtimeCatalogSources": "1f672a812408646e19ba8aab9aa6776fbbb3ab036cd2ab95a563def4048e5bda",
-    "runtimeCatalogArtifact": "7de740988f9fe61b6f65305a5478bf5b075adcf6452406d88ab80acf51fcfac5",
+    "canvasNodeSchema": "c70f42672a5aa70ae3ef15406a3a0382a8c3591abb84ec46e1b35b6229a43db5",
+    "canvasNodeSchemaFile": "6a5936750b967b0ba8e59b46f2a9f25795088bb88ae69e9981d69b92309e37a9",
+    "runtimeCatalogSources": "4caa67aa38367f2c5f2e3ac7b09c12b14f0f0ec8c373243daa4f5567d091c1f3",
+    "runtimeCatalogArtifact": "3b300e43374e2216dfcbaa761073a0a03d75769285cf25cb8a03da5d810178fa",
     "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
     "capabilityGraphCompiler": "1a611d7e91dcf523e0536a92e9adb6ba2d884689a65fa10274bcda3a05ef9840",
     "coverageReceiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7",
     "canonicalTextDigestCompiler": "b0afcf28a257fbbd8f391edc117348f8f2ede1b4a039ae91bce25a8d563ac0cf"
   },
-  "aggregateDigest": "c3359862980a0fef9e30aae48d998c184c49d01104aa8adc98af200122bb4bcb",
+  "aggregateDigest": "ce8e142813d4014bbde48c684bb5fe113d2a306c286fc460912d51ceb836e89b",
   "principles": {
     "oneSentenceStart": true,
     "directCanvasMutation": false,
@@ -3468,7 +3468,7 @@
     },
     {
       "type": "fashvsr-video-upscale",
-      "label": "FashVSR 视频超分",
+      "label": "FlashVSR 视频超分",
       "description": "贞贞的平价AI小屋：单个 480P、3-15 秒视频超分",
       "category": "core",
       "hidden": false,
@@ -6467,7 +6467,7 @@
   ],
   "runtime": {
     "schema": "t8-creative-runtime-catalog-v1",
-    "sourceDigest": "1f672a812408646e19ba8aab9aa6776fbbb3ab036cd2ab95a563def4048e5bda",
+    "sourceDigest": "4caa67aa38367f2c5f2e3ac7b09c12b14f0f0ec8c373243daa4f5567d091c1f3",
     "platforms": [
       {
         "id": "zhenzhen",
@@ -9378,13 +9378,13 @@
         }
       },
       {
-        "id": "video:seedance-nz:FashVSR_video_upscale",
+        "id": "video:seedance-nz:fast",
         "kind": "video",
         "provider": "seedance-nz",
         "platformLabel": "贞贞的平价AI小屋",
-        "model": "FashVSR_video_upscale",
-        "label": "FashVSR_video_upscale",
-        "family": "fashvsr-video-upscale",
+        "model": "fast",
+        "label": "国内 Fast",
+        "family": "seedance-2.0",
         "available": true,
         "catalogSection": "video",
         "compatibility": {
@@ -9398,13 +9398,13 @@
         }
       },
       {
-        "id": "video:seedance-nz:fast",
+        "id": "video:seedance-nz:FlashVSR_video_upscale",
         "kind": "video",
         "provider": "seedance-nz",
         "platformLabel": "贞贞的平价AI小屋",
-        "model": "fast",
-        "label": "国内 Fast",
-        "family": "seedance-2.0",
+        "model": "FlashVSR_video_upscale",
+        "label": "FlashVSR_video_upscale",
+        "family": "fashvsr-video-upscale",
         "available": true,
         "catalogSection": "video",
         "compatibility": {
@@ -11948,8 +11948,8 @@
       "video:fal:grok-video-fal",
       "video:fal:sora-2",
       "video:fal:veo3.1-fal",
-      "video:seedance-nz:FashVSR_video_upscale",
       "video:seedance-nz:fast",
+      "video:seedance-nz:FlashVSR_video_upscale",
       "video:seedance-nz:global-fast",
       "video:seedance-nz:global-mini",
       "video:seedance-nz:global-standard",
@@ -12065,8 +12065,8 @@
     "schema": "t8-creative-capability-coverage-receipt-v1",
     "sourceDigests": {
       "capabilityManifest": "16c15dab6eef440bbbee2e44ccf69dfe75bba70d6a61585ca0fb717279353b1d",
-      "nodeSchema": "aef355a3038e5a13d672f3721dd0d130f35f3f6366d1bf0d7a3db9bc16189a03",
-      "runtimeCatalog": "1f672a812408646e19ba8aab9aa6776fbbb3ab036cd2ab95a563def4048e5bda",
+      "nodeSchema": "c70f42672a5aa70ae3ef15406a3a0382a8c3591abb84ec46e1b35b6229a43db5",
+      "runtimeCatalog": "4caa67aa38367f2c5f2e3ac7b09c12b14f0f0ec8c373243daa4f5567d091c1f3",
       "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
       "receiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7"
     },
@@ -12095,6 +12095,6 @@
       "missingCompatibilityEdges": []
     },
     "complete": true,
-    "digest": "671b6f1305e729a76f5844937794de354dcd56e35f455f1cf998785f6d058f10"
+    "digest": "f62214d8fe64bcfd04c6ee32a25b4c274719bb72880127bcc8c9e3ec7164ecba"
   }
 }

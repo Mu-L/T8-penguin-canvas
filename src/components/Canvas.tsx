@@ -1738,7 +1738,7 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     fashVsrVariant: true,
     videoBuiltinSource: 'seedance-nz',
     mainId: 'fashvsr-video-upscale',
-    model: 'FashVSR_video_upscale',
+    model: 'FlashVSR_video_upscale',
     localRefVideos: [],
     reuseResult: false,
   },

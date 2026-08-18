@@ -99,7 +99,9 @@ export function inferRunRecoveryDescriptor(payload: Record<string, unknown>): Ru
     if (lowerModel.startsWith('hailuo-')) return { version: 1, kind: 'hailuo', taskId, model, pollIntervalMs, maxPolls };
     if (lowerModel.startsWith('flux-3-video-')) return { version: 1, kind: 'flux3', taskId, model, pollIntervalMs, maxPolls };
     if (lowerModel.startsWith('kling-')) return { version: 1, kind: 'kling', taskId, model, pollIntervalMs, maxPolls };
-    if (model === 'FashVSR_video_upscale') return { version: 1, kind: 'fashvsr', taskId, model, pollIntervalMs, maxPolls };
+    if (model === 'FlashVSR_video_upscale' || model === 'FashVSR_video_upscale') {
+      return { version: 1, kind: 'fashvsr', taskId, model, pollIntervalMs, maxPolls };
+    }
     if (lowerModel === 'zhenzhen-upscaler') return { version: 1, kind: 'upscaler', taskId, model, pollIntervalMs, maxPolls };
     if (lowerModel.startsWith('vidu-')) return { version: 1, kind: 'vidu', taskId, model, pollIntervalMs, maxPolls };
     if (lowerModel.includes('seedance')) return { version: 1, kind: 'seedance', taskId, model, taskProvider: 'seedance-nz', pollIntervalMs, maxPolls };

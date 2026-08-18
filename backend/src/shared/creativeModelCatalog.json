@@ -1,6 +1,6 @@
 {
   "schema": "t8-creative-runtime-catalog-v1",
-  "sourceDigest": "1f672a812408646e19ba8aab9aa6776fbbb3ab036cd2ab95a563def4048e5bda",
+  "sourceDigest": "4caa67aa38367f2c5f2e3ac7b09c12b14f0f0ec8c373243daa4f5567d091c1f3",
   "generatedFrom": [
     "src/providers/models.ts",
     "src/config/seedance.ts",
@@ -2109,15 +2109,31 @@
       }
     },
     {
-      "id": "video:seedance-nz:FashVSR_video_upscale",
+      "id": "video:seedance-nz:fast",
       "provider": "seedance-nz",
       "platformLabel": "贞贞的平价AI小屋",
-      "model": "FashVSR_video_upscale",
-      "label": "FashVSR_video_upscale",
+      "model": "fast",
+      "label": "国内 Fast",
+      "family": "seedance-2.0",
+      "available": true,
+      "parameters": {
+        "label": "国内 Fast",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "seedance-2.0",
+        "available": true,
+        "apiSource": "seedance-nz"
+      }
+    },
+    {
+      "id": "video:seedance-nz:FlashVSR_video_upscale",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "FlashVSR_video_upscale",
+      "label": "FlashVSR_video_upscale",
       "family": "fashvsr-video-upscale",
       "available": true,
       "parameters": {
-        "label": "FashVSR_video_upscale",
+        "label": "FlashVSR_video_upscale",
         "platformLabel": "贞贞的平价AI小屋",
         "family": "fashvsr-video-upscale",
         "available": true,
@@ -2133,23 +2149,7 @@
         "maxReferenceImages": 0,
         "maxReferenceVideos": 1,
         "maxReferenceAudios": 0,
-        "description": "FashVSR · 单个 480P、3-15 秒视频超分"
-      }
-    },
-    {
-      "id": "video:seedance-nz:fast",
-      "provider": "seedance-nz",
-      "platformLabel": "贞贞的平价AI小屋",
-      "model": "fast",
-      "label": "国内 Fast",
-      "family": "seedance-2.0",
-      "available": true,
-      "parameters": {
-        "label": "国内 Fast",
-        "platformLabel": "贞贞的平价AI小屋",
-        "family": "seedance-2.0",
-        "available": true,
-        "apiSource": "seedance-nz"
+        "description": "FlashVSR · 单个 480P、3-15 秒视频超分"
       }
     },
     {
