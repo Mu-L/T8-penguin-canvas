@@ -1,9 +1,9 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.9.6",
-  "lastUpdated": "2026-08-18-v2.9.6-release-ready",
+  "lastUpdated": "2026-08-18-v2.9.6-released",
   "flashVsrModelNameCorrection": {
-    "status": "release-ready-v2.9.6-live-verified",
+    "status": "released-v2.9.6-live-verified",
     "date": "2026-08-18",
     "releaseIncluded": true,
     "provider": "seedance-nz",
@@ -1100,22 +1100,40 @@
     ]
   },
   "release": {
-    "status": "release-authorized-not-yet-published",
+    "status": "published-stable-latest",
     "version": "2.9.6",
     "date": "2026-08-18",
-    "publishedAt": null,
+    "publishedAt": "2026-08-18T14:21:09Z",
     "tag": "v2.9.6",
-    "latest": false,
-    "sourceCommit": null,
+    "latest": true,
+    "sourceCommit": "dce1adf081893f290b65c3be1f14b0f150e46a1f",
     "draft": false,
     "prerelease": false,
     "githubImmutable": false,
     "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.6",
-    "artifacts": null,
+    "artifacts": [
+      {
+        "name": "T8-PenguinCanvas-Setup-2.9.6.exe",
+        "bytes": 1354114810,
+        "sha256": "bc2670b47d3065e4be6a95a01ff0063b491ed7481897ffd6276ac3e882d58c04",
+        "sha512": "QdLywACOCKlCImC3WRZ3XUMaA3FI7sElHNRcjc2iwJ/FJXPXO5pORg1armGTSAdpqy74XAy5myYnMRJCWbiE3A=="
+      },
+      {
+        "name": "T8-PenguinCanvas-Setup-2.9.6.exe.blockmap",
+        "bytes": 1413270,
+        "sha256": "ee1647565e22aa9cc68479908e9a84054e3a305f5042f410afd9a6cc8d9f8b49"
+      },
+      {
+        "name": "latest.yml",
+        "bytes": 362,
+        "sha256": "03b998ab76ee7fbe4eee649567522f269ccb974b283c098117605cefaf070c6b"
+      }
+    ],
     "verification": [
       "FlashVSR_video_upscale 已真实提交一次并完成下载、FFprobe 与全量解码；旧 FashVSR_video_upscale 只作为历史画布兼容输入。",
-      "MiniMax Music3 已随 v2.9.3 正式发布，v2.9.6 候选继续完整包含其节点、工作流、官方固定 Skill 快照、1,022 个上游文件、18 个索引和 1,000 个模板。",
-      "正式 Electron/NSIS、私有扩展、加密、运行时、provenance、sealed recovery、固定 Tag/target、三资产完整回下载和 Latest 门禁仍须全部通过。",
+      "MiniMax Music3 已随 v2.9.3 正式发布，v2.9.6 正式包继续完整包含其节点、工作流、官方固定 Skill 快照、1,022 个上游文件、18 个索引和 1,000 个模板。",
+      "固定源码通过 Electron/NSIS、私有扩展、157 个后端源文件加密、四个本地私有文件加密、两套运行时归档、post-build、provenance、sealed recovery、固定 Tag/target、发布前三资产完整回下载和发布后 Latest/远端 digest/size 门禁；本地 recovery 已清除。",
+      "GitHub Release 非草稿、非预发布并为 Latest；三项远端资产大小和 SHA-256 与本地正式产物一致。GitHub 仓库级 immutable release 未启用，因此继续依赖发布器的精确所有权和禁止覆盖门禁。",
       "用户明确授权先发布、后补反馈用户安装环境、协作多端及安装升级证据；仅允许 owner-approved-post-release-v2.9.6 精确延期，延期不等于通过。"
     ]
   },
