@@ -1,9 +1,9 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.9.5",
-  "lastUpdated": "2026-08-18-v2.9.5-release-authorized",
+  "lastUpdated": "2026-08-18-v2.9.5-released",
   "fashVsrAndSeedance25Native1080p": {
-    "status": "release-authorized-v2.9.5-live-verified",
+    "status": "released-v2.9.5-live-verified",
     "date": "2026-08-18",
     "releaseIncluded": true,
     "provider": "seedance-nz",
@@ -57,9 +57,40 @@
       "MiniMax Music3 已随 v2.9.3 正式发布，本版完整保留其节点、工作流、官方固定 Skill 快照、1,022 个上游文件、18 个索引和 1,000 个模板。"
     ],
     "releaseEvidence": {
-      "technicalGates": "must-pass-before-publication",
+      "technicalGates": "passed",
       "affectedUserInstallAndUpgrade": "deferred-not-passed",
       "deferralApproval": "owner-approved-post-release-v2.9.5"
+    },
+    "releasePublication": {
+      "publishedAt": "2026-08-18T06:03:06Z",
+      "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.5",
+      "sourceCommit": "969682d425e66fb50f3452ece139aa1959e005e1",
+      "tagTargetVerified": true,
+      "latest": true,
+      "draft": false,
+      "prerelease": false,
+      "assets": [
+        {
+          "name": "T8-PenguinCanvas-Setup-2.9.5.exe",
+          "bytes": 1354124051,
+          "sha256": "e4990b34d24fd6806fd492ff1fd2026c123614f5f5af28c10d47e4dfe1b957cb"
+        },
+        {
+          "name": "T8-PenguinCanvas-Setup-2.9.5.exe.blockmap",
+          "bytes": 1413024,
+          "sha256": "9696aedbab25d8e0824226b46c1a3142e219d7d0bc237986b73cac268d0dfed6"
+        },
+        {
+          "name": "latest.yml",
+          "bytes": 362,
+          "sha256": "afa845f034fae4a5464f7bfe33fc6d12e0be51d3eb4885b325fd53573781eb99"
+        }
+      ],
+      "verification": [
+        "正式流程完成私有构建、157 个后端源与 4 个本机私有文件加密、双运行时归档、Electron 原生模块重建、NSIS、post-build、provenance、sealed recovery、发布前完整回下载、固定 Tag/target、Latest 与 recovery 清理。",
+        "独立发布后再次完整下载三项公开资产，并匹配本地字节、SHA-256 与 GitHub digest 元数据。",
+        "MiniMax Music3 安装资源完整性为 1,022 文件、18 个风格族索引、1,000 个模板，规范化树 SHA-256 为 d836359b48a4bc3381f8d9eb370ff90dd82cb5ad9aa4e3ba0ed80da2c25b2553。"
+      ]
     }
   },
   "githubIssueFixesV294": {
