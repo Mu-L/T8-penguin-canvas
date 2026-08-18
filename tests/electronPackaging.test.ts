@@ -164,7 +164,7 @@ test('Electron package verifies the crash-recovery service used on backend start
   const server = read('../backend/src/server.js');
   assert.match(postBuild, /services['"], ['"]runRecovery\.t8c/);
   assert.match(server, /scheduleStorageDependentMaintenance/);
-  assert.match(server, /const runs = projectRunsRouter\.getRuntime\(\)/);
+  assert.match(server, /runs = projectRunsRouter\.getRuntime\(\)/);
   assert.match(server, /runs\.recoveryManager\.recoverPendingRuns\(\)/);
   assert.match(server, /shutdownRunRecoveryLifecycle/);
   assert.match(server, /\[run-recovery\] deferred startup failed/);

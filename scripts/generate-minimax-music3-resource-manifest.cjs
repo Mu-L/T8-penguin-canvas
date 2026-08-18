@@ -58,7 +58,10 @@ const manifest = {
 };
 const serialized = `${JSON.stringify(manifest, null, 2)}\n`;
 if (process.argv.includes('--check')) {
-  if (!fs.existsSync(manifestPath) || fs.readFileSync(manifestPath, 'utf8') !== serialized) {
+  const current = fs.existsSync(manifestPath)
+    ? fs.readFileSync(manifestPath, 'utf8').replace(/\r\n/g, '\n')
+    : '';
+  if (current !== serialized) {
     throw new Error('MiniMax Music 3 resource manifest is stale. Run node scripts/generate-minimax-music3-resource-manifest.cjs.');
   }
   process.stdout.write(`[music3-resources] verified ${files.length} files, tree ${normalizedTreeSha256}\n`);

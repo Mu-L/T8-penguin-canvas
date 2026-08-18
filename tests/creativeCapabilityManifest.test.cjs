@@ -487,26 +487,11 @@ test('generated CLI and Skill capability indexes have no drift from the single m
   const runtimeCatalog = buildRuntimeCatalog();
   const graph = buildCapabilityGraph({ manifest, manifestDigest: digest, runtimeCatalog });
   const expectedGraph = graphArtifact(graph);
-  assert.equal(
-    fs.readFileSync(JSON_TARGET, 'utf8'),
-    jsonArtifact(manifest, digest, graph),
-  );
-  assert.equal(
-    fs.readFileSync(MARKDOWN_TARGET, 'utf8'),
-    markdownArtifact(manifest, digest),
-  );
-  assert.equal(
-    fs.readFileSync(GRAPH_BACKEND_TARGET, 'utf8'),
-    expectedGraph,
-  );
-  assert.equal(
-    fs.readFileSync(GRAPH_CLI_TARGET, 'utf8'),
-    expectedGraph,
-  );
-  assert.equal(
-    fs.readFileSync(GRAPH_MARKDOWN_TARGET, 'utf8'),
-    coverageMarkdownArtifact(graph),
-  );
+  assert.deepEqual(canonicalTextBytes(fs.readFileSync(JSON_TARGET)), canonicalTextBytes(jsonArtifact(manifest, digest, graph)));
+  assert.deepEqual(canonicalTextBytes(fs.readFileSync(MARKDOWN_TARGET)), canonicalTextBytes(markdownArtifact(manifest, digest)));
+  assert.deepEqual(canonicalTextBytes(fs.readFileSync(GRAPH_BACKEND_TARGET)), canonicalTextBytes(expectedGraph));
+  assert.deepEqual(canonicalTextBytes(fs.readFileSync(GRAPH_CLI_TARGET)), canonicalTextBytes(expectedGraph));
+  assert.deepEqual(canonicalTextBytes(fs.readFileSync(GRAPH_MARKDOWN_TARGET)), canonicalTextBytes(coverageMarkdownArtifact(graph)));
   assert.equal(publicCreativeCapabilities().capabilityGraph.aggregateDigest, graph.aggregateDigest);
 });
 
@@ -573,14 +558,21 @@ test('Agent tools, CLI schema, Skill reference and UI actions are generated from
     uiActions: 31,
   });
   assert.equal(surfaces.capabilityManifestVersion, manifest.version);
-  assert.equal(fs.readFileSync(COMMAND_CATALOG_TARGET, 'utf8'), commandCatalogArtifact(catalog));
+  assert.deepEqual(
+    canonicalTextBytes(fs.readFileSync(COMMAND_CATALOG_TARGET)),
+    canonicalTextBytes(commandCatalogArtifact(catalog)),
+  );
   for (const target of [
     SURFACES_BACKEND_TARGET,
     SURFACES_CLI_TARGET,
     SURFACES_UI_TARGET,
     SURFACES_SKILL_TARGET,
   ]) {
-    assert.equal(fs.readFileSync(target, 'utf8'), surfaceArtifact, `surface drift at ${target}`);
+    assert.deepEqual(
+      canonicalTextBytes(fs.readFileSync(target)),
+      canonicalTextBytes(surfaceArtifact),
+      `surface drift at ${target}`,
+    );
   }
 
   const sourceCatalog = JSON.parse(fs.readFileSync(COMMAND_CATALOG_SOURCE, 'utf8'));

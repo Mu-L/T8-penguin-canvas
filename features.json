@@ -1,11 +1,11 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.9.4",
-  "lastUpdated": "2026-08-18-fashvsr-native1080p-developed-live-verified-not-released",
+  "version": "2.9.5",
+  "lastUpdated": "2026-08-18-v2.9.5-release-authorized",
   "fashVsrAndSeedance25Native1080p": {
-    "status": "developed-live-verified-not-released",
+    "status": "release-authorized-v2.9.5-live-verified",
     "date": "2026-08-18",
-    "releaseIncluded": false,
+    "releaseIncluded": true,
     "provider": "seedance-nz",
     "platform": "贞贞的平价AI小屋",
     "referenceProject": "F:/AI-T8-video-onekey/ComfyUI/custom_nodes/ComfyUI_Seedance@454e2d726ff9dd7d36a1f85965b5a2e6d762a4a9",
@@ -53,8 +53,14 @@
     ],
     "compatibility": [
       "默认视频渠道、默认模型、旧 Seedance 2.0、既有 Upscaler 与历史画布显式参数保持不变。",
-      "本能力直接在核心目录重新开发；没有迁移或复制独立开发树实现。"
-    ]
+      "本能力直接在核心目录重新开发；没有迁移或复制独立开发树实现。",
+      "MiniMax Music3 已随 v2.9.3 正式发布，本版完整保留其节点、工作流、官方固定 Skill 快照、1,022 个上游文件、18 个索引和 1,000 个模板。"
+    ],
+    "releaseEvidence": {
+      "technicalGates": "must-pass-before-publication",
+      "affectedUserInstallAndUpgrade": "deferred-not-passed",
+      "deferralApproval": "owner-approved-post-release-v2.9.5"
+    }
   },
   "githubIssueFixesV294": {
     "status": "released-v2.9.4",
@@ -1056,7 +1062,7 @@
   "versionSequencePolicy": {
     "status": "active",
     "date": "2026-07-30",
-    "currentVersion": "2.9.4",
+    "currentVersion": "2.9.5",
     "rules": [
       "版本号每一段只使用 0-9；v2.6.9 的下一正式版本固定为 v2.7.0。",
       "禁止创建、打包、推送、打 tag、发布或写入自动更新元数据为 v2.6.10。",
@@ -1083,6 +1089,7 @@
       "v2.9.1 的下一正式版本固定为 v2.9.2。",
       "v2.9.2 的下一正式版本固定为 v2.9.3。",
       "v2.9.3 的下一正式版本固定为 v2.9.4。",
+      "v2.9.4 的下一正式版本固定为 v2.9.5。",
       "后续改版本前必须同步核对 package.json、package-lock.json、README、features.json、项目 SKILL.md、Release notes、自动更新元数据和 Git tag。"
     ]
   },
