@@ -54,7 +54,9 @@ function walkStats(root) {
     const dir = stack.pop();
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
+      const traversableDirectory = entry.isDirectory()
+        || (entry.isSymbolicLink() && fs.statSync(full).isDirectory());
+      if (traversableDirectory) {
         stack.push(full);
         continue;
       }
