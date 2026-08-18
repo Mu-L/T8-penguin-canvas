@@ -1301,6 +1301,33 @@ export async function queryUpscaler(taskId: string): Promise<HappyHorseQueryResu
   return withProviderTransportTrace(data.data, r);
 }
 
+export interface FashVsrSubmitRequest {
+  model: 'FashVSR_video_upscale';
+  videos: string[];
+}
+
+export async function submitFashVsr(req: FashVsrSubmitRequest, transport: ProviderSubmissionTransport = {}): Promise<{
+  taskId: string;
+  model: 'FashVSR_video_upscale';
+  taskType: 'upscale';
+} & ProviderTransportTrace> {
+  const r = await fetch('/api/proxy/video/fashvsr/submit', {
+    method: 'POST',
+    headers: providerSubmissionHeaders(transport),
+    body: JSON.stringify(req),
+  });
+  const data = await safeJsonResponse(r, 'FashVSR 视频超分提交');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
+}
+
+export async function queryFashVsr(taskId: string): Promise<HappyHorseQueryResult> {
+  const r = await fetch(`/api/proxy/video/fashvsr/status/${encodeURIComponent(taskId)}`);
+  const data = await safeJsonResponse(r, 'FashVSR 视频超分查询');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
+}
+
 export type ViduQ3Model =
   | 'vidu-q3-pro-t2v'
   | 'vidu-q3-turbo-t2v'

@@ -1874,8 +1874,7 @@ test('farm canvas types are wired into CanvasData, Canvas persistence, import, a
   assert.match(canvas, /const setFarmCanvas = useCallback\([\s\S]{0,420}?rawSetFarmCanvas\(next\.value\)/);
   assert.match(canvas, /const authoritativeFarmCanvas = sanitizeFarmCanvasState\(data\.farmCanvas\)/);
   assert.match(canvas, /let renderedState = authoritativeState;[\s\S]{0,900}?mergeConcurrentCanvasPatchState\(existingPending\.baseSnapshot, existingPending, authoritativeState\)/);
-  assert.match(canvas, /function canvasPatchStateFromCanonicalParts\([\s\S]{0,900}?snapshot: JSON\.stringify\(\{ nodes, edges, creativeDesk, farmCanvas, nextNodeSerialId \}\)/);
-  assert.match(canvas, /function persistableCanvasPatchStateFromParts\([\s\S]{0,900}?return canvasPatchStateFromCanonicalParts\(persistNodes, persistEdges, creativeDesk, farmCanvas, nextNodeSerialId\)/);
+  assert.match(canvas, /function persistableCanvasPatchStateFromParts\([\s\S]{0,900}?snapshot: JSON\.stringify\(\{ nodes: persistNodes, edges: persistEdges, creativeDesk, farmCanvas, nextNodeSerialId \}\)/);
   assert.match(canvas, new RegExp('pay' + 'load = \\{ nodes: persistNodes, edges: persistEdges, viewport: getViewport\\(\\), nextNodeSerialId, creativeDesk, farmCanvas \\}'));
   assert.match(canvas, /farmCanvas: sanitizeFarmCanvasState\(data\.farmCanvas\)/);
   assert.match(canvas, /setFarmCanvas\(sanitizeFarmCanvasState\(source\.farmCanvas\)\)/);

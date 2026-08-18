@@ -1,6 +1,6 @@
 {
   "schema": "t8-creative-runtime-catalog-v1",
-  "sourceDigest": "03aea781d7d4a19aaf055b41ce6362ccd1c09784f88bb1516690274e76b55dae",
+  "sourceDigest": "1f672a812408646e19ba8aab9aa6776fbbb3ab036cd2ab95a563def4048e5bda",
   "generatedFrom": [
     "src/providers/models.ts",
     "src/config/seedance.ts",
@@ -2109,6 +2109,34 @@
       }
     },
     {
+      "id": "video:seedance-nz:FashVSR_video_upscale",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "FashVSR_video_upscale",
+      "label": "FashVSR_video_upscale",
+      "family": "fashvsr-video-upscale",
+      "available": true,
+      "parameters": {
+        "label": "FashVSR_video_upscale",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "fashvsr-video-upscale",
+        "available": true,
+        "nodeKind": "upscaler",
+        "ratios": [],
+        "defaultRatio": "",
+        "durations": [],
+        "resolutions": [],
+        "defaultResolution": "",
+        "supportsImages": false,
+        "supportsVideos": true,
+        "supportsAudios": false,
+        "maxReferenceImages": 0,
+        "maxReferenceVideos": 1,
+        "maxReferenceAudios": 0,
+        "description": "FashVSR · 单个 480P、3-15 秒视频超分"
+      }
+    },
+    {
       "id": "video:seedance-nz:fast",
       "provider": "seedance-nz",
       "platformLabel": "贞贞的平价AI小屋",
@@ -4164,7 +4192,8 @@
           "720p",
           "1080p",
           "2k",
-          "4k"
+          "4k",
+          "native1080p"
         ],
         "defaultResolution": "720p",
         "supportsImages": true,
@@ -4236,7 +4265,8 @@
           "720p",
           "1080p",
           "2k",
-          "4k"
+          "4k",
+          "native1080p"
         ],
         "defaultResolution": "720p",
         "supportsImages": true,
@@ -4308,7 +4338,8 @@
           "720p",
           "1080p",
           "2k",
-          "4k"
+          "4k",
+          "native1080p"
         ],
         "defaultResolution": "720p",
         "supportsImages": false,
@@ -4380,7 +4411,8 @@
           "720p",
           "1080p",
           "2k",
-          "4k"
+          "4k",
+          "native1080p"
         ],
         "defaultResolution": "720p",
         "supportsImages": true,
@@ -4452,7 +4484,8 @@
           "720p",
           "1080p",
           "2k",
-          "4k"
+          "4k",
+          "native1080p"
         ],
         "defaultResolution": "720p",
         "supportsImages": true,
@@ -4524,7 +4557,8 @@
           "720p",
           "1080p",
           "2k",
-          "4k"
+          "4k",
+          "native1080p"
         ],
         "defaultResolution": "720p",
         "supportsImages": false,
@@ -7881,7 +7915,7 @@
   "counts": {
     "llm": 34,
     "image": 42,
-    "video": 113,
+    "video": 114,
     "audio": 16,
     "actions": 47
   }

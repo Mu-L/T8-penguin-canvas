@@ -692,7 +692,8 @@ export const FLUX3_VIDEO_DURATIONS = Array.from({ length: 16 }, (_, index) => in
 export const FLUX3_VIDEO_RESOLUTIONS = ['hd', 'fhd'] as const;
 const SEEDANCE25_RATIOS = ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'];
 const SEEDANCE25_DURATIONS = [-1, ...Array.from({ length: 27 }, (_, index) => index + 4)];
-const SEEDANCE25_RESOLUTIONS = ['480p', '720p', '1080p', '2k', '4k'];
+const SEEDANCE25_RESOLUTIONS = ['480p', '720p', '1080p', '2k', '4k', 'native1080p'];
+export const FASHVSR_VIDEO_UPSCALE_MODEL = 'FashVSR_video_upscale';
 
 export function isZhenzhenApimartVideoModel(apiModel: string | undefined | null): boolean {
   return (ZHENZHEN_APIMART_VIDEO_MODELS as readonly string[]).includes(String(apiModel || '').trim());
@@ -1189,6 +1190,25 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     durations: [],
     resolutions: ['720p', '1080p', '2k', '4k'],
     defaultResolution: '1080p',
+    supportImages: false,
+    supportVideos: true,
+    maxRefImages: 0,
+  },
+  {
+    id: 'fashvsr-video-upscale',
+    label: 'FashVSR 视频超分',
+    kind: 'upscaler',
+    provider: 'zhenzhen',
+    builtinSource: 'seedance-nz',
+    description: 'FashVSR · 单个 480P、3-15 秒视频超分',
+    apiModelOptions: [
+      { value: FASHVSR_VIDEO_UPSCALE_MODEL, label: FASHVSR_VIDEO_UPSCALE_MODEL },
+    ],
+    ratios: [],
+    defaultRatio: '',
+    durations: [],
+    resolutions: [],
+    defaultResolution: '',
     supportImages: false,
     supportVideos: true,
     maxRefImages: 0,

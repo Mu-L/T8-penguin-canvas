@@ -1,7 +1,61 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.9.4",
-  "lastUpdated": "2026-08-17-v2.9.4-released",
+  "lastUpdated": "2026-08-18-fashvsr-native1080p-developed-live-verified-not-released",
+  "fashVsrAndSeedance25Native1080p": {
+    "status": "developed-live-verified-not-released",
+    "date": "2026-08-18",
+    "releaseIncluded": false,
+    "provider": "seedance-nz",
+    "platform": "贞贞的平价AI小屋",
+    "referenceProject": "F:/AI-T8-video-onekey/ComfyUI/custom_nodes/ComfyUI_Seedance@454e2d726ff9dd7d36a1f85965b5a2e6d762a4a9",
+    "officialDocs": "https://api.seedance.nz/docs/llms.txt",
+    "newNode": {
+      "type": "fashvsr-video-upscale",
+      "label": "FashVSR 视频超分",
+      "model": "FashVSR_video_upscale",
+      "contract": [
+        "只接受一个视频输入；本地与远程素材都先受控读取、校验并上传，不接受多视频。",
+        "付费提交前用 FFprobe 验证输入高度为 480 像素、时长 3-15 秒；最大 50MB，支持 MP4/MOV/AVI/MKV。",
+        "请求固定为 POST /v1/video/generations，body 只含 model 与 metadata.video_url；不发送 prompt、seconds、resolution 或 metadata.content。",
+        "查询固定为 GET /v1/video/generations/{task_id}；成功结果必须下载到本地、验证并持久化后才标记节点成功。"
+      ],
+      "workflow": "docs/workflows/fashvsr-video-upscale.json"
+    },
+    "seedance25": {
+      "models": [
+        "seedance-2.5-global-standard-i2v",
+        "seedance-2.5-global-standard-multi",
+        "seedance-2.5-global-standard-t2v",
+        "seedance-2.5-standard-i2v",
+        "seedance-2.5-standard-multi",
+        "seedance-2.5-standard-t2v"
+      ],
+      "resolutions": ["480p", "720p", "1080p", "2k", "4k", "native1080p"],
+      "native4kSupported": false,
+      "liveTest": "not-run-by-owner-cost-boundary",
+      "savedWorkflows": 6
+    },
+    "liveVerification": {
+      "submissions": 1,
+      "completed": true,
+      "downloaded": true,
+      "fullDecodePassed": true,
+      "input": "854x480, H.264, 3.208008s, 472060 bytes",
+      "output": "1920x1024, H.264, 3.208333s, 987323 bytes",
+      "report": "output/fashvsr-live-core-20260818/report.json",
+      "secretFree": true
+    },
+    "verification": [
+      "FashVSR、Seedance 2.5、前端来源、运行恢复、端口、Run 入口与能力清单定向及相邻回归 68/68 通过。",
+      "TypeScript type-check、Node/JSON 语法、feature-sync 与 2,889 模块生产构建通过；能力目录为 31 actions / 253 runtime entries / 79/79 nodes / 0 public gaps。",
+      "FashVSR 只提交一次真实付费任务并完成下载、ffprobe 与全量解码；Seedance 2.5 native1080p 依用户费用边界只按官方文档核对，没有提交付费任务。"
+    ],
+    "compatibility": [
+      "默认视频渠道、默认模型、旧 Seedance 2.0、既有 Upscaler 与历史画布显式参数保持不变。",
+      "本能力直接在核心目录重新开发；没有迁移或复制独立开发树实现。"
+    ]
+  },
   "githubIssueFixesV294": {
     "status": "released-v2.9.4",
     "date": "2026-08-16",

@@ -4047,6 +4047,83 @@ router.get('/video/upscaler/status/:tid', async (req, res) => {
   }
 });
 
+router.post('/video/fashvsr/submit', async (req, res) => {
+  const settings = loadRawSettings();
+  const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) {
+    return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI小屋 API Key”' });
+  }
+  try {
+    const result = await seedanceNz.submitFashVsrTask(req.body || {}, apiKey, { signal: req.t8AbortSignal });
+    rememberTaskKey(result.taskId, apiKey, {
+      provider: 'fashvsr-nz',
+      model: result.model,
+      taskType: result.taskType,
+    });
+    return res.json({
+      success: true,
+      data: {
+        taskId: result.taskId,
+        model: result.model,
+        taskType: result.taskType,
+        ...seedanceNzTrace(result),
+      },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    proxyRouteError('proxy/video/fashvsr/submit 错误', error, [apiKey]);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: proxyPublicError(error, 'FashVSR 视频超分请求失败', [apiKey]),
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
+router.get('/video/fashvsr/status/:tid', async (req, res) => {
+  const settings = loadRawSettings();
+  const remembered = recallTaskMeta(req.params.tid, 'fashvsr-nz');
+  const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI小屋 API Key' });
+  try {
+    const result = await seedanceNz.queryFashVsrTask(req.params.tid, apiKey, { signal: req.t8AbortSignal });
+    const materialized = await materializeRemoteTaskOutput({
+      status: result.status,
+      remoteUrl: result.videoUrl,
+      kind: 'video',
+      materializationKey: `fashvsr-nz:${req.params.tid}`,
+      providerFetchImpl: seedanceNz.fetchRemote,
+    });
+    const responseData = {
+      status: result.status,
+      progress: safeDiagnosticText(result.progress || '', 80, [apiKey]),
+      videoUrl: materialized.url,
+      failReason: result.status === 'failed'
+        ? safeDiagnosticText(result.failReason || 'FashVSR 视频超分任务失败', 240, [apiKey])
+        : '',
+      model: remembered?.model || seedanceNz.FASHVSR_VIDEO_UPSCALE_MODEL,
+      taskType: remembered?.taskType || 'upscale',
+      ...seedanceNzTrace(result),
+    };
+    if (materialized.failure) {
+      return sendCompletedRemoteOutputFailure(res, materialized.failure, responseData, {
+        defaultCode: 'fashvsr_output_unusable',
+        defaultMessage: 'FashVSR 视频结果无法保存。',
+      });
+    }
+    return res.json({ success: true, data: responseData });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    proxyRouteError('proxy/video/fashvsr/status 错误', error, [apiKey]);
+    if (sendTaskResultQueryRecovery(res, error, { taskId: req.params.tid })) return;
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: proxyPublicError(error, 'FashVSR 视频超分查询失败', [apiKey]),
+      ...seedanceNzTrace(error),
+    });
+  }
+});
+
 router.post('/video/vidu/submit', async (req, res) => {
   const settings = loadRawSettings();
   const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();

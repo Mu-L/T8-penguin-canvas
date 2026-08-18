@@ -12,6 +12,7 @@ export type NodeType =
   | 'video-edit'
   | 'seedance'
   | 'seedance25'
+  | 'fashvsr-video-upscale'
   | 'director-storyboard'
   | 'story'
   | 'script-master'

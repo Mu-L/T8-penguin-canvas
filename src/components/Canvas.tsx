@@ -1348,6 +1348,7 @@ const VideoNode = lazyCanvasNode(() => import('./nodes/VideoNode'), 'VideoNode')
 const VideoEditNode = lazyCanvasNode(() => import('./nodes/VideoEditNode'), 'VideoEditNode');
 const SeedanceNode = lazyCanvasNode(() => import('./nodes/SeedanceNode'), 'SeedanceNode');
 const Seedance25Node = lazyCanvasNode(() => import('./nodes/Seedance25Node'), 'Seedance25Node');
+const FashVsrNode = lazyCanvasNode(() => import('./nodes/FashVsrNode'), 'FashVsrNode');
 const DirectorStoryboardNode = lazyCanvasNode(() => import('./nodes/DirectorStoryboardNode'), 'DirectorStoryboardNode');
 const StoryNode = lazyCanvasNode(() => import('./nodes/StoryNode'), 'StoryNode');
 const ScriptMasterNode = lazyCanvasNode(() => import('./nodes/ScriptMasterNode'), 'ScriptMasterNode');
@@ -1431,6 +1432,7 @@ const SPECIFIC_NODES: Record<string, any> = {
   'video-edit': VideoEditNode,
   seedance: SeedanceNode, // 完全对齐 gpt-image-2-web Seedance2.0(独立 /seedance/v3 路径)
   seedance25: Seedance25Node,
+  'fashvsr-video-upscale': FashVsrNode,
   'director-storyboard': DirectorStoryboardNode,
   story: StoryNode,
   'script-master': ScriptMasterNode,
@@ -1730,6 +1732,14 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     seed: -1,
     maxPoll: 720,
     pollInt: 5,
+    reuseResult: false,
+  },
+  'fashvsr-video-upscale': {
+    fashVsrVariant: true,
+    videoBuiltinSource: 'seedance-nz',
+    mainId: 'fashvsr-video-upscale',
+    model: 'FashVSR_video_upscale',
+    localRefVideos: [],
     reuseResult: false,
   },
   'director-storyboard': {

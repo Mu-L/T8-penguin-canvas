@@ -54,6 +54,7 @@ const EXPECTED_SIGNATURES: Record<string, string> = {
   'video-edit': 'static|null[video]->null[video|audio]',
   seedance: 'static|null[text|image|video|audio]->null[video]',
   seedance25: 'static|null[text|image|video|audio]->null[video]',
+  'fashvsr-video-upscale': 'static|null[video]->null[video]',
   'director-storyboard': 'static|null[text|image|video|audio]->null[video|text]',
   story: 'static|null[text|image|video|audio]->null[video|text]',
   'script-master': 'static|null[text|image|video|audio]->null[text|metadata]',
@@ -162,12 +163,12 @@ function dynamicFixture(type: string): Record<string, unknown> {
   return {};
 }
 
-test('all 78 production types have a valid, exact connection authority matching audited JSX Handles', () => {
+test('all 79 production types have a valid, exact connection authority matching audited JSX Handles', () => {
   assert.equal(manifest.schema, 't8-canvas-node-schema-v1');
   assert.equal(manifest.version, 1);
-  assert.equal(manifest.types.length, 78);
-  assert.equal(new Set(manifest.types.map((entry) => entry.type)).size, 78);
-  assert.equal(Object.keys(EXPECTED_SIGNATURES).length, 78);
+  assert.equal(manifest.types.length, 79);
+  assert.equal(new Set(manifest.types.map((entry) => entry.type)).size, 79);
+  assert.equal(Object.keys(EXPECTED_SIGNATURES).length, 79);
   assert.deepEqual(Object.keys(manifest.connectionPorts).sort(), Object.keys(EXPECTED_SIGNATURES).sort());
   assert.deepEqual(manifest.types.map((entry) => entry.type).sort(), Object.keys(manifest.connectionPorts).sort());
 
@@ -193,7 +194,7 @@ test('all 78 production types have a valid, exact connection authority matching 
   }
 });
 
-test('the runtime resolver handles every one of the 78 production node types without aggregate fallback', () => {
+test('the runtime resolver handles every one of the 79 production node types without aggregate fallback', () => {
   for (const { type } of manifest.types) {
     const resolution = requireResolved(canvasNode(type, dynamicFixture(type)));
     assert.equal(resolution.resolver, manifest.connectionPorts[type].resolver, type);

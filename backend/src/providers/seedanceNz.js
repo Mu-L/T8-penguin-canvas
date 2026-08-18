@@ -46,7 +46,7 @@ const SEEDANCE25_MODELS = new Set([
   ...SEEDANCE25_I2V_MODELS,
   ...SEEDANCE25_MULTI_MODELS,
 ]);
-const SEEDANCE25_RESOLUTIONS = new Set(['480p', '720p', '1080p', '2k', '4k']);
+const SEEDANCE25_RESOLUTIONS = new Set(['480p', '720p', '1080p', '2k', '4k', 'native1080p']);
 const SEEDANCE25_PROMPT_MAX_LENGTH = 20480;
 const SEEDANCE25_DEFAULT_SECONDS = 5;
 const SEEDANCE25_DEFAULT_RESOLUTION = '720p';
@@ -227,6 +227,9 @@ const KLING_PROMPT_MAX_LENGTH = 20480;
 const KLING_MAX_REFERENCE_IMAGES = 4;
 const ZHENZHEN_UPSCALER_MODEL = 'zhenzhen-upscaler';
 const ZHENZHEN_UPSCALER_RESOLUTIONS = new Set(['720p', '1080p', '2k', '4k']);
+const FASHVSR_VIDEO_UPSCALE_MODEL = 'FashVSR_video_upscale';
+const FASHVSR_MIN_SECONDS = 3;
+const FASHVSR_MAX_SECONDS = 15;
 const HAILUO23_T2V_MODELS = new Set([
   'hailuo-2.3-t2v-standard',
   'hailuo-2.3-t2v-pro',
@@ -3518,6 +3521,118 @@ async function buildUpscalerPayload(request, apiKey, options = {}) {
   };
 }
 
+async function probeFashVsrInput(buffer, file, options = {}) {
+  if (typeof options.fashVsrProbe === 'function') {
+    const injected = await options.fashVsrProbe(buffer, file);
+    return {
+      width: Number(injected?.width),
+      height: Number(injected?.height),
+      duration: Number(injected?.duration),
+    };
+  }
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 't8-fashvsr-probe-'));
+  const inputPath = path.join(tempDir, `source.${seedance25ProbeExtension(file, 'video')}`);
+  const ffprobe = options.ffprobePath || resolveBundledFfprobe();
+  const timeoutMs = Math.max(5_000, Math.min(60_000, Number(options.ffprobeTimeoutMs) || 30_000));
+  try {
+    await fs.promises.writeFile(inputPath, buffer);
+    return await withFfmpegProcessSlot(() => new Promise((resolve, reject) => {
+      let settled = false;
+      let stdout = '';
+      const child = spawn(ffprobe, [
+        '-v', 'error',
+        '-select_streams', 'v:0',
+        '-show_entries', 'stream=width,height:format=duration',
+        '-of', 'json',
+        inputPath,
+      ], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+      const finish = (error, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        options.signal?.removeEventListener?.('abort', onAbort);
+        if (error) reject(error);
+        else resolve(value);
+      };
+      const onAbort = () => {
+        try { child.kill('SIGKILL'); } catch {}
+        finish(boundaryError('FashVSR 素材校验已取消', 'FASHVSR_PROBE_ABORTED', 499));
+      };
+      const timer = setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch {}
+        finish(boundaryError('读取 FashVSR 输入视频信息超时', 'FASHVSR_PROBE_TIMEOUT', 504));
+      }, timeoutMs);
+      child.stdout.on('data', (chunk) => {
+        if (stdout.length < 64 * 1024) stdout += chunk.toString('utf8');
+      });
+      child.once('error', () => finish(boundaryError('无法读取 FashVSR 输入视频', 'FASHVSR_INVALID_VIDEO', 400)));
+      child.once('close', (code) => {
+        if (code !== 0) {
+          finish(boundaryError('无法读取 FashVSR 输入视频', 'FASHVSR_INVALID_VIDEO', 400));
+          return;
+        }
+        try {
+          const parsed = JSON.parse(stdout);
+          const stream = Array.isArray(parsed?.streams) ? parsed.streams[0] : null;
+          const result = {
+            width: Number(stream?.width),
+            height: Number(stream?.height),
+            duration: Number(parsed?.format?.duration),
+          };
+          if (!Number.isFinite(result.width) || !Number.isFinite(result.height) || !Number.isFinite(result.duration)) {
+            throw new Error('invalid probe');
+          }
+          finish(null, result);
+        } catch {
+          finish(boundaryError('无法读取 FashVSR 输入视频', 'FASHVSR_INVALID_VIDEO', 400));
+        }
+      });
+      if (options.signal?.aborted) onAbort();
+      else options.signal?.addEventListener?.('abort', onAbort, { once: true });
+    }), { isCancelled: () => options.signal?.aborted === true });
+  } finally {
+    await fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function validateFashVsrInput(buffer, file, options = {}) {
+  const media = await probeFashVsrInput(buffer, file, options);
+  if (media.height !== 480) {
+    throw boundaryError('FashVSR 输入视频必须是 480P（视频高度 480 像素）', 'FASHVSR_REQUIRES_480P', 400);
+  }
+  if (media.duration < FASHVSR_MIN_SECONDS || media.duration > FASHVSR_MAX_SECONDS) {
+    throw boundaryError(
+      `FashVSR 输入视频时长必须为 ${FASHVSR_MIN_SECONDS}-${FASHVSR_MAX_SECONDS} 秒`,
+      'FASHVSR_INVALID_DURATION',
+      400,
+    );
+  }
+}
+
+async function buildFashVsrPayload(request, apiKey, options = {}) {
+  const model = String(request.model || FASHVSR_VIDEO_UPSCALE_MODEL).trim();
+  if (model !== FASHVSR_VIDEO_UPSCALE_MODEL) {
+    throw new Error(`未知 FashVSR 模型：${model || '(空)'}`);
+  }
+  const sources = normalizeList(request.videos || request.videoUrls || (request.video ? [request.video] : []));
+  if (sources.length !== 1) throw new Error('FashVSR 必须提供且只能提供 1 个 480P 视频');
+  const videoUrl = await uploadMedia(sources[0], 'video', apiKey, {
+    ...options,
+    maxBytes: 50 * 1024 * 1024,
+    allowedMimes: ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska'],
+    cacheVariant: 'fashvsr-video-v1',
+    validateBuffer: (buffer, file) => validateFashVsrInput(buffer, file, options),
+  });
+  return {
+    payload: {
+      model: FASHVSR_VIDEO_UPSCALE_MODEL,
+      metadata: { video_url: videoUrl },
+    },
+    model: FASHVSR_VIDEO_UPSCALE_MODEL,
+    taskType: 'upscale',
+  };
+}
+
 function deriveViduTaskType(model) {
   if (VIDU_Q3_T2V_MODELS.has(model)) return 't2v';
   if (VIDU_Q3_I2V_MODELS.has(model)) return 'i2v';
@@ -3744,6 +3859,29 @@ async function submitUpscalerTask(request, apiKey, options = {}) {
   const data = await responseJson(response, 'seedance.nz Zhenzhen Upscaler 任务提交');
   if (!response.ok) throw createUpstreamError(data, response);
   const taskId = requiredTaskId(data?.id || data?.task_id || data?.data?.id, 'seedance.nz Zhenzhen Upscaler 任务提交', response);
+  return { taskId, model: built.model, taskType: built.taskType, ...safeProviderTrace(response, data, { pollCount: 0 }) };
+}
+
+async function submitFashVsrTask(request, apiKey, options = {}) {
+  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
+  const fetchImpl = getFetchImpl(options);
+  const baseUrl = cleanBaseUrl(options.baseUrl);
+  const built = await buildFashVsrPayload(request, apiKey, options);
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/video/generations`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(built.payload),
+  }, options, 'seedance.nz FashVSR 任务提交');
+  const data = await responseJson(response, 'seedance.nz FashVSR 任务提交');
+  if (!response.ok) throw createUpstreamError(data, response);
+  const taskId = requiredTaskId(
+    data?.id || data?.task_id || data?.data?.id || data?.data?.task_id,
+    'seedance.nz FashVSR 任务提交',
+    response,
+  );
   return { taskId, model: built.model, taskType: built.taskType, ...safeProviderTrace(response, data, { pollCount: 0 }) };
 }
 
@@ -4648,6 +4786,40 @@ async function queryTask(taskId, apiKey, options = {}) {
   };
 }
 
+async function queryFashVsrTask(taskId, apiKey, options = {}) {
+  if (!String(apiKey || '').trim()) throw new Error('缺少贞贞的平价AI小屋 API Key');
+  const fetchImpl = getFetchImpl(options);
+  const baseUrl = cleanBaseUrl(options.baseUrl);
+  const response = await fetchProviderResponse(
+    fetchImpl,
+    `${baseUrl}/v1/video/generations/${encodeURIComponent(taskId)}`,
+    { headers: { Authorization: `Bearer ${apiKey}` } },
+    options,
+    'seedance.nz FashVSR 任务查询',
+  );
+  const data = await responseJson(response, 'seedance.nz FashVSR 任务查询');
+  if (!response.ok) throw createUpstreamError(data, response);
+  const body = data?.data && typeof data.data === 'object' ? data.data : data;
+  const status = normalizeStatus(body?.status || body?.data?.status);
+  const videoUrl = String(
+    body?.result_url
+    || body?.resultUrl
+    || body?.video_url
+    || body?.videoUrl
+    || body?.data?.result_url
+    || body?.data?.content?.video_url
+    || body?.content?.video_url
+    || '',
+  ).trim();
+  return {
+    status,
+    progress: safeProgress(body?.progress ?? body?.data?.progress),
+    videoUrl: status === 'succeeded' ? videoUrl || null : null,
+    failReason: status === 'failed' ? 'FashVSR 视频超分任务失败' : null,
+    ...safeProviderTrace(response, data),
+  };
+}
+
 function resetCachesForTests() {
   uploadCache.clear();
   uploadQueues.clear();
@@ -4773,6 +4945,7 @@ module.exports = {
   ZHENZHEN_VIDEO_V31_QUALITY_MODEL,
   ZHENZHEN_UPSCALER_MODEL,
   ZHENZHEN_UPSCALER_RESOLUTIONS,
+  FASHVSR_VIDEO_UPSCALE_MODEL,
   PROVIDER_ID,
   RATIOS,
   RESOLUTIONS,
@@ -4814,6 +4987,7 @@ module.exports = {
   buildFlux3Payload,
   buildKlingPayload,
   buildUpscalerPayload,
+  buildFashVsrPayload,
   buildViduPayload,
   buildHappyHorsePayload,
   buildWanPayload,
@@ -4837,6 +5011,7 @@ module.exports = {
   queryAudioTask,
   querySunoMusicTask,
   queryTask,
+  queryFashVsrTask,
   resetCachesForTests,
   resolveModel,
   seedancePublicDnsLookup,
@@ -4846,6 +5021,7 @@ module.exports = {
   submitFlux3Task,
   submitKlingTask,
   submitUpscalerTask,
+  submitFashVsrTask,
   submitViduTask,
   submitHappyHorseTask,
   submitImageTask,

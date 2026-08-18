@@ -26,7 +26,7 @@ const CANVAS_REQUEST_COMPONENTS: ComponentAudit[] = [
   { file: 'FeishuBitableInputNode.tsx', types: ['feishu-bitable-input'], requestBoundaryCalls: 1, directClickHandlers: ['fetchRecords'] },
   { file: 'FeishuBitableOutputNode.tsx', types: ['feishu-bitable-output'], requestBoundaryCalls: 1, directClickHandlers: ['writeRecords'] },
   { file: 'ImageNode.tsx', types: ['image', 'edit'], requestBoundaryCalls: 1, directClickHandlers: ['handleGenerate'] },
-  { file: 'VideoNode.tsx', types: ['video'], requestBoundaryCalls: 1, directClickHandlers: ['handleGenerate'] },
+  { file: 'VideoNode.tsx', types: ['video', 'fashvsr-video-upscale'], requestBoundaryCalls: 1, directClickHandlers: ['handleGenerate'] },
   { file: 'SeedanceNode.tsx', types: ['seedance', 'seedance25'], requestBoundaryCalls: 1, directClickHandlers: ['handleGenerate'] },
   { file: 'AudioNode.tsx', types: ['audio'], requestBoundaryCalls: 1, directClickHandlers: ['handleGenerate'] },
   { file: 'LLMNode.tsx', types: ['llm'], requestBoundaryCalls: 1, directClickHandlers: ['handleSend'] },
@@ -121,7 +121,7 @@ test('primary node run audit classifies every shared executable type exactly onc
   assert.equal(containsIdentifier('{handleRun}', 'handleRun'), true, 'handler audit must detect exact identifiers');
   assert.equal(containsIdentifier('{handleRunner}', 'handleRun'), false, 'handler audit must not match identifier prefixes');
   const audited = [...CANVAS_REQUEST_COMPONENTS, ...NO_NODE_PRIMARY_COMPONENTS].flatMap((entry) => entry.types);
-  assert.equal(audited.length, 59, 'shared executable audit count changed; classify every new or removed type explicitly');
+  assert.equal(audited.length, 60, 'shared executable audit count changed; classify every new or removed type explicitly');
   assert.equal(new Set(audited).size, audited.length, 'audit matrix must not classify an executable type twice');
   assert.deepEqual([...audited].sort(), [...EXECUTABLE_NODE_TYPES].sort());
 });
@@ -362,4 +362,14 @@ test('Canvas reports whether a component run request actually started', () => {
   assert.match(requestHandler, /return runNodesByOrder|handleRunGroup\(\[nodeId\]/);
   assert.match(requestHandler, /count > 0[\s\S]*?onSettled\?\.\(\{ accepted: true \}\)/);
   assert.match(requestHandler, /\.catch\(\(error\)[\s\S]*?onSettled\?\.\(\{ accepted: false, error: message \}\)/);
+});
+
+test('Canvas isolates equal visible node ids by canvas and remounts node instances after switching', () => {
+  const canvasSource = readFileSync(new URL('../src/components/Canvas.tsx', import.meta.url), 'utf8');
+
+  assert.match(canvasSource, /const launchCanvasId = loadedCanvasIdRef\.current/);
+  assert.match(canvasSource, /const scopedOrder = order\.map\(\(nodeId\) => createCanvasNodeExecutionKey\(launchCanvasId, nodeId\)\)/);
+  assert.match(canvasSource, /activeRunPlansRef\.current\.set\(runReservationToken, new Set\(scopedOrder\)\)/);
+  assert.match(canvasSource, /<ReactFlowProvider key=\{activeCanvasId \|\| 'canvas-empty'\}>/);
+  assert.match(canvasSource, /<CanvasInner \{\.\.\.props\} persistenceRuntime=\{persistenceRuntime\} \/>/);
 });

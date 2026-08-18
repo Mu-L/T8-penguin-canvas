@@ -1,0 +1,50 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "FashVSR 480P 视频超分",
+  "nodes": [
+    {
+      "id": "fashvsr-input-video",
+      "type": "upload",
+      "position": { "x": 0, "y": 80 },
+      "data": {
+        "label": "上传 480P、3-15 秒视频",
+        "uploadType": "video",
+        "lockedUploadType": "video"
+      }
+    },
+    {
+      "id": "fashvsr-video-upscale",
+      "type": "fashvsr-video-upscale",
+      "position": { "x": 420, "y": 80 },
+      "data": {
+        "label": "FashVSR 视频超分",
+        "fashVsrVariant": true,
+        "videoBuiltinSource": "seedance-nz",
+        "mainId": "fashvsr-video-upscale",
+        "model": "FashVSR_video_upscale",
+        "reuseResult": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "fashvsr-input-edge",
+      "source": "fashvsr-input-video",
+      "target": "fashvsr-video-upscale"
+    }
+  ],
+  "nodeCount": 2,
+  "edgeCount": 1,
+  "nodeTypes": ["upload", "fashvsr-video-upscale"],
+  "topologyPreview": {
+    "nodes": [
+      { "id": "fashvsr-input-video", "type": "upload", "label": "上传 480P、3-15 秒视频", "x": 50, "y": 130 },
+      { "id": "fashvsr-video-upscale", "type": "fashvsr-video-upscale", "label": "FashVSR 视频超分", "x": 470, "y": 130 }
+    ],
+    "edges": [
+      { "id": "fashvsr-input-edge", "source": "fashvsr-input-video", "target": "fashvsr-video-upscale" }
+    ]
+  },
+  "savedAt": "2026-08-18T00:00:00.000Z"
+}

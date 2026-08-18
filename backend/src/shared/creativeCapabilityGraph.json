@@ -15,16 +15,16 @@
   },
   "sourceDigests": {
     "creativeCapabilityManifest": "16c15dab6eef440bbbee2e44ccf69dfe75bba70d6a61585ca0fb717279353b1d",
-    "canvasNodeSchema": "1e54f3cb0c563d2b60290fd56c160c07760c42586c170af81ec023c99720038c",
-    "canvasNodeSchemaFile": "64b80d36e6889e1c7b18eeebe10f312cf9d27e1fbd5567179932bdd61cf798e0",
-    "runtimeCatalogSources": "03aea781d7d4a19aaf055b41ce6362ccd1c09784f88bb1516690274e76b55dae",
-    "runtimeCatalogArtifact": "9b72459b4037efc12700a6a7741e998a49c8dd836d14dc4df1b4a77d91be48b0",
+    "canvasNodeSchema": "aef355a3038e5a13d672f3721dd0d130f35f3f6366d1bf0d7a3db9bc16189a03",
+    "canvasNodeSchemaFile": "0108bc673588f895c00bee1eeb20ec6bb6b3ee0960bdd6953848295177c310ae",
+    "runtimeCatalogSources": "1f672a812408646e19ba8aab9aa6776fbbb3ab036cd2ab95a563def4048e5bda",
+    "runtimeCatalogArtifact": "7de740988f9fe61b6f65305a5478bf5b075adcf6452406d88ab80acf51fcfac5",
     "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
     "capabilityGraphCompiler": "1a611d7e91dcf523e0536a92e9adb6ba2d884689a65fa10274bcda3a05ef9840",
     "coverageReceiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7",
     "canonicalTextDigestCompiler": "b0afcf28a257fbbd8f391edc117348f8f2ede1b4a039ae91bce25a8d563ac0cf"
   },
-  "aggregateDigest": "3a3d28a4eadd70ab35334fa9399b4664a0639a7db79376b416dc48f7cd96c99b",
+  "aggregateDigest": "c3359862980a0fef9e30aae48d998c184c49d01104aa8adc98af200122bb4bcb",
   "principles": {
     "oneSentenceStart": true,
     "directCanvasMutation": false,
@@ -36,29 +36,29 @@
   "counts": {
     "capabilities": 31,
     "handlers": 31,
-    "nodes": 78,
-    "executableNodes": 59,
+    "nodes": 79,
+    "executableNodes": 60,
     "generatableNodes": 12,
-    "referencedNodes": 69,
+    "referencedNodes": 70,
     "unreferencedNodes": 9,
-    "directCapabilityNodes": 69,
+    "directCapabilityNodes": 70,
     "internalCompatNodes": 1,
     "semanticSupersededNodes": 8,
     "publicCapabilityGapNodes": 0,
-    "accountedNodes": 78,
+    "accountedNodes": 79,
     "unexplainedNodes": 0,
     "fullyOperableNodes": 19,
-    "runtimeEntries": 252,
+    "runtimeEntries": 253,
     "runtimeByKind": {
       "llm": 34,
       "image": 42,
-      "video": 113,
+      "video": 114,
       "audio": 16,
       "actions": 47
     },
     "runtimeByProvider": {
       "grok-oauth": 2,
-      "seedance-nz": 187,
+      "seedance-nz": 188,
       "zhenzhen": 56,
       "fal": 7
     },
@@ -513,6 +513,7 @@
         "video-edit",
         "seedance",
         "seedance25",
+        "fashvsr-video-upscale",
         "director-storyboard",
         "story",
         "script-master",
@@ -3459,6 +3460,50 @@
         "preview": true,
         "apply": true,
         "run": true,
+        "verify": true,
+        "resume": false,
+        "rollback": true,
+        "recover": true
+      }
+    },
+    {
+      "type": "fashvsr-video-upscale",
+      "label": "FashVSR 视频超分",
+      "description": "贞贞的平价AI小屋：单个 480P、3-15 秒视频超分",
+      "category": "core",
+      "hidden": false,
+      "executable": true,
+      "generatable": false,
+      "agentExposure": "direct-capability",
+      "coverageReason": "registered-capability-reference",
+      "accounting": {
+        "status": "direct-capability",
+        "reasonCode": "registered-capability-reference",
+        "semanticCapabilityIds": [
+          "canvas.node-add"
+        ],
+        "evidence": [
+          "tools/zcanvas-cli/creativeCapabilityManifest.json"
+        ]
+      },
+      "inputs": [
+        "video"
+      ],
+      "outputs": [
+        "video"
+      ],
+      "capabilityIds": [
+        "canvas.node-add"
+      ],
+      "handlerIds": [
+        "creative-action:graph.node-add"
+      ],
+      "coverage": {
+        "understand": true,
+        "plan": true,
+        "preview": true,
+        "apply": true,
+        "run": false,
         "verify": true,
         "resume": false,
         "rollback": true,
@@ -6422,7 +6467,7 @@
   ],
   "runtime": {
     "schema": "t8-creative-runtime-catalog-v1",
-    "sourceDigest": "03aea781d7d4a19aaf055b41ce6362ccd1c09784f88bb1516690274e76b55dae",
+    "sourceDigest": "1f672a812408646e19ba8aab9aa6776fbbb3ab036cd2ab95a563def4048e5bda",
     "platforms": [
       {
         "id": "zhenzhen",
@@ -9333,6 +9378,26 @@
         }
       },
       {
+        "id": "video:seedance-nz:FashVSR_video_upscale",
+        "kind": "video",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "FashVSR_video_upscale",
+        "label": "FashVSR_video_upscale",
+        "family": "fashvsr-video-upscale",
+        "available": true,
+        "catalogSection": "video",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
         "id": "video:seedance-nz:fast",
         "kind": "video",
         "provider": "seedance-nz",
@@ -11691,6 +11756,7 @@
       "feishu-bitable-input",
       "feishu-bitable-output",
       "video",
+      "fashvsr-video-upscale",
       "script-master",
       "mv-music-master",
       "runninghub",
@@ -11882,6 +11948,7 @@
       "video:fal:grok-video-fal",
       "video:fal:sora-2",
       "video:fal:veo3.1-fal",
+      "video:seedance-nz:FashVSR_video_upscale",
       "video:seedance-nz:fast",
       "video:seedance-nz:global-fast",
       "video:seedance-nz:global-mini",
@@ -11998,21 +12065,21 @@
     "schema": "t8-creative-capability-coverage-receipt-v1",
     "sourceDigests": {
       "capabilityManifest": "16c15dab6eef440bbbee2e44ccf69dfe75bba70d6a61585ca0fb717279353b1d",
-      "nodeSchema": "1e54f3cb0c563d2b60290fd56c160c07760c42586c170af81ec023c99720038c",
-      "runtimeCatalog": "03aea781d7d4a19aaf055b41ce6362ccd1c09784f88bb1516690274e76b55dae",
+      "nodeSchema": "aef355a3038e5a13d672f3721dd0d130f35f3f6366d1bf0d7a3db9bc16189a03",
+      "runtimeCatalog": "1f672a812408646e19ba8aab9aa6776fbbb3ab036cd2ab95a563def4048e5bda",
       "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
       "receiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7"
     },
     "inventory": {
       "nodes": {
-        "total": 78,
-        "executable": 59,
+        "total": 79,
+        "executable": 60,
         "generatable": 12
       },
       "runtime": {
         "llm": 34,
         "image": 42,
-        "video": 113,
+        "video": 114,
         "audio": 16,
         "actions": 47
       },
@@ -12028,6 +12095,6 @@
       "missingCompatibilityEdges": []
     },
     "complete": true,
-    "digest": "6db2354fd3c7c6288f666336303e2261169d012997d8e3f4452a331db538c66d"
+    "digest": "671b6f1305e729a76f5844937794de354dcd56e35f455f1cf998785f6d058f10"
   }
 }

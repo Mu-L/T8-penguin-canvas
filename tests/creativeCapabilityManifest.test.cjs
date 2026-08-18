@@ -133,7 +133,7 @@ test('creative capability manifest covers the one-sentence production spine', ()
   assert.equal(payload.principles.explicitApprovalForWrites, true);
   const nodeAdd = payload.capabilities.find((capability) => capability.id === 'canvas.node-add');
   assert.equal(nodeAdd.nodeTypeSelector, 'creator-visible');
-  assert.equal(nodeAdd.nodeTypes.length, 66);
+  assert.equal(nodeAdd.nodeTypes.length, 67);
   assert.equal(nodeAdd.nodeTypes.includes('loop'), true);
   assert.equal(nodeAdd.nodeTypes.includes('remove-bg'), false);
 });
@@ -202,8 +202,8 @@ test('capability graph validates real node types and fails closed on drift', () 
   const { manifest, digest } = readGeneratorManifest();
   const runtimeCatalog = buildRuntimeCatalog();
   const graph = buildCapabilityGraph({ manifest, manifestDigest: digest, runtimeCatalog });
-  assert.equal(graph.counts.nodes, 78);
-  assert.equal(graph.counts.runtimeEntries, 252);
+  assert.equal(graph.counts.nodes, 79);
+  assert.equal(graph.counts.runtimeEntries, 253);
   assert.equal(
     graph.counts.operations,
     graph.capabilities.reduce((sum, capability) => sum + capability.operations.length, 0),
@@ -217,15 +217,15 @@ test('capability graph validates real node types and fails closed on drift', () 
   );
   const nodeAdd = graph.capabilities.find((capability) => capability.id === 'canvas.node-add');
   assert.ok(nodeAdd);
-  assert.equal(nodeAdd.nodeTypes.length, 66);
+  assert.equal(nodeAdd.nodeTypes.length, 67);
   assert.deepEqual(nodeAdd.nodeTypes, graph.nodes.filter((node) => !node.hidden).map((node) => node.type));
-  assert.equal(graph.counts.referencedNodes, 69);
+  assert.equal(graph.counts.referencedNodes, 70);
   assert.equal(graph.counts.unreferencedNodes, 9);
-  assert.equal(graph.counts.directCapabilityNodes, 69);
+  assert.equal(graph.counts.directCapabilityNodes, 70);
   assert.equal(graph.counts.internalCompatNodes, 1);
   assert.equal(graph.counts.semanticSupersededNodes, 8);
   assert.equal(graph.counts.publicCapabilityGapNodes, 0);
-  assert.equal(graph.counts.accountedNodes, 78);
+  assert.equal(graph.counts.accountedNodes, 79);
   assert.equal(graph.counts.unexplainedNodes, 0);
   assert.equal(graph.counts.fullyOperableNodes, 19);
   assert.equal(graph.nodes.find((node) => node.type === 'minimax-h3-prompt-enhancer').coverage.run, true);
@@ -348,7 +348,7 @@ test('capability graph validates real node types and fails closed on drift', () 
   );
   const coverageMarkdown = coverageMarkdownArtifact(graph);
   assert.equal(
-    coverageMarkdown.includes('Accounted / unexplained nodes: **78 / 0**'),
+    coverageMarkdown.includes('Accounted / unexplained nodes: **79 / 0**'),
     true,
   );
   assert.equal(coverageMarkdown.includes('- Public capability gaps: none'), true);
@@ -393,11 +393,11 @@ test('dynamic coverage receipt proves node, runtime, handler, risk, verification
     executable: graph.nodes.filter((node) => node.executable).length,
     generatable: graph.nodes.filter((node) => node.generatable).length,
   });
-  assert.deepEqual(receipt.inventory.nodes, { total: 78, executable: 59, generatable: 12 });
+  assert.deepEqual(receipt.inventory.nodes, { total: 79, executable: 60, generatable: 12 });
   assert.deepEqual(receipt.inventory.runtime, {
     llm: 34,
     image: 42,
-    video: 113,
+    video: 114,
     audio: 16,
     actions: 47,
   });
@@ -416,11 +416,11 @@ test('dynamic coverage receipt proves node, runtime, handler, risk, verification
   assert.doesNotThrow(() => assertCapabilityCoverageReceipt(graph));
   const markdown = coverageMarkdownArtifact(graph);
   assert.equal(
-    markdown.includes('Dynamic node inventory (total / executable / generatable): **78 / 59 / 12**'),
+    markdown.includes('Dynamic node inventory (total / executable / generatable): **79 / 60 / 12**'),
     true,
   );
   assert.equal(
-    markdown.includes('Dynamic runtime inventory (LLM / image / video / audio / actions): **34 / 42 / 113 / 16 / 47**'),
+    markdown.includes('Dynamic runtime inventory (LLM / image / video / audio / actions): **34 / 42 / 114 / 16 / 47**'),
     true,
   );
 
@@ -487,11 +487,26 @@ test('generated CLI and Skill capability indexes have no drift from the single m
   const runtimeCatalog = buildRuntimeCatalog();
   const graph = buildCapabilityGraph({ manifest, manifestDigest: digest, runtimeCatalog });
   const expectedGraph = graphArtifact(graph);
-  assert.deepEqual(canonicalTextBytes(fs.readFileSync(JSON_TARGET)), canonicalTextBytes(jsonArtifact(manifest, digest, graph)));
-  assert.deepEqual(canonicalTextBytes(fs.readFileSync(MARKDOWN_TARGET)), canonicalTextBytes(markdownArtifact(manifest, digest)));
-  assert.deepEqual(canonicalTextBytes(fs.readFileSync(GRAPH_BACKEND_TARGET)), canonicalTextBytes(expectedGraph));
-  assert.deepEqual(canonicalTextBytes(fs.readFileSync(GRAPH_CLI_TARGET)), canonicalTextBytes(expectedGraph));
-  assert.deepEqual(canonicalTextBytes(fs.readFileSync(GRAPH_MARKDOWN_TARGET)), canonicalTextBytes(coverageMarkdownArtifact(graph)));
+  assert.equal(
+    fs.readFileSync(JSON_TARGET, 'utf8'),
+    jsonArtifact(manifest, digest, graph),
+  );
+  assert.equal(
+    fs.readFileSync(MARKDOWN_TARGET, 'utf8'),
+    markdownArtifact(manifest, digest),
+  );
+  assert.equal(
+    fs.readFileSync(GRAPH_BACKEND_TARGET, 'utf8'),
+    expectedGraph,
+  );
+  assert.equal(
+    fs.readFileSync(GRAPH_CLI_TARGET, 'utf8'),
+    expectedGraph,
+  );
+  assert.equal(
+    fs.readFileSync(GRAPH_MARKDOWN_TARGET, 'utf8'),
+    coverageMarkdownArtifact(graph),
+  );
   assert.equal(publicCreativeCapabilities().capabilityGraph.aggregateDigest, graph.aggregateDigest);
 });
 
@@ -558,21 +573,14 @@ test('Agent tools, CLI schema, Skill reference and UI actions are generated from
     uiActions: 31,
   });
   assert.equal(surfaces.capabilityManifestVersion, manifest.version);
-  assert.deepEqual(
-    canonicalTextBytes(fs.readFileSync(COMMAND_CATALOG_TARGET)),
-    canonicalTextBytes(commandCatalogArtifact(catalog)),
-  );
+  assert.equal(fs.readFileSync(COMMAND_CATALOG_TARGET, 'utf8'), commandCatalogArtifact(catalog));
   for (const target of [
     SURFACES_BACKEND_TARGET,
     SURFACES_CLI_TARGET,
     SURFACES_UI_TARGET,
     SURFACES_SKILL_TARGET,
   ]) {
-    assert.deepEqual(
-      canonicalTextBytes(fs.readFileSync(target)),
-      canonicalTextBytes(surfaceArtifact),
-      `surface drift at ${target}`,
-    );
+    assert.equal(fs.readFileSync(target, 'utf8'), surfaceArtifact, `surface drift at ${target}`);
   }
 
   const sourceCatalog = JSON.parse(fs.readFileSync(COMMAND_CATALOG_SOURCE, 'utf8'));
