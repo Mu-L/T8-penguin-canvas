@@ -1053,41 +1053,41 @@
   },
   "release": {
     "status": "published-stable-latest",
-    "version": "2.9.4",
-    "date": "2026-08-17",
-    "publishedAt": "2026-08-16T16:31:12Z",
-    "tag": "v2.9.4",
+    "version": "2.9.5",
+    "date": "2026-08-18",
+    "publishedAt": "2026-08-18T06:03:06Z",
+    "tag": "v2.9.5",
     "latest": true,
-    "sourceCommit": "82be2fbef53e507bf072fb5663a89df6d9f9d745",
+    "sourceCommit": "969682d425e66fb50f3452ece139aa1959e005e1",
     "draft": false,
     "prerelease": false,
     "githubImmutable": false,
-    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.4",
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.5",
     "artifacts": {
       "installer": {
-        "name": "T8-PenguinCanvas-Setup-2.9.4.exe",
-        "size": 1354089563,
-        "sha256": "5337d1661433075fcbc52bd41393c53a143ff351cd3b92afebf7584f379ac80e",
-        "sha512": "twiuHywGAjMOlZAWksUmlTes9y5C/3H/r2kfCxTMj2/+5Qv93FX7AIG2xMVQBi48TpTsh+r/QABSN/KmVp0JtA=="
+        "name": "T8-PenguinCanvas-Setup-2.9.5.exe",
+        "size": 1354124051,
+        "sha256": "e4990b34d24fd6806fd492ff1fd2026c123614f5f5af28c10d47e4dfe1b957cb",
+        "sha512": "xevCQOPzTWjBgikQn31VNqMHrBmASpbXZ5/WRgWsMZRb/7zqsG6Omb9AVTK41zlvrgijspmz+Eg0xQ/QO04nPA=="
       },
       "blockmap": {
-        "name": "T8-PenguinCanvas-Setup-2.9.4.exe.blockmap",
-        "size": 1413103,
-        "sha256": "59976a8d2e1800178c42a3c8353bc4ab49a463c8151af32b5e22464e36b32178"
+        "name": "T8-PenguinCanvas-Setup-2.9.5.exe.blockmap",
+        "size": 1413024,
+        "sha256": "9696aedbab25d8e0824226b46c1a3142e219d7d0bc237986b73cac268d0dfed6"
       },
       "updateManifest": {
         "name": "latest.yml",
         "size": 362,
-        "sha256": "a823d3ec2bf61c84b10dec2f2e70c27d594027dbf2bf8bd7b7062e67cc1e0eba"
+        "sha256": "afa845f034fae4a5464f7bfe33fc6d12e0be51d3eb4885b325fd53573781eb99"
       }
     },
     "verification": [
-      "v2.9.4 在完整保留 v2.9.3 MiniMax Music3 官方 Skill 快照和 v2.9.2 启动优化的基础上，正式加入 zhenzhen/gk-4.6、qwen/qwen3.8-max，并修复 GitHub Issues #12、#20、#21、#22、#23；不回退既有节点、默认渠道、旧画布、工作流或 Provider 协议。",
-      "固定 source commit 82be2fbef53e507bf072fb5663a89df6d9f9d745 已完成唯一 Electron/NSIS 正式流程：TypeScript、2888 模块私有构建、157 个后端源与 4 个本机私有文件加密、双运行时归档、Electron 原生模块重建、post-build、provenance、sealed recovery、固定 Tag/target 和 Latest 全部通过。",
-      "MiniMax Music3 安装内容继续由 1022/1022 文件、1000 个模板、18 个索引、SOURCE/NOTICE/manifest 与规范化树 SHA-256 d836359b48a4bc3381f8d9eb370ff90dd82cb5ad9aa4e3ba0ed80da2c25b2553 固定保护。",
-      "三项自动更新资产在发布前由 sealed recovery 完整回下载，并与本地实际字节、SHA-256、installer SHA-512 及 GitHub digest/size 一致；正式 Release 为非草稿、非预发布并成为 GitHub Latest。",
+      "v2.9.5 新增 FashVSR 视频超分节点并按官方合同真实跑通一次，Seedance 2.5 国内/Global 六模型新增 native1080p；既有默认渠道、默认模型、旧画布与工作流不回退。",
+      "MiniMax Music3 已随 v2.9.3 正式发布，v2.9.5 安装包继续完整包含其节点、工作流、官方固定 Skill 快照、1022 个上游文件、18 个索引、1000 个模板及规范化树 SHA-256 d836359b48a4bc3381f8d9eb370ff90dd82cb5ad9aa4e3ba0ed80da2c25b2553。",
+      "固定 source commit 969682d425e66fb50f3452ece139aa1959e005e1 已完成唯一 Electron/NSIS 正式流程：TypeScript、2904 模块私有构建、157 个后端源与 4 个本机私有文件加密、双运行时归档、Electron 原生模块重建、post-build、provenance、sealed recovery、固定 Tag/target 和 Latest 全部通过。",
+      "三项自动更新资产已完成发布前与独立发布后的完整回下载，并与本地实际字节、SHA-256、installer SHA-512 及 GitHub digest/size 一致；正式 Release 为非草稿、非预发布并成为 GitHub Latest。",
       "为避免本机 7-Zip 高并发导致系统不稳定，最终正式打包进程使用单核亲和性、BelowNormal 优先级与 ELECTRON_BUILDER_COMPRESSION_LEVEL=0；仅降低构建资源占用，所有安装内容、post-build 与远端资产校验保持不变。",
-      "用户已明确授权先发布、后补反馈用户安装环境、协作多端及安装升级证据；协作证据门只允许完全缺失的清单按 owner-approved-post-release-v2.9.4 延期，不能把延期标记为已通过，任何技术门禁失败均不可延期。"
+      "用户已明确授权先发布、后补反馈用户安装环境、协作多端及安装升级证据；协作证据门只允许完全缺失的清单按 owner-approved-post-release-v2.9.5 延期，不能把延期标记为已通过，任何技术门禁失败均不可延期。"
     ]
   },
   "versionSequencePolicy": {
