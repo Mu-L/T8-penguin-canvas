@@ -1,9 +1,9 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.9.7",
-  "lastUpdated": "2026-08-20-v2.9.7-release-ready",
+  "lastUpdated": "2026-08-20-v2.9.7-released",
   "canvasCatalogMetadataCanonicalRecovery": {
-    "status": "release-ready-v2.9.7-regression-verified",
+    "status": "released-v2.9.7-regression-verified",
     "date": "2026-08-20",
     "releaseIncluded": true,
     "affectedVersions": [
@@ -1129,22 +1129,40 @@
     ]
   },
   "release": {
-    "status": "release-authorized-not-yet-published",
+    "status": "published-stable-latest",
     "version": "2.9.7",
     "date": "2026-08-20",
-    "publishedAt": null,
+    "publishedAt": "2026-08-20T04:53:29Z",
     "tag": "v2.9.7",
-    "latest": false,
-    "sourceCommit": null,
+    "latest": true,
+    "sourceCommit": "494d5c4d88ee356150a3a5dfa66e77d83ec6edec",
     "draft": false,
     "prerelease": false,
     "githubImmutable": false,
     "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.7",
-    "artifacts": null,
+    "artifacts": [
+      {
+        "name": "T8-PenguinCanvas-Setup-2.9.7.exe",
+        "bytes": 1354129105,
+        "sha256": "e90973df761bb83a0006cff146433cea0ce929b6966457b9a4e274895f6dbc66",
+        "sha512": "T2CZa2EvcoF04q69+3NcZqmJKcKdzjtf6PspOXKe2hvUDYTwa9seVjBPeemPdOtoZApH8l6dkXznFSXVEQEqmA=="
+      },
+      {
+        "name": "T8-PenguinCanvas-Setup-2.9.7.exe.blockmap",
+        "bytes": 1413441,
+        "sha256": "aea0604cc63a05cc642c3db6a65fd9769594125e5a5cf2dbcbcf4838bac943c6"
+      },
+      {
+        "name": "latest.yml",
+        "bytes": 362,
+        "sha256": "af306513d085c917a7bd78c38054ef08aa2627a14cd31eba0e6f4555319b28c2"
+      }
+    ],
     "verification": [
       "项目数据库目录元数据修复覆盖未来 canonical 写入与 v2.9.2-v2.9.6 精确旧漂移的只读启动兼容；非匹配损坏仍失败关闭。",
-      "v2.9.6 的 FlashVSR、Seedance 2.5 native1080p、MiniMax Music3、全部 79 个节点、默认渠道、默认模型、旧画布与既有工作流继续完整保留。",
-      "正式 Electron/NSIS、私有扩展、加密、运行时、provenance、sealed recovery、固定 Tag/target、三资产完整回下载和 Latest 门禁仍须全部通过。",
+      "目录专项 10/10、typed canonical 2/2、项目数据库基础 39/39、协作延期门 4/4、Electron/更新/运行时合同 20/20、TypeScript、2,904 模块私有构建与 79/79 节点同步通过。",
+      "固定源码通过 157 个后端源文件及四个本机私有文件加密、两套运行时归档完整验证、Electron native rebuild、NSIS、post-build、provenance、sealed recovery、固定 Tag/target、发布前三资产完整回下载和发布后 Latest/远端 digest/size 门禁；本地 recovery 已清除。",
+      "GitHub Release 非草稿、非预发布并为 Latest；三项远端资产大小和 SHA-256 与本地正式产物一致。GitHub 仓库级 immutable release 未启用，因此继续依赖发布器的精确所有权和禁止覆盖门禁。",
       "用户明确授权先发布、后补反馈用户安装环境、协作多端及安装升级证据；仅允许 owner-approved-post-release-v2.9.7 精确延期，延期不等于通过。"
     ]
   },
