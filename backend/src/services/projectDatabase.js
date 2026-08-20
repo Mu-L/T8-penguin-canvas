@@ -1498,6 +1498,23 @@ function inspectProjectDatabaseTypedCanonicalViolations(database) {
     && value === value.toLowerCase()
     && isUuid(value)
   );
+  const isKnownCanvasCatalogMetadataUpdatedAtDrift = (row, document) => {
+    const rowUpdatedAt = Number(row.updated_at);
+    const documentUpdatedAt = Number(document.updatedAt);
+    return Number.isSafeInteger(rowUpdatedAt)
+      && Number.isSafeInteger(documentUpdatedAt)
+      && documentUpdatedAt >= 0
+      && documentUpdatedAt < rowUpdatedAt
+      && Object.prototype.hasOwnProperty.call(document, 'name')
+      && typeof document.name === 'string'
+      && document.name.length > 0
+      && document.name.length <= 240
+      && Object.prototype.hasOwnProperty.call(document, 'nodeCount')
+      && Number.isSafeInteger(document.nodeCount)
+      && document.nodeCount >= 0
+      && Array.isArray(document.nodes)
+      && document.nodeCount === document.nodes.length;
+  };
 
   for (const row of database.prepare(`
     SELECT canvas_id, project_id, schema_version, revision, snapshot_json, updated_at
@@ -1527,7 +1544,13 @@ function inspectProjectDatabaseTypedCanonicalViolations(database) {
     if (!Number.isSafeInteger(document.revision) || document.revision !== Number(row.revision)) {
       mark('canvas_documents', 'snapshot_json.revision');
     }
-    if (!Number.isSafeInteger(document.updatedAt) || document.updatedAt !== Number(row.updated_at)) {
+    if ((!Number.isSafeInteger(document.updatedAt) || document.updatedAt !== Number(row.updated_at))
+      // v2.9.2-v2.9.6 catalog-only rename writes advanced the SQL row
+      // timestamp after persisting name/nodeCount but omitted the matching JSON
+      // updatedAt. Accept only that exact legacy signature without mutating the
+      // database during startup; getCanvas() already treats the row timestamp
+      // as authoritative and the next real write persists canonical JSON.
+      && !isKnownCanvasCatalogMetadataUpdatedAtDrift(row, document)) {
       mark('canvas_documents', 'snapshot_json.updatedAt');
     }
   }
@@ -17879,6 +17902,7 @@ class ProjectDatabase {
         ...snapshot,
         name,
         nodeCount,
+        updatedAt,
       };
       const updated = this.db.prepare(`
         UPDATE canvas_documents

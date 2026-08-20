@@ -1,7 +1,36 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.9.6",
-  "lastUpdated": "2026-08-18-v2.9.6-released",
+  "version": "2.9.7",
+  "lastUpdated": "2026-08-20-v2.9.7-release-ready",
+  "canvasCatalogMetadataCanonicalRecovery": {
+    "status": "release-ready-v2.9.7-regression-verified",
+    "date": "2026-08-20",
+    "releaseIncluded": true,
+    "affectedVersions": [
+      "2.9.2",
+      "2.9.3",
+      "2.9.4",
+      "2.9.5",
+      "2.9.6"
+    ],
+    "symptom": "画布目录重命名后，升级或再次启动可能提示项目数据库 typed canonical JSON 不变量校验失败。",
+    "rootCause": "目录元数据写入器更新 SQL canvas_documents.updated_at 时，只把 name 与 nodeCount 写回 snapshot_json，遗漏同步 JSON updatedAt。",
+    "correction": [
+      "今后的目录元数据写入把同一个 updatedAt 同时持久化到 SQL 行和画布 JSON，保证当前 schema 的 typed canonical 不变量。",
+      "冷启动只兼容 SQL 时间严格更新、JSON 时间仍合法且更旧、name 合法非空且 nodeCount 精确等于 nodes.length 的已知旧签名。",
+      "兼容读取不会在启动时静默改写用户数据库；getCanvas 继续使用 SQL 行时间作为既有权威值，下一次真实写入才自然持久化 canonical JSON。",
+      "任何不匹配的 updatedAt、nodeCount 或其他 canonical 损坏仍失败关闭。"
+    ],
+    "verification": [
+      "专项回归覆盖新目录重命名写入后冷重开、v2.9.2-v2.9.6 精确旧漂移只读重开，以及非匹配 nodeCount 损坏继续失败关闭。",
+      "测试数据库只创建于系统临时目录并在用例结束后清理；未读取、复制或修改任何用户保留项目数据库。",
+      "固定发布源码还必须通过相邻项目数据库回归、TypeScript、发布合同、私有构建与 Electron/NSIS 全部技术门禁。"
+    ],
+    "boundaries": [
+      "该兼容不是通用数据库修复器，不放宽 schema、身份、revision 或其他 typed canonical 校验。",
+      "反馈用户安装、多设备协作与安装升级证据按 owner-approved-post-release-v2.9.7 后补；延期不等于通过，技术门禁不可延期。"
+    ]
+  },
   "flashVsrModelNameCorrection": {
     "status": "released-v2.9.6-live-verified",
     "date": "2026-08-18",
@@ -1100,47 +1129,29 @@
     ]
   },
   "release": {
-    "status": "published-stable-latest",
-    "version": "2.9.6",
-    "date": "2026-08-18",
-    "publishedAt": "2026-08-18T14:21:09Z",
-    "tag": "v2.9.6",
-    "latest": true,
-    "sourceCommit": "dce1adf081893f290b65c3be1f14b0f150e46a1f",
+    "status": "release-authorized-not-yet-published",
+    "version": "2.9.7",
+    "date": "2026-08-20",
+    "publishedAt": null,
+    "tag": "v2.9.7",
+    "latest": false,
+    "sourceCommit": null,
     "draft": false,
     "prerelease": false,
     "githubImmutable": false,
-    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.6",
-    "artifacts": [
-      {
-        "name": "T8-PenguinCanvas-Setup-2.9.6.exe",
-        "bytes": 1354114810,
-        "sha256": "bc2670b47d3065e4be6a95a01ff0063b491ed7481897ffd6276ac3e882d58c04",
-        "sha512": "QdLywACOCKlCImC3WRZ3XUMaA3FI7sElHNRcjc2iwJ/FJXPXO5pORg1armGTSAdpqy74XAy5myYnMRJCWbiE3A=="
-      },
-      {
-        "name": "T8-PenguinCanvas-Setup-2.9.6.exe.blockmap",
-        "bytes": 1413270,
-        "sha256": "ee1647565e22aa9cc68479908e9a84054e3a305f5042f410afd9a6cc8d9f8b49"
-      },
-      {
-        "name": "latest.yml",
-        "bytes": 362,
-        "sha256": "03b998ab76ee7fbe4eee649567522f269ccb974b283c098117605cefaf070c6b"
-      }
-    ],
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.7",
+    "artifacts": null,
     "verification": [
-      "FlashVSR_video_upscale 已真实提交一次并完成下载、FFprobe 与全量解码；旧 FashVSR_video_upscale 只作为历史画布兼容输入。",
-      "MiniMax Music3 已随 v2.9.3 正式发布，v2.9.6 正式包继续完整包含其节点、工作流、官方固定 Skill 快照、1,022 个上游文件、18 个索引和 1,000 个模板。",
-      "固定源码通过 Electron/NSIS、私有扩展、157 个后端源文件加密、四个本地私有文件加密、两套运行时归档、post-build、provenance、sealed recovery、固定 Tag/target、发布前三资产完整回下载和发布后 Latest/远端 digest/size 门禁；本地 recovery 已清除。",
-      "GitHub Release 非草稿、非预发布并为 Latest；三项远端资产大小和 SHA-256 与本地正式产物一致。GitHub 仓库级 immutable release 未启用，因此继续依赖发布器的精确所有权和禁止覆盖门禁。",
-      "用户明确授权先发布、后补反馈用户安装环境、协作多端及安装升级证据；仅允许 owner-approved-post-release-v2.9.6 精确延期，延期不等于通过。"
+      "项目数据库目录元数据修复覆盖未来 canonical 写入与 v2.9.2-v2.9.6 精确旧漂移的只读启动兼容；非匹配损坏仍失败关闭。",
+      "v2.9.6 的 FlashVSR、Seedance 2.5 native1080p、MiniMax Music3、全部 79 个节点、默认渠道、默认模型、旧画布与既有工作流继续完整保留。",
+      "正式 Electron/NSIS、私有扩展、加密、运行时、provenance、sealed recovery、固定 Tag/target、三资产完整回下载和 Latest 门禁仍须全部通过。",
+      "用户明确授权先发布、后补反馈用户安装环境、协作多端及安装升级证据；仅允许 owner-approved-post-release-v2.9.7 精确延期，延期不等于通过。"
     ]
   },
   "versionSequencePolicy": {
     "status": "active",
     "date": "2026-07-30",
-    "currentVersion": "2.9.6",
+    "currentVersion": "2.9.7",
     "rules": [
       "版本号每一段只使用 0-9；v2.6.9 的下一正式版本固定为 v2.7.0。",
       "禁止创建、打包、推送、打 tag、发布或写入自动更新元数据为 v2.6.10。",
@@ -1169,6 +1180,7 @@
       "v2.9.3 的下一正式版本固定为 v2.9.4。",
       "v2.9.4 的下一正式版本固定为 v2.9.5。",
       "v2.9.5 的下一正式版本固定为 v2.9.6。",
+      "v2.9.6 的下一正式版本固定为 v2.9.7。",
       "后续改版本前必须同步核对 package.json、package-lock.json、README、features.json、项目 SKILL.md、Release notes、自动更新元数据和 Git tag。"
     ]
   },
