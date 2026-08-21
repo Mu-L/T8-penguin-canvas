@@ -2,7 +2,17 @@
 
 正式 Electron/GitHub Release 现在要求一份与版本和 40 位源码提交精确绑定的 `t8-collaboration-release-evidence-v2` 清单。v2 不再接受“客户端数量/设备数量”的自报汇总；缺少真实双设备、独立客户端、公网、红队或负载证据时，发布入口会在构建和上传之前失败。`--dry-run` 仍保持不发布用途。
 
-## v2.6.4 一次性先发布后补证据例外
+## v2.9.7 一次性先发布后补证据例外
+
+2026-08-20 用户明确授权 v2.9.7 先发布自动更新包，再补真实 F8-F10、反馈用户安装与安装升级证据。仅当清单文件完全不存在、版本精确为 2.9.7、发布目标是固定 40 位 SHA，且同时设置 T8_COLLAB_RELEASE_EVIDENCE_DEFERRAL=owner-approved-post-release-v2.9.7 时，正式发布器允许继续。该例外不会生成检查数、不会把任何项目标记为 passed；所有构建、测试、摘要、固定 Tag/target、自动更新资产和完整远端下载技术门禁仍必须通过。
+
+## 历史一次性例外
+
+2026-08-18 用户明确授权 v2.9.6 先发布自动更新包，再补真实 F8-F10、反馈用户安装与安装升级证据。仅当清单文件完全不存在、版本精确为 2.9.6、发布目标是固定 40 位 SHA，且同时设置 T8_COLLAB_RELEASE_EVIDENCE_DEFERRAL=owner-approved-post-release-v2.9.6 时，正式发布器允许继续。该例外不会生成检查数、不会把任何项目标记为 passed；所有构建、测试、摘要、固定 Tag/target、自动更新资产和完整远端下载技术门禁仍必须通过。
+
+2026-08-18 用户明确授权 v2.9.5 先发布自动更新包，再补真实 F8-F10、反馈用户安装与安装升级证据。仅当清单文件完全不存在、版本精确为 `2.9.5`、发布目标是固定 40 位 SHA，且同时设置 `T8_COLLAB_RELEASE_EVIDENCE_DEFERRAL=owner-approved-post-release-v2.9.5` 时，正式发布器允许继续。该例外不会生成检查数、不会把任何项目标记为 `passed`，Release notes 与 `features.json` 必须继续写明证据待补；所有构建、测试、摘要、固定 Tag/target、自动更新资产和完整远端下载技术门禁仍必须通过。
+
+2026-08-15 用户明确授权 v2.9.3 先发布自动更新包，再补真实 F8-F10、反馈用户安装与安装升级证据。仅当清单文件完全不存在、版本精确为 2.9.3、发布目标是固定 40 位 SHA，且同时设置 T8_COLLAB_RELEASE_EVIDENCE_DEFERRAL=owner-approved-post-release-v2.9.3 时，正式发布器允许继续。该例外不会生成检查数、不会把任何项目标记为 passed，Release notes 与 features.json 必须继续写明证据待补；所有构建、测试、摘要、固定 Tag/target、自动更新资产和完整远端下载技术门禁仍必须通过。
 
 2026-08-18 用户明确授权 v2.9.5 先发布自动更新包，再补真实 F8-F10、反馈用户安装与安装升级证据。仅当清单文件完全不存在、版本精确为 `2.9.5`、发布目标是固定 40 位 SHA，且同时设置 `T8_COLLAB_RELEASE_EVIDENCE_DEFERRAL=owner-approved-post-release-v2.9.5` 时，正式发布器允许继续。该例外不会生成检查数、不会把任何项目标记为 `passed`；所有技术门禁仍必须通过。正式发布已完成，环境证据仍待后补。
 

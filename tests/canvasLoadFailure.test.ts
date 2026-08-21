@@ -82,4 +82,3 @@ test('Canvas keeps failed loads non-editable and exposes an explicit retry', () 
   assert.match(source, /hasCanvasWriteAuthority\(\{/);
   assert.match(source, /const putBaseRevision = requireAuthoritativeCanvasRevision/);
 });
-

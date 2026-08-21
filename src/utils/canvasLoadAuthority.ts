@@ -27,4 +27,3 @@ export function hasCanvasWriteAuthority(input: CanvasWriteAuthority): boolean {
     && authoritativeCanvasRevision(input.revision) !== null
   );
 }
-

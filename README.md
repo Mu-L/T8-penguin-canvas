@@ -10,13 +10,13 @@ https://www.runninghub.cn/?inviteCode=rh-v1121
 My favorite girl Go YounJung
 # 🐧 贞贞的无限画布（企鹅共创版） · T8-penguin-canvas
 
-> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.9.6
+> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.9.7
 >
 > GitHub：<https://github.com/T8mars/T8-penguin-canvas>
 
 一个面向 AI 创作的 **节点式画布**：拖拽节点、连线编排、生成图像 / 视频 / 音频、调用 LLM、串接 RunningHub 工作流，叠加批量执行、智能对齐、打组、主题模板与终端日志。Web 浏览器和桌面端均可使用。
 
-![status](https://img.shields.io/badge/version-v2.9.6-brightgreen) ![node](https://img.shields.io/badge/node-79-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
+![status](https://img.shields.io/badge/version-v2.9.7-brightgreen) ![node](https://img.shields.io/badge/node-79-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
 
 ---
 
@@ -36,10 +36,11 @@ My favorite girl Go YounJung
 ## ✨ 功能亮点
 
 - 🎨 **79 个节点**，覆盖文本 / 图像 / 视频 / 音频 / LLM / RunningHub / ComfyUI / 3D / 工具 / 辅助 / 工具箱 / 输出预览 / 上传素材 / 素材集 / 批量打标 / 随机路由 / Story 全自动制片 / 剧本大师 / MiniMax H3 / MiniMax Music3 / Seedance 2.0 提示词增强器 / MiniMax H3 官方提示词增强器 / Seedance 2.5 / FlashVSR 视频超分 / 白模预演 / MV 音乐大师
-- 🎞️ **[v2.9.5 FlashVSR 与 Seedance 2.5 原生 1080P 自动更新版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.5)**：新增独立 `FlashVSR 视频超分` 节点并真实跑通，Seedance 2.5 国内/Global 六模型增加官方 `native1080p`。MiniMax Music3 已随 v2.9.3 正式发布，本版继续完整包含其节点、工作流、官方固定 Skill 快照、1,022 个上游文件、18 个索引和 1,000 个模板。
-- 📝 **FlashVSR 名称勘误（v2.9.6 已发布）**：公开模型名已统一为 `FlashVSR_video_upscale`；v2.9.5 旧画布保存的拼写只作为兼容别名读取，并在上游提交前归一化。正式自动更新版见 [v2.9.6 Release](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.6)。
-- 🛠️ **[v2.9.4 LLM 与用户反馈修复自动更新版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.4)**：新增 `zhenzhen/gk-4.6` 与 `qwen/qwen3.8-max`，并修复 ParseHub 同名素材、FFmpeg 7 尾帧、ComfyUI HED/输出节点/Seed/连线参数问题；Music3 与启动优化完整保留。
-- 🎵 **[v2.9.3 MiniMax Music3 提示词增强自动更新版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.3)**：已发布为 GitHub Latest。新增纯文本音乐前期策划节点，支持歌词生成、逐字保留、指定段落润色、纯音乐、结构/语言/BPM/拍号/调性/时长与 Caption 规划；默认继续使用贞贞的平价AI小屋 `bytedance/doubao-seed-2.1-pro`，并支持现有全部已启用扩展 LLM 渠道。安装包已实测包含固定的 MiniMax 官方 Music 3 Skill 快照（1,022 上游文件、18 个风格族索引、1,000 个模板，以及 SOURCE/NOTICE/manifest），按渐进披露每次只读取有限参考；来源提交和树哈希可核验。既有 v2.9.2 启动优化、节点、默认值和旧画布均不回退。
+- 🧰 **[v2.9.7 项目数据库启动兼容修复版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.7)**：修复 v2.9.2–v2.9.6 在画布目录重命名后可能留下 SQL `updated_at` 与画布 JSON `updatedAt` 不一致、导致升级后冷启动被 typed canonical 校验拦截的问题。新写入保持两处时间一致；历史受影响项目仅对该精确旧签名兼容读取，启动时不静默改写数据库，其他 canonical 损坏仍失败关闭。
+- ⚡ **[v2.9.6 FlashVSR 名称修正自动更新版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.6)**：节点、模型目录、默认值和无密钥工作流统一显示并提交 `FlashVSR_video_upscale`；v2.9.5 已保存的 `FashVSR_video_upscale` 仍可载入，但提交前会规范化为新名称。新拼写已真实完成一次 854×480 到 1920×1024 的同任务生成、下载、FFprobe 和全量解码。MiniMax Music3 继续完整包含，不是待补功能。
+- 🎞️ **[v2.9.5 视频超分与 Seedance 2.5 原生 1080P 自动更新版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.5)**：新增独立视频超分节点，对一个 480P、3–15 秒视频执行受控上传、同任务查询、本地下载与完整解码；该版的旧模型拼写已由 v2.9.6 兼容修正为 `FlashVSR_video_upscale`。Seedance 2.5 国内/Global 六模型新增官方 `native1080p` 选项，MiniMax Music3 继续完整保留。
+- 🛠️ **[v2.9.4 LLM 与用户反馈修复自动更新版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.4)**：贞贞的平价AI小屋 LLM / Vision 新增 `zhenzhen/gk-4.6` 与 `qwen/qwen3.8-max`；修复 ParseHub 嵌套目录同名素材覆盖、FFmpeg 7 尾帧截取空结果、ComfyUI `scheduler` 被误识别为 HED、输出节点不可选择、Seed 随机/固定缺失以及已连线宽高/Seed 被默认值覆盖。MiniMax Music3 提示词增强器、官方固定 Skill 快照、v2.9.2 启动优化及全部既有节点、默认模型、默认渠道和旧画布完整保留。
+- 🎵 **[v2.9.3 MiniMax Music3 提示词增强自动更新版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.3)**：新增纯文本音乐前期策划节点，支持歌词生成、逐字保留、指定段落润色、纯音乐、结构/语言/BPM/拍号/调性/时长与 Caption 规划；默认继续使用贞贞的平价AI小屋 `bytedance/doubao-seed-2.1-pro`，并支持现有全部已启用扩展 LLM 渠道。安装包包含固定的 MiniMax 官方 Music 3 Skill 快照（1,022 上游文件、18 个风格族索引、1,000 个模板，以及 SOURCE/NOTICE/manifest），按渐进披露每次只读取有限参考；来源提交和树哈希可核验。
 - ⚡ **[v2.9.2 画布启动与资源性能自动更新版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.2)**：已发布为 GitHub Latest。Electron 先显示可操作启动壳，后端数据库与维护任务按需加载；画布目录改为 50 项游标分页和窗口化，损坏索引渐进恢复。画布 hydration、视口、主题 CSS 与媒体加载均按需执行，跨画布后台运行以 canvasId + entityUid + revision CAS 隔离，避免同 ID 节点串写或结果丢失。隔离开发态 5000 项目录冷启动 959.1ms、刷新 464.9ms、侧栏 DOM 14 行；这不是安装版或所有用户环境保证。
 - 🎬🎵 **v2.9.1 MiniMax H3 OW Fast 音频驱动扩展版**：Hailuo TAB 新增 `minimax-h3-ow-ref2va-audio-drive-fast`、`minimax-h3-ow-fl2va-audio-drive-fast` 与 `minimax-h3-ow-t2v-fast`。两个音频驱动模型严格接收 1 图 + 1 音频，T2V Fast 只接收必填提示词；三者支持 5/10/15 秒、480p/720p 与八种比例。三个模型均已各真实提交一次、成功下载并完整解码，三份配套工作流不含凭据，既有默认模型、默认渠道和旧画布保持不变。
 - 🎨🎵 **v2.9.0 平价 AI 小屋图像与音频扩展版**：图像节点新增 Grok `zhenzhen-image-gk-v2` 与 Wan Image 三模型；音频节点新增 Qwen3-TTS、MiniMax 和 Mureka 三个 TAB、八个模型。12 个模型均已真实提交并成功，13 个媒体结果全部下载解码；Mureka V9 的两个有序音频输出完整保留。12 份配套工作流不含凭据，既有默认渠道、默认模型和旧画布保持不变。
