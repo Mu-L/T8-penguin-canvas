@@ -47,7 +47,7 @@ const uploadFetch = async (_url: string, init?: RequestInit) => {
 test('Seedance 2.5 exposes the exact six-model catalog on both standalone and Video surfaces', () => {
   assert.deepEqual(SEEDANCE25_MODEL_OPTIONS.map((item) => item.value), MODELS);
   assert.deepEqual(SEEDANCE25_VIDEO_MODELS, MODELS);
-  assert.deepEqual(SEEDANCE25_RESOLUTION_OPTIONS, ['480p', '720p', '1080p', '2k', '4k']);
+  assert.deepEqual(SEEDANCE25_RESOLUTION_OPTIONS, ['480p', '720p', '1080p', '2k', '4k', 'native1080p']);
   assert.deepEqual(
     [SEEDANCE25_MULTI_MAX_IMAGES, SEEDANCE25_MULTI_MAX_VIDEOS, SEEDANCE25_MULTI_MAX_AUDIOS, SEEDANCE25_MULTI_MAX_TOTAL],
     [30, 10, 10, 50],
@@ -228,6 +228,34 @@ test('Seedance 2.5 enforces updated media formats and physical duration limits b
     uploadIntervalMs: 0,
     seedance25DurationProbe: async () => durations.shift(),
   }), /总时长不得超过 30 秒/);
+});
+
+test('all six Seedance 2.5 Standard models accept native1080p and reject native4k', async () => {
+  for (const model of MODELS) {
+    provider.resetCachesForTests();
+    const mode = seedance25TaskType(model);
+    const request: Record<string, unknown> = {
+      model,
+      prompt: mode === 'i2v' ? '' : 'native resolution contract',
+      duration: 4,
+      ratio: 'adaptive',
+      resolution: 'native1080p',
+    };
+    if (mode === 'i2v') request.firstFrame = IMAGE;
+    if (mode === 'multi') request.refImages = [IMAGE];
+    const built = await provider.buildSeedance25Payload(request, 'test-key', {
+      fetchImpl: uploadFetch,
+      uploadIntervalMs: 0,
+    });
+    assert.equal(built.payload.metadata.resolution, 'native1080p', model);
+  }
+  await assert.rejects(provider.buildSeedance25Payload({
+    model: 'seedance-2.5-standard-t2v',
+    prompt: 'invalid native resolution',
+    duration: 4,
+    ratio: 'adaptive',
+    resolution: 'native4k',
+  }, 'test-key'), /不支持分辨率 native4k/);
 });
 
 test('all six Seedance 2.5 workflows are saved, key-free and model-correct', () => {

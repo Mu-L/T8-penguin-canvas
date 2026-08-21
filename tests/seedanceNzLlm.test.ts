@@ -32,11 +32,13 @@ const EXPECTED_MODELS = [
   'glm-5.2',
   'glm-5v-turbo',
   'minimax/minimax-m2.7',
+  'zhenzhen/gk-4.6',
   'qwen/qwen3.6-flash',
   'qwen/qwen3.6-max-preview',
   'qwen/qwen3.6-plus',
   'qwen/qwen3.7-max',
   'qwen/qwen3.7-plus',
+  'qwen/qwen3.8-max',
 ];
 
 const EMPTY_SETTINGS: ApiSettings = {
@@ -53,10 +55,12 @@ const EMPTY_SETTINGS: ApiSettings = {
   advancedProviders: [],
 };
 
-test('Seedance NZ LLM catalog is the exact verified 20-model allowlist', () => {
+test('Seedance NZ LLM catalog is the exact verified 22-model allowlist', () => {
   assert.deepEqual([...SEEDANCE_NZ_LLM_MODELS], EXPECTED_MODELS);
   assert.equal(DEFAULT_SEEDANCE_NZ_LLM_MODEL, 'bytedance/doubao-seed-2.0-mini');
   assert.equal(resolveSeedanceNzLlmModel('glm-5.2'), 'glm-5.2');
+  assert.equal(resolveSeedanceNzLlmModel('zhenzhen/gk-4.6'), 'zhenzhen/gk-4.6');
+  assert.equal(resolveSeedanceNzLlmModel('qwen/qwen3.8-max'), 'qwen/qwen3.8-max');
   assert.equal(resolveSeedanceNzLlmModel('not-in-catalog'), DEFAULT_SEEDANCE_NZ_LLM_MODEL);
 });
 
@@ -72,6 +76,8 @@ test('built-in LLM provider resolves the domestic key and rejects models outside
   assert.equal(domestic.apiKey, 'domestic-key');
   assert.equal(domestic.baseUrl, 'https://api.seedance.nz');
   assert.equal(domestic.modelAllowed, true);
+  assert.equal(resolve(settings, 'seedance-nz', 'zhenzhen/gk-4.6').modelAllowed, true);
+  assert.equal(resolve(settings, 'seedance-nz', 'qwen/qwen3.8-max').modelAllowed, true);
   assert.equal(resolve(settings, 'seedance-nz', 'unknown-model').modelAllowed, false);
 
   const defaultProvider = resolve(settings, 'zhenzhen', 'custom-model');
@@ -89,10 +95,10 @@ test('run authority records the selected domestic LLM provider and exact model',
       data: {
         llmApiSource: 'seedance-nz',
         providerSource: 'zhenzhen',
-        providerModel: 'qwen/qwen3.7-plus',
+        providerModel: 'qwen/qwen3.8-max',
       },
     }),
-    { provider: 'seedance-nz', model: 'qwen/qwen3.7-plus' },
+    { provider: 'seedance-nz', model: 'qwen/qwen3.8-max' },
   );
   assert.throws(
     () => runIntentAuthority.providerDeclarationForNode({

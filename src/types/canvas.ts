@@ -12,10 +12,12 @@ export type NodeType =
   | 'video-edit'
   | 'seedance'
   | 'seedance25'
+  | 'fashvsr-video-upscale'
   | 'director-storyboard'
   | 'story'
   | 'script-master'
   | 'minimax-h3-prompt-enhancer'
+  | 'minimax-music3-prompt-enhancer'
   | 'minimax-h3-official-prompt-enhancer'
   | 'seedance20-prompt-enhancer'
   | 'mv-music-master'
@@ -173,6 +175,7 @@ export interface AdvancedProviderConfig {
       workflowJson?: Record<string, any>;
       fields?: Array<{ nodeId: string; fieldName: string; source?: string; value?: any; options?: Array<string | number> }>;
       excludeRules?: string[];
+      outputNodeIds?: string[];
     }>;
   };
   jimengConfig?: {

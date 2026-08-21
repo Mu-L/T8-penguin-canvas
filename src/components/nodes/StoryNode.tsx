@@ -127,6 +127,8 @@ import {
 import { useUpdateNodeData } from './useUpdateNodeData';
 import { useUpstreamMaterials } from './useUpstreamMaterials';
 import SmartImage from '../SmartImage';
+import LazyAudio from '../LazyAudio';
+import LazyVideo from '../LazyVideo';
 import {
   advancedProviderModelOptions,
   advancedProvidersForNode,
@@ -1969,8 +1971,8 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
                 <div className="relative aspect-video bg-white/[0.03]">
                   {asset.url
                     ? asset.kind === 'audio'
-                      ? <div className="grid h-full place-items-center px-3"><audio src={asset.url} controls className="w-full" /></div>
-                      : <img src={asset.url} alt={asset.name} className={`h-full w-full object-cover transition duration-500 ${generating ? 'scale-[1.02] opacity-55' : ''}`} />
+                      ? <div className="grid h-full place-items-center px-3"><LazyAudio src={asset.url} controls className="w-full" /></div>
+                      : <SmartImage src={asset.url} alt={asset.name} thumbSize={720} className={`h-full w-full object-cover transition duration-500 ${generating ? 'scale-[1.02] opacity-55' : ''}`} />
                     : <div className="grid h-full place-items-center text-white/25"><PackageOpen size={30} /></div>}
                   {generating && <div className="absolute inset-0 grid place-items-center overflow-hidden bg-black/45 backdrop-blur-[1px]">
                     <span className="absolute h-24 w-24 animate-ping rounded-full border border-amber-300/20" />
@@ -2030,7 +2032,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
   );
 
   const renderVideosStage = () => (
-    <div className="min-h-0 flex-1 overflow-auto rounded-2xl border border-white/10 bg-white/[0.025] p-4"><div className="grid grid-cols-2 gap-3 xl:grid-cols-3">{project.shots.map((shot, index) => <article key={shot.id} className="overflow-hidden rounded-xl border border-white/10 bg-black/20"><div className="relative aspect-video bg-black">{shot.videoUrl ? <video src={shot.videoUrl} controls className="h-full w-full object-contain" /> : <div className="grid h-full place-items-center text-white/25">{ACTIVE_TASK_STATUSES.has(shot.status) ? <Loader2 className="animate-spin" /> : <Film />}</div>}<span className={`absolute right-2 top-2 rounded-full border px-2 py-1 text-[9px] ${statusTone(shot.status)}`}>{statusLabel(shot.status)}</span></div><div className="p-3"><div className="flex gap-2"><span className="text-[10px] text-white/35">#{index + 1}</span><strong className="min-w-0 flex-1 truncate text-xs text-white">{shot.title}</strong><span className="text-[10px] text-white/45">{shot.durationSec}s</span></div>{shot.error && <p className="mt-2 text-[10px] text-rose-300">{shot.error}</p>}</div></article>)}</div></div>
+    <div className="min-h-0 flex-1 overflow-auto rounded-2xl border border-white/10 bg-white/[0.025] p-4"><div className="grid grid-cols-2 gap-3 xl:grid-cols-3">{project.shots.map((shot, index) => <article key={shot.id} className="overflow-hidden rounded-xl border border-white/10 bg-black/20"><div className="relative aspect-video bg-black">{shot.videoUrl ? <LazyVideo src={shot.videoUrl} controls className="h-full w-full object-contain" /> : <div className="grid h-full place-items-center text-white/25">{ACTIVE_TASK_STATUSES.has(shot.status) ? <Loader2 className="animate-spin" /> : <Film />}</div>}<span className={`absolute right-2 top-2 rounded-full border px-2 py-1 text-[9px] ${statusTone(shot.status)}`}>{statusLabel(shot.status)}</span></div><div className="p-3"><div className="flex gap-2"><span className="text-[10px] text-white/35">#{index + 1}</span><strong className="min-w-0 flex-1 truncate text-xs text-white">{shot.title}</strong><span className="text-[10px] text-white/45">{shot.durationSec}s</span></div>{shot.error && <p className="mt-2 text-[10px] text-rose-300">{shot.error}</p>}</div></article>)}</div></div>
   );
 
   const composeRunning = ACTIVE_TASK_STATUSES.has(project.composeTaskStatus);
@@ -2041,7 +2043,7 @@ const StoryNode = ({ id, data, selected }: NodeProps) => {
     >
       <div className="w-full max-w-4xl text-center">
         {project.finalVideoUrl ? (
-          <video src={project.finalVideoUrl} controls className="mx-auto max-h-[58vh] w-full rounded-2xl bg-black shadow-2xl" />
+          <LazyVideo src={project.finalVideoUrl} controls className="mx-auto max-h-[58vh] w-full rounded-2xl bg-black shadow-2xl" />
         ) : (
           <div className={`mx-auto grid aspect-video max-w-3xl place-items-center rounded-2xl border border-dashed bg-black/20 ${project.composeTaskStatus === 'failed' ? 'border-rose-300/30' : composeRunning ? 'border-amber-300/30' : 'border-white/15'}`}>
             <div className={project.composeTaskStatus === 'failed' ? 'text-rose-200/80' : composeRunning ? 'text-amber-100/80' : 'text-white/30'}>

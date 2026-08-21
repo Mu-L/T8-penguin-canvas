@@ -69,6 +69,15 @@ const ComfyUIAppMakerNode = ({ id, data, selected }: NodeProps) => {
   const workflowRaw = String(d.comfyMakerWorkflowRaw || '');
   const workflowJson = useMemo(() => parseWorkflow(workflowRaw), [workflowRaw]);
   const analysis = useMemo(() => analyzeComfyWorkflow(workflowJson || null), [workflowJson]);
+  const availableOutputNodeIds = useMemo(() => analysis.outputNodes.map((item) => item.nodeId), [analysis.outputNodes]);
+  const selectedOutputNodeIds = useMemo(() => {
+    if (!Array.isArray(d.comfyMakerOutputNodeIds)) return availableOutputNodeIds;
+    const available = new Set(availableOutputNodeIds);
+    const selected: string[] = [...new Set<string>(d.comfyMakerOutputNodeIds
+      .map((nodeId: unknown) => String(nodeId))
+      .filter((nodeId: string) => available.has(nodeId)))];
+    return selected.length ? selected : availableOutputNodeIds;
+  }, [availableOutputNodeIds, d.comfyMakerOutputNodeIds]);
   const importChecklist = useMemo(() => buildComfyWorkflowImportChecklist(workflowJson || null, analysis), [workflowJson, analysis]);
   const excludeRulesRaw = String(d.comfyMakerExcludeRules || '');
   const excludeRules = useMemo(() => parseComfyFieldExcludeRules(excludeRulesRaw), [excludeRulesRaw]);
@@ -89,9 +98,10 @@ const ComfyUIAppMakerNode = ({ id, data, selected }: NodeProps) => {
         categoryId: d.comfyMakerCategoryId || categories[0]?.id || 'general',
         description: d.comfyMakerDescription || '',
         excludeRules,
+        outputNodeIds: selectedOutputNodeIds,
       })
       : null
-  ), [workflowJson, d.comfyMakerTitle, d.comfyMakerAppId, d.comfyMakerCategoryId, d.comfyMakerDescription, excludeRules, categories]);
+  ), [workflowJson, d.comfyMakerTitle, d.comfyMakerAppId, d.comfyMakerCategoryId, d.comfyMakerDescription, excludeRules, selectedOutputNodeIds, categories]);
   const app = useMemo(() => (
     rawApp
       ? { ...rawApp, userParams: rawApp.userParams.filter((param) => !hiddenParamKeySet.has(param.key)) }
@@ -137,7 +147,7 @@ const ComfyUIAppMakerNode = ({ id, data, selected }: NodeProps) => {
     : 'nodrag nopan nowheel rounded border px-2 py-1 text-[11px] inline-flex items-center justify-center gap-1';
 
   const setRaw = (raw: string) => {
-    update({ comfyMakerWorkflowRaw: raw, comfyMakerHiddenParamKeys: [] });
+    update({ comfyMakerWorkflowRaw: raw, comfyMakerHiddenParamKeys: [], comfyMakerOutputNodeIds: null });
     setStatus('');
   };
 
@@ -150,6 +160,7 @@ const ComfyUIAppMakerNode = ({ id, data, selected }: NodeProps) => {
       comfyMakerDescription: '用于学习字段映射和首次连通测试；运行前把 Checkpoint 改成本机已安装的模型文件名。',
       comfyMakerExcludeRules: '',
       comfyMakerHiddenParamKeys: [],
+      comfyMakerOutputNodeIds: null,
     });
     setStatus('已载入基础文生图样例。保存到超市后，运行前请把 Checkpoint 改成本机模型文件名。');
   };
@@ -184,6 +195,21 @@ const ComfyUIAppMakerNode = ({ id, data, selected }: NodeProps) => {
     if (hiddenParamKeySet.has(key)) return;
     update({ comfyMakerHiddenParamKeys: [...hiddenParamKeys, key] });
     setStatus('已从新手参数面板移除，保存到超市时不会包含这个参数。');
+  };
+
+  const toggleOutputNode = (nodeId: string) => {
+    const selected = new Set(selectedOutputNodeIds);
+    if (selected.has(nodeId)) {
+      if (selected.size <= 1) {
+        setStatus('至少保留一个输出节点；旧应用未配置时仍会收集全部输出。');
+        return;
+      }
+      selected.delete(nodeId);
+    } else {
+      selected.add(nodeId);
+    }
+    update({ comfyMakerOutputNodeIds: availableOutputNodeIds.filter((id) => selected.has(id)) });
+    setStatus('已更新要收集的 ComfyUI 输出节点。');
   };
 
   const handleFile = (file: File) => {
@@ -392,6 +418,23 @@ const ComfyUIAppMakerNode = ({ id, data, selected }: NodeProps) => {
           <div className="mt-1 text-[11px]" style={{ color: sub }}>
             字段 {analysis.fields.length} 个 · 排除后 {filteredAnalysisFields.length} 个 · 图片输入 {analysis.imageInputCount} · 视频输入 {analysis.videoInputCount} · 音频输入 {analysis.audioInputCount} · 输出节点 {analysis.outputCount}
           </div>
+          {analysis.outputNodes.length > 0 && (
+            <div className="mt-2 space-y-1 rounded border p-2" style={{ borderColor: border }}>
+              <div className="text-[10px] font-bold" style={{ color: sub }}>收集这些输出节点（默认全选）</div>
+              {analysis.outputNodes.map((outputNode) => (
+                <label key={outputNode.nodeId} className="nodrag nopan nowheel flex items-center gap-2 text-[10px]">
+                  <input
+                    type="checkbox"
+                    checked={selectedOutputNodeIds.includes(outputNode.nodeId)}
+                    onChange={() => toggleOutputNode(outputNode.nodeId)}
+                  />
+                  <span className="font-mono" style={{ color: accent }}>#{outputNode.nodeId}</span>
+                  <span className="min-w-0 truncate">{outputNode.nodeTitle || outputNode.classType}</span>
+                  <span className="ml-auto shrink-0" style={{ color: sub }}>{outputNode.classType}</span>
+                </label>
+              ))}
+            </div>
+          )}
           <div className="mt-2 grid grid-cols-1 gap-1">
             {importChecklist.map((item) => (
               <div

@@ -6,6 +6,8 @@ import {
   queryAudio,
   submitSunoNz,
   querySunoNz,
+  submitFlowMusic,
+  queryFlowMusic,
   submitSeedAudio,
   querySeedAudio,
   submitSeedanceNzAudio,
@@ -18,6 +20,7 @@ import {
   type AudioProviderMode,
   type SunoPlatform,
   type SunoNzTaskResult,
+  type FlowMusicTaskResult,
   type SeedanceNzAudioQueryResult,
   type WhisperResponseFormat,
 } from '../../services/generation';
@@ -41,6 +44,12 @@ import {
   MINIMAX_BITRATES,
   MINIMAX_LANGUAGE_BOOSTS,
   MUREKA_BGM_MODELS,
+  FLOWMUSIC_ACTIONS,
+  FLOWMUSIC_FORMATS,
+  FLOWMUSIC_VIDEO_PRESETS,
+  FLOWMUSIC_VERSIONS,
+  getFlowMusicActionDef,
+  type FlowMusicOperation,
   type SunoNzOperation,
 } from '../../providers/models';
 import { useUpdateNodeData } from './useUpdateNodeData';
@@ -57,6 +66,8 @@ import { useOrderedMaterials } from './useOrderedMaterials';
 import MaterialPreviewSection from './MaterialPreviewSection';
 import ReuseResultToggle from './ReuseResultToggle';
 import MentionPromptInput from './MentionPromptInput';
+import LazyAudio from '../LazyAudio';
+import LazyVideo from '../LazyVideo';
 import { resolveMediaMentions, type MediaMention } from './mediaMentions';
 import { useDragMaterialStore, type MaterialPayload } from '../../stores/dragMaterial';
 import { useMaterialDropTarget } from '../../hooks/useMaterialDropTarget';
@@ -122,7 +133,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
 
   const d = data as any;
   const providerParams = (d?.providerParams && typeof d.providerParams === 'object') ? d.providerParams : {};
-  const audioProviderMode: AudioProviderMode = ['seed-audio', 'whisper', 'qwen3-tts', 'minimax', 'mureka'].includes(d?.audioProviderMode)
+  const audioProviderMode: AudioProviderMode = ['seed-audio', 'whisper', 'qwen3-tts', 'minimax', 'mureka', 'lyria'].includes(d?.audioProviderMode)
     ? d.audioProviderMode
     : 'suno';
   const isSeedAudio = audioProviderMode === 'seed-audio';
@@ -130,6 +141,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
   const isQwen3Tts = audioProviderMode === 'qwen3-tts';
   const isMinimaxAudio = audioProviderMode === 'minimax';
   const isMureka = audioProviderMode === 'mureka';
+  const isLyria = audioProviderMode === 'lyria';
   const isSeedanceNzAudio = isQwen3Tts || isMinimaxAudio || isMureka;
   const isSuno = audioProviderMode === 'suno';
   const sunoPlatform: SunoPlatform = d?.sunoPlatform === 'seedance-nz' ? 'seedance-nz' : 'zhenzhen';
@@ -213,6 +225,28 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     : MUREKA_BGM_MODELS[0];
   const murekaInstrumentalId: string = String(d?.murekaInstrumentalId || '');
   const murekaCount: number = Math.min(3, Math.max(1, Number(d?.murekaCount) || 1));
+  const flowMusicOperation: FlowMusicOperation = getFlowMusicActionDef(d?.flowMusicOperation).value;
+  const flowMusicAction = getFlowMusicActionDef(flowMusicOperation);
+  const flowMusicNeedsPrompt = ['flowmusic-generation', 'flowmusic-lyrics', 'flowmusic-extend', 'flowmusic-replace', 'flowmusic-cover'].includes(flowMusicOperation);
+  const flowMusicVersion: 'default' | 'lyria-3.5' = (FLOWMUSIC_VERSIONS as readonly string[]).includes(d?.flowMusicVersion)
+    ? d.flowMusicVersion
+    : 'lyria-3.5';
+  const flowMusicLyrics: string = String(d?.flowMusicLyrics || '');
+  const flowMusicTitle: string = String(d?.flowMusicTitle || '');
+  const flowMusicBpm: number = Math.max(1, Math.round(Number(d?.flowMusicBpm) || 120));
+  const flowMusicLength: number = Math.min(240, Math.max(1, Math.round(Number(d?.flowMusicLength) || 60)));
+  const flowMusicClipId: string = String(d?.flowMusicClipId || '');
+  const flowMusicExtendFrom: number = Math.max(0, Number(d?.flowMusicExtendFrom) || 0);
+  const flowMusicExtendSeconds: number = Math.min(164, Math.max(1, Math.round(Number(d?.flowMusicExtendSeconds) || 30)));
+  const flowMusicStartSeconds: number = Math.max(0, Number(d?.flowMusicStartSeconds) || 0);
+  const flowMusicEndSeconds: number = Math.max(0, Number(d?.flowMusicEndSeconds) || 10);
+  const flowMusicStrength: number = Math.min(1, Math.max(0, Number(d?.flowMusicStrength) || 0.5));
+  const flowMusicFormat: 'mp3' | 'wav' = (FLOWMUSIC_FORMATS as readonly string[]).includes(d?.flowMusicFormat)
+    ? d.flowMusicFormat
+    : 'mp3';
+  const flowMusicPreset: 'simple' | 'modern' | 'player' = (FLOWMUSIC_VIDEO_PRESETS as readonly string[]).includes(d?.flowMusicPreset)
+    ? d.flowMusicPreset
+    : 'modern';
   const seedanceNzAudioResultText: string = typeof d?.seedanceNzAudioResultText === 'string' ? d.seedanceNzAudioResultText : '';
   const whisperResponseFormat: WhisperResponseFormat = ['json', 'verbose_json', 'srt', 'text', 'vtt'].includes(d?.whisperResponseFormat)
     ? d.whisperResponseFormat
@@ -309,18 +343,21 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
       ? ['text', 'image', 'audio']
       : isMinimaxClone ? ['text', 'audio']
       : isSeedanceNzAudio ? ['text']
+      : isLyria
+        ? (['flowmusic-generation', 'flowmusic-lyrics'].includes(flowMusicOperation) ? ['text'] : ['text', 'audio'])
       : isWhisper ? ['video', 'audio'] : isSunoNz ? ['text', 'audio'] : (mode === 'generate' ? ['text'] : ['text', 'audio']),
-    [isSeedAudio, isMinimaxClone, isSeedanceNzAudio, isWhisper, isSunoNz, mode],
+    [isSeedAudio, isMinimaxClone, isSeedanceNzAudio, isLyria, flowMusicOperation, isWhisper, isSunoNz, mode],
   );
   
   // Whisper 可直接转写 MP4；其余音频能力仍只消费音频素材。
-  const collectUpstream = (): { prompt: string; audioUrl: string; imageUrls: string[]; audioUrls: string[] } => {
+  const collectUpstream = (): { prompt: string; audioUrl: string; audioClipId: string; imageUrls: string[]; audioUrls: string[] } => {
     const prompt = orderedTexts.map((t) => t.url).filter((s) => !!s).join('\n').trim();
     const audioUrl = orderedAudios[0]?.url || (isWhisper ? orderedVideos[0]?.url : '') || localRefAudio || '';
+    const audioClipId = orderedAudios.map((item) => String(item.clipId || '').trim()).find(Boolean) || '';
     const imageUrls = [...orderedImages.map((item) => item.url), localRefImage].filter(Boolean).slice(0, 1);
     const maxAudios = isMinimaxClone ? 1 : isSunoNz ? 4 : 3;
     const audioUrls = [...orderedAudios.map((item) => item.url), localRefAudio].filter((value, index, values) => !!value && values.indexOf(value) === index).slice(0, maxAudios);
-    return { prompt, audioUrl, imageUrls, audioUrls };
+    return { prompt, audioUrl, audioClipId, imageUrls, audioUrls };
   };
 
   // 上传本地音频 → 获取 clipId
@@ -352,7 +389,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     if (!f) return;
     setError(null);
     try {
-      if (isSeedAudio || isWhisper || isSunoNz || isMinimaxClone) {
+      if (isSeedAudio || isWhisper || isSunoNz || isMinimaxClone || isLyria) {
         setUploading(true);
         const uploaded = await uploadLocalFile(f);
         update({ localRefAudio: uploaded.url, uploadedClipId: '', uploadedFilename: f.name });
@@ -360,7 +397,9 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           ? 'Whisper 待转写素材'
           : isSeedAudio
             ? 'Seed Audio 参考音频'
-            : isMinimaxClone ? 'MiniMax 声音克隆参考音频' : 'Suno 参考音频';
+            : isMinimaxClone
+              ? 'MiniMax 声音克隆参考音频'
+              : isLyria ? 'Lyria / Flow Music 参考音频' : 'Suno 参考音频';
         logBus.success(`${targetLabel}已加入: ${f.name}`, src);
       } else {
         await uploadFile(f);
@@ -697,6 +736,127 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     });
   };
 
+  const finishFlowMusicResult = async (
+    result: FlowMusicTaskResult,
+    reporter?: RunNodeLifecycleReporter,
+    pollCount = 0,
+  ) => {
+    const resultTracks = Array.isArray(result.tracks) ? result.tracks : [];
+    const resultText = String(result.text || '').trim();
+    const videoUrls = Array.isArray(result.videoUrls) ? result.videoUrls : [];
+    const fileUrls = Array.isArray(result.fileUrls) ? result.fileUrls : [];
+    const clipIds = Array.from(new Set([
+      ...(Array.isArray(result.clipIds) ? result.clipIds : []),
+      result.clipId || '',
+      ...resultTracks.map((track) => track.clipId || ''),
+    ].map((value) => String(value || '').trim()).filter(Boolean)));
+    update({
+      status: 'success',
+      progress: '100%',
+      taskId: result.taskId || taskId,
+      tracks: resultTracks,
+      audioUrl: resultTracks[0]?.audioUrl || result.audioUrls?.[0] || '',
+      audioUrl_1: resultTracks[1]?.audioUrl || result.audioUrls?.[1] || '',
+      audioUrls: result.audioUrls || resultTracks.map((track) => track.audioUrl),
+      videoUrl: videoUrls[0] || '',
+      videos: videoUrls,
+      fileUrls,
+      imageUrls: result.imageUrls || [],
+      flowMusicClipId: clipIds[0] || flowMusicClipId,
+      flowMusicClipIds: clipIds,
+      seedanceNzAudioResultText: resultText,
+      text: resultText,
+      texts: resultText ? [resultText] : [],
+      provider: 'seedance-nz',
+      model: flowMusicOperation,
+      apiModel: 'flowmusic',
+      requestId: result.requestId,
+      transportHttpStatus: result.transportHttpStatus,
+      upstreamHttpStatus: result.upstreamHttpStatus,
+      usage: result.usage,
+      pollCount,
+      partialFailures: result.partialFailures || [],
+    });
+    await reporter?.providerResponse({
+      provider: 'seedance-nz',
+      model: flowMusicOperation,
+      upstreamTaskId: result.taskId || taskId,
+      requestId: result.requestId,
+      transportHttpStatus: result.transportHttpStatus,
+      upstreamHttpStatus: result.upstreamHttpStatus,
+      usage: result.usage,
+      pollCount,
+      status: 'succeeded',
+      httpStatusSource: 'local-backend',
+    });
+    if (result.partialFailures?.length) {
+      logBus.warn(`Lyria 已完成，但有 ${result.partialFailures.length} 个附属结果保存失败；已保留可用结果`, src);
+    }
+    logBus.success(
+      `Lyria ${flowMusicOperation} 完成 · 音频${resultTracks.length} / 视频${videoUrls.length} / 文件${fileUrls.length}${resultText ? ' / 文本1' : ''}`,
+      src,
+    );
+    taskCompletionSound.notifyComplete(id, 'audio');
+  };
+
+  const startFlowMusicPolling = (tid: string, reporter?: RunNodeLifecycleReporter): Promise<void> => {
+    stopPoll();
+    return new Promise<void>((resolve, reject) => {
+      let elapsed = 0;
+      let pollInFlight = false;
+      pollTimer.current = window.setInterval(async () => {
+        if (pollInFlight) return;
+        elapsed += 1;
+        if (elapsed > SUNO_MAX_POLL) {
+          stopPoll();
+          const message = 'Lyria 轮询超时 (60min)，任务 ID 已保留，可稍后重试';
+          setError(message);
+          update({ status: 'error', error: message });
+          reject(new Error(message));
+          return;
+        }
+        pollInFlight = true;
+        try {
+          const result = await queryFlowMusic(tid);
+          const normalizedStatus = String(result.status || '').trim().toLowerCase();
+          await reporter?.polling({
+            provider: 'seedance-nz',
+            model: flowMusicOperation,
+            taskId: tid,
+            requestId: result.requestId,
+            transportHttpStatus: result.transportHttpStatus,
+            upstreamHttpStatus: result.upstreamHttpStatus,
+            usage: result.usage,
+            httpStatusSource: 'local-backend',
+            pollCount: elapsed,
+            pollLimit: SUNO_MAX_POLL,
+            status: normalizedStatus,
+            progress: result.progress,
+          });
+          if (normalizedStatus === 'materializing') {
+            update({ status: 'polling', progress: '100% · 正在下载全部结果' });
+          } else if (normalizedStatus === 'succeeded') {
+            stopPoll();
+            await finishFlowMusicResult(result, reporter, elapsed);
+            resolve();
+          } else if (normalizedStatus === 'failed') {
+            stopPoll();
+            const message = result.failReason || result.error || 'Lyria 任务失败';
+            setError(message);
+            update({ status: 'error', error: message });
+            reject(new Error(message));
+          } else {
+            update({ status: 'polling', progress: String(result.progress || `#${elapsed}`) });
+          }
+        } catch (pollError: any) {
+          logBus.warn(`Lyria 轮询出错: ${pollError?.message || pollError}`, src);
+        } finally {
+          pollInFlight = false;
+        }
+      }, 4000);
+    });
+  };
+
   const finishSunoNzResult = async (
     result: SunoNzTaskResult,
     reporter?: RunNodeLifecycleReporter,
@@ -818,12 +978,20 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     const resolvedLocalPrompt = resolveMediaMentions(localPrompt, promptMentions, mentionMaterials);
     const finalPrompt = (upstream.prompt || resolvedLocalPrompt || '').trim();
     const sunoNzNeedsPrompt = sunoNzAction.requiredFields.includes('prompt');
-    if (!isWhisper && !isSunoNz && !(isMureka && murekaInstrumentalId.trim()) && !finalPrompt) {
+    if (!isWhisper && !isSunoNz && !isLyria && !(isMureka && murekaInstrumentalId.trim()) && !finalPrompt) {
       setError(isSeedAudio ? '请填写音频提示词' : '请填写歌词 / 提示词');
       return;
     }
     if (isSunoNz && sunoNzNeedsPrompt && !finalPrompt) {
       setError(`${sunoNzOperation} 需要填写提示词`);
+      return;
+    }
+    if (isLyria && flowMusicNeedsPrompt && flowMusicOperation !== 'flowmusic-generation' && !finalPrompt) {
+      setError(`${flowMusicOperation} 需要填写提示词 / 指令`);
+      return;
+    }
+    if (isLyria && flowMusicOperation === 'flowmusic-generation' && !finalPrompt && !flowMusicLyrics.trim()) {
+      setError('flowmusic-generation 的曲风提示词与歌词至少填写一个');
       return;
     }
     if (isSeedAudio && (finalPrompt.length < 5 || finalPrompt.length > 2048)) {
@@ -835,11 +1003,13 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
       : isMinimaxAudio
         ? minimaxAudioModel
         : isMureka ? murekaModel : '';
-    const traceProvider = isSeedAudio || isWhisper || isSunoNz || isSeedanceNzAudio ? 'seedance-nz' : 'suno';
+    const traceProvider = isSeedAudio || isWhisper || isSunoNz || isSeedanceNzAudio || isLyria ? 'seedance-nz' : 'suno';
     const traceModel = isWhisper
       ? 'whisper-1'
       : isSeedAudio
         ? 'doubao-seed-audio-1.0'
+        : isLyria
+          ? flowMusicOperation
         : isSeedanceNzAudio
           ? latestAudioModel
           : isSunoNz ? sunoNzOperation : version;
@@ -856,7 +1026,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
       fileUrls: [],
       sunoVideoUrls: [],
       sunoFileUrls: [],
-      ...(isWhisper || isSunoNz || isSeedanceNzAudio
+      ...(isWhisper || isSunoNz || isSeedanceNzAudio || isLyria
         ? { transcript: '', sunoResultText: '', seedanceNzAudioResultText: '', text: '', texts: [] }
         : {}),
       ...(isWhisper ? {
@@ -944,6 +1114,71 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
         update({ status: 'polling', taskId: result.taskId, lastPrompt: finalPrompt, progress: '0%' });
         logBus.info(`Seed Audio 任务 ${result.taskId} 已提交，开始轮询`, src);
         await startSeedAudioPolling(result.taskId, reporter);
+        return;
+      }
+      if (isLyria) {
+        const sourceClipId = flowMusicClipId.trim() || upstream.audioClipId;
+        if (flowMusicOperation === 'flowmusic-upload-audio' && !upstream.audioUrl) {
+          throw new Error('flowmusic-upload-audio 必须连接、拖入或上传 1 个音频素材');
+        }
+        if (['flowmusic-extend', 'flowmusic-replace', 'flowmusic-cover', 'flowmusic-stems', 'flowmusic-download-audio', 'flowmusic-video-clip'].includes(flowMusicOperation) && !sourceClipId) {
+          throw new Error(`${flowMusicOperation} 需要 clip_id；可连接上游 Lyria 节点自动读取，或手动填写`);
+        }
+        if (flowMusicOperation === 'flowmusic-replace' && flowMusicEndSeconds <= flowMusicStartSeconds) {
+          throw new Error('flowmusic-replace 的结束秒数必须大于开始秒数');
+        }
+        const request = {
+          operation: flowMusicOperation,
+          version: flowMusicAction.supportsLyria35 ? flowMusicVersion : undefined,
+          sound_prompt: flowMusicOperation === 'flowmusic-generation' ? (finalPrompt || undefined) : undefined,
+          lyrics: flowMusicOperation === 'flowmusic-generation' ? (flowMusicLyrics.trim() || undefined) : undefined,
+          prompt: flowMusicOperation === 'flowmusic-lyrics' ? finalPrompt : undefined,
+          title: flowMusicAction.supportsLyria35 ? (flowMusicTitle.trim() || undefined) : undefined,
+          bpm: flowMusicOperation === 'flowmusic-generation' ? flowMusicBpm : undefined,
+          length: flowMusicOperation === 'flowmusic-generation' ? flowMusicLength : undefined,
+          seed: flowMusicAction.supportsLyria35 && seed > 0 ? seed : undefined,
+          audioUrl: flowMusicOperation === 'flowmusic-upload-audio' ? upstream.audioUrl : undefined,
+          clip_id: sourceClipId || undefined,
+          instruction: ['flowmusic-extend', 'flowmusic-replace', 'flowmusic-cover'].includes(flowMusicOperation) ? finalPrompt : undefined,
+          extend_from_s: flowMusicOperation === 'flowmusic-extend' ? flowMusicExtendFrom : undefined,
+          extend_s: flowMusicOperation === 'flowmusic-extend' ? flowMusicExtendSeconds : undefined,
+          start_s: flowMusicOperation === 'flowmusic-replace' ? flowMusicStartSeconds : undefined,
+          end_s: flowMusicOperation === 'flowmusic-replace' ? flowMusicEndSeconds : undefined,
+          strength: flowMusicOperation === 'flowmusic-cover' ? flowMusicStrength : undefined,
+          format: flowMusicOperation === 'flowmusic-download-audio' ? flowMusicFormat : undefined,
+          preset: flowMusicOperation === 'flowmusic-video-clip' ? flowMusicPreset : undefined,
+        };
+        logBus.info(`提交 Lyria: ${flowMusicOperation}${flowMusicAction.supportsLyria35 ? ` · ${flowMusicVersion}` : ''}`, src);
+        const result = await submitFlowMusic(request, { submissionKey: reporter?.providerSubmissionKey });
+        const normalizedStatus = String(result.status || '').trim().toLowerCase();
+        if (result.taskId) {
+          await reporter?.providerSubmitted({
+            provider: 'seedance-nz',
+            model: flowMusicOperation,
+            upstreamTaskId: result.taskId,
+            requestId: result.requestId,
+            transportHttpStatus: result.transportHttpStatus,
+            upstreamHttpStatus: result.upstreamHttpStatus,
+            usage: result.usage,
+            httpStatusSource: 'local-backend',
+          });
+          update({
+            status: normalizedStatus === 'succeeded' ? 'success' : 'polling',
+            taskId: result.taskId,
+            lastPrompt: finalPrompt,
+            progress: String(result.progress || '0%'),
+            provider: 'seedance-nz',
+            model: flowMusicOperation,
+            apiModel: 'flowmusic',
+          });
+        }
+        if (normalizedStatus === 'succeeded') {
+          await finishFlowMusicResult(result, reporter, 0);
+          return;
+        }
+        if (normalizedStatus === 'failed') throw new Error(result.failReason || result.error || 'Lyria 任务失败');
+        if (!result.taskId) throw new Error('Lyria 请求已接受，但既未返回结果也未返回 task_id');
+        await startFlowMusicPolling(result.taskId, reporter);
         return;
       }
       if (isSeedanceNzAudio) {
@@ -1171,6 +1406,13 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
     lifecycleAware: true,
     shouldReuseResult: (nodeData) => isWhisper
       ? nodeData?.reuseResult === true && typeof nodeData?.transcript === 'string' && nodeData.transcript.trim().length > 0
+      : isLyria
+        ? nodeData?.reuseResult === true && (
+            hasReusableGenerationResult('audio', nodeData)
+            || (typeof nodeData?.seedanceNzAudioResultText === 'string' && nodeData.seedanceNzAudioResultText.trim().length > 0)
+            || (Array.isArray(nodeData?.videos) && nodeData.videos.length > 0)
+            || (Array.isArray(nodeData?.fileUrls) && nodeData.fileUrls.length > 0)
+          )
       : isSunoNz
         ? nodeData?.reuseResult === true && (
             hasReusableGenerationResult('audio', nodeData)
@@ -1237,9 +1479,9 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
       }}
     >
       <Handle type="target" position={Position.Left} style={{ background: audioColor, border: 0 }} />
-      {isWhisper || isMinimaxClone || (isSunoNz && sunoNzAction.resultFamily === 'text') ? (
+      {isWhisper || isMinimaxClone || (isSunoNz && sunoNzAction.resultFamily === 'text') || (isLyria && flowMusicAction.resultFamily === 'text') ? (
         <Handle type="source" id="text" position={Position.Right} style={{ background: textColor, border: 0 }} />
-      ) : isSunoNz && sunoNzAction.resultFamily === 'video' ? (
+      ) : (isSunoNz && sunoNzAction.resultFamily === 'video') || (isLyria && flowMusicAction.resultFamily === 'video') ? (
         <Handle type="source" id="video" position={Position.Right} style={{ background: videoColor, border: 0 }} />
       ) : (
         <>
@@ -1264,7 +1506,8 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
               : isSeedAudio ? 'Seed Audio'
                 : isQwen3Tts ? 'Qwen3-TTS'
                   : isMinimaxAudio ? 'MiniMax'
-                    : isMureka ? 'Mureka' : 'Suno'
+                    : isMureka ? 'Mureka'
+                      : isLyria ? 'Lyria' : 'Suno'
           }</div>
           <div className="text-[10px] text-white/40 truncate">
             {isWhisper
@@ -1273,6 +1516,8 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
                 ? 'doubao-seed-audio-1.0 · 贞贞的平价AI小屋'
                 : isSeedanceNzAudio
                   ? `${isQwen3Tts ? qwenTtsModel : isMinimaxAudio ? minimaxAudioModel : murekaModel} · 贞贞的平价AI小屋`
+                : isLyria
+                  ? `${flowMusicOperation} · flowmusic · 贞贞的平价AI小屋`
                 : isSunoNz
                   ? `${sunoNzOperation} · 贞贞的平价AI小屋`
                   : `${version} · ${MODES.find((m) => m.id === mode)?.label}`}
@@ -1289,6 +1534,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
             { value: 'qwen3-tts', label: 'Qwen3-TTS' },
             { value: 'minimax', label: 'MiniMax' },
             { value: 'mureka', label: 'Mureka' },
+            { value: 'lyria', label: 'Lyria' },
           ] as const).map((item) => (
             <button
               key={item.value}
@@ -1394,6 +1640,77 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
             <div className="text-[10px] leading-relaxed text-white/45">
               官方路径：{sunoNzAction.action ? `/v1/music/generations/${sunoNzAction.action}` : '/v1/music/generations'}
               {' · '}结果：{sunoNzAction.resultFamily}
+            </div>
+          </div>
+        )}
+
+        {isLyria && (
+          <div className="rounded border border-fuchsia-300/20 bg-fuchsia-400/[0.05] p-2 space-y-2">
+            <div>
+              <label className="text-[10px] text-white/50 block mb-1">Lyria / Flow Music 操作（9 项）</label>
+              <select
+                value={flowMusicOperation}
+                onChange={(e) => update({ flowMusicOperation: e.target.value, status: 'idle', error: null, taskId: undefined })}
+                className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-fuchsia-300/40"
+              >
+                {FLOWMUSIC_ACTIONS.map((item) => (
+                  <option key={item.value} value={item.value} className="bg-zinc-900">{item.value} · {item.label}</option>
+                ))}
+              </select>
+            </div>
+            {flowMusicAction.supportsLyria35 && (
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">生成版本</label>
+                <select value={flowMusicVersion} onChange={(e) => update({ flowMusicVersion: e.target.value })} className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none">
+                  {FLOWMUSIC_VERSIONS.map((item) => <option key={item} value={item} className="bg-zinc-900">{item === 'default' ? '默认版本' : item}</option>)}
+                </select>
+              </div>
+            )}
+            {flowMusicOperation === 'flowmusic-generation' && (
+              <>
+                <div>
+                  <label className="text-[10px] text-white/50 block mb-1">歌词（曲风提示词与歌词至少一个非空）</label>
+                  <textarea value={flowMusicLyrics} onChange={(e) => update({ flowMusicLyrics: e.target.value })} placeholder="支持完整歌词与段落标签" className="h-24 w-full resize-y rounded bg-white/5 border border-white/10 px-2 py-1 text-[11px] text-white outline-none" />
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <label className="text-[10px] text-white/50">BPM<input type="number" min={1} value={flowMusicBpm} onChange={(e) => update({ flowMusicBpm: Number(e.target.value) || 120 })} className="mt-1 w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white" /></label>
+                  <label className="text-[10px] text-white/50">时长(秒)<input type="number" min={1} max={240} value={flowMusicLength} onChange={(e) => update({ flowMusicLength: Number(e.target.value) || 60 })} className="mt-1 w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white" /></label>
+                </div>
+              </>
+            )}
+            {['flowmusic-extend', 'flowmusic-replace', 'flowmusic-cover', 'flowmusic-stems', 'flowmusic-download-audio', 'flowmusic-video-clip'].includes(flowMusicOperation) && (
+              <div>
+                <label className="text-[10px] text-white/50 block mb-1">来源 clip_id</label>
+                <input value={flowMusicClipId} onChange={(e) => update({ flowMusicClipId: e.target.value })} placeholder="留空则自动读取上游 Lyria 节点" className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none" />
+                <div className="mt-1 text-[10px] leading-relaxed text-amber-100/55">续写 / 替换 / 翻唱优先连接 Lyria 音乐生成节点取得原生 clip；部分导入音频 clip 只支持下载类操作。</div>
+              </div>
+            )}
+            {flowMusicOperation === 'flowmusic-extend' && (
+              <div className="grid grid-cols-2 gap-2">
+                <label className="text-[10px] text-white/50">从第几秒续写<input type="number" min={0} step={0.1} value={flowMusicExtendFrom} onChange={(e) => update({ flowMusicExtendFrom: Number(e.target.value) || 0 })} className="mt-1 w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white" /></label>
+                <label className="text-[10px] text-white/50">续写时长(1–164秒)<input type="number" min={1} max={164} value={flowMusicExtendSeconds} onChange={(e) => update({ flowMusicExtendSeconds: Number(e.target.value) || 30 })} className="mt-1 w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white" /></label>
+              </div>
+            )}
+            {flowMusicOperation === 'flowmusic-replace' && (
+              <div className="grid grid-cols-2 gap-2">
+                <label className="text-[10px] text-white/50">开始秒数<input type="number" min={0} step={0.1} value={flowMusicStartSeconds} onChange={(e) => update({ flowMusicStartSeconds: Number(e.target.value) || 0 })} className="mt-1 w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white" /></label>
+                <label className="text-[10px] text-white/50">结束秒数<input type="number" min={0} step={0.1} value={flowMusicEndSeconds} onChange={(e) => update({ flowMusicEndSeconds: Number(e.target.value) || 10 })} className="mt-1 w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white" /></label>
+              </div>
+            )}
+            {flowMusicOperation === 'flowmusic-cover' && (
+              <label className="text-[10px] text-white/50 block">翻唱强度 0–1<input type="number" min={0} max={1} step={0.05} value={flowMusicStrength} onChange={(e) => update({ flowMusicStrength: Number(e.target.value) })} className="mt-1 w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white" /></label>
+            )}
+            {flowMusicOperation === 'flowmusic-download-audio' && (
+              <label className="text-[10px] text-white/50 block">下载格式<select value={flowMusicFormat} onChange={(e) => update({ flowMusicFormat: e.target.value })} className="mt-1 w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white">{FLOWMUSIC_FORMATS.map((item) => <option key={item} value={item} className="bg-zinc-900">{item}</option>)}</select></label>
+            )}
+            {flowMusicOperation === 'flowmusic-video-clip' && (
+              <label className="text-[10px] text-white/50 block">视频预设<select value={flowMusicPreset} onChange={(e) => update({ flowMusicPreset: e.target.value })} className="mt-1 w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white">{FLOWMUSIC_VIDEO_PRESETS.map((item) => <option key={item} value={item} className="bg-zinc-900">{item}</option>)}</select></label>
+            )}
+            {flowMusicAction.supportsLyria35 && (
+              <label className="text-[10px] text-white/50 block">标题（可选）<input value={flowMusicTitle} onChange={(e) => update({ flowMusicTitle: e.target.value })} className="mt-1 w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white" /></label>
+            )}
+            <div className="text-[10px] leading-relaxed text-white/45">
+              固定请求 model=flowmusic · 官方路径 /v1/music/generations{flowMusicAction.action ? `/${flowMusicAction.action}` : ''} · 结果 {flowMusicAction.resultFamily}
             </div>
           </div>
         )}
@@ -1532,10 +1849,10 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           data={d}
           update={update}
           context={{
-            providerSource: isSeedAudio || isWhisper || isSunoNz || isSeedanceNzAudio ? 'seedance-nz' : 'zhenzhen',
-            model: isWhisper ? 'whisper-1' : isSeedAudio ? 'doubao-seed-audio-1.0' : isQwen3Tts ? qwenTtsModel : isMinimaxAudio ? minimaxAudioModel : isMureka ? murekaModel : isSunoNz ? sunoNzOperation : version,
-            apiModel: isWhisper ? 'whisper-1' : isSeedAudio ? 'doubao-seed-audio-1.0' : isQwen3Tts ? qwenTtsModel : isMinimaxAudio ? minimaxAudioModel : isMureka ? murekaModel : isSunoNz ? sunoNzOperation : `suno-${version}`,
-            providerKind: isWhisper ? 'whisper' : isSeedAudio ? 'seed-audio' : isQwen3Tts ? 'qwen3-tts' : isMinimaxAudio ? 'minimax' : isMureka ? 'mureka' : 'suno',
+            providerSource: isSeedAudio || isWhisper || isSunoNz || isSeedanceNzAudio || isLyria ? 'seedance-nz' : 'zhenzhen',
+            model: isWhisper ? 'whisper-1' : isSeedAudio ? 'doubao-seed-audio-1.0' : isQwen3Tts ? qwenTtsModel : isMinimaxAudio ? minimaxAudioModel : isMureka ? murekaModel : isLyria ? flowMusicOperation : isSunoNz ? sunoNzOperation : version,
+            apiModel: isWhisper ? 'whisper-1' : isSeedAudio ? 'doubao-seed-audio-1.0' : isQwen3Tts ? qwenTtsModel : isMinimaxAudio ? minimaxAudioModel : isMureka ? murekaModel : isLyria ? 'flowmusic' : isSunoNz ? sunoNzOperation : `suno-${version}`,
+            providerKind: isWhisper ? 'whisper' : isSeedAudio ? 'seed-audio' : isQwen3Tts ? 'qwen3-tts' : isMinimaxAudio ? 'minimax' : isMureka ? 'mureka' : isLyria ? 'lyria' : 'suno',
           }}
         />
 
@@ -1599,7 +1916,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
             <input value={tags} onChange={(e) => update({ tags: e.target.value })} placeholder="pop, cinematic, energetic" className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none" />
           </div>
         )}
-        {!isWhisper && (!isSunoNz || sunoNzAction.requiredFields.includes('prompt')) && (
+        {!isWhisper && (!isSunoNz || sunoNzAction.requiredFields.includes('prompt')) && (!isLyria || flowMusicNeedsPrompt) && (
         <div>
           <label className="text-[10px] text-white/50 block mb-1">{
             isSeedAudio ? '音频提示词'
@@ -1608,6 +1925,12 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
                   : isMinimaxClone ? '克隆任务说明 / 试听文本'
                     : isMinimaxAudio ? '需要朗读的文本'
                       : isMureka ? 'BGM 描述（与 instrumental_id 二选一）'
+                        : isLyria
+                          ? flowMusicOperation === 'flowmusic-generation'
+                            ? '曲风 / 编曲提示词（可选）'
+                            : flowMusicOperation === 'flowmusic-lyrics'
+                              ? '歌词主题 / 写作要求'
+                              : '续写 / 替换 / 翻唱指令'
                         : sunoNzOperation === 'suno-lyrics' ? '歌词主题 / 要求' : '歌词 / 提示词'
           }</label>
           <MentionPromptInput
@@ -1620,7 +1943,11 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
               ? '例如：雨夜城市街道，轻柔雨声与远处车流，无人声'
               : isQwen3Tts || (isMinimaxAudio && !isMinimaxMusic)
                 ? '输入需要合成的语音文本'
-                : isMureka ? '例如：温暖、轻盈的原声吉他背景音乐' : '[Verse]...'}
+                : isMureka
+                  ? '例如：温暖、轻盈的原声吉他背景音乐'
+                  : isLyria
+                    ? (flowMusicOperation === 'flowmusic-lyrics' ? '例如：写一首关于雨夜重逢的中文流行歌词' : '例如：电影感电子流行，女声，120 BPM')
+                    : '[Verse]...'}
             isDark={isDark}
             isPixel={isPixel}
             promptTemplateKind="video"
@@ -1787,12 +2114,14 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
                 ? '上游素材 · MiniMax 克隆参考音频'
                 : isSeedanceNzAudio
                   ? '上游素材 · 文本提示'
+                : isLyria
+                  ? '上游素材 · 文本 / 音频 / clip_id'
               : isSunoNz
                 ? '上游素材 · 文本 / 最多 4 段音频'
                 : mode === 'generate' ? '上游素材 · 歌词提示' : '上游素材 · 参考音频'}
         />
 
-        {(isSeedAudio || isWhisper || isMinimaxClone || showSunoNzAudioImport) && (localRefImage || localRefAudio) && (
+        {(isSeedAudio || isWhisper || isMinimaxClone || isLyria || showSunoNzAudioImport) && (localRefImage || localRefAudio) && (
           <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.05] p-2 space-y-1">
             <div className="flex items-center justify-between gap-2 text-[10px] text-cyan-100/75">
               <span>本地参考素材</span>
@@ -1803,7 +2132,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           </div>
         )}
 
-        {(isSeedAudio || isWhisper || isMinimaxClone || showSunoNzAudioImport) && (
+        {(isSeedAudio || isWhisper || isMinimaxClone || isLyria || showSunoNzAudioImport) && (
           <div className="flex gap-1.5">
             <input
               ref={fileInputRef}
@@ -1818,6 +2147,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
                 ? '导入中…'
                 : isWhisper ? '导入待转写音频 / MP4'
                   : isMinimaxClone ? '导入克隆参考音频（10 秒–5 分钟）'
+                    : isLyria ? '导入 Lyria 参考音频'
                     : isSunoNz ? '导入 Suno 参考音频（至少 6 秒）' : '导入参考音频'}
             </button>
           </div>
@@ -1896,7 +2226,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           </div>
         )}
 
-        {isSunoNz && taskId && (
+        {(isSunoNz || isLyria) && taskId && (
           <div className="rounded border border-white/10 bg-black/10 px-2 py-1.5">
             <div className="mb-1 flex items-center justify-between text-[10px] text-white/45">
               <span>本次 task_id（后续处理可直接使用）</span>
@@ -1910,6 +2240,8 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           checked={d?.reuseResult === true}
           hasResult={isWhisper
             ? transcript.trim().length > 0
+            : isLyria
+              ? hasReusableGenerationResult('audio', d) || seedanceNzAudioResultText.trim().length > 0 || (Array.isArray(d?.videos) && d.videos.length > 0) || (Array.isArray(d?.fileUrls) && d.fileUrls.length > 0)
             : isSeedanceNzAudio
               ? hasReusableGenerationResult('audio', d) || seedanceNzAudioResultText.trim().length > 0
             : isSunoNz
@@ -1926,6 +2258,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           >
             <Sparkles size={12} /> {isWhisper
               ? '开始转写'
+              : isLyria ? `执行 ${flowMusicAction.label}`
               : isSunoNz ? `执行 ${sunoNzAction.label}`
                 : isMinimaxClone ? '创建克隆音色'
                   : '生成音频'}
@@ -1961,17 +2294,17 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           </div>
         )}
 
-        {isSeedanceNzAudio && seedanceNzAudioResultText && (
+        {(isSeedanceNzAudio || isLyria) && seedanceNzAudioResultText && (
           <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.05] px-2 py-1.5">
-            <div className="mb-1 text-[10px] font-semibold text-cyan-100/80">文本结果</div>
+            <div className="mb-1 text-[10px] font-semibold text-cyan-100/80">{isLyria ? flowMusicAction.label : '文本'}结果</div>
             <div className="max-h-36 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-white/75">{seedanceNzAudioResultText}</div>
           </div>
         )}
 
-        {isSunoNz && sunoVideoUrls.length > 0 && !hasAutoOutput && (
+        {((isSunoNz && sunoVideoUrls.length > 0) || (isLyria && Array.isArray(d?.videos) && d.videos.length > 0)) && !hasAutoOutput && (
           <div className="space-y-2">
-            {sunoVideoUrls.map((url, index) => (
-              <video
+            {(isLyria ? d.videos : sunoVideoUrls).map((url: string, index: number) => (
+              <LazyVideo
                 key={`${url}:${index}`}
                 src={url}
                 controls
@@ -1987,10 +2320,10 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
           </div>
         )}
 
-        {isSunoNz && sunoFileUrls.length > 0 && (
+        {((isSunoNz && sunoFileUrls.length > 0) || (isLyria && Array.isArray(d?.fileUrls) && d.fileUrls.length > 0)) && (
           <div className="rounded border border-white/10 bg-white/[0.03] p-2 space-y-1">
             <div className="text-[10px] font-semibold text-white/60">结果文件</div>
-            {sunoFileUrls.map((url, index) => (
+            {(isLyria ? d.fileUrls : sunoFileUrls).map((url: string, index: number) => (
               <a key={`${url}:${index}`} href={url} download className="block truncate text-[10px] text-cyan-200 hover:underline">
                 下载文件 {index + 1} · {url.split('/').pop()}
               </a>
@@ -2015,7 +2348,7 @@ const AudioNode = ({ id, data, selected }: NodeProps) => {
                 {t.title && <span className="truncate">🎵 {t.title}</span>}
                 {t.clipId && <span className="ml-auto text-white/30">{t.clipId.slice(0, 8)}…</span>}
               </div>
-              <audio
+              <LazyAudio
                 src={t.audioUrl}
                 controls
                 className="w-full h-8"

@@ -54,12 +54,14 @@ const EXPECTED_SIGNATURES: Record<string, string> = {
   'video-edit': 'static|null[video]->null[video|audio]',
   seedance: 'static|null[text|image|video|audio]->null[video]',
   seedance25: 'static|null[text|image|video|audio]->null[video]',
+  'fashvsr-video-upscale': 'static|null[video]->null[video]',
   'director-storyboard': 'static|null[text|image|video|audio]->null[video|text]',
   story: 'static|null[text|image|video|audio]->null[video|text]',
   'script-master': 'static|null[text|image|video|audio]->null[text|metadata]',
   audio: 'static|null[text|image|audio|video]->audio-0[audio],audio-1[audio],text[text],video[video]',
   llm: 'static|null[text|image|video]->null[text]',
   'minimax-h3-prompt-enhancer': 'static|null[text|image|video]->null[text]',
+  'minimax-music3-prompt-enhancer': 'static|music-idea[text],lyrics[text]->lyrics[text],music-caption[text],payload[text],report[metadata]',
   'minimax-h3-official-prompt-enhancer': 'static|null[text|image|video|audio]->null[text]',
   'seedance20-prompt-enhancer': 'static|null[text|image|video]->null[text]',
   'mv-music-master': 'static|master-audio[audio],lyrics[text],identity-image[image],style-image[image],motion-reference[video]->final-video[video],master-audio[audio],storyboards[image],prompt-pack[text],manifest[metadata]',
@@ -161,12 +163,12 @@ function dynamicFixture(type: string): Record<string, unknown> {
   return {};
 }
 
-test('all 77 production types have a valid, exact connection authority matching audited JSX Handles', () => {
+test('all 79 production types have a valid, exact connection authority matching audited JSX Handles', () => {
   assert.equal(manifest.schema, 't8-canvas-node-schema-v1');
   assert.equal(manifest.version, 1);
-  assert.equal(manifest.types.length, 77);
-  assert.equal(new Set(manifest.types.map((entry) => entry.type)).size, 77);
-  assert.equal(Object.keys(EXPECTED_SIGNATURES).length, 77);
+  assert.equal(manifest.types.length, 79);
+  assert.equal(new Set(manifest.types.map((entry) => entry.type)).size, 79);
+  assert.equal(Object.keys(EXPECTED_SIGNATURES).length, 79);
   assert.deepEqual(Object.keys(manifest.connectionPorts).sort(), Object.keys(EXPECTED_SIGNATURES).sort());
   assert.deepEqual(manifest.types.map((entry) => entry.type).sort(), Object.keys(manifest.connectionPorts).sort());
 
@@ -192,7 +194,7 @@ test('all 77 production types have a valid, exact connection authority matching 
   }
 });
 
-test('the runtime resolver handles every one of the 77 production node types without aggregate fallback', () => {
+test('the runtime resolver handles every one of the 79 production node types without aggregate fallback', () => {
   for (const { type } of manifest.types) {
     const resolution = requireResolved(canvasNode(type, dynamicFixture(type)));
     assert.equal(resolution.resolver, manifest.connectionPorts[type].resolver, type);

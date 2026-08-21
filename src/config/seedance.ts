@@ -31,7 +31,7 @@ export const SEEDANCE25_MODEL_OPTIONS = [
 ] as const;
 export const SEEDANCE25_DURATION_OPTIONS = [-1, ...Array.from({ length: 27 }, (_, index) => index + 4)] as const;
 export const SEEDANCE25_RATIO_OPTIONS = ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'] as const;
-export const SEEDANCE25_RESOLUTION_OPTIONS = ['480p', '720p', '1080p', '2k', '4k'] as const;
+export const SEEDANCE25_RESOLUTION_OPTIONS = ['480p', '720p', '1080p', '2k', '4k', 'native1080p'] as const;
 export const SEEDANCE25_DEFAULT_DURATION = 5;
 export const SEEDANCE25_DEFAULT_RESOLUTION = '720p';
 export const SEEDANCE25_REFERENCE_MIN_SECONDS = 2;

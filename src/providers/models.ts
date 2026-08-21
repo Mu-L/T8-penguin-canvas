@@ -59,6 +59,7 @@ export const ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL = 'zhenzhen-image-g-v2-lowprice'
 export const ZHENZHEN_IMAGE_GK_V15_MODEL = 'zhenzhen-image-gk-v15';
 export const ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL = 'zhenzhen-image-gk-v15-edit';
 export const ZHENZHEN_IMAGE_GK_V2_MODEL = 'zhenzhen-image-gk-v2';
+export const ZHENZHEN_IMAGE_GK_V2_EDIT_MODEL = 'zhenzhen-image-gk-v2-edit';
 export const ZHENZHEN_IMAGE_NB_2_LITE_MODEL = 'zhenzhen-image-nb-2-lite';
 export const ZHENZHEN_IMAGE_NB_2_MODEL = 'zhenzhen-image-nb-2';
 export const ZHENZHEN_IMAGE_NB_PRO_MODEL = 'zhenzhen-image-nb-pro';
@@ -73,6 +74,7 @@ export const ZHENZHEN_BUDGET_GPT2_MODEL_OPTIONS = [
 ] as const;
 export const ZHENZHEN_BUDGET_GROK_MODEL_OPTIONS = [
   { value: ZHENZHEN_IMAGE_GK_V2_MODEL, label: ZHENZHEN_IMAGE_GK_V2_MODEL },
+  { value: ZHENZHEN_IMAGE_GK_V2_EDIT_MODEL, label: ZHENZHEN_IMAGE_GK_V2_EDIT_MODEL },
   { value: ZHENZHEN_IMAGE_GK_V15_MODEL, label: ZHENZHEN_IMAGE_GK_V15_MODEL },
   { value: ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL, label: ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL },
 ] as const;
@@ -87,6 +89,7 @@ export const ZHENZHEN_IMAGE_G2_MODEL_OPTIONS = ZHENZHEN_BUDGET_GPT2_MODEL_OPTION
 export const ZHENZHEN_APIMART_IMAGE_MODELS = [
   ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
   ZHENZHEN_IMAGE_GK_V2_MODEL,
+  ZHENZHEN_IMAGE_GK_V2_EDIT_MODEL,
   ZHENZHEN_IMAGE_GK_V15_MODEL,
   ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL,
   ZHENZHEN_IMAGE_NB_2_LITE_MODEL,
@@ -100,6 +103,11 @@ export const ZHENZHEN_BUDGET_IMAGE_MODELS = [
 export const ZHENZHEN_IMAGE_G2_RATIOS = ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'];
 export const ZHENZHEN_IMAGE_GK_V15_RATIOS = ['1:1', '16:9', '9:16', '3:2', '2:3'];
 export const ZHENZHEN_IMAGE_GK_V2_RATIOS = ['1:1', '16:9', '9:16', '3:2', '2:3'];
+export const ZHENZHEN_IMAGE_GK_V2_EDIT_RATIOS = [
+  'auto', '16:9', '19.5:9', '1:1', '1:2', '20:9', '2:1',
+  '2:3', '3:2', '3:4', '4:3', '9:16', '9:19.5', '9:20',
+] as const;
+export const ZHENZHEN_IMAGE_GK_V2_EDIT_RESOLUTIONS = ['1k', '2k'] as const;
 export const ZHENZHEN_IMAGE_NB_STANDARD_RATIOS = [
   '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9',
 ];
@@ -692,7 +700,10 @@ export const FLUX3_VIDEO_DURATIONS = Array.from({ length: 16 }, (_, index) => in
 export const FLUX3_VIDEO_RESOLUTIONS = ['hd', 'fhd'] as const;
 const SEEDANCE25_RATIOS = ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'];
 const SEEDANCE25_DURATIONS = [-1, ...Array.from({ length: 27 }, (_, index) => index + 4)];
-const SEEDANCE25_RESOLUTIONS = ['480p', '720p', '1080p', '2k', '4k'];
+const SEEDANCE25_RESOLUTIONS = ['480p', '720p', '1080p', '2k', '4k', 'native1080p'];
+export const FLASHVSR_VIDEO_UPSCALE_MODEL = 'FlashVSR_video_upscale';
+/** @deprecated Kept as an internal symbol alias so existing imports remain source-compatible. */
+export const FASHVSR_VIDEO_UPSCALE_MODEL = FLASHVSR_VIDEO_UPSCALE_MODEL;
 
 export function isZhenzhenApimartVideoModel(apiModel: string | undefined | null): boolean {
   return (ZHENZHEN_APIMART_VIDEO_MODELS as readonly string[]).includes(String(apiModel || '').trim());
@@ -1194,6 +1205,25 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     maxRefImages: 0,
   },
   {
+    id: 'fashvsr-video-upscale',
+    label: 'FlashVSR 视频超分',
+    kind: 'upscaler',
+    provider: 'zhenzhen',
+    builtinSource: 'seedance-nz',
+    description: 'FlashVSR · 单个 480P、3-15 秒视频超分',
+    apiModelOptions: [
+      { value: FASHVSR_VIDEO_UPSCALE_MODEL, label: FASHVSR_VIDEO_UPSCALE_MODEL },
+    ],
+    ratios: [],
+    defaultRatio: '',
+    durations: [],
+    resolutions: [],
+    defaultResolution: '',
+    supportImages: false,
+    supportVideos: true,
+    maxRefImages: 0,
+  },
+  {
     id: 'seedance-2.5',
     label: 'Seedance 2.5',
     kind: 'seedance25',
@@ -1511,10 +1541,48 @@ export const MINIMAX_LANGUAGE_BOOSTS = [
 ] as const;
 
 export const MUREKA_BGM_MODELS = ['mureka-v8-bgm', 'mureka-v9-bgm'] as const;
+
+export const FLOWMUSIC_MODEL = 'flowmusic';
+export const FLOWMUSIC_VERSIONS = ['default', 'lyria-3.5'] as const;
+export const FLOWMUSIC_FORMATS = ['mp3', 'wav'] as const;
+export const FLOWMUSIC_VIDEO_PRESETS = ['simple', 'modern', 'player'] as const;
+export type FlowMusicOperation =
+  | 'flowmusic-generation'
+  | 'flowmusic-lyrics'
+  | 'flowmusic-upload-audio'
+  | 'flowmusic-extend'
+  | 'flowmusic-replace'
+  | 'flowmusic-cover'
+  | 'flowmusic-stems'
+  | 'flowmusic-download-audio'
+  | 'flowmusic-video-clip';
+export const FLOWMUSIC_ACTIONS = [
+  { value: 'flowmusic-generation', label: '音乐生成', action: '', resultFamily: 'audio', supportsLyria35: true },
+  { value: 'flowmusic-lyrics', label: '歌词生成', action: 'lyrics', resultFamily: 'text', supportsLyria35: false },
+  { value: 'flowmusic-upload-audio', label: '上传音频', action: 'upload-audio', resultFamily: 'audio', supportsLyria35: false },
+  { value: 'flowmusic-extend', label: '音乐续写', action: 'extend', resultFamily: 'audio', supportsLyria35: true },
+  { value: 'flowmusic-replace', label: '片段替换', action: 'replace', resultFamily: 'audio', supportsLyria35: true },
+  { value: 'flowmusic-cover', label: '整曲翻唱', action: 'cover', resultFamily: 'audio', supportsLyria35: true },
+  { value: 'flowmusic-stems', label: '人声伴奏分离', action: 'stems', resultFamily: 'file', supportsLyria35: false },
+  { value: 'flowmusic-download-audio', label: '下载音频', action: 'download-audio', resultFamily: 'audio', supportsLyria35: false },
+  { value: 'flowmusic-video-clip', label: '音乐视频', action: 'video-clip', resultFamily: 'video', supportsLyria35: false },
+] as const satisfies ReadonlyArray<{
+  value: FlowMusicOperation;
+  label: string;
+  action: string;
+  resultFamily: 'audio' | 'text' | 'file' | 'video';
+  supportsLyria35: boolean;
+}>;
+
+export function getFlowMusicActionDef(value: unknown) {
+  return FLOWMUSIC_ACTIONS.find((item) => item.value === value) || FLOWMUSIC_ACTIONS[0];
+}
+
 export const SEEDANCE_NZ_AUDIO_MODELS = [
   ...QWEN3_TTS_MODELS,
   ...MINIMAX_AUDIO_MODELS,
   ...MUREKA_BGM_MODELS,
+  FLOWMUSIC_MODEL,
 ] as const;
 
 export const DEFAULT_LLM_MODEL = 'gemini-3.5-flash';

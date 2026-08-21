@@ -418,6 +418,10 @@ function normalizeComfyuiConfig(value, options = {}) {
           if (fields.length) workflow.fields = fields;
           const excludeRules = normalizeComfyExcludeRules(item.excludeRules || item.exclude_rules || item.excludedFields || item.excluded_fields);
           if (excludeRules.length) workflow.excludeRules = excludeRules;
+          const outputNodeIds = Array.isArray(item.outputNodeIds)
+            ? [...new Set(item.outputNodeIds.map((nodeId) => cleanText(nodeId, 40)).filter(Boolean))].slice(0, 80)
+            : [];
+          if (outputNodeIds.length) workflow.outputNodeIds = outputNodeIds;
           return workflow;
         })
         .filter((item) => item && item.id && item.name)

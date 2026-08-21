@@ -52,6 +52,8 @@ import { createReadableStudioPalette } from '../../utils/readableStudioPalette';
 import MaterialPreviewSection from './MaterialPreviewSection';
 import MentionPromptInput from './MentionPromptInput';
 import SmartImage from '../SmartImage';
+import LazyAudio from '../LazyAudio';
+import LazyVideo from '../LazyVideo';
 import {
   materialMentionKey,
   resolveMediaMentions,
@@ -3359,8 +3361,8 @@ function ArtifactCard({
       )}
       {artifact.text && <div className="text-[11px] whitespace-pre-wrap max-h-32 overflow-y-auto" style={{ color: cardSubText }}>{artifact.text}</div>}
       {artifact.kind === 'image' && url && <ArtifactImagePreview src={url} title={artifact.title} surface={surface} border={border} text={cardText} accent={accent} accentText={accentText} />}
-      {artifact.kind === 'video' && url && <video src={url} controls className="w-full rounded-lg max-h-56" />}
-      {artifact.kind === 'audio' && url && <audio src={url} controls className="w-full h-9" />}
+      {artifact.kind === 'video' && url && <LazyVideo src={url} controls className="w-full rounded-lg max-h-56" />}
+      {artifact.kind === 'audio' && url && <LazyAudio src={url} controls className="w-full h-9" />}
       <div className="flex flex-wrap gap-1.5">
         <button type="button" onClick={() => onReference(artifact)} className="rounded px-2 py-1 text-[10px] font-bold" style={{ background: 'transparent', color: cardText, border: `1px solid ${border}` }}>
           引用

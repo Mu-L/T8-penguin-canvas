@@ -1498,6 +1498,23 @@ function inspectProjectDatabaseTypedCanonicalViolations(database) {
     && value === value.toLowerCase()
     && isUuid(value)
   );
+  const isKnownCanvasCatalogMetadataUpdatedAtDrift = (row, document) => {
+    const rowUpdatedAt = Number(row.updated_at);
+    const documentUpdatedAt = Number(document.updatedAt);
+    return Number.isSafeInteger(rowUpdatedAt)
+      && Number.isSafeInteger(documentUpdatedAt)
+      && documentUpdatedAt >= 0
+      && documentUpdatedAt < rowUpdatedAt
+      && Object.prototype.hasOwnProperty.call(document, 'name')
+      && typeof document.name === 'string'
+      && document.name.length > 0
+      && document.name.length <= 240
+      && Object.prototype.hasOwnProperty.call(document, 'nodeCount')
+      && Number.isSafeInteger(document.nodeCount)
+      && document.nodeCount >= 0
+      && Array.isArray(document.nodes)
+      && document.nodeCount === document.nodes.length;
+  };
 
   for (const row of database.prepare(`
     SELECT canvas_id, project_id, schema_version, revision, snapshot_json, updated_at
@@ -1527,7 +1544,13 @@ function inspectProjectDatabaseTypedCanonicalViolations(database) {
     if (!Number.isSafeInteger(document.revision) || document.revision !== Number(row.revision)) {
       mark('canvas_documents', 'snapshot_json.revision');
     }
-    if (!Number.isSafeInteger(document.updatedAt) || document.updatedAt !== Number(row.updated_at)) {
+    if ((!Number.isSafeInteger(document.updatedAt) || document.updatedAt !== Number(row.updated_at))
+      // v2.9.2-v2.9.6 catalog-only rename writes advanced the SQL row
+      // timestamp after persisting name/nodeCount but omitted the matching JSON
+      // updatedAt. Accept only that exact legacy signature without mutating the
+      // database during startup; getCanvas() already treats the row timestamp
+      // as authoritative and the next real write persists canonical JSON.
+      && !isKnownCanvasCatalogMetadataUpdatedAtDrift(row, document)) {
       mark('canvas_documents', 'snapshot_json.updatedAt');
     }
   }
@@ -2724,6 +2747,38 @@ function sameDatabaseFileState(left, right) {
   return left.size === right.size && left.mtimeNs === right.mtimeNs;
 }
 
+function sameDatabaseSidecarState(left, right) {
+  const leftEmpty = left == null || left.size === 0n;
+  const rightEmpty = right == null || right.size === 0n;
+  if (leftEmpty || rightEmpty) return leftEmpty && rightEmpty;
+  return sameDatabaseFileState(left, right);
+}
+
+function projectDatabaseStartupSourceStates(filename) {
+  if (!filename || filename === ':memory:') return null;
+  return Object.freeze({
+    primary: databaseFileState(filename),
+    wal: databaseFileState(`${filename}-wal`),
+    journal: databaseFileState(`${filename}-journal`),
+  });
+}
+
+function isCleanProjectDatabaseStartupCandidate(states) {
+  return Boolean(
+    states?.primary
+    && states.primary.size > 0n
+    && (!states.wal || states.wal.size === 0n)
+    && (!states.journal || states.journal.size === 0n)
+  );
+}
+
+function sameProjectDatabaseStartupSourceStates(left, right) {
+  return Boolean(left && right)
+    && sameDatabaseFileState(left.primary, right.primary)
+    && sameDatabaseSidecarState(left.wal, right.wal)
+    && sameDatabaseSidecarState(left.journal, right.journal);
+}
+
 function projectDatabaseBackupQueueKey(filename) {
   const resolved = path.resolve(filename);
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
@@ -3150,6 +3205,46 @@ function parseJson(value, fallback = null) {
   } catch (_) {
     return fallback;
   }
+}
+
+function canvasListPageError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  error.status = 400;
+  error.statusCode = 400;
+  return error;
+}
+
+function encodeCanvasListPageCursor(row) {
+  return Buffer.from(JSON.stringify([
+    Number(row.updated_at),
+    String(row.canvas_id),
+  ]), 'utf8').toString('base64url');
+}
+
+function decodeCanvasListPageCursor(value) {
+  if (value == null || value === '') return null;
+  const encoded = String(value).trim();
+  if (!encoded || encoded.length > 1_024 || !/^[A-Za-z0-9_-]+$/.test(encoded)) {
+    throw canvasListPageError('canvas_list_cursor_invalid', '画布列表游标无效');
+  }
+  let decoded;
+  try {
+    decoded = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+  } catch (_) {
+    throw canvasListPageError('canvas_list_cursor_invalid', '画布列表游标无效');
+  }
+  const updatedAt = Number(decoded?.[0]);
+  const canvasId = String(decoded?.[1] || '');
+  if (!Array.isArray(decoded)
+    || decoded.length !== 2
+    || !Number.isSafeInteger(updatedAt)
+    || updatedAt < 0
+    || !canvasId
+    || canvasId.length > 512) {
+    throw canvasListPageError('canvas_list_cursor_invalid', '画布列表游标无效');
+  }
+  return Object.freeze({ updatedAt, canvasId });
 }
 
 function escapeLikePattern(value) {
@@ -6608,7 +6703,13 @@ class ProjectDatabase {
     this.projectDatabasePhysicalPolicyState32 = null;
     this.projectDatabaseIdentity32 = null;
     this.schema32MigratedFrom31ThisStartup = false;
+    const startupStartedAt = Date.now();
+    let startupPhaseStartedAt = startupStartedAt;
+    const observeStartup = options.startupObservability === true;
+    const startupDurations = {};
     this.backupFilename = options.backupFilename || (filename === ':memory:' ? null : `${filename}.backup`);
+    this.startupBackupEnabled = Boolean(this.backupFilename && options.autoBackup !== false);
+    this.startupBackupDeferred = this.startupBackupEnabled && options.deferStartupBackup === true;
     this.preMigration23BackupFilename = options.preMigration23BackupFilename
       || (filename === ':memory:' ? null : `${filename}.pre-migration-v22.sqlite3`);
     this.preMigrationBackupFilename = options.preMigrationBackupFilename
@@ -6734,6 +6835,16 @@ class ProjectDatabase {
     this.closePromise = null;
     this.backupPending = 0;
     this.closing = false;
+    const markStartupPhase = (phase) => {
+      const now = Date.now();
+      startupDurations[phase] = Math.max(0, now - startupPhaseStartedAt);
+      startupPhaseStartedAt = now;
+      if (observeStartup) {
+        console.log(
+          `[startup] component=project-db phase=${phase} phaseMs=${startupDurations[phase]} totalMs=${Math.max(0, now - startupStartedAt)}`,
+        );
+      }
+    };
     if (filename !== ':memory:' && !fs.existsSync(path.dirname(filename))) {
       fs.mkdirSync(path.dirname(filename), { recursive: true });
     }
@@ -6747,10 +6858,48 @@ class ProjectDatabase {
         ],
         options,
       );
+      markStartupPhase('owner-acquired');
       try {
-        this.preflightExistingDatabase();
-        this.db = new BetterSqlite3(this.filename);
+        this.startupUsedCleanActiveFastPath = false;
+        const cleanCandidateBefore = projectDatabaseStartupSourceStates(this.filename);
+        if (isCleanProjectDatabaseStartupCandidate(cleanCandidateBefore)) {
+          this.db = new BetterSqlite3(this.filename);
+          let currentSchema = null;
+          try {
+            currentSchema = inspectProjectDatabaseSchema(this.db, { requireContiguous: true });
+          } catch (_) {
+            currentSchema = null;
+          }
+          if (typeof options.afterStartupFastPathOpen === 'function') {
+            options.afterStartupFastPathOpen({ filename: this.filename });
+          }
+          const cleanCandidateAfter = projectDatabaseStartupSourceStates(this.filename);
+          if (currentSchema?.initialized === true
+            && currentSchema.version === PROJECT_DATABASE_SCHEMA_VERSION
+            && sameProjectDatabaseStartupSourceStates(cleanCandidateBefore, cleanCandidateAfter)) {
+            // The owner guard is already exclusive, no committed WAL/journal
+            // exists, the current schema was inspected before any pragma or
+            // migration, and the source identity remained stable across open.
+            // Skip only the duplicate isolated-copy preflight; initializeDatabase
+            // below still runs schema, migration, FK, every ledger invariant,
+            // quick_check, freshness and interrupted-run recovery unchanged.
+            this.startupUsedCleanActiveFastPath = true;
+            markStartupPhase('clean-active-fast-path');
+          } else {
+            try { if (this.db?.open) this.db.close(); } catch (_) {}
+            this.db = null;
+          }
+        }
+        if (!this.startupUsedCleanActiveFastPath) {
+          if (typeof options.beforeStartupPreflight === 'function') {
+            options.beforeStartupPreflight({ filename: this.filename });
+          }
+          this.preflightExistingDatabase();
+          markStartupPhase('preflight-verified');
+          this.db = new BetterSqlite3(this.filename);
+        }
         this.initializeDatabase();
+        markStartupPhase('active-initialized');
       } catch (error) {
         if (this.filename === ':memory:') throw error;
         const storageError = translateProjectDatabaseStorageCapacityError(error, {
@@ -6785,11 +6934,9 @@ class ProjectDatabase {
           throw recoveryError;
         }
       }
-      if (this.backupFilename && options.autoBackup !== false) {
-        this.startupBackupPromise = this.createBackup();
-        this.startupBackupPromise.catch((error) => {
-          console.warn('[project-db] startup backup failed:', error?.message || error);
-        });
+      this.startupDurations = Object.freeze({ ...startupDurations });
+      if (this.startupBackupEnabled && !this.startupBackupDeferred) {
+        this.startStartupBackup();
       }
     } catch (error) {
       try { if (this.db?.open) this.db.close(); } catch (_) {}
@@ -9229,6 +9376,26 @@ class ProjectDatabase {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
     this.db.pragma('busy_timeout = 5000');
+  }
+
+  startStartupBackup() {
+    if (!this.startupBackupEnabled) return Promise.resolve(null);
+    if (this.startupBackupPromise) return this.startupBackupPromise;
+    if (this.closing) return Promise.resolve(null);
+    this.startupBackupDeferred = false;
+    const startedAt = Date.now();
+    this.startupBackupPromise = this.createBackup();
+    this.startupBackupPromise.then(
+      () => {
+        if (this.options.startupObservability === true) {
+          console.log(`[startup] component=project-db phase=startup-backup-complete phaseMs=${Math.max(0, Date.now() - startedAt)}`);
+        }
+      },
+      (error) => {
+        console.warn('[project-db] startup backup failed:', error?.message || error);
+      },
+    );
+    return this.startupBackupPromise;
   }
 
   createBackup() {
@@ -17717,6 +17884,50 @@ class ProjectDatabase {
       updatedAt: row.updated_at,
     }) : null;
   }
+  updateCanvasCatalogMetadata(canvasId, metadata = {}) {
+    const normalizedCanvasId = String(canvasId || '');
+    return this.withProjectDatabaseWrite('canvas.catalog-metadata.update', () => {
+      const row = this.db.prepare(`
+        SELECT canvas_id, project_id, revision, snapshot_json, created_at, updated_at
+        FROM canvas_documents WHERE canvas_id = ?
+      `).get(normalizedCanvasId);
+      if (!row) return null;
+      const snapshot = parseJson(row.snapshot_json, {});
+      const previousName = String(snapshot.name || snapshot.title || row.canvas_id);
+      const requestedName = metadata.name == null ? previousName : String(metadata.name).trim();
+      const name = String(requestedName || previousName || row.canvas_id).slice(0, 240);
+      const nodeCount = Array.isArray(snapshot.nodes) ? snapshot.nodes.length : 0;
+      const updatedAt = Math.max(Date.now(), Number(row.updated_at) || 0);
+      const nextSnapshot = {
+        ...snapshot,
+        name,
+        nodeCount,
+        updatedAt,
+      };
+      const updated = this.db.prepare(`
+        UPDATE canvas_documents
+        SET snapshot_json = ?, updated_at = ?
+        WHERE canvas_id = ? AND project_id = ? AND revision = ?
+      `).run(
+        JSON.stringify(nextSnapshot),
+        updatedAt,
+        row.canvas_id,
+        row.project_id,
+        row.revision,
+      );
+      if (updated.changes !== 1) throw new RevisionConflictError(this.getCanvas(normalizedCanvasId));
+      return {
+        id: row.canvas_id,
+        projectId: row.project_id,
+        revision: row.revision,
+        name,
+        nodeCount,
+        createdAt: row.created_at,
+        updatedAt,
+      };
+    });
+  }
+
 
   _collaborationTextTarget(document, targetType, targetEntityUid) {
     const identity = String(targetEntityUid || '').toLowerCase();
@@ -20013,20 +20224,95 @@ class ProjectDatabase {
 
   listCanvases(projectId = DEFAULT_PROJECT_ID) {
     return this.db.prepare(`
-      SELECT canvas_id, project_id, revision, snapshot_json, created_at, updated_at
-      FROM canvas_documents WHERE project_id = ? ORDER BY updated_at DESC
-    `).all(projectId).map((row) => {
-      const snapshot = parseJson(row.snapshot_json, {});
-      return {
-        id: row.canvas_id,
-        projectId: row.project_id,
-        revision: row.revision,
-        name: String(snapshot.name || snapshot.title || row.canvas_id),
-        nodeCount: Array.isArray(snapshot.nodes) ? snapshot.nodes.length : 0,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      };
-    });
+      SELECT canvas_id, project_id, revision, created_at, updated_at,
+        COALESCE(
+          NULLIF(CAST(json_extract(snapshot_json, '$.name') AS TEXT), ''),
+          NULLIF(CAST(json_extract(snapshot_json, '$.title') AS TEXT), ''),
+          canvas_id
+        ) AS catalog_name,
+        COALESCE(
+          CAST(json_extract(snapshot_json, '$.nodeCount') AS INTEGER),
+          json_array_length(snapshot_json, '$.nodes'),
+          0
+        ) AS catalog_node_count
+      FROM canvas_documents WHERE project_id = ?
+      ORDER BY updated_at DESC, canvas_id ASC
+    `).all(projectId).map((row) => ({
+      id: row.canvas_id, projectId: row.project_id, revision: row.revision,
+      name: String(row.catalog_name || row.canvas_id), nodeCount: Number(row.catalog_node_count || 0),
+      createdAt: row.created_at, updatedAt: row.updated_at,
+    }));
+  }
+
+  listCanvasesPage(projectId = DEFAULT_PROJECT_ID, options = {}) {
+    const rawLimit = options?.limit == null || options.limit === ''
+      ? 50
+      : Number(options.limit);
+    if (!Number.isSafeInteger(rawLimit) || rawLimit < 1 || rawLimit > 200) {
+      throw canvasListPageError('canvas_list_limit_invalid', '画布列表 limit 必须是 1-200 的安全整数');
+    }
+    const cursor = decodeCanvasListPageCursor(options?.cursor);
+    const normalizedProjectId = String(projectId || DEFAULT_PROJECT_ID);
+    const rows = cursor
+      ? this.db.prepare(`
+          SELECT canvas_id, project_id, revision, created_at, updated_at,
+            COALESCE(
+              NULLIF(CAST(json_extract(snapshot_json, '$.name') AS TEXT), ''),
+              NULLIF(CAST(json_extract(snapshot_json, '$.title') AS TEXT), ''),
+              canvas_id
+            ) AS catalog_name,
+            COALESCE(
+              CAST(json_extract(snapshot_json, '$.nodeCount') AS INTEGER),
+              json_array_length(snapshot_json, '$.nodes'),
+              0
+            ) AS catalog_node_count
+          FROM canvas_documents
+          WHERE project_id = ?
+            AND (updated_at < ? OR (updated_at = ? AND canvas_id > ?))
+          ORDER BY updated_at DESC, canvas_id ASC
+          LIMIT ?
+        `).all(
+          normalizedProjectId,
+          cursor.updatedAt,
+          cursor.updatedAt,
+          cursor.canvasId,
+          rawLimit + 1,
+        )
+      : this.db.prepare(`
+          SELECT canvas_id, project_id, revision, created_at, updated_at,
+            COALESCE(
+              NULLIF(CAST(json_extract(snapshot_json, '$.name') AS TEXT), ''),
+              NULLIF(CAST(json_extract(snapshot_json, '$.title') AS TEXT), ''),
+              canvas_id
+            ) AS catalog_name,
+            COALESCE(
+              CAST(json_extract(snapshot_json, '$.nodeCount') AS INTEGER),
+              json_array_length(snapshot_json, '$.nodes'),
+              0
+            ) AS catalog_node_count
+          FROM canvas_documents
+          WHERE project_id = ?
+          ORDER BY updated_at DESC, canvas_id ASC
+          LIMIT ?
+        `).all(normalizedProjectId, rawLimit + 1);
+    const hasMore = rows.length > rawLimit;
+    const pageRows = hasMore ? rows.slice(0, rawLimit) : rows;
+    const items = pageRows.map((row) => ({
+      id: row.canvas_id,
+      projectId: row.project_id,
+      revision: row.revision,
+      name: String(row.catalog_name || row.canvas_id),
+      nodeCount: Number(row.catalog_node_count || 0),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+    return {
+      items,
+      hasMore,
+      nextCursor: hasMore && pageRows.length > 0
+        ? encodeCanvasListPageCursor(pageRows[pageRows.length - 1])
+        : null,
+    };
   }
 
   listCanvasAssetIds(projectId, canvasId, limit = 2000) {
@@ -32909,11 +33195,21 @@ class ProjectDatabase {
 let singleton = null;
 
 function getProjectDatabase(config) {
-  if (!singleton) singleton = new ProjectDatabase(config.PROJECT_DB_FILE, {
-    backupFilename: config.PROJECT_DB_BACKUP_FILE,
-    projectDatabaseStoragePolicy32: config.PROJECT_DB_STORAGE_POLICY_32,
+  // Preserve the long-standing no-argument singleton ABI without importing
+  // config (or touching storage) until a caller explicitly requests the DB.
+  const runtimeConfig = config || require('../config');
+  if (!singleton) singleton = new ProjectDatabase(runtimeConfig.PROJECT_DB_FILE, {
+    backupFilename: runtimeConfig.PROJECT_DB_BACKUP_FILE,
+    projectDatabaseStoragePolicy32: runtimeConfig.PROJECT_DB_STORAGE_POLICY_32,
+    deferStartupBackup: true,
+    startupObservability: true,
   });
   return singleton;
+}
+
+function startProjectDatabaseStartupBackup() {
+  if (!singleton) return Promise.resolve(null);
+  return singleton.startStartupBackup();
 }
 
 async function closeProjectDatabase() {
@@ -32959,5 +33255,6 @@ module.exports = {
   CanvasPatchRevertConflictError,
   CanvasPatchValidationError,
   getProjectDatabase,
+  startProjectDatabaseStartupBackup,
   closeProjectDatabase,
 };

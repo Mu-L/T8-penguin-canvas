@@ -46,7 +46,7 @@ const SEEDANCE25_MODELS = new Set([
   ...SEEDANCE25_I2V_MODELS,
   ...SEEDANCE25_MULTI_MODELS,
 ]);
-const SEEDANCE25_RESOLUTIONS = new Set(['480p', '720p', '1080p', '2k', '4k']);
+const SEEDANCE25_RESOLUTIONS = new Set(['480p', '720p', '1080p', '2k', '4k', 'native1080p']);
 const SEEDANCE25_PROMPT_MAX_LENGTH = 20480;
 const SEEDANCE25_DEFAULT_SECONDS = 5;
 const SEEDANCE25_DEFAULT_RESOLUTION = '720p';
@@ -76,6 +76,7 @@ const ZHENZHEN_IMAGE_G2_MODELS = new Set([
 ]);
 const ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL = 'zhenzhen-image-g-v2-lowprice';
 const ZHENZHEN_IMAGE_GK_V2_MODEL = 'zhenzhen-image-gk-v2';
+const ZHENZHEN_IMAGE_GK_V2_EDIT_MODEL = 'zhenzhen-image-gk-v2-edit';
 const ZHENZHEN_IMAGE_GK_V15_MODEL = 'zhenzhen-image-gk-v15';
 const ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL = 'zhenzhen-image-gk-v15-edit';
 const ZHENZHEN_IMAGE_NB_2_LITE_MODEL = 'zhenzhen-image-nb-2-lite';
@@ -89,6 +90,7 @@ const ZHENZHEN_IMAGE_NB_MODELS = new Set([
 const ZHENZHEN_APIMART_IMAGE_MODELS = new Set([
   ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
   ZHENZHEN_IMAGE_GK_V2_MODEL,
+  ZHENZHEN_IMAGE_GK_V2_EDIT_MODEL,
   ZHENZHEN_IMAGE_GK_V15_MODEL,
   ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL,
   ...ZHENZHEN_IMAGE_NB_MODELS,
@@ -123,6 +125,12 @@ const QWEN_IMAGE_30_RATIOS = new Set([
 const QWEN_IMAGE_30_PROMPT_MIN_LENGTH = 5;
 const QWEN_IMAGE_30_PROMPT_MAX_LENGTH = 2000;
 const QWEN_IMAGE_30_MAX_REFERENCE_IMAGES = 3;
+const ZHENZHEN_IMAGE_GK_V2_EDIT_RATIOS = new Set([
+  'auto', '16:9', '19.5:9', '1:1', '1:2', '20:9', '2:1',
+  '2:3', '3:2', '3:4', '4:3', '9:16', '9:19.5', '9:20',
+]);
+const ZHENZHEN_IMAGE_GK_V2_EDIT_RESOLUTIONS = new Set(['1k', '2k']);
+const ZHENZHEN_IMAGE_GK_V2_EDIT_MAX_IMAGES = 3;
 const WAN27_GLOBAL_T2I_MODEL = 'wan-2.7-global-t2i';
 const WAN27_GLOBAL_I2I_MODEL = 'wan-2.7-global-i2i';
 const WAN27_GLOBAL_I2I_PRO_MODEL = 'wan-2.7-global-i2i-pro';
@@ -227,6 +235,10 @@ const KLING_PROMPT_MAX_LENGTH = 20480;
 const KLING_MAX_REFERENCE_IMAGES = 4;
 const ZHENZHEN_UPSCALER_MODEL = 'zhenzhen-upscaler';
 const ZHENZHEN_UPSCALER_RESOLUTIONS = new Set(['720p', '1080p', '2k', '4k']);
+const FASHVSR_VIDEO_UPSCALE_MODEL = 'FlashVSR_video_upscale';
+const LEGACY_FASHVSR_VIDEO_UPSCALE_MODEL = 'FashVSR_video_upscale';
+const FASHVSR_MIN_SECONDS = 3;
+const FASHVSR_MAX_SECONDS = 15;
 const HAILUO23_T2V_MODELS = new Set([
   'hailuo-2.3-t2v-standard',
   'hailuo-2.3-t2v-pro',
@@ -419,6 +431,28 @@ const MINIMAX_LANGUAGE_BOOSTS = new Set([
   'French', 'German', 'Spanish', 'Portuguese', 'Russian',
 ]);
 const MUREKA_BGM_MODELS = new Set(['mureka-v8-bgm', 'mureka-v9-bgm']);
+const FLOWMUSIC_MODEL = 'flowmusic';
+const FLOWMUSIC_VERSIONS = new Set(['default', 'lyria-3.5']);
+const FLOWMUSIC_FORMATS = new Set(['mp3', 'wav']);
+const FLOWMUSIC_VIDEO_PRESETS = new Set(['simple', 'modern', 'player']);
+const flowMusicActionSpec = (action, allowedFields, requiredFields, resultFamily, supportsLyria35 = false) => Object.freeze({
+  action,
+  allowedFields: Object.freeze(allowedFields),
+  requiredFields: Object.freeze(requiredFields),
+  resultFamily,
+  supportsLyria35,
+});
+const FLOWMUSIC_ACTION_SPECS = Object.freeze({
+  'flowmusic-generation': flowMusicActionSpec('', ['version', 'sound_prompt', 'lyrics', 'title', 'bpm', 'length', 'seed'], [], 'audio', true),
+  'flowmusic-lyrics': flowMusicActionSpec('lyrics', ['prompt'], ['prompt'], 'text'),
+  'flowmusic-upload-audio': flowMusicActionSpec('upload-audio', ['audio_url'], ['audio_url'], 'audio'),
+  'flowmusic-extend': flowMusicActionSpec('extend', ['version', 'clip_id', 'extend_from_s', 'extend_s', 'instruction', 'title', 'seed'], ['clip_id', 'extend_from_s', 'extend_s', 'instruction'], 'audio', true),
+  'flowmusic-replace': flowMusicActionSpec('replace', ['version', 'clip_id', 'start_s', 'end_s', 'instruction', 'title', 'seed'], ['clip_id', 'start_s', 'end_s', 'instruction'], 'audio', true),
+  'flowmusic-cover': flowMusicActionSpec('cover', ['version', 'clip_id', 'instruction', 'strength', 'title', 'seed'], ['clip_id', 'instruction', 'strength'], 'audio', true),
+  'flowmusic-stems': flowMusicActionSpec('stems', ['clip_id'], ['clip_id'], 'file'),
+  'flowmusic-download-audio': flowMusicActionSpec('download-audio', ['clip_id', 'format'], ['clip_id', 'format'], 'audio'),
+  'flowmusic-video-clip': flowMusicActionSpec('video-clip', ['clip_id', 'preset'], ['clip_id', 'preset'], 'video'),
+});
 const SEEDANCE_NZ_AUDIO_MODELS = new Set([
   SEED_AUDIO_MODEL,
   ...QWEN3_TTS_MODELS,
@@ -2534,8 +2568,28 @@ async function buildApimartImagePayload(request, apiKey, options = {}) {
     throw new Error(`${model} 提示词最多 20000 字符`);
   }
   const refs = normalizeList(request.images || request.refImages);
-  const n = normalizePositiveInteger(request.n, 1, 1, 10, 'APIMart 图片生成数量 n ');
+  const maxOutputs = model === ZHENZHEN_IMAGE_GK_V2_MODEL ? 12 : 10;
+  const n = normalizePositiveInteger(request.n, 1, 1, maxOutputs, 'APIMart 图片生成数量 n ');
   const payload = { model, prompt, n };
+
+  if (model === ZHENZHEN_IMAGE_GK_V2_EDIT_MODEL) {
+    if (refs.length < 1 || refs.length > ZHENZHEN_IMAGE_GK_V2_EDIT_MAX_IMAGES) {
+      throw new Error(`${model} 必须按顺序提供 1-${ZHENZHEN_IMAGE_GK_V2_EDIT_MAX_IMAGES} 张参考图`);
+    }
+    const aspectRatio = String(request.aspect_ratio || request.aspectRatio || request.ratio || 'auto').trim().toLowerCase();
+    if (!ZHENZHEN_IMAGE_GK_V2_EDIT_RATIOS.has(aspectRatio)) {
+      throw new Error(`${model} 不支持比例 ${aspectRatio || '(空)'}`);
+    }
+    const resolution = String(request.resolution || '1k').trim().toLowerCase();
+    if (!ZHENZHEN_IMAGE_GK_V2_EDIT_RESOLUTIONS.has(resolution)) {
+      throw new Error(`${model} 分辨率只支持 1k 或 2k`);
+    }
+    payload.images = await uploadApimartImages(refs, apiKey, options);
+    payload.aspect_ratio = aspectRatio;
+    payload.resolution = resolution;
+    payload.nsfw_check = normalizeAudioBoolean(request.nsfw_check ?? request.nsfwCheck, false);
+    return { payload, model, taskType: 'i2i' };
+  }
 
   if (model === ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL) {
     if (refs.length > 16) throw new Error(`${model} 最多支持 16 张参考图`);
@@ -2591,7 +2645,12 @@ async function buildApimartImagePayload(request, apiKey, options = {}) {
     payload.images = await uploadApimartImages(refs.slice(0, 1), apiKey, options);
     return { payload, model, taskType: 'i2i' };
   }
-  if (refs.length) throw new Error(`${model} 是文生图模型，不接受参考图；需要编辑图片请使用 ${ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL}`);
+  if (refs.length) {
+    const editModel = model === ZHENZHEN_IMAGE_GK_V2_MODEL
+      ? ZHENZHEN_IMAGE_GK_V2_EDIT_MODEL
+      : ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL;
+    throw new Error(`${model} 是文生图模型，不接受参考图；需要编辑图片请使用 ${editModel}`);
+  }
   return { payload, model, taskType: 't2i' };
 }
 
@@ -3518,6 +3577,118 @@ async function buildUpscalerPayload(request, apiKey, options = {}) {
   };
 }
 
+async function probeFashVsrInput(buffer, file, options = {}) {
+  if (typeof options.fashVsrProbe === 'function') {
+    const injected = await options.fashVsrProbe(buffer, file);
+    return {
+      width: Number(injected?.width),
+      height: Number(injected?.height),
+      duration: Number(injected?.duration),
+    };
+  }
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 't8-fashvsr-probe-'));
+  const inputPath = path.join(tempDir, `source.${seedance25ProbeExtension(file, 'video')}`);
+  const ffprobe = options.ffprobePath || resolveBundledFfprobe();
+  const timeoutMs = Math.max(5_000, Math.min(60_000, Number(options.ffprobeTimeoutMs) || 30_000));
+  try {
+    await fs.promises.writeFile(inputPath, buffer);
+    return await withFfmpegProcessSlot(() => new Promise((resolve, reject) => {
+      let settled = false;
+      let stdout = '';
+      const child = spawn(ffprobe, [
+        '-v', 'error',
+        '-select_streams', 'v:0',
+        '-show_entries', 'stream=width,height:format=duration',
+        '-of', 'json',
+        inputPath,
+      ], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+      const finish = (error, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        options.signal?.removeEventListener?.('abort', onAbort);
+        if (error) reject(error);
+        else resolve(value);
+      };
+      const onAbort = () => {
+        try { child.kill('SIGKILL'); } catch {}
+        finish(boundaryError('FlashVSR 素材校验已取消', 'FASHVSR_PROBE_ABORTED', 499));
+      };
+      const timer = setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch {}
+        finish(boundaryError('读取 FlashVSR 输入视频信息超时', 'FASHVSR_PROBE_TIMEOUT', 504));
+      }, timeoutMs);
+      child.stdout.on('data', (chunk) => {
+        if (stdout.length < 64 * 1024) stdout += chunk.toString('utf8');
+      });
+      child.once('error', () => finish(boundaryError('无法读取 FlashVSR 输入视频', 'FASHVSR_INVALID_VIDEO', 400)));
+      child.once('close', (code) => {
+        if (code !== 0) {
+          finish(boundaryError('无法读取 FlashVSR 输入视频', 'FASHVSR_INVALID_VIDEO', 400));
+          return;
+        }
+        try {
+          const parsed = JSON.parse(stdout);
+          const stream = Array.isArray(parsed?.streams) ? parsed.streams[0] : null;
+          const result = {
+            width: Number(stream?.width),
+            height: Number(stream?.height),
+            duration: Number(parsed?.format?.duration),
+          };
+          if (!Number.isFinite(result.width) || !Number.isFinite(result.height) || !Number.isFinite(result.duration)) {
+            throw new Error('invalid probe');
+          }
+          finish(null, result);
+        } catch {
+          finish(boundaryError('无法读取 FlashVSR 输入视频', 'FASHVSR_INVALID_VIDEO', 400));
+        }
+      });
+      if (options.signal?.aborted) onAbort();
+      else options.signal?.addEventListener?.('abort', onAbort, { once: true });
+    }), { isCancelled: () => options.signal?.aborted === true });
+  } finally {
+    await fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function validateFashVsrInput(buffer, file, options = {}) {
+  const media = await probeFashVsrInput(buffer, file, options);
+  if (media.height !== 480) {
+    throw boundaryError('FlashVSR 输入视频必须是 480P（视频高度 480 像素）', 'FASHVSR_REQUIRES_480P', 400);
+  }
+  if (media.duration < FASHVSR_MIN_SECONDS || media.duration > FASHVSR_MAX_SECONDS) {
+    throw boundaryError(
+      `FlashVSR 输入视频时长必须为 ${FASHVSR_MIN_SECONDS}-${FASHVSR_MAX_SECONDS} 秒`,
+      'FASHVSR_INVALID_DURATION',
+      400,
+    );
+  }
+}
+
+async function buildFashVsrPayload(request, apiKey, options = {}) {
+  const requestedModel = String(request.model || FASHVSR_VIDEO_UPSCALE_MODEL).trim();
+  if (requestedModel !== FASHVSR_VIDEO_UPSCALE_MODEL && requestedModel !== LEGACY_FASHVSR_VIDEO_UPSCALE_MODEL) {
+    throw new Error(`未知 FlashVSR 模型：${requestedModel || '(空)'}`);
+  }
+  const sources = normalizeList(request.videos || request.videoUrls || (request.video ? [request.video] : []));
+  if (sources.length !== 1) throw new Error('FlashVSR 必须提供且只能提供 1 个 480P 视频');
+  const videoUrl = await uploadMedia(sources[0], 'video', apiKey, {
+    ...options,
+    maxBytes: 50 * 1024 * 1024,
+    allowedMimes: ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska'],
+    cacheVariant: 'fashvsr-video-v1',
+    validateBuffer: (buffer, file) => validateFashVsrInput(buffer, file, options),
+  });
+  return {
+    payload: {
+      model: FASHVSR_VIDEO_UPSCALE_MODEL,
+      metadata: { video_url: videoUrl },
+    },
+    model: FASHVSR_VIDEO_UPSCALE_MODEL,
+    taskType: 'upscale',
+  };
+}
+
 function deriveViduTaskType(model) {
   if (VIDU_Q3_T2V_MODELS.has(model)) return 't2v';
   if (VIDU_Q3_I2V_MODELS.has(model)) return 'i2v';
@@ -3747,6 +3918,29 @@ async function submitUpscalerTask(request, apiKey, options = {}) {
   return { taskId, model: built.model, taskType: built.taskType, ...safeProviderTrace(response, data, { pollCount: 0 }) };
 }
 
+async function submitFashVsrTask(request, apiKey, options = {}) {
+  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
+  const fetchImpl = getFetchImpl(options);
+  const baseUrl = cleanBaseUrl(options.baseUrl);
+  const built = await buildFashVsrPayload(request, apiKey, options);
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/video/generations`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(built.payload),
+  }, options, 'seedance.nz FlashVSR 任务提交');
+  const data = await responseJson(response, 'seedance.nz FlashVSR 任务提交');
+  if (!response.ok) throw createUpstreamError(data, response);
+  const taskId = requiredTaskId(
+    data?.id || data?.task_id || data?.data?.id || data?.data?.task_id,
+    'seedance.nz FlashVSR 任务提交',
+    response,
+  );
+  return { taskId, model: built.model, taskType: built.taskType, ...safeProviderTrace(response, data, { pollCount: 0 }) };
+}
+
 async function submitViduTask(request, apiKey, options = {}) {
   if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
   const fetchImpl = getFetchImpl(options);
@@ -3937,7 +4131,12 @@ function extractSunoText(value, depth = 0) {
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   if (Array.isArray(value)) {
     const simple = value.filter((item) => ['string', 'number', 'boolean'].includes(typeof item));
-    return simple.length === value.length && simple.length > 0 ? JSON.stringify(simple) : '';
+    if (simple.length === value.length && simple.length > 0) return JSON.stringify(simple);
+    for (const item of value) {
+      const text = extractSunoText(item, depth + 1);
+      if (text) return text;
+    }
+    return '';
   }
   if (typeof value !== 'object') return '';
   for (const key of ['text', 'lyrics', 'tags', 'aligned_lyrics', 'bpm', 'persona_id', 'voice_id', 'audio_id', 'content', 'message']) {
@@ -4024,6 +4223,156 @@ async function querySunoMusicTask(taskId, apiKey, options = {}) {
   if (!response.ok) throw createUpstreamError(data, response);
   return {
     ...normalizeSunoMusicResponse(data, { resultFamily: options.resultFamily }),
+    taskId: safeTaskId,
+    ...safeProviderTrace(response, data),
+  };
+}
+
+function normalizeFlowMusicOperation(value) {
+  const operation = String(value || 'flowmusic-generation').trim();
+  if (!Object.prototype.hasOwnProperty.call(FLOWMUSIC_ACTION_SPECS, operation)) {
+    throw new Error(`未知 Flow Music 操作：${operation}`);
+  }
+  return operation;
+}
+
+async function buildFlowMusicPayload(request, apiKey, options = {}) {
+  const input = request && typeof request === 'object' ? request : {};
+  const operation = normalizeFlowMusicOperation(input.operation);
+  const spec = FLOWMUSIC_ACTION_SPECS[operation];
+  const payload = { model: FLOWMUSIC_MODEL };
+
+  if (spec.supportsLyria35) {
+    const version = String(input.version || 'lyria-3.5').trim().toLowerCase();
+    if (!FLOWMUSIC_VERSIONS.has(version)) {
+      throw new Error(`${operation} 的 version 只支持 default 或 lyria-3.5`);
+    }
+    if (version !== 'default') payload.version = version;
+  }
+
+  for (const field of ['sound_prompt', 'lyrics', 'prompt', 'title', 'clip_id', 'instruction']) {
+    if (!spec.allowedFields.includes(field)) continue;
+    const value = String(input[field] ?? input[field.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase())] ?? '').trim();
+    if (value) payload[field] = value;
+  }
+
+  if (operation === 'flowmusic-generation') {
+    if (!payload.sound_prompt && !payload.lyrics) {
+      throw new Error('Flow Music 的 sound_prompt 与 lyrics 不能同时为空');
+    }
+    payload.bpm = String(finiteSunoNumber(input.bpm ?? 120, 'bpm', { min: 1, integer: true }));
+    const length = finiteSunoNumber(input.length ?? 60, 'length', { min: 1, integer: true });
+    if (length > 240) throw new Error('Flow Music 参数 length 必须在 1-240 秒之间');
+    payload.length = length;
+    payload.seed = finiteSunoNumber(input.seed ?? 0, 'seed', { min: 0, integer: true });
+  } else if (operation === 'flowmusic-lyrics') {
+    if (String(payload.prompt || '').length > 3000) throw new Error('flowmusic-lyrics 的 prompt 最多 3000 字符');
+  } else if (operation === 'flowmusic-upload-audio') {
+    const source = String(input.audio_url || input.audioUrl || normalizeList(input.audioUrls)[0] || '').trim();
+    if (source) {
+      const normalizedSource = normalizeT8LocalMediaRef(source);
+      payload.audio_url = /^https?:\/\//i.test(normalizedSource) && !isT8LocalMediaPath(normalizedSource)
+        ? normalizedSource
+        : await uploadMedia(normalizedSource, 'audio', apiKey, options);
+    }
+  } else if (operation === 'flowmusic-extend') {
+    payload.extend_from_s = finiteSunoNumber(input.extend_from_s ?? input.extendFromSeconds ?? 0, 'extend_from_s', { min: 0 });
+    payload.extend_s = finiteSunoNumber(input.extend_s ?? input.extendSeconds ?? 30, 'extend_s', { min: 1, integer: true });
+    if (payload.extend_s > 164) throw new Error('Flow Music 参数 extend_s 必须在 1-164 秒之间');
+    payload.seed = finiteSunoNumber(input.seed ?? 0, 'seed', { min: 0, integer: true });
+  } else if (operation === 'flowmusic-replace') {
+    payload.start_s = finiteSunoNumber(input.start_s ?? input.startSeconds ?? 0, 'start_s', { min: 0 });
+    payload.end_s = finiteSunoNumber(input.end_s ?? input.endSeconds ?? 10, 'end_s', { min: 0 });
+    if (payload.end_s <= payload.start_s) throw new Error('Flow Music 参数 end_s 必须大于 start_s');
+    payload.seed = finiteSunoNumber(input.seed ?? 0, 'seed', { min: 0, integer: true });
+  } else if (operation === 'flowmusic-cover') {
+    const strength = Number(input.strength ?? 0.5);
+    if (!Number.isFinite(strength) || strength < 0 || strength > 1) {
+      throw new Error('Flow Music 参数 strength 必须在 0-1 之间');
+    }
+    payload.strength = strength;
+    payload.seed = finiteSunoNumber(input.seed ?? 0, 'seed', { min: 0, integer: true });
+  } else if (operation === 'flowmusic-download-audio') {
+    const format = String(input.format || 'mp3').trim().toLowerCase();
+    if (!FLOWMUSIC_FORMATS.has(format)) throw new Error(`Flow Music 不支持下载格式 ${format || '(空)'}`);
+    payload.format = format;
+  } else if (operation === 'flowmusic-video-clip') {
+    const preset = String(input.preset || 'modern').trim().toLowerCase();
+    if (!FLOWMUSIC_VIDEO_PRESETS.has(preset)) throw new Error(`Flow Music 不支持视频模板 ${preset || '(空)'}`);
+    payload.preset = preset;
+  }
+
+  for (const field of spec.requiredFields) {
+    if (!sunoRequiredValuePresent(payload[field])) throw new Error(`${operation} 缺少必填参数：${field}`);
+  }
+  return {
+    operation,
+    action: spec.action,
+    resultFamily: spec.resultFamily,
+    payload,
+  };
+}
+
+function normalizeFlowMusicResponse(data, options = {}) {
+  const rawData = data?.data;
+  const taskData = Array.isArray(rawData)
+    ? (rawData.find((item) => item && typeof item === 'object') || {})
+    : rawData && typeof rawData === 'object' ? rawData : data;
+  const resultData = taskData?.result !== undefined ? taskData.result : taskData;
+  const rawStatus = String(taskData?.status || data?.status || '').trim().toLowerCase();
+  const taskId = sunoTaskIdFromResponse(data);
+  const status = normalizeStatus(rawStatus);
+  const music = Array.isArray(resultData?.music) ? resultData.music : [];
+  const clipIds = music.map((item) => String(item?.clip_id || '').trim()).filter(Boolean);
+  return {
+    taskId,
+    status,
+    progress: safeProgress(taskData?.progress ?? data?.progress),
+    resultFamily: options.resultFamily || 'audio',
+    artifacts: collectSunoArtifacts(resultData),
+    music,
+    clipIds,
+    text: extractSunoText(resultData),
+    failReason: status === 'failed' ? 'Flow Music 任务失败' : '',
+  };
+}
+
+async function submitFlowMusicTask(request, apiKey, options = {}) {
+  if (!String(apiKey || '').trim()) throw new Error('请先在 API 设置中填写“贞贞的平价AI小屋 API Key”');
+  const fetchImpl = getFetchImpl(options);
+  const baseUrl = cleanBaseUrl(options.baseUrl);
+  const built = await buildFlowMusicPayload(request, apiKey, options);
+  const suffix = built.action ? `/${built.action}` : '';
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/music/generations${suffix}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(built.payload),
+  }, options, `seedance.nz ${built.operation} 提交`);
+  const data = await responseJson(response, `seedance.nz ${built.operation} 提交`);
+  if (!response.ok) throw createUpstreamError(data, response);
+  return {
+    operation: built.operation,
+    action: built.action,
+    ...normalizeFlowMusicResponse(data, { resultFamily: built.resultFamily }),
+    ...safeProviderTrace(response, data, { pollCount: 0 }),
+  };
+}
+
+async function queryFlowMusicTask(taskId, apiKey, options = {}) {
+  if (!String(apiKey || '').trim()) throw new Error('缺少贞贞的平价AI小屋 API Key');
+  const safeTaskId = requiredTaskId(taskId, 'Flow Music 任务查询');
+  const fetchImpl = getFetchImpl(options);
+  const baseUrl = cleanBaseUrl(options.baseUrl);
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/music/tasks/${encodeURIComponent(safeTaskId)}`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  }, options, 'seedance.nz Flow Music 任务查询');
+  const data = await responseJson(response, 'seedance.nz Flow Music 任务查询');
+  if (!response.ok) throw createUpstreamError(data, response);
+  return {
+    ...normalizeFlowMusicResponse(data, { resultFamily: options.resultFamily }),
     taskId: safeTaskId,
     ...safeProviderTrace(response, data),
   };
@@ -4648,6 +4997,40 @@ async function queryTask(taskId, apiKey, options = {}) {
   };
 }
 
+async function queryFashVsrTask(taskId, apiKey, options = {}) {
+  if (!String(apiKey || '').trim()) throw new Error('缺少贞贞的平价AI小屋 API Key');
+  const fetchImpl = getFetchImpl(options);
+  const baseUrl = cleanBaseUrl(options.baseUrl);
+  const response = await fetchProviderResponse(
+    fetchImpl,
+    `${baseUrl}/v1/video/generations/${encodeURIComponent(taskId)}`,
+    { headers: { Authorization: `Bearer ${apiKey}` } },
+    options,
+    'seedance.nz FlashVSR 任务查询',
+  );
+  const data = await responseJson(response, 'seedance.nz FlashVSR 任务查询');
+  if (!response.ok) throw createUpstreamError(data, response);
+  const body = data?.data && typeof data.data === 'object' ? data.data : data;
+  const status = normalizeStatus(body?.status || body?.data?.status);
+  const videoUrl = String(
+    body?.result_url
+    || body?.resultUrl
+    || body?.video_url
+    || body?.videoUrl
+    || body?.data?.result_url
+    || body?.data?.content?.video_url
+    || body?.content?.video_url
+    || '',
+  ).trim();
+  return {
+    status,
+    progress: safeProgress(body?.progress ?? body?.data?.progress),
+    videoUrl: status === 'succeeded' ? videoUrl || null : null,
+    failReason: status === 'failed' ? 'FlashVSR 视频超分任务失败' : null,
+    ...safeProviderTrace(response, data),
+  };
+}
+
 function resetCachesForTests() {
   uploadCache.clear();
   uploadQueues.clear();
@@ -4760,6 +5143,7 @@ module.exports = {
   ZHENZHEN_APIMART_VIDEO_MODELS,
   ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
   ZHENZHEN_IMAGE_GK_V2_MODEL,
+  ZHENZHEN_IMAGE_GK_V2_EDIT_MODEL,
   ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL,
   ZHENZHEN_IMAGE_GK_V15_MODEL,
   ZHENZHEN_IMAGE_NB_2_LITE_MODEL,
@@ -4773,6 +5157,7 @@ module.exports = {
   ZHENZHEN_VIDEO_V31_QUALITY_MODEL,
   ZHENZHEN_UPSCALER_MODEL,
   ZHENZHEN_UPSCALER_RESOLUTIONS,
+  FASHVSR_VIDEO_UPSCALE_MODEL,
   PROVIDER_ID,
   RATIOS,
   RESOLUTIONS,
@@ -4800,6 +5185,11 @@ module.exports = {
   MINIMAX_BITRATES,
   MINIMAX_LANGUAGE_BOOSTS,
   MUREKA_BGM_MODELS,
+  FLOWMUSIC_MODEL,
+  FLOWMUSIC_VERSIONS,
+  FLOWMUSIC_FORMATS,
+  FLOWMUSIC_VIDEO_PRESETS,
+  FLOWMUSIC_ACTION_SPECS,
   SEEDANCE_NZ_AUDIO_MODELS,
   SUNO_ACTION_SPECS,
   SUNO_VERSIONS,
@@ -4808,12 +5198,14 @@ module.exports = {
   WAN27_SPICY_MODEL,
   WAN27_SPICY_RESOLUTIONS,
   buildAudioPayload,
+  buildFlowMusicPayload,
   buildSunoMusicPayload,
   buildHailuoPayload,
   buildMinimaxH3ContextIrPayload,
   buildFlux3Payload,
   buildKlingPayload,
   buildUpscalerPayload,
+  buildFashVsrPayload,
   buildViduPayload,
   buildHappyHorsePayload,
   buildWanPayload,
@@ -4835,17 +5227,21 @@ module.exports = {
   queryMinimaxH3ContextIrTask,
   queryMidjourneyTask,
   queryAudioTask,
+  queryFlowMusicTask,
   querySunoMusicTask,
   queryTask,
+  queryFashVsrTask,
   resetCachesForTests,
   resolveModel,
   seedancePublicDnsLookup,
   submitAudioTask,
+  submitFlowMusicTask,
   submitSunoMusicTask,
   submitHailuoTask,
   submitFlux3Task,
   submitKlingTask,
   submitUpscalerTask,
+  submitFashVsrTask,
   submitViduTask,
   submitHappyHorseTask,
   submitImageTask,

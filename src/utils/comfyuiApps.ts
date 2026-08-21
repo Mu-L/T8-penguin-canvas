@@ -49,6 +49,8 @@ export interface ComfyAppDefinition {
   categoryId: string;
   description?: string;
   workflowJson: Record<string, any>;
+  /** Missing/empty keeps the legacy behavior of collecting every workflow output. */
+  outputNodeIds?: string[];
   fields: ComfyFieldMapping[];
   userParams: ComfyAppUserParam[];
   outputs: ComfyAppOutputMapping[];
@@ -270,6 +272,9 @@ export function normalizeComfyAppManifest(value: Partial<ComfyAppManifest> | nul
       };
     }).filter(Boolean) as ComfyAppUserParam[] : [];
     const stabilized = stabilizeComfyAppRuntimeParams(fields, rawUserParams);
+    const outputNodeIds: string[] = Array.isArray(item.outputNodeIds)
+      ? [...new Set<string>(item.outputNodeIds.map((nodeId: any) => cleanText(nodeId, '', 40)).filter(Boolean))].slice(0, 80)
+      : [];
     const outputs = Array.isArray(item.outputs) && item.outputs.length ? item.outputs : [{ key: 'image', label: '输出图', kind: 'image' }];
     return {
       id,
@@ -277,6 +282,7 @@ export function normalizeComfyAppManifest(value: Partial<ComfyAppManifest> | nul
       categoryId,
       description: cleanText(item.description, '', 300),
       workflowJson: item.workflowJson,
+      ...(outputNodeIds.length ? { outputNodeIds } : {}),
       fields: stabilized.fields,
       userParams: stabilized.userParams,
       outputs: outputs.map((output: any, outputIndex: number) => ({
@@ -479,6 +485,7 @@ export function buildComfyAppFromWorkflow(options: {
   categoryId?: string;
   description?: string;
   excludeRules?: string[];
+  outputNodeIds?: string[];
 }): ComfyAppDefinition {
   const title = cleanText(options.title, 'ComfyUI 工作流', 100);
   const analysis = analyzeComfyWorkflow(options.workflowJson);
@@ -518,6 +525,9 @@ export function buildComfyAppFromWorkflow(options: {
     categoryId: cleanId(options.categoryId, DEFAULT_CATEGORY_ID),
     description: cleanText(options.description, '从 ComfyUI API Workflow 自动生成的应用', 300),
     workflowJson: options.workflowJson,
+    ...(Array.isArray(options.outputNodeIds) && options.outputNodeIds.length
+      ? { outputNodeIds: [...new Set(options.outputNodeIds.map((nodeId) => cleanText(nodeId, '', 40)).filter(Boolean))].slice(0, 80) }
+      : {}),
     fields,
     userParams,
     outputs: [{ key: 'image', label: '输出图', kind: 'image' }],

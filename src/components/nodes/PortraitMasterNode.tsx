@@ -713,7 +713,7 @@ const PortraitAvatarPreview = ({ selection }: { selection: PortraitSelection }) 
 const PortraitMasterNode = ({ id, data, selected }: NodeProps) => {
   const update = useUpdateNodeData(id);
   const rf = useReactFlow();
-  const { activeId, canvases, loadCanvases } = useCanvasStore();
+  const { activeId, canvases, refreshCanvasMetadata } = useCanvasStore();
   const { templateId, customTemplates } = useThemeStore();
   const yyhPortraitIds = useHiddenFeatureStore((s) => s.yyhPortraitIds);
   const d = (data as any) || {};
@@ -1286,7 +1286,7 @@ const PortraitMasterNode = ({ id, data, selected }: NodeProps) => {
         edges: Array.isArray(canvas.edges) ? canvas.edges : [],
         viewport: canvas.viewport || { x: 0, y: 0, zoom: 1 },
       });
-      await loadCanvases();
+      await refreshCanvasMetadata(targetId);
       logBus.success(`已发送到${selectedTargetCanvas?.name || '目标画布'}`, '肖像大师');
     } catch (e: any) {
       logBus.warn(e?.message || '发送到目标画布失败', '肖像大师');

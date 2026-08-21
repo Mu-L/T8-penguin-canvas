@@ -6405,11 +6405,16 @@ function getCollaborationGateway(config) {
   return singleton;
 }
 
+function peekCollaborationGateway() {
+  return singleton;
+}
+
 module.exports = {
   CollaborationGateway,
   SESSION_COOKIE,
   createFixedWindowLimiter,
   getCollaborationGateway,
+  peekCollaborationGateway,
   publicNodeRunState,
   publicRunOutputAssets,
   publicRunState,

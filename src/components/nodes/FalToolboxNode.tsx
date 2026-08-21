@@ -46,6 +46,7 @@ import MaterialPreviewSection from './MaterialPreviewSection';
 import MentionPromptInput from './MentionPromptInput';
 import LoopingVideo from '../LoopingVideo';
 import SmartImage from '../SmartImage';
+import LazyAudio from '../LazyAudio';
 import ResizableCorners from './ResizableCorners';
 
 const handleStyle: CSSProperties = {
@@ -934,7 +935,7 @@ const FalToolboxNode = ({ id, data, selected }: NodeProps) => {
             <div className="space-y-2 pt-2" style={{ borderTop: `1px solid ${border}` }}>
               {imageUrls.map((url, index) => <SmartImage key={`${url}-${index}`} src={url} alt="Fal超市输出" className="w-full rounded object-contain" thumbSize={720} />)}
               {videoUrls.map((url, index) => <LoopingVideo key={`${url}-${index}`} src={url} controls className="w-full rounded" />)}
-              {audioUrls.map((url, index) => <audio key={`${url}-${index}`} src={url} controls className="w-full h-8" />)}
+              {audioUrls.map((url, index) => <LazyAudio key={`${url}-${index}`} src={url} controls className="w-full h-8" />)}
               {modelUrls.map((url, index) => (
                 <a
                   key={`${url}-${index}`}

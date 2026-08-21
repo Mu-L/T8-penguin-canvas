@@ -1,6 +1,6 @@
 {
   "schema": "t8-creative-runtime-catalog-v1",
-  "sourceDigest": "3c8802635d0fd87c9b478e92085f2d71d6b363323bb71b0b48928be2718f1ba0",
+  "sourceDigest": "e33b63ae25634d421f1ddad19cfcb24dd02cf89c72bbb85e1b755330dacb220b",
   "generatedFrom": [
     "src/providers/models.ts",
     "src/config/seedance.ts",
@@ -390,6 +390,36 @@
       "available": true,
       "parameters": {
         "label": "qwen/qwen3.7-plus",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "llm",
+        "available": true
+      }
+    },
+    {
+      "id": "llm:seedance-nz:qwen/qwen3.8-max",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "qwen/qwen3.8-max",
+      "label": "qwen/qwen3.8-max",
+      "family": "llm",
+      "available": true,
+      "parameters": {
+        "label": "qwen/qwen3.8-max",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "llm",
+        "available": true
+      }
+    },
+    {
+      "id": "llm:seedance-nz:zhenzhen/gk-4.6",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "zhenzhen/gk-4.6",
+      "label": "zhenzhen/gk-4.6",
+      "family": "llm",
+      "available": true,
+      "parameters": {
+        "label": "zhenzhen/gk-4.6",
         "platformLabel": "贞贞的平价AI小屋",
         "family": "llm",
         "available": true
@@ -1263,6 +1293,31 @@
       }
     },
     {
+      "id": "image:seedance-nz:zhenzhen-image-gk-v2-edit",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "zhenzhen-image-gk-v2-edit",
+      "label": "zhenzhen-image-gk-v2-edit",
+      "family": "grok-image",
+      "available": true,
+      "parameters": {
+        "label": "zhenzhen-image-gk-v2-edit",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "grok-image",
+        "available": true,
+        "tabLabel": "Grok",
+        "capabilities": [
+          "t2i",
+          "i2i",
+          "edit"
+        ],
+        "parameterKind": "seedance-nz-image",
+        "supportsReference": true,
+        "maxReferenceImages": 3,
+        "description": "贞贞的平价AI小屋图像模型"
+      }
+    },
+    {
       "id": "image:seedance-nz:zhenzhen-image-nb-2",
       "provider": "seedance-nz",
       "platformLabel": "贞贞的平价AI小屋",
@@ -2092,6 +2147,34 @@
         "family": "seedance-2.0",
         "available": true,
         "apiSource": "seedance-nz"
+      }
+    },
+    {
+      "id": "video:seedance-nz:FlashVSR_video_upscale",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "FlashVSR_video_upscale",
+      "label": "FlashVSR_video_upscale",
+      "family": "fashvsr-video-upscale",
+      "available": true,
+      "parameters": {
+        "label": "FlashVSR_video_upscale",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "fashvsr-video-upscale",
+        "available": true,
+        "nodeKind": "upscaler",
+        "ratios": [],
+        "defaultRatio": "",
+        "durations": [],
+        "resolutions": [],
+        "defaultResolution": "",
+        "supportsImages": false,
+        "supportsVideos": true,
+        "supportsAudios": false,
+        "maxReferenceImages": 0,
+        "maxReferenceVideos": 1,
+        "maxReferenceAudios": 0,
+        "description": "FlashVSR · 单个 480P、3-15 秒视频超分"
       }
     },
     {
@@ -4134,7 +4217,8 @@
           "720p",
           "1080p",
           "2k",
-          "4k"
+          "4k",
+          "native1080p"
         ],
         "defaultResolution": "720p",
         "supportsImages": true,
@@ -4206,7 +4290,8 @@
           "720p",
           "1080p",
           "2k",
-          "4k"
+          "4k",
+          "native1080p"
         ],
         "defaultResolution": "720p",
         "supportsImages": true,
@@ -4278,7 +4363,8 @@
           "720p",
           "1080p",
           "2k",
-          "4k"
+          "4k",
+          "native1080p"
         ],
         "defaultResolution": "720p",
         "supportsImages": false,
@@ -4350,7 +4436,8 @@
           "720p",
           "1080p",
           "2k",
-          "4k"
+          "4k",
+          "native1080p"
         ],
         "defaultResolution": "720p",
         "supportsImages": true,
@@ -4422,7 +4509,8 @@
           "720p",
           "1080p",
           "2k",
-          "4k"
+          "4k",
+          "native1080p"
         ],
         "defaultResolution": "720p",
         "supportsImages": true,
@@ -4494,7 +4582,8 @@
           "720p",
           "1080p",
           "2k",
-          "4k"
+          "4k",
+          "native1080p"
         ],
         "defaultResolution": "720p",
         "supportsImages": false,
@@ -6780,6 +6869,22 @@
       }
     },
     {
+      "id": "audio:seedance-nz:flowmusic",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "model": "flowmusic",
+      "label": "Lyria / Flow Music",
+      "family": "lyria",
+      "available": true,
+      "parameters": {
+        "label": "Lyria / Flow Music",
+        "platformLabel": "贞贞的平价AI小屋",
+        "family": "lyria",
+        "available": true,
+        "description": "Flow Music 官方九项音乐创作与处理能力；请求 model 固定为 flowmusic"
+      }
+    },
+    {
       "id": "audio:seedance-nz:minimax-music-2.6",
       "provider": "seedance-nz",
       "platformLabel": "贞贞的平价AI小屋",
@@ -6983,6 +7088,184 @@
     }
   ],
   "actions": [
+    {
+      "id": "audio:seedance-nz:flowmusic-cover",
+      "kind": "audio",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "action": "flowmusic-cover",
+      "label": "flowmusic-cover",
+      "family": "lyria",
+      "resultKind": "audio",
+      "parameters": {
+        "action": "cover",
+        "requiredFields": [
+          "clip_id",
+          "instruction",
+          "strength"
+        ],
+        "allowedFields": [
+          "version",
+          "clip_id",
+          "instruction",
+          "strength",
+          "title",
+          "seed"
+        ],
+        "fixedModel": "flowmusic",
+        "supportsLyria35": true
+      }
+    },
+    {
+      "id": "audio:seedance-nz:flowmusic-download-audio",
+      "kind": "audio",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "action": "flowmusic-download-audio",
+      "label": "flowmusic-download-audio",
+      "family": "lyria",
+      "resultKind": "audio",
+      "parameters": {
+        "action": "download-audio",
+        "requiredFields": [
+          "clip_id",
+          "format"
+        ],
+        "allowedFields": [
+          "clip_id",
+          "format"
+        ],
+        "fixedModel": "flowmusic",
+        "supportsLyria35": false
+      }
+    },
+    {
+      "id": "audio:seedance-nz:flowmusic-extend",
+      "kind": "audio",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "action": "flowmusic-extend",
+      "label": "flowmusic-extend",
+      "family": "lyria",
+      "resultKind": "audio",
+      "parameters": {
+        "action": "extend",
+        "requiredFields": [
+          "clip_id",
+          "extend_from_s",
+          "extend_s",
+          "instruction"
+        ],
+        "allowedFields": [
+          "version",
+          "clip_id",
+          "extend_from_s",
+          "extend_s",
+          "instruction",
+          "title",
+          "seed"
+        ],
+        "fixedModel": "flowmusic",
+        "supportsLyria35": true
+      }
+    },
+    {
+      "id": "audio:seedance-nz:flowmusic-generation",
+      "kind": "audio",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "action": "flowmusic-generation",
+      "label": "flowmusic-generation",
+      "family": "lyria",
+      "resultKind": "audio",
+      "parameters": {
+        "action": "",
+        "requiredFields": [],
+        "allowedFields": [
+          "version",
+          "sound_prompt",
+          "lyrics",
+          "title",
+          "bpm",
+          "length",
+          "seed"
+        ],
+        "fixedModel": "flowmusic",
+        "supportsLyria35": true
+      }
+    },
+    {
+      "id": "audio:seedance-nz:flowmusic-replace",
+      "kind": "audio",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "action": "flowmusic-replace",
+      "label": "flowmusic-replace",
+      "family": "lyria",
+      "resultKind": "audio",
+      "parameters": {
+        "action": "replace",
+        "requiredFields": [
+          "clip_id",
+          "start_s",
+          "end_s",
+          "instruction"
+        ],
+        "allowedFields": [
+          "version",
+          "clip_id",
+          "start_s",
+          "end_s",
+          "instruction",
+          "title",
+          "seed"
+        ],
+        "fixedModel": "flowmusic",
+        "supportsLyria35": true
+      }
+    },
+    {
+      "id": "audio:seedance-nz:flowmusic-stems",
+      "kind": "audio",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "action": "flowmusic-stems",
+      "label": "flowmusic-stems",
+      "family": "lyria",
+      "resultKind": "file",
+      "parameters": {
+        "action": "stems",
+        "requiredFields": [
+          "clip_id"
+        ],
+        "allowedFields": [
+          "clip_id"
+        ],
+        "fixedModel": "flowmusic",
+        "supportsLyria35": false
+      }
+    },
+    {
+      "id": "audio:seedance-nz:flowmusic-upload-audio",
+      "kind": "audio",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "action": "flowmusic-upload-audio",
+      "label": "flowmusic-upload-audio",
+      "family": "lyria",
+      "resultKind": "audio",
+      "parameters": {
+        "action": "upload-audio",
+        "requiredFields": [
+          "audio_url"
+        ],
+        "allowedFields": [
+          "audio_url"
+        ],
+        "fixedModel": "flowmusic",
+        "supportsLyria35": false
+      }
+    },
     {
       "id": "audio:seedance-nz:suno-add-instrumental",
       "kind": "audio",
@@ -7822,6 +8105,27 @@
       }
     },
     {
+      "id": "text:seedance-nz:flowmusic-lyrics",
+      "kind": "text",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "action": "flowmusic-lyrics",
+      "label": "flowmusic-lyrics",
+      "family": "lyria",
+      "resultKind": "text",
+      "parameters": {
+        "action": "lyrics",
+        "requiredFields": [
+          "prompt"
+        ],
+        "allowedFields": [
+          "prompt"
+        ],
+        "fixedModel": "flowmusic",
+        "supportsLyria35": false
+      }
+    },
+    {
       "id": "text:seedance-nz:midjourney-describe",
       "kind": "text",
       "provider": "seedance-nz",
@@ -7832,6 +8136,29 @@
       "resultKind": "text",
       "parameters": {
         "summary": "必须且只能提供 1 张参考图，返回文字描述。"
+      }
+    },
+    {
+      "id": "video:seedance-nz:flowmusic-video-clip",
+      "kind": "video",
+      "provider": "seedance-nz",
+      "platformLabel": "贞贞的平价AI小屋",
+      "action": "flowmusic-video-clip",
+      "label": "flowmusic-video-clip",
+      "family": "lyria",
+      "resultKind": "video",
+      "parameters": {
+        "action": "video-clip",
+        "requiredFields": [
+          "clip_id",
+          "preset"
+        ],
+        "allowedFields": [
+          "clip_id",
+          "preset"
+        ],
+        "fixedModel": "flowmusic",
+        "supportsLyria35": false
       }
     },
     {
@@ -7849,10 +8176,10 @@
     }
   ],
   "counts": {
-    "llm": 32,
-    "image": 42,
-    "video": 113,
-    "audio": 16,
-    "actions": 47
+    "llm": 34,
+    "image": 43,
+    "video": 114,
+    "audio": 17,
+    "actions": 56
   }
 }

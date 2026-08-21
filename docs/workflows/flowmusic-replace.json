@@ -1,0 +1,112 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "Lyria · flowmusic-replace",
+  "nodes": [
+    {
+      "id": "flowmusic-replace-source",
+      "type": "audio",
+      "position": {
+        "x": 0,
+        "y": 40
+      },
+      "data": {
+        "label": "Lyria · 先生成可编辑的原生 clip",
+        "audioProviderMode": "lyria",
+        "apiModel": "flowmusic",
+        "flowMusicOperation": "flowmusic-generation",
+        "flowMusicVersion": "lyria-3.5",
+        "prompt": "电影感器乐流行，温暖钢琴与克制电子节奏，无人声",
+        "flowMusicBpm": 110,
+        "flowMusicLength": 8,
+        "reuseResult": false
+      }
+    },
+    {
+      "id": "flowmusic-replace-action",
+      "type": "audio",
+      "position": {
+        "x": 440,
+        "y": 40
+      },
+      "data": {
+        "label": "Lyria · 片段替换",
+        "audioProviderMode": "lyria",
+        "apiModel": "flowmusic",
+        "flowMusicOperation": "flowmusic-replace",
+        "flowMusicClipId": "",
+        "reuseResult": false,
+        "prompt": "将选定片段替换为情绪逐步增强的弦乐过门",
+        "flowMusicVersion": "lyria-3.5",
+        "flowMusicStartSeconds": 1,
+        "flowMusicEndSeconds": 5
+      }
+    },
+    {
+      "id": "flowmusic-replace-output",
+      "type": "output",
+      "position": {
+        "x": 860,
+        "y": 40
+      },
+      "data": {
+        "label": "片段替换结果",
+        "outputType": "audio"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "flowmusic-replace-clip-edge",
+      "source": "flowmusic-replace-source",
+      "target": "flowmusic-replace-action"
+    },
+    {
+      "id": "flowmusic-replace-output-edge",
+      "source": "flowmusic-replace-action",
+      "target": "flowmusic-replace-output"
+    }
+  ],
+  "nodeCount": 3,
+  "edgeCount": 2,
+  "nodeTypes": [
+    "audio",
+    "output"
+  ],
+  "topologyPreview": {
+    "nodes": [
+      {
+        "id": "flowmusic-replace-source",
+        "type": "audio",
+        "label": "Lyria · 先生成可编辑的原生 clip",
+        "x": 8,
+        "y": 50
+      },
+      {
+        "id": "flowmusic-replace-action",
+        "type": "audio",
+        "label": "Lyria · 片段替换",
+        "x": 51,
+        "y": 50
+      },
+      {
+        "id": "flowmusic-replace-output",
+        "type": "output",
+        "label": "片段替换结果",
+        "x": 92,
+        "y": 50
+      }
+    ],
+    "edges": [
+      {
+        "source": "flowmusic-replace-source",
+        "target": "flowmusic-replace-action"
+      },
+      {
+        "source": "flowmusic-replace-action",
+        "target": "flowmusic-replace-output"
+      }
+    ]
+  },
+  "savedAt": "2026-08-21T00:00:00.000Z"
+}

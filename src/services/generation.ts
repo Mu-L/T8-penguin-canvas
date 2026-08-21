@@ -319,6 +319,7 @@ export interface SeedreamNzSubmitRequest {
     | 'zhenzhen-image-g2-i2i'
     | 'zhenzhen-image-g-v2-lowprice'
     | 'zhenzhen-image-gk-v2'
+    | 'zhenzhen-image-gk-v2-edit'
     | 'zhenzhen-image-gk-v15'
     | 'zhenzhen-image-gk-v15-edit'
     | 'zhenzhen-image-nb-2-lite'
@@ -350,6 +351,8 @@ export interface SeedreamNzSubmitRequest {
   width?: number;
   height?: number;
   thinking_mode?: boolean;
+  aspect_ratio?: string;
+  nsfw_check?: boolean;
 }
 
 export async function submitSeedreamNz(
@@ -743,7 +746,7 @@ export interface GenerateLlmRequest {
   /** 流式开关;默认 false(非流式) */
   stream?: boolean;
   /** 后端受控请求配置；提示词增强器使用真实媒体上传并禁止自动重放付费请求。 */
-  requestProfile?: 'minimax-h3-prompt-enhancer' | 'seedance20-prompt-enhancer' | 'mv-music-master';
+  requestProfile?: 'minimax-h3-prompt-enhancer' | 'minimax-music3-prompt-enhancer' | 'seedance20-prompt-enhancer' | 'mv-music-master';
 }
 
 export interface GenerateLlmResult {
@@ -788,6 +791,8 @@ export interface GenerateExternalLlmRequest extends Omit<GenerateLlmRequest, 'st
   providerId: string;
   providerModel?: string;
   providerParams?: Record<string, any>;
+  /** 扩展 LLM 同步请求超时；由后端限界，Music 3 多阶段任务需显式放宽。 */
+  timeoutMs?: number;
 }
 
 export function buildGenerateExternalLlmRequestBody(req: GenerateExternalLlmRequest): GenerateExternalLlmRequest {
@@ -1299,6 +1304,33 @@ export async function queryUpscaler(taskId: string): Promise<HappyHorseQueryResu
   return withProviderTransportTrace(data.data, r);
 }
 
+export interface FashVsrSubmitRequest {
+  model: 'FlashVSR_video_upscale' | 'FashVSR_video_upscale';
+  videos: string[];
+}
+
+export async function submitFashVsr(req: FashVsrSubmitRequest, transport: ProviderSubmissionTransport = {}): Promise<{
+  taskId: string;
+  model: 'FlashVSR_video_upscale';
+  taskType: 'upscale';
+} & ProviderTransportTrace> {
+  const r = await fetch('/api/proxy/video/fashvsr/submit', {
+    method: 'POST',
+    headers: providerSubmissionHeaders(transport),
+    body: JSON.stringify(req),
+  });
+  const data = await safeJsonResponse(r, 'FlashVSR 视频超分提交');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
+}
+
+export async function queryFashVsr(taskId: string): Promise<HappyHorseQueryResult> {
+  const r = await fetch(`/api/proxy/video/fashvsr/status/${encodeURIComponent(taskId)}`);
+  const data = await safeJsonResponse(r, 'FlashVSR 视频超分查询');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r);
+}
+
 export type ViduQ3Model =
   | 'vidu-q3-pro-t2v'
   | 'vidu-q3-turbo-t2v'
@@ -1543,7 +1575,7 @@ export async function queryMinimaxH3ContextIr(
 // 完全对齐主项目 gpt-image-2-web 的 runSuno / runSunoCover / runSunoExtend
 // ========================================================================
 export type AudioMode = 'generate' | 'cover' | 'extend';
-export type AudioProviderMode = 'suno' | 'seed-audio' | 'whisper' | 'qwen3-tts' | 'minimax' | 'mureka';
+export type AudioProviderMode = 'suno' | 'seed-audio' | 'whisper' | 'qwen3-tts' | 'minimax' | 'mureka' | 'lyria';
 export type SunoPlatform = 'zhenzhen' | 'seedance-nz';
 export type WhisperResponseFormat = 'json' | 'verbose_json' | 'srt' | 'text' | 'vtt';
 
@@ -1833,6 +1865,73 @@ export async function querySunoNz(taskId: string): Promise<SunoNzTaskResult> {
   const data = await safeJsonResponse(r, '贞贞的平价AI小屋 Suno');
   if (!r.ok || !data.success) throw providerResponseError(r, data);
   return withProviderTransportTrace(data.data, r) as SunoNzTaskResult;
+}
+
+export type FlowMusicOperation =
+  | 'flowmusic-generation'
+  | 'flowmusic-lyrics'
+  | 'flowmusic-upload-audio'
+  | 'flowmusic-extend'
+  | 'flowmusic-replace'
+  | 'flowmusic-cover'
+  | 'flowmusic-stems'
+  | 'flowmusic-download-audio'
+  | 'flowmusic-video-clip';
+
+export interface FlowMusicSubmitRequest {
+  operation: FlowMusicOperation;
+  version?: 'default' | 'lyria-3.5';
+  sound_prompt?: string;
+  lyrics?: string;
+  prompt?: string;
+  title?: string;
+  bpm?: number;
+  length?: number;
+  seed?: number;
+  audioUrl?: string;
+  clip_id?: string;
+  extend_from_s?: number;
+  extend_s?: number;
+  instruction?: string;
+  start_s?: number;
+  end_s?: number;
+  strength?: number;
+  format?: 'mp3' | 'wav';
+  preset?: 'simple' | 'modern' | 'player';
+}
+
+export type FlowMusicTaskResult = Omit<SunoNzTaskResult, 'operation'> & {
+  model?: 'flowmusic';
+  operation?: FlowMusicOperation;
+  clipId?: string;
+  clipIds?: string[];
+};
+
+export async function submitFlowMusic(
+  req: FlowMusicSubmitRequest,
+  transport: ProviderSubmissionTransport = {},
+): Promise<FlowMusicTaskResult> {
+  const r = await fetch('/api/proxy/audio/flowmusic/submit', {
+    method: 'POST',
+    headers: providerSubmissionHeaders(transport),
+    body: JSON.stringify(req),
+    signal: transport.signal,
+  });
+  const data = await safeJsonResponse(r, '贞贞的平价AI小屋 Flow Music');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r) as FlowMusicTaskResult;
+}
+
+export async function queryFlowMusic(
+  taskId: string,
+  transport: ProviderSubmissionTransport = {},
+): Promise<FlowMusicTaskResult> {
+  const r = await fetch(`/api/proxy/audio/flowmusic/status/${encodeURIComponent(taskId)}`, {
+    signal: transport.signal,
+  });
+  const data = await safeJsonResponse(r, '贞贞的平价AI小屋 Flow Music');
+  if (!r.ok || !data.success) throw providerResponseError(r, data);
+  return withProviderTransportTrace(data.data, r) as FlowMusicTaskResult;
 }
 
 export interface SeedAudioSubmitRequest {

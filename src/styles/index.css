@@ -1,19 +1,5 @@
-/* 像素风主题(可切换) - @import 必须置顶 */
-@import url('https://fonts.googleapis.com/css2?family=DotGothic16&family=M+PLUS+Rounded+1c:wght@400;500;700;800&display=swap');
-@import './theme-pixel.css';
+/* 共享主题基础；视觉主题由 themeCssLoader 按需加载。 */
 @import './theme-core.css';
-@import './theme-op.css';
-@import './theme-rh.css';
-@import './theme-naruto.css';
-@import './theme-eva.css';
-@import './theme-yyh.css';
-@import './theme-slamdunk.css';
-@import './theme-soccer.css';
-@import './theme-dragonball.css';
-@import './theme-saintseiya.css';
-@import './theme-tetris.css';
-@import './theme-farm-story.css';
-@import './theme-garden-defense.css';
 
 @tailwind base;
 @tailwind components;

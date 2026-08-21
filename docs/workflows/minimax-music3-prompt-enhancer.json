@@ -1,0 +1,93 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "MiniMax Music 3 · 歌词与曲风前期策划",
+  "nodes": [
+    {
+      "id": "music3-idea",
+      "type": "text",
+      "position": { "x": 0, "y": 40 },
+      "data": { "label": "歌曲创作意图", "text": "华语流行与氛围 R&B 融合，女声，克制的主歌逐步走向开阔副歌，钢琴、合成器与温暖低频。" }
+    },
+    {
+      "id": "music3-lyrics",
+      "type": "text",
+      "position": { "x": 0, "y": 300 },
+      "data": { "label": "歌词（可选）", "text": "[Verse]\n夜色沿着窗沿慢慢落下\n\n[Chorus]\n我把未说的话唱给远方" }
+    },
+    {
+      "id": "music3-enhancer",
+      "type": "minimax-music3-prompt-enhancer",
+      "position": { "x": 420, "y": 80 },
+      "data": {
+        "label": "MiniMax Music 提示词增强器",
+        "musicIdea": "",
+        "lyrics": "",
+        "lyricsMode": "auto",
+        "qualityMode": "official-full",
+        "semanticMode": "private",
+        "manualSemanticProfile": "",
+        "editRequest": "",
+        "editScope": "auto",
+        "editSection": "Verse",
+        "editSectionOccurrence": 1,
+        "structurePreset": "auto",
+        "customStructure": "",
+        "language": "auto",
+        "customLanguage": "",
+        "captionLanguage": "English",
+        "meter": "auto",
+        "customMeter": "",
+        "durationSeconds": 0,
+        "bpm": 0,
+        "keyScale": "",
+        "captionWords": 0,
+        "constraints": "",
+        "seed": 0,
+        "llmApiSource": "seedance-nz",
+        "providerSource": "zhenzhen",
+        "providerId": "",
+        "providerModel": "bytedance/doubao-seed-2.1-pro",
+        "status": "idle",
+        "error": ""
+      }
+    },
+    {
+      "id": "music3-caption-output",
+      "type": "output",
+      "position": { "x": 980, "y": 80 },
+      "data": { "label": "Music 3 Caption", "outputType": "text" }
+    },
+    {
+      "id": "music3-lyrics-output",
+      "type": "output",
+      "position": { "x": 980, "y": 330 },
+      "data": { "label": "最终歌词", "outputType": "text" }
+    }
+  ],
+  "edges": [
+    { "id": "music3-edge-idea", "source": "music3-idea", "target": "music3-enhancer", "targetHandle": "music-idea" },
+    { "id": "music3-edge-lyrics", "source": "music3-lyrics", "target": "music3-enhancer", "targetHandle": "lyrics" },
+    { "id": "music3-edge-caption", "source": "music3-enhancer", "sourceHandle": "music-caption", "target": "music3-caption-output" },
+    { "id": "music3-edge-lyrics-output", "source": "music3-enhancer", "sourceHandle": "lyrics", "target": "music3-lyrics-output" }
+  ],
+  "nodeCount": 5,
+  "edgeCount": 4,
+  "nodeTypes": ["text", "minimax-music3-prompt-enhancer", "output"],
+  "topologyPreview": {
+    "nodes": [
+      { "id": "music3-idea", "type": "text", "label": "歌曲创作意图", "x": 8, "y": 20 },
+      { "id": "music3-lyrics", "type": "text", "label": "歌词（可选）", "x": 8, "y": 75 },
+      { "id": "music3-enhancer", "type": "minimax-music3-prompt-enhancer", "label": "MiniMax Music 提示词增强器", "x": 50, "y": 48 },
+      { "id": "music3-caption-output", "type": "output", "label": "Music 3 Caption", "x": 92, "y": 28 },
+      { "id": "music3-lyrics-output", "type": "output", "label": "最终歌词", "x": 92, "y": 72 }
+    ],
+    "edges": [
+      { "source": "music3-idea", "target": "music3-enhancer" },
+      { "source": "music3-lyrics", "target": "music3-enhancer" },
+      { "source": "music3-enhancer", "target": "music3-caption-output" },
+      { "source": "music3-enhancer", "target": "music3-lyrics-output" }
+    ]
+  },
+  "savedAt": "2026-08-14T00:00:00.000Z"
+}

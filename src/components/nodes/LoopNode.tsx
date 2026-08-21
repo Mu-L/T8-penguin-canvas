@@ -5,7 +5,7 @@ import { useUpdateNodeData } from './useUpdateNodeData';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
 import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
 import { useThemeStore } from '../../stores/theme';
-import { matchesRunCompletion, useRunBusStore } from '../../stores/runBus';
+import { createCanvasNodeExecutionKey, matchesRunCompletion, useRunBusStore } from '../../stores/runBus';
 import { useUpstreamMaterials, type MaterialKind, type Material } from './useUpstreamMaterials';
 import { topologicalSort } from '../../utils/topologicalSort';
 import { excludeRandomRouteBranchDescendants } from '../../utils/randomRoute';
@@ -166,6 +166,7 @@ function awaitTriggeredNode(
   return new Promise<boolean>((resolve) => {
     let resolved = false;
     const startCancelSeq = useRunBusStore.getState().cancelSeq;
+    const executionNodeId = createCanvasNodeExecutionKey(runContext?.canvasId, nodeId);
     let executionToken: string | null = null;
     const finish = (ok: boolean) => {
       if (resolved) return;
@@ -175,18 +176,18 @@ function awaitTriggeredNode(
       resolve(ok);
     };
     const off = useRunBusStore.subscribe((state) => {
-      if (cancelRef.current || (state.cancelSeq !== startCancelSeq && state.cancelTargets.includes(nodeId))) finish(false);
-      else if (matchesRunCompletion(state.lastDone, nodeId, executionToken)) finish(state.lastDone.ok);
-      else if (executionToken && state.executionTokens[nodeId] !== executionToken) finish(false);
+      if (cancelRef.current || (state.cancelSeq !== startCancelSeq && state.cancelTargets.includes(executionNodeId))) finish(false);
+      else if (matchesRunCompletion(state.lastDone, executionNodeId, executionToken)) finish(state.lastDone.ok);
+      else if (executionToken && state.executionTokens[executionNodeId] !== executionToken) finish(false);
     });
     const timer = window.setTimeout(() => finish(false), timeoutMs);
     // 用 triggerRunMany([id]) 而非 triggerRun(id) 触发——这样并联多链时 currentRunId 不会互相覆盖
     const tokens = useRunBusStore.getState().triggerRunMany([nodeId], 'batch', runContext);
     executionToken = tokens[nodeId] || null;
     const current = useRunBusStore.getState();
-    if (cancelRef.current || (current.cancelSeq !== startCancelSeq && current.cancelTargets.includes(nodeId))) finish(false);
-    else if (matchesRunCompletion(current.lastDone, nodeId, executionToken)) finish(current.lastDone.ok);
-    else if (!executionToken || current.executionTokens[nodeId] !== executionToken) finish(false);
+    if (cancelRef.current || (current.cancelSeq !== startCancelSeq && current.cancelTargets.includes(executionNodeId))) finish(false);
+    else if (matchesRunCompletion(current.lastDone, executionNodeId, executionToken)) finish(current.lastDone.ok);
+    else if (!executionToken || current.executionTokens[executionNodeId] !== executionToken) finish(false);
   });
 }
 

@@ -1,6 +1,10 @@
 const express = require('express');
 const config = require('../config');
-const { getProjectDatabase } = require('../services/projectDatabase');
+const {
+  createLazyRuntime,
+  getProjectStorageRuntime,
+  sendProjectRuntimeUnavailable,
+} = require('../services/projectRuntime');
 const {
   sendProjectDatabaseStorageCapacityError,
 } = require('../services/projectDatabasePublicError');
@@ -52,33 +56,74 @@ function runCommittedNotification(label, callback) {
   }
 }
 
-const database = getProjectDatabase(config);
-const previewPipeline = getAssetPreviewPipeline(config, database);
-const assetIndexer = getBackgroundAssetIndexer(config, database, previewPipeline);
-const collaborationGateway = getCollaborationGateway(config);
-const runExecutionPolicy = new HostExecutionPolicy(database);
-const recoveryManager = getRunRecoveryManager({
-  database,
-  baseUrl: `http://127.0.0.1:${config.PORT}`,
-  broadcast: {
-    intent: (intent) => runCommittedNotification(
-      'recovery.run-intent',
-      () => collaborationGateway.broadcastHostRunIntent(intent),
-    ),
-    run: (run) => runCommittedNotification(
-      'recovery.run',
-      () => collaborationGateway.broadcastHostRunState(run),
-    ),
-    node: (run, nodeRun) => runCommittedNotification(
-      'recovery.node',
-      () => collaborationGateway.broadcastHostNodeRunState(run, nodeRun),
-    ),
-    output: (run, nodeRun, assets) => runCommittedNotification(
-      'recovery.output',
-      () => collaborationGateway.broadcastHostRunOutput(run, nodeRun, assets),
-    ),
-  },
-  commitRunOutputArtifacts: (input) => assetIndexer.commitHostRunOutputAssets(input),
+let database = null;
+let previewPipeline = null;
+let assetIndexer = null;
+let collaborationGateway = null;
+let runExecutionPolicy = null;
+let recoveryManager = null;
+
+const projectRunsRuntime = createLazyRuntime(() => {
+  const nextDatabase = getProjectStorageRuntime(config).database;
+  const nextPreviewPipeline = getAssetPreviewPipeline(config, nextDatabase);
+  const nextAssetIndexer = getBackgroundAssetIndexer(config, nextDatabase, nextPreviewPipeline);
+  const nextCollaborationGateway = getCollaborationGateway(config);
+  const nextRunExecutionPolicy = new HostExecutionPolicy(nextDatabase);
+  const nextRecoveryManager = getRunRecoveryManager({
+    database: nextDatabase,
+    baseUrl: `http://127.0.0.1:${config.PORT}`,
+    broadcast: {
+      intent: (intent) => runCommittedNotification(
+        'recovery.run-intent',
+        () => nextCollaborationGateway.broadcastHostRunIntent(intent),
+      ),
+      run: (run) => runCommittedNotification(
+        'recovery.run',
+        () => nextCollaborationGateway.broadcastHostRunState(run),
+      ),
+      node: (run, nodeRun) => runCommittedNotification(
+        'recovery.node',
+        () => nextCollaborationGateway.broadcastHostNodeRunState(run, nodeRun),
+      ),
+      output: (run, nodeRun, assets) => runCommittedNotification(
+        'recovery.output',
+        () => nextCollaborationGateway.broadcastHostRunOutput(run, nodeRun, assets),
+      ),
+    },
+    commitRunOutputArtifacts: (input) => nextAssetIndexer.commitHostRunOutputAssets(input),
+  });
+  return {
+    database: nextDatabase,
+    previewPipeline: nextPreviewPipeline,
+    assetIndexer: nextAssetIndexer,
+    collaborationGateway: nextCollaborationGateway,
+    runExecutionPolicy: nextRunExecutionPolicy,
+    recoveryManager: nextRecoveryManager,
+  };
+});
+
+function getProjectRunsRuntime() {
+  const runtime = projectRunsRuntime.get();
+  database = runtime.database;
+  previewPipeline = runtime.previewPipeline;
+  assetIndexer = runtime.assetIndexer;
+  collaborationGateway = runtime.collaborationGateway;
+  runExecutionPolicy = runtime.runExecutionPolicy;
+  recoveryManager = runtime.recoveryManager;
+  return runtime;
+}
+
+function peekProjectRunsRuntime() {
+  return projectRunsRuntime.peek();
+}
+
+router.use((_req, res, next) => {
+  try {
+    getProjectRunsRuntime();
+    next();
+  } catch (error) {
+    sendProjectRuntimeUnavailable(res, error);
+  }
 });
 
 function requireRun(runId, res) {
@@ -822,3 +867,5 @@ router.post('/:runId/nodes/:nodeRunId/outputs', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.getRuntime = getProjectRunsRuntime;
+module.exports.peekRuntime = peekProjectRunsRuntime;

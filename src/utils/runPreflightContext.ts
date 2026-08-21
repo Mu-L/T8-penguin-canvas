@@ -424,8 +424,10 @@ function builtInCredentialNotice(node: Node, settings: ApiSettings): RunPrefligh
         );
   }
 
-  if (node.type === 'minimax-h3-prompt-enhancer' || node.type === 'seedance20-prompt-enhancer') {
-    const enhancerLabel = node.type === 'seedance20-prompt-enhancer' ? 'Seedance 2.0' : 'MiniMax H3';
+  if (node.type === 'minimax-h3-prompt-enhancer' || node.type === 'minimax-music3-prompt-enhancer' || node.type === 'seedance20-prompt-enhancer') {
+    const enhancerLabel = node.type === 'seedance20-prompt-enhancer'
+      ? 'Seedance 2.0'
+      : node.type === 'minimax-music3-prompt-enhancer' ? 'MiniMax Music 3' : 'MiniMax H3';
     if (data.llmApiSource !== 'zhenzhen') {
       return configuredSecret(settings.zhenzhenSd2ApiKey)
         ? null

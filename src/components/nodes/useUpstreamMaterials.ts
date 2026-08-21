@@ -41,6 +41,8 @@ export interface Material {
   label?: string;
   rhNodeId?: string;
   sourceNodeSerialId?: number;
+  /** Stable provider clip identity used by chained music operations. */
+  clipId?: string;
 }
 
 export interface UpstreamMaterials {
@@ -246,6 +248,7 @@ export function useUpstreamMaterials(nodeId: string): UpstreamMaterials {
       arr: Material[],
       keyOverride?: string,
       labelOverride?: string,
+      clipIdOverride?: string,
     ) => {
       if (typeof v !== 'string') return;
       const s = v.trim();
@@ -260,6 +263,7 @@ export function useUpstreamMaterials(nodeId: string): UpstreamMaterials {
         sourceNodeId: sourceId,
         origin: 'upstream',
         label: labelOverride || (s.split('/').pop() || s).slice(0, 28),
+        clipId: clipIdOverride || undefined,
       });
     };
 
@@ -352,6 +356,20 @@ export function useUpstreamMaterials(nodeId: string): UpstreamMaterials {
         for (const u of ud.videoUrls) pushUrl(sid, 'video', u, videos);
       }
 
+      const audioClipIds = new Map<string, string>();
+      if (Array.isArray(ud.tracks)) {
+        for (const track of ud.tracks) {
+          const audioUrl = String(track?.audioUrl || track?.remoteUrl || '').trim();
+          const clipId = String(track?.clipId || '').trim();
+          if (audioUrl && clipId) audioClipIds.set(audioUrl, clipId);
+        }
+      }
+      const fallbackClipId = String(ud.flowMusicClipId || '').trim();
+      const pushAudioUrl = (value: unknown) => {
+        const audioUrl = typeof value === 'string' ? value.trim() : '';
+        pushUrl(sid, 'audio', value, audios, undefined, undefined, audioClipIds.get(audioUrl) || fallbackClipId);
+      };
+
       // === v1.2.9.14: Suno 双端口语义 (与 FramePair 同模式) ===
       // AudioNode (Suno) 同时具备 audioUrl(主轨, sourceHandle='audio-0') + audioUrl_1(副轨, sourceHandle='audio-1') 字段时按 handle 过滤,
       //   - 'audio-0' 端口 → 只输出主轨
@@ -363,19 +381,19 @@ export function useUpstreamMaterials(nodeId: string): UpstreamMaterials {
       if (isSuno) {
         const wantA0 = handles.has('audio-0') || (handles.has(null) && !handles.has('audio-1'));
         const wantA1 = handles.has('audio-1') || (handles.has(null) && !handles.has('audio-0'));
-        if (wantA0) pushUrl(sid, 'audio', ud.audioUrl, audios);
-        if (wantA1) pushUrl(sid, 'audio', ud.audioUrl_1, audios);
+        if (wantA0) pushAudioUrl(ud.audioUrl);
+        if (wantA1) pushAudioUrl(ud.audioUrl_1);
         if (Array.isArray(ud.audioUrls)) {
-          for (const u of ud.audioUrls) pushUrl(sid, 'audio', u, audios);
+          for (const u of ud.audioUrls) pushAudioUrl(u);
         }
         continue;
       }
 
       // 音频 (audioUrl 主轨, audioUrl_1 副轨——AudioNode 双输出口, audioUrls 数组 — LoopNode 聚合)
-      pushUrl(sid, 'audio', ud.audioUrl, audios);
-      pushUrl(sid, 'audio', ud.audioUrl_1, audios);
+      pushAudioUrl(ud.audioUrl);
+      pushAudioUrl(ud.audioUrl_1);
       if (Array.isArray(ud.audioUrls)) {
-        for (const u of ud.audioUrls) pushUrl(sid, 'audio', u, audios);
+        for (const u of ud.audioUrls) pushAudioUrl(u);
       }
       }
     }

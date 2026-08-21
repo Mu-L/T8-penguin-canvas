@@ -40,6 +40,7 @@ test('video built-in sources keep workshop and budget-house catalogs independent
       'vidu-q3',
       'kling-v3.0',
       'zhenzhen-upscaler',
+      'fashvsr-video-upscale',
       'seedance-2.5',
     ],
   );

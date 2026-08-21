@@ -32,6 +32,7 @@ import MediaMetadataBadge from '../MediaMetadataBadge';
 import RhImageCapabilityRail from '../RhImageCapabilityRail';
 import RhVideoCapabilityRail from '../RhVideoCapabilityRail';
 import SmartImage from '../SmartImage';
+import LazyAudio from '../LazyAudio';
 import ImageLongEdgeButtons from '../ImageLongEdgeButtons';
 import { useImageLongEdgeOutputs } from '../../hooks/useImageLongEdgeOutputs';
 import { generateImage } from '../../services/generation';
@@ -1409,7 +1410,7 @@ const UploadNode = ({ id, data, selected, type }: NodeProps) => {
               <div className="space-y-1.5">
                 {mediaItems.map((item, i) => (
                   <div key={`${item.url}-${i}`} className="space-y-0.5">
-                    <audio
+                    <LazyAudio
                       src={item.url}
                       controls
                       className="w-full"

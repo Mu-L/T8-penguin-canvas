@@ -1,0 +1,79 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "Lyria · flowmusic-generation",
+  "nodes": [
+    {
+      "id": "flowmusic-generation-action",
+      "type": "audio",
+      "position": {
+        "x": 40,
+        "y": 40
+      },
+      "data": {
+        "label": "Lyria · 音乐生成",
+        "audioProviderMode": "lyria",
+        "apiModel": "flowmusic",
+        "flowMusicOperation": "flowmusic-generation",
+        "flowMusicClipId": "",
+        "reuseResult": false,
+        "prompt": "电影感电子流行，温暖钢琴与渐进合成器，女声",
+        "flowMusicLyrics": "[Verse]\n雨落在未寄出的信上\n\n[Chorus]\n天亮以后我们重新出发",
+        "flowMusicVersion": "lyria-3.5",
+        "flowMusicTitle": "天亮以后",
+        "flowMusicBpm": 112,
+        "flowMusicLength": 30
+      }
+    },
+    {
+      "id": "flowmusic-generation-output",
+      "type": "output",
+      "position": {
+        "x": 860,
+        "y": 40
+      },
+      "data": {
+        "label": "音乐生成结果",
+        "outputType": "audio"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "flowmusic-generation-output-edge",
+      "source": "flowmusic-generation-action",
+      "target": "flowmusic-generation-output"
+    }
+  ],
+  "nodeCount": 2,
+  "edgeCount": 1,
+  "nodeTypes": [
+    "audio",
+    "output"
+  ],
+  "topologyPreview": {
+    "nodes": [
+      {
+        "id": "flowmusic-generation-action",
+        "type": "audio",
+        "label": "Lyria · 音乐生成",
+        "x": 8,
+        "y": 50
+      },
+      {
+        "id": "flowmusic-generation-output",
+        "type": "output",
+        "label": "音乐生成结果",
+        "x": 92,
+        "y": 50
+      }
+    ],
+    "edges": [
+      {
+        "source": "flowmusic-generation-action",
+        "target": "flowmusic-generation-output"
+      }
+    ]
+  },
+  "savedAt": "2026-08-21T00:00:00.000Z"
+}

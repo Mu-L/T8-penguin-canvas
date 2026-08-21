@@ -22,6 +22,7 @@ import {
   type NodeProps,
   type NodeChange,
   type EdgeChange,
+  type Viewport,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Play, Copy, CopyPlus, Trash2, FolderPlus, PackagePlus, Library, Download, Workflow, Send as SendIcon, Sparkles } from 'lucide-react';
@@ -32,7 +33,7 @@ import { useThemeStore } from '../stores/theme';
 import { useShortcutStore } from '../stores/shortcuts';
 import { trackAchievementEvent, useAchievementStore } from '../stores/achievements';
 import { getTemplateMode, resolveThemeTemplate } from '../theme/defaultTemplates';
-import { matchesRunCompletion, registerRunNodeExecutionContexts, useRunBusStore, type RunNodeExecutionContext } from '../stores/runBus';
+import { createCanvasNodeExecutionKey, matchesRunCompletion, registerRunNodeExecutionContexts, useRunBusStore, type RunNodeExecutionContext } from '../stores/runBus';
 import { useGroupBusStore, GROUP_COLORS, DEFAULT_GROUP_NAME } from '../stores/groupBus';
 import { useRadialMenuStore } from '../stores/radialMenu';
 import { topologicalSort } from '../utils/topologicalSort';
@@ -115,8 +116,19 @@ import {
   parseNodeSerialInput,
 } from '../utils/nodeSerialIds';
 import { resolveConnectionByNodeSerialId } from '../utils/connectByNodeSerialId';
-import { cloneCanvasEntityAsNew, ensureCanvasEntityUids } from '../utils/canvasEntityIdentity';
+import { cloneCanvasEntityAsNew, ensureCanvasEntityUids, isCanonicalEntityUid } from '../utils/canvasEntityIdentity';
+import { consumeCommittedCanvasNodePatches, readCommittedCanvasNodePatches } from '../utils/committedCanvasNodePatchMailbox';
 import { formatShortcutList, matchesAnyShortcut } from '../utils/keyboardShortcuts';
+import {
+  hasCanvasWriteAuthority,
+  requireAuthoritativeCanvasRevision,
+} from '../utils/canvasLoadAuthority';
+import {
+  getBrowserCanvasViewportStorage,
+  resolveCanvasInitialViewport,
+  stageCanvasViewportWrite,
+  writeCanvasViewport,
+} from '../utils/canvasViewportStorage';
 import { applyNodeAlignment, type NodeAlignAction } from '../utils/nodeAlign';
 import {
   RADIAL_MENU_MOVE_TOLERANCE,
@@ -203,12 +215,8 @@ import {
 } from '../stores/dragMaterial';
 import ThemeMusicToggle from './ThemeMusicToggle';
 import CreativeDeskLayer from './CreativeDeskLayer';
-import FarmCanvasLayer, { type FarmCanvasFloatingFeedback } from './FarmCanvasLayer';
-import GardenDefenseExperience from '../features/garden-defense/GardenDefenseExperience.tsx';
-import DragonBallRadar from './DragonBallRadar';
-import SaintSeiyaSanctuary from './SaintSeiyaSanctuary';
-import TetrisPanel from './TetrisPanel';
-import FarmStoryPanel, { T8_FARM_STORY_PANEL_COLLAPSED_STORAGE_KEY, type FarmStoryPanelCanvasHint } from './FarmStoryPanel';
+import type { FarmCanvasFloatingFeedback } from './FarmCanvasLayer';
+import type { FarmStoryPanelCanvasHint } from './FarmStoryPanel';
 import SendMaterialsModal from './SendMaterialsModal';
 import RunPreflightModal from './RunPreflightModal';
 import SmartImage from './SmartImage';
@@ -379,6 +387,8 @@ const CANVAS_OVERVIEW_FIT_OPTIONS = {
   minZoom: CANVAS_MIN_ZOOM,
   maxZoom: 1.15,
 };
+const CANVAS_DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
+const CANVAS_VIEWPORT_STORAGE_THROTTLE_MS = 180;
 const CANVAS_PAN_MOUSE_BUTTONS = [0, 1] as const;
 const RADIAL_MENU_MOUSE_BUTTON = 2;
 const RADIAL_MENU_CONTEXT_SUPPRESS_MS = 700;
@@ -391,6 +401,7 @@ const FARM_DEV_TEST_WATER_AMOUNT = 999;
 const FARM_JUMP_HIGHLIGHT_MS = 900;
 const FARM_MINIMAP_ROUTE_HINT_MS = 1600;
 const FARM_SOUND_ENABLED_STORAGE_KEY = 't8-farm-story-sfx-enabled';
+const T8_FARM_STORY_PANEL_COLLAPSED_STORAGE_KEY = 't8-farm-story-panel-collapsed';
 const FARM_MINIMAP_WIDTH = 214;
 const FARM_MINIMAP_HEIGHT = 136;
 const FARM_MINIMAP_RIGHT = 24;
@@ -1323,6 +1334,13 @@ function lazyCanvasNode(load: () => Promise<any>, displayName: string): Componen
   return WrappedNode;
 }
 
+const FarmCanvasLayer = lazy(() => import('./FarmCanvasLayer'));
+const GardenDefenseExperience = lazy(() => import('../features/garden-defense/GardenDefenseExperience.tsx'));
+const DragonBallRadar = lazy(() => import('./DragonBallRadar'));
+const SaintSeiyaSanctuary = lazy(() => import('./SaintSeiyaSanctuary'));
+const TetrisPanel = lazy(() => import('./TetrisPanel'));
+const FarmStoryPanel = lazy(() => import('./FarmStoryPanel'));
+
 const TextNode = lazyCanvasNode(() => import('./nodes/TextNode'), 'TextNode');
 const ImageNode = lazyCanvasNode(() => import('./nodes/ImageNode'), 'ImageNode');
 const LLMNode = lazyCanvasNode(() => import('./nodes/LLMNode'), 'LLMNode');
@@ -1330,10 +1348,12 @@ const VideoNode = lazyCanvasNode(() => import('./nodes/VideoNode'), 'VideoNode')
 const VideoEditNode = lazyCanvasNode(() => import('./nodes/VideoEditNode'), 'VideoEditNode');
 const SeedanceNode = lazyCanvasNode(() => import('./nodes/SeedanceNode'), 'SeedanceNode');
 const Seedance25Node = lazyCanvasNode(() => import('./nodes/Seedance25Node'), 'Seedance25Node');
+const FashVsrNode = lazyCanvasNode(() => import('./nodes/FashVsrNode'), 'FashVsrNode');
 const DirectorStoryboardNode = lazyCanvasNode(() => import('./nodes/DirectorStoryboardNode'), 'DirectorStoryboardNode');
 const StoryNode = lazyCanvasNode(() => import('./nodes/StoryNode'), 'StoryNode');
 const ScriptMasterNode = lazyCanvasNode(() => import('./nodes/ScriptMasterNode'), 'ScriptMasterNode');
 const MiniMaxH3PromptEnhancerNode = lazyCanvasNode(() => import('./nodes/MiniMaxH3PromptEnhancerNode'), 'MiniMaxH3PromptEnhancerNode');
+const MiniMaxMusic3PromptEnhancerNode = lazyCanvasNode(() => import('./nodes/MiniMaxMusic3PromptEnhancerNode'), 'MiniMaxMusic3PromptEnhancerNode');
 const MinimaxH3OfficialPromptEnhancerNode = lazyCanvasNode(() => import('./nodes/MinimaxH3OfficialPromptEnhancerNode'), 'MinimaxH3OfficialPromptEnhancerNode');
 const Seedance20PromptEnhancerNode = lazyCanvasNode(() => import('./nodes/Seedance20PromptEnhancerNode'), 'Seedance20PromptEnhancerNode');
 const MvMusicMasterNode = lazyCanvasNode(() => import('./nodes/MvMusicMasterNode'), 'MvMusicMasterNode');
@@ -1412,10 +1432,12 @@ const SPECIFIC_NODES: Record<string, any> = {
   'video-edit': VideoEditNode,
   seedance: SeedanceNode, // 完全对齐 gpt-image-2-web Seedance2.0(独立 /seedance/v3 路径)
   seedance25: Seedance25Node,
+  'fashvsr-video-upscale': FashVsrNode,
   'director-storyboard': DirectorStoryboardNode,
   story: StoryNode,
   'script-master': ScriptMasterNode,
   'minimax-h3-prompt-enhancer': MiniMaxH3PromptEnhancerNode,
+  'minimax-music3-prompt-enhancer': MiniMaxMusic3PromptEnhancerNode,
   'minimax-h3-official-prompt-enhancer': MinimaxH3OfficialPromptEnhancerNode,
   'seedance20-prompt-enhancer': Seedance20PromptEnhancerNode,
   'mv-music-master': MvMusicMasterNode,
@@ -1712,6 +1734,14 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     pollInt: 5,
     reuseResult: false,
   },
+  'fashvsr-video-upscale': {
+    fashVsrVariant: true,
+    videoBuiltinSource: 'seedance-nz',
+    mainId: 'fashvsr-video-upscale',
+    model: 'FlashVSR_video_upscale',
+    localRefVideos: [],
+    reuseResult: false,
+  },
   'director-storyboard': {
     seedanceApiSource: 'auto',
     seedanceNzModel: 'fast',
@@ -1964,6 +1994,42 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     error: '',
     enhancedPrompt: '',
     prompt: '',
+  },
+  'minimax-music3-prompt-enhancer': {
+    musicIdea: '',
+    lyrics: '',
+    lyricsMode: 'auto',
+    qualityMode: 'official-full',
+    semanticMode: 'private',
+    manualSemanticProfile: '',
+    editRequest: '',
+    editScope: 'auto',
+    editSection: 'Verse',
+    editSectionOccurrence: 1,
+    structurePreset: 'auto',
+    customStructure: '',
+    language: 'auto',
+    customLanguage: '',
+    captionLanguage: 'English',
+    meter: 'auto',
+    customMeter: '',
+    durationSeconds: 0,
+    bpm: 0,
+    keyScale: '',
+    captionWords: 0,
+    constraints: '',
+    seed: 0,
+    llmApiSource: 'seedance-nz',
+    providerSource: 'zhenzhen',
+    providerId: '',
+    providerModel: 'bytedance/doubao-seed-2.1-pro',
+    status: 'idle',
+    error: '',
+    lyricsResult: '',
+    musicCaption: '',
+    music3PayloadJson: '',
+    enhancementReportJson: '',
+    music3StageCache: {},
   },
   'minimax-h3-official-prompt-enhancer': {
     userPrompt: '',
@@ -3667,6 +3733,8 @@ function PlacementShelf({
 interface CanvasInnerProps {
   onAddNodeRef?: React.MutableRefObject<AddNodeFn | null>;
   onInsertWorkflowRef?: React.MutableRefObject<InsertWorkflowFn | null>;
+  persistenceRuntime: CanvasPersistenceRuntime;
+  themeStyleOverride?: string;
 }
 
 type PersistableCanvasPatchState = {
@@ -3679,6 +3747,38 @@ type PersistableCanvasPatchState = {
 };
 
 type PendingCanvasSave = PersistableCanvasPatchState & CanvasPatchPendingEnvelope;
+
+type CanvasPersistenceRuntime = {
+  saveTimersByCanvas: Map<string, number>;
+  pendingSaveFlushersByCanvas: Map<string, () => void>;
+  pendingSaveByCanvas: Map<string, PendingCanvasSave>;
+  latestPersistableByCanvas: Map<string, PersistableCanvasPatchState>;
+  autosaveGenerationByCanvas: Map<string, number>;
+  lastSavedByCanvas: Map<string, string>;
+  lastSavedNodeCountByCanvas: Map<string, number>;
+  skipInitialAutosaveCanvasIds: Set<string>;
+  skipInitialHistoryCanvasIds: Set<string>;
+  canvasRevisions: Map<string, number>;
+  canvasMutationQueues: Map<string, Promise<void>>;
+  allowEmptySaveCanvasIds: Set<string>;
+};
+
+function createCanvasPersistenceRuntime(): CanvasPersistenceRuntime {
+  return {
+    saveTimersByCanvas: new Map(),
+    pendingSaveFlushersByCanvas: new Map(),
+    pendingSaveByCanvas: new Map(),
+    latestPersistableByCanvas: new Map(),
+    autosaveGenerationByCanvas: new Map(),
+    lastSavedByCanvas: new Map(),
+    lastSavedNodeCountByCanvas: new Map(),
+    skipInitialAutosaveCanvasIds: new Set(),
+    skipInitialHistoryCanvasIds: new Set(),
+    canvasRevisions: new Map(),
+    canvasMutationQueues: new Map(),
+    allowEmptySaveCanvasIds: new Set(),
+  };
+}
 
 function pendingCanvasSaveFromState(
   state: PersistableCanvasPatchState,
@@ -3699,6 +3799,23 @@ function pendingCanvasSaveFromState(
   };
 }
 
+function canvasPatchStateFromCanonicalParts(
+  nodes: Node[],
+  edges: Edge[],
+  creativeDesk: CreativeDeskState,
+  farmCanvas: FarmCanvasState,
+  nextNodeSerialId: number,
+): PersistableCanvasPatchState {
+  return {
+    nodes,
+    edges,
+    creativeDesk,
+    farmCanvas,
+    nextNodeSerialId,
+    snapshot: JSON.stringify({ nodes, edges, creativeDesk, farmCanvas, nextNodeSerialId }),
+  };
+}
+
 function persistableCanvasPatchStateFromParts(
   nodes: Node[],
   edges: Edge[],
@@ -3713,14 +3830,7 @@ function persistableCanvasPatchStateFromParts(
     && !transientSubflowIds.has(edge.source)
     && !transientSubflowIds.has(edge.target)
     && !(edge.data as any)?.__subflowRuntime);
-  return {
-    nodes: persistNodes,
-    edges: persistEdges,
-    creativeDesk,
-    farmCanvas,
-    nextNodeSerialId,
-    snapshot: JSON.stringify({ nodes: persistNodes, edges: persistEdges, creativeDesk, farmCanvas, nextNodeSerialId }),
-  };
+  return canvasPatchStateFromCanonicalParts(persistNodes, persistEdges, creativeDesk, farmCanvas, nextNodeSerialId);
 }
 
 function parsePersistableCanvasPatchSnapshot(snapshot: string): Omit<PersistableCanvasPatchState, 'snapshot'> | null {
@@ -3793,8 +3903,8 @@ function requireVersionedCanvasPatchDocument(value: unknown, canvasId: string): 
   return document as VersionedCanvasData;
 }
 
-function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
-  const { activeId, canvases, loadCanvases, setActive } = useCanvasStore();
+function CanvasInner({ onAddNodeRef, onInsertWorkflowRef, persistenceRuntime, themeStyleOverride }: CanvasInnerProps) {
+  const { activeId, canvases, refreshCanvasMetadata, setActive } = useCanvasStore();
   const { theme, style, templateId, customTemplates } = useThemeStore();
   const shortcuts = useShortcutStore((s) => s.shortcuts);
   const shortcutText = useCallback((actionId: string) => formatShortcutList(shortcuts[actionId]), [shortcuts]);
@@ -3802,7 +3912,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     () => resolveThemeTemplate(templateId, customTemplates),
     [templateId, customTemplates],
   );
-  const visualStyle = currentTemplate.visuals?.style || style;
+  const visualStyle = themeStyleOverride || currentTemplate.visuals?.style || style;
   const isOp = visualStyle === 'op';
   const isNaruto = visualStyle === 'naruto';
   const isEva = visualStyle === 'eva';
@@ -3811,6 +3921,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   const isSoccer = visualStyle === 'soccer-hero';
   const isDragonBall = visualStyle === 'dragon-ball';
   const isTetris = visualStyle === 'tetris';
+  const isSaintSeiya = visualStyle === 'saint-seiya';
   const isFarmStory = visualStyle === 'farm-story';
   const isGardenDefense = visualStyle === 'garden-defense';
   const farmDevToolsEnabled = isFarmStory && import.meta.env.DEV;
@@ -3845,6 +3956,13 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     edgesRef.current = identified;
     graphMutationEpochRef.current = next.epoch;
     rawSetEdges(identified);
+  }, []);
+  const replaceHydratedCanvasGraph = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
+    nodesRef.current = nextNodes;
+    edgesRef.current = nextEdges;
+    graphMutationEpochRef.current += 1;
+    rawSetNodes(nextNodes);
+    rawSetEdges(nextEdges);
   }, []);
   const [runReplayRuntime, setRunReplayRuntime] = useState<{ nodes: Node[]; edges: Edge[] } | null>(null);
   const runReplayRuntimeRef = useRef(runReplayRuntime);
@@ -3939,19 +4057,36 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   const [placementShelfHidden, setPlacementShelfHidden] = useState(false);
   const placementShelfClearedCanvasIdsRef = useRef<Set<string>>(new Set());
   const [loaded, setLoaded] = useState(false);
+  const [canvasLoadFailure, setCanvasLoadFailure] = useState<{
+    canvasId: string;
+    message: string;
+  } | null>(null);
+  const [canvasLoadAttempt, setCanvasLoadAttempt] = useState(0);
+  const [backgroundSaveFailure, setBackgroundSaveFailure] = useState<{
+    canvasId: string;
+    nodeId: string;
+    message: string;
+    kind: 'persist-failed' | 'active-sync-failed';
+  } | null>(null);
+  const [initialCanvasViewport, setInitialCanvasViewport] = useState<{ canvasId: string; viewport: Viewport | null } | null>(null);
   const [loadedCanvasId, setLoadedCanvasId] = useState<string | null>(null);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [activeCanvasRevision, setActiveCanvasRevision] = useState(0);
   const activeProjectIdRef = useRef<string | null>(activeProjectId);
   activeProjectIdRef.current = activeProjectId;
-  const saveTimersByCanvasRef = useRef<Map<string, number>>(new Map());
-  const pendingSaveByCanvasRef = useRef<Map<string, PendingCanvasSave>>(new Map());
-  const latestPersistableByCanvasRef = useRef<Map<string, PersistableCanvasPatchState>>(new Map());
-  const autosaveGenerationByCanvasRef = useRef<Map<string, number>>(new Map());
-  const lastSavedByCanvasRef = useRef<Map<string, string>>(new Map());
-  const lastSavedNodeCountByCanvasRef = useRef<Map<string, number>>(new Map());
-  const canvasRevisionsRef = useRef<Map<string, number>>(new Map());
-  const canvasMutationQueuesRef = useRef<Map<string, Promise<void>>>(new Map());
+  const saveTimersByCanvasRef = useRef(persistenceRuntime.saveTimersByCanvas);
+  const pendingSaveFlushersByCanvasRef = useRef(persistenceRuntime.pendingSaveFlushersByCanvas);
+  const pendingSaveByCanvasRef = useRef(persistenceRuntime.pendingSaveByCanvas);
+  const latestPersistableByCanvasRef = useRef(persistenceRuntime.latestPersistableByCanvas);
+  const autosaveGenerationByCanvasRef = useRef(persistenceRuntime.autosaveGenerationByCanvas);
+  const lastSavedByCanvasRef = useRef(persistenceRuntime.lastSavedByCanvas);
+  const lastSavedNodeCountByCanvasRef = useRef(persistenceRuntime.lastSavedNodeCountByCanvas);
+  const skipInitialAutosaveCanvasIdsRef = useRef(persistenceRuntime.skipInitialAutosaveCanvasIds);
+  const skipInitialHistoryCanvasIdsRef = useRef(persistenceRuntime.skipInitialHistoryCanvasIds);
+  const canvasViewportStorageTimerRef = useRef<number | null>(null);
+  const pendingCanvasViewportStorageRef = useRef<{ canvasId: string; viewport: Viewport } | null>(null);
+  const canvasRevisionsRef = useRef(persistenceRuntime.canvasRevisions);
+  const canvasMutationQueuesRef = useRef(persistenceRuntime.canvasMutationQueues);
   const patchPreviewBaselinesRef = useRef<Map<string, { canvasId: string; revision: number; snapshot: string; mutationEpoch: number }>>(new Map());
   const handledBrowserHandoffsRef = useRef(new Set<string>());
   const nextNodeSerialIdRef = useRef(1);
@@ -3960,7 +4095,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   const radialViewportLockRef = useRef<{ x: number; y: number; zoom: number } | null>(null);
   const radialContextMenuSuppressedUntilRef = useRef(0);
   const fileDragOutFeedbackTimerRef = useRef<number | null>(null);
-  const allowEmptySaveCanvasIdsRef = useRef<Set<string>>(new Set());
+  const allowEmptySaveCanvasIdsRef = useRef(persistenceRuntime.allowEmptySaveCanvasIds);
   const edgeMotionReleaseTimerRef = useRef<number | null>(null);
   const [viewportMoving, setViewportMoving] = useState(false);
   const [canvasZoomReadability, setCanvasZoomReadability] = useState<CanvasZoomReadabilityTier>('detail');
@@ -3972,6 +4107,33 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   loadedCanvasIdRef.current = loadedCanvasId;
   const lastDone = useRunBusStore((s) => s.lastDone);
   const lastAchievementDoneTsRef = useRef(0);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleBackgroundSaveFailure = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        canvasId?: unknown;
+        nodeId?: unknown;
+        message?: unknown;
+      }>).detail;
+      if (
+        typeof detail?.canvasId !== 'string'
+        || typeof detail.nodeId !== 'string'
+        || typeof detail.message !== 'string'
+        || !detail.canvasId.trim()
+        || !detail.nodeId.trim()
+        || !detail.message.trim()
+      ) return;
+      setBackgroundSaveFailure({
+        canvasId: detail.canvasId,
+        nodeId: detail.nodeId,
+        message: detail.message,
+        kind: 'persist-failed',
+      });
+    };
+    window.addEventListener('penguin:canvas-background-save-error', handleBackgroundSaveFailure);
+    return () => window.removeEventListener('penguin:canvas-background-save-error', handleBackgroundSaveFailure);
+  }, []);
   const achievementProfileLoaded = useAchievementStore((state) => Boolean(state.profile));
   const achievementTrackingEnabled = useAchievementStore((state) => state.profile?.preferences?.enabled !== false);
   const rhDuckDecodedUnlocked = useAchievementStore((state) => Boolean(state.profile?.unlockedAchievements?.['rh-duck-decoded']));
@@ -4398,6 +4560,38 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     }
   }, [getViewport, setViewport]);
 
+  const flushCanvasViewportStorage = useCallback(() => {
+    if (canvasViewportStorageTimerRef.current !== null && typeof window !== 'undefined') {
+      window.clearTimeout(canvasViewportStorageTimerRef.current);
+    }
+    canvasViewportStorageTimerRef.current = null;
+    const pending = pendingCanvasViewportStorageRef.current;
+    pendingCanvasViewportStorageRef.current = null;
+    if (!pending) return;
+    writeCanvasViewport(
+      getBrowserCanvasViewportStorage(),
+      pending.canvasId,
+      pending.viewport,
+    );
+  }, []);
+
+  const scheduleCanvasViewportStorage = useCallback((canvasId: string, viewport: Viewport) => {
+    if (typeof window === 'undefined') return;
+    const staged = stageCanvasViewportWrite(
+      pendingCanvasViewportStorageRef.current,
+      canvasId,
+      viewport,
+    );
+    if (!staged) return;
+    if (staged.displaced) flushCanvasViewportStorage();
+    pendingCanvasViewportStorageRef.current = staged.pending;
+    if (canvasViewportStorageTimerRef.current !== null) return;
+    canvasViewportStorageTimerRef.current = window.setTimeout(
+      flushCanvasViewportStorage,
+      CANVAS_VIEWPORT_STORAGE_THROTTLE_MS,
+    );
+  }, [flushCanvasViewportStorage]);
+
   const handleViewportMoveStart = useCallback(() => {
     if (radialViewportLockRef.current) {
       restoreRadialViewportLock();
@@ -4421,6 +4615,10 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       viewport,
       typeof window === 'undefined' ? 1 : window.devicePixelRatio,
     );
+    const canvasId = loadedCanvasIdRef.current;
+    if (canvasId && loadedRef.current) {
+      scheduleCanvasViewportStorage(canvasId, snappedViewport);
+    }
     if (
       Math.abs(snappedViewport.x - viewport.x) > 0.001 ||
       Math.abs(snappedViewport.y - viewport.y) > 0.001
@@ -4428,7 +4626,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       void setViewport(snappedViewport);
     }
     releaseEdgeMotionSoon(setViewportMoving);
-  }, [releaseEdgeMotionSoon, restoreRadialViewportLock, setViewport]);
+  }, [releaseEdgeMotionSoon, restoreRadialViewportLock, scheduleCanvasViewportStorage, setViewport]);
 
   // ===== SHIFT+拖拽 Handle 批量移线 =====
   // 按住 SHIFT 从节点入口(target handle)拖出，可一次性把所有入边移到另一个节点的入口。
@@ -4818,6 +5016,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   // 加载画布数据
   useEffect(() => {
     if (!activeId) {
+      setCanvasLoadFailure(null);
       cancelScheduledHistoryCapture();
       nextNodeSerialIdRef.current = 1;
       setNodes([]);
@@ -4831,19 +5030,26 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       setPlacementShelfItems([]);
       setPlacementShelfOpen(false);
       setLoaded(false);
+      setInitialCanvasViewport(null);
       setLoadedCanvasId(null);
       setActiveProjectId(null);
       setActiveCanvasRevision(0);
       setCanvasPatchConflictMessage('');
       patchPreviewBaselinesRef.current.clear();
+      skipInitialAutosaveCanvasIdsRef.current.clear();
+      skipInitialHistoryCanvasIdsRef.current.clear();
       histReset();
       return;
     }
     const requestedCanvasId = activeId;
+    setCanvasLoadFailure(null);
     cancelScheduledHistoryCapture();
     setActiveProjectId(null);
     setActiveCanvasRevision(0);
     setCanvasPatchConflictMessage('');
+    setInitialCanvasViewport(null);
+    skipInitialAutosaveCanvasIdsRef.current.delete(requestedCanvasId);
+    skipInitialHistoryCanvasIdsRef.current.delete(requestedCanvasId);
     patchPreviewBaselinesRef.current.clear();
     setLoaded(false);
     setLoadedCanvasId(null);
@@ -4852,27 +5058,16 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       .getCanvasData(requestedCanvasId)
       .then((data) => {
         if (cancelled || useCanvasStore.getState().activeId !== requestedCanvasId) return;
+        const revision = requireAuthoritativeCanvasRevision(data.revision);
         const projectId = String(data.projectId || 'project-local').trim() || 'project-local';
         setActiveProjectId(projectId);
-        const revision = Number(data.revision);
-        if (Number.isSafeInteger(revision) && revision > 0) setCanvasRevision(requestedCanvasId, revision);
+        setCanvasRevision(requestedCanvasId, revision);
         const authoritativeCreativeDesk = migrateCreativeDeskToViewportCoordinates(data.creativeDesk, data.viewport);
         const authoritativeFarmCanvas = sanitizeFarmCanvasState(data.farmCanvas);
         const authoritativeNextNodeSerialId = Math.max(1, Number(data.nextNodeSerialId) || 1);
-        const authoritativeState: PersistableCanvasPatchState = {
-          nodes: data.nodes || [],
-          edges: data.edges || [],
-          creativeDesk: authoritativeCreativeDesk,
-          farmCanvas: authoritativeFarmCanvas,
-          nextNodeSerialId: authoritativeNextNodeSerialId,
-          snapshot: JSON.stringify({
-            nodes: data.nodes || [],
-            edges: data.edges || [],
-            creativeDesk: authoritativeCreativeDesk,
-            farmCanvas: authoritativeFarmCanvas,
-            nextNodeSerialId: authoritativeNextNodeSerialId,
-          }),
-        };
+        const authoritativeState = canvasPatchStateFromCanonicalParts(
+          data.nodes || [], data.edges || [], authoritativeCreativeDesk, authoritativeFarmCanvas, authoritativeNextNodeSerialId,
+        );
         const existingPending = pendingSaveByCanvasRef.current.get(requestedCanvasId) || null;
         let renderedState = authoritativeState;
         let activatedPending: PendingCanvasSave | null = null;
@@ -4909,28 +5104,30 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         const savedNextNodeSerialId = renderedState.nextNodeSerialId;
         // ⚡ 兑底补丁: 历史画布中可能存在 connectable=false 的旧 groupBox 节点
         // (5656721 事故期间创建的 group), 加载时强制打开可连接以恢复右侧聚合输出口
-        const fixedNsBeforeSerials = ns.map((n: any) =>
-          n.type === 'groupBox' && n.connectable === false
-            ? { ...n, connectable: true }
-            : n,
-        );
-        const normalized = normalizeCanvasNodeSerials(fixedNsBeforeSerials, savedNextNodeSerialId);
+        let groupBoxRepaired = false;
+        const repairedNodeCandidates = ns.map((n: any) => {
+          if (n.type === 'groupBox' && n.connectable === false) {
+            groupBoxRepaired = true;
+            return { ...n, connectable: true };
+          }
+          return n;
+        });
+        const serialInputNodes = groupBoxRepaired ? repairedNodeCandidates : ns;
+        const normalized = normalizeCanvasNodeSerials(serialInputNodes, savedNextNodeSerialId);
         nextNodeSerialIdRef.current = normalized.nextNodeSerialId;
-        const fixedNs = normalized.nodes;
-        const normalizedRenderedState: PersistableCanvasPatchState = {
-          nodes: fixedNs,
-          edges: es,
-          creativeDesk: nextCreativeDesk,
-          farmCanvas: nextFarmCanvas,
-          nextNodeSerialId: normalized.nextNodeSerialId,
-          snapshot: JSON.stringify({
-            nodes: fixedNs,
-            edges: es,
-            creativeDesk: nextCreativeDesk,
-            farmCanvas: nextFarmCanvas,
-            nextNodeSerialId: normalized.nextNodeSerialId,
-          }),
-        };
+        const normalizedNodes = normalized.changed ? normalized.nodes : serialInputNodes;
+        const fixedNs = ensureCanvasEntityUids(normalizedNodes, 'node');
+        const fixedEs = ensureCanvasEntityUids(es, 'edge');
+        const canonicalizationChanged = groupBoxRepaired
+          || normalized.changed
+          || normalized.nextNodeSerialId !== savedNextNodeSerialId
+          || fixedNs !== normalizedNodes
+          || fixedEs !== es;
+        const normalizedRenderedState = canonicalizationChanged
+          ? canvasPatchStateFromCanonicalParts(
+              fixedNs, fixedEs, nextCreativeDesk, nextFarmCanvas, normalized.nextNodeSerialId,
+            )
+          : renderedState;
         latestPersistableByCanvasRef.current.set(requestedCanvasId, normalizedRenderedState);
         autosaveGenerationByCanvasRef.current.set(
           requestedCanvasId,
@@ -4948,8 +5145,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         } else {
           pendingSaveByCanvasRef.current.delete(requestedCanvasId);
         }
-        setNodes(fixedNs);
-        setEdges(es);
+        replaceHydratedCanvasGraph(fixedNs, fixedEs);
         setCreativeDesk(nextCreativeDesk);
         setFarmCanvas(nextFarmCanvas);
         setFarmCanvasEditing(false);
@@ -4958,54 +5154,52 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         setCreativeDeskActiveItemId(null);
         setPlacementShelfItems(placementShelfClearedCanvasIdsRef.current.has(requestedCanvasId) ? [] : placementShelfItemsFromCanvasNodes(fixedNs, '画布'));
         setPlacementShelfOpen(false);
+        const restoredViewport = resolveCanvasInitialViewport(
+          getBrowserCanvasViewportStorage(),
+          requestedCanvasId,
+          data.viewport,
+        );
+        setInitialCanvasViewport({ canvasId: requestedCanvasId, viewport: restoredViewport });
         // GET authority is the only saved baseline. Pending local state must never
         // be relabelled as durable merely because it is rendered after activation.
         lastSavedByCanvasRef.current.set(requestedCanvasId, authoritativeState.snapshot);
         lastSavedNodeCountByCanvasRef.current.set(requestedCanvasId, authoritativeState.nodes.length);
         allowEmptySaveCanvasIdsRef.current.delete(requestedCanvasId);
         cancelScheduledHistoryCapture();
-        histReset({ nodes: fixedNs, edges: es });
+        skipInitialHistoryCanvasIdsRef.current.add(requestedCanvasId);
+        if (!activatedPending && normalizedRenderedState.snapshot === authoritativeState.snapshot) {
+          skipInitialAutosaveCanvasIdsRef.current.add(requestedCanvasId);
+        }
+        histReset({ nodes: fixedNs, edges: fixedEs }, { deferClone: true });
         setLoadedCanvasId(requestedCanvasId);
         setLoaded(true);
+        setCanvasLoadFailure(null);
         if (shouldSchedulePendingCas && activatedPending && !activatedPending.conflicted) {
           setDragSaveTick((tick) => tick + 1);
         }
       })
       .catch((e) => {
         if (cancelled || useCanvasStore.getState().activeId !== requestedCanvasId) return;
+        const message = e instanceof Error ? e.message : '未知加载错误';
         console.error('加载画布失败', e);
-        nextNodeSerialIdRef.current = 1;
-        setNodes([]);
-        setEdges([]);
-        setCreativeDesk(createDefaultCreativeDeskState());
-        setFarmCanvas(createFarmState());
-        setFarmCanvasEditing(false);
-        setFarmCanvasFeedback('点击工具后，在画布空白处开始经营。');
-        setCreativeDeskEditing(false);
-        setCreativeDeskActiveItemId(null);
-        setPlacementShelfItems([]);
-        setPlacementShelfOpen(false);
+        setCanvasLoadFailure({ canvasId: requestedCanvasId, message });
         setActiveProjectId(null);
         setActiveCanvasRevision(0);
-        cancelScheduledHistoryCapture();
-        histReset();
-        setLoadedCanvasId(requestedCanvasId);
-        setLoaded(true);
+        setLoadedCanvasId(null);
+        setLoaded(false);
+        logBus.warn('画布加载失败，已保持只读：' + message, '画布同步');
       });
     return () => {
       cancelled = true;
     };
-  }, [activeId, cancelScheduledHistoryCapture, histReset, setCanvasRevision]);
+  }, [activeId, cancelScheduledHistoryCapture, canvasLoadAttempt, histReset, replaceHydratedCanvasGraph, setCanvasRevision]);
 
   useEffect(() => {
     return () => {
-      for (const timer of saveTimersByCanvasRef.current.values()) {
-        window.clearTimeout(timer);
+      flushCanvasViewportStorage();
+      for (const flushPendingAutosave of [...pendingSaveFlushersByCanvasRef.current.values()]) {
+        flushPendingAutosave();
       }
-      saveTimersByCanvasRef.current.clear();
-      pendingSaveByCanvasRef.current.clear();
-      latestPersistableByCanvasRef.current.clear();
-      autosaveGenerationByCanvasRef.current.clear();
       patchPreviewBaselinesRef.current.clear();
       cancelScheduledHistoryCapture();
       if (edgeMotionReleaseTimerRef.current) {
@@ -5013,7 +5207,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         edgeMotionReleaseTimerRef.current = null;
       }
     };
-  }, [assignActiveNodeSerials, cancelScheduledHistoryCapture, releaseEdgeMotionSoon]);
+  }, [assignActiveNodeSerials, cancelScheduledHistoryCapture, flushCanvasViewportStorage, releaseEdgeMotionSoon]);
 
   useEffect(() => {
     if (!activeId || !loaded || loadedCanvasId !== activeId) return;
@@ -5050,13 +5244,23 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   // nodes/edges 变化后压栈(节流防止拖拽中海量入栈)
   useEffect(() => {
     if (!loaded || loadedCanvasId !== activeId) return;
+    if (activeId && skipInitialHistoryCanvasIdsRef.current.delete(activeId)) return;
     scheduleCapture({ nodes, edges });
   }, [nodes, edges, activeId, loaded, loadedCanvasId, scheduleCapture]);
 
   // 自动保存(防抖 800ms,防空数据覆盖)
   useEffect(() => {
     if (!activeId || !loaded || loadedCanvasId !== activeId) return;
+    const currentRevision = canvasRevisionsRef.current.get(activeId);
+    if (!hasCanvasWriteAuthority({
+      activeCanvasId: activeId,
+      loadedCanvasId,
+      loaded,
+      revision: currentRevision,
+    })) return;
+    const authoritativeRevision = requireAuthoritativeCanvasRevision(currentRevision);
     if (isDraggingRef.current) return;
+    if (skipInitialAutosaveCanvasIdsRef.current.delete(activeId)) return;
     const nextNodeSerialId = nextNodeSerialIdRef.current;
     const canvasIdForSave = activeId;
     // 过滤 SHIFT 批量移线拖拽过程中的 phantom 节点与重定向边(不作为持久化快照)
@@ -5073,7 +5277,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     const existingPending = pendingSaveByCanvasRef.current.get(canvasIdForSave) || null;
     const currentPending = pendingCanvasSaveFromState(currentState, {
       baseSnapshot: existingPending?.baseSnapshot || previousSnapshot,
-      baseRevision: existingPending?.baseRevision ?? canvasRevisionsRef.current.get(canvasIdForSave) ?? 0,
+      baseRevision: existingPending?.baseRevision ?? authoritativeRevision,
     });
     const reconciliation = reconcileCanvasPatchAutosavePending({
       authoritativeSnapshot: previousSnapshot,
@@ -5088,6 +5292,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       const blockedTimer = saveTimersByCanvasRef.current.get(canvasIdForSave);
       if (blockedTimer !== undefined) window.clearTimeout(blockedTimer);
       saveTimersByCanvasRef.current.delete(canvasIdForSave);
+      pendingSaveFlushersByCanvasRef.current.delete(canvasIdForSave);
     }
     if (reconciliation.shouldReturn) {
       if (reconciliation.pending) pendingSaveByCanvasRef.current.set(canvasIdForSave, reconciliation.pending);
@@ -5102,6 +5307,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     }
     const previousTimer = saveTimersByCanvasRef.current.get(canvasIdForSave);
     if (previousTimer) window.clearTimeout(previousTimer);
+    pendingSaveFlushersByCanvasRef.current.delete(canvasIdForSave);
     pendingSaveByCanvasRef.current.set(canvasIdForSave, currentPending);
     const generation = (autosaveGenerationByCanvasRef.current.get(canvasIdForSave) || 0) + 1;
     autosaveGenerationByCanvasRef.current.set(canvasIdForSave, generation);
@@ -5110,7 +5316,16 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       snapshot,
       pendingIdentity: currentPending,
     };
-    const timer = window.setTimeout(async () => {
+    let timer: number;
+    let started = false;
+    const flushPendingAutosave = () => {
+      if (started) return;
+      started = true;
+      if (timer) window.clearTimeout(timer);
+      if (pendingSaveFlushersByCanvasRef.current.get(canvasIdForSave) === flushPendingAutosave) {
+        pendingSaveFlushersByCanvasRef.current.delete(canvasIdForSave);
+      }
+      void (async () => {
       const payload = { nodes: persistNodes, edges: persistEdges, viewport: getViewport(), nextNodeSerialId, creativeDesk, farmCanvas };
       const latestStateForResponse = () => {
         const active = useCanvasStore.getState().activeId === canvasIdForSave
@@ -5142,15 +5357,17 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         const scheduledTimer = saveTimersByCanvasRef.current.get(canvasIdForSave);
         if (scheduledTimer !== undefined) window.clearTimeout(scheduledTimer);
         saveTimersByCanvasRef.current.delete(canvasIdForSave);
+        pendingSaveFlushersByCanvasRef.current.delete(canvasIdForSave);
       };
       try {
         await enqueueCanvasMutation(canvasIdForSave, async () => {
           // 计时器等待其他 mutation 时，generation 或 pending 身份任一变化都使旧 PUT 失效。
           if (autosaveGenerationByCanvasRef.current.get(canvasIdForSave) !== token.generation
             || pendingSaveByCanvasRef.current.get(canvasIdForSave) !== token.pendingIdentity) return;
+          const putBaseRevision = requireAuthoritativeCanvasRevision(canvasRevisionsRef.current.get(canvasIdForSave));
           const saved = await api.saveCanvasData(canvasIdForSave, payload, {
             allowEmpty: allowEmptySave,
-            baseRevision: canvasRevisionsRef.current.get(canvasIdForSave),
+            baseRevision: putBaseRevision,
           });
           const savedRevision = Number(saved.revision);
           if (!Number.isSafeInteger(savedRevision) || savedRevision < 1) {
@@ -5214,11 +5431,18 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
           });
           invalidateOutstandingAutosaves();
           if (response.pending) pendingSaveByCanvasRef.current.set(canvasIdForSave, response.pending);
-          logBus.warn('画布 revision 冲突；本地修改已保留并阻止自动覆盖，请先处理冲突。', '画布同步');
-          if (latest.active) {
-            setCanvasPatchConflictMessage('画布 revision 冲突；本地修改已保留并阻止自动覆盖，请先处理冲突。');
+          else pendingSaveByCanvasRef.current.delete(canvasIdForSave);
+          if (response.pending?.conflicted) {
+            logBus.warn('画布 revision 冲突；本地修改已保留并阻止自动覆盖，请先处理冲突。', '画布同步');
+            if (latest.active) {
+              setCanvasPatchConflictMessage('画布 revision 冲突；本地修改已保留并阻止自动覆盖，请先处理冲突。');
+            }
+            console.warn('画布版本冲突，已停止旧快照覆盖；等待协作同步', e.data);
+          } else {
+            if (latest.active) setCanvasPatchConflictMessage('');
+            if (response.shouldScheduleCas) setDragSaveTick((tick) => tick + 1);
+            console.warn('旧画布保存请求已被新的权威 revision 取代；保留合并结果并继续补偿保存', e.data);
           }
-          console.warn('画布版本冲突，已停止旧快照覆盖；等待协作同步', e.data);
         } else if (pendingSaveByCanvasRef.current.get(canvasIdForSave)?.snapshot === snapshot
           && useCanvasStore.getState().activeId === canvasIdForSave) {
           // 短暂网络故障保留同一快照，并重新进入防抖保存；409 必须先显式同步，不能盲重试覆盖。
@@ -5229,9 +5453,15 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         if (saveTimersByCanvasRef.current.get(canvasIdForSave) === timer) {
           saveTimersByCanvasRef.current.delete(canvasIdForSave);
         }
+        if (pendingSaveFlushersByCanvasRef.current.get(canvasIdForSave) === flushPendingAutosave) {
+          pendingSaveFlushersByCanvasRef.current.delete(canvasIdForSave);
+        }
       }
-    }, 800);
+      })();
+    };
+    timer = window.setTimeout(flushPendingAutosave, 800);
     saveTimersByCanvasRef.current.set(canvasIdForSave, timer);
+    pendingSaveFlushersByCanvasRef.current.set(canvasIdForSave, flushPendingAutosave);
   }, [nodes, edges, creativeDesk, farmCanvas, activeId, loaded, loadedCanvasId, getViewport, dragSaveTick, enqueueCanvasMutation, setCanvasRevision]);
 
   const getCreativeDeskCenter = useCallback(() => {
@@ -5913,6 +6143,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     const timer = saveTimersByCanvasRef.current.get(canvasId);
     if (timer) window.clearTimeout(timer);
     saveTimersByCanvasRef.current.delete(canvasId);
+    pendingSaveFlushersByCanvasRef.current.delete(canvasId);
 
     const current = currentPersistableCanvas();
     const mutationEpoch = graphMutationEpochRef.current;
@@ -6045,9 +6276,14 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       ? mergeConcurrentCanvasPatchState(options!.expectedLocalSnapshot!, local, authoritativeState)
       : { state: authoritativeState, conflicts: [] as CanvasPatchMergeConflict[] };
     const renderedState = mergeResult.state;
+    autosaveGenerationByCanvasRef.current.set(
+      canvasId,
+      (autosaveGenerationByCanvasRef.current.get(canvasId) || 0) + 1,
+    );
     const timer = saveTimersByCanvasRef.current.get(canvasId);
     if (timer) window.clearTimeout(timer);
     saveTimersByCanvasRef.current.delete(canvasId);
+    pendingSaveFlushersByCanvasRef.current.delete(canvasId);
     lastSavedByCanvasRef.current.set(canvasId, authoritativeState.snapshot);
     lastSavedNodeCountByCanvasRef.current.set(canvasId, authoritativeState.nodes.length);
     if (hasConcurrentLocalChanges) {
@@ -6104,12 +6340,144 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
     };
   }, [cancelScheduledHistoryCapture, currentPersistableCanvas, histCaptureTransition, histReset, setCanvasRevision]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleBackgroundNodePatched = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        canvasId?: unknown;
+        nodeId?: unknown;
+        entityUid?: unknown;
+        revision?: unknown;
+        dataPatch?: unknown;
+        document?: unknown;
+      }>).detail;
+      if (
+        typeof detail?.canvasId !== 'string'
+        || typeof detail.nodeId !== 'string'
+        || !isCanonicalEntityUid(detail.entityUid)
+        || !detail.dataPatch
+        || typeof detail.dataPatch !== 'object'
+        || Array.isArray(detail.dataPatch)
+        || !detail.document
+        || typeof detail.document !== 'object'
+        || useCanvasStore.getState().activeId !== detail.canvasId
+        || loadedCanvasIdRef.current !== detail.canvasId
+        || !loadedRef.current
+      ) return;
+      const canvasId = detail.canvasId;
+      const nodeId = detail.nodeId;
+      const entityUid = detail.entityUid.toLowerCase();
+      const localTarget = nodesRef.current.find((node) => (
+        isCanonicalEntityUid((node as { entityUid?: unknown }).entityUid)
+        && String((node as { entityUid?: unknown }).entityUid).toLowerCase() === entityUid
+      ));
+      if (!localTarget) return;
+      try {
+        const document = requireVersionedCanvasPatchDocument(detail.document, canvasId);
+        const authoritativeTarget = (document.nodes as Array<{ entityUid?: unknown }>).find((node) => (
+          isCanonicalEntityUid(node?.entityUid)
+          && String(node.entityUid).toLowerCase() === entityUid
+        ));
+        if (!authoritativeTarget) return;
+        const knownRevision = canvasRevisionsRef.current.get(canvasId) || 0;
+        if (document.revision < knownRevision) return;
+        const baseline = lastSavedByCanvasRef.current.get(canvasId)
+          || currentPersistableCanvas().snapshot;
+        const committed = commitAuthoritativeCanvasPatchDocument(canvasId, document, {
+          expectedLocalSnapshot: baseline,
+        });
+        consumeCommittedCanvasNodePatches(canvasId, document.revision);
+        if (!committed.active) return;
+        if (committed.conflicts.length > 0) {
+          logBus.warn(
+            `后台节点 ${nodeId} 已保存到画布 r${document.revision}；${committed.conflicts.length} 处同期编辑已保留，需确认后再保存。`,
+            '画布同步',
+          );
+        } else {
+          logBus.success(`后台节点 ${nodeId} 已同步到当前画布 r${document.revision}`, '画布同步');
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error || '未知同步错误');
+        setBackgroundSaveFailure({
+          canvasId,
+          nodeId,
+          message: `结果已保存，但当前画布同步失败：${message}`,
+          kind: 'active-sync-failed',
+        });
+        logBus.error(`后台节点结果已保存，但当前画布同步失败：${message}`, '画布同步');
+      }
+    };
+    window.addEventListener('penguin:canvas-background-node-patched', handleBackgroundNodePatched);
+    return () => window.removeEventListener('penguin:canvas-background-node-patched', handleBackgroundNodePatched);
+  }, [commitAuthoritativeCanvasPatchDocument, currentPersistableCanvas]);
+
   const fetchAuthoritativeCanvasPatchDocument = useCallback(async (canvasId: string) => {
     const document = requireVersionedCanvasPatchDocument(await api.getCanvasData(canvasId), canvasId);
     const knownRevision = canvasRevisionsRef.current.get(canvasId) || 0;
     if (document.revision < knownRevision) throw new Error('服务端返回了倒退的画布 revision');
     return document;
   }, []);
+
+  useEffect(() => {
+    if (!activeId || !loaded || loadedCanvasId !== activeId) return;
+    const pendingPatches = readCommittedCanvasNodePatches(activeId);
+    if (pendingPatches.length === 0) return;
+    const throughRevision = Math.max(...pendingPatches.map((entry) => entry.revision));
+    const matchingPatches = pendingPatches.filter((entry) => nodesRef.current.some((node) => (
+      isCanonicalEntityUid((node as { entityUid?: unknown }).entityUid)
+      && String((node as { entityUid?: unknown }).entityUid).toLowerCase() === entry.entityUid
+    )));
+    if (matchingPatches.length === 0) {
+      consumeCommittedCanvasNodePatches(activeId, throughRevision);
+      return;
+    }
+    const canvasId = activeId;
+    const baseline = lastSavedByCanvasRef.current.get(canvasId)
+      || currentPersistableCanvas().snapshot;
+    let cancelled = false;
+    void fetchAuthoritativeCanvasPatchDocument(canvasId)
+      .then((document) => {
+        if (
+          cancelled
+          || useCanvasStore.getState().activeId !== canvasId
+          || loadedCanvasIdRef.current !== canvasId
+          || !loadedRef.current
+        ) return;
+        if (document.revision < throughRevision) {
+          throw new Error('后台节点结果 revision 尚未进入权威画布读取');
+        }
+        const committed = commitAuthoritativeCanvasPatchDocument(canvasId, document, {
+          expectedLocalSnapshot: baseline,
+        });
+        if (!committed.active) return;
+        consumeCommittedCanvasNodePatches(canvasId, document.revision);
+        logBus.success(
+          `已从后台结果邮箱同步 ${matchingPatches.length} 个节点到当前画布 r${document.revision}`,
+          '画布同步',
+        );
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        const message = error instanceof Error ? error.message : String(error || '未知同步错误');
+        setBackgroundSaveFailure({
+          canvasId,
+          nodeId: matchingPatches.map((entry) => entry.nodeId).join('、'),
+          message: `结果已保存，但当前画布同步失败：${message}`,
+          kind: 'active-sync-failed',
+        });
+        logBus.error(`后台节点结果邮箱同步失败：${message}`, '画布同步');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeId,
+    commitAuthoritativeCanvasPatchDocument,
+    currentPersistableCanvas,
+    fetchAuthoritativeCanvasPatchDocument,
+    loaded,
+    loadedCanvasId,
+  ]);
 
   useEffect(() => {
     const subscribe = window.t8pc?.agentControl?.onCanvasMutation;
@@ -8080,6 +8448,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       }
 
       const data = await api.getCanvasData(targetCanvasId);
+      const targetRevision = requireAuthoritativeCanvasRevision(data.revision);
       const normalizedTarget = normalizeCanvasNodeSerials(
         (Array.isArray(data.nodes) ? data.nodes : []) as Node[],
         data.nextNodeSerialId,
@@ -8124,14 +8493,14 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         creativeDesk: data.creativeDesk,
         farmCanvas: sanitizeFarmCanvasState(data.farmCanvas),
       };
-      await api.saveCanvasData(targetCanvasId, payload);
+      await api.saveCanvasData(targetCanvasId, payload, { baseRevision: targetRevision });
       api.autoSaveCanvasData(targetCanvasId, payload).catch(() => {});
-      await loadCanvases();
+      await refreshCanvasMetadata(targetCanvasId);
       if (switchAfter) setActive(targetCanvasId);
       setSendModal(null);
       logBus.success(`跨画布视频剪辑：已追加 ${incomingClips.length} 段视频到目标画布`, '视频剪辑');
     },
-    [activeId, assignActiveNodeSerials, basePositionForActiveSend, getViewport, loadCanvases, registerPlacementShelfNodes, setActive],
+    [activeId, assignActiveNodeSerials, basePositionForActiveSend, getViewport, refreshCanvasMetadata, registerPlacementShelfNodes, setActive],
   );
 
   const handleSendMaterialsToCanvas = useCallback(
@@ -8183,6 +8552,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
 
         const data = await api.getCanvasData(targetCanvasId);
         const targetNodesRaw = (Array.isArray(data.nodes) ? data.nodes : []) as Node[];
+        const targetRevision = requireAuthoritativeCanvasRevision(data.revision);
         const normalizedTarget = normalizeCanvasNodeSerials(targetNodesRaw, data.nextNodeSerialId);
         const targetNodes = normalizedTarget.nodes;
         const targetEdges = (Array.isArray(data.edges) ? data.edges : []) as Edge[];
@@ -8208,9 +8578,9 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
           creativeDesk: data.creativeDesk,
           farmCanvas: sanitizeFarmCanvasState(data.farmCanvas),
         };
-        await api.saveCanvasData(targetCanvasId, payload);
+        await api.saveCanvasData(targetCanvasId, payload, { baseRevision: targetRevision });
         api.autoSaveCanvasData(targetCanvasId, payload).catch(() => {});
-        await loadCanvases();
+        await refreshCanvasMetadata(targetCanvasId);
         if (switchAfter) setActive(targetCanvasId);
         setSendModal(null);
         logBus.success(`已发送 ${summarizeSendNodeFragment(fragment)} 到目标画布`, '发送节点');
@@ -8280,6 +8650,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       const data = await api.getCanvasData(targetCanvasId);
       const targetNodesRaw = Array.isArray(data.nodes) ? data.nodes : [];
       const normalizedTarget = normalizeCanvasNodeSerials(targetNodesRaw as Node[], data.nextNodeSerialId);
+      const targetRevision = requireAuthoritativeCanvasRevision(data.revision);
       const targetNodes = normalizedTarget.nodes;
       const targetEdges = Array.isArray(data.edges) ? data.edges : [];
       const cleaned = removeDuplicateSendBridgeNodes(
@@ -8312,9 +8683,9 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         creativeDesk: data.creativeDesk,
         farmCanvas: sanitizeFarmCanvasState(data.farmCanvas),
       };
-      await api.saveCanvasData(targetCanvasId, payload);
+      await api.saveCanvasData(targetCanvasId, payload, { baseRevision: targetRevision });
       api.autoSaveCanvasData(targetCanvasId, payload).catch(() => {});
-      await loadCanvases();
+      await refreshCanvasMetadata(targetCanvasId);
       if (switchAfter) setActive(targetCanvasId);
       setSendModal(null);
       logBus.success(
@@ -8322,7 +8693,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         '发送素材',
       );
     },
-    [activeId, appendMaterialsToVideoEditNode, assignActiveNodeSerials, basePositionForActiveSend, getViewport, loadCanvases, registerPlacementShelfNodes, resolveSendMode, sendModal, setActive],
+    [activeId, appendMaterialsToVideoEditNode, assignActiveNodeSerials, basePositionForActiveSend, getViewport, refreshCanvasMetadata, registerPlacementShelfNodes, resolveSendMode, sendModal, setActive],
   );
 
   const saveWorkflowFragmentToResource = useCallback(
@@ -9151,6 +9522,11 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
   // 通用: 在指定节点子集上拓扑排序 + 串行调 runBus
   const runNodesByOrder = useCallback(
     async (subNodes: Node[], subEdges: Edge[], options: RunNodesByOrderOptions = {}) => {
+      const launchCanvasId = loadedCanvasIdRef.current;
+      if (!launchCanvasId) {
+        logBus.warn('当前画布尚未加载完成，未启动运行', '运行体检');
+        return -1;
+      }
       const runControl: ActiveCanvasRunControl = {
         cancelled: false,
         cancelPersistence: Promise.resolve(),
@@ -9185,8 +9561,9 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       }
       const order = requestedOrder || topologicalSort(plannedSubgraph.nodes, plannedSubgraph.edges, EXECUTABLE_NODE_TYPES);
       if (order.length === 0) return 0;
+      const scopedOrder = order.map((nodeId) => createCanvasNodeExecutionKey(launchCanvasId, nodeId));
       const reservedNodeIds = new Set(Array.from(activeRunPlansRef.current.values()).flatMap((ids) => [...ids]));
-      const conflictingNodeIds = order.filter((nodeId) => reservedNodeIds.has(nodeId));
+      const conflictingNodeIds = order.filter((_, index) => reservedNodeIds.has(scopedOrder[index]));
       if (conflictingNodeIds.length > 0) {
         logBus.warn(
           `以下节点已有任务在运行，未重复提交：${conflictingNodeIds.join('、')}`,
@@ -9194,7 +9571,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         );
         return -1;
       }
-      activeRunPlansRef.current.set(runReservationToken, new Set(order));
+      activeRunPlansRef.current.set(runReservationToken, new Set(scopedOrder));
       planReserved = true;
       const authorizedScope = await authorizeRunNodes(
         options.preflightContextNodes || plannedSubgraph.nodes,
@@ -9230,6 +9607,9 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       }
       const persistenceSnapshot = captureExecutionSnapshot();
       if (!persistenceSnapshot) return -1;
+      if (persistenceSnapshot.canvasId !== launchCanvasId) {
+        throw new Error('运行请求所属画布已切换，未启动错误画布上的节点');
+      }
       if (!isSameRunPreflightExecutionSnapshot(persistenceSnapshot, captureExecutionSnapshot())) {
         throw new Error('确认后画布、revision 或执行图发生变化，已停止创建 Run');
       }
@@ -9505,6 +9885,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         for (let i = 0; i < order.length; i++) {
           if (runControl.cancelled) break;
           const id = order[i];
+          const executionNodeId = createCanvasNodeExecutionKey(runContext?.canvasId || launchCanvasId, id);
           const doneResult = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
             let done = false;
             let executionToken: string | null = null;
@@ -9517,8 +9898,8 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
             };
             const unsub = useRunBusStore.subscribe((state) => {
               if (runControl.cancelled) finish({ ok: false, error: 'stopped' });
-              else if (matchesRunCompletion(state.lastDone, id, executionToken)) finish({ ok: state.lastDone.ok, error: state.lastDone.error });
-              else if (executionToken && state.executionTokens[id] !== executionToken) finish({ ok: false, error: 'superseded' });
+              else if (matchesRunCompletion(state.lastDone, executionNodeId, executionToken)) finish({ ok: state.lastDone.ok, error: state.lastDone.error });
+              else if (executionToken && state.executionTokens[executionNodeId] !== executionToken) finish({ ok: false, error: 'superseded' });
             });
             // 安全超时 60 分钟，避免图像/视频/SD2.0/音频长轮询被批量运行提前截断。
             const timer = window.setTimeout(() => finish({ ok: false, error: 'timeout' }), 60 * 60 * 1000);
@@ -9530,8 +9911,8 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
             releaseLaunch();
             const current = useRunBusStore.getState();
             if (runControl.cancelled) finish({ ok: false, error: 'stopped' });
-            else if (matchesRunCompletion(current.lastDone, id, executionToken)) finish({ ok: current.lastDone.ok, error: current.lastDone.error });
-            else if (current.executionTokens[id] !== executionToken) finish({ ok: false, error: 'superseded' });
+            else if (matchesRunCompletion(current.lastDone, executionNodeId, executionToken)) finish({ ok: current.lastDone.ok, error: current.lastDone.error });
+            else if (current.executionTokens[executionNodeId] !== executionToken) finish({ ok: false, error: 'superseded' });
           });
           if (!doneResult.ok) failedCount += 1;
           if (order.length > 1) setBatchProgress(order.length, i + 1);
@@ -13319,6 +13700,42 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       </div>
     );
   }
+  if (!loaded || loadedCanvasId !== activeId) {
+    const loadFailure = canvasLoadFailure?.canvasId === activeId ? canvasLoadFailure : null;
+    return (
+      <div
+        className="t8-canvas-shell flex-1 flex items-center justify-center px-6"
+        data-theme-visual={visualStyle}
+        data-theme-mode={theme}
+        data-canvas-load-state={loadFailure ? 'failed' : 'loading'}
+        aria-busy={!loadFailure}
+        style={{ background: bgColor, color: themeTokens.textMuted }}
+      >
+        {loadFailure ? (
+          <div role="alert" className="max-w-lg rounded-2xl border border-red-500/40 bg-[var(--bg-secondary)]/95 p-6 text-center shadow-2xl">
+            <LucideIcons.AlertTriangle className="mx-auto mb-3 text-red-500" size={30} aria-hidden="true" />
+            <h2 className="text-base font-bold text-[var(--text-primary)]">画布暂时无法加载</h2>
+            <p className="mt-2 break-words text-sm leading-6 text-[var(--text-secondary)]">{loadFailure.message}</p>
+            <p className="mt-3 text-xs leading-5 text-[var(--text-secondary)]">加载成功前画布保持只读，不会创建空白内容或发送保存请求。</p>
+            <button
+              type="button"
+              className="mx-auto mt-5 flex h-10 items-center gap-2 rounded-lg bg-[var(--accent-primary)] px-5 text-sm font-bold text-white"
+              onClick={() => setCanvasLoadAttempt((attempt) => attempt + 1)}
+            >
+              <LucideIcons.RefreshCw size={16} aria-hidden="true" />
+              重试加载
+            </button>
+          </div>
+        ) : (
+          <div role="status" className="flex items-center gap-3 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-secondary)]/90 px-5 py-4 text-sm">
+            <LucideIcons.LoaderCircle className="animate-spin text-[var(--accent-primary)]" size={20} aria-hidden="true" />
+            正在读取权威画布…
+          </div>
+        )}
+      </div>
+    );
+  }
+
 
   const floatingControlRail = (
     <>
@@ -13569,6 +13986,47 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       onContextMenuCapture={onCanvasContextMenuCapture}
       onMouseMove={handleCanvasPointerMove}
     >
+      {backgroundSaveFailure && (
+        <div
+          role="alert"
+          data-canvas-background-save-error="true"
+          data-canvas-background-save-error-kind={backgroundSaveFailure.kind}
+          className={`absolute left-1/2 top-16 z-[120] flex w-[min(560px,calc(100%-32px))] -translate-x-1/2 items-start gap-3 border px-4 py-3 ${
+            visualStyle === 'pixel'
+              ? 'border-2 border-[var(--px-ink)] bg-[var(--px-yellow)] text-[var(--px-ink)] shadow-[4px_4px_0_var(--px-ink)]'
+              : 'rounded-xl border-red-500/50 bg-[var(--bg-secondary)]/95 text-[var(--text-primary)] shadow-2xl backdrop-blur'
+          }`}
+        >
+          <LucideIcons.AlertTriangle className="mt-0.5 shrink-0 text-red-500" size={20} aria-hidden="true" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-bold">
+              {backgroundSaveFailure.kind === 'persist-failed'
+                ? '后台节点结果未能保存'
+                : '后台节点结果已保存，当前界面同步失败'}
+            </p>
+            <p className="mt-1 break-words text-xs leading-5 opacity-85">
+              画布 {backgroundSaveFailure.canvasId} · 节点 {backgroundSaveFailure.nodeId}：{backgroundSaveFailure.message}
+            </p>
+            <p className="mt-1 text-xs leading-5 opacity-75">
+              {backgroundSaveFailure.kind === 'persist-failed'
+                ? '结果没有被标记为已保存；请保留当前任务信息并稍后重新运行。'
+                : '服务端结果已持久化；请重新打开该画布以同步最新结果，无需重新生成。'}
+            </p>
+          </div>
+          <button
+            type="button"
+            className={`nodrag nopan shrink-0 px-2 py-1 text-xs font-bold ${
+              visualStyle === 'pixel'
+                ? 'border-2 border-[var(--px-ink)] bg-[var(--px-surface)]'
+                : 'rounded-md border border-[var(--border-primary)] bg-[var(--bg-tertiary)]'
+            }`}
+            aria-label="关闭后台保存失败提示"
+            onClick={() => setBackgroundSaveFailure(null)}
+          >
+            关闭
+          </button>
+        </div>
+      )}
       <CanvasToolbar
         canUndo={canUndo}
         canRedo={canRedo}
@@ -13646,27 +14104,43 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
             <span aria-hidden="true" data-farm-toolbar-priority-dot="true" />
           </button>
         )}
-        <GardenDefenseExperience
-          visualStyle={visualStyle}
-          canvasId={activeId}
-          viewportMoving={viewportMoving}
-          nodeDragging={nodeDragging}
-        />
-        <TetrisPanel
-          visualStyle={visualStyle}
-          viewportMoving={viewportMoving}
-          nodeDragging={nodeDragging}
-        />
-        <DragonBallRadar
-          visualStyle={visualStyle}
-          viewportMoving={viewportMoving}
-          nodeDragging={nodeDragging}
-        />
-        <SaintSeiyaSanctuary
-          visualStyle={visualStyle}
-          viewportMoving={viewportMoving}
-          nodeDragging={nodeDragging}
-        />
+        {isGardenDefense && (
+          <Suspense fallback={null}>
+            <GardenDefenseExperience
+              visualStyle={visualStyle}
+              canvasId={activeId}
+              viewportMoving={viewportMoving}
+              nodeDragging={nodeDragging}
+            />
+          </Suspense>
+        )}
+        {isTetris && (
+          <Suspense fallback={null}>
+            <TetrisPanel
+              visualStyle={visualStyle}
+              viewportMoving={viewportMoving}
+              nodeDragging={nodeDragging}
+            />
+          </Suspense>
+        )}
+        {isDragonBall && (
+          <Suspense fallback={null}>
+            <DragonBallRadar
+              visualStyle={visualStyle}
+              viewportMoving={viewportMoving}
+              nodeDragging={nodeDragging}
+            />
+          </Suspense>
+        )}
+        {isSaintSeiya && (
+          <Suspense fallback={null}>
+            <SaintSeiyaSanctuary
+              visualStyle={visualStyle}
+              viewportMoving={viewportMoving}
+              nodeDragging={nodeDragging}
+            />
+          </Suspense>
+        )}
       </CanvasToolbar>
       <GenerationHistoryPanel
         open={generationHistoryOpen}
@@ -13736,7 +14210,9 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
           onFocusNode={focusGenerationHistoryNode}
         />
       )}
-      <FarmStoryPanel
+      {isFarmStory && (
+        <Suspense fallback={null}>
+          <FarmStoryPanel
         visualStyle={visualStyle}
         themeMode={theme}
         open={farmStoryPanelOpen}
@@ -13765,7 +14241,9 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
         onCompleteOrder={handleFarmCompleteOrder}
         onCompleteNpcVisit={handleFarmCompleteNpcVisit}
         onFollowupCanvasHint={handleFarmFollowupCanvasHint}
-      />
+          />
+        </Suspense>
+      )}
       {isFarmStory && farmTopNotice && (
         <div
           className={`t8-farm-followup-notice is-${farmTopNotice.tone}`}
@@ -13879,6 +14357,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
       <WorkflowDoctorHighlightContext.Provider value={workflowDoctorHighlightMap}>
         <ReactFlow
           nodes={renderedNodes}
+          key={loadedCanvasId || 'canvas-loading'}
           edges={renderedEdges}
           nodeTypes={memoNodeTypes}
           edgeTypes={memoEdgeTypes}
@@ -13911,7 +14390,12 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
           snapGrid={SNAP_GRID}
           elevateNodesOnSelect={false}
           minZoom={CANVAS_MIN_ZOOM}
-          fitView
+          defaultViewport={
+            initialCanvasViewport?.canvasId === loadedCanvasId && initialCanvasViewport.viewport
+              ? initialCanvasViewport.viewport
+              : CANVAS_DEFAULT_VIEWPORT
+          }
+          fitView={!(initialCanvasViewport?.canvasId === loadedCanvasId && initialCanvasViewport.viewport)}
           fitViewOptions={CANVAS_OVERVIEW_FIT_OPTIONS}
           proOptions={memoProOptions}
           defaultEdgeOptions={memoDefaultEdgeOptions}
@@ -13922,7 +14406,10 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
           size={isPixel ? 1.6 : 1.2}
           color={dotColor}
         />
-        <FarmCanvasLayer
+        {(isFarmStory || farmCanvasEditing
+          || farmCanvas.objects.length > 0 || farmCanvas.animals.length > 0) && (
+          <Suspense fallback={null}>
+            <FarmCanvasLayer
           farmCanvas={farmCanvas}
           editing={farmCanvasEditing}
           visualStyle={visualStyle}
@@ -13934,7 +14421,9 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
           onAction={handleFarmCanvasAction}
           onCancelContinuousAction={handleFarmCancelContinuousAction}
           onFinishContinuousAction={handleFarmFinishContinuousAction}
-        />
+            />
+          </Suspense>
+        )}
         {!creativeDeskEditing && (
           <CreativeDeskLayer
             creativeDesk={creativeDesk}
@@ -15137,12 +15626,18 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef }: CanvasInnerProps) {
 interface CanvasProps {
   onAddNodeRef?: React.MutableRefObject<AddNodeFn | null>;
   onInsertWorkflowRef?: React.MutableRefObject<InsertWorkflowFn | null>;
+  themeStyleOverride?: string;
 }
 
 export default function Canvas(props: CanvasProps) {
+  const activeCanvasId = useCanvasStore((state) => state.activeId);
+  const persistenceRuntimeRef = useRef<CanvasPersistenceRuntime | null>(null);
+  const persistenceRuntime = persistenceRuntimeRef.current || createCanvasPersistenceRuntime();
+  persistenceRuntimeRef.current = persistenceRuntime;
+
   return (
-    <ReactFlowProvider>
-      <CanvasInner {...props} />
+    <ReactFlowProvider key={activeCanvasId || 'canvas-empty'}>
+      <CanvasInner {...props} persistenceRuntime={persistenceRuntime} />
     </ReactFlowProvider>
   );
 }

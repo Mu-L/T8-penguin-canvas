@@ -60,7 +60,8 @@ test('静帧和动画导出遵守 5 秒、24 FPS、H.264 MP4 与停止合同', (
   assert.match(studio, /for \(let frame = 0; frame < TOTAL_FRAMES; frame \+= 1\)/);
   assert.match(studio, /PREVIS_EXPORT_CANCELLED/);
   assert.match(studio, /cancelExport:/);
-  assert.match(node, /cancelTargets\.includes\(id\)/);
+  assert.match(node, /createCanvasNodeExecutionKey\(originCanvasIdRef\.current, id\)/);
+  assert.match(node, /cancelTargets\.includes\(executionNodeId\)/);
   assert.match(node, /status: 'stopped', taskStatus: 'cancelled'/);
   assert.match(node, /schema: 't8-previs-output-v1'/);
   assert.match(node, /role: 'composition_reference'/);

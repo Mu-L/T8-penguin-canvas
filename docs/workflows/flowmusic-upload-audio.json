@@ -1,0 +1,103 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "Lyria · flowmusic-upload-audio",
+  "nodes": [
+    {
+      "id": "flowmusic-upload-audio-source",
+      "type": "upload",
+      "position": {
+        "x": 0,
+        "y": 40
+      },
+      "data": {
+        "label": "上传参考音频",
+        "uploadType": "audio",
+        "lockedUploadType": "audio"
+      }
+    },
+    {
+      "id": "flowmusic-upload-audio-action",
+      "type": "audio",
+      "position": {
+        "x": 440,
+        "y": 40
+      },
+      "data": {
+        "label": "Lyria · 上传音频",
+        "audioProviderMode": "lyria",
+        "apiModel": "flowmusic",
+        "flowMusicOperation": "flowmusic-upload-audio",
+        "flowMusicClipId": "",
+        "reuseResult": false
+      }
+    },
+    {
+      "id": "flowmusic-upload-audio-output",
+      "type": "output",
+      "position": {
+        "x": 860,
+        "y": 40
+      },
+      "data": {
+        "label": "上传音频结果",
+        "outputType": "audio"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "flowmusic-upload-audio-source-edge",
+      "source": "flowmusic-upload-audio-source",
+      "target": "flowmusic-upload-audio-action"
+    },
+    {
+      "id": "flowmusic-upload-audio-output-edge",
+      "source": "flowmusic-upload-audio-action",
+      "target": "flowmusic-upload-audio-output"
+    }
+  ],
+  "nodeCount": 3,
+  "edgeCount": 2,
+  "nodeTypes": [
+    "upload",
+    "audio",
+    "output"
+  ],
+  "topologyPreview": {
+    "nodes": [
+      {
+        "id": "flowmusic-upload-audio-source",
+        "type": "upload",
+        "label": "上传参考音频",
+        "x": 8,
+        "y": 50
+      },
+      {
+        "id": "flowmusic-upload-audio-action",
+        "type": "audio",
+        "label": "Lyria · 上传音频",
+        "x": 51,
+        "y": 50
+      },
+      {
+        "id": "flowmusic-upload-audio-output",
+        "type": "output",
+        "label": "上传音频结果",
+        "x": 92,
+        "y": 50
+      }
+    ],
+    "edges": [
+      {
+        "source": "flowmusic-upload-audio-source",
+        "target": "flowmusic-upload-audio-action"
+      },
+      {
+        "source": "flowmusic-upload-audio-action",
+        "target": "flowmusic-upload-audio-output"
+      }
+    ]
+  },
+  "savedAt": "2026-08-21T00:00:00.000Z"
+}

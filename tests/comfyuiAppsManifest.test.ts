@@ -72,3 +72,13 @@ test('ComfyUI store runner does not force prompt input for fixed workflow apps',
   assert.match(service, /const request:\s*GenerateExternalImageRequest/);
   assert.match(service, /if\s*\(prompt\)\s*request\.prompt = prompt/);
 });
+
+test('ComfyUI app maker exposes seed random mode and selectable output nodes', () => {
+  assert.match(store, /value === '' \|\| value === null \|\| value === undefined/);
+  assert.match(store, /切换为每次运行随机 Seed/);
+  assert.match(workflow, /outputNodes: ComfyDetectedOutputNode\[\]/);
+  assert.match(maker, /收集这些输出节点（默认全选）/);
+  assert.match(maker, /comfyMakerOutputNodeIds/);
+  assert.match(comfyApps, /outputNodeIds\?: string\[\]/);
+  assert.match(service, /outputNodeIds: app\.outputNodeIds/);
+});

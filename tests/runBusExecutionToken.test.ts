@@ -202,13 +202,42 @@ test('parallel nodes keep their own explicit RunContext while the active context
 
   assert.equal(runBus.getRunExecutionBinding('node-a', firstToken).runContext.runId, 'run-first');
   assert.equal(runBus.getRunExecutionBinding('node-b', secondToken).runContext.runId, 'run-second');
-  assert.equal(store.getState().activeNodeRunIds['node-a'], 'node-run-a');
-  assert.deepEqual(store.getState().runningIds, ['node-a', 'node-b']);
+  const firstExecutionNodeId = runBus.createCanvasNodeExecutionKey(firstContext.canvasId, 'node-a');
+  const secondExecutionNodeId = runBus.createCanvasNodeExecutionKey(secondContext.canvasId, 'node-b');
+  assert.equal(store.getState().activeNodeRunIds[firstExecutionNodeId], 'node-run-a');
+  assert.deepEqual(store.getState().runningIds, [firstExecutionNodeId, secondExecutionNodeId]);
+  assert.notEqual(firstExecutionNodeId, secondExecutionNodeId);
 
   store.getState().clearActiveRunContext('run-first');
   assert.equal(store.getState().activeRunContext.runId, 'run-second');
   store.getState().clearActiveRunContext('run-second');
   assert.equal(store.getState().activeRunContext, null);
+});
+
+test('same visible node id runs independently on two canvases', () => {
+  const firstContext = { ...context('run-story-a', ['story-1']), canvasId: 'canvas-a' };
+  const secondContext = { ...context('run-story-b', ['story-1']), canvasId: 'canvas-b' };
+  const firstExecutionNodeId = runBus.createCanvasNodeExecutionKey(firstContext.canvasId, 'story-1');
+  const secondExecutionNodeId = runBus.createCanvasNodeExecutionKey(secondContext.canvasId, 'story-1');
+
+  const firstToken = store.getState().triggerRun('story-1', 'single', firstContext);
+  const secondToken = store.getState().triggerRun('story-1', 'single', secondContext);
+
+  assert.notEqual(firstExecutionNodeId, secondExecutionNodeId);
+  assert.deepEqual(runBus.parseCanvasNodeExecutionKey(firstExecutionNodeId), { canvasId: 'canvas-a', nodeId: 'story-1' });
+  assert.deepEqual(runBus.parseCanvasNodeExecutionKey('story-1'), { canvasId: null, nodeId: 'story-1' });
+  assert.notEqual(firstToken, secondToken);
+  assert.equal(store.getState().executionTokens[firstExecutionNodeId], firstToken);
+  assert.equal(store.getState().executionTokens[secondExecutionNodeId], secondToken);
+  assert.deepEqual(store.getState().runningIds, [firstExecutionNodeId, secondExecutionNodeId]);
+  assert.equal(runBus.getRunExecutionBinding(firstExecutionNodeId, firstToken).originalNodeId, 'story-1');
+  assert.equal(runBus.getRunExecutionBinding(secondExecutionNodeId, secondToken).originalNodeId, 'story-1');
+
+  assert.equal(store.getState().markDone(firstExecutionNodeId, firstToken, true), true);
+  assert.equal(store.getState().executionTokens[firstExecutionNodeId], undefined);
+  assert.equal(store.getState().executionTokens[secondExecutionNodeId], secondToken);
+  assert.deepEqual(store.getState().runningIds, [secondExecutionNodeId]);
+  assert.equal(store.getState().markDone(secondExecutionNodeId, secondToken, true), true);
 });
 
 test('cancelRun stops only tokens bound to that durable Run', async () => {
@@ -225,10 +254,10 @@ test('cancelRun stops only tokens bound to that durable Run', async () => {
   assert.deepEqual(calls, ['first-stopped']);
   assert.equal(runBus.isRunExecutionCancelled(firstToken), true);
   assert.equal(runBus.isRunExecutionCancelled(secondToken), false);
-  assert.equal(store.getState().executionTokens['node-a'], undefined);
-  assert.equal(store.getState().executionTokens['node-b'], secondToken);
-  assert.deepEqual(store.getState().runningIds, ['node-b']);
-  assert.deepEqual(store.getState().cancelTargets, ['node-a']);
+  assert.equal(store.getState().executionTokens[runBus.createCanvasNodeExecutionKey(firstContext.canvasId, 'node-a')], undefined);
+  assert.equal(store.getState().executionTokens[runBus.createCanvasNodeExecutionKey(secondContext.canvasId, 'node-b')], secondToken);
+  assert.deepEqual(store.getState().runningIds, [runBus.createCanvasNodeExecutionKey(secondContext.canvasId, 'node-b')]);
+  assert.deepEqual(store.getState().cancelTargets, [runBus.createCanvasNodeExecutionKey(firstContext.canvasId, 'node-a')]);
 });
 
 test('cancelAll awaits registered persistence and late handlers still see cancelled tokens', async () => {
@@ -263,16 +292,16 @@ test('all run-bus waiters require node id and execution token instead of timesta
   const subflow = read('src/components/nodes/SubflowNode.tsx');
   const hook = read('src/hooks/useRunTrigger.ts');
 
-  assert.match(canvas, /matchesRunCompletion\(state\.lastDone, id, executionToken\)/);
-  assert.match(loop, /matchesRunCompletion\(state\.lastDone, nodeId, executionToken\)/);
-  assert.match(randomRoute, /matchesRunCompletion\(state\.lastDone, nodeId, executionToken\)/);
-  assert.match(subflow, /matchesRunCompletion\(state\.lastDone, nodeId, executionToken\)/);
+  assert.match(canvas, /matchesRunCompletion\(state\.lastDone, executionNodeId, executionToken\)/);
+  assert.match(loop, /matchesRunCompletion\(state\.lastDone, executionNodeId, executionToken\)/);
+  assert.match(randomRoute, /matchesRunCompletion\(state\.lastDone, executionNodeId, executionToken\)/);
+  assert.match(subflow, /matchesRunCompletion\(state\.lastDone, executionNodeId, executionToken\)/);
   assert.doesNotMatch(`${loop}\n${randomRoute}\n${subflow}`, /lastDone\.ts\s*>=/);
 
-  assert.match(hook, /s\.executionTokens\[nodeId\]/);
-  assert.match(hook, /markDone\(nodeId, capturedExecutionToken, true\)/);
-  assert.match(hook, /setActiveNodeRun\(nodeId, undefined, capturedExecutionToken\)/);
-  assert.match(hook, /getRunExecutionBinding\(nodeId, capturedExecutionToken\)/);
+  assert.match(hook, /s\.executionTokens\[executionNodeId\]/);
+  assert.match(hook, /markDone\(executionNodeId, capturedExecutionToken, true\)/);
+  assert.match(hook, /setActiveNodeRun\(executionNodeId, undefined, capturedExecutionToken\)/);
+  assert.match(hook, /getRunExecutionBinding\(executionNodeId, capturedExecutionToken\)/);
   assert.match(hook, /registerRunExecutionCancelHandler/);
   assert.match(hook, /await persistTerminal\('succeeded'\)/);
   assert.match(canvas, /triggerRun\([\s\S]*runContext/);

@@ -3,18 +3,19 @@ import { Handle, Position, useReactFlow, type Edge, type Node, type NodeProps } 
 import { ExternalLink, GitFork, Play, RotateCcw, Workflow } from 'lucide-react';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
 import { requestCanvasNodeRun } from '../../utils/canvasRunRequest';
-import { matchesRunCompletion, registerRunNodeExecutionContexts, useRunBusStore } from '../../stores/runBus';
+import { createCanvasNodeExecutionKey, matchesRunCompletion, registerRunNodeExecutionContexts, useRunBusStore } from '../../stores/runBus';
 import * as api from '../../services/api';
 import { EXECUTABLE_NODE_TYPES } from '../../config/executableNodeTypes';
 import { compileSubflow, isPrivateSubflowDataKey, loadSubflowDependencyDefinitions, prepareSubflowRootInputs, subflowDependencyMapKey, type SubflowDefinition, type SubflowParameter, type SubflowPort } from '../../utils/subflows';
 import { selectSingleSourceHandleData } from '../../utils/sourceHandleData';
 import { useUpdateNodeData } from './useUpdateNodeData';
-import type { RunNodeLifecycleReporter } from '../../types/project';
+import type { RunContext, RunNodeLifecycleReporter } from '../../types/project';
 
-function waitForNode(nodeId: string, executionToken: string) {
+function waitForNode(nodeId: string, executionToken: string, runContext: RunContext | null) {
   return new Promise<boolean>((resolve) => {
     let settled = false;
     const cancelSeq = useRunBusStore.getState().cancelSeq;
+    const executionNodeId = createCanvasNodeExecutionKey(runContext?.canvasId, nodeId);
     const finish = (ok: boolean) => {
       if (settled) return;
       settled = true;
@@ -23,15 +24,15 @@ function waitForNode(nodeId: string, executionToken: string) {
       resolve(ok);
     };
     const unsubscribe = useRunBusStore.subscribe((state) => {
-      if (state.cancelSeq !== cancelSeq && state.cancelTargets.includes(nodeId)) finish(false);
-      else if (matchesRunCompletion(state.lastDone, nodeId, executionToken)) finish(state.lastDone.ok);
-      else if (state.executionTokens[nodeId] !== executionToken) finish(false);
+      if (state.cancelSeq !== cancelSeq && state.cancelTargets.includes(executionNodeId)) finish(false);
+      else if (matchesRunCompletion(state.lastDone, executionNodeId, executionToken)) finish(state.lastDone.ok);
+      else if (state.executionTokens[executionNodeId] !== executionToken) finish(false);
     });
     const timer = window.setTimeout(() => finish(false), 60 * 60 * 1000);
     const current = useRunBusStore.getState();
-    if (current.cancelSeq !== cancelSeq && current.cancelTargets.includes(nodeId)) finish(false);
-    else if (matchesRunCompletion(current.lastDone, nodeId, executionToken)) finish(current.lastDone.ok);
-    else if (current.executionTokens[nodeId] !== executionToken) finish(false);
+    if (current.cancelSeq !== cancelSeq && current.cancelTargets.includes(executionNodeId)) finish(false);
+    else if (matchesRunCompletion(current.lastDone, executionNodeId, executionToken)) finish(current.lastDone.ok);
+    else if (current.executionTokens[executionNodeId] !== executionToken) finish(false);
   });
 }
 
@@ -150,7 +151,8 @@ const SubflowNode = memo((props: NodeProps) => {
     const existingEdges = getEdges();
     const rootInputs = prepareSubflowRootInputs(definition, props.id, existingNodes, existingEdges, compiled.inputTargets);
     const runtimeIds = new Set([...compiled.nodes, ...rootInputs.nodes].map((node) => node.id));
-    const parentNodeRunId = useRunBusStore.getState().activeNodeRunIds[props.id];
+    const parentExecutionNodeId = createCanvasNodeExecutionKey(reporter.runContext?.canvasId, props.id);
+    const parentNodeRunId = useRunBusStore.getState().activeNodeRunIds[parentExecutionNodeId];
     const unregisterExecutionContexts = registerRunNodeExecutionContexts(Object.fromEntries(
       Object.entries(compiled.trace).map(([nodeId, trace]) => [nodeId, {
         subflowPath: trace.instancePath.slice(0, -1),
@@ -184,7 +186,7 @@ const SubflowNode = memo((props: NodeProps) => {
         });
         if (!runnable.length) continue;
         const executionTokens = useRunBusStore.getState().triggerRunMany(runnable, 'batch', reporter.runContext);
-        const waits = runnable.map((nodeId) => waitForNode(nodeId, executionTokens[nodeId]));
+        const waits = runnable.map((nodeId) => waitForNode(nodeId, executionTokens[nodeId], reporter.runContext));
         const results = await Promise.all(waits);
         const failedIndex = results.findIndex((ok) => !ok);
         if (failedIndex >= 0) throw new Error(`子工作流内部节点失败: ${runnable[failedIndex].split('::').pop()}`);

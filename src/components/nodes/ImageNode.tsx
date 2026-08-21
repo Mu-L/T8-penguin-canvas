@@ -7,6 +7,7 @@ import MaterialPreviewSection from './MaterialPreviewSection';
 import ReuseResultToggle from './ReuseResultToggle';
 import MentionPromptInput from './MentionPromptInput';
 import SmartImage from '../SmartImage';
+import LazyVideo from '../LazyVideo';
 import PromptTextarea from '../PromptTextarea';
 import { resolveMediaMentions, type MediaMention } from './mediaMentions';
 import {
@@ -39,7 +40,10 @@ import {
   ZHENZHEN_IMAGE_GK_V15_MODEL,
   ZHENZHEN_IMAGE_GK_V15_RATIOS,
   ZHENZHEN_IMAGE_GK_V2_MODEL,
+  ZHENZHEN_IMAGE_GK_V2_EDIT_MODEL,
   ZHENZHEN_IMAGE_GK_V2_RATIOS,
+  ZHENZHEN_IMAGE_GK_V2_EDIT_RATIOS,
+  ZHENZHEN_IMAGE_GK_V2_EDIT_RESOLUTIONS,
   ZHENZHEN_IMAGE_NB_2_LITE_MODEL,
   ZHENZHEN_IMAGE_NB_2_MODEL,
   ZHENZHEN_IMAGE_NB_PRO_MODEL,
@@ -462,6 +466,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   const isZhenzhenApimartImage = isZhenzhenBudgetImageSelected && isZhenzhenApimartImageModel(apiModel);
   const isZhenzhenLowpriceImage = apiModel === ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL;
   const isZhenzhenGrokImageV2 = apiModel === ZHENZHEN_IMAGE_GK_V2_MODEL;
+  const isZhenzhenGrokImageV2Edit = apiModel === ZHENZHEN_IMAGE_GK_V2_EDIT_MODEL;
   const isZhenzhenGrokImage = apiModel === ZHENZHEN_IMAGE_GK_V15_MODEL;
   const isZhenzhenGrokImageEdit = apiModel === ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL;
   const isZhenzhenNb2Lite = apiModel === ZHENZHEN_IMAGE_NB_2_LITE_MODEL;
@@ -473,12 +478,18 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
   const zhenzhenNbImageCount = isZhenzhenNb2Lite
     ? Math.min(4, Math.max(1, Number(d?.apimartImageCount) || 1))
     : 1;
-  const grokV2ImageCount = Math.min(10, Math.max(1, Number(d?.grokV2ImageCount) || 1));
+  const grokV2ImageCount = Math.min(isZhenzhenGrokImageV2 ? 12 : 10, Math.max(1, Number(d?.grokV2ImageCount) || 1));
+  const grokV2EditResolution = (ZHENZHEN_IMAGE_GK_V2_EDIT_RESOLUTIONS as readonly string[]).includes(d?.grokV2EditResolution)
+    ? d.grokV2EditResolution as '1k' | '2k'
+    : '1k';
+  const grokV2EditNsfwCheck = d?.grokV2EditNsfwCheck === true;
   const seedanceNzProviderLabel = isZhenzhenBudgetPlatformSelected
     ? '贞贞的平价AI小屋'
     : '贞贞的平价AI小屋';
   const effectiveAspectRatios = isZhenzhenImageG2
     ? ZHENZHEN_IMAGE_G2_RATIOS
+    : isZhenzhenGrokImageV2Edit
+      ? [...ZHENZHEN_IMAGE_GK_V2_EDIT_RATIOS]
     : isZhenzhenGrokImageV2
       ? ZHENZHEN_IMAGE_GK_V2_RATIOS
     : (isZhenzhenGrokImage || isZhenzhenGrokImageEdit)
@@ -492,7 +503,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
         : modelDef.aspectRatios;
   const effectiveAspectRatio = effectiveAspectRatios.includes(aspectRatio)
     ? aspectRatio
-    : (isZhenzhenImageG2 ? 'adaptive' : '1:1');
+    : (isZhenzhenImageG2 ? 'adaptive' : isZhenzhenGrokImageV2Edit ? 'auto' : '1:1');
   const effectiveSizes = isZhenzhenImageG2
     ? ['1K']
     : isZhenzhenLowpriceImage
@@ -503,7 +514,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           ? ['1K']
           : isZhenzhenNbPro
             ? ['1K', '2K', '4K']
-      : (isZhenzhenGrokImageV2 || isZhenzhenGrokImage || isZhenzhenGrokImageEdit)
+      : (isZhenzhenGrokImageV2 || isZhenzhenGrokImageV2Edit || isZhenzhenGrokImage || isZhenzhenGrokImageEdit)
         ? []
         : modelDef.sizes;
   const effectiveSizeLevel = isZhenzhenImageG2
@@ -816,6 +827,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
     const nextSize = gptImage2ZhenzhenVariantSize(nextApiModel);
     if (isZhenzhenBudgetImageModel(nextApiModel)) {
       const nextModel = nextApiModel === ZHENZHEN_IMAGE_GK_V2_MODEL
+        || nextApiModel === ZHENZHEN_IMAGE_GK_V2_EDIT_MODEL
         || nextApiModel === ZHENZHEN_IMAGE_GK_V15_MODEL
         || nextApiModel === ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL
         ? 'grok-image'
@@ -826,6 +838,8 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             : 'gpt-image-2';
       const nextRatio = isZhenzhenImageG2Model(nextApiModel)
         ? (ZHENZHEN_IMAGE_G2_RATIOS.includes(aspectRatio) ? aspectRatio : 'adaptive')
+        : nextApiModel === ZHENZHEN_IMAGE_GK_V2_EDIT_MODEL
+          ? ((ZHENZHEN_IMAGE_GK_V2_EDIT_RATIOS as readonly string[]).includes(aspectRatio) ? aspectRatio : 'auto')
         : nextModel === 'grok-image'
           ? (ZHENZHEN_IMAGE_GK_V15_RATIOS.includes(aspectRatio) ? aspectRatio : '1:1')
           : nextModel === 'nano-banana-2'
@@ -991,6 +1005,18 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
       setError('zhenzhen-image-gk-v2 提示词最多 20000 字符');
       logBus.error(`生成中止: Grok Image v2 提示词长度 ${finalPrompt.length} 超过 20000`, src);
       return;
+    }
+    if (isZhenzhenGrokImageV2Edit) {
+      if (finalPrompt.length > 20000) {
+        setError('zhenzhen-image-gk-v2-edit 提示词最多 20000 字符');
+        logBus.error(`生成中止: Grok Image v2 编辑提示词长度 ${finalPrompt.length} 超过 20000`, src);
+        return;
+      }
+      if (upstreamImages.length < 1 || upstreamImages.length > 3) {
+        setError('zhenzhen-image-gk-v2-edit 必须按顺序提供 1–3 张参考图');
+        logBus.error(`生成中止: Grok Image v2 编辑参考图数量 ${upstreamImages.length}`, src);
+        return;
+      }
     }
     if (isQwenImageTab && (finalPrompt.length < 5 || finalPrompt.length > 2000)) {
       setError('Qwen Image 3.0 提示词必须为 5-2000 字符');
@@ -1692,6 +1718,10 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           ? []
           : isZhenzhenGrokImage
             ? []
+            : isZhenzhenGrokImageV2
+              ? []
+            : isZhenzhenGrokImageV2Edit
+              ? allRefs.slice(0, 3)
             : isZhenzhenGrokImageEdit
               ? allRefs.slice(0, 1)
               : allRefs;
@@ -1737,6 +1767,8 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             ? `${effectiveSizeLevel.toLowerCase()} · ${effectiveAspectRatio}`
             : isZhenzhenNb
               ? `${effectiveSizeLevel.toLowerCase()} · ${effectiveAspectRatio} · n=${zhenzhenNbImageCount}`
+            : isZhenzhenGrokImageV2Edit
+              ? `${grokV2EditResolution} · ${effectiveAspectRatio} · n=${grokV2ImageCount}`
             : (isZhenzhenGrokImageV2 || isZhenzhenGrokImage || isZhenzhenGrokImageEdit)
               ? effectiveAspectRatio
           : (seedreamNzResolution === 'custom' ? seedreamNzResolvedSize : seedreamNzResolution);
@@ -1772,6 +1804,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
               | 'zhenzhen-image-g2-i2i'
               | 'zhenzhen-image-g-v2-lowprice'
               | 'zhenzhen-image-gk-v2'
+              | 'zhenzhen-image-gk-v2-edit'
               | 'zhenzhen-image-gk-v15'
               | 'zhenzhen-image-gk-v15-edit'
               | 'zhenzhen-image-nb-2-lite'
@@ -1779,7 +1812,9 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
               | 'zhenzhen-image-nb-pro'
             : undefined,
           modelFamily: isZhenzhenBudgetImageSelected || isQwenImageTab || isSeedreamLayerTab || isWanImageTab ? undefined : seedreamNzModelFamily,
-          resolution: isSeedreamLayerTab
+          resolution: isZhenzhenGrokImageV2Edit
+            ? grokV2EditResolution
+            : isSeedreamLayerTab
             ? seedreamLayerResolution
             : isQwenImageTab
             ? qwenSizingMode === 'ratio' ? qwenResolution : undefined
@@ -1790,7 +1825,9 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
               : isZhenzhenNb
                 ? effectiveSizeLevel.toLowerCase() as '0.5k' | '1k' | '2k' | '4k'
             : (seedreamNzResolution === 'custom' ? undefined : seedreamNzResolution),
-          ratio: isQwenImageTab
+          ratio: isZhenzhenGrokImageV2Edit
+            ? effectiveAspectRatio as any
+            : isQwenImageTab
             ? qwenSizingMode === 'ratio' ? effectiveAspectRatio as
               | '1:1' | '2:3' | '3:2' | '3:4' | '4:3' | '4:5' | '5:4' | '9:16' | '16:9' | '21:9'
               : undefined
@@ -1804,7 +1841,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
             : !isZhenzhenImageG2 && seedreamNzResolution === 'custom' ? seedreamNzResolvedSize : undefined,
           n: isQwenImageTab
             ? qwenImageCount
-            : isZhenzhenGrokImageV2
+            : isZhenzhenGrokImageV2 || isZhenzhenGrokImageV2Edit
               ? grokV2ImageCount
               : isZhenzhenNb ? zhenzhenNbImageCount : isZhenzhenApimartImage ? 1 : undefined,
           output_format: isSeedreamLayerTab
@@ -1817,6 +1854,8 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           width: isWanImageTab && !isWanImageI2I ? wanImageWidth : undefined,
           height: isWanImageTab && !isWanImageI2I ? wanImageHeight : undefined,
           thinking_mode: isWanImageTab && !isWanImageI2I ? wanImageThinkingMode : undefined,
+          aspect_ratio: isZhenzhenGrokImageV2Edit ? effectiveAspectRatio : undefined,
+          nsfw_check: isZhenzhenGrokImageV2Edit ? grokV2EditNsfwCheck : undefined,
         }, { submissionKey: reporter?.providerSubmissionKey });
         if (!isCurrentGenerationRun(runId)) return;
         const taskId = submit.taskId;
@@ -2798,7 +2837,9 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
                       : isZhenzhenNbPro
                         ? 'Nano Banana Pro：支持 1K/2K/4K、标准比例和最多 14 张参考图；单次固定 1 张输出。'
                   : isZhenzhenGrokImageV2
-                    ? 'Grok Imagine 2.0 文生图：提示词最多 20000 字符，支持一次生成 1–10 张，不发送参考图。'
+                    ? 'Grok Imagine 2.0 文生图：提示词最多 20000 字符，支持一次生成 1–12 张，不发送参考图。'
+                  : isZhenzhenGrokImageV2Edit
+                    ? 'Grok Imagine 2.0 编辑：必须按顺序提供 1–3 张参考图，支持 1K/2K、自动或固定比例、一次生成 1–10 张。'
                   : isZhenzhenGrokImageEdit
                     ? 'Grok Image 1.5 编辑：必须提供参考图，仅使用第 1 张。'
                     : 'Grok Image 1.5 文生图：只使用 Prompt，不发送参考图。'}
@@ -2858,7 +2899,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
           </div>
         )}
 
-        {isZhenzhenGrokImageV2 && !isExternalSelected && (
+        {(isZhenzhenGrokImageV2 || isZhenzhenGrokImageV2Edit) && !isExternalSelected && (
           <div>
             <label className="text-[10px] text-white/50 block mb-1">生成张数</label>
             <select
@@ -2867,10 +2908,37 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
               style={{ background: '#18181b', color: '#ffffff' }}
               className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
             >
-              {Array.from({ length: 10 }, (_, index) => index + 1).map((count) => (
+              {Array.from({ length: isZhenzhenGrokImageV2 ? 12 : 10 }, (_, index) => index + 1).map((count) => (
                 <option key={count} value={count} style={{ background: '#18181b', color: '#ffffff' }}>{count}</option>
               ))}
             </select>
+          </div>
+        )}
+
+        {isZhenzhenGrokImageV2Edit && !isExternalSelected && (
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] text-white/50 block mb-1">编辑分辨率</label>
+              <select
+                value={grokV2EditResolution}
+                onChange={(e) => update({ grokV2EditResolution: e.target.value })}
+                style={{ background: '#18181b', color: '#ffffff' }}
+                className="w-full rounded border border-white/10 px-2 py-1 text-xs outline-none focus:border-white/30"
+              >
+                {ZHENZHEN_IMAGE_GK_V2_EDIT_RESOLUTIONS.map((resolution) => (
+                  <option key={resolution} value={resolution} style={{ background: '#18181b', color: '#ffffff' }}>{resolution.toUpperCase()}</option>
+                ))}
+              </select>
+            </div>
+            <label className="mt-4 flex items-center gap-2 rounded border border-white/10 px-2 py-1 text-[10px] text-white/65">
+              <input
+                type="checkbox"
+                checked={grokV2EditNsfwCheck}
+                onChange={(e) => update({ grokV2EditNsfwCheck: e.target.checked })}
+                className="accent-cyan-400"
+              />
+              启用 NSFW 检查
+            </label>
           </div>
         )}
 
@@ -3788,7 +3856,7 @@ const ImageNode = ({ id, data, selected }: NodeProps) => {
       )}
       {isZhenzhenBudgetMjSelected && videoUrl && !hasAutoOutput && (
         <div className="border-t border-white/10 p-2">
-          <video
+          <LazyVideo
             src={videoUrl}
             controls
             preload="metadata"

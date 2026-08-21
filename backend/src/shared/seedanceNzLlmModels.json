@@ -14,9 +14,11 @@
   "glm-5.2",
   "glm-5v-turbo",
   "minimax/minimax-m2.7",
+  "zhenzhen/gk-4.6",
   "qwen/qwen3.6-flash",
   "qwen/qwen3.6-max-preview",
   "qwen/qwen3.6-plus",
   "qwen/qwen3.7-max",
-  "qwen/qwen3.7-plus"
+  "qwen/qwen3.7-plus",
+  "qwen/qwen3.8-max"
 ]

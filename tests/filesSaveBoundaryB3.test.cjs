@@ -132,6 +132,27 @@ test('B3 file save boundary rejects traversal/SSRF/unbounded media and keeps upl
     assert.deepEqual(fs.readFileSync(path.join(saveDir, 'saved.png')), PNG);
   });
 
+  await t.test('preserves mounted ParseHub path context when no filename is supplied', async () => {
+    const firstDir = path.join(outputDir, 'parsehub', '作品甲');
+    const secondDir = path.join(outputDir, 'parsehub', '作品乙');
+    fs.mkdirSync(firstDir, { recursive: true });
+    fs.mkdirSync(secondDir, { recursive: true });
+    fs.writeFileSync(path.join(firstDir, '0.png'), PNG);
+    fs.writeFileSync(path.join(secondDir, '0.png'), PNG);
+
+    const first = await post('/api/files/save-to-disk', { url: '/files/output/parsehub/%E4%BD%9C%E5%93%81%E7%94%B2/0.png' });
+    const second = await post('/api/files/save-to-disk', { url: '/files/output/parsehub/%E4%BD%9C%E5%93%81%E4%B9%99/0.png' });
+
+    assert.equal(first.response.status, 200, JSON.stringify(first.payload));
+    assert.equal(second.response.status, 200, JSON.stringify(second.payload));
+    assert.equal(first.payload.data.filename, 'parsehub_作品甲_0.png');
+    assert.equal(second.payload.data.filename, 'parsehub_作品乙_0.png');
+    assert.equal(first.payload.data.exist, false);
+    assert.equal(second.payload.data.exist, false);
+    assert.ok(fs.existsSync(path.join(saveDir, first.payload.data.filename)));
+    assert.ok(fs.existsSync(path.join(saveDir, second.payload.data.filename)));
+  });
+
   await t.test('rejects plain, encoded and double-encoded mounted traversal without leaking host paths', async () => {
     const outsidePath = path.join(root, 'outside.png');
     fs.writeFileSync(outsidePath, PNG);

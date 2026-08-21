@@ -83,7 +83,7 @@ import {
   type CanvasPatchFlight,
 } from '../utils/canvasPatchMerge';
 import { useApiKeysStore } from '../stores/apiKeys';
-import { useRunBusStore } from '../stores/runBus';
+import { parseCanvasNodeExecutionKey, useRunBusStore } from '../stores/runBus';
 import CollaborationHostPanel from './CollaborationHostPanel';
 
 type WorkbenchTab = 'subflows' | 'runs' | 'assets' | 'doctor' | 'collaboration';
@@ -278,8 +278,18 @@ function flattenNodeRunTree(items: NodeRunSummary[]) {
 export default function ProjectWorkbench(props: ProjectWorkbenchProps) {
   const advancedProviders = useApiKeysStore((state) => state.settings.advancedProviders || []);
   const providerSettingsLoaded = useApiKeysStore((state) => state.loaded);
-  const liveRunningNodeIds = useRunBusStore((state) => state.runningIds);
-  const liveExecutionTokenNodeIds = useRunBusStore((state) => state.executionTokens);
+  const liveRunningExecutionNodeIds = useRunBusStore((state) => state.runningIds);
+  const liveExecutionTokens = useRunBusStore((state) => state.executionTokens);
+  const liveRunningNodeIds = useMemo(() => {
+    const executionNodeIds = [...new Set([
+      ...liveRunningExecutionNodeIds,
+      ...Object.keys(liveExecutionTokens),
+    ])];
+    return executionNodeIds
+      .map(parseCanvasNodeExecutionKey)
+      .filter((identity) => !props.canvasId || identity.canvasId === null || identity.canvasId === props.canvasId)
+      .map((identity) => identity.nodeId);
+  }, [liveExecutionTokens, liveRunningExecutionNodeIds, props.canvasId]);
   const [tab, setTab] = useState<WorkbenchTab>(props.initialTab || 'subflows');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -429,7 +439,7 @@ export default function ProjectWorkbench(props: ProjectWorkbenchProps) {
       runs: doctorRuns,
       liveRun: {
         complete: true,
-        activeNodeIds: [...new Set([...liveRunningNodeIds, ...Object.keys(liveExecutionTokenNodeIds)])],
+        activeNodeIds: liveRunningNodeIds,
       },
       limits: {
         estimatedCost: reservedEstimatedCost,
@@ -449,7 +459,7 @@ export default function ProjectWorkbench(props: ProjectWorkbenchProps) {
       )
       : [];
     return [...authoritativeIssues, ...localIssues];
-  }, [doctorProviders, doctorRuns, liveExecutionTokenNodeIds, liveRunningNodeIds, props.edges, props.nodes, props.open, props.projectId, providerSettingsLoaded, scopedDoctorRemoteContext, tab]);
+  }, [doctorProviders, doctorRuns, liveRunningNodeIds, props.edges, props.nodes, props.open, props.projectId, providerSettingsLoaded, scopedDoctorRemoteContext, tab]);
   const doctorHighlights = useMemo(
     () => buildWorkflowDoctorCanvasHighlights(issues, props.edges),
     [issues, props.edges],

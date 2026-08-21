@@ -1071,10 +1071,15 @@ function getAssetPreviewPipeline(config, database) {
   return singleton;
 }
 
+function peekAssetPreviewPipeline() {
+  return singleton;
+}
+
 module.exports = {
   AssetPreviewPipeline,
   JOB_KIND_BY_ASSET_KIND,
   getAssetPreviewPipeline,
+  peekAssetPreviewPipeline,
   isRetryablePreviewError,
   sanitizePreviewError,
   cleanupOrphanedPreviewTemps,

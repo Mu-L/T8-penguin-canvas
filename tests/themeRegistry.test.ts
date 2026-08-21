@@ -269,6 +269,7 @@ test('Farm Story keeps React Flow ports and edge cut markers in the correct canv
 });
 
 test('Farm Story theme mounts canvas chrome, sidebar icons, cuts, minimap, and the farm panel', () => {
+  const themeCssLoader = read('../src/theme/themeCssLoader.ts');
   const cssIndex = read('../src/styles/index.css');
   const css = read('../src/styles/theme-farm-story.css');
   const canvas = read('../src/components/Canvas.tsx');
@@ -288,9 +289,13 @@ test('Farm Story theme mounts canvas chrome, sidebar icons, cuts, minimap, and t
     : '';
 
   assert.equal(existsSync(new URL('../src/styles/theme-farm-story.css', import.meta.url)), true);
-  assert.match(cssIndex, /theme-farm-story\.css/);
-  assert.match(canvas, /import FarmStoryPanel, \{ T8_FARM_STORY_PANEL_COLLAPSED_STORAGE_KEY, type FarmStoryPanelCanvasHint \} from '\.\/FarmStoryPanel'/);
-  assert.match(canvas, /import FarmCanvasLayer, \{ type FarmCanvasFloatingFeedback \} from '\.\/FarmCanvasLayer'/);
+  assert.match(themeCssLoader, /'farm-story': \(\) => import\('\.\.\/styles\/theme-farm-story\.css'\)/);
+  assert.match(canvas, /import type \{ FarmStoryPanelCanvasHint \} from '\.\/FarmStoryPanel'/);
+  assert.match(canvas, /import type \{ FarmCanvasFloatingFeedback \} from '\.\/FarmCanvasLayer'/);
+  assert.match(canvas, /const FarmStoryPanel = lazy\(\(\) => import\('\.\/FarmStoryPanel'\)\)/);
+  assert.match(canvas, /const FarmCanvasLayer = lazy\(\(\) => import\('\.\/FarmCanvasLayer'\)\)/);
+  assert.match(canvas, /\{isFarmStory && \(\s*<Suspense fallback=\{null\}>\s*<FarmStoryPanel/);
+  assert.match(canvas, /farmCanvas\.animals\.length > 0\) && \(\s*<Suspense fallback=\{null\}>\s*<FarmCanvasLayer/);
   assert.match(canvas, /FARM_BUILDING_DEFINITIONS/);
   assert.match(canvas, /FARM_DECOR_DEFINITIONS/);
   assert.match(canvas, /buildFarmMiniMapMarkers/);
@@ -3011,14 +3016,16 @@ test('Farm Story theme mounts canvas chrome, sidebar icons, cuts, minimap, and t
 });
 
 test('Tetris theme files are imported and mounted in the toolbar without covering core controls', () => {
-  const cssIndex = read('../src/styles/index.css');
+  const themeCssLoader = read('../src/theme/themeCssLoader.ts');
   const css = read('../src/styles/theme-tetris.css');
   const canvas = read('../src/components/Canvas.tsx');
   const edge = read('../src/components/edges/DeletableEdge.tsx');
   const panel = read('../src/components/TetrisPanel.tsx');
 
-  assert.match(cssIndex, /theme-tetris\.css/);
-  assert.match(canvas, /import TetrisPanel from '\.\/TetrisPanel'/);
+  assert.match(themeCssLoader, /tetris: \(\) => import\('\.\.\/styles\/theme-tetris\.css'\)/);
+  assert.match(canvas, /const TetrisPanel = lazy\(\(\) => import\('\.\/TetrisPanel'\)\)/);
+  assert.match(canvas, /\{isTetris && \(\s*<Suspense fallback=\{null\}>\s*<TetrisPanel/);
+  assert.doesNotMatch(canvas, /import TetrisPanel from '\.\/TetrisPanel'/);
   assert.match(canvas, /<CanvasToolbar[\s\S]*<TetrisPanel[\s\S]*visualStyle=\{visualStyle\}/);
   assert.match(canvas, /t8:tetris-energy-bonus/);
   assert.match(panel, /TETRIS_PANEL_COLLAPSED_STORAGE_KEY/);

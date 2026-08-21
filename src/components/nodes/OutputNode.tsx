@@ -23,6 +23,7 @@ import MediaMetadataBadge from '../MediaMetadataBadge';
 import RhImageCapabilityRail from '../RhImageCapabilityRail';
 import RhVideoCapabilityRail from '../RhVideoCapabilityRail';
 import SmartImage from '../SmartImage';
+import LazyAudio from '../LazyAudio';
 import ImageLongEdgeButtons from '../ImageLongEdgeButtons';
 import { useMaterialDropTarget } from '../../hooks/useMaterialDropTarget';
 import { useImageLongEdgeOutputs } from '../../hooks/useImageLongEdgeOutputs';
@@ -1762,7 +1763,7 @@ const OutputNode = ({ id, data, selected }: NodeProps) => {
             </div>
             {collected.audios.map((u, i) => (
               <div key={i} className="space-y-0.5">
-                <audio
+                <LazyAudio
                   src={u}
                   controls
                   className="w-full"

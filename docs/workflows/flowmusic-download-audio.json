@@ -1,0 +1,109 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "Lyria · flowmusic-download-audio",
+  "nodes": [
+    {
+      "id": "flowmusic-download-audio-source",
+      "type": "audio",
+      "position": {
+        "x": 0,
+        "y": 40
+      },
+      "data": {
+        "label": "Lyria · 先生成可编辑的原生 clip",
+        "audioProviderMode": "lyria",
+        "apiModel": "flowmusic",
+        "flowMusicOperation": "flowmusic-generation",
+        "flowMusicVersion": "lyria-3.5",
+        "prompt": "电影感器乐流行，温暖钢琴与克制电子节奏，无人声",
+        "flowMusicBpm": 110,
+        "flowMusicLength": 8,
+        "reuseResult": false
+      }
+    },
+    {
+      "id": "flowmusic-download-audio-action",
+      "type": "audio",
+      "position": {
+        "x": 440,
+        "y": 40
+      },
+      "data": {
+        "label": "Lyria · 下载音频",
+        "audioProviderMode": "lyria",
+        "apiModel": "flowmusic",
+        "flowMusicOperation": "flowmusic-download-audio",
+        "flowMusicClipId": "",
+        "reuseResult": false,
+        "flowMusicFormat": "wav"
+      }
+    },
+    {
+      "id": "flowmusic-download-audio-output",
+      "type": "output",
+      "position": {
+        "x": 860,
+        "y": 40
+      },
+      "data": {
+        "label": "下载音频结果",
+        "outputType": "audio"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "flowmusic-download-audio-clip-edge",
+      "source": "flowmusic-download-audio-source",
+      "target": "flowmusic-download-audio-action"
+    },
+    {
+      "id": "flowmusic-download-audio-output-edge",
+      "source": "flowmusic-download-audio-action",
+      "target": "flowmusic-download-audio-output"
+    }
+  ],
+  "nodeCount": 3,
+  "edgeCount": 2,
+  "nodeTypes": [
+    "audio",
+    "output"
+  ],
+  "topologyPreview": {
+    "nodes": [
+      {
+        "id": "flowmusic-download-audio-source",
+        "type": "audio",
+        "label": "Lyria · 先生成可编辑的原生 clip",
+        "x": 8,
+        "y": 50
+      },
+      {
+        "id": "flowmusic-download-audio-action",
+        "type": "audio",
+        "label": "Lyria · 下载音频",
+        "x": 51,
+        "y": 50
+      },
+      {
+        "id": "flowmusic-download-audio-output",
+        "type": "output",
+        "label": "下载音频结果",
+        "x": 92,
+        "y": 50
+      }
+    ],
+    "edges": [
+      {
+        "source": "flowmusic-download-audio-source",
+        "target": "flowmusic-download-audio-action"
+      },
+      {
+        "source": "flowmusic-download-audio-action",
+        "target": "flowmusic-download-audio-output"
+      }
+    ]
+  },
+  "savedAt": "2026-08-21T00:00:00.000Z"
+}

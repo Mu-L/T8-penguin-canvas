@@ -1,0 +1,111 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "Lyria · flowmusic-cover",
+  "nodes": [
+    {
+      "id": "flowmusic-cover-source",
+      "type": "audio",
+      "position": {
+        "x": 0,
+        "y": 40
+      },
+      "data": {
+        "label": "Lyria · 先生成可编辑的原生 clip",
+        "audioProviderMode": "lyria",
+        "apiModel": "flowmusic",
+        "flowMusicOperation": "flowmusic-generation",
+        "flowMusicVersion": "lyria-3.5",
+        "prompt": "电影感器乐流行，温暖钢琴与克制电子节奏，无人声",
+        "flowMusicBpm": 110,
+        "flowMusicLength": 8,
+        "reuseResult": false
+      }
+    },
+    {
+      "id": "flowmusic-cover-action",
+      "type": "audio",
+      "position": {
+        "x": 440,
+        "y": 40
+      },
+      "data": {
+        "label": "Lyria · 整曲翻唱",
+        "audioProviderMode": "lyria",
+        "apiModel": "flowmusic",
+        "flowMusicOperation": "flowmusic-cover",
+        "flowMusicClipId": "",
+        "reuseResult": false,
+        "prompt": "改编为克制、细腻的女声爵士版本",
+        "flowMusicVersion": "lyria-3.5",
+        "flowMusicStrength": 0.5
+      }
+    },
+    {
+      "id": "flowmusic-cover-output",
+      "type": "output",
+      "position": {
+        "x": 860,
+        "y": 40
+      },
+      "data": {
+        "label": "整曲翻唱结果",
+        "outputType": "audio"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "flowmusic-cover-clip-edge",
+      "source": "flowmusic-cover-source",
+      "target": "flowmusic-cover-action"
+    },
+    {
+      "id": "flowmusic-cover-output-edge",
+      "source": "flowmusic-cover-action",
+      "target": "flowmusic-cover-output"
+    }
+  ],
+  "nodeCount": 3,
+  "edgeCount": 2,
+  "nodeTypes": [
+    "audio",
+    "output"
+  ],
+  "topologyPreview": {
+    "nodes": [
+      {
+        "id": "flowmusic-cover-source",
+        "type": "audio",
+        "label": "Lyria · 先生成可编辑的原生 clip",
+        "x": 8,
+        "y": 50
+      },
+      {
+        "id": "flowmusic-cover-action",
+        "type": "audio",
+        "label": "Lyria · 整曲翻唱",
+        "x": 51,
+        "y": 50
+      },
+      {
+        "id": "flowmusic-cover-output",
+        "type": "output",
+        "label": "整曲翻唱结果",
+        "x": 92,
+        "y": 50
+      }
+    ],
+    "edges": [
+      {
+        "source": "flowmusic-cover-source",
+        "target": "flowmusic-cover-action"
+      },
+      {
+        "source": "flowmusic-cover-action",
+        "target": "flowmusic-cover-output"
+      }
+    ]
+  },
+  "savedAt": "2026-08-21T00:00:00.000Z"
+}

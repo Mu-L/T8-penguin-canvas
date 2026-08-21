@@ -247,6 +247,7 @@ function buildRuntimeCatalog() {
           || model === seedanceNz.ZHENZHEN_IMAGE_NB_2_LITE_MODEL
           ? 'nano-banana-2'
       : model === seedanceNz.ZHENZHEN_IMAGE_GK_V2_MODEL
+        || model === seedanceNz.ZHENZHEN_IMAGE_GK_V2_EDIT_MODEL
         || model === seedanceNz.ZHENZHEN_IMAGE_GK_V15_MODEL
         || model === seedanceNz.ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL
         ? 'grok-image'
@@ -268,6 +269,8 @@ function buildRuntimeCatalog() {
             ? 0
             : model === seedanceNz.ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL
               ? 1
+              : model === seedanceNz.ZHENZHEN_IMAGE_GK_V2_EDIT_MODEL
+                ? 3
               : undefined;
     image.push(modelEntry(
       'image',
@@ -380,6 +383,9 @@ function buildRuntimeCatalog() {
       maxOutputs: 3,
     }));
   }
+  audio.push(modelEntry('audio', 'seedance-nz', seedanceNz.FLOWMUSIC_MODEL, 'Lyria / Flow Music', 'lyria', {
+    description: 'Flow Music 官方九项音乐创作与处理能力；请求 model 固定为 flowmusic',
+  }));
 
   const actions = [];
   for (const item of models.SUNO_NZ_ACTIONS || []) {
@@ -396,6 +402,23 @@ function buildRuntimeCatalog() {
         referenceType: item.referenceType,
         allowedVersions: item.allowedVersions,
         defaultVersion: item.defaultVersion,
+      },
+    ));
+  }
+  for (const [operation, spec] of Object.entries(seedanceNz.FLOWMUSIC_ACTION_SPECS || {})) {
+    actions.push(actionEntry(
+      spec.resultFamily === 'video' ? 'video' : spec.resultFamily === 'text' ? 'text' : 'audio',
+      'seedance-nz',
+      operation,
+      operation,
+      'lyria',
+      spec.resultFamily,
+      {
+        action: spec.action,
+        requiredFields: spec.requiredFields,
+        allowedFields: spec.allowedFields,
+        fixedModel: seedanceNz.FLOWMUSIC_MODEL,
+        supportsLyria35: spec.supportsLyria35,
       },
     ));
   }

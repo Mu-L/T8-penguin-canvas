@@ -13,10 +13,12 @@ import { useThemeStore } from '../../stores/theme';
 import { copyFileToOutput, uploadFileBlob } from '../../services/imageOps';
 import { useRunTrigger } from '../../hooks/useRunTrigger';
 import { createCanvasNodeRunRequestId, requestCanvasNodeRun } from '../../utils/canvasRunRequest';
-import { useRunBusStore } from '../../stores/runBus';
+import { createCanvasNodeExecutionKey, useRunBusStore } from '../../stores/runBus';
+import { useCanvasStore } from '../../stores/canvas';
 import type { PrevisStudioEditorHandle } from '../../features/previs-studio/PrevisStudioEditor';
 import ResizableCorners from './ResizableCorners';
 import { useUpdateNodeData } from './useUpdateNodeData';
+import SmartImage from '../SmartImage';
 
 const LazyPrevisStudioEditor = lazy(() => import('../../features/previs-studio/PrevisStudioEditor'));
 
@@ -102,15 +104,17 @@ const PrevisStudioNode = ({ id, data, selected }: NodeProps) => {
   const [size, setSize] = useState(() => d?.size && Number(d.size.w) > 0
     ? { w: Number(d.size.w), h: Number(d.size.h) }
     : { w: 500, h: 460 });
+  const originCanvasIdRef = useRef(useCanvasStore.getState().activeId);
+  const executionNodeId = createCanvasNodeExecutionKey(originCanvasIdRef.current, id);
   const cancelSeq = useRunBusStore((state) => state.cancelSeq);
   const cancelTargets = useRunBusStore((state) => state.cancelTargets);
 
   useEffect(() => {
-    if (!cancelTargets.includes(id)) return;
+    if (!cancelTargets.includes(executionNodeId)) return;
     cancelledDuringRunRef.current = true;
     editorRef.current?.cancelExport();
     setMessage('白模预演导出已停止');
-  }, [cancelSeq, cancelTargets, id]);
+  }, [cancelSeq, cancelTargets, executionNodeId]);
 
   useEffect(() => {
     if (!upstreamModelUrl || d.previsUpstreamModelUrl === upstreamModelUrl) return;
@@ -334,7 +338,7 @@ const PrevisStudioNode = ({ id, data, selected }: NodeProps) => {
 
       <div className="relative min-h-[190px] flex-1 overflow-hidden" style={{ background: isDark ? '#555653' : '#c7c4bd' }}>
         {d.imageUrl ? (
-          <img src={d.imageUrl} alt="白模预演当前输出" className="h-full w-full object-cover" draggable={false} />
+          <SmartImage src={d.imageUrl} alt="白模预演当前输出" thumbSize={960} className="h-full w-full object-cover" draggable={false} />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3" style={{ color: isDark ? '#e7e3d9' : '#423d35' }}>
             <div className="relative flex h-24 w-36 items-center justify-center rounded-lg border" style={{ borderColor: 'rgba(255,255,255,.34)', background: 'rgba(0,0,0,.16)' }}>

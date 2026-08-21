@@ -8,7 +8,25 @@ const {
   sendProjectDatabaseStorageCapacityError,
 } = require('../services/projectDatabasePublicError');
 
-const defaultGateway = getCollaborationGateway(config);
+let defaultGatewayValue = null;
+function resolveDefaultGateway() {
+  if (!defaultGatewayValue) defaultGatewayValue = getCollaborationGateway(config);
+  return defaultGatewayValue;
+}
+
+// Route registration must stay storage-free so /api/status can answer before
+// SQLite is opened. Handler-time property access resolves the shared gateway.
+const defaultGateway = new Proxy(Object.create(null), {
+  get(_target, property) {
+    const gateway = resolveDefaultGateway();
+    const value = gateway[property];
+    return typeof value === 'function' ? value.bind(gateway) : value;
+  },
+  set(_target, property, value) {
+    resolveDefaultGateway()[property] = value;
+    return true;
+  },
+});
 const AUDIT_QUERY_WINDOW_LIMIT = 1000;
 const AUDIT_PAGE_DEFAULT_LIMIT = 25;
 const AUDIT_PAGE_MAX_LIMIT = 100;

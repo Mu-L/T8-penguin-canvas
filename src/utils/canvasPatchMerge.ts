@@ -324,6 +324,28 @@ export function reconcileCanvasPatchAutosaveResponse<TPending extends CanvasPatc
   const pendingIdentityMatches = input.pending === input.token.pendingIdentity;
 
   if (input.outcome === 'conflict') {
+    // A newer authoritative document (for example a completed background
+    // node.patch) may already have rebased the current pending edit while an
+    // older PUT is still in flight. Its expected 409 belongs to the retired
+    // token; it must not poison the newly-rebased pending state.
+    if (!tokenMatches && input.pending && !pendingIdentityMatches && !input.pending.conflicted) {
+      const pending = {
+        ...input.current,
+        baseSnapshot: input.pending.baseSnapshot,
+        baseRevision: input.pending.baseRevision,
+        conflicted: false,
+        conflicts: input.pending.conflicts,
+      };
+      return {
+        acceptedSnapshot: null,
+        acceptedRevision: null,
+        tokenMatches,
+        currentSnapshotMatches,
+        pendingIdentityMatches,
+        pending,
+        shouldScheduleCas: Boolean(input.active && pending.snapshot !== pending.baseSnapshot),
+      };
+    }
     const provenance = input.pending || input.token.pendingIdentity;
     const conflicts = provenance.conflicts.some((conflict) => conflict.kind === 'same-field' && conflict.path === 'revision')
       ? provenance.conflicts

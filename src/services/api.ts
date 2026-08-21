@@ -176,9 +176,77 @@ export async function checkBackendStatus(): Promise<boolean> {
 }
 
 // ========== 画布列表 ==========
+export interface CanvasListRecoveryState {
+  status: 'idle' | 'running' | 'ready' | 'failed';
+  reason: 'missing' | 'invalid' | null;
+  scanned: number;
+  total: number;
+  recovered: number;
+  startedAt: number | null;
+  completedAt: number | null;
+}
+
+export interface CanvasListPage {
+  items: CanvasListItem[];
+  total: number | null;
+  hasMore: boolean;
+  nextCursor: string | null;
+  partial: boolean;
+  searchUnavailable: boolean;
+  recovery: CanvasListRecoveryState;
+  activeItem: CanvasListItem | null;
+}
+
+export interface ListCanvasPageOptions {
+  limit?: number;
+  cursor?: string | null;
+  activeId?: string | null;
+  query?: string | null;
+}
+
 export async function listCanvases(): Promise<CanvasListItem[]> {
   const res = await request<{ success: boolean; data: CanvasListItem[] }>(`${BASE}/canvas`);
   return res.data || [];
+}
+
+export async function listCanvasPage(options: ListCanvasPageOptions = {}): Promise<CanvasListPage> {
+  const query = new URLSearchParams();
+  query.set('limit', String(Math.max(1, Math.min(200, Math.trunc(options.limit || 50)))));
+  if (options.cursor) query.set('cursor', options.cursor);
+  if (options.activeId) query.set('activeId', options.activeId);
+  if (options.query?.trim()) query.set('q', options.query.trim());
+  const res = await request<{
+    success: boolean;
+    data: CanvasListItem[];
+    meta?: {
+      total?: number | null;
+      hasMore?: boolean;
+      nextCursor?: string | null;
+      partial?: boolean;
+      searchUnavailable?: boolean;
+      recovery?: CanvasListRecoveryState;
+      activeItem?: CanvasListItem;
+    };
+  }>(`${BASE}/canvas?${query.toString()}`);
+  return {
+    items: Array.isArray(res.data) ? res.data : [],
+    total: typeof res.meta?.total === 'number' && Number.isSafeInteger(res.meta.total) ? res.meta.total : null,
+    hasMore: Boolean(res.meta?.hasMore),
+    nextCursor: typeof res.meta?.nextCursor === 'string' && res.meta.nextCursor ? res.meta.nextCursor : null,
+    partial: Boolean(res.meta?.partial),
+    searchUnavailable: Boolean(res.meta?.searchUnavailable),
+    recovery: res.meta?.recovery || {
+      status: 'ready', reason: null, scanned: 0, total: 0, recovered: 0, startedAt: null, completedAt: null,
+    },
+    activeItem: res.meta?.activeItem || null,
+  };
+}
+
+export async function getCanvasMetadata(id: string): Promise<CanvasListItem | null> {
+  const targetId = String(id || '').trim();
+  if (!targetId) return null;
+  const res = await request<{ success: boolean; data: CanvasListItem }>(`${BASE}/canvas/${encodeURIComponent(targetId)}/metadata`);
+  return res.data || null;
 }
 
 export async function createCanvas(name?: string): Promise<CanvasListItem> {

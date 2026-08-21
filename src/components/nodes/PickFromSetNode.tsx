@@ -19,6 +19,7 @@ import { useUpstreamMaterials, type MaterialKind } from './useUpstreamMaterials'
 import { PORT_COLOR } from '../../config/portTypes';
 import LoopingVideo from '../LoopingVideo';
 import SmartImage from '../SmartImage';
+import LazyAudio from '../LazyAudio';
 
 /**
  * PickFromSetNode —「从合集获取」工具节点 (v1.2.8 新增)
@@ -405,7 +406,7 @@ const PickFromSetNode = (p: NodeProps) => {
               <LoopingVideo src={currentValue} style={{ width: '100%', maxHeight: 260, objectFit: 'contain', display: 'block' }} muted />
             )}
             {pickKind === 'audio' && (
-              <audio src={currentValue} controls className="w-full" />
+              <LazyAudio src={currentValue} controls className="w-full" />
             )}
             {pickKind === 'text' && (
               <div

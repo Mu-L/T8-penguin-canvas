@@ -1,0 +1,108 @@
+{
+  "schema": "t8-workflow-fragment",
+  "version": 1,
+  "title": "Grok Image · zhenzhen-image-gk-v2-edit 图像编辑",
+  "nodes": [
+    {
+      "id": "gk-v2-edit-source",
+      "type": "upload",
+      "position": {
+        "x": 0,
+        "y": 40
+      },
+      "data": {
+        "label": "上传 1–3 张参考图",
+        "uploadType": "image",
+        "lockedUploadType": "image"
+      }
+    },
+    {
+      "id": "gk-v2-edit",
+      "type": "image",
+      "position": {
+        "x": 420,
+        "y": 40
+      },
+      "data": {
+        "label": "Grok Image v2 Edit",
+        "model": "grok-image",
+        "apiModel": "zhenzhen-image-gk-v2-edit",
+        "imageBuiltinSource": "seedance-nz",
+        "prompt": "保留主体身份与构图，将场景改为雨夜电影灯光",
+        "aspectRatio": "auto",
+        "grokV2EditResolution": "2k",
+        "grokV2ImageCount": 1,
+        "grokV2EditNsfwCheck": false,
+        "imageOnlyOutput": true,
+        "reuseResult": false
+      }
+    },
+    {
+      "id": "gk-v2-edit-output",
+      "type": "output",
+      "position": {
+        "x": 840,
+        "y": 40
+      },
+      "data": {
+        "label": "编辑图片",
+        "outputType": "image"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "gk-v2-edit-source-edge",
+      "source": "gk-v2-edit-source",
+      "target": "gk-v2-edit"
+    },
+    {
+      "id": "gk-v2-edit-output-edge",
+      "source": "gk-v2-edit",
+      "target": "gk-v2-edit-output"
+    }
+  ],
+  "nodeCount": 3,
+  "edgeCount": 2,
+  "nodeTypes": [
+    "upload",
+    "image",
+    "output"
+  ],
+  "topologyPreview": {
+    "nodes": [
+      {
+        "id": "gk-v2-edit-source",
+        "type": "upload",
+        "label": "上传 1–3 张参考图",
+        "x": 8,
+        "y": 50
+      },
+      {
+        "id": "gk-v2-edit",
+        "type": "image",
+        "label": "Grok Image v2 Edit",
+        "x": 50,
+        "y": 50
+      },
+      {
+        "id": "gk-v2-edit-output",
+        "type": "output",
+        "label": "编辑图片",
+        "x": 92,
+        "y": 50
+      }
+    ],
+    "edges": [
+      {
+        "source": "gk-v2-edit-source",
+        "target": "gk-v2-edit"
+      },
+      {
+        "source": "gk-v2-edit",
+        "target": "gk-v2-edit-output"
+      }
+    ]
+  },
+  "savedAt": "2026-08-21T00:00:00.000Z"
+}

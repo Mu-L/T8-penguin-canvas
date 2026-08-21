@@ -16,7 +16,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNodes, useViewport, useReactFlow, type Node } from '@xyflow/react';
 import { Play, Square, X } from 'lucide-react';
 import { useThemeStore } from '../stores/theme';
-import { useRunBusStore } from '../stores/runBus';
+import { createCanvasNodeExecutionKey, useRunBusStore } from '../stores/runBus';
+import { useCanvasStore } from '../stores/canvas';
 import { trackAchievementEvent } from '../stores/achievements';
 import { useHiddenFeatureStore, isRhDuckUploadEnabled, isYyhPortraitEnabled } from '../stores/hiddenFeatures';
 import { resolveThemeTemplate } from '../theme/defaultTemplates';
@@ -62,6 +63,7 @@ const NodeActionBar = ({ onRunNode, onStopRun }: NodeActionBarProps) => {
     typeof document !== 'undefined' && document.documentElement.dataset.themeVisual === 'yyh';
   const isYyhVisual = visualStyle === 'yyh' || isYyhDomVisual;
 
+  const activeCanvasId = useCanvasStore((state) => state.activeId);
   const currentRunId = useRunBusStore((s) => s.currentRunId);
   const runningIds = useRunBusStore((s) => s.runningIds);
   const rhDuckUploadIds = useHiddenFeatureStore((s) => s.rhDuckUploadIds);
@@ -159,7 +161,8 @@ const NodeActionBar = ({ onRunNode, onStopRun }: NodeActionBarProps) => {
 
   const selectedStatus = String(selectedData?.status || '');
   const selectedNodeBusy = selectedStatus === 'submitting' || selectedStatus === 'polling';
-  const isRunning = currentRunId === selectedExe.id || runningIds.includes(selectedExe.id) || selectedNodeBusy;
+  const selectedExecutionNodeId = createCanvasNodeExecutionKey(activeCanvasId, selectedExe.id);
+  const isRunning = currentRunId === selectedExecutionNodeId || runningIds.includes(selectedExecutionNodeId) || selectedNodeBusy;
 
   // === 主题派生样式 ===
   // 科技风: 深色玻璃面板 + 圆角  /  像素风: 硬边 + 硬阴影

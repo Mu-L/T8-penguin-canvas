@@ -4,16 +4,16 @@ import type { RunContext } from '../types/project';
 
 /**
  * 批量运行总线
- * - currentRunId：单点模式指示 (后兼容 v1.2.7 之前)
- * - runningIds：并发运行中的节点集合 (v1.2.8 新增，为循环器节点并联模式使用)
- * - executionTokens：每个节点当前唯一的执行令牌；同 nodeId 重触发也必须换新令牌
+ * - currentRunId：单点模式指示，内部使用 canvasId + nodeId 作用域键
+ * - runningIds：并发运行中的作用域节点集合
+ * - executionTokens：每个作用域节点当前唯一的执行令牌；同画布 nodeId 重触发也必须换新令牌
  * - lastDone：最后一次被当前令牌接受的完成信息
  * - triggerRun(id)：单点调度并返回本次 execution token
  * - triggerRunMany(ids)：并发调度并返回每个节点的 execution token
  * - markDone(id, token, ok)：仅当前 token 可完成节点，旧任务完成会被忽略
  * - cancelAll()：取消全部 (广播本轮 cancelTargets/cancelSeq，再清空运行节点和令牌)
  *
- * 向后兼容保证：现有 16 个节点仅依赖 currentRunId 逻辑不变；useRunTrigger 后续会同时检查 runningIds 是否包含自身 id。
+ * 调用兼容保证：triggerRun/triggerRunMany 仍接收画布内 nodeId，批量返回值仍以原 nodeId 索引。
  */
 
 export interface LastDoneInfo {
@@ -22,6 +22,38 @@ export interface LastDoneInfo {
   ok: boolean;
   ts: number;
   error?: string;
+}
+
+const CANVAS_NODE_EXECUTION_KEY_SEPARATOR = '\u001f';
+
+/**
+ * Run-bus state is process-global while display node ids are only unique inside
+ * one canvas. Scope provider execution state so Story #1 on two canvases does
+ * not share a lock, token, completion or cancellation target.
+ */
+export function createCanvasNodeExecutionKey(canvasId: string | null | undefined, nodeId: string): string {
+  const normalizedNodeId = String(nodeId || '').trim();
+  const normalizedCanvasId = String(canvasId || '').trim();
+  return normalizedCanvasId
+    ? `${normalizedCanvasId}${CANVAS_NODE_EXECUTION_KEY_SEPARATOR}${normalizedNodeId}`
+    : normalizedNodeId;
+}
+
+export function parseCanvasNodeExecutionKey(executionNodeId: string): {
+  canvasId: string | null;
+  nodeId: string;
+} {
+  const normalizedExecutionNodeId = String(executionNodeId || '');
+  const separatorIndex = normalizedExecutionNodeId.indexOf(CANVAS_NODE_EXECUTION_KEY_SEPARATOR);
+  if (separatorIndex < 0) return { canvasId: null, nodeId: normalizedExecutionNodeId };
+  return {
+    canvasId: normalizedExecutionNodeId.slice(0, separatorIndex) || null,
+    nodeId: normalizedExecutionNodeId.slice(separatorIndex + CANVAS_NODE_EXECUTION_KEY_SEPARATOR.length),
+  };
+}
+
+export function runContextNodeExecutionKey(nodeId: string, context: RunContext | null | undefined): string {
+  return createCanvasNodeExecutionKey(context?.canvasId, nodeId);
 }
 
 interface RunBusState {
@@ -100,7 +132,10 @@ export function getRunNodeExecutionContext(nodeId: string) {
 }
 
 export interface RunExecutionBinding {
+  /** Canvas-scoped runtime key used by the process-global run bus. */
   nodeId: string;
+  /** Stable display id recorded in Run/NodeRun evidence. */
+  originalNodeId: string;
   executionToken: string;
   mode: 'single' | 'batch';
   runContext: RunContext | null;
@@ -153,20 +188,23 @@ function bindRunExecution(
   mode: 'single' | 'batch',
   runContext: RunContext | null,
 ) {
+  const executionNodeId = runContextNodeExecutionKey(nodeId, runContext);
   cancelledRunExecutionTokens.delete(executionToken);
   runExecutionBindings.set(executionToken, {
-    nodeId,
+    nodeId: executionNodeId,
+    originalNodeId: nodeId,
     executionToken,
     mode,
     runContext: cloneRunContext(runContext),
     nodeContext: cloneNodeExecutionContext(getRunNodeExecutionContext(nodeId)),
     issuedAt: Date.now(),
   });
+  return executionNodeId;
 }
 
 export function getRunExecutionBinding(nodeId: string, executionToken: string): RunExecutionBinding | null {
   const binding = runExecutionBindings.get(executionToken);
-  if (!binding || binding.nodeId !== nodeId) return null;
+  if (!binding || (binding.nodeId !== nodeId && binding.originalNodeId !== nodeId)) return null;
   return binding;
 }
 
@@ -179,9 +217,16 @@ export function registerRunExecutionCancelHandler(
   executionToken: string,
   handler: RunExecutionCancelHandler,
 ) {
-  const entry = { nodeId, handler };
+  const executionNodeId = getRunExecutionBinding(nodeId, executionToken)?.nodeId || nodeId;
+  const entry = { nodeId: executionNodeId, handler };
   runExecutionCancelHandlers.set(executionToken, entry);
-  if (cancelledRunExecutionTokens.has(executionToken)) void Promise.resolve().then(handler);
+  if (cancelledRunExecutionTokens.has(executionToken)) {
+    void Promise.resolve()
+      .then(handler)
+      .catch((error) => {
+        console.error(`[run-bus] late cancel persistence failed (${executionNodeId}/${executionToken})`, error);
+      });
+  }
   return () => {
     if (runExecutionCancelHandlers.get(executionToken) === entry) runExecutionCancelHandlers.delete(executionToken);
   };
@@ -189,7 +234,7 @@ export function registerRunExecutionCancelHandler(
 
 export function releaseRunExecutionBinding(nodeId: string, executionToken: string) {
   const binding = runExecutionBindings.get(executionToken);
-  if (binding?.nodeId === nodeId) runExecutionBindings.delete(executionToken);
+  if (binding && (binding.nodeId === nodeId || binding.originalNodeId === nodeId)) runExecutionBindings.delete(executionToken);
   runExecutionCancelHandlers.delete(executionToken);
   cancelledRunExecutionTokens.delete(executionToken);
 }
@@ -255,14 +300,14 @@ export const useRunBusStore = create<RunBusState>((set, get) => ({
     const runContext = explicitRunContext === undefined ? get().activeRunContext : explicitRunContext;
     assertNodeAuthorizedByRunContext(runContext, id);
     const executionToken = createRunExecutionToken();
-    bindRunExecution(id, executionToken, mode, runContext);
+    const executionNodeId = bindRunExecution(id, executionToken, mode, runContext);
     if (typeof window !== 'undefined') taskCompletionSound.primeAudio();
     set((s) => ({
-      currentRunId: id,
-      runningIds: s.runningIds.includes(id) ? s.runningIds : [...s.runningIds, id],
-      executionTokens: { ...s.executionTokens, [id]: executionToken },
-      activeNodeRunIds: Object.fromEntries(Object.entries(s.activeNodeRunIds).filter(([nodeId]) => nodeId !== id)),
-      activeNodeRunTokens: Object.fromEntries(Object.entries(s.activeNodeRunTokens).filter(([nodeId]) => nodeId !== id)),
+      currentRunId: executionNodeId,
+      runningIds: s.runningIds.includes(executionNodeId) ? s.runningIds : [...s.runningIds, executionNodeId],
+      executionTokens: { ...s.executionTokens, [executionNodeId]: executionToken },
+      activeNodeRunIds: Object.fromEntries(Object.entries(s.activeNodeRunIds).filter(([nodeId]) => nodeId !== executionNodeId)),
+      activeNodeRunTokens: Object.fromEntries(Object.entries(s.activeNodeRunTokens).filter(([nodeId]) => nodeId !== executionNodeId)),
       cancelTargets: [],
       mode: s.mode === 'batch' ? 'batch' : mode,
     }));
@@ -273,16 +318,21 @@ export const useRunBusStore = create<RunBusState>((set, get) => ({
     const runContext = explicitRunContext === undefined ? get().activeRunContext : explicitRunContext;
     uniqueIds.forEach((id) => assertNodeAuthorizedByRunContext(runContext, id));
     const issuedTokens = Object.fromEntries(uniqueIds.map((id) => [id, createRunExecutionToken()]));
-    for (const [id, executionToken] of Object.entries(issuedTokens)) bindRunExecution(id, executionToken, mode, runContext);
+    const issuedExecutions = uniqueIds.map((id) => ({
+      executionNodeId: bindRunExecution(id, issuedTokens[id], mode, runContext),
+      executionToken: issuedTokens[id],
+    }));
     if (typeof window !== 'undefined') taskCompletionSound.primeAudio();
     set((s) => {
       // 并发模式：runningIds 合并去重，currentRunId 取首个 (仅为向后兼容订阅者)
-      const merged = Array.from(new Set([...s.runningIds, ...uniqueIds]));
-      const issuedIds = new Set(uniqueIds);
+      const executionNodeIds = issuedExecutions.map((item) => item.executionNodeId);
+      const merged = Array.from(new Set([...s.runningIds, ...executionNodeIds]));
+      const issuedIds = new Set(executionNodeIds);
+      const scopedTokens = Object.fromEntries(issuedExecutions.map((item) => [item.executionNodeId, item.executionToken]));
       return {
         runningIds: merged,
-        currentRunId: uniqueIds.length > 0 ? uniqueIds[0] : s.currentRunId,
-        executionTokens: { ...s.executionTokens, ...issuedTokens },
+        currentRunId: executionNodeIds.length > 0 ? executionNodeIds[0] : s.currentRunId,
+        executionTokens: { ...s.executionTokens, ...scopedTokens },
         activeNodeRunIds: Object.fromEntries(Object.entries(s.activeNodeRunIds).filter(([nodeId]) => !issuedIds.has(nodeId))),
         activeNodeRunTokens: Object.fromEntries(Object.entries(s.activeNodeRunTokens).filter(([nodeId]) => !issuedIds.has(nodeId))),
         cancelTargets: [],
@@ -293,17 +343,18 @@ export const useRunBusStore = create<RunBusState>((set, get) => ({
   },
   markDone: (id, executionToken, ok, error) => {
     let accepted = false;
+    const executionNodeId = getRunExecutionBinding(id, executionToken)?.nodeId || id;
     let acceptedTs = 0;
     set((s) => {
-      if (s.executionTokens[id] !== executionToken) return s;
+      if (s.executionTokens[executionNodeId] !== executionToken) return s;
       accepted = true;
       acceptedTs = Math.max(Date.now(), (s.lastDone?.ts || 0) + 1);
-      const nextRunningIds = s.runningIds.filter((x) => x !== id);
+      const nextRunningIds = s.runningIds.filter((x) => x !== executionNodeId);
       const nextExecutionTokens = { ...s.executionTokens };
-      delete nextExecutionTokens[id];
+      delete nextExecutionTokens[executionNodeId];
       return {
-        lastDone: { id, executionToken, ok, ts: acceptedTs, error },
-        currentRunId: s.currentRunId === id ? null : s.currentRunId,
+        lastDone: { id: executionNodeId, executionToken, ok, ts: acceptedTs, error },
+        currentRunId: s.currentRunId === executionNodeId ? null : s.currentRunId,
         runningIds: nextRunningIds,
         executionTokens: nextExecutionTokens,
         // 单节点模式且无其他运行中节点时回到 idle;批量模式由 Canvas 控制
@@ -315,7 +366,7 @@ export const useRunBusStore = create<RunBusState>((set, get) => ({
               : 'idle',
       };
     });
-    if (accepted && ok && typeof window !== 'undefined') taskCompletionSound.notifyComplete(id, undefined, acceptedTs);
+    if (accepted && ok && typeof window !== 'undefined') taskCompletionSound.notifyComplete(executionNodeId, undefined, acceptedTs);
     return accepted;
   },
   cancelAll: async () => {
@@ -353,18 +404,19 @@ export const useRunBusStore = create<RunBusState>((set, get) => ({
       : state
   )),
   setActiveNodeRun: (nodeId, nodeRunId, executionToken) => set((state) => {
-    const activeExecutionToken = state.executionTokens[nodeId];
-    const registeredExecutionToken = state.activeNodeRunTokens[nodeId];
+    const executionNodeId = getRunExecutionBinding(nodeId, executionToken)?.nodeId || nodeId;
+    const activeExecutionToken = state.executionTokens[executionNodeId];
+    const registeredExecutionToken = state.activeNodeRunTokens[executionNodeId];
     if (nodeRunId && activeExecutionToken !== executionToken) return state;
     if (!nodeRunId && registeredExecutionToken !== executionToken) return state;
     const nextIds = { ...state.activeNodeRunIds };
     const nextTokens = { ...state.activeNodeRunTokens };
     if (nodeRunId) {
-      nextIds[nodeId] = nodeRunId;
-      nextTokens[nodeId] = executionToken;
+      nextIds[executionNodeId] = nodeRunId;
+      nextTokens[executionNodeId] = executionToken;
     } else {
-      delete nextIds[nodeId];
-      delete nextTokens[nodeId];
+      delete nextIds[executionNodeId];
+      delete nextTokens[executionNodeId];
     }
     return { activeNodeRunIds: nextIds, activeNodeRunTokens: nextTokens };
   }),

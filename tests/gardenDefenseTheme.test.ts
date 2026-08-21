@@ -85,12 +85,15 @@ test('garden defense battle is mounted under the top-right toolbar with Phaser a
   const canvas = read('../src/components/Canvas.tsx');
   const experience = read('../src/features/garden-defense/GardenDefenseExperience.tsx');
   const stage = read('../src/features/garden-defense/GardenDefenseStage.tsx');
-  const cssIndex = read('../src/styles/index.css');
+  const themeCssLoader = read('../src/theme/themeCssLoader.ts');
   const themeCss = read('../src/styles/theme-garden-defense.css');
   const sound = read('../src/features/garden-defense/sound.ts');
   const storage = read('../src/features/garden-defense/storage.ts');
   const pkg = JSON.parse(read('../package.json'));
 
+  assert.match(canvas, /const GardenDefenseExperience = lazy\(\(\) => import\('\.\.\/features\/garden-defense\/GardenDefenseExperience\.tsx'\)\)/);
+  assert.match(canvas, /\{isGardenDefense && \(\s*<Suspense fallback=\{null\}>\s*<GardenDefenseExperience/);
+  assert.doesNotMatch(canvas, /import GardenDefenseExperience from/);
   assert.match(canvas, /GardenDefenseExperience/);
   assert.match(canvas, /withGardenDefenseNodeVisualState/);
   assert.match(canvas, /isGardenDefense\s*\?\s*nodes\.map\(withGardenDefenseNodeVisualState\)/);
@@ -130,7 +133,7 @@ test('garden defense battle is mounted under the top-right toolbar with Phaser a
   assert.match(stage, /data-garden-sun-count/);
   assert.match(experience, /data-garden-sun-pulse/);
   assert.match(experience, /projectile-fired/);
-  assert.match(cssIndex, /theme-garden-defense\.css/);
+  assert.match(themeCssLoader, /'garden-defense': \(\) => import\('\.\.\/styles\/theme-garden-defense\.css'\)/);
   assert.match(themeCss, /data-theme-visual="garden-defense"/);
   assert.match(themeCss, /data-theme-mode="dark"/);
   assert.match(themeCss, /react-flow__pane::before/);

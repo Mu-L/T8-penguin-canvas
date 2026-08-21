@@ -13,6 +13,7 @@ import {
   ZHENZHEN_VIDEO_V31_FAST_MODEL,
   ZHENZHEN_VIDEO_V31_LITE_MODEL,
   ZHENZHEN_VIDEO_V31_QUALITY_MODEL,
+  FASHVSR_VIDEO_UPSCALE_MODEL,
   GROK_VIDEO_1_5_NEW_SIZES,
   grokVideo15NewSizeFromRatio,
   isFalVideoModel,
@@ -41,6 +42,8 @@ import {
   queryKling,
   submitUpscaler,
   queryUpscaler,
+  submitFashVsr,
+  queryFashVsr,
   submitVidu,
   queryVidu,
   submitWan,
@@ -163,6 +166,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   const isPixel = themeStyle === 'pixel';
 
   const d = data as any;
+  const isFashVsrVariant = d?.fashVsrVariant === true;
   const providerParams = (d?.providerParams && typeof d.providerParams === 'object') ? d.providerParams : {};
   const advancedProviders = useApiKeysStore((s) => s.settings.advancedProviders);
   const videoAdvancedProviders = useMemo(
@@ -177,7 +181,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     }),
     [advancedProviders, d?.providerSource, d?.providerId, d?.providerModel],
   );
-  const isExternalSelected = providerSelection.available && providerSelection.providerSource !== 'zhenzhen';
+  const isExternalSelected = !isFashVsrVariant && providerSelection.available && providerSelection.providerSource !== 'zhenzhen';
   const savedExternalMissing = !!d?.providerId
     && !!d?.providerSource
     && d.providerSource !== 'zhenzhen'
@@ -241,6 +245,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   const isSeedance25 = !isExternalSelected && modelDef.kind === 'seedance25';
   const isKling = !isExternalSelected && modelDef.kind === 'kling';
   const isUpscaler = !isExternalSelected && modelDef.kind === 'upscaler';
+  const isFashVsr = isUpscaler && apiModel === FASHVSR_VIDEO_UPSCALE_MODEL;
   const isVidu = !isExternalSelected && modelDef.kind === 'vidu';
   const isWan = !isExternalSelected && modelDef.kind === 'wan';
   const isApimartBudgetVideo = !isExternalSelected && isZhenzhenApimartVideoModel(apiModel);
@@ -766,7 +771,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             : isKling
               ? await queryKling(tid)
             : isUpscaler
-              ? await queryUpscaler(tid)
+              ? isFashVsr ? await queryFashVsr(tid) : await queryUpscaler(tid)
             : isVidu
               ? await queryVidu(tid)
             : isHappyHorse
@@ -781,7 +786,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             model: apiModel,
             taskId: tid,
             recovery: {
-              kind: isWan ? 'wan' : isSeedance25 ? 'seedance' : isFlux3 ? 'flux3' : isHailuo ? 'hailuo' : isKling ? 'kling' : isUpscaler ? 'upscaler' : isVidu ? 'vidu' : isHappyHorse ? 'happyhorse' : isApimartBudgetVideo ? 'seedance' : 'video',
+              kind: isWan ? 'wan' : isSeedance25 ? 'seedance' : isFlux3 ? 'flux3' : isHailuo ? 'hailuo' : isKling ? 'kling' : isFashVsr ? 'fashvsr' : isUpscaler ? 'upscaler' : isVidu ? 'vidu' : isHappyHorse ? 'happyhorse' : isApimartBudgetVideo ? 'seedance' : 'video',
               taskId: tid, model: apiModel, pollIntervalMs: POLL_INT, maxPolls: MAX,
             },
             requestId: r.requestId,
@@ -1190,8 +1195,10 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       return;
     }
     if (isUpscaler && videoUrls.length !== 1) {
-      setError('Zhenzhen Upscaler 必须连接或拖入且只能保留 1 个 MP4 视频');
-      logBus.error('生成中止: Zhenzhen Upscaler 输入视频数量必须为 1', src);
+      setError(isFashVsr
+        ? 'FlashVSR 必须连接或拖入且只能保留 1 个 480P、3-15 秒视频'
+        : 'Zhenzhen Upscaler 必须连接或拖入且只能保留 1 个 MP4 视频');
+      logBus.error(`生成中止: ${isFashVsr ? 'FlashVSR' : 'Zhenzhen Upscaler'} 输入视频数量必须为 1`, src);
       return;
     }
     if (isViduUpstreamUnavailable) {
@@ -1593,6 +1600,28 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       }
 
       if (isUpscaler) {
+        if (isFashVsr) {
+          logBus.info('提交 FlashVSR: 单个 480P、3-15 秒视频', src);
+          const result = await submitFashVsr({
+            model: FASHVSR_VIDEO_UPSCALE_MODEL,
+            videos: [videoUrls[0]],
+          }, { submissionKey: reporter?.providerSubmissionKey });
+          if (!isCurrentGenerationRun(runId)) return;
+          await reporter?.providerSubmitted({
+            provider: traceProvider,
+            model: traceModel,
+            upstreamTaskId: result.taskId,
+            requestId: result.requestId,
+            transportHttpStatus: result.transportHttpStatus,
+            upstreamHttpStatus: result.upstreamHttpStatus,
+            usage: result.usage,
+            httpStatusSource: 'local-backend',
+          });
+          update({ status: 'polling', taskId: result.taskId, lastPrompt: '', progress: '0%' });
+          logBus.info('FlashVSR 任务已提交，开始轮询', src);
+          await startPolling(result.taskId, runId, reporter);
+          return;
+        }
         const targetResolution: UpscalerResolution = ['720p', '1080p', '2k', '4k'].includes(resolution)
           ? resolution as UpscalerResolution
           : '1080p';
@@ -2046,7 +2075,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           <VideoIcon size={13} />
         </div>
         <div className="flex-1">
-          <div className="text-sm font-semibold text-white">视频</div>
+          <div className="text-sm font-semibold text-white">{isFashVsrVariant ? 'FlashVSR 视频超分' : '视频'}</div>
           <div className="text-[10px] text-white/40">
             {isExternalSelected && providerSelection.provider
               ? `${providerSelection.provider.label || providerSelection.provider.id} · ${externalProviderModel || '未选模型'}`
@@ -2472,7 +2501,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
               : seedance25Mode === 'i2v'
                 ? '图生视频使用排序后的第 1 张首帧图与可选第 2 张尾帧图；提示词可选。'
                 : '多模态参考必须填写提示词并至少提供 1 个素材；最多 30 图、10 视频、10 音频，合计不超过 50 个。'}
-            <div className="mt-1 text-white/35">贞贞的平价AI小屋 · Standard · 4-30 秒/自动 · 480p/720p/1080p/2k/4k · 默认 5 秒/720p</div>
+            <div className="mt-1 text-white/35">贞贞的平价AI小屋 · Standard · 4-30 秒/自动 · 480p/720p/1080p/2k/4k/native1080p · 默认 5 秒/720p</div>
             {seedance25Mode === 'multi' && (
               <div className="mt-1 text-white/35">
                 单段音视频 2-30 秒，全部参考音视频总时长不超过 30 秒；提交前实际读取时长。图片 JPG/JPEG/PNG/WEBP≤30MB，视频 MP4、音频 MP3/WAV≤50MB。
@@ -2636,8 +2665,14 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
 
         {isUpscaler && (
           <div className="rounded border border-emerald-300/20 bg-emerald-400/[0.06] px-2 py-1.5 text-[10px] leading-relaxed text-white/55">
-            连接或拖入恰好 1 个 MP4 视频，选择目标分辨率后执行高清化；无需 Prompt，时长由输入视频读取。
-            <div className="mt-1 text-white/35">贞贞的平价AI小屋 API · 目标 720p / 1080p / 2k / 4k · 输入最长约 10 分钟</div>
+            {isFashVsr
+              ? '连接或拖入恰好 1 个 480P、3-15 秒视频；无需 Prompt，也没有分辨率参数，模型按固定协议执行超分。'
+              : '连接或拖入恰好 1 个 MP4 视频，选择目标分辨率后执行高清化；无需 Prompt，时长由输入视频读取。'}
+            <div className="mt-1 text-white/35">
+              {isFashVsr
+                ? '贞贞的平价AI小屋 API · FlashVSR_video_upscale · 固定 ¥1/次'
+                : '贞贞的平价AI小屋 API · 目标 720p / 1080p / 2k / 4k · 输入最长约 10 分钟'}
+            </div>
           </div>
         )}
 

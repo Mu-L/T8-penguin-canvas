@@ -9,7 +9,7 @@ const MAX_AGENT_REQUEST_BYTES = 64 * 1024;
 
 function createCanvasAgentToolsRouter(options = {}) {
   const router = express.Router();
-  const database = options.database || getProjectDatabase(config);
+  const database = () => options.database || getProjectDatabase(config);
   router.post('/tools', (req, res) => {
     try {
       const contentLength = Number(req.get('content-length'));
@@ -20,7 +20,7 @@ function createCanvasAgentToolsRouter(options = {}) {
       if (Buffer.byteLength(serialized, 'utf8') > MAX_AGENT_REQUEST_BYTES) {
         return res.status(413).json({ success: false, code: 'agent_request_too_large', error: 'Agent 工具请求超过 64 KiB' });
       }
-      const data = executeCanvasAgentTool(database, req.body, {
+      const data = executeCanvasAgentTool(database(), req.body, {
         actorId: 'local-owner',
         role: 'owner',
         capabilities: ['editGraph'],

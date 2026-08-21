@@ -14,17 +14,17 @@
     "coverageReceiptCompiler": "tools/zcanvas-cli/src/capabilityCoverage.cjs"
   },
   "sourceDigests": {
-    "creativeCapabilityManifest": "5c56b3b64d483ae6e6da5268f25c059f2a3fcc2c13e3c3d64d39b10e1e56402b",
-    "canvasNodeSchema": "3d76c2debc7687d67a54eea884287aa0b973e3f4bf01dab9984e01b240961bfc",
-    "canvasNodeSchemaFile": "7b34c456f72907fd1d0d84563d380af5f195835f2be7b17adb054db4e614f375",
-    "runtimeCatalogSources": "3c8802635d0fd87c9b478e92085f2d71d6b363323bb71b0b48928be2718f1ba0",
-    "runtimeCatalogArtifact": "236233576d77eaa115867cb4d36528f2fea6d1a98e7048896023b5d1f3300350",
+    "creativeCapabilityManifest": "16c15dab6eef440bbbee2e44ccf69dfe75bba70d6a61585ca0fb717279353b1d",
+    "canvasNodeSchema": "c70f42672a5aa70ae3ef15406a3a0382a8c3591abb84ec46e1b35b6229a43db5",
+    "canvasNodeSchemaFile": "6a5936750b967b0ba8e59b46f2a9f25795088bb88ae69e9981d69b92309e37a9",
+    "runtimeCatalogSources": "e33b63ae25634d421f1ddad19cfcb24dd02cf89c72bbb85e1b755330dacb220b",
+    "runtimeCatalogArtifact": "cc0c01eae2d388d338fc61109c230bc0d6788511e9c699eff5053a1b8653a997",
     "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
     "capabilityGraphCompiler": "1a611d7e91dcf523e0536a92e9adb6ba2d884689a65fa10274bcda3a05ef9840",
     "coverageReceiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7",
     "canonicalTextDigestCompiler": "b0afcf28a257fbbd8f391edc117348f8f2ede1b4a039ae91bce25a8d563ac0cf"
   },
-  "aggregateDigest": "22bb59d7396373301e8ea3d1b54faf54c92abb425e519a80eefbfccf7698d9c8",
+  "aggregateDigest": "55cfc6964ffaa52418db68ac1b9599f498a2caacf522ce319e4d6ec0db75f49c",
   "principles": {
     "oneSentenceStart": true,
     "directCanvasMutation": false,
@@ -36,29 +36,29 @@
   "counts": {
     "capabilities": 31,
     "handlers": 31,
-    "nodes": 77,
-    "executableNodes": 58,
-    "generatableNodes": 11,
-    "referencedNodes": 68,
+    "nodes": 79,
+    "executableNodes": 60,
+    "generatableNodes": 12,
+    "referencedNodes": 70,
     "unreferencedNodes": 9,
-    "directCapabilityNodes": 68,
+    "directCapabilityNodes": 70,
     "internalCompatNodes": 1,
     "semanticSupersededNodes": 8,
     "publicCapabilityGapNodes": 0,
-    "accountedNodes": 77,
+    "accountedNodes": 79,
     "unexplainedNodes": 0,
-    "fullyOperableNodes": 18,
-    "runtimeEntries": 250,
+    "fullyOperableNodes": 19,
+    "runtimeEntries": 264,
     "runtimeByKind": {
-      "llm": 32,
-      "image": 42,
-      "video": 113,
-      "audio": 16,
-      "actions": 47
+      "llm": 34,
+      "image": 43,
+      "video": 114,
+      "audio": 17,
+      "actions": 56
     },
     "runtimeByProvider": {
       "grok-oauth": 2,
-      "seedance-nz": 185,
+      "seedance-nz": 199,
       "zhenzhen": 56,
       "fal": 7
     },
@@ -331,6 +331,7 @@
       "nodeTypes": [
         "llm",
         "minimax-h3-prompt-enhancer",
+        "minimax-music3-prompt-enhancer",
         "minimax-h3-official-prompt-enhancer",
         "seedance20-prompt-enhancer",
         "output"
@@ -512,12 +513,14 @@
         "video-edit",
         "seedance",
         "seedance25",
+        "fashvsr-video-upscale",
         "director-storyboard",
         "story",
         "script-master",
         "audio",
         "llm",
         "minimax-h3-prompt-enhancer",
+        "minimax-music3-prompt-enhancer",
         "minimax-h3-official-prompt-enhancer",
         "seedance20-prompt-enhancer",
         "mv-music-master",
@@ -3464,6 +3467,50 @@
       }
     },
     {
+      "type": "fashvsr-video-upscale",
+      "label": "FlashVSR 视频超分",
+      "description": "贞贞的平价AI小屋：单个 480P、3-15 秒视频超分",
+      "category": "core",
+      "hidden": false,
+      "executable": true,
+      "generatable": false,
+      "agentExposure": "direct-capability",
+      "coverageReason": "registered-capability-reference",
+      "accounting": {
+        "status": "direct-capability",
+        "reasonCode": "registered-capability-reference",
+        "semanticCapabilityIds": [
+          "canvas.node-add"
+        ],
+        "evidence": [
+          "tools/zcanvas-cli/creativeCapabilityManifest.json"
+        ]
+      },
+      "inputs": [
+        "video"
+      ],
+      "outputs": [
+        "video"
+      ],
+      "capabilityIds": [
+        "canvas.node-add"
+      ],
+      "handlerIds": [
+        "creative-action:graph.node-add"
+      ],
+      "coverage": {
+        "understand": true,
+        "plan": true,
+        "preview": true,
+        "apply": true,
+        "run": false,
+        "verify": true,
+        "resume": false,
+        "rollback": true,
+        "recover": true
+      }
+    },
+    {
       "type": "director-storyboard",
       "label": "导演分镜台",
       "description": "秒级长片分镜台：多镜头提示词、参考素材和 Seedance2.0 无限并发生成",
@@ -3769,6 +3816,54 @@
       ],
       "outputs": [
         "text"
+      ],
+      "capabilityIds": [
+        "canvas.node-add",
+        "create.script"
+      ],
+      "handlerIds": [
+        "creative-action:graph.node-add",
+        "creative-plan:create.script"
+      ],
+      "coverage": {
+        "understand": true,
+        "plan": true,
+        "preview": true,
+        "apply": true,
+        "run": true,
+        "verify": true,
+        "resume": false,
+        "rollback": true,
+        "recover": true
+      }
+    },
+    {
+      "type": "minimax-music3-prompt-enhancer",
+      "label": "MiniMax Music提示词增强器",
+      "description": "基于 MiniMax Music 3 官方 Skill 的纯文本歌曲策划节点，支持歌词生成、逐字保留、定域润色、渐进披露模板、隐私隔离和全部扩展 LLM 渠道；不生成音频",
+      "category": "inspiration",
+      "hidden": false,
+      "executable": true,
+      "generatable": true,
+      "agentExposure": "direct-capability",
+      "coverageReason": "registered-capability-reference",
+      "accounting": {
+        "status": "direct-capability",
+        "reasonCode": "registered-capability-reference",
+        "semanticCapabilityIds": [
+          "canvas.node-add",
+          "create.script"
+        ],
+        "evidence": [
+          "tools/zcanvas-cli/creativeCapabilityManifest.json"
+        ]
+      },
+      "inputs": [
+        "text"
+      ],
+      "outputs": [
+        "text",
+        "metadata"
       ],
       "capabilityIds": [
         "canvas.node-add",
@@ -6372,7 +6467,7 @@
   ],
   "runtime": {
     "schema": "t8-creative-runtime-catalog-v1",
-    "sourceDigest": "3c8802635d0fd87c9b478e92085f2d71d6b363323bb71b0b48928be2718f1ba0",
+    "sourceDigest": "e33b63ae25634d421f1ddad19cfcb24dd02cf89c72bbb85e1b755330dacb220b",
     "platforms": [
       {
         "id": "zhenzhen",
@@ -6446,6 +6541,173 @@
         "family": "seed-audio",
         "available": true,
         "catalogSection": "audio",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "audio:seedance-nz:flowmusic",
+        "kind": "audio",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "flowmusic",
+        "label": "Lyria / Flow Music",
+        "family": "lyria",
+        "available": true,
+        "catalogSection": "audio",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "audio:seedance-nz:flowmusic-cover",
+        "kind": "audio",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "action": "flowmusic-cover",
+        "label": "flowmusic-cover",
+        "family": "lyria",
+        "resultKind": "audio",
+        "available": true,
+        "catalogSection": "actions",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "audio:seedance-nz:flowmusic-download-audio",
+        "kind": "audio",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "action": "flowmusic-download-audio",
+        "label": "flowmusic-download-audio",
+        "family": "lyria",
+        "resultKind": "audio",
+        "available": true,
+        "catalogSection": "actions",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "audio:seedance-nz:flowmusic-extend",
+        "kind": "audio",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "action": "flowmusic-extend",
+        "label": "flowmusic-extend",
+        "family": "lyria",
+        "resultKind": "audio",
+        "available": true,
+        "catalogSection": "actions",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "audio:seedance-nz:flowmusic-generation",
+        "kind": "audio",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "action": "flowmusic-generation",
+        "label": "flowmusic-generation",
+        "family": "lyria",
+        "resultKind": "audio",
+        "available": true,
+        "catalogSection": "actions",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "audio:seedance-nz:flowmusic-replace",
+        "kind": "audio",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "action": "flowmusic-replace",
+        "label": "flowmusic-replace",
+        "family": "lyria",
+        "resultKind": "audio",
+        "available": true,
+        "catalogSection": "actions",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "audio:seedance-nz:flowmusic-stems",
+        "kind": "audio",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "action": "flowmusic-stems",
+        "label": "flowmusic-stems",
+        "family": "lyria",
+        "resultKind": "file",
+        "available": true,
+        "catalogSection": "actions",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "audio:seedance-nz:flowmusic-upload-audio",
+        "kind": "audio",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "action": "flowmusic-upload-audio",
+        "label": "flowmusic-upload-audio",
+        "family": "lyria",
+        "resultKind": "audio",
+        "available": true,
+        "catalogSection": "actions",
         "compatibility": {
           "known": true,
           "installed": true,
@@ -8182,6 +8444,26 @@
         }
       },
       {
+        "id": "image:seedance-nz:zhenzhen-image-gk-v2-edit",
+        "kind": "image",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "zhenzhen-image-gk-v2-edit",
+        "label": "zhenzhen-image-gk-v2-edit",
+        "family": "grok-image",
+        "available": true,
+        "catalogSection": "image",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
         "id": "image:seedance-nz:zhenzhen-image-nb-2",
         "kind": "image",
         "provider": "seedance-nz",
@@ -8962,6 +9244,46 @@
         }
       },
       {
+        "id": "llm:seedance-nz:qwen/qwen3.8-max",
+        "kind": "llm",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "qwen/qwen3.8-max",
+        "label": "qwen/qwen3.8-max",
+        "family": "llm",
+        "available": true,
+        "catalogSection": "llm",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "llm:seedance-nz:zhenzhen/gk-4.6",
+        "kind": "llm",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "zhenzhen/gk-4.6",
+        "label": "zhenzhen/gk-4.6",
+        "family": "llm",
+        "available": true,
+        "catalogSection": "llm",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
         "id": "llm:zhenzhen:gemini-3.1-flash-lite-preview",
         "kind": "llm",
         "provider": "zhenzhen",
@@ -9142,6 +9464,27 @@
         }
       },
       {
+        "id": "text:seedance-nz:flowmusic-lyrics",
+        "kind": "text",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "action": "flowmusic-lyrics",
+        "label": "flowmusic-lyrics",
+        "family": "lyria",
+        "resultKind": "text",
+        "available": true,
+        "catalogSection": "actions",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
         "id": "text:seedance-nz:midjourney-describe",
         "kind": "text",
         "provider": "seedance-nz",
@@ -9252,6 +9595,47 @@
         "family": "seedance-2.0",
         "available": true,
         "catalogSection": "video",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "video:seedance-nz:FlashVSR_video_upscale",
+        "kind": "video",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "FlashVSR_video_upscale",
+        "label": "FlashVSR_video_upscale",
+        "family": "fashvsr-video-upscale",
+        "available": true,
+        "catalogSection": "video",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "video:seedance-nz:flowmusic-video-clip",
+        "kind": "video",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "action": "flowmusic-video-clip",
+        "label": "flowmusic-video-clip",
+        "family": "lyria",
+        "resultKind": "video",
+        "available": true,
+        "catalogSection": "actions",
         "compatibility": {
           "known": true,
           "installed": true,
@@ -11601,6 +11985,7 @@
       "feishu-bitable-input",
       "feishu-bitable-output",
       "video",
+      "fashvsr-video-upscale",
       "script-master",
       "mv-music-master",
       "runninghub",
@@ -11653,6 +12038,14 @@
       "audio:grok-oauth:xai-stt",
       "audio:grok-oauth:xai-tts",
       "audio:seedance-nz:doubao-seed-audio-1.0",
+      "audio:seedance-nz:flowmusic",
+      "audio:seedance-nz:flowmusic-cover",
+      "audio:seedance-nz:flowmusic-download-audio",
+      "audio:seedance-nz:flowmusic-extend",
+      "audio:seedance-nz:flowmusic-generation",
+      "audio:seedance-nz:flowmusic-replace",
+      "audio:seedance-nz:flowmusic-stems",
+      "audio:seedance-nz:flowmusic-upload-audio",
       "audio:seedance-nz:minimax-music-2.6",
       "audio:seedance-nz:minimax-speech-2.8-hd",
       "audio:seedance-nz:minimax-speech-2.8-turbo",
@@ -11737,6 +12130,7 @@
       "image:seedance-nz:zhenzhen-image-gk-v15",
       "image:seedance-nz:zhenzhen-image-gk-v15-edit",
       "image:seedance-nz:zhenzhen-image-gk-v2",
+      "image:seedance-nz:zhenzhen-image-gk-v2-edit",
       "image:seedance-nz:zhenzhen-image-nb-2",
       "image:seedance-nz:zhenzhen-image-nb-2-lite",
       "image:seedance-nz:zhenzhen-image-nb-pro",
@@ -11776,6 +12170,8 @@
       "llm:seedance-nz:qwen/qwen3.6-plus",
       "llm:seedance-nz:qwen/qwen3.7-max",
       "llm:seedance-nz:qwen/qwen3.7-plus",
+      "llm:seedance-nz:qwen/qwen3.8-max",
+      "llm:seedance-nz:zhenzhen/gk-4.6",
       "llm:zhenzhen:gemini-3.1-flash-lite-preview",
       "llm:zhenzhen:gemini-3.1-pro-preview",
       "llm:zhenzhen:gemini-3.5-flash",
@@ -11785,12 +12181,15 @@
       "llm:zhenzhen:gpt-5.6-luna",
       "llm:zhenzhen:gpt-image-2-all",
       "llm:zhenzhen:kimi-k3",
+      "text:seedance-nz:flowmusic-lyrics",
       "text:seedance-nz:midjourney-describe",
       "video:fal:grok-imagine-video-1.5",
       "video:fal:grok-video-fal",
       "video:fal:sora-2",
       "video:fal:veo3.1-fal",
       "video:seedance-nz:fast",
+      "video:seedance-nz:FlashVSR_video_upscale",
+      "video:seedance-nz:flowmusic-video-clip",
       "video:seedance-nz:global-fast",
       "video:seedance-nz:global-mini",
       "video:seedance-nz:global-standard",
@@ -11905,24 +12304,24 @@
   "coverageReceipt": {
     "schema": "t8-creative-capability-coverage-receipt-v1",
     "sourceDigests": {
-      "capabilityManifest": "5c56b3b64d483ae6e6da5268f25c059f2a3fcc2c13e3c3d64d39b10e1e56402b",
-      "nodeSchema": "3d76c2debc7687d67a54eea884287aa0b973e3f4bf01dab9984e01b240961bfc",
-      "runtimeCatalog": "3c8802635d0fd87c9b478e92085f2d71d6b363323bb71b0b48928be2718f1ba0",
+      "capabilityManifest": "16c15dab6eef440bbbee2e44ccf69dfe75bba70d6a61585ca0fb717279353b1d",
+      "nodeSchema": "c70f42672a5aa70ae3ef15406a3a0382a8c3591abb84ec46e1b35b6229a43db5",
+      "runtimeCatalog": "e33b63ae25634d421f1ddad19cfcb24dd02cf89c72bbb85e1b755330dacb220b",
       "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
       "receiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7"
     },
     "inventory": {
       "nodes": {
-        "total": 77,
-        "executable": 58,
-        "generatable": 11
+        "total": 79,
+        "executable": 60,
+        "generatable": 12
       },
       "runtime": {
-        "llm": 32,
-        "image": 42,
-        "video": 113,
-        "audio": 16,
-        "actions": 47
+        "llm": 34,
+        "image": 43,
+        "video": 114,
+        "audio": 17,
+        "actions": 56
       },
       "capabilities": 31,
       "handlers": 31,
@@ -11936,6 +12335,6 @@
       "missingCompatibilityEdges": []
     },
     "complete": true,
-    "digest": "aa7f4a60d90c71bcd2418fd268afbfce046b0e174ca4d2655b67c8594fdd0d55"
+    "digest": "30093228f5b727e3894b68f5c4243442df7b0d0b717619deb273749fb68aa673"
   }
 }
