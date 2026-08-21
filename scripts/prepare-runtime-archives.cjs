@@ -40,6 +40,17 @@ const RUNTIMES = [
 ];
 
 function require7za() {
+  const candidates = [
+    process.env.T8_RUNTIME_ARCHIVE_7Z,
+    process.platform === 'win32'
+      ? path.join(process.env.ProgramFiles || 'C:\\Program Files', '7-Zip', '7z.exe')
+      : '',
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      if (fs.statSync(candidate).isFile()) return candidate;
+    } catch (_) {}
+  }
   try {
     const mod = require('7zip-bin');
     if (mod && mod.path7za && fs.existsSync(mod.path7za)) return mod.path7za;

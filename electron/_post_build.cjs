@@ -187,11 +187,22 @@ function sha256File(filename) {
 }
 
 function require7zaForRuntimeVerification() {
+  const candidates = [
+    process.env.T8_RUNTIME_ARCHIVE_7Z,
+    process.platform === 'win32'
+      ? path.join(process.env.ProgramFiles || 'C:\\Program Files', '7-Zip', '7z.exe')
+      : '',
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      if (fs.statSync(candidate).isFile()) return candidate;
+    } catch (_) {}
+  }
   try {
     const sevenZip = require('7zip-bin');
     if (sevenZip?.path7za && fs.existsSync(sevenZip.path7za)) return sevenZip.path7za;
   } catch (_) {}
-  failSecurity('strict runtime archive verification requires 7zip-bin');
+  failSecurity('strict runtime archive verification requires system 7-Zip or 7zip-bin');
   return '';
 }
 

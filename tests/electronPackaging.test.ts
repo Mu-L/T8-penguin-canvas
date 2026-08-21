@@ -927,6 +927,9 @@ test('Electron release verifies packaged media and offline runtime sidecars', ()
   assert.match(postBuild, /entry\.sourceSha256/);
   assert.match(postBuild, /spawnSync\(\s*path7za,\s*\['t', '-mmt=2'/);
   assert.match(postBuild, /packaged runtime archive is missing required entries/);
+  assert.match(postBuild, /T8_RUNTIME_ARCHIVE_7Z/);
+  assert.match(postBuild, /ProgramFiles[\s\S]*7-Zip[\s\S]*7z\.exe/);
+  assert.match(read('../scripts/prepare-runtime-archives.cjs'), /T8_RUNTIME_ARCHIVE_7Z/);
   assert.match(postBuild, /archive SHA-256, CRC and required entries verified/);
   assert.match(postBuild, /if \(archiveStrict\) \{[\s\S]*verifyPackagedRuntimeArchive\([\s\S]*verifyDirectAiWatermarkRuntime\(runtimeRoot\)/);
   assert.match(postBuild, /if \(archiveStrict\) \{[\s\S]*verifyPackagedRuntimeArchive\([\s\S]*verifyDirectParseHubRuntime\(libsRoot\)/);
