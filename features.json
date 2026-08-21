@@ -1,10 +1,11 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.9.7",
-  "lastUpdated": "2026-08-20-v2.9.7-released",
+  "version": "2.9.8",
+  "lastUpdated": "2026-08-21-v2.9.8-release-authorized",
   "grokV2EditAndLyriaFlowMusic": {
-    "status": "implemented-contract-and-live-verified",
+    "status": "release-authorized-v2.9.8-contract-and-live-verified",
     "date": "2026-08-21",
+    "releaseIncluded": true,
     "provider": "seedance-nz",
     "platform": "贞贞的平价AI小屋",
     "referenceProject": "F:/AI-T8-video-onekey/ComfyUI/custom_nodes/ComfyUI_Seedance@9247b9ceb2c31f7ccd43b26743469a1c03dbc075",
@@ -56,6 +57,11 @@
       "allDecodedOrValidated": true,
       "secretFreeReport": "output/grok-flowmusic-live-20260821/report.json",
       "observedCompatibility": "公网 M4A 作为 flowmusic-upload-audio 的 audio_url 可成功导入并返回 clip_id；创作类二次编辑以 flowmusic-generation 返回的原生 clip_id 作为可靠来源。"
+    },
+    "releaseEvidence": {
+      "technicalGates": "must-pass-before-publish",
+      "affectedUserInstallF8F10AndInstalledUpgrade": "deferred-not-passed",
+      "deferralApproval": "owner-approved-post-release-v2.9.8"
     }
   },
   "canvasCatalogMetadataCanonicalRecovery": {

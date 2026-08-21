@@ -10,13 +10,13 @@ https://www.runninghub.cn/?inviteCode=rh-v1121
 My favorite girl Go YounJung
 # 🐧 贞贞的无限画布（企鹅共创版） · T8-penguin-canvas
 
-> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.9.7
+> AI 节点画布工作流工具 · Web + Electron 桌面端｜v2.9.8
 >
 > GitHub：<https://github.com/T8mars/T8-penguin-canvas>
 
 一个面向 AI 创作的 **节点式画布**：拖拽节点、连线编排、生成图像 / 视频 / 音频、调用 LLM、串接 RunningHub 工作流，叠加批量执行、智能对齐、打组、主题模板与终端日志。Web 浏览器和桌面端均可使用。
 
-![status](https://img.shields.io/badge/version-v2.9.7-brightgreen) ![node](https://img.shields.io/badge/node-79-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
+![status](https://img.shields.io/badge/version-v2.9.8-brightgreen) ![node](https://img.shields.io/badge/node-79-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
 
 ---
 
@@ -36,6 +36,7 @@ My favorite girl Go YounJung
 ## ✨ 功能亮点
 
 - 🎨 **79 个节点**，覆盖文本 / 图像 / 视频 / 音频 / LLM / RunningHub / ComfyUI / 3D / 工具 / 辅助 / 工具箱 / 输出预览 / 上传素材 / 素材集 / 批量打标 / 随机路由 / Story 全自动制片 / 剧本大师 / MiniMax H3 / MiniMax Music3 / Seedance 2.0 提示词增强器 / MiniMax H3 官方提示词增强器 / Seedance 2.5 / FlashVSR 视频超分 / 白模预演 / MV 音乐大师
+- 🎨🎵 **v2.9.8 Grok 编辑与 Lyria/Flow Music 扩展版**：Grok Image 新增 `zhenzhen-image-gk-v2-edit`，支持 1–3 张有序参考图、1–10 张结果、官方比例与 1K/2K。音频节点新增 Lyria TAB，完整覆盖 Flow Music 的生成、歌词、上传、续写、替换、翻唱、分轨、音频下载和视频剪辑九种操作；音频、文本、视频与 stems ZIP 均按类型完整转存，`clip_id` 可沿画布连接继续使用。10 项真实 API 任务均已完成并下载、解码或校验；既有默认渠道、默认模型、79 个节点和 v2.9.7 数据库修复不回退。
 - 🧰 **[v2.9.7 项目数据库启动兼容修复版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.7)**：修复 v2.9.2–v2.9.6 在画布目录重命名后可能留下 SQL `updated_at` 与画布 JSON `updatedAt` 不一致、导致升级后冷启动被 typed canonical 校验拦截的问题。新写入保持两处时间一致；历史受影响项目仅对该精确旧签名兼容读取，启动时不静默改写数据库，其他 canonical 损坏仍失败关闭。
 - ⚡ **[v2.9.6 FlashVSR 名称修正自动更新版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.6)**：节点、模型目录、默认值和无密钥工作流统一显示并提交 `FlashVSR_video_upscale`；v2.9.5 已保存的 `FashVSR_video_upscale` 仍可载入，但提交前会规范化为新名称。新拼写已真实完成一次 854×480 到 1920×1024 的同任务生成、下载、FFprobe 和全量解码。MiniMax Music3 继续完整包含，不是待补功能。
 - 🎞️ **[v2.9.5 视频超分与 Seedance 2.5 原生 1080P 自动更新版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.5)**：新增独立视频超分节点，对一个 480P、3–15 秒视频执行受控上传、同任务查询、本地下载与完整解码；该版的旧模型拼写已由 v2.9.6 兼容修正为 `FlashVSR_video_upscale`。Seedance 2.5 国内/Global 六模型新增官方 `native1080p` 选项，MiniMax Music3 继续完整保留。
