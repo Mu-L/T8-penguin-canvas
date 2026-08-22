@@ -133,7 +133,7 @@ test('creative capability manifest covers the one-sentence production spine', ()
   assert.equal(payload.principles.explicitApprovalForWrites, true);
   const nodeAdd = payload.capabilities.find((capability) => capability.id === 'canvas.node-add');
   assert.equal(nodeAdd.nodeTypeSelector, 'creator-visible');
-  assert.equal(nodeAdd.nodeTypes.length, 67);
+  assert.equal(nodeAdd.nodeTypes.length, 69);
   assert.equal(nodeAdd.nodeTypes.includes('loop'), true);
   assert.equal(nodeAdd.nodeTypes.includes('remove-bg'), false);
 });
@@ -202,8 +202,8 @@ test('capability graph validates real node types and fails closed on drift', () 
   const { manifest, digest } = readGeneratorManifest();
   const runtimeCatalog = buildRuntimeCatalog();
   const graph = buildCapabilityGraph({ manifest, manifestDigest: digest, runtimeCatalog });
-  assert.equal(graph.counts.nodes, 79);
-  assert.equal(graph.counts.runtimeEntries, 253);
+  assert.equal(graph.counts.nodes, 81);
+  assert.equal(graph.counts.runtimeEntries, 269);
   assert.equal(
     graph.counts.operations,
     graph.capabilities.reduce((sum, capability) => sum + capability.operations.length, 0),
@@ -217,15 +217,15 @@ test('capability graph validates real node types and fails closed on drift', () 
   );
   const nodeAdd = graph.capabilities.find((capability) => capability.id === 'canvas.node-add');
   assert.ok(nodeAdd);
-  assert.equal(nodeAdd.nodeTypes.length, 67);
+  assert.equal(nodeAdd.nodeTypes.length, 69);
   assert.deepEqual(nodeAdd.nodeTypes, graph.nodes.filter((node) => !node.hidden).map((node) => node.type));
-  assert.equal(graph.counts.referencedNodes, 70);
+  assert.equal(graph.counts.referencedNodes, 72);
   assert.equal(graph.counts.unreferencedNodes, 9);
-  assert.equal(graph.counts.directCapabilityNodes, 70);
+  assert.equal(graph.counts.directCapabilityNodes, 72);
   assert.equal(graph.counts.internalCompatNodes, 1);
   assert.equal(graph.counts.semanticSupersededNodes, 8);
   assert.equal(graph.counts.publicCapabilityGapNodes, 0);
-  assert.equal(graph.counts.accountedNodes, 79);
+  assert.equal(graph.counts.accountedNodes, 81);
   assert.equal(graph.counts.unexplainedNodes, 0);
   assert.equal(graph.counts.fullyOperableNodes, 19);
   assert.equal(graph.nodes.find((node) => node.type === 'minimax-h3-prompt-enhancer').coverage.run, true);
@@ -348,7 +348,7 @@ test('capability graph validates real node types and fails closed on drift', () 
   );
   const coverageMarkdown = coverageMarkdownArtifact(graph);
   assert.equal(
-    coverageMarkdown.includes('Accounted / unexplained nodes: **79 / 0**'),
+    coverageMarkdown.includes('Accounted / unexplained nodes: **81 / 0**'),
     true,
   );
   assert.equal(coverageMarkdown.includes('- Public capability gaps: none'), true);
@@ -393,13 +393,13 @@ test('dynamic coverage receipt proves node, runtime, handler, risk, verification
     executable: graph.nodes.filter((node) => node.executable).length,
     generatable: graph.nodes.filter((node) => node.generatable).length,
   });
-  assert.deepEqual(receipt.inventory.nodes, { total: 79, executable: 60, generatable: 12 });
+  assert.deepEqual(receipt.inventory.nodes, { total: 81, executable: 62, generatable: 12 });
   assert.deepEqual(receipt.inventory.runtime, {
     llm: 34,
-    image: 42,
-    video: 114,
-    audio: 16,
-    actions: 47,
+    image: 45,
+    video: 115,
+    audio: 17,
+    actions: 58,
   });
   assert.equal(receipt.inventory.capabilities, graph.capabilities.length);
   assert.equal(receipt.inventory.handlers, graph.bindings.length);
@@ -416,11 +416,11 @@ test('dynamic coverage receipt proves node, runtime, handler, risk, verification
   assert.doesNotThrow(() => assertCapabilityCoverageReceipt(graph));
   const markdown = coverageMarkdownArtifact(graph);
   assert.equal(
-    markdown.includes('Dynamic node inventory (total / executable / generatable): **79 / 60 / 12**'),
+    markdown.includes('Dynamic node inventory (total / executable / generatable): **81 / 62 / 12**'),
     true,
   );
   assert.equal(
-    markdown.includes('Dynamic runtime inventory (LLM / image / video / audio / actions): **34 / 42 / 114 / 16 / 47**'),
+    markdown.includes('Dynamic runtime inventory (LLM / image / video / audio / actions): **34 / 45 / 115 / 17 / 58**'),
     true,
   );
 

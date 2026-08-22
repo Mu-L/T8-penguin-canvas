@@ -60,6 +60,16 @@
         }
       ]
     },
+    "model-3d": {
+      "resolver": "static",
+      "inputs": [{ "id": null, "kinds": ["text", "image"], "required": false, "minConnections": 0, "maxConnections": null }],
+      "outputs": [{ "id": null, "kinds": ["model3d"], "required": false, "minConnections": 0, "maxConnections": null }]
+    },
+    "grok-image-tools": {
+      "resolver": "static",
+      "inputs": [{ "id": null, "kinds": ["image", "metadata"], "required": false, "minConnections": 0, "maxConnections": null }],
+      "outputs": [{ "id": null, "kinds": ["image", "metadata"], "required": false, "minConnections": 0, "maxConnections": null }]
+    },
     "material-set": {
       "resolver": "material-set",
       "inputs": [
@@ -2276,6 +2286,51 @@
       "generation": {
         "allowedDataFields": {},
         "defaults": {}
+      }
+    },
+    {
+      "type": "model-3d",
+      "label": "3D",
+      "category": "core",
+      "description": "可扩展 3D 生成节点；首个 Hunyuan 3D Tab 支持 v3.1 文生/有序多视图图生 GLB，并自动创建预览下载节点",
+      "icon": "Box",
+      "color": "violet",
+      "ports": { "inputs": ["text", "image"], "outputs": ["model3d"] },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {
+          "threeDTab": { "type": "string", "enum": ["hunyuan-3d"] },
+          "model": { "type": "string", "enum": ["hunyuan3d-v3.1-text-to-3d", "hunyuan3d-v3.1-image-to-3d"] },
+          "prompt": { "type": "string", "maxLength": 20000 },
+          "faceCount": { "type": "integer", "minimum": 10000, "maximum": 1500000 },
+          "enablePbr": { "type": "boolean" },
+          "generateType": { "type": "string", "enum": ["Normal", "Geometry", "Sketch"] }
+        },
+        "defaults": { "threeDTab": "hunyuan-3d", "model": "hunyuan3d-v3.1-text-to-3d", "prompt": "", "faceCount": 500000, "enablePbr": false, "generateType": "Normal" }
+      }
+    },
+    {
+      "type": "grok-image-tools",
+      "label": "Grok 分割编辑",
+      "category": "core",
+      "description": "Grok Image v2 专用两阶段节点：对单图任务智能分割并持久化 image_id/对象，再按对象、边界框或选区编辑",
+      "icon": "ScanSearch",
+      "color": "sky",
+      "ports": { "inputs": ["image", "metadata"], "outputs": ["image", "metadata"] },
+      "executable": true,
+      "generatable": false,
+      "generation": {
+        "allowedDataFields": {
+          "grokToolMode": { "type": "string", "enum": ["segment", "region-edit"] },
+          "sourceTaskId": { "type": "string", "maxLength": 256 },
+          "includeMaskRle": { "type": "boolean" },
+          "grokImageId": { "type": "string", "maxLength": 512 },
+          "prompt": { "type": "string", "maxLength": 20000 },
+          "selectionMode": { "type": "string", "enum": ["object_indices", "boxes", "selection_regions"] },
+          "selectionJson": { "type": "string", "maxLength": 200000 }
+        },
+        "defaults": { "grokToolMode": "segment", "sourceTaskId": "", "includeMaskRle": false, "grokImageId": "", "prompt": "", "selectionMode": "object_indices", "selectionJson": "[0]" }
       }
     },
     {

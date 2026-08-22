@@ -63,6 +63,8 @@ export const NODE_DEFAULT_SIZE: Record<string, { w: number; h: number }> = {
   'artist-style-master': { w: 480, h: 620 },
   'anime-tag-master': { w: 500, h: 660 },
   'model-3d-preview': { w: 520, h: 440 },
+  'model-3d': { w: 360, h: 560 },
+  'grok-image-tools': { w: 360, h: 520 },
   'face-expression-3d': { w: 520, h: 520 },
   'comfyui-store': { w: 400, h: 560 },
   'comfyui-app-maker': { w: 720, h: 620 },

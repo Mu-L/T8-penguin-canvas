@@ -15,16 +15,16 @@
   },
   "sourceDigests": {
     "creativeCapabilityManifest": "16c15dab6eef440bbbee2e44ccf69dfe75bba70d6a61585ca0fb717279353b1d",
-    "canvasNodeSchema": "c70f42672a5aa70ae3ef15406a3a0382a8c3591abb84ec46e1b35b6229a43db5",
-    "canvasNodeSchemaFile": "6a5936750b967b0ba8e59b46f2a9f25795088bb88ae69e9981d69b92309e37a9",
-    "runtimeCatalogSources": "e33b63ae25634d421f1ddad19cfcb24dd02cf89c72bbb85e1b755330dacb220b",
-    "runtimeCatalogArtifact": "cc0c01eae2d388d338fc61109c230bc0d6788511e9c699eff5053a1b8653a997",
+    "canvasNodeSchema": "83c6e41656f42d157868169b5170b2937968758846ef0c192f02638adfc601e7",
+    "canvasNodeSchemaFile": "772652c353605329d13dbc1697d09f0b1bcc25af00f8eb72893ce7da9d6534e0",
+    "runtimeCatalogSources": "d0cc923fc64179e0a3cf12910e6f8d7cc263e6851d4fea127af74e587f34e017",
+    "runtimeCatalogArtifact": "70aee553873e06f79c06e18ae75d19f9f60357e694b1af661a808b5ff8940eb6",
     "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
     "capabilityGraphCompiler": "1a611d7e91dcf523e0536a92e9adb6ba2d884689a65fa10274bcda3a05ef9840",
     "coverageReceiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7",
     "canonicalTextDigestCompiler": "b0afcf28a257fbbd8f391edc117348f8f2ede1b4a039ae91bce25a8d563ac0cf"
   },
-  "aggregateDigest": "55cfc6964ffaa52418db68ac1b9599f498a2caacf522ce319e4d6ec0db75f49c",
+  "aggregateDigest": "97e7660e157eaa26514935ce07c5afb4c3c5e8302983d4721555941c5a496823",
   "principles": {
     "oneSentenceStart": true,
     "directCanvasMutation": false,
@@ -36,29 +36,29 @@
   "counts": {
     "capabilities": 31,
     "handlers": 31,
-    "nodes": 79,
-    "executableNodes": 60,
+    "nodes": 81,
+    "executableNodes": 62,
     "generatableNodes": 12,
-    "referencedNodes": 70,
+    "referencedNodes": 72,
     "unreferencedNodes": 9,
-    "directCapabilityNodes": 70,
+    "directCapabilityNodes": 72,
     "internalCompatNodes": 1,
     "semanticSupersededNodes": 8,
     "publicCapabilityGapNodes": 0,
-    "accountedNodes": 79,
+    "accountedNodes": 81,
     "unexplainedNodes": 0,
     "fullyOperableNodes": 19,
-    "runtimeEntries": 264,
+    "runtimeEntries": 269,
     "runtimeByKind": {
       "llm": 34,
-      "image": 43,
-      "video": 114,
+      "image": 45,
+      "video": 115,
       "audio": 17,
-      "actions": 56
+      "actions": 58
     },
     "runtimeByProvider": {
       "grok-oauth": 2,
-      "seedance-nz": 199,
+      "seedance-nz": 204,
       "zhenzhen": 56,
       "fal": 7
     },
@@ -502,6 +502,8 @@
         "upload",
         "model-3d-upload",
         "model-3d-preview",
+        "model-3d",
+        "grok-image-tools",
         "material-set",
         "generation-target",
         "output",
@@ -2863,6 +2865,97 @@
       ],
       "outputs": [
         "image"
+      ],
+      "capabilityIds": [
+        "canvas.node-add"
+      ],
+      "handlerIds": [
+        "creative-action:graph.node-add"
+      ],
+      "coverage": {
+        "understand": true,
+        "plan": true,
+        "preview": true,
+        "apply": true,
+        "run": false,
+        "verify": true,
+        "resume": false,
+        "rollback": true,
+        "recover": true
+      }
+    },
+    {
+      "type": "model-3d",
+      "label": "3D",
+      "description": "可扩展 3D 生成节点；首个 Hunyuan 3D Tab 支持 v3.1 文生/有序多视图图生 GLB，并自动创建预览下载节点",
+      "category": "core",
+      "hidden": false,
+      "executable": true,
+      "generatable": false,
+      "agentExposure": "direct-capability",
+      "coverageReason": "registered-capability-reference",
+      "accounting": {
+        "status": "direct-capability",
+        "reasonCode": "registered-capability-reference",
+        "semanticCapabilityIds": [
+          "canvas.node-add"
+        ],
+        "evidence": [
+          "tools/zcanvas-cli/creativeCapabilityManifest.json"
+        ]
+      },
+      "inputs": [
+        "text",
+        "image"
+      ],
+      "outputs": [
+        "model3d"
+      ],
+      "capabilityIds": [
+        "canvas.node-add"
+      ],
+      "handlerIds": [
+        "creative-action:graph.node-add"
+      ],
+      "coverage": {
+        "understand": true,
+        "plan": true,
+        "preview": true,
+        "apply": true,
+        "run": false,
+        "verify": true,
+        "resume": false,
+        "rollback": true,
+        "recover": true
+      }
+    },
+    {
+      "type": "grok-image-tools",
+      "label": "Grok 分割编辑",
+      "description": "Grok Image v2 专用两阶段节点：对单图任务智能分割并持久化 image_id/对象，再按对象、边界框或选区编辑",
+      "category": "core",
+      "hidden": false,
+      "executable": true,
+      "generatable": false,
+      "agentExposure": "direct-capability",
+      "coverageReason": "registered-capability-reference",
+      "accounting": {
+        "status": "direct-capability",
+        "reasonCode": "registered-capability-reference",
+        "semanticCapabilityIds": [
+          "canvas.node-add"
+        ],
+        "evidence": [
+          "tools/zcanvas-cli/creativeCapabilityManifest.json"
+        ]
+      },
+      "inputs": [
+        "image",
+        "metadata"
+      ],
+      "outputs": [
+        "image",
+        "metadata"
       ],
       "capabilityIds": [
         "canvas.node-add"
@@ -6467,7 +6560,7 @@
   ],
   "runtime": {
     "schema": "t8-creative-runtime-catalog-v1",
-    "sourceDigest": "e33b63ae25634d421f1ddad19cfcb24dd02cf89c72bbb85e1b755330dacb220b",
+    "sourceDigest": "d0cc923fc64179e0a3cf12910e6f8d7cc263e6851d4fea127af74e587f34e017",
     "platforms": [
       {
         "id": "zhenzhen",
@@ -8464,6 +8557,46 @@
         }
       },
       {
+        "id": "image:seedance-nz:zhenzhen-image-gk-v2-region-edit",
+        "kind": "image",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "zhenzhen-image-gk-v2-region-edit",
+        "label": "zhenzhen-image-gk-v2-region-edit",
+        "family": "grok-image-tools",
+        "available": true,
+        "catalogSection": "image",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "image:seedance-nz:zhenzhen-image-gk-v2-segment",
+        "kind": "image",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "zhenzhen-image-gk-v2-segment",
+        "label": "zhenzhen-image-gk-v2-segment",
+        "family": "grok-image-tools",
+        "available": true,
+        "catalogSection": "image",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
         "id": "image:seedance-nz:zhenzhen-image-nb-2",
         "kind": "image",
         "provider": "seedance-nz",
@@ -9453,6 +9586,48 @@
         "family": "llm",
         "available": true,
         "catalogSection": "llm",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "model3d:seedance-nz:hunyuan3d-v3.1-image-to-3d",
+        "kind": "model3d",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "action": "hunyuan3d-v3.1-image-to-3d",
+        "label": "hunyuan3d-v3.1-image-to-3d",
+        "family": "hunyuan-3d",
+        "resultKind": "model3d",
+        "available": true,
+        "catalogSection": "actions",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
+        "id": "model3d:seedance-nz:hunyuan3d-v3.1-text-to-3d",
+        "kind": "model3d",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "action": "hunyuan3d-v3.1-text-to-3d",
+        "label": "hunyuan3d-v3.1-text-to-3d",
+        "family": "hunyuan-3d",
+        "resultKind": "model3d",
+        "available": true,
+        "catalogSection": "actions",
         "compatibility": {
           "known": true,
           "installed": true,
@@ -11128,6 +11303,26 @@
         }
       },
       {
+        "id": "video:seedance-nz:zhenzhen-video-g-omni-flash-lowprice",
+        "kind": "video",
+        "provider": "seedance-nz",
+        "platformLabel": "贞贞的平价AI小屋",
+        "model": "zhenzhen-video-g-omni-flash-lowprice",
+        "label": "zhenzhen-video-g-omni-flash-lowprice（平价 Omni）",
+        "family": "grok-video-3",
+        "available": true,
+        "catalogSection": "video",
+        "compatibility": {
+          "known": true,
+          "installed": true,
+          "credentialReady": null,
+          "regionReady": true,
+          "executable": false,
+          "available": true,
+          "requiresRuntimeCheck": true
+        }
+      },
+      {
         "id": "video:seedance-nz:zhenzhen-video-gk-v15",
         "kind": "video",
         "provider": "seedance-nz",
@@ -11980,6 +12175,8 @@
     "referencedWithoutRun": [
       "model-3d-upload",
       "model-3d-preview",
+      "model-3d",
+      "grok-image-tools",
       "material-set",
       "generation-target",
       "feishu-bitable-input",
@@ -12131,6 +12328,8 @@
       "image:seedance-nz:zhenzhen-image-gk-v15-edit",
       "image:seedance-nz:zhenzhen-image-gk-v2",
       "image:seedance-nz:zhenzhen-image-gk-v2-edit",
+      "image:seedance-nz:zhenzhen-image-gk-v2-region-edit",
+      "image:seedance-nz:zhenzhen-image-gk-v2-segment",
       "image:seedance-nz:zhenzhen-image-nb-2",
       "image:seedance-nz:zhenzhen-image-nb-2-lite",
       "image:seedance-nz:zhenzhen-image-nb-pro",
@@ -12181,6 +12380,8 @@
       "llm:zhenzhen:gpt-5.6-luna",
       "llm:zhenzhen:gpt-image-2-all",
       "llm:zhenzhen:kimi-k3",
+      "model3d:seedance-nz:hunyuan3d-v3.1-image-to-3d",
+      "model3d:seedance-nz:hunyuan3d-v3.1-text-to-3d",
       "text:seedance-nz:flowmusic-lyrics",
       "text:seedance-nz:midjourney-describe",
       "video:fal:grok-imagine-video-1.5",
@@ -12264,6 +12465,7 @@
       "video:seedance-nz:wan-2.7-spicy-i2v",
       "video:seedance-nz:zhenzhen-upscaler",
       "video:seedance-nz:zhenzhen-video-g-omni-flash",
+      "video:seedance-nz:zhenzhen-video-g-omni-flash-lowprice",
       "video:seedance-nz:zhenzhen-video-gk-v15",
       "video:seedance-nz:zhenzhen-video-v31-fast",
       "video:seedance-nz:zhenzhen-video-v31-lite",
@@ -12305,23 +12507,23 @@
     "schema": "t8-creative-capability-coverage-receipt-v1",
     "sourceDigests": {
       "capabilityManifest": "16c15dab6eef440bbbee2e44ccf69dfe75bba70d6a61585ca0fb717279353b1d",
-      "nodeSchema": "c70f42672a5aa70ae3ef15406a3a0382a8c3591abb84ec46e1b35b6229a43db5",
-      "runtimeCatalog": "e33b63ae25634d421f1ddad19cfcb24dd02cf89c72bbb85e1b755330dacb220b",
+      "nodeSchema": "83c6e41656f42d157868169b5170b2937968758846ef0c192f02638adfc601e7",
+      "runtimeCatalog": "d0cc923fc64179e0a3cf12910e6f8d7cc263e6851d4fea127af74e587f34e017",
       "handlerBindings": "7f689a24a0d9afd39cb2788f5ecdcbdcbc6446adc357bc36373d1ab2461cd4bd",
       "receiptCompiler": "68c02167cb5317107edd346223a5e5999168e447bacbb977ff8e9678e6753fe7"
     },
     "inventory": {
       "nodes": {
-        "total": 79,
-        "executable": 60,
+        "total": 81,
+        "executable": 62,
         "generatable": 12
       },
       "runtime": {
         "llm": 34,
-        "image": 43,
-        "video": 114,
+        "image": 45,
+        "video": 115,
         "audio": 17,
-        "actions": 56
+        "actions": 58
       },
       "capabilities": 31,
       "handlers": 31,
@@ -12335,6 +12537,6 @@
       "missingCompatibilityEdges": []
     },
     "complete": true,
-    "digest": "30093228f5b727e3894b68f5c4243442df7b0d0b717619deb273749fb68aa673"
+    "digest": "cc588a67266cc53c415052dd21dfefc18804136125f7941e5f94571b27276795"
   }
 }

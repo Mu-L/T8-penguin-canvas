@@ -9,6 +9,7 @@ import {
   videoModelsForSource,
   type VideoBuiltinSource,
   ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL,
+  ZHENZHEN_VIDEO_G_OMNI_FLASH_LOWPRICE_MODEL,
   ZHENZHEN_VIDEO_GK_V15_MODEL,
   ZHENZHEN_VIDEO_V31_FAST_MODEL,
   ZHENZHEN_VIDEO_V31_LITE_MODEL,
@@ -250,11 +251,17 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
   const isWan = !isExternalSelected && modelDef.kind === 'wan';
   const isApimartBudgetVideo = !isExternalSelected && isZhenzhenApimartVideoModel(apiModel);
   const isApimartOmni = apiModel === ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL;
+  const isApimartOmniLowprice = apiModel === ZHENZHEN_VIDEO_G_OMNI_FLASH_LOWPRICE_MODEL;
   const isApimartGrok = apiModel === ZHENZHEN_VIDEO_GK_V15_MODEL;
   const isApimartV31Fast = apiModel === ZHENZHEN_VIDEO_V31_FAST_MODEL;
   const isApimartV31Quality = apiModel === ZHENZHEN_VIDEO_V31_QUALITY_MODEL;
   const isApimartV31Lite = apiModel === ZHENZHEN_VIDEO_V31_LITE_MODEL;
   const isApimartV31 = isApimartV31Fast || isApimartV31Quality || isApimartV31Lite;
+  const apimartOmniLowpriceMode: 'text' | 'frame' | 'reference_images' | 'reference_video' =
+    ['text', 'frame', 'reference_images', 'reference_video'].includes(d?.apimartOmniLowpriceMode)
+      ? d.apimartOmniLowpriceMode
+      : 'text';
+  const apimartOmniLowpriceNsfwCheck = d?.apimartOmniLowpriceNsfwCheck === true;
   const happyHorseMode = apiModel.endsWith('-i2v') ? 'i2v' : apiModel.endsWith('-r2v') ? 'r2v' : 't2v';
   const isHailuoH3 = isHailuo && apiModel.startsWith('hailuo-h3-');
   const isMinimaxH3Ow = isHailuo && apiModel.startsWith('minimax-h3-ow-');
@@ -302,11 +309,15 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     ? 8
     : isApimartGrok
       ? Math.max(6, Math.min(30, Number(rawDuration) || 6))
-      : isApimartOmni ? 0 : rawDuration;
+      : isApimartOmni ? 0
+        : isApimartOmniLowprice && ![4, 6, 8, 10].includes(Number(rawDuration)) ? 6
+          : rawDuration;
   const rawResolution: string = d?.resolution
     || (isJimengSeedanceSelected ? '720p' : activeModelOption?.defaultResolution || modelDef.defaultResolution || '');
   const resolution: string = isApimartOmni
     ? '720p'
+    : isApimartOmniLowprice && !['720p', '1080p', '4k'].includes(rawResolution.toLowerCase())
+      ? '720p'
     : isApimartV31 && !['720p', '1080p', '4k'].includes(rawResolution.toLowerCase())
       ? '720p'
       : isApimartGrok && !['480p', '720p'].includes(rawResolution.toLowerCase())
@@ -384,6 +395,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     ? [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 18]
     : isApimartOmni
     ? []
+    : isApimartOmniLowprice
+    ? [4, 6, 8, 10]
     : isApimartV31
     ? [8]
     : isApimartGrok
@@ -403,6 +416,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     ? ['480p', '720p', '1080p']
     : isApimartOmni
     ? ['720p']
+    : isApimartOmniLowprice
+    ? ['720p', '1080p', '4k']
     : isApimartV31
     ? ['720p', '1080p', '4k']
     : isApimartGrok
@@ -538,6 +553,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       ? happyHorseMode === 't2v' ? 0 : happyHorseMode === 'i2v' ? 1 : 9
       : isApimartOmni
       ? 16
+      : isApimartOmniLowprice
+      ? apimartOmniLowpriceMode === 'frame' ? 1 : apimartOmniLowpriceMode === 'reference_images' ? 3 : 0
       : isApimartGrok
       ? 7
       : isApimartV31Fast
@@ -569,6 +586,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     ? 3
     : isApimartOmni
     ? 1
+    : isApimartOmniLowprice && apimartOmniLowpriceMode === 'reference_video'
+    ? 1
     : isJimengSeedanceSelected ? JIMENG_SEEDANCE_LIMITS.videos : 0;
   const maxMentionAudios = isSeedance25 && seedance25Mode === 'multi'
     ? SEEDANCE25_MULTI_MAX_AUDIOS
@@ -597,6 +616,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       ? ['text', 'image', 'video', 'audio']
       : isApimartOmni
         ? ['text', 'image', 'video']
+      : isApimartOmniLowprice
+        ? apimartOmniLowpriceMode === 'reference_video' ? ['text', 'video'] : apimartOmniLowpriceMode === 'text' ? ['text'] : ['text', 'image']
       : isUpscaler
         ? ['video']
       : isKling && klingMode === 'edit'
@@ -612,7 +633,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
       : isHailuoH3 && hailuoMode === 'multi'
         ? ['text', 'image', 'video', 'audio']
         : ['text', 'image']),
-    [modelDef.kind, isJimengSeedanceSelected, isApimartOmni, isUpscaler, isKling, klingMode, isSeedance25, seedance25Mode, isFlux3, flux3Mode, isMinimaxH3OwAudioDrive, isHailuoH3, hailuoMode],
+    [modelDef.kind, isJimengSeedanceSelected, isApimartOmni, isApimartOmniLowprice, apimartOmniLowpriceMode, isUpscaler, isKling, klingMode, isSeedance25, seedance25Mode, isFlux3, flux3Mode, isMinimaxH3OwAudioDrive, isHailuoH3, hailuoMode],
   );
 
   // 收集上游 prompt + 参考图/视频/音频 (按用户拖拽顺序), 合并本地拖入素材
@@ -1344,7 +1365,7 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
 
       if (isApimartBudgetVideo) {
         const apimartImages = imageUrls.slice(0, maxMentionRefs);
-        const apimartVideos = isApimartOmni ? videoUrls.slice(0, 1) : [];
+        const apimartVideos = (isApimartOmni || (isApimartOmniLowprice && apimartOmniLowpriceMode === 'reference_video')) ? videoUrls.slice(0, 1) : [];
         logBus.info(
           `提交平价AI小屋视频: ${apiModel} · ${isApimartOmni ? '时长由模型决定' : `${duration}s`} · ${resolution} · ${ratio} · 图${apimartImages.length}/视${apimartVideos.length}`,
           src,
@@ -1357,6 +1378,11 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
           resolution,
           refImages: apimartImages.length ? apimartImages : undefined,
           videos: apimartVideos.length ? apimartVideos : undefined,
+          ...(isApimartOmniLowprice ? {
+            mode: apimartOmniLowpriceMode,
+            aspect_ratio: ratio,
+            nsfw_check: apimartOmniLowpriceNsfwCheck,
+          } : {}),
           taskProvider: 'seedance-nz',
         }, { submissionKey: reporter?.providerSubmissionKey });
         if (!isCurrentGenerationRun(runId)) return;
@@ -1991,9 +2017,9 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
             : (modelDef.maxRefImages || 7) + 4;
       if (cur.length >= cap) return;
       update({ localRefImages: [...cur, payload.url] });
-    } else if (payload.kind === 'video' && payload.url && (isJimengSeedanceSelected || isApimartOmni || isUpscaler || (isFlux3 && flux3Mode === 'v2v') || (isKling && klingMode === 'edit'))) {
+    } else if (payload.kind === 'video' && payload.url && (isJimengSeedanceSelected || isApimartOmni || (isApimartOmniLowprice && apimartOmniLowpriceMode === 'reference_video') || isUpscaler || (isFlux3 && flux3Mode === 'v2v') || (isKling && klingMode === 'edit'))) {
       const cur = Array.isArray(d?.localRefVideos) ? d.localRefVideos : [];
-      const cap = isUpscaler || isApimartOmni || (isFlux3 && flux3Mode === 'v2v') || (isKling && klingMode === 'edit') ? 1 : JIMENG_SEEDANCE_LIMITS.videos;
+      const cap = isUpscaler || isApimartOmni || isApimartOmniLowprice || (isFlux3 && flux3Mode === 'v2v') || (isKling && klingMode === 'edit') ? 1 : JIMENG_SEEDANCE_LIMITS.videos;
       if (cur.indexOf(payload.url) !== -1 || cur.length >= cap) return;
       update({ localRefVideos: [...cur, payload.url] });
     } else if (payload.kind === 'audio' && payload.url && isJimengSeedanceSelected) {
@@ -2009,6 +2035,8 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
     accepts: isJimengSeedanceSelected
       ? ['image', 'video', 'audio', 'text']
       : isApimartOmni ? ['image', 'video', 'text']
+      : isApimartOmniLowprice
+        ? apimartOmniLowpriceMode === 'reference_video' ? ['video', 'text'] : apimartOmniLowpriceMode === 'text' ? ['text'] : ['image', 'text']
       : isApimartV31Lite ? ['text']
       : isUpscaler ? ['video']
       : isFlux3 ? flux3Mode === 'v2v' ? ['video', 'text'] : flux3Mode === 'i2v' ? ['image', 'text'] : ['text']
@@ -2511,11 +2539,34 @@ const VideoNode = ({ id, data, selected }: NodeProps) => {
         )}
 
         {isApimartBudgetVideo && (
-          <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.06] px-2 py-1.5 text-[10px] leading-relaxed text-white/55">
+          <div className="rounded border border-cyan-300/20 bg-cyan-400/[0.06] px-2 py-1.5 text-[10px] leading-relaxed text-white/55 space-y-2">
             <div>贞贞的平价AI小屋 · {apiModel}</div>
+            {isApimartOmniLowprice && (
+              <>
+                <div>
+                  <label className="text-[10px] text-white/50 block mb-1">生成模式</label>
+                  <select
+                    value={apimartOmniLowpriceMode}
+                    onChange={(e) => update({ apimartOmniLowpriceMode: e.target.value, localRefImages: [], localRefVideos: [] })}
+                    className="w-full rounded bg-white/5 border border-white/10 px-2 py-1 text-xs text-white outline-none focus:border-cyan-300/40"
+                  >
+                    <option value="text" className="bg-zinc-900">文生视频</option>
+                    <option value="frame" className="bg-zinc-900">首帧图生视频（1 图）</option>
+                    <option value="reference_images" className="bg-zinc-900">参考图生视频（1 或 3 图）</option>
+                    <option value="reference_video" className="bg-zinc-900">参考视频</option>
+                  </select>
+                </div>
+                <label className="flex items-center gap-1.5 text-[10px] text-white/60 cursor-pointer">
+                  <input type="checkbox" checked={apimartOmniLowpriceNsfwCheck} onChange={(e) => update({ apimartOmniLowpriceNsfwCheck: e.target.checked })} className="accent-cyan-400" />
+                  启用内容检查
+                </label>
+              </>
+            )}
             <div className="mt-1 text-white/40">
               {isApimartOmni
                 ? 'Omni Flash：时长由模型决定，固定 720p；支持 Prompt、最多 16 张图片，或 1 个参考视频。'
+                : isApimartOmniLowprice
+                  ? '平价 Omni：4/6/8/10 秒，720p/1080p/4K；支持文生、首帧、1/3 张参考图或 1 个参考视频。参考视频模式不发送 seconds。'
                 : isApimartGrok
                   ? 'Grok Video 1.5：6–30 秒，480p / 720p，最多 7 张参考图。'
                   : isApimartV31Fast

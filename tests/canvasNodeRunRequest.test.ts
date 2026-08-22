@@ -71,6 +71,8 @@ const CANVAS_REQUEST_COMPONENTS: ComponentAudit[] = [
   { file: 'TopazVideoUpscaleNode.tsx', types: ['topaz-video-upscale'], requestBoundaryCalls: 1, directClickHandlers: ['handleRun'] },
   { file: 'FaceExpression3DNode.tsx', types: ['face-expression-3d'], requestBoundaryCalls: 1, directClickHandlers: ['runSingle', 'runBatch'] },
   { file: 'PrevisStudioNode.tsx', types: ['previs-studio'], requestBoundaryCalls: 1, directClickHandlers: [] },
+  { file: 'Model3DNode.tsx', types: ['model-3d'], requestBoundaryCalls: 1, directClickHandlers: ['run'] },
+  { file: 'GrokImageToolsNode.tsx', types: ['grok-image-tools'], requestBoundaryCalls: 1, directClickHandlers: ['run'] },
   { file: 'Panorama3DNode.tsx', types: ['panorama-3d'], requestBoundaryCalls: 1, directClickHandlers: ['generatePanorama', 'exportFrame', 'exportSceneSnapshot', 'exportControlSnapshot'] },
 ];
 
@@ -121,7 +123,7 @@ test('primary node run audit classifies every shared executable type exactly onc
   assert.equal(containsIdentifier('{handleRun}', 'handleRun'), true, 'handler audit must detect exact identifiers');
   assert.equal(containsIdentifier('{handleRunner}', 'handleRun'), false, 'handler audit must not match identifier prefixes');
   const audited = [...CANVAS_REQUEST_COMPONENTS, ...NO_NODE_PRIMARY_COMPONENTS].flatMap((entry) => entry.types);
-  assert.equal(audited.length, 60, 'shared executable audit count changed; classify every new or removed type explicitly');
+  assert.equal(audited.length, 62, 'shared executable audit count changed; classify every new or removed type explicitly');
   assert.equal(new Set(audited).size, audited.length, 'audit matrix must not classify an executable type twice');
   assert.deepEqual([...audited].sort(), [...EXECUTABLE_NODE_TYPES].sort());
 });

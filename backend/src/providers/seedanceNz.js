@@ -77,6 +77,8 @@ const ZHENZHEN_IMAGE_G2_MODELS = new Set([
 const ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL = 'zhenzhen-image-g-v2-lowprice';
 const ZHENZHEN_IMAGE_GK_V2_MODEL = 'zhenzhen-image-gk-v2';
 const ZHENZHEN_IMAGE_GK_V2_EDIT_MODEL = 'zhenzhen-image-gk-v2-edit';
+const ZHENZHEN_IMAGE_GK_V2_SEGMENT_MODEL = 'zhenzhen-image-gk-v2-segment';
+const ZHENZHEN_IMAGE_GK_V2_REGION_EDIT_MODEL = 'zhenzhen-image-gk-v2-region-edit';
 const ZHENZHEN_IMAGE_GK_V15_MODEL = 'zhenzhen-image-gk-v15';
 const ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL = 'zhenzhen-image-gk-v15-edit';
 const ZHENZHEN_IMAGE_NB_2_LITE_MODEL = 'zhenzhen-image-nb-2-lite';
@@ -91,6 +93,8 @@ const ZHENZHEN_APIMART_IMAGE_MODELS = new Set([
   ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
   ZHENZHEN_IMAGE_GK_V2_MODEL,
   ZHENZHEN_IMAGE_GK_V2_EDIT_MODEL,
+  ZHENZHEN_IMAGE_GK_V2_SEGMENT_MODEL,
+  ZHENZHEN_IMAGE_GK_V2_REGION_EDIT_MODEL,
   ZHENZHEN_IMAGE_GK_V15_MODEL,
   ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL,
   ...ZHENZHEN_IMAGE_NB_MODELS,
@@ -153,12 +157,14 @@ const SEEDREAM_LAYER_OUTPUT_FORMATS = new Set(['jpeg', 'png']);
 const SEEDREAM_LAYER_PROMPT_MAX_LENGTH = 2000;
 const SEEDREAM_LAYER_SOURCE_MAX_BYTES = 30 * 1024 * 1024;
 const ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL = 'zhenzhen-video-g-omni-flash';
+const ZHENZHEN_VIDEO_G_OMNI_FLASH_LOWPRICE_MODEL = 'zhenzhen-video-g-omni-flash-lowprice';
 const ZHENZHEN_VIDEO_GK_V15_MODEL = 'zhenzhen-video-gk-v15';
 const ZHENZHEN_VIDEO_V31_FAST_MODEL = 'zhenzhen-video-v31-fast';
 const ZHENZHEN_VIDEO_V31_QUALITY_MODEL = 'zhenzhen-video-v31-quality';
 const ZHENZHEN_VIDEO_V31_LITE_MODEL = 'zhenzhen-video-v31-lite';
 const ZHENZHEN_APIMART_VIDEO_MODELS = new Set([
   ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL,
+  ZHENZHEN_VIDEO_G_OMNI_FLASH_LOWPRICE_MODEL,
   ZHENZHEN_VIDEO_GK_V15_MODEL,
   ZHENZHEN_VIDEO_V31_FAST_MODEL,
   ZHENZHEN_VIDEO_V31_QUALITY_MODEL,
@@ -174,6 +180,10 @@ const ZHENZHEN_IMAGE_NB_EXTREME_RATIOS = new Set([
 ]);
 const ZHENZHEN_APIMART_VEO_RATIOS = new Set(['16:9', '9:16']);
 const ZHENZHEN_APIMART_VEO_RESOLUTIONS = new Set(['720p', '1080p', '4k']);
+const HUNYUAN3D_TEXT_MODEL = 'hunyuan3d-v3.1-text-to-3d';
+const HUNYUAN3D_IMAGE_MODEL = 'hunyuan3d-v3.1-image-to-3d';
+const HUNYUAN3D_MODELS = new Set([HUNYUAN3D_TEXT_MODEL, HUNYUAN3D_IMAGE_MODEL]);
+const HUNYUAN3D_GENERATE_TYPES = new Set(['Normal', 'Geometry', 'Sketch']);
 const WHISPER_MODEL = 'whisper-1';
 const WHISPER_RESPONSE_FORMATS = new Set(['json', 'verbose_json', 'srt', 'text', 'vtt']);
 const WHISPER_FILE_EXTENSIONS = new Set(['.mp3', '.wav', '.flac', '.m4a', '.mp4', '.ogg', '.opus', '.aac', '.aiff', '.aif']);
@@ -2563,6 +2573,43 @@ async function buildApimartImagePayload(request, apiKey, options = {}) {
   if (!ZHENZHEN_APIMART_IMAGE_MODELS.has(model)) {
     throw new Error(`未知 APIMart 图像模型：${model || '(空)'}`);
   }
+  if (model === ZHENZHEN_IMAGE_GK_V2_SEGMENT_MODEL) {
+    const sourceTaskId = String(request.source_task_id || request.sourceTaskId || '').trim();
+    if (!sourceTaskId) throw new Error(`${model} 必须提供已完成单图任务的 source_task_id`);
+    return {
+      payload: {
+        model,
+        operation: 'segment',
+        source_task_id: sourceTaskId,
+        include_mask_rle: request.include_mask_rle === true || request.includeMaskRle === true,
+      },
+      model,
+      taskType: 'segment',
+    };
+  }
+  if (model === ZHENZHEN_IMAGE_GK_V2_REGION_EDIT_MODEL) {
+    const imageId = String(request.image_id || request.imageId || '').trim();
+    if (!imageId) throw new Error(`${model} 必须提供分割结果 image_id`);
+    const prompt = normalizeApimartPrompt(request.prompt, model);
+    const selectionKeys = ['object_indices', 'boxes', 'selection_regions'];
+    const supplied = selectionKeys.filter((key) => Array.isArray(request[key]) && request[key].length > 0);
+    if (supplied.length !== 1) throw new Error(`${model} 必须且只能提供 object_indices、boxes、selection_regions 之一`);
+    const selection = request[supplied[0]];
+    if (supplied[0] === 'object_indices' && selection.some((item) => !Number.isInteger(item) || item < 0)) {
+      throw new Error('object_indices 必须是非负整数数组');
+    }
+    if (supplied[0] === 'boxes' && selection.some((item) => !Array.isArray(item) || !item.length || item.some((value) => !Number.isFinite(Number(value))))) {
+      throw new Error('boxes 必须是非空数值数组组成的数组');
+    }
+    if (supplied[0] === 'selection_regions' && selection.some((item) => !item || typeof item !== 'object' || Array.isArray(item))) {
+      throw new Error('selection_regions 必须是对象数组');
+    }
+    return {
+      payload: { model, operation: 'region_edit', image_id: imageId, prompt, [supplied[0]]: selection },
+      model,
+      taskType: 'region_edit',
+    };
+  }
   const prompt = normalizeApimartPrompt(request.prompt, model);
   if (model === ZHENZHEN_IMAGE_GK_V2_MODEL && prompt.length > 20000) {
     throw new Error(`${model} 提示词最多 20000 字符`);
@@ -2730,6 +2777,49 @@ async function buildApimartVideoPayload(request, apiKey, options = {}) {
     }
     if (extendFromTaskId) payload.metadata.extend_from_task_id = extendFromTaskId;
     return { payload, model, taskType: refs.length || videoSources.length ? 'multi' : 't2v' };
+  }
+
+  if (model === ZHENZHEN_VIDEO_G_OMNI_FLASH_LOWPRICE_MODEL) {
+    if (!prompt) throw new Error(`${model} 必须填写提示词`);
+    const mode = String(request.mode || 'text').trim().toLowerCase();
+    if (!['text', 'frame', 'reference_images', 'reference_video'].includes(mode)) {
+      throw new Error(`${model} 不支持模式 ${mode || '(空)'}`);
+    }
+    const seconds = normalizePositiveInteger(request.duration ?? request.seconds, 6, 4, 10, `${model} 时长 `);
+    if (![4, 6, 8, 10].includes(seconds)) throw new Error(`${model} 时长只支持 4、6、8、10 秒`);
+    const resolution = String(request.resolution || '720p').trim().toLowerCase();
+    if (!['720p', '1080p', '4k'].includes(resolution)) throw new Error(`${model} 分辨率只支持 720p、1080p、4k`);
+    const aspectRatio = String(request.aspect_ratio || request.aspectRatio || request.ratio || '16:9').trim();
+    if (!['16:9', '9:16'].includes(aspectRatio)) throw new Error(`${model} 比例只支持 16:9 或 9:16`);
+    const lowpricePayload = {
+      model,
+      prompt,
+      resolution,
+      aspect_ratio: aspectRatio,
+      nsfw_check: request.nsfw_check === true || request.nsfwCheck === true,
+    };
+    if (mode === 'text') {
+      if (refs.length || videoSources.length) throw new Error('text 模式不能连接参考素材');
+      lowpricePayload.seconds = String(seconds);
+      return { payload: lowpricePayload, model, taskType: 't2v' };
+    }
+    if (mode === 'frame') {
+      if (refs.length !== 1 || videoSources.length) throw new Error('frame 模式必须且只能连接 1 张首帧图');
+      lowpricePayload.seconds = String(seconds);
+      lowpricePayload.generation_type = 'frame';
+      lowpricePayload.images = await uploadApimartImages(refs, apiKey, options);
+      return { payload: lowpricePayload, model, taskType: 'i2v' };
+    }
+    if (mode === 'reference_images') {
+      if (![1, 3].includes(refs.length) || videoSources.length) throw new Error('reference_images 模式必须连接 1 或 3 张参考图');
+      lowpricePayload.seconds = String(seconds);
+      lowpricePayload.generation_type = 'reference';
+      lowpricePayload.images = await uploadApimartImages(refs, apiKey, options);
+      return { payload: lowpricePayload, model, taskType: 'i2v' };
+    }
+    if (refs.length || videoSources.length !== 1) throw new Error('reference_video 模式必须且只能连接 1 个参考视频');
+    lowpricePayload.metadata = { video_url: await uploadMedia(videoSources[0], 'video', apiKey, options) };
+    return { payload: lowpricePayload, model, taskType: 'v2v' };
   }
 
   const ratio = String(request.ratio || '16:9').trim().toLowerCase();
@@ -4138,6 +4228,7 @@ function extractSunoText(value, depth = 0) {
     }
     return '';
   }
+
   if (typeof value !== 'object') return '';
   for (const key of ['text', 'lyrics', 'tags', 'aligned_lyrics', 'bpm', 'persona_id', 'voice_id', 'audio_id', 'content', 'message']) {
     if (value[key] === undefined) continue;
@@ -4830,6 +4921,9 @@ async function queryImageTask(taskId, apiKey, options = {}) {
   const status = normalizeImageTaskStatus(record?.status || data?.status);
   const nested = record?.data && typeof record.data === 'object' ? record.data : {};
   const imageUrls = status === 'succeeded' ? imageTaskResultUrls(record, nested) : [];
+  const operationResult = status === 'succeeded'
+    ? (record?.content?.result || nested?.content?.result || data?.content?.result || null)
+    : null;
   const failReason = status === 'failed'
     ? String(
       record?.fail_reason
@@ -4845,7 +4939,96 @@ async function queryImageTask(taskId, apiKey, options = {}) {
     progress: safeProgress(record?.progress ?? data?.progress),
     imageUrl: imageUrls[0] || null,
     imageUrls,
+    operationResult,
     failReason,
+    ...safeProviderTrace(response, data),
+  };
+}
+
+async function buildHunyuan3dPayload(request, apiKey, options = {}) {
+  const model = String(request.model || '').trim().toLowerCase();
+  if (!HUNYUAN3D_MODELS.has(model)) throw new Error(`未知 Hunyuan 3D 模型：${model || '(空)'}`);
+  const prompt = String(request.prompt || '').trim();
+  if (!prompt) throw new Error('Hunyuan 3D 必须填写提示词');
+  const faceCount = normalizePositiveInteger(request.face_count ?? request.faceCount, 500000, 10000, 1500000, 'face_count ');
+  const generateType = String(request.generate_type || request.generateType || 'Normal').trim();
+  if (!HUNYUAN3D_GENERATE_TYPES.has(generateType)) throw new Error(`Hunyuan 3D 不支持 generate_type ${generateType}`);
+  const refs = normalizeList(request.images || request.refImages);
+  if (model === HUNYUAN3D_TEXT_MODEL && refs.length) throw new Error('文生 3D 不接受参考图');
+  if (model === HUNYUAN3D_IMAGE_MODEL && (refs.length < 1 || refs.length > 8)) throw new Error('图生 3D 必须提供 1-8 张有序视图');
+  const payload = { model, prompt, face_count: faceCount, enable_pbr: request.enable_pbr === true || request.enablePbr === true, generate_type: generateType };
+  if (refs.length) {
+    payload.images = [];
+    for (const source of refs) {
+      payload.images.push(await uploadMedia(source, 'image', apiKey, {
+        ...options,
+        maxBytes: IMAGE_REFERENCE_MAX_BYTES,
+        allowedMimes: ['image/jpeg', 'image/png'],
+        cacheVariant: 'hunyuan3d-v31-image',
+      }));
+    }
+  }
+  return { payload, model, taskType: model === HUNYUAN3D_IMAGE_MODEL ? 'i3d' : 't3d' };
+}
+
+async function submitHunyuan3dTask(request, apiKey, options = {}) {
+  if (!String(apiKey || '').trim()) throw new Error('请先填写贞贞的平价AI小屋 API Key');
+  const fetchImpl = getFetchImpl(options);
+  const baseUrl = cleanBaseUrl(options.baseUrl);
+  const built = await buildHunyuan3dPayload(request, apiKey, options);
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/3d/generations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify(built.payload),
+  }, options, 'seedance.nz Hunyuan 3D 任务提交');
+  const data = await responseJson(response, 'seedance.nz Hunyuan 3D 任务提交');
+  if (!response.ok) throw createUpstreamError(data, response);
+  const taskId = requiredTaskId(data?.task_id || data?.id || data?.data?.task_id || data?.data?.id, 'seedance.nz Hunyuan 3D 任务提交', response);
+  return { taskId, model: built.model, taskType: built.taskType, ...safeProviderTrace(response, data, { pollCount: 0 }) };
+}
+
+function model3dResultUrls(value) {
+  const urls = [];
+  const visit = (item) => {
+    if (typeof item === 'string') { if (/^https?:\/\//i.test(item.trim())) urls.push(item.trim()); return; }
+    if (Array.isArray(item)) { item.forEach(visit); return; }
+    if (!item || typeof item !== 'object') return;
+    Object.values(item).forEach(visit);
+  };
+  visit(value);
+  const score = (url) => {
+    let pathname = '';
+    try { pathname = new URL(url).pathname.toLowerCase(); } catch {}
+    if (pathname.endsWith('.glb')) return 100;
+    if (pathname.endsWith('.gltf')) return 80;
+    if (pathname.endsWith('.zip')) return 10;
+    return 0;
+  };
+  return [...new Set(urls)].sort((a, b) => score(b) - score(a));
+}
+
+async function queryHunyuan3dTask(taskId, apiKey, options = {}) {
+  if (!String(apiKey || '').trim()) throw new Error('缺少贞贞的平价AI小屋 API Key');
+  const fetchImpl = getFetchImpl(options);
+  const baseUrl = cleanBaseUrl(options.baseUrl);
+  const response = await fetchProviderResponse(fetchImpl, `${baseUrl}/v1/3d/generations/${encodeURIComponent(taskId)}`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  }, options, 'seedance.nz Hunyuan 3D 任务查询');
+  const data = await responseJson(response, 'seedance.nz Hunyuan 3D 任务查询');
+  if (!response.ok) throw createUpstreamError(data, response);
+  const record = data?.data && typeof data.data === 'object' ? data.data : data;
+  const status = normalizeImageTaskStatus(record?.status || data?.status);
+  // A successful Hunyuan response can include previews and ZIP sidecars beside
+  // the actual GLB. Keep only the highest-confidence renderable model so the
+  // materializer and 3D preview never receive an unrelated attachment.
+  const rankedModelUrls = status === 'succeeded' ? model3dResultUrls(record) : [];
+  const modelUrls = rankedModelUrls.length ? [rankedModelUrls[0]] : [];
+  return {
+    status,
+    progress: safeProgress(record?.progress ?? data?.progress),
+    modelUrl: modelUrls[0] || null,
+    modelUrls,
+    failReason: status === 'failed' ? String(record?.fail_reason || record?.failReason || record?.message || data?.message || '3D 任务失败') : null,
     ...safeProviderTrace(response, data),
   };
 }
@@ -5144,6 +5327,8 @@ module.exports = {
   ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
   ZHENZHEN_IMAGE_GK_V2_MODEL,
   ZHENZHEN_IMAGE_GK_V2_EDIT_MODEL,
+  ZHENZHEN_IMAGE_GK_V2_SEGMENT_MODEL,
+  ZHENZHEN_IMAGE_GK_V2_REGION_EDIT_MODEL,
   ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL,
   ZHENZHEN_IMAGE_GK_V15_MODEL,
   ZHENZHEN_IMAGE_NB_2_LITE_MODEL,
@@ -5151,6 +5336,7 @@ module.exports = {
   ZHENZHEN_IMAGE_NB_PRO_MODEL,
   ZHENZHEN_IMAGE_NB_MODELS,
   ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL,
+  ZHENZHEN_VIDEO_G_OMNI_FLASH_LOWPRICE_MODEL,
   ZHENZHEN_VIDEO_GK_V15_MODEL,
   ZHENZHEN_VIDEO_V31_FAST_MODEL,
   ZHENZHEN_VIDEO_V31_LITE_MODEL,
@@ -5158,6 +5344,10 @@ module.exports = {
   ZHENZHEN_UPSCALER_MODEL,
   ZHENZHEN_UPSCALER_RESOLUTIONS,
   FASHVSR_VIDEO_UPSCALE_MODEL,
+  HUNYUAN3D_TEXT_MODEL,
+  HUNYUAN3D_IMAGE_MODEL,
+  HUNYUAN3D_MODELS,
+  HUNYUAN3D_GENERATE_TYPES,
   PROVIDER_ID,
   RATIOS,
   RESOLUTIONS,
@@ -5213,6 +5403,7 @@ module.exports = {
   buildSeedance25Payload,
   buildApimartImagePayload,
   buildApimartVideoPayload,
+  buildHunyuan3dPayload,
   buildImagePayload,
   buildSeedreamLayerDecompositionPayload,
   buildQwenImage30Payload,
@@ -5224,6 +5415,8 @@ module.exports = {
   normalizePromptMentions,
   normalizeResolution,
   queryImageTask,
+  submitHunyuan3dTask,
+  queryHunyuan3dTask,
   queryMinimaxH3ContextIrTask,
   queryMidjourneyTask,
   queryAudioTask,

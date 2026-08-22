@@ -43,6 +43,8 @@ const EXPECTED_SIGNATURES: Record<string, string> = {
   upload: 'upload|none->null[image|video|audio|model3d]',
   'model-3d-upload': 'static|none->null[model3d]',
   'model-3d-preview': 'static|null[model3d]->null[image]',
+  'model-3d': 'static|null[text|image]->null[model3d]',
+  'grok-image-tools': 'static|null[image|metadata]->null[image|metadata]',
   'material-set': 'material-set|null[text|image|video|audio]->null[text|image|video|audio]',
   'generation-target': 'static|null[text|image]->null[image]',
   output: 'static|null[text|image|video|audio|model3d|any]->null[any]',
@@ -163,12 +165,12 @@ function dynamicFixture(type: string): Record<string, unknown> {
   return {};
 }
 
-test('all 79 production types have a valid, exact connection authority matching audited JSX Handles', () => {
+test('all 81 production types have a valid, exact connection authority matching audited JSX Handles', () => {
   assert.equal(manifest.schema, 't8-canvas-node-schema-v1');
   assert.equal(manifest.version, 1);
-  assert.equal(manifest.types.length, 79);
-  assert.equal(new Set(manifest.types.map((entry) => entry.type)).size, 79);
-  assert.equal(Object.keys(EXPECTED_SIGNATURES).length, 79);
+  assert.equal(manifest.types.length, 81);
+  assert.equal(new Set(manifest.types.map((entry) => entry.type)).size, 81);
+  assert.equal(Object.keys(EXPECTED_SIGNATURES).length, 81);
   assert.deepEqual(Object.keys(manifest.connectionPorts).sort(), Object.keys(EXPECTED_SIGNATURES).sort());
   assert.deepEqual(manifest.types.map((entry) => entry.type).sort(), Object.keys(manifest.connectionPorts).sort());
 
@@ -194,7 +196,7 @@ test('all 79 production types have a valid, exact connection authority matching 
   }
 });
 
-test('the runtime resolver handles every one of the 79 production node types without aggregate fallback', () => {
+test('the runtime resolver handles every one of the 81 production node types without aggregate fallback', () => {
   for (const { type } of manifest.types) {
     const resolution = requireResolved(canvasNode(type, dynamicFixture(type)));
     assert.equal(resolution.resolver, manifest.connectionPorts[type].resolver, type);

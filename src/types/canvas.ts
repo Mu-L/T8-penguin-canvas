@@ -33,6 +33,8 @@ export type NodeType =
   | 'fal-toolbox'
   | 'fal-toolbox-maker'
   | 'model-3d-preview'
+  | 'model-3d'
+  | 'grok-image-tools'
   | 'face-expression-3d'
   | 'previs-studio'
   | 'model-3d-upload'

@@ -1364,6 +1364,8 @@ const RHToolsNode = lazyCanvasNode(() => import('./nodes/RHToolsNode'), 'RHTools
 const RHToolboxNode = lazyCanvasNode(() => import('./nodes/RHToolboxNode'), 'RHToolboxNode');
 const FalToolboxNode = lazyCanvasNode(() => import('./nodes/FalToolboxNode'), 'FalToolboxNode');
 const Model3DPreviewNode = lazyCanvasNode(() => import('./nodes/Model3DPreviewNode'), 'Model3DPreviewNode');
+const Model3DNode = lazyCanvasNode(() => import('./nodes/Model3DNode'), 'Model3DNode');
+const GrokImageToolsNode = lazyCanvasNode(() => import('./nodes/GrokImageToolsNode'), 'GrokImageToolsNode');
 const FaceExpression3DNode = lazyCanvasNode(() => import('./nodes/FaceExpression3DNode'), 'FaceExpression3DNode');
 const PrevisStudioNode = lazyCanvasNode(() => import('./nodes/PrevisStudioNode'), 'PrevisStudioNode');
 const GrokOAuthAgentNode = lazyCanvasNode(() => import('./nodes/GrokOAuthAgentNode'), 'GrokOAuthAgentNode');
@@ -1454,6 +1456,8 @@ const SPECIFIC_NODES: Record<string, any> = {
   ...(import.meta.env?.DEV ? { 'rh-toolbox-maker': RHToolboxMakerNode } : {}),
   'fal-toolbox': FalToolboxNode,
   'model-3d-preview': Model3DPreviewNode,
+  'model-3d': Model3DNode,
+  'grok-image-tools': GrokImageToolsNode,
   'face-expression-3d': FaceExpression3DNode,
   'previs-studio': PrevisStudioNode,
   'model-3d-upload': UploadNode,
@@ -2283,6 +2287,40 @@ const INITIAL_DATA: Record<string, Record<string, any>> = {
     status: 'idle',
     error: '',
     size: { w: 520, h: 440 },
+  },
+  'model-3d': {
+    threeDTab: 'hunyuan-3d',
+    model: 'hunyuan3d-v3.1-text-to-3d',
+    prompt: '',
+    faceCount: 500000,
+    enablePbr: false,
+    generateType: 'Normal',
+    materialOrder: [],
+    modelUrl: '',
+    modelUrls: [],
+    urls: [],
+    status: 'idle',
+    progress: '',
+    error: '',
+    size: { w: 360, h: 560 },
+  },
+  'grok-image-tools': {
+    grokToolMode: 'segment',
+    sourceTaskId: '',
+    includeMaskRle: false,
+    grokImageId: '',
+    grokObjects: [],
+    grokSegmentationResult: null,
+    prompt: '',
+    selectionMode: 'object_indices',
+    selectionJson: '[0]',
+    imageUrl: '',
+    imageUrls: [],
+    urls: [],
+    status: 'idle',
+    progress: '',
+    error: '',
+    size: { w: 360, h: 520 },
   },
   'face-expression-3d': {
     faceExpression3DState: defaultFaceExpressionState(),

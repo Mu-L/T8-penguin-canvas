@@ -3261,6 +3261,18 @@ router.get('/image/seedance-nz/status/:tid', async (req, res) => {
   try {
     const result = await seedanceNz.queryImageTask(req.params.tid, apiKey, { signal: req.t8AbortSignal });
     if (result.status === 'succeeded') {
+      if (result.operationResult && typeof result.operationResult === 'object' && result.operationResult.image_id) {
+        return res.json({
+          success: true,
+          data: {
+            status: 'completed',
+            progress: '100%',
+            operationResult: result.operationResult,
+            outputCount: 0,
+            ...seedanceNzTrace(result),
+          },
+        });
+      }
       const listedImageUrls = (Array.isArray(result.imageUrls) && result.imageUrls.length
         ? result.imageUrls
         : [result.imageUrl])
@@ -3334,6 +3346,56 @@ router.get('/image/seedance-nz/status/:tid', async (req, res) => {
       error: proxyPublicError(error, 'seedance.nz 图像查询失败', [apiKey]),
       ...seedanceNzTrace(error),
     });
+  }
+});
+
+router.post('/3d/seedance-nz/submit', async (req, res) => {
+  const settings = loadRawSettings();
+  const apiKey = String(settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) return res.status(400).json({ success: false, error: '请先在 API 设置中填写“贞贞的平价AI小屋 API Key”' });
+  try {
+    const result = await seedanceNz.submitHunyuan3dTask(req.body || {}, apiKey, { signal: req.t8AbortSignal });
+    rememberTaskKey(result.taskId, apiKey, { provider: 'seedance-nz-3d', model: result.model, taskType: result.taskType });
+    return res.json({
+      success: true,
+      data: { taskId: result.taskId, status: 'pending', progress: '0%', model: result.model, taskProvider: 'seedance-nz-3d', ...seedanceNzTrace(result) },
+    });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    proxyRouteError('proxy/3d/seedance-nz/submit 错误', error, [apiKey]);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({ success: false, error: proxyPublicError(error, 'Hunyuan 3D 请求失败', [apiKey]), ...seedanceNzTrace(error) });
+  }
+});
+
+router.get('/3d/seedance-nz/status/:tid', async (req, res) => {
+  const settings = loadRawSettings();
+  const remembered = recallTaskMeta(req.params.tid, 'seedance-nz-3d');
+  const apiKey = String(remembered?.apiKey || settings?.zhenzhenSd2ApiKey || '').trim();
+  if (!apiKey) return res.status(400).json({ success: false, error: '缺少贞贞的平价AI小屋 API Key' });
+  try {
+    const result = await seedanceNz.queryHunyuan3dTask(req.params.tid, apiKey, { signal: req.t8AbortSignal });
+    if (result.status === 'succeeded') {
+      const remoteUrls = (Array.isArray(result.modelUrls) ? result.modelUrls : [result.modelUrl]).map((value) => String(value || '').trim()).filter(Boolean);
+      if (!remoteUrls.length) return res.status(502).json({ success: false, data: { status: 'failed', progress: '100%', error: '3D 任务完成但未返回可下载模型文件', recoverable: true } });
+      const modelUrls = [];
+      const failures = [];
+      for (const [index, remoteUrl] of remoteUrls.entries()) {
+        const saved = await saveRemoteFalToolboxFile(remoteUrl, 'model3d', `seedance-nz-3d:${req.params.tid}:${index}`);
+        if (saved.url) modelUrls.push(saved.url);
+        else if (saved.error) failures.push(saved.error);
+      }
+      if (!modelUrls.length || modelUrls.length !== remoteUrls.length) {
+        return res.status(502).json({ success: false, data: { status: 'materializing', progress: '99%', error: failures[0]?.message || '3D 模型下载尚未完成', recoverable: true, retryAfterMs: 800 } });
+      }
+      return res.json({ success: true, data: { status: 'completed', progress: '100%', modelUrl: modelUrls[0], modelUrls, urls: modelUrls, outputCount: modelUrls.length, ...seedanceNzTrace(result) } });
+    }
+    if (result.status === 'failed') return res.json({ success: false, data: { status: 'failed', progress: '100%', error: safeDiagnosticText(result.failReason || '3D 任务失败', 240, [apiKey]), ...seedanceNzTrace(result) } });
+    return res.json({ success: true, data: { status: result.status, progress: safeDiagnosticText(seedreamNzProgress(result.progress), 80, [apiKey]), ...seedanceNzTrace(result) } });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    proxyRouteError('proxy/3d/seedance-nz/status 错误', error, [apiKey]);
+    if (sendTaskResultQueryRecovery(res, error, { taskId: req.params.tid, status: 'materializing' })) return;
+    return res.status(status >= 400 && status < 600 ? status : 500).json({ success: false, error: proxyPublicError(error, 'Hunyuan 3D 查询失败', [apiKey]), ...seedanceNzTrace(error) });
   }
 });
 

@@ -191,7 +191,7 @@ test('Electron package locks canvas Agent bytecode and shared node schema to sou
 
   assert.equal(schema.schema, 't8-canvas-node-schema-v1');
   assert.equal(schema.version, 1);
-  assert.equal(schema.types.length, 79);
+  assert.equal(schema.types.length, 81);
   for (const source of requiredSources) assert.ok(encrypt.includes(`source: '${source}'`), source);
   for (const output of requiredOutputs) {
     assert.ok(encrypt.includes(`output: '${output}'`), output);

@@ -175,6 +175,8 @@
         "upload",
         "model-3d-upload",
         "model-3d-preview",
+        "model-3d",
+        "grok-image-tools",
         "material-set",
         "generation-target",
         "output",

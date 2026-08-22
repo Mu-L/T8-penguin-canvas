@@ -60,6 +60,8 @@ export const ZHENZHEN_IMAGE_GK_V15_MODEL = 'zhenzhen-image-gk-v15';
 export const ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL = 'zhenzhen-image-gk-v15-edit';
 export const ZHENZHEN_IMAGE_GK_V2_MODEL = 'zhenzhen-image-gk-v2';
 export const ZHENZHEN_IMAGE_GK_V2_EDIT_MODEL = 'zhenzhen-image-gk-v2-edit';
+export const ZHENZHEN_IMAGE_GK_V2_SEGMENT_MODEL = 'zhenzhen-image-gk-v2-segment';
+export const ZHENZHEN_IMAGE_GK_V2_REGION_EDIT_MODEL = 'zhenzhen-image-gk-v2-region-edit';
 export const ZHENZHEN_IMAGE_NB_2_LITE_MODEL = 'zhenzhen-image-nb-2-lite';
 export const ZHENZHEN_IMAGE_NB_2_MODEL = 'zhenzhen-image-nb-2';
 export const ZHENZHEN_IMAGE_NB_PRO_MODEL = 'zhenzhen-image-nb-pro';
@@ -90,6 +92,8 @@ export const ZHENZHEN_APIMART_IMAGE_MODELS = [
   ZHENZHEN_IMAGE_G_V2_LOWPRICE_MODEL,
   ZHENZHEN_IMAGE_GK_V2_MODEL,
   ZHENZHEN_IMAGE_GK_V2_EDIT_MODEL,
+  ZHENZHEN_IMAGE_GK_V2_SEGMENT_MODEL,
+  ZHENZHEN_IMAGE_GK_V2_REGION_EDIT_MODEL,
   ZHENZHEN_IMAGE_GK_V15_MODEL,
   ZHENZHEN_IMAGE_GK_V15_EDIT_MODEL,
   ZHENZHEN_IMAGE_NB_2_LITE_MODEL,
@@ -650,12 +654,14 @@ export interface VideoModelDef {
 
 // Veo 系列子模型。第一项是切到 Veo 分类时的默认具体模型。
 export const ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL = 'zhenzhen-video-g-omni-flash';
+export const ZHENZHEN_VIDEO_G_OMNI_FLASH_LOWPRICE_MODEL = 'zhenzhen-video-g-omni-flash-lowprice';
 export const ZHENZHEN_VIDEO_GK_V15_MODEL = 'zhenzhen-video-gk-v15';
 export const ZHENZHEN_VIDEO_V31_FAST_MODEL = 'zhenzhen-video-v31-fast';
 export const ZHENZHEN_VIDEO_V31_QUALITY_MODEL = 'zhenzhen-video-v31-quality';
 export const ZHENZHEN_VIDEO_V31_LITE_MODEL = 'zhenzhen-video-v31-lite';
 export const ZHENZHEN_APIMART_VIDEO_MODELS = [
   ZHENZHEN_VIDEO_G_OMNI_FLASH_MODEL,
+  ZHENZHEN_VIDEO_G_OMNI_FLASH_LOWPRICE_MODEL,
   ZHENZHEN_VIDEO_GK_V15_MODEL,
   ZHENZHEN_VIDEO_V31_FAST_MODEL,
   ZHENZHEN_VIDEO_V31_QUALITY_MODEL,
@@ -742,6 +748,15 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     apiModelOptions: [
       { value: 'grok-video-3', label: 'grok-video-3（新版1.5）' },
       { value: ZHENZHEN_VIDEO_GK_V15_MODEL, label: ZHENZHEN_VIDEO_GK_V15_MODEL, builtinSource: 'seedance-nz' },
+      {
+        value: ZHENZHEN_VIDEO_G_OMNI_FLASH_LOWPRICE_MODEL,
+        label: `${ZHENZHEN_VIDEO_G_OMNI_FLASH_LOWPRICE_MODEL}（平价 Omni）`,
+        builtinSource: 'seedance-nz',
+        ratios: ['16:9', '9:16'], defaultRatio: '16:9',
+        durations: [4, 6, 8, 10], defaultDuration: 6,
+        resolutions: ['720p', '1080p', '4k'], defaultResolution: '720p',
+        supportImages: true, supportVideos: true, maxRefImages: 3, maxRefVideos: 1,
+      },
       { value: 'grok-1.5-video-6s', label: 'grok-1.5-video-6s（Zhenzhen New）' },
       { value: 'grok-1.5-video-10s', label: 'grok-1.5-video-10s（Zhenzhen New）' },
       { value: 'grok-1.5-video-15s', label: 'grok-1.5-video-15s（Zhenzhen New）' },

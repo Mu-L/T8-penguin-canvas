@@ -73,8 +73,9 @@ test('all interval-based generation polling never overlaps a slow status request
   assert.equal((videoNode.match(/let pollInFlight = false;/g) || []).length, 2);
   assert.equal((videoNode.match(/if \(pollInFlight\) return;/g) || []).length, 2);
   assert.equal((videoNode.match(/pollInFlight = false;/g) || []).length, 4);
-  assert.equal((audioNode.match(/let pollInFlight = false;/g) || []).length, 4);
-  assert.equal((audioNode.match(/if \(pollInFlight\) return;/g) || []).length, 4);
+  assert.equal((audioNode.match(/let pollInFlight = false;/g) || []).length, 5);
+  assert.equal((audioNode.match(/if \(pollInFlight\) return;/g) || []).length, 5);
+  assert.equal((audioNode.match(/pollInFlight = false;/g) || []).length, 10);
   assert.match(runningHubNode, /let pollInFlight = false;[\s\S]*?if \(pollInFlight\) return;/);
   assert.match(rhToolsNode, /let pollInFlight = false;[\s\S]*?if \(pollInFlight\) return;/);
 });

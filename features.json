@@ -1,7 +1,75 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "2.9.8",
-  "lastUpdated": "2026-08-21-v2.9.8-release-authorized",
+  "version": "2.9.9",
+  "lastUpdated": "2026-08-22-v2.9.9-release-authorized",
+  "hunyuan3dAndGrokAug22": {
+    "status": "release-authorized-v2.9.9-live-verified",
+    "date": "2026-08-22",
+    "releaseIncluded": true,
+    "provider": "seedance-nz",
+    "platform": "贞贞的平价AI小屋",
+    "referenceProject": "F:/AI-T8-video-onekey/ComfyUI/custom_nodes/ComfyUI_Seedance@28d9a7957e6fe1dfa91291c938768675b2d9eeb7",
+    "officialDocs": "https://api.seedance.nz/docs/llms.txt",
+    "nodes": {
+      "model3d": {
+        "type": "model-3d",
+        "label": "3D",
+        "tabs": ["Hunyuan 3D"],
+        "tabArchitecture": "MODEL_3D_TABS is an explicit extensible registry; future 3D families add sibling tabs without changing the stable model-3d node identity.",
+        "models": [
+          "hunyuan3d-v3.1-image-to-3d",
+          "hunyuan3d-v3.1-text-to-3d"
+        ],
+        "contract": "POST /v1/3d/generations；GET /v1/3d/generations/{task_id}；图生支持 1-8 张按 front/left/right/back/top/bottom/front-left/front-right 排序的图片；face_count 10000-1500000；generate_type=Normal/Geometry/Sketch；成功 GLB 必须立即下载、校验并转存本地后才完成。",
+        "output": "输出 model3d 端口；画布自动创建现有 3D 预览节点，支持交互预览与本地文件下载。"
+      },
+      "grokImageTools": {
+        "type": "grok-image-tools",
+        "models": ["zhenzhen-image-gk-v2-segment", "zhenzhen-image-gk-v2-region-edit"],
+        "contract": "独立两阶段 UI：segment 从同画布 GK v2 源任务取得 source_task_id 并持久化 image_id/objects；region_edit 精确选择 object_indices、boxes 或 selection_regions 三者之一。"
+      },
+      "grokVideo": {
+        "tab": "Grok Video",
+        "model": "zhenzhen-video-g-omni-flash-lowprice",
+        "modes": ["text", "frame", "reference_images", "reference_video"],
+        "contract": "4/6/8/10 秒，720p/1080p/4k，16:9/9:16；参考图只允许 1 或 3 张；参考视频只允许 1 个且不发送 seconds。"
+      }
+    },
+    "workflows": [
+      "docs/workflows/hunyuan3d-v3.1-image-to-3d.json",
+      "docs/workflows/hunyuan3d-v3.1-text-to-3d.json",
+      "docs/workflows/zhenzhen-image-gk-v2-segment.json",
+      "docs/workflows/zhenzhen-image-gk-v2-region-edit.json",
+      "docs/workflows/zhenzhen-video-g-omni-flash-lowprice-text.json",
+      "docs/workflows/zhenzhen-video-g-omni-flash-lowprice-frame.json",
+      "docs/workflows/zhenzhen-video-g-omni-flash-lowprice-reference-images.json",
+      "docs/workflows/zhenzhen-video-g-omni-flash-lowprice-reference-video.json"
+    ],
+    "verification": [
+      "模型、Payload、状态查询、节点端口、运行入口、Hunyuan 3D Tab 注册、路由、本地转存、8 份无凭据工作流与能力目录专项及相邻回归 137/137 通过。",
+      "TypeScript、Provider/Proxy Node 语法与 feature-sync:check 通过；能力目录为 31 actions / 269 runtime entries / 81/81 nodes / zero public gaps。",
+      "真实串行验证：Grok v2 源图与 region_edit JPEG 均由 Sharp 解码；segment、region_edit、低价 Omni 4 秒 1280x720 H.264 视频均成功并下载，视频通过 FFmpeg 全帧解码。",
+      "Hunyuan 图生 3D 成功下载 31,198,488-byte GLB；文生 3D 在选择器修复后重新执行一次明确的新验证任务，成功下载 29,156,812-byte GLB。两份文件均验证 glTF magic、GLB v2、声明长度与实际长度一致；两种 3D 模型的本地物化链路均已验证。",
+      "隔离真实 UI 验收：核心目录开发页可添加 3D 与 Grok 分割编辑节点；Hunyuan 3D Tab、双模型、8 视图顺序、分割/区域编辑切换均可见；视频节点切到平价AI小屋后可选择低价 Omni 及四种模式，页面控制台 error=0。"
+    ],
+    "liveEvidence": {
+      "image3dReport": "output/hunyuan-grok-aug22-live/image3d-report.json",
+      "image3dSha256": "920646075628ea4d0c84056c7d56fd408ea404e6d2cc45cae42ec52dccc301e1",
+      "text3dReport": "output/hunyuan-grok-aug22-live/text3d-report.json",
+      "text3dSha256": "e8f2e75111aa48bb5bf624a71fa49385e9d1cfd1b30d3dd9868d8c71ec5695ad",
+      "secretFree": true,
+      "temporaryRecoveryStateRemoved": true
+    },
+    "releaseEvidence": {
+      "technicalGates": "must-pass-before-publish",
+      "affectedUserInstallF8F10AndInstalledUpgrade": "deferred-not-passed",
+      "deferralApproval": "owner-approved-post-release-v2.9.9"
+    },
+    "boundaries": [
+      "现有默认 Provider、默认模型、节点类型、旧画布字段和 v2.9.8 及更早功能均未改变。",
+      "正式发布必须从已推送的固定源码提交执行完整 Electron/NSIS、provenance、sealed recovery、GitHub 三资产回下载、固定 Tag/target 与 Latest 门禁。"
+    ]
+  },
   "grokV2EditAndLyriaFlowMusic": {
     "status": "release-authorized-v2.9.8-contract-and-live-verified",
     "date": "2026-08-21",
