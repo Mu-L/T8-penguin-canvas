@@ -1,9 +1,9 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "2.9.9",
-  "lastUpdated": "2026-08-22-v2.9.9-release-authorized",
+  "lastUpdated": "2026-08-22-v2.9.9-released",
   "hunyuan3dAndGrokAug22": {
-    "status": "release-authorized-v2.9.9-live-verified",
+    "status": "released-v2.9.9-live-verified",
     "date": "2026-08-22",
     "releaseIncluded": true,
     "provider": "seedance-nz",
@@ -61,9 +61,30 @@
       "temporaryRecoveryStateRemoved": true
     },
     "releaseEvidence": {
-      "technicalGates": "must-pass-before-publish",
+      "technicalGates": "passed-before-publish",
       "affectedUserInstallF8F10AndInstalledUpgrade": "deferred-not-passed",
-      "deferralApproval": "owner-approved-post-release-v2.9.9"
+      "deferralApproval": "owner-approved-post-release-v2.9.9",
+      "sourceCommit": "a68afa5a3fcd9275a6d0d802d82286496daeffd6",
+      "publishedAt": "2026-08-22T10:59:03Z",
+      "releaseUrl": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.9",
+      "latest": true,
+      "draft": false,
+      "prerelease": false,
+      "artifacts": {
+        "T8-PenguinCanvas-Setup-2.9.9.exe": {
+          "size": 1317093618,
+          "sha256": "8254c55d6da7293acc62b5d4a9da64fc31ad650a7a4c5de34a6ed0aa9560446c"
+        },
+        "T8-PenguinCanvas-Setup-2.9.9.exe.blockmap": {
+          "size": 1371975,
+          "sha256": "4119d6f2fbddc2c5ac7df723d7b3e6bed9522adc72874e92e4ad496c097ce276"
+        },
+        "latest.yml": {
+          "size": 362,
+          "sha256": "e10fd8516d95b888a78855f56e3a5c54839ccb70b64db0ecd92268114d1f1214"
+        }
+      },
+      "verification": "完整发布前和独立发布后三资产回下载均通过；Tag/target、Latest、latest.yml 与恢复状态清理均通过。"
     },
     "boundaries": [
       "现有默认 Provider、默认模型、节点类型、旧画布字段和 v2.9.8 及更早功能均未改变。",

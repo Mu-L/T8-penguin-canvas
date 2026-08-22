@@ -36,7 +36,7 @@ My favorite girl Go YounJung
 ## ✨ 功能亮点
 
 - 🎨 **81 个节点**，覆盖文本 / 图像 / 视频 / 音频 / LLM / RunningHub / ComfyUI / 3D / 工具 / 辅助 / 工具箱 / 输出预览 / 上传素材 / 素材集 / 批量打标 / 随机路由 / Story 全自动制片 / 剧本大师 / MiniMax H3 / MiniMax Music3 / Seedance 2.0 提示词增强器 / MiniMax H3 官方提示词增强器 / Seedance 2.5 / FlashVSR 视频超分 / 白模预演 / MV 音乐大师
-- 🧊🎬 **v2.9.9 Hunyuan 3D 与 Grok 创作扩展版**：核心节点新增稳定的“3D”入口，首个可扩展 TAB 为 `Hunyuan 3D`，支持文生/图生 3D、1–8 张有序视图、PBR、面数设置、GLB 本地转存、交互预览与下载；新增 Grok 分割编辑节点，完整承接智能分割和对象/框/选区区域编辑；Grok Video 新增低价 Omni 四模式。真实 API、图片/视频解码、两份 GLB v2、本地 UI、137 项回归及 81/81 节点同步均已验证，既有默认渠道、默认模型和全部旧画布保持不变。
+- 🧊🎬 **[v2.9.9 Hunyuan 3D 与 Grok 创作扩展自动更新版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.9)**：核心节点新增稳定的“3D”入口，首个可扩展 TAB 为 `Hunyuan 3D`，支持文生/图生 3D、1–8 张有序视图、PBR、面数设置、GLB 本地转存、交互预览与下载；新增 Grok 分割编辑节点，完整承接智能分割和对象/框/选区区域编辑；Grok Video 新增低价 Omni 四模式。真实 API、图片/视频解码、两份 GLB v2、本地 UI、137 项回归及 81/81 节点同步均已验证，既有默认渠道、默认模型和全部旧画布保持不变。
 - 🎨🎵 **v2.9.8 Grok 编辑与 Lyria/Flow Music 扩展版**：Grok Image 新增 `zhenzhen-image-gk-v2-edit`，支持 1–3 张有序参考图、1–10 张结果、官方比例与 1K/2K。音频节点新增 Lyria TAB，完整覆盖 Flow Music 的生成、歌词、上传、续写、替换、翻唱、分轨、音频下载和视频剪辑九种操作；音频、文本、视频与 stems ZIP 均按类型完整转存，`clip_id` 可沿画布连接继续使用。10 项真实 API 任务均已完成并下载、解码或校验；既有默认渠道、默认模型、79 个节点和 v2.9.7 数据库修复不回退。
 - 🧰 **[v2.9.7 项目数据库启动兼容修复版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.7)**：修复 v2.9.2–v2.9.6 在画布目录重命名后可能留下 SQL `updated_at` 与画布 JSON `updatedAt` 不一致、导致升级后冷启动被 typed canonical 校验拦截的问题。新写入保持两处时间一致；历史受影响项目仅对该精确旧签名兼容读取，启动时不静默改写数据库，其他 canonical 损坏仍失败关闭。
 - ⚡ **[v2.9.6 FlashVSR 名称修正自动更新版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v2.9.6)**：节点、模型目录、默认值和无密钥工作流统一显示并提交 `FlashVSR_video_upscale`；v2.9.5 已保存的 `FashVSR_video_upscale` 仍可载入，但提交前会规范化为新名称。新拼写已真实完成一次 854×480 到 1920×1024 的同任务生成、下载、FFprobe 和全量解码。MiniMax Music3 继续完整包含，不是待补功能。
