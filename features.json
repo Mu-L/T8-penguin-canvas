@@ -1,9 +1,9 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "3.1.8",
-  "lastUpdated": "2026-09-13-v3.1.8-release-candidate",
+  "lastUpdated": "2026-09-13-v3.1.8-released-dual-platform-verified",
   "tunIpv6AndTerminalLogRecovery20260913": {
-    "status": "release-authorized-v3.1.8-targeted-verified",
+    "status": "released-v3.1.8-targeted-verified",
     "date": "2026-09-13",
     "releaseIncluded": true,
     "scope": "Maximally relax network preclassification only for internally marked trusted Provider result/status hostnames, including all present and future image, video, audio, RunningHub and other providers; also make terminal log history survive renderer reload/application restart without persisting credentials.",
@@ -15,22 +15,22 @@
       "The older exact Mihomo IPv6 classifier and fixed-IP AliDNS/Cloudflare/Google recovery remain as compatibility for ordinary hostname-bound TUN routing, but trusted Provider success no longer depends on that list.",
       "Persist at most 300 terminal entries for 14 days; recovered copies redact URL query/fragment signatures, Bearer/API keys and oversized text. Clear removes both visible and persisted history."
     ],
-    "verification": "Shared DNS/safe download/trusted Provider buffer+streaming tests 31/31 and terminal persistence/redaction tests 3/3 passed; coverage proves local resolver is not invoked, arbitrary private/ULA/invalid resolver metadata cannot veto Chromium, trusted fallback accepts a hostname resolving to loopback, while literal/private/local redirects and generic untrusted private resolution remain blocked. Backend syntax and TypeScript type-check passed; real affected client evidence remains pending.",
-    "boundary": "Included in the authorized v3.1.8 release candidate. Formal source commit, Electron package, immutable tag, GitHub Release and automatic-update assets remain pending until the release chain reports success; affected-user and installed-build evidence is owner-approved for post-release collection and is not counted as passed."
+    "verification": "Shared DNS/safe download/trusted Provider buffer+streaming tests 31/31 and terminal persistence/redaction tests 3/3 passed; coverage proves local resolver is not invoked, arbitrary private/ULA/invalid resolver metadata cannot veto Chromium, trusted fallback accepts a hostname resolving to loopback, while literal/private/local redirects and generic untrusted private resolution remain blocked. Backend syntax, TypeScript and release gates passed; the fixed source and six Windows/macOS assets were published and independently download-verified.",
+    "boundary": "Released in v3.1.8 from fixed source 4d374bd14bab68a6ac7daf842567e79652962872. Affected-user, installed-build, external-device and F8-F10 evidence remains owner-approved for post-release collection and is not counted as passed."
   },
   "electronReleaseV318": {
-    "status": "release-authorized-source-build-pending",
+    "status": "released-dual-platform-verified",
     "date": "2026-09-13",
-    "releaseIncluded": false,
+    "releaseIncluded": true,
     "version": "3.1.8",
     "tag": "v3.1.8",
-    "latest": false,
-    "sourceCommit": null,
-    "publishedAt": null,
+    "latest": true,
+    "sourceCommit": "4d374bd14bab68a6ac7daf842567e79652962872",
+    "publishedAt": "2026-09-13T05:44:42Z",
     "draft": false,
     "prerelease": false,
     "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.1.8",
-    "macWorkflow": null,
+    "macWorkflow": "https://github.com/T8mars/T8-penguin-canvas/actions/runs/34741074336",
     "releaseRecord": "release",
     "scope": [
       "受信 Provider 域名结果不再被本机 resolveHost、地址族、公私网分类或固定 Fake-IP 网段提前否决，统一交给 Electron/Chromium 的系统代理、TUN 与 VPN 网络栈。",
@@ -38,8 +38,9 @@
       "终端日志保存最多 300 条、最长 14 天的脱敏恢复副本，刷新、渲染器重载或应用重启后不再无条件显示 0。"
     ],
     "verification": [
-      "受信 Provider 下载、普通 URL 安全边界、重定向、Fake-IP、流式落盘与日志恢复/脱敏专项 34/34 通过；Backend 语法与 TypeScript 通过。",
-      "正式源码提交、Tag、Windows 自动更新资产、GitHub Latest 和远端完整回下载尚待本次发布链完成，当前条目不提前标记为已发布。"
+      "受信 Provider 下载、普通 URL 安全边界、重定向、Fake-IP、流式落盘与日志恢复/脱敏专项 34/34 通过；Backend 语法、TypeScript、能力/双语/公开边界、工作树与 Electron 发布合同通过。",
+      "固定源码/Tag 4d374bd14bab68a6ac7daf842567e79652962872 已推送；Windows 恢复链在首次主机崩溃未产生完整包后复用同一 recovery，完成唯一正式包、加密、NSIS、provenance、上传、完整回下载与 Latest，recovery 已清除。",
+      "真实 macOS arm64 workflow 34741074336 从同一 Tag 完成 ad-hoc 签名技术预览 DMG/ZIP/更新清单、追加上传和 runner 回下载；本机独立 Mac 三资产及追加后的 Windows 三资产均完整回下载通过。六资产详情见顶层 release。"
     ],
     "evidenceBoundary": {
       "technicalGates": "required-before-release",
@@ -3115,30 +3116,30 @@
     ]
   },
   "release": {
-    "status": "released-v3.1.7-dual-platform-verified",
-    "version": "3.1.7",
+    "status": "released-v3.1.8-dual-platform-verified",
+    "version": "3.1.8",
     "date": "2026-09-13",
-    "tag": "v3.1.7",
+    "tag": "v3.1.8",
     "latest": true,
-    "sourceCommit": "9771860cacadf67b76385faa405de8ee2db5c87a",
-    "publishedAt": "2026-09-12T17:41:11Z",
+    "sourceCommit": "4d374bd14bab68a6ac7daf842567e79652962872",
+    "publishedAt": "2026-09-13T05:44:42Z",
     "draft": false,
     "prerelease": false,
-    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.1.7",
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.1.8",
     "verification": [
-      "固定源码/Tag 9771860cacadf67b76385faa405de8ee2db5c87a 已发布为非草稿、非预发布 GitHub Latest；origin/main 与发布分支先推送该固定源码，发布后证据提交不移动 Tag。",
-      "Windows 唯一一次生产编译/加密链完成；7 文件 app.asar、双运行时、native rebuild、NSIS、provenance、sealed recovery、上传与远端完整回下载全部通过，recovery 已清除。",
-      "真实 macOS arm64 workflow https://github.com/T8mars/T8-penguin-canvas/actions/runs/34709089838 成功完成同源构建、ad-hoc 签名、DMG/ZIP/更新清单、追加上传和 runner 回下载；本机独立完整回下载再次通过。",
+      "固定源码/Tag 4d374bd14bab68a6ac7daf842567e79652962872 已发布为非草稿、非预发布 GitHub Latest；origin/main 与发布分支先推送该固定源码，发布后证据提交不移动 Tag。",
+      "Windows 正式链首次在 NSIS 压缩期随主机崩溃终止，未封印 recovery、未产生完整安装包、未创建 Release；恢复后复用同一 release recovery，完成唯一正式包、7 文件 app.asar、双运行时、native rebuild、NSIS、provenance、sealed recovery、上传与远端完整回下载，recovery 已清除。",
+      "真实 macOS arm64 workflow https://github.com/T8mars/T8-penguin-canvas/actions/runs/34741074336 成功完成同源构建、ad-hoc 签名、DMG/ZIP/更新清单、追加上传和 runner 回下载；本机独立完整回下载再次通过。",
       "六资产的 GitHub 大小/SHA-256、latest.yml 安装包 SHA-512、latest-mac.yml ZIP SHA-512、Tag、Release target 与 macSource 对账一致；Mac 追加后的 Windows 全量回下载完成资产字节核对，GitHub 公共 Release 页面复核仍为 Latest 且指向固定源码。",
-      "真实用户旧库、安装升级、外部设备、多端协作与 F8-F10 只按 owner-approved-post-release-v3.1.7 后补，不视为已经通过。"
+      "真实受影响 VPN/TUN 用户、用户旧库、安装升级、外部设备、多端协作与 F8-F10 只按 owner-approved-post-release-v3.1.8 后补，不视为已经通过。"
     ],
     "assets": {
-      "T8-PenguinCanvas-Setup-3.1.7.exe": "1378593013 bytes / sha256 d4ab20428bd8d135ea64a2311899ee10359d6d35fa27dd007aaf1cd42ec43266",
-      "T8-PenguinCanvas-Setup-3.1.7.exe.blockmap": "1437700 bytes / sha256 3975cf07c61a8a5218486a86f08d350486b351990f195fccd7924b714bb571f5",
-      "latest.yml": "362 bytes / sha256 7a1541bad4d39250b07ddf5ad07a708c06ae65152aa0231588ea210fb5cc6752",
-      "T8-PenguinCanvas-3.1.7-mac-arm64.dmg": "514441904 bytes / sha256 50274b56504bc2fc2a330474bbf5c49d19a47cf6d8197028089fddb5becacd49",
-      "T8-PenguinCanvas-3.1.7-mac-arm64.zip": "506435424 bytes / sha256 e7f8bfdd3d3cae66448a6282365b00f51be2b916e5d570a8e770bfe7187e62e3",
-      "latest-mac.yml": "536 bytes / sha256 d1d19568bf560f5108d46987e33c40768ed22fa9cfaa6ae4e8a1d8747f5d5531"
+      "T8-PenguinCanvas-Setup-3.1.8.exe": "1378595394 bytes / sha256 4f72a1d7e9e3a0c843a60b69dd368981a01f705871b5d62df5f2180c30fcc624",
+      "T8-PenguinCanvas-Setup-3.1.8.exe.blockmap": "1438130 bytes / sha256 07fb270529568050e8f0910ec5a215837ab794fc23d939ab628681e6b5583972",
+      "latest.yml": "362 bytes / sha256 34b8b17831c386ff31e9750cf265c50f0dc4304b820ba1d82799c6c0a7210028",
+      "T8-PenguinCanvas-3.1.8-mac-arm64.dmg": "514426604 bytes / sha256 f7f1854720d52e02ee23c24ae25214063d9f87cde2267b06f3f3889b92b3247c",
+      "T8-PenguinCanvas-3.1.8-mac-arm64.zip": "506438015 bytes / sha256 7a0458533c537c69b22c5274aae8ca90d83208ec4b72cf3291fc2a5140a42ae9",
+      "latest-mac.yml": "536 bytes / sha256 c5202cbbd0643ca35a27c0a1b74b9fc08dbf97407a693d57cef61019e61373ad"
     }
   },
   "versionSequencePolicy": {

@@ -2,19 +2,19 @@
 
 更新：2026-09-13。仅维护当前事实；长期规则见根 `SKILL.md` 和 `AGENTS.md`。本页预算 80 行 / 8 KiB，旧检查点迁入专题，不追加长日报。
 
-- 默认目录 `E:\PenguinPravite\T8-penguin-canvas`；branch `codex/release-v3.0.8-volcengine-assets-ux`，common dir `.git`。v3.1.7 正式源码与 Tag 固定为 `9771860cacadf67b76385faa405de8ee2db5c87a`，不得移动；实际开工仍以 git/worktree 门为准。
-- package 版本已进入 `3.1.8` 发布候选；本次只纳入 TUN/VPN 受信 Provider 结果下载最大兼容和终端日志恢复，固定源码、Tag、Windows 自动更新资产和 GitHub Latest 尚待正式发布链完成。
-- 用户已明确授权 v3.1.8 构建、推送、Tag 与 Release；真实受影响用户、安装环境及 F8–F10 证据按 `owner-approved-post-release-v3.1.8` 后补且不视为通过。Mac 仅在 GitHub Actions 额度不足时允许暂缓。
+- 默认目录 `E:\PenguinPravite\T8-penguin-canvas`；branch `codex/release-v3.0.8-volcengine-assets-ux`，common dir `.git`。v3.1.8 正式源码与 Tag 固定为 `4d374bd14bab68a6ac7daf842567e79652962872`，不得移动；实际开工仍以 git/worktree 门为准。
+- package 当前正式版本为 `3.1.8`；本版只纳入 TUN/VPN 受信 Provider 结果下载最大兼容和终端日志恢复，Windows 与 Mac 六资产已从同一固定 Tag 发布并完成远端完整下载校验。
+- v3.1.8 真实受影响用户、安装环境及 F8–F10 证据按 `owner-approved-post-release-v3.1.8` 后补且不视为通过；正式技术门、双平台构建与自动更新 Release 均已完成。
 
 ## 当前检查点
 
 | 事项 | 当前事实与下一步 |
 | --- | --- |
-| v3.1.8 发布 | 版本合同、README、自动更新 workflow 与 Release notes 已进入候选；下一步完成发布门、固定源码提交/推送/Tag、唯一一次 Windows 正式链及额度允许的同源 Mac workflow，再回填 `feature electronReleaseV318` 与 `feature release`。 |
+| v3.1.8 发布 | 已完成：固定源码/Tag `4d374bd14bab68a6ac7daf842567e79652962872`、Windows 唯一正式包与自动更新三资产、同源 [Mac workflow](https://github.com/T8mars/T8-penguin-canvas/actions/runs/34741074336) 三资产、GitHub [Latest Release](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.1.8) 及六资产完整回下载均通过。首次 Windows NSIS 期主机崩溃未留下完整包或 Release，恢复链复用同一 recovery 后封印并清除。详见 `feature electronReleaseV318` 与 `feature release`。 |
 | 文档轻量化 | 已完成：根手册与当前上下文均在预算内，原文逐字节归档；features/roadmap 按需读。8组校验通过，1353份源码/配置/原测试/技能散列未变，详见[校验记录](../local-private/context-maintenance/verification.json)。后续遵守手册开头预算。 |
 | 生成历史 | 当前支持范围已随 v3.1.6 发布；19个完整客户端场景/25项、React UI 13项、限定回归56/56通过，通过进程正常退出/强制0/残留0。完整状态与剩余范围见[验收清单](generation-history-acceptance-status.md)及[证据索引](generation-history-acceptance-20260912.md)。 |
 | Provider 超时策略 | 已随 v3.1.7 发布：移除媒体生成通用代理 90 秒边界，并覆盖扩展适配器、工具箱自定义轮询、导演分镜与崩溃恢复；媒体全链路最低 15 分钟，LLM 默认且最长 3 分钟，连接探测/重试间隔不变。详情用 `feature providerTimeoutPolicy20260913` 查询。 |
-| TUN/代理最大兼容与日志恢复 | v3.1.8 候选已验证：受信 Provider 域名结果不再预判 `resolveHost` 地址或维护 Fake-IP 白名单，Chromium 系统网络及失败后的同任务 GET 回退均接受任意有效解析地址；仅字面量本机/内网与本地域名仍拒绝，普通 URL 安全策略不变。另有 Mihomo IPv6/国内 DoH 兼容和终端日志 14 天脱敏恢复。专项 34/34 与 TypeScript 通过；真实受影响 TUN 客户端/安装版证据后补。详见 `feature tunIpv6AndTerminalLogRecovery20260913`。 |
+| TUN/代理最大兼容与日志恢复 | 已随 v3.1.8 发布：受信 Provider 域名结果不再预判 `resolveHost` 地址或维护 Fake-IP 白名单，Chromium 系统网络及失败后的同任务 GET 回退均接受任意有效解析地址；仅字面量本机/内网与本地域名仍拒绝，普通 URL 安全策略不变。另有 Mihomo IPv6/国内 DoH 兼容和终端日志 14 天脱敏恢复。专项 34/34、TypeScript 与双平台正式包通过；真实受影响 TUN 客户端/安装版证据后补。详见 `feature tunIpv6AndTerminalLogRecovery20260913`。 |
 | 历史修复最终限定检查 | 专题清单与 features 回执已同步为 19/25+React UI 13、限定回归56/56；本轮按暂停点复核后未重跑。支持范围已接受；用户旧库、安装升级、断电、真实Provider、外部设备与其他未适配输入仍不计通过。 |
 | 工坊 Suno V6 | 三版本已随 v3.1.6 发布且有出音证据；wild请求 `chirp-hawk-wild` 实际返回 `chirp-hawk`，身份需渠道确认。保留旧模型/默认与独立平价协议，不再自动付费重试。用 `feature sunoWorkshopV620260912` 查完整记录。 |
 | 平价小屋 Suno V6 | 三项动作、34项目录、双语UI和4份无密钥工作流已随 v3.1.6 发布。真实API三动作各有成功案例；失败的纯测试音模型案例明确记录且未冒认。详见[专题与证据](seedance-nz-suno-v6-actions.md)。 |
