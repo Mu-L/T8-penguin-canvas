@@ -1,7 +1,53 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "3.1.7",
-  "lastUpdated": "2026-09-13-v3.1.7-dual-platform-release-verified",
+  "version": "3.1.8",
+  "lastUpdated": "2026-09-13-v3.1.8-release-candidate",
+  "tunIpv6AndTerminalLogRecovery20260913": {
+    "status": "release-authorized-v3.1.8-targeted-verified",
+    "date": "2026-09-13",
+    "releaseIncluded": true,
+    "scope": "Maximally relax network preclassification only for internally marked trusted Provider result/status hostnames, including all present and future image, video, audio, RunningHub and other providers; also make terminal log history survive renderer reload/application restart without persisting credentials.",
+    "rootCause": "Any resolved-address classifier is structurally unable to distinguish a future proxy/TUN synthetic range from a real private endpoint. The prior IPv4-only classifier rejected Mihomo fdfe:dcba:9876::/64 before Chromium could connect, and adding one prefix would repeat the failure for the next range. Separately, the terminal Zustand store was memory-only while canvas/node error state persisted.",
+    "contract": [
+      "For trustedProviderOutput hostname targets, never call Electron resolveHost as a security gate and never reject by returned address family, synthetic prefix, public/private classification or mixed answers; Chromium owns DNS/PAC/system proxy/TUN/VPN end-to-end.",
+      "If Chromium fails transiently or the bridge is absent, the same trusted hostname's idempotent GET fallback accepts any syntactically valid IPv4/IPv6 resolver answer. This deliberately removes dependence on every current or future Fake-IP range.",
+      "Literal loopback/private/Fake-IP URL targets, single-label and .local/.internal/.localhost/.home.arpa names remain blocked on every redirect. Generic untrusted URLs retain strict public-address and rebinding checks; redirect credential stripping, byte/format limits and no Provider generation POST replay remain enforced.",
+      "The older exact Mihomo IPv6 classifier and fixed-IP AliDNS/Cloudflare/Google recovery remain as compatibility for ordinary hostname-bound TUN routing, but trusted Provider success no longer depends on that list.",
+      "Persist at most 300 terminal entries for 14 days; recovered copies redact URL query/fragment signatures, Bearer/API keys and oversized text. Clear removes both visible and persisted history."
+    ],
+    "verification": "Shared DNS/safe download/trusted Provider buffer+streaming tests 31/31 and terminal persistence/redaction tests 3/3 passed; coverage proves local resolver is not invoked, arbitrary private/ULA/invalid resolver metadata cannot veto Chromium, trusted fallback accepts a hostname resolving to loopback, while literal/private/local redirects and generic untrusted private resolution remain blocked. Backend syntax and TypeScript type-check passed; real affected client evidence remains pending.",
+    "boundary": "Included in the authorized v3.1.8 release candidate. Formal source commit, Electron package, immutable tag, GitHub Release and automatic-update assets remain pending until the release chain reports success; affected-user and installed-build evidence is owner-approved for post-release collection and is not counted as passed."
+  },
+  "electronReleaseV318": {
+    "status": "release-authorized-source-build-pending",
+    "date": "2026-09-13",
+    "releaseIncluded": false,
+    "version": "3.1.8",
+    "tag": "v3.1.8",
+    "latest": false,
+    "sourceCommit": null,
+    "publishedAt": null,
+    "draft": false,
+    "prerelease": false,
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.1.8",
+    "macWorkflow": null,
+    "releaseRecord": "release",
+    "scope": [
+      "受信 Provider 域名结果不再被本机 resolveHost、地址族、公私网分类或固定 Fake-IP 网段提前否决，统一交给 Electron/Chromium 的系统代理、TUN 与 VPN 网络栈。",
+      "系统通道失败后的同任务幂等 GET 回退接受域名解析出的任意有效 IPv4/IPv6；字面量本机/内网、本地域名、跨域凭据剥离、媒体校验和生成 POST 不重放边界继续保留。",
+      "终端日志保存最多 300 条、最长 14 天的脱敏恢复副本，刷新、渲染器重载或应用重启后不再无条件显示 0。"
+    ],
+    "verification": [
+      "受信 Provider 下载、普通 URL 安全边界、重定向、Fake-IP、流式落盘与日志恢复/脱敏专项 34/34 通过；Backend 语法与 TypeScript 通过。",
+      "正式源码提交、Tag、Windows 自动更新资产、GitHub Latest 和远端完整回下载尚待本次发布链完成，当前条目不提前标记为已发布。"
+    ],
+    "evidenceBoundary": {
+      "technicalGates": "required-before-release",
+      "externalAffectedTunUserInstallAndF8F10": "deferred-not-passed",
+      "deferralApproval": "owner-approved-post-release-v3.1.8",
+      "rule": "仅真实受影响 VPN/TUN 用户、外部设备和安装环境证据允许后补；正式技术门、固定源码、Windows 自动更新资产和远端完整性验证不可延期。"
+    }
+  },
   "electronReleaseV317": {
     "status": "released-dual-platform-verified",
     "date": "2026-09-13",
@@ -3098,7 +3144,7 @@
   "versionSequencePolicy": {
     "status": "active",
     "date": "2026-07-30",
-    "currentVersion": "3.1.7",
+    "currentVersion": "3.1.8",
     "rules": [
       "版本号每一段只使用 0-9；v2.6.9 的下一正式版本固定为 v2.7.0。",
       "禁止创建、打包、推送、打 tag、发布或写入自动更新元数据为 v2.6.10。",
@@ -3134,6 +3180,7 @@
       "v3.1.4 的下一正式版本固定为 v3.1.5。",
       "v3.1.5 的下一正式版本固定为 v3.1.6。",
       "v3.1.6 的下一正式版本固定为 v3.1.7。",
+      "v3.1.7 的下一正式版本固定为 v3.1.8。",
       "后续改版本前必须同步核对 package.json、package-lock.json、README、features.json、项目 SKILL.md、Release notes、自动更新元数据和 Git tag。"
     ]
   },

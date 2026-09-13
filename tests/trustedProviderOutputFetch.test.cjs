@@ -277,6 +277,28 @@ test('trusted Provider bridge strips sensitive headers after a cross-origin redi
   });
 });
 
+test('trusted Provider redirects to a literal private target remain blocked', { concurrency: false }, async () => {
+  const calls = [];
+  const bridge = systemFetchBridge(async (input) => {
+    calls.push(String(input));
+    return new Response(null, {
+      status: 302,
+      headers: { location: 'http://127.0.0.1/private-result' },
+    });
+  });
+
+  await withGlobalFetch(bridge, async () => {
+    await assert.rejects(
+      safeRemoteMediaFetch('https://provider-output.test/start', {
+        trustedProviderOutput: true,
+        timeoutMs: 2_000,
+      }),
+      (error) => error?.code === 'private_address',
+    );
+  });
+  assert.deepEqual(calls, ['https://provider-output.test/start']);
+});
+
 test('trusted Provider bridge enforces the configured response size limit', { concurrency: false }, async () => {
   const bridge = systemFetchBridge(async () => new Response(Buffer.from('too-large'), {
     status: 200,
@@ -322,9 +344,8 @@ test('trusted Provider bridge network failure falls back to the DNS-pinned trans
   try {
     const port = server.address().port;
     await withGlobalFetch(bridge, async () => {
-      const result = await safeRemoteMediaFetch(`http://fallback.test:${port}/provider-result`, {
+      const result = await safeRemoteMediaFetch(`http://provider-fallback.example:${port}/provider-result`, {
         trustedProviderOutput: true,
-        allowPrivateForTests: allowLocalTestHost,
         lookupImpl: loopbackLookup,
         timeoutMs: 2_000,
       });
@@ -478,8 +499,9 @@ test('trusted Provider output never falls back after caller cancellation or a no
   }
 });
 
-test('trusted Provider output allows proxy-side DNS when Chromium resolution is unavailable', { concurrency: false }, async () => {
+test('trusted Provider output delegates DNS entirely to Chromium without local pre-resolution', { concurrency: false }, async () => {
   let bridgeCalls = 0;
+  let resolverCalls = 0;
   const bridge = systemFetchBridge(async () => {
     bridgeCalls += 1;
     return new Response(Buffer.from('proxy-resolved'), {
@@ -487,6 +509,7 @@ test('trusted Provider output allows proxy-side DNS when Chromium resolution is 
       headers: { 'content-length': '14', 'content-type': 'image/png' },
     });
   }, async () => {
+    resolverCalls += 1;
     const error = new Error('local resolver intentionally unavailable');
     error.code = 'ERR_NAME_NOT_RESOLVED';
     throw error;
@@ -500,25 +523,31 @@ test('trusted Provider output allows proxy-side DNS when Chromium resolution is 
     assert.equal(result.buffer.toString(), 'proxy-resolved');
   });
   assert.equal(bridgeCalls, 1);
+  assert.equal(resolverCalls, 0);
 });
 
-test('trusted Provider output rejects Chromium targets resolving to loopback', { concurrency: false }, async () => {
+test('trusted Provider output still rejects literal private and local-name targets before Chromium', { concurrency: false }, async () => {
   let bridgeCalls = 0;
   const bridge = systemFetchBridge(async () => {
     bridgeCalls += 1;
     throw new Error('blocked targets must never reach Chromium fetch');
-  }, async () => ({
-    endpoints: [{ address: '127.0.0.1', family: 'ipv4' }],
-  }));
+  });
 
   await withGlobalFetch(bridge, async () => {
-    await assert.rejects(
-      safeRemoteMediaFetch('https://provider-output.test/private.png', {
-        trustedProviderOutput: true,
-        timeoutMs: 2_000,
-      }),
-      (error) => error?.code === 'private_address',
-    );
+    for (const url of [
+      'https://127.0.0.1/private.png',
+      'https://[::1]/private.png',
+      'https://device.local/private.png',
+      'https://intranet/private.png',
+    ]) {
+      await assert.rejects(
+        safeRemoteMediaFetch(url, {
+          trustedProviderOutput: true,
+          timeoutMs: 2_000,
+        }),
+        (error) => error?.code === 'private_address',
+      );
+    }
   });
   assert.equal(bridgeCalls, 0);
 });
@@ -541,6 +570,90 @@ test('trusted Provider output accepts the RFC 2544 range used by TUN Fake-IP', {
       timeoutMs: 2_000,
     });
     assert.equal(result.buffer.toString(), 'fake-ip-ok');
+  });
+  assert.equal(bridgeCalls, 1);
+});
+
+test('trusted Provider hostname skips every local resolver classification and leaves routing to Chromium', { concurrency: false }, async () => {
+  let bridgeCalls = 0;
+  let resolverCalls = 0;
+  const dualStackBridge = systemFetchBridge(async () => {
+    bridgeCalls += 1;
+    return new Response(Buffer.from('dual-fake-ip-ok'), {
+      status: 200,
+      headers: { 'content-length': '15', 'content-type': 'image/webp' },
+    });
+  }, async () => {
+    resolverCalls += 1;
+    return {
+      endpoints: [
+        { address: '198.18.0.104', family: 'ipv4' },
+        { address: 'fdfe:dcba:9876::64', family: 'ipv6' },
+      ],
+    };
+  });
+
+  await withGlobalFetch(dualStackBridge, async () => {
+    const result = await safeRemoteMediaFetch('https://provider-output.test/mihomo.webp', {
+      trustedProviderOutput: true,
+      timeoutMs: 2_000,
+    });
+    assert.equal(result.buffer.toString(), 'dual-fake-ip-ok');
+  });
+  assert.equal(bridgeCalls, 1);
+  assert.equal(resolverCalls, 0);
+
+  const mixedPrivateBridge = systemFetchBridge(async () => {
+    bridgeCalls += 1;
+    return new Response(Buffer.from('chromium-owned-route'), {
+      status: 200,
+      headers: { 'content-length': '20', 'content-type': 'image/webp' },
+    });
+  }, async () => {
+    resolverCalls += 1;
+    return {
+      endpoints: [
+        { address: 'not-an-ip', family: 'ipv7' },
+        { address: '192.168.1.20', family: 'ipv4' },
+        { address: 'fd00::20', family: 'ipv6' },
+      ],
+    };
+  });
+
+  await withGlobalFetch(mixedPrivateBridge, async () => {
+    const result = await safeRemoteMediaFetch('https://provider-output.test/private-or-synthetic.webp', {
+      trustedProviderOutput: true,
+      timeoutMs: 2_000,
+    });
+    assert.equal(result.buffer.toString(), 'chromium-owned-route');
+  });
+  assert.equal(bridgeCalls, 2);
+  assert.equal(resolverCalls, 0);
+});
+
+test('trusted Provider streaming download accepts Mihomo IPv6 Fake-IP', { concurrency: false }, async (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 't8-mihomo-ipv6-download-'));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  const targetPath = path.join(tmpDir, 'result.webp');
+  let bridgeCalls = 0;
+  const bridge = systemFetchBridge(async () => {
+    bridgeCalls += 1;
+    return new Response(Buffer.from('saved-through-tun'), {
+      status: 200,
+      headers: { 'content-length': '17', 'content-type': 'image/webp' },
+    });
+  }, async () => ({
+    endpoints: [{ address: 'fdfe:dcba:9876::35', family: 'ipv6' }],
+  }));
+
+  await withGlobalFetch(bridge, async () => {
+    const result = await safeRemoteMediaDownload(
+      'https://provider-output.test/mihomo-file.webp',
+      targetPath,
+      { trustedProviderOutput: true, timeoutMs: 2_000 },
+    );
+    assert.equal(result.byteSize, 17);
+    assert.equal(fs.readFileSync(targetPath, 'utf8'), 'saved-through-tun');
   });
   assert.equal(bridgeCalls, 1);
 });

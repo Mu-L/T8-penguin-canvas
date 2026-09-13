@@ -28,6 +28,7 @@ const TUN_PUBLIC_DNS_SERVERS = Object.freeze(
     .slice(0, 4),
 );
 const TUN_DOH_ENDPOINTS = Object.freeze([
+  Object.freeze({ address: '223.5.5.5', servername: 'dns.alidns.com', path: '/resolve' }),
   Object.freeze({ address: '1.1.1.1', servername: 'cloudflare-dns.com' }),
   Object.freeze({ address: '8.8.8.8', servername: 'dns.google' }),
 ]);
@@ -74,15 +75,6 @@ function parseIpv4Number(value) {
 function matchesIpv4Cidr(value, network, prefixLength) {
   const mask = prefixLength === 0 ? 0 : (0xffffffff << (32 - prefixLength)) >>> 0;
   return ((value & mask) >>> 0) === ((network & mask) >>> 0);
-}
-
-function isTunFakeAddress(value) {
-  const ipv4 = ipv4NumberFromAddress(value);
-  return ipv4 !== null && matchesIpv4Cidr(
-    ipv4,
-    TUN_FAKE_IPV4_NETWORK,
-    TUN_FAKE_IPV4_PREFIX_LENGTH,
-  );
 }
 
 // IANA special-purpose ranges that are not ordinary globally-routable unicast
@@ -145,6 +137,50 @@ function matchesIpv6Cidr(value, network, prefixLength) {
   if (remainingBits === 0) return true;
   const mask = (0xff << (8 - remainingBits)) & 0xff;
   return (value[fullBytes] & mask) === (network[fullBytes] & mask);
+}
+
+function tunFakeIpv6Ranges() {
+  const configured = String(process.env.T8_TUN_FAKE_IPV6_CIDRS || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const cidrs = ['fdfe:dcba:9876::/64', ...configured];
+  const seen = new Set();
+  const ranges = [];
+  for (const cidr of cidrs) {
+    const separator = cidr.lastIndexOf('/');
+    if (separator <= 0) continue;
+    const prefixLength = Number(cidr.slice(separator + 1));
+    const network = parseIpv6Bytes(cidr.slice(0, separator));
+    if (!network || !Number.isInteger(prefixLength) || prefixLength < 0 || prefixLength > 128) continue;
+    const key = `${network.toString('hex')}/${prefixLength}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    ranges.push(Object.freeze({ network, prefixLength }));
+  }
+  return Object.freeze(ranges);
+}
+
+// Clash/Mihomo uses 198.18.0.0/15 and fdfe:dcba:9876::/64 as synthetic
+// routing tokens in Fake-IP mode. They are exempted only when a hostname was
+// resolved by the active TUN; literal Fake-IP URLs and ordinary private
+// addresses still fail closed. Trusted Provider downloads additionally use
+// Chromium's system route, so the TUN keeps ownership of the real connection.
+const TUN_FAKE_IPV6_RANGES = tunFakeIpv6Ranges();
+
+function isTunFakeAddress(value) {
+  const ipv4 = ipv4NumberFromAddress(value);
+  if (ipv4 !== null) {
+    return matchesIpv4Cidr(
+      ipv4,
+      TUN_FAKE_IPV4_NETWORK,
+      TUN_FAKE_IPV4_PREFIX_LENGTH,
+    );
+  }
+  const ipv6 = parseIpv6Bytes(value);
+  return Boolean(ipv6 && TUN_FAKE_IPV6_RANGES.some(({ network, prefixLength }) => (
+    matchesIpv6Cidr(ipv6, network, prefixLength)
+  )));
 }
 
 const BLOCKED_IPV6_RANGES = Object.freeze([
@@ -292,7 +328,7 @@ function resolveDohRecordType(hostname, endpoint, type) {
       port: 443,
       servername: endpoint.servername,
       method: 'GET',
-      path: `/dns-query?name=${encodeURIComponent(hostname)}&type=${encodeURIComponent(type)}`,
+      path: `${String(endpoint.path || '/dns-query').replace(/\?+$/, '')}?name=${encodeURIComponent(hostname)}&type=${encodeURIComponent(type)}`,
       agent: false,
       headers: {
         Host: endpoint.servername,
@@ -448,19 +484,40 @@ async function resolvePublicAddresses(
     return { address, family, detectedFamily };
   });
   // A Fake-IP returned for a hostname is a routing token owned by the active
-  // TUN, not the real destination. Keep it as the first connection path so
+  // TUN, not the real destination. Keep all valid synthetic answers (IPv4
+  // first, then IPv6) as the connection paths so
   // Clash/sing-box can apply the user's domain rules. Literal Fake-IP URLs are
   // still rejected above. If that connection fails, the caller falls back to
   // independently resolved public addresses without weakening the SSRF policy.
-  const tunFakeRecord = normalizedRecords.find((record) => isTunFakeAddress(record.address));
-  if (tunFakeRecord && acceptTunFake) {
-    return [{
-      address: tunFakeRecord.address,
-      family: tunFakeRecord.family,
-      tunFake: true,
-    }];
+  const tunFakeRecords = normalizedRecords.filter((record) => (
+    record.detectedFamily
+    && record.family === record.detectedFamily
+    && isTunFakeAddress(record.address)
+  ));
+  if (tunFakeRecords.length && normalizedRecords.some((record) => (
+    !record.detectedFamily
+    || record.family !== record.detectedFamily
+    || (!bypass && isPrivateAddress(record.address) && !isTunFakeAddress(record.address))
+  ))) {
+    throw remoteMediaError('private_address', '远程地址不是全球可路由单播地址，已拒绝访问。');
   }
-  if (tunFakeRecord) {
+  if (tunFakeRecords.length && acceptTunFake) {
+    const seenTunRecords = new Set();
+    return tunFakeRecords
+      .filter((record) => {
+        const key = `${record.family}:${record.address}`;
+        if (seenTunRecords.has(key)) return false;
+        seenTunRecords.add(key);
+        return true;
+      })
+      .map((record) => ({
+        address: record.address,
+        family: record.family,
+        tunFake: true,
+      }))
+      .sort((left, right) => left.family === right.family ? 0 : (left.family === 4 ? -1 : 1));
+  }
+  if (tunFakeRecords.length) {
     records = await publicLookupImpl(normalizedHostname);
   }
   return normalizedPublicRecords(records, bypass);
@@ -853,11 +910,15 @@ async function openSafeRemoteResponse(inputUrl, options, state, initialRedirectC
     const target = parseRemoteUrl(currentUrl, options);
     if (previousTarget && previousTarget.origin !== target.origin) sensitiveHeadersAllowed = false;
     const privateTestSetting = options.allowPrivateForTests;
+    const trustedProviderHostname = options.trustedProviderOutput === true;
+    if (trustedProviderHostname && trustedSystemHostnameBlocked(target.hostname, privateTestSetting)) {
+      throw remoteMediaError('private_address', 'Provider 结果地址使用了字面量本机、内网或本地域名，已拒绝访问。');
+    }
     let pinnedCandidates = await withinDeadline(
       resolvePublicAddresses(
         target.hostname,
         options.lookupImpl || dns.lookup,
-        privateTestSetting,
+        trustedProviderHostname ? true : privateTestSetting,
         options.publicLookupImpl || resolveTunPublicDns,
         options.acceptTunFake !== false,
       ),
@@ -1081,56 +1142,15 @@ function trustedSystemHostnameBlocked(hostname, allowPrivateForTests) {
     || withoutTrailingDot.endsWith('.home.arpa');
 }
 
-function trustedSystemResolvedAddresses(result) {
-  const endpoints = Array.isArray(result?.endpoints) ? result.endpoints : [];
-  return endpoints.map((endpoint) => {
-    const address = normalizeAddress(endpoint?.address);
-    const detectedFamily = net.isIP(address);
-    const familyName = String(endpoint?.family || '').trim().toLowerCase();
-    const declaredFamily = familyName === 'ipv4' ? 4 : (familyName === 'ipv6' ? 6 : detectedFamily);
-    return { address, detectedFamily, declaredFamily };
-  });
-}
-
-async function validateTrustedSystemTarget(target, options, state) {
+async function validateTrustedSystemTarget(target, options) {
   if (trustedSystemHostnameBlocked(target.hostname, options.allowPrivateForTests)) {
-    throw remoteMediaError('private_address', 'Provider 结果地址指向本机或内网，已拒绝访问。');
+    throw remoteMediaError('private_address', 'Provider 结果地址使用了字面量本机、内网或本地域名，已拒绝访问。');
   }
-  const metadata = systemFetchBridgeMetadata();
-  const resolveHost = metadata?.resolveHost;
-  if (typeof resolveHost !== 'function') {
-    await withinDeadline(resolvePublicAddresses(
-      target.hostname,
-      options.lookupImpl || dns.lookup,
-      options.allowPrivateForTests,
-      options.publicLookupImpl || resolveTunPublicDns,
-      options.acceptTunFake !== false,
-    ), state);
-    return;
-  }
-
-  let resolved;
-  try {
-    resolved = await withinDeadline(resolveHost(target.hostname), state);
-  } catch (_) {
-    // A PAC or authenticated proxy may intentionally resolve the destination
-    // remotely, so local Chromium DNS can fail while net.fetch still succeeds.
-    // This path is only reachable for authenticated Provider result URLs;
-    // literal/private/local hostnames were rejected above and user URLs keep
-    // the original DNS-pinned transport.
-    return;
-  }
-  const endpoints = trustedSystemResolvedAddresses(resolved);
-  if (!endpoints.length) return;
-  const bypass = privateAddressAllowedForTests(options.allowPrivateForTests, target.hostname);
-  const unsafe = endpoints.some((endpoint) => (
-    !endpoint.detectedFamily
-    || endpoint.declaredFamily !== endpoint.detectedFamily
-    || (!bypass && isPrivateAddress(endpoint.address) && !isTunFakeAddress(endpoint.address))
-  ));
-  if (unsafe) {
-    throw remoteMediaError('private_address', 'Provider 结果地址解析到本机或内网，已拒绝访问。');
-  }
+  // This URL came from a Provider result/status contract, not from the generic
+  // user URL fetcher. Chromium must own DNS, PAC, system proxy, TUN and VPN
+  // routing end-to-end. Pre-classifying resolveHost endpoints recreates the
+  // exact false-positive whenever a proxy adopts a new synthetic IPv4/IPv6
+  // range, so hostname targets deliberately skip all resolved-address checks.
 }
 
 async function openTrustedSystemResponse(target, options, state, sensitiveHeadersAllowed) {
@@ -1319,7 +1339,7 @@ async function downloadTrustedProviderOutputToFile(
   while (true) {
     const target = parseRemoteUrl(currentUrl, options);
     if (previousTarget && previousTarget.origin !== target.origin) sensitiveHeadersAllowed = false;
-    await validateTrustedSystemTarget(target, options, state);
+    await validateTrustedSystemTarget(target, options);
     const { controller, response } = await openTrustedSystemResponse(
       target,
       options,
@@ -1366,7 +1386,7 @@ async function fetchTrustedProviderOutput(inputUrl, options, state, initialRedir
   while (true) {
     const target = parseRemoteUrl(currentUrl, options);
     if (previousTarget && previousTarget.origin !== target.origin) sensitiveHeadersAllowed = false;
-    await validateTrustedSystemTarget(target, options, state);
+    await validateTrustedSystemTarget(target, options);
     const { controller, response } = await openTrustedSystemResponse(
       target,
       options,

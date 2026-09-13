@@ -124,6 +124,9 @@ test('non-public address classifier only permits ordinary globally-routable unic
   assert.equal(isLoopbackAddress('::ffff:8.8.8.8'), false);
   assert.equal(isTunFakeAddress('198.18.0.1'), true);
   assert.equal(isTunFakeAddress('198.19.255.254'), true);
+  assert.equal(isTunFakeAddress('fdfe:dcba:9876::1'), true);
+  assert.equal(isTunFakeAddress('fdfe:dcba:9876:0:ffff::64'), true);
+  assert.equal(isTunFakeAddress('fdfe:dcba:9877::1'), false);
   assert.equal(isTunFakeAddress('192.168.1.1'), false);
 });
 
@@ -198,6 +201,30 @@ test('hostname-bound TUN Fake-IP stays on the TUN path and explicit fallback use
     async () => [{ address: '1.1.1.1', family: 4 }],
   );
   assert.deepEqual(mixedTunAnswer, { address: '198.18.12.35', family: 4, tunFake: true });
+
+  const ipv6TunAnswer = await resolvePublicAddress(
+    'ipv6-tun.example',
+    async () => [{ address: 'fdfe:dcba:9876::64', family: 6 }],
+    false,
+    async () => [{ address: '1.1.1.1', family: 4 }],
+  );
+  assert.deepEqual(ipv6TunAnswer, { address: 'fdfe:dcba:9876::64', family: 6, tunFake: true });
+
+  await assert.rejects(
+    resolvePublicAddress(
+      'tun-rebinding.example',
+      async () => [
+        { address: 'fdfe:dcba:9876::64', family: 6 },
+        { address: '192.168.1.20', family: 4 },
+      ],
+    ),
+    (error) => error?.code === 'private_address',
+  );
+
+  await assert.rejects(
+    resolvePublicAddress('fdfe:dcba:9876::64'),
+    (error) => error?.code === 'private_address',
+  );
 
   const publicFallback = await resolvePublicAddress(
     'cdn.example',

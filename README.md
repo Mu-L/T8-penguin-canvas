@@ -10,20 +10,20 @@ https://www.runninghub.cn/?inviteCode=rh-v1121
 My favorite girl Go YounJung
 # 🐧 贞贞的无限画布（企鹅共创版） · T8-penguin-canvas
 
-> AI 节点画布工作流工具 · Web + Electron 桌面端｜v3.1.7
+> AI 节点画布工作流工具 · Web + Electron 桌面端｜v3.1.8
 >
 > GitHub：<https://github.com/T8mars/T8-penguin-canvas>
 
-> 2026-09-13：v3.1.7 统一 AI Provider 超时合同：图片、视频、音频等媒体生成的提交、响应读取、上传、轮询、恢复与结果回下载生产链路至少保留 15 分钟；LLM 默认且最长 3 分钟。连接探测、重试间隔、界面防抖和本地媒体工具继续使用各自短边界；外部/用户环境证据按 `owner-approved-post-release-v3.1.7` 后补且不视为通过。
+> 2026-09-13：v3.1.8 修复 VPN/TUN 环境下 Provider 已生成结果却被本机 Fake-IP 误判拦截，以及刷新或重启后终端日志归零。受信 Provider 域名结果交给 Electron/Chromium 的系统代理链处理，不再依赖固定 Fake-IP 网段；恢复日志保留 14 天并脱敏。外部/用户环境证据按 `owner-approved-post-release-v3.1.8` 后补且不视为通过。
 
 一个面向 AI 创作的 **节点式画布**：拖拽节点、连线编排、生成图像 / 视频 / 音频、调用 LLM、串接 RunningHub 工作流，叠加批量执行、智能对齐、打组、主题模板与终端日志。Web 浏览器和桌面端均可使用。
 
-![status](https://img.shields.io/badge/version-v3.1.7-brightgreen) ![node](https://img.shields.io/badge/node-83-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
+![status](https://img.shields.io/badge/version-v3.1.8-brightgreen) ![node](https://img.shields.io/badge/node-83-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
 
 ## 💻 桌面版下载
 
-- **Windows x64**：在 [v3.1.7 Release](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.1.7) 下载 `T8-PenguinCanvas-Setup-3.1.7.exe`。
-- **macOS Apple Silicon**：在 [v3.1.7 Release](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.1.7) 下载 `T8-PenguinCanvas-3.1.7-mac-arm64.dmg`。支持 M1/M2/M3/M4 等 arm64 Mac，最低 macOS 12，使用 ad-hoc 完整性签名且尚无 Apple Developer ID 公证；首次打开请在 Finder 中右键应用并选择“打开”。Intel Mac 暂不支持。
+- **Windows x64**：在 [v3.1.8 Release](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.1.8) 下载 `T8-PenguinCanvas-Setup-3.1.8.exe`。
+- **macOS Apple Silicon**：在 [v3.1.8 Release](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.1.8) 下载 `T8-PenguinCanvas-3.1.8-mac-arm64.dmg`。支持 M1/M2/M3/M4 等 arm64 Mac，最低 macOS 12，使用 ad-hoc 完整性签名且尚无 Apple Developer ID 公证；首次打开请在 Finder 中右键应用并选择“打开”。Intel Mac 暂不支持。
 
 ---
 
@@ -43,6 +43,7 @@ My favorite girl Go YounJung
 ## ✨ 功能亮点
 
 - 🎨 **83 个节点**，覆盖文本 / 图像 / 视频 / 音频 / LLM / RunningHub / ComfyUI / 3D / 工具 / 辅助 / 工具箱 / 输出预览 / 上传素材 / 素材集 / 火山引擎素材库 / 批量打标 / 随机路由 / Story 全自动制片 / 剧本大师 / Creator Agent 作品化 / 多语言本地化大师 / MiniMax H3 / MiniMax Music3 / Seedance 2.0 提示词增强器 / MiniMax H3 官方提示词增强器 / Seedance 2.5 / FlashVSR 视频超分 / 白模预演 / MV 音乐大师
+- 🌐🧾 **[v3.1.8 VPN/TUN 与终端日志可靠性版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.1.8)**：受信 Provider 的域名结果由 Electron/Chromium 完整接管 DNS、PAC、系统代理、TUN 与 VPN，不再因 IPv4/IPv6 Fake-IP 网段变化把已生成素材判为内网；系统通道失败时仍可对同一结果执行幂等 GET 回收。终端日志刷新或重启后恢复最近 14 天记录，持久副本自动脱敏并受数量限制。
 - ⏱️ **[v3.1.7 Provider 超时可靠性版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.1.7)**：移除媒体生成通用代理的 90 秒提前终止，统一保护内置/扩展 Provider、RunningHub/FAL 工具箱、导演分镜与崩溃恢复等链路，当前和未来媒体模型生产等待不少于 15 分钟；LLM 独立限制为最长 3 分钟，避免文本请求无界占用。
 - 🗂️🎵 **[v3.1.6 生成历史、Creator Skill 与 Suno V6 版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.1.6)**：生成历史新增不可变来源、参数快照、素材找回、放回画布与关闭保存保护；Creator 新增离线签名技能目录、导入/启停/固定版本与首批三项产品创作技能；工坊新增 Suno V6 / V6 Wild / V6 Mini，平价小屋新增 Create Model、Upload Cover、Upload Extend 三动作和四份无密钥工作流。旧默认、旧画布与原 Provider 协议保持兼容，仍未验收范围见 Release notes。
 - 🖼️🎬 **[v3.1.5 GPT Image 2.5、Image G v2.5、MiniMax-H3 V2 与 Vosr2 版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.1.5)**：贞贞的AI工坊 GPT2 TAB 新增 Flare/Sunburst 标准、2K、4K 六模型，支持 1–10 张输出和最多 14 张有序参考图；平价AI小屋同 TAB 新增 Image G v2.5 Lowprice/Flare/Sunburst 三模型；Hailuo TAB 新增 `MiniMax-H3` V2 多模态视频及四份无凭据工作流；图像和视频节点新增 Vosr2 单素材超分，分别固定输出 4K 和 2K。全部新模型均完成真实 Provider 验收，旧默认值、协议和画布不迁移。
