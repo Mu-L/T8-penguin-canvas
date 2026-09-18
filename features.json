@@ -1,7 +1,27 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
-  "version": "3.1.8",
-  "lastUpdated": "2026-09-13-v3.1.8-released-dual-platform-verified",
+  "version": "3.1.9",
+  "lastUpdated": "2026-09-18-v3.1.9-release-prepared-not-published",
+  "electronReleaseV319": {
+    "status": "owner-authorized-release-prepared-not-published",
+    "date": "2026-09-18",
+    "releaseIncluded": false,
+    "version": "3.1.9",
+    "tag": "v3.1.9",
+    "scope": "Creator provider settings event-lifetime fix and production-handler regression; preserve every existing model, default and canvas contract.",
+    "verification": "Focused Creator/i18n/Electron suites 99/99 and TypeScript passed; formal packaging, fixed-source publication and full asset verification still required.",
+    "evidenceBoundary": "owner-approved-post-release-v3.1.9: external affected-user/install/F8-F10 evidence deferred, not passed; technical gates and Windows updater integrity cannot be deferred. Mac may be deferred only if GitHub quota is insufficient.",
+    "details": "docs/release-v3.1.9.md"
+  },
+  "creatorSettingsEventLifetime20260918": {
+    "status": "targeted-verified-v3.1.9-release-prepared",
+    "date": "2026-09-18",
+    "releaseIncluded": false,
+    "issue": "https://github.com/T8mars/T8-penguin-canvas/issues/29",
+    "summary": "Capture the Creator provider select value before queuing its functional state updater; do not retain a React event whose currentTarget is cleared after dispatch.",
+    "verification": "Production JSX handler regression reproduced null.value before the fix; new tests 3/3 and focused Creator/i18n/Electron suites 99/99 passed, as did TypeScript. v3.1.9 release is authorized but not yet published; Mac affected-user verification remains pending.",
+    "details": "docs/github-issues-20260918.md"
+  },
   "tunIpv6AndTerminalLogRecovery20260913": {
     "status": "released-v3.1.8-targeted-verified",
     "date": "2026-09-13",

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { normalizeUiLocale, resolveUiLocalePreference } from '../src/i18n';
+import { normalizeUiLocale, resolveUiLocalePreference } from '../src/i18n/index';
 import { pseudoLocalize } from '../src/i18n/pseudo';
 import { ENGLISH_NODE_CATALOG, getNodeSearchText, localizeNodeMeta } from '../src/i18n/nodeCatalog';
 import { enUS, zhCN } from '../src/i18n/resources';

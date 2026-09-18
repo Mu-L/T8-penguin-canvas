@@ -1960,7 +1960,11 @@ export default function CreatorAgentPanelV2(props: CreatorAgentPanelV2Props) {
                     <div className="t8-creator-v2-settings-readiness is-empty" role="note"><span>{settingsReadinessMessage}</span><button type="button" className="is-primary" onClick={openApiSettings}>{copy('配置 API', 'Set up API')}</button></div>
                   ) : <>
                     {settingsReadinessMessage && <div className="t8-creator-v2-settings-readiness" role="note"><span>{settingsReadinessMessage}</span><button type="button" onClick={openApiSettings}>{copy('配置 API', 'Set up API')}</button></div>}
-                    <label><span>{copy('服务渠道', 'Service provider')}</span><select ref={settingsFirstSelectRef} value={settingsDraft.providerId} disabled={isSettingsBusy} onChange={(event) => setSettingsDraft((current) => ({ ...current, providerId: event.currentTarget.value, llm: null, image: null, video: null }))}>
+                    <label><span>{copy('服务渠道', 'Service provider')}</span><select ref={settingsFirstSelectRef} value={settingsDraft.providerId} disabled={isSettingsBusy} onChange={(event) => {
+                      // React clears currentTarget after dispatch; queued/replayed updates must only capture the value.
+                      const providerId = event.currentTarget.value;
+                      setSettingsDraft((current) => ({ ...current, providerId, llm: null, image: null, video: null }));
+                    }}>
                       <option value="auto">{copy('智能选择（推荐）', 'Automatic (recommended)')}</option>
                       {catalog?.providers.map((provider) => <option key={provider.id} value={provider.id} disabled={!provider.configured}>{formatCreatorProviderLabel(provider.id, provider.label, isChinese)}{provider.configured ? '' : copy('（未配置）', ' (not configured)')}</option>)}
                     </select></label>
