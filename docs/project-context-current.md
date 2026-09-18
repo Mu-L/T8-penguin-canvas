@@ -2,16 +2,17 @@
 
 更新：2026-09-18。仅维护当前事实；长期规则见根 `SKILL.md` 和 `AGENTS.md`。本页预算 80 行 / 8 KiB，旧检查点迁入专题，不追加长日报。
 
-- 默认目录 `E:\PenguinPravite\T8-penguin-canvas`；branch `codex/release-v3.0.8-volcengine-assets-ux`，common dir `.git`。v3.1.8 正式源码与 Tag 固定为 `4d374bd14bab68a6ac7daf842567e79652962872`，不得移动；实际开工仍以 git/worktree 门为准。
-- package 当前版本为 `3.1.9`，用户已明确授权 Windows 正式发布和自动更新，Mac 仅在 GitHub 额度不足时延期。发布准备只纳入 Creator 渠道选择事件生命周期修复，当前尚未打包或发布；详情见[发布专题](release-v3.1.9.md)。
+- 默认目录 `E:\PenguinPravite\T8-penguin-canvas`；branch `codex/release-v3.0.8-volcengine-assets-ux`，common dir `.git`。v3.1.9 正式源码与 Tag 固定为 `adec4754cee4ccbcd44f0063fe8b7858bf3e6944`，不得移动；实际开工仍以 git/worktree 门为准。
+- package 当前版本为 `3.1.9`，只纳入 Creator 渠道选择事件生命周期修复；Windows 唯一正式包、同源 Mac 包、自动更新六资产、Latest 与独立完整回下载均已完成。详情见[发布专题](release-v3.1.9.md)。
 - v3.1.9 真实受影响用户、安装环境及 F8–F10 证据按 `owner-approved-post-release-v3.1.9` 后补且不视为通过；正式技术门、固定源码、Windows 自动更新与完整回下载不可延期。
 
 ## 当前检查点
 
 | 事项 | 当前事实与下一步 |
 | --- | --- |
-| GitHub Issues 复核 | #29 的 Creator 渠道选择事件生命周期缺陷已本地修复，真实源码处理器旧版复现、修复后专项3/3及五套回归99/99、TypeScript通过；已纳入授权的v3.1.9发布准备，Mac用户“仅打开面板”仍需定位。#24/#25继续保留真实验收边界，详见[专题](github-issues-20260918.md)。 |
-| v3.1.8 发布 | 已完成：固定源码/Tag `4d374bd14bab68a6ac7daf842567e79652962872`、Windows 唯一正式包与自动更新三资产、同源 [Mac workflow](https://github.com/T8mars/T8-penguin-canvas/actions/runs/34741074336) 三资产、GitHub [Latest Release](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.1.8) 及六资产完整回下载均通过。首次 Windows NSIS 期主机崩溃未留下完整包或 Release，恢复链复用同一 recovery 后封印并清除。详见 `feature electronReleaseV318` 与 `feature release`。 |
+| GitHub Issues 复核 | #29 的 Creator 渠道选择修复已随v3.1.9双平台发布并回复用户，专项3/3及五套回归99/99、TypeScript与发布专项29/29通过；用户“仅打开面板”仍需真实Mac定位。#24/#25继续保留验收边界，详见[专题](github-issues-20260918.md)。 |
+| v3.1.9 发布 | Windows 唯一正式链与同源[Mac任务](https://github.com/T8mars/T8-penguin-canvas/actions/runs/35354742555)成功，稳定 Latest/两个更新清单/六资产独立完整回下载通过，Windows资产追加前后不变，recovery已清除；Mac仍未公证，固定Tag不移动。详见[发布专题](release-v3.1.9.md)。 |
+| v3.1.8 历史发布 | 六资产已完成同源构建和完整回下载，历史Tag/资产冻结不移动；目前Latest为v3.1.9。旧版发布及首次主机崩溃恢复事实保留在 `feature electronReleaseV318` 与[Mac流程](macos-release.md)。 |
 | 文档轻量化 | 已完成：根手册与当前上下文均在预算内，原文逐字节归档；features/roadmap 按需读。8组校验通过，1353份源码/配置/原测试/技能散列未变，详见[校验记录](../local-private/context-maintenance/verification.json)。后续遵守手册开头预算。 |
 | 生成历史 | 当前支持范围已随 v3.1.6 发布；19个完整客户端场景/25项、React UI 13项、限定回归56/56通过，通过进程正常退出/强制0/残留0。完整状态与剩余范围见[验收清单](generation-history-acceptance-status.md)及[证据索引](generation-history-acceptance-20260912.md)。 |
 | Provider 超时策略 | 已随 v3.1.7 发布：移除媒体生成通用代理 90 秒边界，并覆盖扩展适配器、工具箱自定义轮询、导演分镜与崩溃恢复；媒体全链路最低 15 分钟，LLM 默认且最长 3 分钟，连接探测/重试间隔不变。详情用 `feature providerTimeoutPolicy20260913` 查询。 |

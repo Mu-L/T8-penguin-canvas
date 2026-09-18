@@ -1,25 +1,30 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "3.1.9",
-  "lastUpdated": "2026-09-18-v3.1.9-release-prepared-not-published",
+  "lastUpdated": "2026-09-18-v3.1.9-dual-platform-released-download-verified",
   "electronReleaseV319": {
-    "status": "owner-authorized-release-prepared-not-published",
+    "status": "released-dual-platform-verified",
     "date": "2026-09-18",
-    "releaseIncluded": false,
+    "releaseIncluded": true,
     "version": "3.1.9",
     "tag": "v3.1.9",
+    "latest": true,
+    "sourceCommit": "adec4754cee4ccbcd44f0063fe8b7858bf3e6944",
+    "publishedAt": "2026-09-18T14:11:33Z",
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.1.9",
+    "macWorkflow": "https://github.com/T8mars/T8-penguin-canvas/actions/runs/35354742555",
     "scope": "Creator provider settings event-lifetime fix and production-handler regression; preserve every existing model, default and canvas contract.",
-    "verification": "Focused Creator/i18n/Electron suites 99/99 and TypeScript passed; formal packaging, fixed-source publication and full asset verification still required.",
+    "verification": "Creator/i18n/Electron 99/99, release/packaging regression 29/29 and TypeScript passed; unique Windows formal build, sealed provenance and stable Latest verified. Same-tag Mac workflow succeeded; six assets independently fully downloaded and both updater SHA-512 checks passed. Post-Mac Windows bytes remain unchanged.",
     "evidenceBoundary": "owner-approved-post-release-v3.1.9: external affected-user/install/F8-F10 evidence deferred, not passed; technical gates and Windows updater integrity cannot be deferred. Mac may be deferred only if GitHub quota is insufficient.",
     "details": "docs/release-v3.1.9.md"
   },
   "creatorSettingsEventLifetime20260918": {
-    "status": "targeted-verified-v3.1.9-release-prepared",
+    "status": "released-v3.1.9-targeted-verified",
     "date": "2026-09-18",
-    "releaseIncluded": false,
+    "releaseIncluded": true,
     "issue": "https://github.com/T8mars/T8-penguin-canvas/issues/29",
     "summary": "Capture the Creator provider select value before queuing its functional state updater; do not retain a React event whose currentTarget is cleared after dispatch.",
-    "verification": "Production JSX handler regression reproduced null.value before the fix; new tests 3/3 and focused Creator/i18n/Electron suites 99/99 passed, as did TypeScript. v3.1.9 release is authorized but not yet published; Mac affected-user verification remains pending.",
+    "verification": "Production JSX handler regression reproduced null.value before the fix; new tests 3/3 and focused Creator/i18n/Electron suites 99/99 passed, as did TypeScript. Included in fixed v3.1.9 Windows/Mac release; Mac affected-user opening-only symptom verification remains pending.",
     "details": "docs/github-issues-20260918.md"
   },
   "tunIpv6AndTerminalLogRecovery20260913": {
@@ -3136,36 +3141,34 @@
     ]
   },
   "release": {
-    "status": "released-v3.1.8-dual-platform-verified",
-    "version": "3.1.8",
-    "date": "2026-09-13",
-    "tag": "v3.1.8",
+    "status": "released-v3.1.9-dual-platform-verified",
+    "version": "3.1.9",
+    "date": "2026-09-18",
+    "tag": "v3.1.9",
     "latest": true,
-    "sourceCommit": "4d374bd14bab68a6ac7daf842567e79652962872",
-    "publishedAt": "2026-09-13T05:44:42Z",
+    "sourceCommit": "adec4754cee4ccbcd44f0063fe8b7858bf3e6944",
+    "publishedAt": "2026-09-18T14:11:33Z",
     "draft": false,
     "prerelease": false,
-    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.1.8",
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.1.9",
+    "details": "docs/release-v3.1.9.md",
     "verification": [
-      "固定源码/Tag 4d374bd14bab68a6ac7daf842567e79652962872 已发布为非草稿、非预发布 GitHub Latest；origin/main 与发布分支先推送该固定源码，发布后证据提交不移动 Tag。",
-      "Windows 正式链首次在 NSIS 压缩期随主机崩溃终止，未封印 recovery、未产生完整安装包、未创建 Release；恢复后复用同一 release recovery，完成唯一正式包、7 文件 app.asar、双运行时、native rebuild、NSIS、provenance、sealed recovery、上传与远端完整回下载，recovery 已清除。",
-      "真实 macOS arm64 workflow https://github.com/T8mars/T8-penguin-canvas/actions/runs/34741074336 成功完成同源构建、ad-hoc 签名、DMG/ZIP/更新清单、追加上传和 runner 回下载；本机独立完整回下载再次通过。",
-      "六资产的 GitHub 大小/SHA-256、latest.yml 安装包 SHA-512、latest-mac.yml ZIP SHA-512、Tag、Release target 与 macSource 对账一致；Mac 追加后的 Windows 全量回下载完成资产字节核对，GitHub 公共 Release 页面复核仍为 Latest 且指向固定源码。",
-      "真实受影响 VPN/TUN 用户、用户旧库、安装升级、外部设备、多端协作与 F8-F10 只按 owner-approved-post-release-v3.1.8 后补，不视为已经通过。"
+      "Fixed v3.1.9 source/Tag published as stable Latest; unique Windows formal build and three-asset full download/size/SHA-256/updater SHA-512 passed; sealed recovery cleared.",
+      "Same-source Apple Silicon workflow 35354742555 succeeded; six assets independently fully downloaded, both updater SHA-512 checks passed, and post-Mac Windows assets remain unchanged. External affected-user/install/F8-F10 evidence deferred, not passed."
     ],
     "assets": {
-      "T8-PenguinCanvas-Setup-3.1.8.exe": "1378595394 bytes / sha256 4f72a1d7e9e3a0c843a60b69dd368981a01f705871b5d62df5f2180c30fcc624",
-      "T8-PenguinCanvas-Setup-3.1.8.exe.blockmap": "1438130 bytes / sha256 07fb270529568050e8f0910ec5a215837ab794fc23d939ab628681e6b5583972",
-      "latest.yml": "362 bytes / sha256 34b8b17831c386ff31e9750cf265c50f0dc4304b820ba1d82799c6c0a7210028",
-      "T8-PenguinCanvas-3.1.8-mac-arm64.dmg": "514426604 bytes / sha256 f7f1854720d52e02ee23c24ae25214063d9f87cde2267b06f3f3889b92b3247c",
-      "T8-PenguinCanvas-3.1.8-mac-arm64.zip": "506438015 bytes / sha256 7a0458533c537c69b22c5274aae8ca90d83208ec4b72cf3291fc2a5140a42ae9",
-      "latest-mac.yml": "536 bytes / sha256 c5202cbbd0643ca35a27c0a1b74b9fc08dbf97407a693d57cef61019e61373ad"
+      "T8-PenguinCanvas-Setup-3.1.9.exe": "1375853074 bytes / sha256 2d39f91baf788ded3d2a84bb3217b34e54c2f7d761fb8763c248d7470f2e8e38",
+      "T8-PenguinCanvas-Setup-3.1.9.exe.blockmap": "1434362 bytes / sha256 1e4c0227078f3684e59a502981ba7c832aa6ea8c350fe7802a8b15ee36c5f268",
+      "latest.yml": "362 bytes / sha256 548febff374e039318bbfb2ca360d7c0400b0faa625614eb8668318399a5a77b",
+      "T8-PenguinCanvas-3.1.9-mac-arm64.dmg": "514347610 bytes / sha256 addc8270600a1e28389b4589bd9740e705ad1600e9a00a2672be9be2be5e8c77",
+      "T8-PenguinCanvas-3.1.9-mac-arm64.zip": "506437985 bytes / sha256 da036f4f1313b73fd8970ca93e926a981efca1f392c27b69fcbaa45ace1da60b",
+      "latest-mac.yml": "536 bytes / sha256 47752e9b3945115d5295e5cc12dc65ba86d848b15423af463c2436218f50983b"
     }
   },
   "versionSequencePolicy": {
     "status": "active",
     "date": "2026-07-30",
-    "currentVersion": "3.1.8",
+    "currentVersion": "3.1.9",
     "rules": [
       "版本号每一段只使用 0-9；v2.6.9 的下一正式版本固定为 v2.7.0。",
       "禁止创建、打包、推送、打 tag、发布或写入自动更新元数据为 v2.6.10。",
@@ -3202,6 +3205,7 @@
       "v3.1.5 的下一正式版本固定为 v3.1.6。",
       "v3.1.6 的下一正式版本固定为 v3.1.7。",
       "v3.1.7 的下一正式版本固定为 v3.1.8。",
+      "v3.1.8 的下一正式版本固定为 v3.1.9；之后为 v3.2.0，禁止 v3.1.10。",
       "后续改版本前必须同步核对 package.json、package-lock.json、README、features.json、项目 SKILL.md、Release notes、自动更新元数据和 Git tag。"
     ]
   },

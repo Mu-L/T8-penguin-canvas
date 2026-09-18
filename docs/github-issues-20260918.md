@@ -31,3 +31,4 @@
 - [#29 最小修复与 Mac 复验请求](https://github.com/T8mars/T8-penguin-canvas/issues/29#issuecomment-5730960646)。
 - [#24 当前性能进展与脱敏复现场景请求](https://github.com/T8mars/T8-penguin-canvas/issues/24#issuecomment-5730960624)。
 - [#25 中英文进展与剩余验收边界](https://github.com/T8mars/T8-penguin-canvas/issues/25#issuecomment-5730960620)。
+- [#29 v3.1.9 双平台补丁已发布，请求区分渠道切换和仅打开面板复验](https://github.com/T8mars/T8-penguin-canvas/issues/29#issuecomment-5731345665)；Issue 仍为 OPEN，正式发布事实见发布专题。
