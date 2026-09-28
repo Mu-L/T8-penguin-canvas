@@ -6,6 +6,7 @@ import {
   hasCanvasWriteAuthority,
   requireAuthoritativeCanvasRevision,
 } from '../src/utils/canvasLoadAuthority.ts';
+import { canvasDatabaseRecoveryPlanFromPayload } from '../src/utils/canvasDatabaseRecovery.ts';
 
 test('canvas write authority requires a successful load with a strict server revision', () => {
   assert.equal(authoritativeCanvasRevision(7), 7);
@@ -65,13 +66,14 @@ test('GET 500 or timeout keeps edits at zero PUTs until a retry restores the ser
 
 test('Canvas keeps failed loads non-editable and exposes an explicit retry', () => {
   const source = readFileSync(new URL('../src/components/Canvas.tsx', import.meta.url), 'utf8');
+  const routeSource = readFileSync(new URL('../backend/src/routes/canvas.js', import.meta.url), 'utf8');
   const loadStart = source.indexOf('.getCanvasData(requestedCanvasId)');
   const catchStart = source.indexOf('.catch((e) =>', loadStart);
   const catchEnd = source.indexOf('return () => {', catchStart);
   assert.ok(loadStart >= 0 && catchStart > loadStart && catchEnd > catchStart);
   const failedLoad = source.slice(catchStart, catchEnd);
 
-  assert.match(failedLoad, /setCanvasLoadFailure\(\{ canvasId: requestedCanvasId, message \}\)/);
+  assert.match(failedLoad, /setCanvasLoadFailure\(\{[\s\S]*canvasId: requestedCanvasId,[\s\S]*message,[\s\S]*recovery: api\.canvasDatabaseRecoveryPlanFromError\(e\)/);
   assert.match(failedLoad, /setLoadedCanvasId\(null\)/);
   assert.match(failedLoad, /setLoaded\(false\)/);
   assert.doesNotMatch(failedLoad, /setNodes\(\[\]\)|setEdges\(\[\]\)|setLoaded\(true\)|histReset\(/);
@@ -79,6 +81,44 @@ test('Canvas keeps failed loads non-editable and exposes an explicit retry', () 
   assert.match(source, /if \(!loaded \|\| loadedCanvasId !== activeId\)/);
   assert.match(source, /data-canvas-load-state=\{loadFailure \? 'failed' : 'loading'\}/);
   assert.match(source, /setCanvasLoadAttempt\(\(attempt\) => attempt \+ 1\)/);
+  assert.match(source, /restoreCanvasDatabaseCanonicalBackup\(failure\.recovery\.planId\)/);
+  assert.match(source, /window\.confirm\(t\('canvas:state\.restoreBackupConfirm'/);
   assert.match(source, /hasCanvasWriteAuthority\(\{/);
   assert.match(source, /const putBaseRevision = requireAuthoritativeCanvasRevision/);
+  assert.match(routeSource, /explicitCanonicalBackupRecoveryAvailable !== true/);
+  assert.match(routeSource, /canvasDatabaseRecoveryPlans\.delete\(planId\)/);
+  assert.match(routeSource, /confirmation !== CANVAS_DATABASE_RECOVERY_CONFIRMATION/);
+  assert.doesNotMatch(routeSource, /res\.json\(\{[\s\S]{0,300}authorization/);
+});
+
+test('only a live, bounded server recovery plan enables the explicit backup action', () => {
+  const planId = '11111111-1111-4111-8111-111111111111';
+  const expiresAt = Date.now() + 60_000;
+  const valid = {
+    recovery: {
+      available: true,
+      planId,
+      expiresAt,
+      potentiallyDiscardedWriteCount: 2,
+      reasons: ['captured-write-sequence-behind-acknowledged-watermark'],
+    },
+  };
+  assert.deepEqual(canvasDatabaseRecoveryPlanFromPayload(valid), {
+    available: true,
+    planId,
+    expiresAt,
+    potentiallyDiscardedWriteCount: 2,
+    reasons: ['captured-write-sequence-behind-acknowledged-watermark'],
+  });
+  const expired = {
+    recovery: {
+      available: true,
+      planId,
+      expiresAt: Date.now() - 1,
+      potentiallyDiscardedWriteCount: 2,
+      reasons: ['captured-write-sequence-behind-acknowledged-watermark'],
+    },
+  };
+  assert.equal(canvasDatabaseRecoveryPlanFromPayload(expired), null);
+  assert.equal(canvasDatabaseRecoveryPlanFromPayload(new Error('untrusted')), null);
 });

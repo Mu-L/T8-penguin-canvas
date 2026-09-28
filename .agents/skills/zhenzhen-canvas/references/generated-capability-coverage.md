@@ -3,7 +3,7 @@
 > Machine-generated from the real Canvas Node Schema, creative capability manifest,
 > runtime model/action catalog, and handler bindings. Do not edit by hand.
 
-- Aggregate SHA-256: `b2181f19a50a8d54cf89cce46bf53a37be670a4fea94d93f71304853a7e1886b`
+- Aggregate SHA-256: `261630ad4b7de45e1bea2892f5aab59c2d284258125a7b75e87a91addcc2dc99`
 - Capabilities / handlers: **39 / 39**
 - Canvas nodes: **83**
 - Referenced / unreferenced nodes: **74 / 9**

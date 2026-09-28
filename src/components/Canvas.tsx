@@ -4265,8 +4265,10 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef, onReadinessChange, onR
   const [canvasLoadFailure, setCanvasLoadFailure] = useState<{
     canvasId: string;
     message: string;
+    recovery: api.CanvasDatabaseRecoveryPlan | null;
   } | null>(null);
   const [canvasLoadAttempt, setCanvasLoadAttempt] = useState(0);
+  const [canvasDatabaseRecoveryRunning, setCanvasDatabaseRecoveryRunning] = useState(false);
   const [backgroundSaveFailure, setBackgroundSaveFailure] = useState<{
     canvasId: string;
     nodeId: string;
@@ -5435,7 +5437,11 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef, onReadinessChange, onR
         if (cancelled || useCanvasStore.getState().activeId !== requestedCanvasId) return;
         const message = e instanceof Error ? e.message : '未知加载错误';
         console.error('加载画布失败', e);
-        setCanvasLoadFailure({ canvasId: requestedCanvasId, message });
+        setCanvasLoadFailure({
+          canvasId: requestedCanvasId,
+          message,
+          recovery: api.canvasDatabaseRecoveryPlanFromError(e),
+        });
         setActiveProjectId(null);
         setActiveCanvasRevision(0);
         setInitializedFlowCanvasId(null);
@@ -14349,6 +14355,31 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef, onReadinessChange, onR
     };
   }, [onRetryLoadRef]);
 
+  const restoreCanonicalBackup = useCallback(async (
+    failure: NonNullable<typeof canvasLoadFailure>,
+  ) => {
+    if (!failure.recovery || canvasDatabaseRecoveryRunning) return;
+    const confirmed = window.confirm(t('canvas:state.restoreBackupConfirm', {
+      count: failure.recovery.potentiallyDiscardedWriteCount,
+    }));
+    if (!confirmed) return;
+    setCanvasDatabaseRecoveryRunning(true);
+    try {
+      const result = await api.restoreCanvasDatabaseCanonicalBackup(failure.recovery.planId);
+      if (!result.backupRefreshed) {
+        logBus.warn(t('canvas:state.restoreBackupRefreshWarning'), '画布恢复');
+      }
+      setCanvasLoadFailure(null);
+      setCanvasLoadAttempt((attempt) => attempt + 1);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t('canvas:state.restoreBackupFailed');
+      setCanvasLoadFailure({ canvasId: failure.canvasId, message, recovery: null });
+      logBus.warn(t('canvas:state.restoreBackupFailed') + '：' + message, '画布恢复');
+    } finally {
+      setCanvasDatabaseRecoveryRunning(false);
+    }
+  }, [canvasDatabaseRecoveryRunning, t]);
+
   if (!renderedCanvasId) {
     return (
       <div
@@ -14381,14 +14412,37 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef, onReadinessChange, onR
             <h2 className="text-base font-bold text-[var(--text-primary)]">{t('canvas:state.loadFailed')}</h2>
             <p className="mt-2 break-words text-sm leading-6 text-[var(--text-secondary)]">{loadFailure.message}</p>
             <p className="mt-3 text-xs leading-5 text-[var(--text-secondary)]">{t('canvas:state.readOnlyUntilLoaded')}</p>
-            <button
-              type="button"
-              className="mx-auto mt-5 flex h-10 items-center gap-2 rounded-lg bg-[var(--accent-primary)] px-5 text-sm font-bold text-white"
-              onClick={() => setCanvasLoadAttempt((attempt) => attempt + 1)}
-            >
-              <LucideIcons.RefreshCw size={16} aria-hidden="true" />
-              {t('canvas:state.retryLoad')}
-            </button>
+            {loadFailure.recovery ? (
+              <p className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-700 dark:text-amber-300">
+                {t('canvas:state.restoreBackupAvailable', {
+                  count: loadFailure.recovery.potentiallyDiscardedWriteCount,
+                })}
+              </p>
+            ) : null}
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+              <button
+                type="button"
+                className="flex h-10 items-center gap-2 rounded-lg bg-[var(--accent-primary)] px-5 text-sm font-bold text-white"
+                onClick={() => setCanvasLoadAttempt((attempt) => attempt + 1)}
+                disabled={canvasDatabaseRecoveryRunning}
+              >
+                <LucideIcons.RefreshCw size={16} aria-hidden="true" />
+                {t('canvas:state.retryLoad')}
+              </button>
+              {loadFailure.recovery ? (
+                <button
+                  type="button"
+                  className="flex h-10 items-center gap-2 rounded-lg bg-amber-600 px-5 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60"
+                  onClick={() => void restoreCanonicalBackup(loadFailure)}
+                  disabled={canvasDatabaseRecoveryRunning}
+                >
+                  <LucideIcons.DatabaseBackup size={16} aria-hidden="true" />
+                  {canvasDatabaseRecoveryRunning
+                    ? t('canvas:state.restoringBackup')
+                    : t('canvas:state.restoreBackup')}
+                </button>
+              ) : null}
+            </div>
           </div>
         ) : (
           <div role="status" className="flex items-center gap-3 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-secondary)]/90 px-5 py-4 text-sm">

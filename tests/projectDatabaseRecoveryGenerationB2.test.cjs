@@ -433,6 +433,185 @@ test('schema32 stale canonical backup cannot roll a newer acknowledged revision 
   }
 });
 
+test('explicit one-time recovery restores a verified stale canonical backup without lowering the ACK watermark', async () => {
+  const fixture = temporaryProject('t8-b2-explicit-stale-recovery-');
+  let database = null;
+  try {
+    database = new ProjectDatabase(fixture.filename, {
+      backupFilename: fixture.backupFilename,
+      autoBackup: false,
+    });
+    database.ensureCanvas('canvas-a', {
+      nodes: [{ id: 'node-a', position: { x: 0, y: 0 }, data: {} }],
+      edges: [],
+    });
+    await database.createBackup();
+    const newer = database.applyOperations('canvas-a', [move('newer-revision', 25)], {
+      expectedRevision: 1,
+    }).document;
+    assert.equal(newer.revision, 2);
+    await database.close();
+    database = null;
+    fs.writeFileSync(fixture.filename, Buffer.from('broken-primary-requiring-explicit-recovery'));
+
+    let failure = null;
+    assert.throws(() => new ProjectDatabase(fixture.filename, {
+      backupFilename: fixture.backupFilename,
+      autoBackup: false,
+    }), (error) => {
+      failure = error;
+      return error instanceof ProjectDatabaseRecoveryError
+        && error.details?.phase === 'backup_freshness_rejected'
+        && error.details?.explicitCanonicalBackupRecoveryAvailable === true;
+    });
+    const acknowledgedBefore = failure.details.acknowledgedWriteSequence;
+    const capturedBefore = failure.details.capturedWriteSequence;
+    assert.ok(capturedBefore < acknowledgedBefore);
+
+    assert.throws(() => new ProjectDatabase(fixture.filename, {
+      backupFilename: fixture.backupFilename,
+      autoBackup: false,
+      explicitCanonicalBackupRecovery32: {
+        recoveryPlanId: '11111111-1111-4111-8111-111111111111',
+        databaseUuid: failure.details.databaseUuid,
+        sourceRecoveryGeneration: failure.details.sourceRecoveryGeneration,
+        acknowledgedRecoveryGeneration: failure.details.acknowledgedRecoveryGeneration,
+        acknowledgedWriteSequence: acknowledgedBefore + 1,
+        capturedWriteSequence: capturedBefore,
+        receiptEvidenceDigest: failure.details.receiptEvidenceDigest,
+        acknowledgementDigest: failure.details.acknowledgementDigest,
+        freshnessReasons: [...failure.details.freshnessReasons],
+      },
+    }), (error) => error instanceof ProjectDatabaseRecoveryError
+      && error.details?.phase === 'backup_freshness_rejected');
+
+    database = new ProjectDatabase(fixture.filename, {
+      backupFilename: fixture.backupFilename,
+      autoBackup: false,
+      explicitCanonicalBackupRecovery32: {
+        recoveryPlanId: '22222222-2222-4222-8222-222222222222',
+        databaseUuid: failure.details.databaseUuid,
+        sourceRecoveryGeneration: failure.details.sourceRecoveryGeneration,
+        acknowledgedRecoveryGeneration: failure.details.acknowledgedRecoveryGeneration,
+        acknowledgedWriteSequence: acknowledgedBefore,
+        capturedWriteSequence: capturedBefore,
+        receiptEvidenceDigest: failure.details.receiptEvidenceDigest,
+        acknowledgementDigest: failure.details.acknowledgementDigest,
+        freshnessReasons: [...failure.details.freshnessReasons],
+      },
+    });
+    const restored = database.getCanvas('canvas-a');
+    assert.equal(restored.revision, 1);
+    assert.deepEqual(restored.nodes[0].position, { x: 0, y: 0 });
+    assert.deepEqual(database.lastProjectDatabaseExplicitRecovery32, {
+      recovered: true,
+      recoveryPlanId: '22222222-2222-4222-8222-222222222222',
+      sourceCapturedWriteSequence: capturedBefore,
+      previousAcknowledgedWriteSequence: acknowledgedBefore,
+      restoredWriteSequence: acknowledgedBefore + 1,
+      potentiallyDiscardedWriteCount: acknowledgedBefore - capturedBefore,
+      freshnessReasons: ['captured-write-sequence-behind-acknowledged-watermark'],
+    });
+    const acknowledgementAfter = JSON.parse(fs.readFileSync(
+      fixture.generationFilename,
+      'utf8',
+    ));
+    assert.equal(acknowledgementAfter.acknowledgedWriteSequence, acknowledgedBefore + 1);
+    assert.equal(database.getRecoveryGeneration(), acknowledgementAfter.generation);
+    assert.equal(fs.existsSync(failure.details.primaryEvidence[0]), true);
+  } finally {
+    await database?.close().catch(() => undefined);
+    cleanup(fixture.directory);
+  }
+});
+
+test('explicit one-time recovery accepts the verified prior generation while keeping the ACK monotonic', async () => {
+  const fixture = temporaryProject('t8-b2-explicit-generation-recovery-');
+  let database = null;
+  try {
+    database = new ProjectDatabase(fixture.filename, {
+      backupFilename: fixture.backupFilename,
+      autoBackup: false,
+    });
+    database.ensureCanvas('canvas-a', {
+      nodes: [{ id: 'node-a', position: { x: 0, y: 0 }, data: {} }],
+      edges: [],
+    });
+    await database.createBackup();
+    const sourceGeneration = database.getRecoveryGeneration();
+    const acknowledgedGeneration = database.rotateRecoveryGeneration(
+      'explicit-generation-mismatch-test',
+      sourceGeneration,
+    );
+    assert.notEqual(acknowledgedGeneration, sourceGeneration);
+    await database.close();
+    database = null;
+    fs.writeFileSync(fixture.filename, Buffer.from('broken-primary-after-generation-rotation'));
+
+    let failure = null;
+    assert.throws(() => new ProjectDatabase(fixture.filename, {
+      backupFilename: fixture.backupFilename,
+      autoBackup: false,
+    }), (error) => {
+      failure = error;
+      return error instanceof ProjectDatabaseRecoveryError
+        && error.details?.phase === 'backup_freshness_rejected'
+        && error.details?.explicitCanonicalBackupRecoveryAvailable === true;
+    });
+    assert.deepEqual(failure.details.freshnessReasons, [
+      'generation-mismatch',
+      'captured-write-sequence-behind-acknowledged-watermark',
+    ]);
+    assert.equal(failure.details.sourceRecoveryGeneration, sourceGeneration);
+    assert.equal(failure.details.acknowledgedRecoveryGeneration, acknowledgedGeneration);
+    const acknowledgedBefore = failure.details.acknowledgedWriteSequence;
+    const capturedBefore = failure.details.capturedWriteSequence;
+    assert.ok(capturedBefore < acknowledgedBefore);
+
+    database = new ProjectDatabase(fixture.filename, {
+      backupFilename: fixture.backupFilename,
+      autoBackup: false,
+      explicitCanonicalBackupRecovery32: {
+        recoveryPlanId: '33333333-3333-4333-8333-333333333333',
+        databaseUuid: failure.details.databaseUuid,
+        sourceRecoveryGeneration: failure.details.sourceRecoveryGeneration,
+        acknowledgedRecoveryGeneration: failure.details.acknowledgedRecoveryGeneration,
+        acknowledgedWriteSequence: acknowledgedBefore,
+        capturedWriteSequence: capturedBefore,
+        receiptEvidenceDigest: failure.details.receiptEvidenceDigest,
+        acknowledgementDigest: failure.details.acknowledgementDigest,
+        freshnessReasons: [...failure.details.freshnessReasons],
+      },
+    });
+    const restored = database.getCanvas('canvas-a');
+    assert.equal(restored.revision, 1);
+    assert.deepEqual(restored.nodes[0].position, { x: 0, y: 0 });
+    assert.deepEqual(database.lastProjectDatabaseExplicitRecovery32, {
+      recovered: true,
+      recoveryPlanId: '33333333-3333-4333-8333-333333333333',
+      sourceCapturedWriteSequence: capturedBefore,
+      previousAcknowledgedWriteSequence: acknowledgedBefore,
+      restoredWriteSequence: acknowledgedBefore + 1,
+      potentiallyDiscardedWriteCount: acknowledgedBefore - capturedBefore,
+      freshnessReasons: [
+        'generation-mismatch',
+        'captured-write-sequence-behind-acknowledged-watermark',
+      ],
+    });
+    const acknowledgementAfter = JSON.parse(fs.readFileSync(
+      fixture.generationFilename,
+      'utf8',
+    ));
+    assert.equal(acknowledgementAfter.acknowledgedWriteSequence, acknowledgedBefore + 1);
+    assert.equal(acknowledgementAfter.generation, database.getRecoveryGeneration());
+    assert.notEqual(acknowledgementAfter.generation, acknowledgedGeneration);
+    assert.equal(fs.existsSync(failure.details.primaryEvidence[0]), true);
+  } finally {
+    await database?.close().catch(() => undefined);
+    cleanup(fixture.directory);
+  }
+});
+
 test('freshness gate runs before the legacy recovery replace hook and never rotates generation', async () => {
   const fixture = temporaryProject('t8-b2-recovery-interruption-');
   try {

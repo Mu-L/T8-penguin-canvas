@@ -6758,6 +6758,7 @@ class ProjectDatabase {
     this.lastProjectDatabaseRecoveryGenerationDurabilityWarning32 = null;
     this.lastProjectDatabaseRecoveryDurabilityWarning32 = null;
     this.lastProjectDatabaseWriteDurabilityWarning32 = null;
+    this.lastProjectDatabaseExplicitRecovery32 = null;
     this.lastProjectDatabaseBackupDurabilityWarning32 = null;
     const protectedBases = [
       ['primary', filename],
@@ -8810,15 +8811,51 @@ class ProjectDatabase {
           receiptEvidence,
           verifications,
         );
-        if (!freshness.fresh) {
+        const explicitRecoveryAuthorization = this.options
+          .explicitCanonicalBackupRecovery32;
+        const explicitRecoveryAllowedReasons = new Set([
+          'generation-mismatch',
+          'captured-write-sequence-behind-acknowledged-watermark',
+        ]);
+        const explicitRecoveryAuthorized = !freshness.fresh
+          && explicitRecoveryAuthorization
+          && typeof explicitRecoveryAuthorization === 'object'
+          && !Array.isArray(explicitRecoveryAuthorization)
+          && isUuid(explicitRecoveryAuthorization.recoveryPlanId)
+          && freshness.reasons.length > 0
+          && freshness.reasons.every((reason) => explicitRecoveryAllowedReasons.has(reason))
+          && canonical.databaseUuid === observed.state.databaseUuid
+          && explicitRecoveryAuthorization.databaseUuid === canonical.databaseUuid
+          && explicitRecoveryAuthorization.sourceRecoveryGeneration
+            === canonical.recoveryGeneration
+          && explicitRecoveryAuthorization.acknowledgedRecoveryGeneration
+            === observed.state.generation
+          && explicitRecoveryAuthorization.acknowledgedWriteSequence
+            === observed.state.acknowledgedWriteSequence
+          && explicitRecoveryAuthorization.capturedWriteSequence
+            === canonical.capturedWriteSequence
+          && explicitRecoveryAuthorization.receiptEvidenceDigest === receiptEvidenceDigest
+          && explicitRecoveryAuthorization.acknowledgementDigest === observed.digest
+          && stableJson(explicitRecoveryAuthorization.freshnessReasons)
+            === stableJson(freshness.reasons);
+        if (!freshness.fresh && !explicitRecoveryAuthorized) {
           throw new ProjectDatabaseRecoveryError(
             'schema 32 canonical backup 落后于已确认水位或身份代次不匹配，已停止自动恢复',
             {
               phase: 'backup_freshness_rejected',
               freshnessStatus: freshness.status,
               freshnessReasons: freshness.reasons,
+              databaseUuid: canonical.databaseUuid,
+              sourceRecoveryGeneration: canonical.recoveryGeneration,
+              acknowledgedRecoveryGeneration: observed.state.generation,
               acknowledgedWriteSequence: observed.state.acknowledgedWriteSequence,
               capturedWriteSequence: canonical.capturedWriteSequence,
+              receiptEvidenceDigest,
+              acknowledgementDigest: observed.digest,
+              explicitCanonicalBackupRecoveryAvailable:
+                canonical.databaseUuid === observed.state.databaseUuid
+                && freshness.reasons.length > 0
+                && freshness.reasons.every((reason) => explicitRecoveryAllowedReasons.has(reason)),
               primaryEvidence: evidence,
               backupEvidence: this.backupFilename,
               restoreTemp,
@@ -8826,7 +8863,11 @@ class ProjectDatabase {
             originalError,
           );
         }
-        if (canonical.capturedWriteSequence >= Number.MAX_SAFE_INTEGER) {
+        const recoveryPreviousWriteSequence = Math.max(
+          canonical.capturedWriteSequence,
+          observed.state.acknowledgedWriteSequence,
+        );
+        if (recoveryPreviousWriteSequence >= Number.MAX_SAFE_INTEGER) {
           throw new ProjectDatabaseRecoveryError(
             'schema 32 canonical backup write sequence 已耗尽，无法安全旋转恢复代次',
             { phase: 'backup_recovery_sequence_exhausted' },
@@ -8844,16 +8885,18 @@ class ProjectDatabase {
           createProjectDatabaseFreshnessFence32({
             databaseUuid: canonical.databaseUuid,
             generation: nextGeneration,
-            previousGeneration: canonical.recoveryGeneration,
-            acknowledgedWriteSequence: canonical.capturedWriteSequence + 1,
-            reason: 'database-recovery',
+            previousGeneration: observed.state.generation,
+            acknowledgedWriteSequence: recoveryPreviousWriteSequence + 1,
+            reason: explicitRecoveryAuthorized
+              ? 'explicit-stale-canonical-backup-recovery'
+              : 'database-recovery',
             requiresSnapshot: true,
             updatedAt: nextUpdatedAt,
           }),
           {
             databaseUuid: canonical.databaseUuid,
             recoveryGeneration: nextGeneration,
-            writeSequence: canonical.capturedWriteSequence + 1,
+            writeSequence: recoveryPreviousWriteSequence + 1,
           },
         );
         const transition = normalizeProjectDatabaseRecoveryTransition32({
@@ -8861,9 +8904,9 @@ class ProjectDatabase {
           transitionId: crypto.randomUUID().toLowerCase(),
           kind: 'canonical-recovery',
           databaseUuid: canonical.databaseUuid,
-          previousGeneration: canonical.recoveryGeneration,
+          previousGeneration: observed.state.generation,
           generation: transitionFence.generation,
-          previousWriteSequence: canonical.capturedWriteSequence,
+          previousWriteSequence: recoveryPreviousWriteSequence,
           writeSequence: transitionFence.acknowledgedWriteSequence,
           previousAcknowledgementDigest: observed.digest,
           reason: transitionFence.reason,
@@ -8899,22 +8942,39 @@ class ProjectDatabase {
               DEFAULT_PROJECT_ID,
               this.durableLedgerPolicies?.project || DEFAULT_PROJECT_DURABLE_LEDGER_POLICY,
             );
-            const rotated = writableCandidate.prepare(`
+            const advanceIdentity = writableCandidate.prepare(`
               UPDATE project_database_identity
-              SET recovery_generation = ?, write_sequence = write_sequence + 1, updated_at = ?
+              SET recovery_generation = CASE
+                    WHEN write_sequence + 1 = ? THEN ?
+                    ELSE recovery_generation
+                  END,
+                  write_sequence = write_sequence + 1,
+                  updated_at = ?
               WHERE singleton_id = 1
                 AND database_uuid = ?
                 AND recovery_generation = ?
                 AND write_sequence = ?
                 AND write_sequence < 9007199254740991
               RETURNING database_uuid, recovery_generation, write_sequence
-            `).get(
-              transitionFence.generation,
-              transitionFence.updatedAt,
-              canonical.databaseUuid,
-              canonical.recoveryGeneration,
-              canonical.capturedWriteSequence,
-            );
+            `);
+            let rotated = null;
+            let expectedGeneration = canonical.recoveryGeneration;
+            for (let expectedSequence = canonical.capturedWriteSequence;
+              expectedSequence < transitionFence.acknowledgedWriteSequence;
+              expectedSequence += 1) {
+              rotated = advanceIdentity.get(
+                transitionFence.acknowledgedWriteSequence,
+                transitionFence.generation,
+                transitionFence.updatedAt,
+                canonical.databaseUuid,
+                expectedGeneration,
+                expectedSequence,
+              );
+              if (expectedSequence + 1 === transitionFence.acknowledgedWriteSequence) {
+                expectedGeneration = transitionFence.generation;
+              }
+              if (!rotated) break;
+            }
             if (!rotated
               || rotated.database_uuid !== transitionFence.databaseUuid
               || rotated.recovery_generation !== transitionFence.generation
@@ -9317,6 +9377,20 @@ class ProjectDatabase {
               },
               error,
             );
+          }
+          if (explicitRecoveryAuthorized) {
+            this.lastProjectDatabaseExplicitRecovery32 = Object.freeze({
+              recovered: true,
+              recoveryPlanId: explicitRecoveryAuthorization.recoveryPlanId,
+              sourceCapturedWriteSequence: canonical.capturedWriteSequence,
+              previousAcknowledgedWriteSequence: observed.state.acknowledgedWriteSequence,
+              restoredWriteSequence: transitionFence.acknowledgedWriteSequence,
+              potentiallyDiscardedWriteCount: Math.max(
+                0,
+                observed.state.acknowledgedWriteSequence - canonical.capturedWriteSequence,
+              ),
+              freshnessReasons: Object.freeze([...freshness.reasons]),
+            });
           }
           restoredTransferred = true;
           return restored;
@@ -33328,6 +33402,23 @@ function getProjectDatabase(config) {
   return singleton;
 }
 
+function recoverProjectDatabaseFromExplicitCanonicalBackup(config, authorization) {
+  const runtimeConfig = config || require('../config');
+  if (singleton) return singleton;
+  if (!authorization || typeof authorization !== 'object' || Array.isArray(authorization)) {
+    throw new TypeError('显式 canonical backup 恢复缺少服务端验证凭证');
+  }
+  singleton = new ProjectDatabase(runtimeConfig.PROJECT_DB_FILE, {
+    backupFilename: runtimeConfig.PROJECT_DB_BACKUP_FILE,
+    projectDatabaseStoragePolicy32: runtimeConfig.PROJECT_DB_STORAGE_POLICY_32,
+    deferStartupBackup: true,
+    startupObservability: true,
+    explicitCanonicalBackupRecovery32: authorization,
+  });
+  notifyProjectDatabaseReady(singleton);
+  return singleton;
+}
+
 function startProjectDatabaseStartupBackup() {
   if (!singleton) return Promise.resolve(null);
   return singleton.startStartupBackup();
@@ -33376,6 +33467,7 @@ module.exports = {
   CanvasPatchRevertConflictError,
   CanvasPatchValidationError,
   getProjectDatabase,
+  recoverProjectDatabaseFromExplicitCanonicalBackup,
   onProjectDatabaseReady,
   startProjectDatabaseStartupBackup,
   closeProjectDatabase,

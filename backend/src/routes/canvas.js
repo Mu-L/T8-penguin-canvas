@@ -1,9 +1,13 @@
 // 画布数据 CRUD 路由(Phase 0 占位,Phase 1 完整实现)
 const express = require('express');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
-const { getProjectDatabase } = require('../services/projectDatabase');
+const {
+  getProjectDatabase,
+  recoverProjectDatabaseFromExplicitCanonicalBackup,
+} = require('../services/projectDatabase');
 const { mapCanvasMutationError } = require('../services/canvasPatch');
 
 const router = express.Router();
@@ -12,6 +16,9 @@ const CANVAS_LIST_PAGE_DEFAULT = 50;
 const CANVAS_LIST_PAGE_MAX = 200;
 const CANVAS_LIST_RECOVERY_BATCH_SIZE = 2;
 const CANVAS_LIST_MIRROR_THROTTLE_MS = 2_000;
+const CANVAS_DATABASE_RECOVERY_PLAN_TTL_MS = 10 * 60 * 1000;
+const CANVAS_DATABASE_RECOVERY_CONFIRMATION = 'restore-verified-canonical-backup';
+const canvasDatabaseRecoveryPlans = new Map();
 
 let canvasListRuntimePath = '';
 let canvasListCache = null;
@@ -35,6 +42,58 @@ const deletedCanvasListIds = new Set();
 
 function projectDatabase() {
   return getProjectDatabase(config);
+}
+
+function pruneCanvasDatabaseRecoveryPlans(now = Date.now()) {
+  for (const [planId, plan] of canvasDatabaseRecoveryPlans) {
+    if (plan.expiresAt <= now) canvasDatabaseRecoveryPlans.delete(planId);
+  }
+  while (canvasDatabaseRecoveryPlans.size > 8) {
+    canvasDatabaseRecoveryPlans.delete(canvasDatabaseRecoveryPlans.keys().next().value);
+  }
+}
+
+function createCanvasDatabaseRecoveryPlan(error, now = Date.now()) {
+  const details = error?.details;
+  if (error?.code !== 'project_database_recovery_failed'
+    || details?.phase !== 'backup_freshness_rejected'
+    || details?.explicitCanonicalBackupRecoveryAvailable !== true
+    || typeof details.databaseUuid !== 'string'
+    || typeof details.sourceRecoveryGeneration !== 'string'
+    || typeof details.acknowledgedRecoveryGeneration !== 'string'
+    || typeof details.receiptEvidenceDigest !== 'string'
+    || typeof details.acknowledgementDigest !== 'string'
+    || !Number.isSafeInteger(details.acknowledgedWriteSequence)
+    || !Number.isSafeInteger(details.capturedWriteSequence)
+    || !Array.isArray(details.freshnessReasons)) {
+    return null;
+  }
+  pruneCanvasDatabaseRecoveryPlans(now);
+  const planId = crypto.randomUUID().toLowerCase();
+  const expiresAt = now + CANVAS_DATABASE_RECOVERY_PLAN_TTL_MS;
+  const authorization = Object.freeze({
+    recoveryPlanId: planId,
+    databaseUuid: details.databaseUuid,
+    sourceRecoveryGeneration: details.sourceRecoveryGeneration,
+    acknowledgedRecoveryGeneration: details.acknowledgedRecoveryGeneration,
+    acknowledgedWriteSequence: details.acknowledgedWriteSequence,
+    capturedWriteSequence: details.capturedWriteSequence,
+    receiptEvidenceDigest: details.receiptEvidenceDigest,
+    acknowledgementDigest: details.acknowledgementDigest,
+    freshnessReasons: Object.freeze([...details.freshnessReasons]),
+  });
+  canvasDatabaseRecoveryPlans.set(planId, Object.freeze({ planId, expiresAt, authorization }));
+  pruneCanvasDatabaseRecoveryPlans(now);
+  return Object.freeze({
+    available: true,
+    planId,
+    expiresAt,
+    potentiallyDiscardedWriteCount: Math.max(
+      0,
+      details.acknowledgedWriteSequence - details.capturedWriteSequence,
+    ),
+    reasons: Object.freeze([...details.freshnessReasons]),
+  });
 }
 
 function expectedRevisionFromRequest(req) {
@@ -1625,6 +1684,66 @@ router.post('/', (req, res) => {
   });
 });
 
+// POST /api/canvas/recovery/restore-canonical-backup — 用户明确确认后，恢复已完整
+// 验证但落后于 ACK 的 canonical backup。服务端持有一次性计划，客户端不能提交路径、
+// 水位或数据库身份来改变恢复目标。
+router.post('/recovery/restore-canonical-backup', async (req, res) => {
+  pruneCanvasDatabaseRecoveryPlans();
+  const planId = String(req.body?.planId || '').trim().toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(planId)
+    || req.body?.confirmation !== CANVAS_DATABASE_RECOVERY_CONFIRMATION) {
+    return res.status(400).json({
+      success: false,
+      code: 'canvas_database_recovery_confirmation_invalid',
+      error: '数据库恢复确认无效，请重新加载恢复方案',
+    });
+  }
+  const plan = canvasDatabaseRecoveryPlans.get(planId);
+  canvasDatabaseRecoveryPlans.delete(planId);
+  if (!plan || plan.expiresAt <= Date.now()) {
+    return res.status(409).json({
+      success: false,
+      code: 'canvas_database_recovery_plan_stale',
+      error: '数据库恢复方案已过期，请重试加载后重新确认',
+    });
+  }
+
+  let database;
+  try {
+    database = recoverProjectDatabaseFromExplicitCanonicalBackup(config, plan.authorization);
+  } catch (error) {
+    return sendCanvasPatchError(res, error, {
+      fallbackCode: 'canvas_database_recovery_failed',
+      fallbackMessage: '数据库恢复未能安全完成，原始证据仍已保留',
+      defaultStatus: 500,
+    });
+  }
+
+  const recovery = database.lastProjectDatabaseExplicitRecovery32;
+  if (!recovery?.recovered || recovery.recoveryPlanId !== planId) {
+    return res.status(409).json({
+      success: false,
+      code: 'canvas_database_recovery_already_resolved',
+      error: '数据库状态已经变化，请直接重试加载画布',
+    });
+  }
+  let backupRefreshWarning = null;
+  try {
+    await database.startStartupBackup();
+  } catch (error) {
+    backupRefreshWarning = String(error?.code || 'canonical_backup_refresh_failed');
+  }
+  return res.json({
+    success: true,
+    data: {
+      recovered: true,
+      potentiallyDiscardedWriteCount: recovery.potentiallyDiscardedWriteCount,
+      backupRefreshed: backupRefreshWarning === null,
+      ...(backupRefreshWarning ? { warning: backupRefreshWarning } : {}),
+    },
+  });
+});
+
 // GET /api/canvas/:id — 获取单个画布数据
 router.get('/:id', (req, res) => {
   const file = getCanvasFile(req.params.id);
@@ -1658,10 +1777,15 @@ router.get('/:id', (req, res) => {
     res.set('ETag', `"${document.revision}"`);
     res.json({ success: true, data: document });
   } catch (e) {
-    return sendCanvasPatchError(res, e, {
+    const mapped = mapCanvasMutationError(e, {
       fallbackCode: 'canvas_read_failed',
       fallbackMessage: '画布读取失败',
       defaultStatus: 500,
+    });
+    const recovery = createCanvasDatabaseRecoveryPlan(e);
+    return res.status(mapped.status).json({
+      ...mapped.body,
+      ...(recovery ? { recovery } : {}),
     });
   }
 });

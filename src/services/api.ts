@@ -94,6 +94,10 @@ import type {
 import type { SubflowDefinition } from '../utils/subflows';
 import { HISTORY_QUERY_TIMEOUT, withHistoryRequestDeadline } from '../utils/historyRequestDeadline';
 import {
+  canvasDatabaseRecoveryPlanFromPayload,
+  type CanvasDatabaseRecoveryPlan,
+} from '../utils/canvasDatabaseRecovery';
+import {
   parseCanvasAgentToolResult,
   type CanvasAgentToolName,
   type CanvasAgentToolRequest,
@@ -108,6 +112,8 @@ export interface ApiErrorEnvelope {
   params: Record<string, string | number | boolean>;
   error: string;
 }
+
+export type { CanvasDatabaseRecoveryPlan } from '../utils/canvasDatabaseRecovery';
 
 const API_MESSAGE_KEY_RE = /^[a-z][a-z0-9]*(?:\.[a-zA-Z0-9_-]+)+$/;
 
@@ -149,6 +155,12 @@ export class ApiRequestError extends Error {
     this.messageKey = envelope.messageKey;
     this.params = envelope.params;
   }
+}
+
+export function canvasDatabaseRecoveryPlanFromError(error: unknown): CanvasDatabaseRecoveryPlan | null {
+  return error instanceof ApiRequestError
+    ? canvasDatabaseRecoveryPlanFromPayload(error.data)
+    : null;
 }
 
 export interface ProjectRunIntentClaimInput {
@@ -335,6 +347,30 @@ export async function createCanvas(name?: string): Promise<CanvasListItem> {
 
 export async function getCanvasData(id: string): Promise<CanvasData> {
   const res = await request<{ success: boolean; data: CanvasData }>(`${BASE}/canvas/${id}`);
+  return res.data;
+}
+
+export async function restoreCanvasDatabaseCanonicalBackup(planId: string): Promise<{
+  recovered: boolean;
+  potentiallyDiscardedWriteCount: number;
+  backupRefreshed: boolean;
+  warning?: string;
+}> {
+  const res = await request<{
+    success: boolean;
+    data: {
+      recovered: boolean;
+      potentiallyDiscardedWriteCount: number;
+      backupRefreshed: boolean;
+      warning?: string;
+    };
+  }>(`${BASE}/canvas/recovery/restore-canonical-backup`, {
+    method: 'POST',
+    body: JSON.stringify({
+      planId,
+      confirmation: 'restore-verified-canonical-backup',
+    }),
+  });
   return res.data;
 }
 

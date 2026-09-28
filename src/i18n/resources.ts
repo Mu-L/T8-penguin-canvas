@@ -86,6 +86,10 @@ export const zhCN = {
       noCanvasTitle: '🐧 贞贞的无限画布（企鹅共创版）', noCanvas: '请先在左侧创建或选择一个画布',
       loadFailed: '画布暂时无法加载', readOnlyUntilLoaded: '加载成功前画布保持只读，不会创建空白内容或发送保存请求。',
       retryLoad: '重试加载', loadingAuthoritative: '正在读取权威画布…',
+      restoreBackupAvailable: '已找到完整可验证的旧备份。恢复后可能舍弃最近 {{count}} 次已确认数据库写入；原始故障文件会保留。',
+      restoreBackup: '恢复可验证备份', restoringBackup: '正在安全恢复…',
+      restoreBackupConfirm: '将恢复完整可验证的旧备份，并保留当前故障文件作为证据。最多可能舍弃最近 {{count}} 次已确认数据库写入。确定继续吗？',
+      restoreBackupFailed: '未能安全恢复数据库', restoreBackupRefreshWarning: '画布已恢复，但新的 canonical backup 刷新失败；请尽快重启后复核。',
     },
     startupPoster: {
       title: '创作活动海报',
@@ -678,6 +682,10 @@ export const enUS = {
       noCanvasTitle: "🐧 Zhenzhen's Infinite Canvas (Penguin Co-creation Edition)", noCanvas: 'Create or select a canvas from the sidebar.',
       loadFailed: 'Canvas could not be loaded', readOnlyUntilLoaded: 'The canvas remains read-only until loading succeeds. No blank content or save request will be created.',
       retryLoad: 'Retry loading', loadingAuthoritative: 'Loading authoritative canvas…',
+      restoreBackupAvailable: 'A complete, verified older backup is available. Restoring may discard up to {{count}} acknowledged database writes; the failed files will be preserved.',
+      restoreBackup: 'Restore verified backup', restoringBackup: 'Restoring safely…',
+      restoreBackupConfirm: 'Restore the complete, verified older backup and preserve the current failed files as evidence? Up to {{count}} acknowledged database writes may be discarded.',
+      restoreBackupFailed: 'The database could not be recovered safely', restoreBackupRefreshWarning: 'The canvas was recovered, but refreshing the canonical backup failed. Restart soon to verify it.',
     },
     startupPoster: {
       title: 'Creator campaign posters',
