@@ -1,16 +1,21 @@
 {
   "$schema": "本文件为 T8-penguin-canvas 节点清单防丢失锁,任何节点删减都需要在 roadmap.md 中说明并更新本文件。",
   "version": "3.2.1",
-  "lastUpdated": "2026-09-29-v3.2.1-release-prepared",
+  "lastUpdated": "2026-09-29-v3.2.1-dual-platform-release-verified",
   "electronReleaseV321": {
-    "status": "prepared-technical-verification-pending",
+    "status": "released-dual-platform-verified",
     "date": "2026-09-29",
-    "releaseIncluded": false,
+    "releaseIncluded": true,
     "version": "3.2.1",
     "tag": "v3.2.1",
+    "latest": true,
+    "sourceCommit": "2dc205dfe6dc743195eeb5aa57db27c0da1fa29f",
+    "publishedAt": "2026-09-28T20:12:11Z",
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.2.1",
+    "macWorkflow": "https://github.com/T8mars/T8-penguin-canvas/actions/runs/36477586509",
     "scope": "Publish explicit schema32 recovery of a verified same-database stale canonical backup after read-only Canvas confirmation; preserve failed-primary evidence and keep the ACK watermark monotonic.",
-    "verification": "Schema32, adjacent recovery and HTTP confirmation tests 47/47, TypeScript, Node syntax, public/worktree gates, capability synchronization and the development production build passed. Formal Electron/NSIS, updater publication and remote verification remain pending.",
-    "evidenceBoundary": "owner-approved-post-release-v3.2.1: affected-user old databases, physical install/upgrade and F8-F10 evidence may be collected after release and are not passed; Mac may be deferred only if GitHub Actions quota is insufficient.",
+    "verification": "Schema32, adjacent recovery and HTTP confirmation tests 47/47, TypeScript, public/worktree gates and capability synchronization passed. Windows formal chain completed encryption, runtimes, native rebuild, NSIS, post-build, provenance, sealed recovery, publication and full download. Same-tag Apple Silicon workflow 36477586509 completed ad-hoc DMG/ZIP/updater build and runner download verification; independent Mac and post-Mac Windows full downloads passed with six assets present.",
+    "evidenceBoundary": "owner-approved-post-release-v3.2.1: affected-user old databases, physical install/upgrade and F8-F10 evidence remain deferred and not passed. Mac is an ad-hoc-signed, unnotarized technical preview; GitHub quota was sufficient and no Mac deferral was used.",
     "details": "docs/release-v3.2.1.md"
   },
   "electronReleaseV320": {
@@ -3168,30 +3173,30 @@
     ]
   },
   "release": {
-    "status": "released-v3.2.0-dual-platform-verified",
-    "version": "3.2.0",
-    "date": "2026-09-22",
-    "tag": "v3.2.0",
+    "status": "released-v3.2.1-dual-platform-verified",
+    "version": "3.2.1",
+    "date": "2026-09-29",
+    "tag": "v3.2.1",
     "latest": true,
-    "sourceCommit": "dfb388c2d2dbae4df3186ea268f69cca96d793ac",
-    "publishedAt": "2026-09-22T15:58:45Z",
+    "sourceCommit": "2dc205dfe6dc743195eeb5aa57db27c0da1fa29f",
+    "publishedAt": "2026-09-28T20:12:11Z",
     "draft": false,
     "prerelease": false,
-    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.2.0",
-    "details": "docs/release-v3.2.0.md",
+    "url": "https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.2.1",
+    "details": "docs/release-v3.2.1.md",
     "verification": [
-      "The unique Windows Electron/NSIS flow completed provenance, sealed recovery, automatic-update publication, stable Latest and full remote re-download; recovery was cleared.",
-      "Same-tag Apple Silicon workflow 35751218655 succeeded and appended three verified Mac assets. Independent Mac full-download and final Windows full-download verification passed with all six assets present. External affected-user/install/F8-F10 evidence remains deferred under owner-approved-post-release-v3.2.0 and is not passed."
+      "The Windows Electron/NSIS flow completed provenance, sealed recovery, automatic-update publication, stable Latest and full remote re-download; recovery was cleared.",
+      "Same-tag Apple Silicon workflow 36477586509 succeeded and appended three verified Mac assets. Independent Mac full-download and final Windows full-download verification passed with all six assets present. External affected-user/install/F8-F10 evidence remains deferred under owner-approved-post-release-v3.2.1 and is not passed."
     ],
     "assets": {
-      "windowsInstaller": {"name": "T8-PenguinCanvas-Setup-3.2.0.exe", "bytes": 1378616565, "sha256": "1013df706477f64563890c580437e03e9ab5f402a1c59817d13b81e59d4b74c4"},
-      "windowsBlockmap": {"name": "T8-PenguinCanvas-Setup-3.2.0.exe.blockmap", "bytes": 1437932, "sha256": "d3e898c3448a2a1fde837d47bd1a76a0c345250228e59922845eefb97e8a1526"},
-      "windowsUpdater": {"name": "latest.yml", "bytes": 362, "sha256": "71bb02f994b613909a7d6de78f32edbb0fb59bb7f700819f0ca96a6cf11f7895"},
-      "macDmg": {"name": "T8-PenguinCanvas-3.2.0-mac-arm64.dmg", "bytes": 514463422, "sha256": "0b82ebbbf3f598680fdf98f0bb80320d7b0a00e87045b61fcdb92d3e89869b81"},
-      "macZip": {"name": "T8-PenguinCanvas-3.2.0-mac-arm64.zip", "bytes": 506459843, "sha256": "64b0491834f73be14f8a5ad8ae2a73c20a5b89102fb8b3fcb9c2e5fb612df885"},
-      "macUpdater": {"name": "latest-mac.yml", "bytes": 536, "sha256": "debdf7517f310ec33ad3ba58f7c3200065052adbaf9c4d1022beb7c92d411bca"}
+      "windowsInstaller": {"name": "T8-PenguinCanvas-Setup-3.2.1.exe", "bytes": 1378626592, "sha256": "31894c1da71167d6bfda2961bbce5fef37d5a188207aaaab07fc1aa941cbede3"},
+      "windowsBlockmap": {"name": "T8-PenguinCanvas-Setup-3.2.1.exe.blockmap", "bytes": 1437813, "sha256": "09c6cabf58ac403cda45a6b7698228ef132f921872646215c21a08d07911daf8"},
+      "windowsUpdater": {"name": "latest.yml", "bytes": 362, "sha256": "a650479da6a53d7250e58e8c90924c2c61c5f342c1a6246380b15aa0d5975eef"},
+      "macDmg": {"name": "T8-PenguinCanvas-3.2.1-mac-arm64.dmg", "bytes": 514400308, "sha256": "f105f9cd530a981db8c986fbec46f3b4b8b2a838de9d3e4ad1ffa9ddb54dc398"},
+      "macZip": {"name": "T8-PenguinCanvas-3.2.1-mac-arm64.zip", "bytes": 506469502, "sha256": "5bd4a1db9d8aa218e2f254b2e20d195d4972dbc6aac7ab96d9c1ca1d189eb63f"},
+      "macUpdater": {"name": "latest-mac.yml", "bytes": 536, "sha256": "31eb50335a47098e9f35e1296f9b9fd82fad4ef5001b9eda9dccee7d7c6df72d"}
     },
-    "macWorkflow": "https://github.com/T8mars/T8-penguin-canvas/actions/runs/35751218655"
+    "macWorkflow": "https://github.com/T8mars/T8-penguin-canvas/actions/runs/36477586509"
   },
   "versionSequencePolicy": {
     "status": "active",
@@ -9540,8 +9545,8 @@
     "version": "3.2.1",
     "semverVersion": "3.2.1",
     "versionNumberPolicy": "T8 版本号仍采用 x.y.z 三段，但每一段只允许 0-9；任一段到 9 后下一次发布必须向左进位，禁止任一段出现两位数字。例：1.9.9 的下一版必须是 2.0.0。",
-    "versionNote": "v3.2.1 对同库可验证的旧 canonical backup 提供用户明确确认的 schema32 恢复，完整保留 v3.2.0 及更早能力；正式发布事实只在固定源码、唯一构建、上传与回下载确证后填写。公开源码继续排除本地私有计费/支付/充值实现。",
-    "installer": "v3.2.1 安装包、blockmap 与 latest.yml 的字节数和摘要等待唯一 dist:release 流程生成及远端完整回下载；不得沿用 v3.2.0 资产事实。",
+    "versionNote": "v3.2.1 对同库可验证的旧 canonical backup 提供用户明确确认的 schema32 恢复，完整保留 v3.2.0 及更早能力；固定源码与双平台六资产已完成正式发布和完整回下载。公开源码继续排除本地私有计费/支付/充值实现。",
+    "installer": "v3.2.1 Windows 安装包、blockmap、latest.yml 与 Mac DMG、ZIP、latest-mac.yml 均已从固定源码发布并完整回下载；精确字节与摘要见 release.assets 及 docs/release-v3.2.1.md。",
     "updaterInstallMode": "自动更新下载完成后不得静默安装：main.cjs 必须设置 autoInstallOnAppQuit=false，显式安装调用 quitAndInstall(false,true)；electron/build-resources/installer.nsh 通过 SetSilent normal 让新版 NSIS 安装器即使收到旧客户端传入的 /S 也尽量切回前台安装向导。",
     "installerShortcutPolicy": "安装完成后必须创建桌面和开始菜单快捷方式：package.json build.nsis.createDesktopShortcut 必须为 \"always\"，createStartMenuShortcut 必须为 true；electron/build-resources/installer.nsh 必须保留 customInstall 兜底 CreateShortCut \"$newStartMenuLink\" 与 \"$DESKTOP\\${SHORTCUT_NAME}.lnk\"，防止更新安装/keepShortcuts 路径遗漏入口。",
     "updaterEntryPolicy": "顶栏桌面更新入口不得只因 window.t8pc.updater 缺失就静默消失；Electron UA 或 t8pc.getInfo/openExternal 可用时必须显示诊断入口，提示重新安装完整桌面包，Web/纯浏览器环境才隐藏。状态为 not-available 时按钮仍保留“更新”字样，避免用户误以为自动更新入口被删除。",
@@ -15826,9 +15831,9 @@
     ]
   },
   "schema32ExplicitRecovery20260928": {
-    "status": "implemented-unreleased-targeted-verified",
+    "status": "released-v3.2.1-targeted-verified",
     "date": "2026-09-28",
-    "releaseIncluded": false,
+    "releaseIncluded": true,
     "scope": [
       "Canvas schema32 startup failures caused only by a same-database stale canonical backup or recovery-generation mismatch now expose a bounded, ten-minute, server-held one-time recovery plan instead of requiring users to manipulate SQLite files.",
       "The Canvas stays read-only until the user explicitly confirms restoring the verified older backup. The UI shows the maximum acknowledged database-write gap, preserves the failed primary evidence, retries hydration only after recovery, and immediately refreshes the canonical backup.",
@@ -15840,7 +15845,7 @@
       "Production build passed after generated capability synchronization at 39 actions / 299 runtime entries / 83 of 83 nodes / zero public gaps; Vite transformed 2986 modules.",
       "The explicit recovery fixture proves the older canvas is restored only after exact confirmation, the ACK advances rather than regresses, corrupted-primary evidence remains present, and a modified authorization is rejected. All database fixtures lived only in system temporary directories and were removed after testing."
     ],
-    "boundary": "This change is not packaged or released yet. It cannot reconstruct writes whose only durable SQLite pages/WAL were already lost; it provides a safe in-app choice to restore the newest fully verified canonical backup while preserving evidence. UUID-mismatched or otherwise unverifiable backups remain blocked and require an operator recovery flow."
+    "boundary": "Released in v3.2.1. It cannot reconstruct writes whose only durable SQLite pages/WAL were already lost; it provides a safe in-app choice to restore the newest fully verified canonical backup while preserving evidence. UUID-mismatched or otherwise unverifiable backups remain blocked and require an operator recovery flow. Affected-user old databases and installed-upgrade evidence remain deferred, not passed."
   },
   "qwen21AnimateMotionTransfer20260922": {
     "status": "released-v3.2.0-live-verified",

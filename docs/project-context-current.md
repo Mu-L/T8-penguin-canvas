@@ -2,9 +2,9 @@
 
 更新：2026-09-29。仅维护当前事实；长期规则见根 `SKILL.md` 和 `AGENTS.md`。本页预算 80 行 / 8 KiB，旧检查点迁入专题，不追加长日报。
 
-- 默认目录 `E:\PenguinPravite\T8-penguin-canvas`；branch `codex/release-v3.0.8-volcengine-assets-ux`，common dir `.git`。v3.2.0 正式源码与 Tag 固定为 `dfb388c2d2dbae4df3186ea268f69cca96d793ac`，不得移动；实际开工仍以 git/worktree 门为准。
-- package 已准备 `3.2.1`（v3.2.0 后按十进制进位）。本版只纳入 schema32 画布确认恢复修复；正式 Electron、GitHub Release 和自动更新资产仍待本次唯一发布流程完成，详见[发布专题](release-v3.2.1.md)。
-- v3.2.0 真实受影响用户、安装环境及 F8–F10 证据按 `owner-approved-post-release-v3.2.0` 后补且不视为通过；Mac 为 ad-hoc 签名、未公证技术预览。本次 GitHub 额度充足，未延期 Mac。
+- 默认目录 `E:\PenguinPravite\T8-penguin-canvas`；branch `codex/release-v3.0.8-volcengine-assets-ux`，common dir `.git`。v3.2.1 正式源码与 Tag 固定为 `2dc205dfe6dc743195eeb5aa57db27c0da1fa29f`，不得移动；实际开工仍以 git/worktree 门为准。
+- package 当前为 `3.2.1`（v3.2.0 后按十进制进位）。schema32 画布确认恢复修复已完成 Windows/macOS 同源正式发布，六资产和两个自动更新清单完整回下载通过，详见[发布专题](release-v3.2.1.md)。
+- v3.2.1 真实受影响用户旧库、安装升级及 F8–F10 证据按 `owner-approved-post-release-v3.2.1` 后补且不视为通过；Mac 为 ad-hoc 签名、未公证技术预览。GitHub 额度充足，未延期 Mac。
 
 ## 当前检查点
 
@@ -17,8 +17,8 @@
 | 生成历史 | 当前支持范围已随 v3.1.6 发布；19个完整客户端场景/25项、React UI 13项、限定回归56/56通过，通过进程正常退出/强制0/残留0。完整状态与剩余范围见[验收清单](generation-history-acceptance-status.md)及[证据索引](generation-history-acceptance-20260912.md)。 |
 | Provider 超时策略 | 已随 v3.1.7 发布：移除媒体生成通用代理 90 秒边界，并覆盖扩展适配器、工具箱自定义轮询、导演分镜与崩溃恢复；媒体全链路最低 15 分钟，LLM 默认且最长 3 分钟，连接探测/重试间隔不变。详情用 `feature providerTimeoutPolicy20260913` 查询。 |
 | TUN/代理最大兼容与日志恢复 | 已随 v3.1.8 发布：受信 Provider 域名结果不再预判 `resolveHost` 地址或维护 Fake-IP 白名单，Chromium 系统网络及失败后的同任务 GET 回退均接受任意有效解析地址；仅字面量本机/内网与本地域名仍拒绝，普通 URL 安全策略不变。另有 Mihomo IPv6/国内 DoH 兼容和终端日志 14 天脱敏恢复。专项 34/34、TypeScript 与双平台正式包通过；真实受影响 TUN 客户端/安装版证据后补。详见 `feature tunIpv6AndTerminalLogRecovery20260913`。 |
-| v3.2.0 发布 | 已完成：固定 Tag/源码 `v3.2.0` / `dfb388c2d2dbae4df3186ea268f69cca96d793ac` 为稳定 [Latest](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.2.0)。Windows 唯一正式链、provenance、sealed recovery、自动更新三资产和完整回下载通过；同源 [Mac workflow 35751218655](https://github.com/T8mars/T8-penguin-canvas/actions/runs/35751218655) 成功，runner 与本机独立 Mac 验证通过，追加后 Windows 再下载通过，最终六资产。 |
-| schema32 画布恢复 | v3.2.1 发布准备中：同库旧 canonical backup/代次不一致可生成十分钟一次性恢复方案，用户在只读界面确认后恢复并保留故障证据；UUID/校验/方案任一不匹配继续阻断，ACK 只前进不回退。专项、相邻矩阵与真实 HTTP 确认 47/47、TypeScript、public/worktree、能力同步与开发态 production build 通过；真实用户旧库证据待补。详见 `feature schema32ExplicitRecovery20260928`。 |
+| v3.2.1 发布 | 固定 Tag/源码 `v3.2.1` / `2dc205dfe6dc743195eeb5aa57db27c0da1fa29f` 为稳定 [Latest](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.2.1)。Windows NSIS、provenance、自动更新三资产与完整回下载通过；同源 [Mac workflow 36477586509](https://github.com/T8mars/T8-penguin-canvas/actions/runs/36477586509) 成功，Mac 三资产独立下载和追加后的 Windows 再下载通过，最终六资产。 |
+| schema32 画布恢复 | 已随 v3.2.1 发布：同库旧 canonical backup/代次不一致可生成十分钟一次性恢复方案，用户在只读界面确认后恢复并保留故障证据；UUID/校验/方案任一不匹配继续阻断，ACK 只前进不回退。专项、相邻矩阵与真实 HTTP 确认 47/47；真实用户旧库证据待补。详见 `feature schema32ExplicitRecovery20260928`。 |
 | Qwen 2.1 / Animate | 已随 v3.2.0 发布：图像/视频节点独立 Tab、精确参数、恢复、可信结果落盘和四份无凭据工作流已接入。T2I、I2I、Animate 三任务均到达 `succeeded`，Animate 产物完成下载解析；Qwen 当次结果下载受本机 Node TLS 中断，未重交付费任务。详见[专题](qwen21-animate-motion-transfer.md)和 `feature qwen21AnimateMotionTransfer20260922`。 |
 | 历史修复最终限定检查 | 专题清单与 features 回执已同步为 19/25+React UI 13、限定回归56/56；本轮按暂停点复核后未重跑。支持范围已接受；用户旧库、安装升级、断电、真实Provider、外部设备与其他未适配输入仍不计通过。 |
 | 工坊 Suno V6 | 三版本已随 v3.1.6 发布且有出音证据；wild请求 `chirp-hawk-wild` 实际返回 `chirp-hawk`，身份需渠道确认。保留旧模型/默认与独立平价协议，不再自动付费重试。用 `feature sunoWorkshopV620260912` 查完整记录。 |
