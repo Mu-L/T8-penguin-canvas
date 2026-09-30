@@ -300,6 +300,8 @@ function observeProjectDatabasePhysicalStorage32(database, options = {}) {
     databaseFilesystemIdentity,
     tempFilesystemIdentity,
     databaseAndTempShareFilesystem,
+    databaseDrive: memory ? '' : path.parse(databaseDirectory).root,
+    tempDrive: memory ? '' : path.parse(tempDirectory).root,
     complete: memory || (
       pageSize != null
       && pageCount != null
@@ -457,7 +459,7 @@ function assertProjectDatabaseWriteAdmission32(snapshot, policyInput = {}) {
   if (observedDatabaseFreeBytes < requiredDatabaseFreeBytes) {
     throw new ProjectDatabasePhysicalCapacityAdmissionError(
       'filesystem-reserve',
-      '项目数据库所在磁盘的安全空间不足',
+      storageSpaceMessage(snapshot.databaseDrive, requiredDatabaseFreeBytes, observedDatabaseFreeBytes),
       { requiredDatabaseFreeBytes, observedDatabaseFreeBytes },
     );
   }
@@ -465,7 +467,7 @@ function assertProjectDatabaseWriteAdmission32(snapshot, policyInput = {}) {
     && snapshot.tempFilesystemFreeBytes < policy.sqliteTempReserveBytes) {
     throw new ProjectDatabasePhysicalCapacityAdmissionError(
       'temp-storage-full',
-      'SQLite 临时存储所在磁盘的安全空间不足',
+      storageSpaceMessage(snapshot.tempDrive, policy.sqliteTempReserveBytes, snapshot.tempFilesystemFreeBytes, true),
       {
         requiredTempFreeBytes: policy.sqliteTempReserveBytes,
         observedTempFreeBytes: snapshot.tempFilesystemFreeBytes,
@@ -494,11 +496,17 @@ function assertProjectDatabaseMigrationAdmission32(snapshot, policyInput = {}) {
   if (observedDatabaseFreeBytes < requiredDatabaseFreeBytes) {
     throw new ProjectDatabasePhysicalCapacityAdmissionError(
       'filesystem-reserve',
-      'schema32 迁移缺少备份候选与恢复证据的安全空间',
+      storageSpaceMessage(snapshot.databaseDrive, requiredDatabaseFreeBytes, observedDatabaseFreeBytes),
       { migration: true, requiredDatabaseFreeBytes, observedDatabaseFreeBytes },
     );
   }
   return Object.freeze({ admitted: true, memory: false });
+}
+
+function storageSpaceMessage(drive, required, available, temporary = false) {
+  const needed = (Math.ceil(required / 1024 ** 3 * 100) / 100).toFixed(2);
+  const remaining = (Math.floor(available / 1024 ** 3 * 100) / 100).toFixed(2);
+  return `${temporary ? '系统临时目录所在盘' : '应用数据所在盘'}${drive ? `（${drive}）` : ''}空间不足：需要预留至少 ${needed} GiB，当前剩余 ${remaining} GiB。${temporary ? '请释放系统盘空间后重试。' : '建议预留 10 GiB；可点击“选择其他盘并迁移重启”修改数据目录。'}原数据未删除。`;
 }
 
 module.exports = Object.freeze({

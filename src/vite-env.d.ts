@@ -318,6 +318,10 @@ interface T8AgentControlCanvasMutation {
 
 interface Window {
   t8pc?: {
+    storage?: {
+      status: () => Promise<{ enabled: boolean; path?: string; freeBytes?: number; reserveBytes?: number }>;
+      chooseAndRestart: () => Promise<{ success: boolean; canceled?: boolean; error?: string }>;
+    };
     onCanvasCloseRequest?: (callback: (cancelled: () => boolean) => Promise<{
       ok: boolean; reason?: 'running' | 'conflict' | 'save';
     }>) => () => void;

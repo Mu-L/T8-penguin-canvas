@@ -36,6 +36,15 @@ function fixture() {
 }
 const turn = () => new Promise((resolve) => setImmediate(resolve));
 
+test('failed migration preparation revokes close approval and allows a new save receipt', async () => {
+  const f = fixture();
+  const first = f.gate.request(); f.respond(); assert.equal(await first, true);
+  f.gate.cancelApproval();
+  assert.ok(f.sent.some(([channel, id]) => channel === 't8pc:canvas-close-cancel' && id === 'request-1'));
+  const second = f.gate.request(); f.respond(); assert.equal(await second, true);
+  assert.equal(f.sent.filter(([channel]) => channel === 't8pc:canvas-close-request').length, 2);
+});
+
 test('native close remains open until exact current main-frame save receipt', async () => {
   const f = fixture();
   f.win.close();

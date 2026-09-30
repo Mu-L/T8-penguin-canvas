@@ -1,12 +1,14 @@
 # 当前项目上下文
 
-更新：2026-09-29。仅维护当前事实；长期规则见根 `SKILL.md` 和 `AGENTS.md`。本页预算 80 行 / 8 KiB，旧检查点迁入专题，不追加长日报。
+更新：2026-09-30。仅维护当前事实；长期规则见根 `SKILL.md` 和 `AGENTS.md`。本页预算 80 行 / 8 KiB，旧检查点迁入专题，不追加长日报。
 
 - 默认目录 `E:\PenguinPravite\T8-penguin-canvas`；branch `codex/release-v3.0.8-volcengine-assets-ux`，common dir `.git`。v3.2.1 正式源码与 Tag 固定为 `2dc205dfe6dc743195eeb5aa57db27c0da1fa29f`，不得移动；实际开工仍以 git/worktree 门为准。
-- package 当前为 `3.2.1`（v3.2.0 后按十进制进位）。schema32 画布确认恢复修复已完成 Windows/macOS 同源正式发布，六资产和两个自动更新清单完整回下载通过，详见[发布专题](release-v3.2.1.md)。
+- package 当前为 `3.2.2`；数据目录迁移版已获正式发布授权，准备中，实际结果见[发布专题](release-v3.2.2.md)。v3.2.1 六资产及两个更新清单已验证、Tag 冻结。
 - v3.2.1 真实受影响用户旧库、安装升级及 F8–F10 证据按 `owner-approved-post-release-v3.2.1` 后补且不视为通过；Mac 为 ad-hoc 签名、未公证技术预览。GitHub 额度充足，未延期 Mac。
 
 ## 当前检查点
+
+数据路径迁移已实现，v3.2.2 发布中：容量提示显示盘符和所需/剩余 GiB，错误页及设置页可迁移至其他盘；保留原目录，详情及测试边界见[专题](desktop-data-storage.md)。
 
 | 事项 | 当前事实与下一步 |
 | --- | --- |

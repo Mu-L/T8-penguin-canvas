@@ -10,6 +10,7 @@ const REQUIRED_ELECTRON_ASAR_ENTRIES = Object.freeze([
   'electron/preload.cjs',
   'electron/loader.cjs',
   'electron/systemFetchBridge.cjs',
+  'electron/dataStorage.cjs',
   'package.json',
 ]);
 

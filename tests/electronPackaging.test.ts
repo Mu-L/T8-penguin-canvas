@@ -33,6 +33,7 @@ test('Electron package files include every static local CommonJS startup depende
     'electron/preload.cjs',
     'electron/loader.cjs',
     'electron/systemFetchBridge.cjs',
+    'electron/dataStorage.cjs',
   ];
   for (const entrypoint of requiredEntrypoints) {
     assert.ok(packagedFiles.has(entrypoint), `missing Electron entrypoint from build.files: ${entrypoint}`);
@@ -79,6 +80,7 @@ test('Windows and macOS post-build gates enforce the shared app.asar startup con
     'electron/preload.cjs',
     'electron/loader.cjs',
     'electron/systemFetchBridge.cjs',
+    'electron/dataStorage.cjs',
     'package.json',
   ]);
   assert.ok(contract.REQUIRED_ELECTRON_ASAR_ENTRIES.includes('electron/i18n.cjs'));
@@ -166,7 +168,7 @@ test('Electron does not open the renderer before the packaged backend is ready',
   assert.match(main, /finally \{ electronQuitReady = true; \}/);
   assert.match(main, /if \(electronQuitReady\) app\.quit\(\);/);
   assert.match(main, /if \(electronQuitRequested \|\| pendingMainWindow\.isDestroyed\(\)\) return;/);
-  assert.match(main, /app\.whenReady\(\)\.then\(async \(\) => \{\s+if \(!ELECTRON_SINGLE_INSTANCE_OWNER \|\| electronQuitRequested\) return;\s+initializeElectronLocale\([\s\S]*?\);\s+createLogWindow\(\);/);
+  assert.match(main, /app\.whenReady\(\)\.then\(async \(\) => \{\s+if \(!ELECTRON_SINGLE_INSTANCE_OWNER \|\| electronQuitRequested\) return;[\s\S]*?initializeElectronLocale\([\s\S]*?\);\s+createLogWindow\(\);[\s\S]*?await desktopDataStorage\.migrate\(/);
   assert.ok(main.indexOf('if (!backendReady)') < main.indexOf('createMainWindow();', main.indexOf('app.whenReady()')));
 });
 
@@ -201,7 +203,7 @@ test('Electron injects a persistent host authority only into exact main-window m
   const vite = read('../vite.config.ts');
   const ignore = read('../.gitignore');
 
-  assert.match(main, /electronManagementAuthorityPath\(\)[\s\S]*app\.getPath\('userData'\)[\s\S]*collaboration-management-authority\.json/);
+  assert.match(main, /electronManagementAuthorityPath\(\)[\s\S]*getUserDataDir\(\)[\s\S]*collaboration-management-authority\.json/);
   assert.match(main, /safeStorage\.encryptString\(token\)\.toString\('base64'\)/);
   assert.match(main, /safeStorage\.decryptString\(Buffer\.from\(record\.tokenEnc, 'base64'\)\)/);
   assert.match(main, /details\.webContentsId !== webContentsId/);

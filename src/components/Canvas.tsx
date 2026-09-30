@@ -1,5 +1,6 @@
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type RefObject, type SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
+import DesktopDataStorage from './DesktopDataStorage';
 import NodeDomLanguageBoundary from '../i18n/NodeDomLanguageBoundary';
 import {
   ReactFlow,
@@ -14412,6 +14413,7 @@ function CanvasInner({ onAddNodeRef, onInsertWorkflowRef, onReadinessChange, onR
             <h2 className="text-base font-bold text-[var(--text-primary)]">{t('canvas:state.loadFailed')}</h2>
             <p className="mt-2 break-words text-sm leading-6 text-[var(--text-secondary)]">{loadFailure.message}</p>
             <p className="mt-3 text-xs leading-5 text-[var(--text-secondary)]">{t('canvas:state.readOnlyUntilLoaded')}</p>
+            <DesktopDataStorage />
             {loadFailure.recovery ? (
               <p className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-700 dark:text-amber-300">
                 {t('canvas:state.restoreBackupAvailable', {

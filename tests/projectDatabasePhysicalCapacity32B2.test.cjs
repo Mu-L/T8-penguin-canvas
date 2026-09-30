@@ -189,6 +189,12 @@ test('B2 schema32 admission distinguishes main, WAL, disk, TEMP and migration re
     walBytes: policy.walPressureBytes - policy.maximumSingleTransactionWalBytes,
   }, 'wal-pressure');
   rejected({ databaseFilesystemFreeBytes: 1 }, 'filesystem-reserve');
+  assert.throws(() => assertProjectDatabaseMigrationAdmission32({
+    ...base, databaseDrive: 'C:\\', databaseFilesystemFreeBytes: 1,
+  }, policy), (error) => /C:\\/.test(error.message)
+    && /需要预留至少 \d+\.\d{2} GiB/.test(error.message)
+    && /当前剩余 0.00 GiB/.test(error.message)
+    && /选择其他盘并迁移重启/.test(error.message));
   rejected({
     databaseAndTempShareFilesystem: false,
     tempFilesystemFreeBytes: 1,

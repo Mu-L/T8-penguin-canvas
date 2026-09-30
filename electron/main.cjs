@@ -38,6 +38,9 @@ const {
 } = require('./i18n.cjs');
 
 const APP_VERSION = require('../package.json').version;
+const { createDataStorage } = require('./dataStorage.cjs');
+let desktopDataStorage = null;
+let dataStorageRestartPending = false;
 const ELECTRON_BACKEND_SHUTDOWN_DEADLINE_MS = 15_000;
 const ELECTRON_STARTUP_SHELL_PAINT_DEADLINE_MS = 2_500;
 const ELECTRON_FRONTEND_LOAD_RETRY_DELAY_MS = 250;
@@ -64,6 +67,7 @@ let mainWindowCloseGate = null;
 // Backend shutdown must not start until the renderer's existing CAS queue is saved.
 function createCanvasCloseGate(window) {
   let approved = false;
+  let approvedRequestId = null;
   let pending = null;
   let warning = null;
   const warn = (reason) => {
@@ -80,6 +84,7 @@ function createCanvasCloseGate(window) {
     pending = null;
     clearTimeout(request.timer);
     approved = ok === true;
+    approvedRequestId = approved ? request.id : null;
     if (!approved && !window.isDestroyed()) {
       try { window.webContents.send('t8pc:canvas-close-cancel', request.id); } catch {}
       warn(reason);
@@ -118,7 +123,10 @@ function createCanvasCloseGate(window) {
     ipcMain.removeListener('t8pc:canvas-close-result', onResult);
     finish(false, 'save');
   });
-  return { request };
+  return { request, cancelApproval() {
+    if (approvedRequestId && !window.isDestroyed()) window.webContents.send('t8pc:canvas-close-cancel', approvedRequestId);
+    approved = false; approvedRequestId = null;
+  } };
 }
 let vibeXRhLoginWindow = null;
 let logWindow = null;
@@ -1255,7 +1263,7 @@ function getResourcePath(rel) {
 
 function getUserDataDir() {
   if (isPackaged()) {
-    return app.getPath('userData');
+    return desktopDataStorage ? desktopDataStorage.root() : app.getPath('userData');
   }
   const developmentOverride = String(process.env.T8PC_DEV_DATA_ROOT || '').trim();
   if (developmentOverride) {
@@ -1343,7 +1351,7 @@ function ensureDevelopmentManagementAuthority() {
 }
 
 function electronManagementAuthorityPath() {
-  return path.join(app.getPath('userData'), 'data', 'collaboration-management-authority.json');
+  return path.join(getUserDataDir(), 'data', 'collaboration-management-authority.json');
 }
 
 function ensureElectronManagementEncryption() {
@@ -2635,6 +2643,35 @@ ipcMain.handle('t8pc:get-info', () => ({
   updater: updaterState,
 }));
 
+ipcMain.handle('t8pc:storage:status', (event) => {
+  assertTrustedMainRenderer(event);
+  if (event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('Storage settings require the main frame');
+  return desktopDataStorage ? { enabled: true, ...desktopDataStorage.status() } : { enabled: false };
+});
+ipcMain.handle('t8pc:storage:choose', async (event) => {
+  assertTrustedMainRenderer(event);
+  if (event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('Storage settings require the main frame');
+  if (!desktopDataStorage || dataStorageRestartPending) return { success: false, canceled: true };
+  dataStorageRestartPending = true;
+  try {
+    const english = getElectronLocale() === 'en-US';
+    const picked = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory', 'createDirectory'] });
+    if (picked.canceled || !picked.filePaths[0]) return { success: false, canceled: true };
+    const confirm = await dialog.showMessageBox(mainWindow, {
+      type: 'question', title: english ? 'Move application data' : '迁移应用数据',
+      message: english ? 'Save, restart and copy your application data to this folder?' : '保存并重启，将画布、素材和配置复制到该目录下的新独立文件夹？',
+      detail: `${picked.filePaths[0]}\n${english ? 'The old data stays intact. Destination needs the data size plus 10 GiB free. Windows temporary files still need 0.5 GiB on the system drive.' : '原数据会保留，不自动删除。目标盘需要数据体积加 10 GiB 空间；系统临时目录所在盘仍需至少 0.5 GiB。'}`,
+      buttons: english ? ['Cancel', 'Move and restart'] : ['取消', '迁移并重启'], defaultId: 0, cancelId: 0,
+    });
+    if (confirm.response !== 1 || (mainWindowCloseGate && !await mainWindowCloseGate.request())) return { success: false, canceled: true };
+    desktopDataStorage.schedule(picked.filePaths[0]);
+    app.relaunch();
+    app.quit();
+    return { success: true };
+  } catch (error) { mainWindowCloseGate?.cancelApproval(); return { success: false, error: String(error.message) }; }
+  finally { dataStorageRestartPending = false; }
+});
+
 ipcMain.handle('t8pc:locale:get', () => ({ locale: getElectronLocale() }));
 ipcMain.handle('t8pc:locale:set', (_event, locale) => applyElectronLocale(locale));
 
@@ -2732,8 +2769,29 @@ ipcMain.on('t8pc:drag-file-out', (event, payload) => {
 // ---------- 生命周期 ----------
 app.whenReady().then(async () => {
   if (!ELECTRON_SINGLE_INSTANCE_OWNER || electronQuitRequested) return;
+  if (isPackaged()) {
+    try {
+      desktopDataStorage = createDataStorage(app.getPath('userData'));
+      desktopDataStorage.assertAvailable();
+      initializeElectronLocale(getUserDataDir(), app.getLocale());
+      createLogWindow();
+      await waitForStartupShellPaint();
+      let lastProgress = -1;
+      await desktopDataStorage.migrate(({ completed, total }) => {
+        const progress = total ? Math.floor(completed / total * 100) : 100;
+        if (progress === lastProgress) return;
+        lastProgress = progress;
+        dbgLog(`[storage] ${getElectronLocale() === 'en-US' ? 'Copying and verifying data; original retained' : '正在复制并校验数据，原目录保留'}: ${progress}%`);
+      });
+      desktopDataStorage.assertAvailable();
+    } catch (error) {
+      await dialog.showMessageBox({ type: 'error', title: '数据目录 / Data storage', message: String(error.message) });
+      try { if (!desktopDataStorage) throw error; desktopDataStorage.assertAvailable(); }
+      catch { app.quit(); return; }
+    }
+  }
   initializeElectronLocale(getUserDataDir(), app.getLocale());
-  createLogWindow();
+  if (!logWindow) createLogWindow();
   await waitForStartupShellPaint();
   markElectronStartupStage('backend-start-requested');
   try {

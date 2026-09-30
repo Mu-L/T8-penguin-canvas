@@ -10,9 +10,11 @@ https://www.runninghub.cn/?inviteCode=rh-v1121
 My favorite girl Go YounJung
 # 🐧 贞贞的无限画布（企鹅共创版） · T8-penguin-canvas
 
-> AI 节点画布工作流工具 · Web + Electron 桌面端｜v3.2.1
+> AI 节点画布工作流工具 · Web + Electron 桌面端｜v3.2.2
 >
 > GitHub：<https://github.com/T8mars/T8-penguin-canvas>
+
+> 2026-09-30：v3.2.2 空间不足提示显示实际盘符、需要预留和当前剩余 GiB；安装版设置页及画布加载失败页可选择 D/E 等盘迁移应用数据。重启后离线复制、逐文件校验，成功才切换路径，原目录不自动删除；建议数据盘预留 10 GiB，系统临时盘仍需至少 0.5 GiB。
 
 > 2026-09-29：v3.2.1 修复 schema32 画布启动时可验证备份落后于已确认写入水位或恢复代次不一致导致的加载阻断。受影响画布先保持只读；用户确认后可由程序恢复同一数据库的完整备份并保留故障证据。无法核实身份或备份的情况继续阻断；真实用户旧库与安装升级证据待补。
 
@@ -20,12 +22,12 @@ My favorite girl Go YounJung
 
 一个面向 AI 创作的 **节点式画布**：拖拽节点、连线编排、生成图像 / 视频 / 音频、调用 LLM、串接 RunningHub 工作流，叠加批量执行、智能对齐、打组、主题模板与终端日志。Web 浏览器和桌面端均可使用。
 
-![status](https://img.shields.io/badge/version-v3.2.1-brightgreen) ![node](https://img.shields.io/badge/node-83-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
+![status](https://img.shields.io/badge/version-v3.2.2-brightgreen) ![node](https://img.shields.io/badge/node-83-blue) ![react](https://img.shields.io/badge/react-19-61dafb) ![electron](https://img.shields.io/badge/electron-33-47848f) ![license](https://img.shields.io/badge/license-MIT-yellow)
 
 ## 💻 桌面版下载
 
-- **Windows x64**：在 [v3.2.1 Release](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.2.1) 下载 `T8-PenguinCanvas-Setup-3.2.1.exe`。
-- **macOS Apple Silicon**：在 [v3.2.1 Release](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.2.1) 下载 `T8-PenguinCanvas-3.2.1-mac-arm64.dmg`。支持 M1/M2/M3/M4 等 arm64 Mac，最低 macOS 12，使用 ad-hoc 完整性签名且尚无 Apple Developer ID 公证；首次打开请在 Finder 中右键应用并选择“打开”。Intel Mac 暂不支持。
+- **Windows x64**：在 [v3.2.2 Release](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.2.2) 下载 `T8-PenguinCanvas-Setup-3.2.2.exe`。
+- **macOS Apple Silicon**：在 [v3.2.2 Release](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.2.2) 下载 `T8-PenguinCanvas-3.2.2-mac-arm64.dmg`。支持 M1/M2/M3/M4 等 arm64 Mac，最低 macOS 12，使用 ad-hoc 完整性签名且尚无 Apple Developer ID 公证；首次打开请在 Finder 中右键应用并选择“打开”。Intel Mac 暂不支持。
 
 ---
 
@@ -45,6 +47,7 @@ My favorite girl Go YounJung
 ## ✨ 功能亮点
 
 - 🎨 **83 个节点**，覆盖文本 / 图像 / 视频 / 音频 / LLM / RunningHub / ComfyUI / 3D / 工具 / 辅助 / 工具箱 / 输出预览 / 上传素材 / 素材集 / 火山引擎素材库 / 批量打标 / 随机路由 / Story 全自动制片 / 剧本大师 / Creator Agent 作品化 / 多语言本地化大师 / MiniMax H3 / MiniMax Music3 / Seedance 2.0 提示词增强器 / MiniMax H3 官方提示词增强器 / Seedance 2.5 / FlashVSR 视频超分 / 白模预演 / MV 音乐大师
+- 💾 **[v3.2.2 数据目录迁移版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.2.2)**：磁盘空间提示不再只显示 schema32 内部术语；可从设置或加载失败页迁移至其他盘，离线校验后切换，原数据保留。
 - 🛟 **[v3.2.1 画布安全恢复版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.2.1)**：schema32 主库不可读时，若同库 canonical backup 完整可验但水位或恢复代次落后，画布显示恢复方案和最多可能丢失的已确认写入次数；用户确认后恢复并保留故障文件。身份不匹配、证据损坏或方案过期仍拒绝。
 - 🎨🎬 **[v3.2.0 Qwen Image Global 2.1 / Animate Motion Transfer 版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.2.0)**：图像节点新增 Qwen 2.1 独立 Tab，支持文生图、0–10 张有序参考图、1K/2K/4K、8 种比例与可选 Seed；视频节点新增 Animate Motion Transfer 独立 Tab，严格使用 1 张角色图 + 1 个动作视频及官方姿态/镜头/表情参数，不混入 Prompt、Seed 或音频。
 - 🛠️ **[v3.1.9 Creator 渠道设置可靠性版](https://github.com/T8mars/T8-penguin-canvas/releases/tag/v3.1.9)**：渠道选择先捕获值，再排队更新状态，避免 React 事件结束后的 `currentTarget` 空值崩溃；覆盖连续选择和状态更新重放，保留原模型重置与其他设置。
